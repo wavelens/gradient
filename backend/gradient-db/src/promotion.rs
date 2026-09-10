@@ -23,14 +23,20 @@
 //!
 //! | flag                             | discipline                | heal                                                          |
 //! |----------------------------------|---------------------------|---------------------------------------------------------------|
-//! | `closure_complete`               | bidirectional (CLEAR+SET) | [`reconcile_closure_complete`]                                |
-//! | `drv_closure_cached`             | bidirectional (CLEAR+SET) | [`reconcile_drv_closure_cached`]                              |
+//! | `fetchable` / `unready_deps`     | moved by the event that changes it ([`crate::readiness`]) | [`crate::readiness::repair_pending`] over the pending anchors |
 //! | `derivation_output.is_cached`    | event-driven (set on NAR ingest, cleared by demote) | [`crate::cache_storage::demote_unbacked_trusted_outputs`] keys on ground truth, not this flag |
 //! | `cached_path.missing_references` | moved by the reference ripple (commit / retire) | [`crate::nar_closure::repair_counters_for`] over the gating paths |
 //!
-//! The two closure flags cache ground truth that can REGRESS (GC deletes a NAR,
-//! an output is evicted, an edge is recorded late), so they must be cleared as
-//! well as set - a stale-true flag dispatches a build whose inputs are gone,
+//! `closure_complete` and `drv_closure_cached` are NOT in that table any more.
+//! Nothing writes them and no scope runs [`reconcile_closure_complete`] or
+//! [`reconcile_drv_closure_cached`]; the readiness pair replaced what they cached,
+//! and #591 removes the columns and the two fixpoints together. Until it does, the
+//! dispatch gate still reads `closure_complete`, so this branch is not complete
+//! until that gate moves.
+//!
+//! Everything in the table caches ground truth that can REGRESS (GC deletes a NAR,
+//! an output is evicted, an edge is recorded late), so every forward move needs its
+//! symmetric loss - a stale-true gate dispatches a build whose inputs are gone,
 //! the terminal-`InputsUnavailable` poison class.
 //!
 //! The gates additionally require `derivation.walked` (via
@@ -198,7 +204,7 @@ fn substitute_created_anchors_sql() -> String {
     format!(
         r#"
         UPDATE derivation_build AS db
-        SET status = {substituted}, substituted = true, closure_complete = true,
+        SET status = {substituted}, substituted = true,
             updated_at = (now() AT TIME ZONE 'UTC')
         FROM derivation_build old
         WHERE old.id = db.id AND db.status = {created} AND db.derivation = ANY($1::uuid[])
@@ -510,78 +516,62 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
     Ok(returned_transitions(rows))
 }
 
-/// Global proactive mirror of [`cascade_dependency_failed`]. The reactive cascade
-/// fires only on a fresh terminal-failure *transition*, so it cannot reach an
-/// anchor that becomes non-terminal **after** its dependency already failed:
-/// `requeue_failed_anchors` / `requeue_failed_closure_for_eval` thaw a dependent
-/// back to `Created` without re-checking its (still-failed) dependency, and a
-/// concurrent eval can re-fail a dependency after the dependent was thawed. Such a
-/// dependent can never build, yet sits `Created`/`Queued`/`FailedTransient`
-/// forever - the dispatch gate holds it (its dep is not terminal-success) and
-/// `check_evaluation_done` never finalizes its evaluation. This sweep walks
-/// `derivation_dependency` upward from every terminal-failed anchor and fails each
-/// reachable non-terminal anchor in one statement (the recursive term traverses
-/// the graph structurally, so a whole poisoned subtree converges per pass). It is
-/// the failure-side counterpart of the [`promote_ready`] success-side backstop.
-/// Returns the changes it made so the caller can fan out the effects and
-/// finalize the now-settled evaluations.
+/// Proactive mirror of [`cascade_dependency_failed`], bounded to one evaluation's
+/// dependency closure. The reactive cascade fires only on a fresh terminal-failure
+/// *transition*, so it cannot reach an anchor that becomes non-terminal **after**
+/// its dependency already failed: `requeue_failed_anchors` /
+/// `requeue_failed_closure_for_eval` thaw a dependent back to `Created` without
+/// re-checking its (still-failed) dependency, and a concurrent eval can re-fail a
+/// dependency after the dependent was thawed. Such a dependent can never build, yet
+/// sits `Created`/`Queued`/`FailedTransient` forever - the dispatch gate holds it
+/// (its dep is not terminal-success) and `check_evaluation_done` never finalizes its
+/// evaluation. This walks `derivation_dependency` upward from every terminal-failed
+/// anchor in the closure and fails each reachable non-terminal anchor in one
+/// statement (the recursive term traverses the graph structurally, so a whole
+/// poisoned subtree converges per pass). Returns the changes it made so the caller
+/// can fan out the effects and finalize the now-settled evaluations.
 pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
     db: &C,
-    scope: Option<gradient_types::EvaluationId>,
+    evaluation: gradient_types::EvaluationId,
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            dependency_failed_reconcile_sql(scope),
-            fixpoint_params(scope),
+            dependency_failed_reconcile_sql(),
+            [Value::Uuid(Some(evaluation.into_inner()))],
         ))
         .await?;
 
     Ok(returned_transitions(rows))
 }
 
-/// Recursive upward walk from every terminal-failed anchor that fails each
-/// reachable non-terminal anchor. Mirrors the reactive
-/// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted`,
-/// which is retried, not permanent). The failed roots are excluded from the
-/// UPDATE by the cascade-target predicate, so the sweep is idempotent. `None`
-/// is the global full-table backstop; `Some(eval)` bounds the seed, the walk,
-/// and the UPDATE to that eval's dependency closure ($1) so the per-worker-event
-/// `Eval`/`Unstick` heal - which runs right after the requeue thaw - re-fails
-/// that eval's thawed victims without scanning the whole table.
-fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) -> String {
+/// Recursive upward walk from every terminal-failed anchor in the evaluation's
+/// closure that fails each reachable non-terminal anchor. Mirrors the reactive
+/// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted`, which
+/// is retried, not permanent). The failed roots are excluded from the UPDATE by the
+/// cascade-target predicate, so the sweep is idempotent. The seed, the walk and the
+/// UPDATE are all bounded to the eval closure ($1): this runs right after the
+/// requeue thaw, on an event, and re-fails that eval's own thawed victims without
+/// ever scanning the whole table.
+fn dependency_failed_reconcile_sql() -> String {
     let dependency_failed = status_sql::build(BuildStatus::DependencyFailed);
     let cascade_target = status_sql::build_in(&CASCADE_TARGET);
     let terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE);
-    let (prelude, update_bound) = match scope {
-        None => (
-            dependency_closure_cte(
-                "dependents",
-                &format!(
-                    "SELECT derivation FROM derivation_build WHERE status IN ({terminal_failure})"
-                ),
-                ClosureDirection::Dependents,
+    let prelude = format!(
+        "WITH RECURSIVE {closure},\n    {dependents}",
+        closure = eval_closure_cte_body(),
+        dependents = bounded_dependency_closure_cte_body(
+            "dependents",
+            &format!(
+                "SELECT derivation FROM derivation_build \
+                 WHERE status IN ({terminal_failure}) \
+                   AND derivation IN (SELECT derivation FROM closure)"
             ),
-            String::new(),
+            ClosureDirection::Dependents,
+            "e.derivation IN (SELECT derivation FROM closure)",
         ),
-        Some(_) => (
-            format!(
-                "WITH RECURSIVE {closure},\n    {dependents}",
-                closure = eval_closure_cte_body(),
-                dependents = bounded_dependency_closure_cte_body(
-                    "dependents",
-                    &format!(
-                        "SELECT derivation FROM derivation_build \
-                         WHERE status IN ({terminal_failure}) \
-                           AND derivation IN (SELECT derivation FROM closure)"
-                    ),
-                    ClosureDirection::Dependents,
-                    "e.derivation IN (SELECT derivation FROM closure)",
-                ),
-            ),
-            " AND db.derivation IN (SELECT derivation FROM closure)".to_string(),
-        ),
-    };
+    );
+
     format!(
         r#"
     {prelude}
@@ -590,7 +580,8 @@ fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) 
     FROM derivation_build old
     WHERE old.id = db.id
       AND db.status IN ({cascade_target})
-      AND db.derivation IN (SELECT derivation FROM dependents){update_bound}
+      AND db.derivation IN (SELECT derivation FROM dependents)
+      AND db.derivation IN (SELECT derivation FROM closure)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#
     )
@@ -766,7 +757,7 @@ fn requeue_failed_anchors_sql() -> String {
         r#"
         {ctes}
         UPDATE derivation_build db
-        SET status = {created}, attempt = 0, closure_complete = false,
+        SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
         WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
           AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
@@ -810,7 +801,7 @@ fn requeue_failed_closure_for_eval_sql() -> String {
         r#"
         {ctes}
         UPDATE derivation_build db
-        SET status = {created}, attempt = 0, closure_complete = false,
+        SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
         WHERE db.derivation IN (SELECT derivation FROM closure)
           AND db.status IN ({requeueable})
@@ -823,7 +814,7 @@ fn requeue_failed_closure_for_eval_sql() -> String {
 
 /// Reconcile anchor state from cache state across an evaluation's dependency
 /// closure: any anchor whose outputs are **all** present in our cache
-/// (`cached_path.file_hash`) is marked `Completed` + `closure_complete`, even if a
+/// (`cached_path.file_hash`) is marked `Completed`, even if a
 /// requeue / dependency-failed cascade / demote previously reset it. The dispatch
 /// gate keys on the build-graph anchor state, which repeatedly desyncs from the
 /// durable cache state - a derivation whose artifacts exist sits `Created` and
@@ -831,8 +822,9 @@ fn requeue_failed_closure_for_eval_sql() -> String {
 /// for "is this built", so trust it here; the reactive heals
 /// (`demote_referrers_of` / absent-orphan recovery) remain the backstop for the
 /// rare case where a cached output's runtime closure is itself incomplete. Returns
-/// the changes it made (flag-only touches on already-terminal anchors report
-/// `from == to`, which the effects emitter treats as a re-announce).
+/// the changes it made, so the caller can advance the dependents of what it just
+/// settled; an anchor already terminal-success is left alone, since it has nothing
+/// left for this statement to write.
 pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
@@ -846,12 +838,11 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
             {cte}
             UPDATE derivation_build db
             SET status = CASE WHEN db.status IN ({terminal_success}) THEN db.status ELSE {completed} END,
-                closure_complete = true,
                 updated_at = (now() AT TIME ZONE 'UTC')
             FROM derivation_build old
             WHERE old.id = db.id
               AND db.derivation IN (SELECT derivation FROM closure)
-              AND (db.status NOT IN ({terminal_success}) OR NOT db.closure_complete)
+              AND db.status NOT IN ({terminal_success})
               AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
               AND NOT EXISTS (
                 SELECT 1 FROM derivation_output o
@@ -959,7 +950,7 @@ mod tests {
     /// anchors, so pin the SQL shape (no live DB in unit tests).
     #[test]
     fn dependency_failed_reconcile_sql_mirrors_the_cascade() {
-        let sql = dependency_failed_reconcile_sql(None)
+        let sql = dependency_failed_reconcile_sql()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -1003,37 +994,31 @@ mod tests {
         );
     }
 
-    /// Scoped to an eval (`Eval`/`Unstick`), the sweep must bound the seed, the
-    /// walk, and the UPDATE to that eval's dependency closure ($1) so the inline
-    /// per-worker-event heal re-fails its own thawed victims without a full-table
-    /// scan. The global (`None`) pass must not carry any closure walk.
+    /// The sweep is bounded to one eval's dependency closure ($1) and has no
+    /// full-table form left: the seed, the walk and the UPDATE all carry the
+    /// membership filter, so an event-driven heal re-fails its own thawed victims
+    /// without ever scanning the table.
     #[test]
-    fn dependency_failed_reconcile_sql_bounds_to_eval_closure_when_scoped() {
+    fn dependency_failed_reconcile_sql_bounds_to_eval_closure() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let global = norm(dependency_failed_reconcile_sql(None));
-        assert!(
-            !global.contains("FROM closure"),
-            "global pass scans the whole table, no closure walk: {global}"
-        );
-        let scoped = norm(dependency_failed_reconcile_sql(Some(
-            gradient_types::EvaluationId::now_v7(),
-        )));
+        let scoped = norm(dependency_failed_reconcile_sql());
         assert!(
             scoped.contains("WITH RECURSIVE closure(derivation) AS"),
-            "scoped pass must walk the eval closure: {scoped}"
+            "the sweep must walk the eval closure: {scoped}"
         );
         assert!(
-            scoped.contains(
-                "WHERE status IN (4, 6, 9) AND derivation IN (SELECT derivation FROM closure)"
-            ),
-            "scoped seed must be the closure's terminal-failed anchors: {scoped}"
+            scoped.contains(&format!(
+                "WHERE status IN ({terminal_failure}) AND derivation IN (SELECT derivation FROM closure)",
+                terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE),
+            )),
+            "the seed must be the closure's terminal-failed anchors: {scoped}"
         );
         assert!(
             scoped
                 .matches("IN (SELECT derivation FROM closure)")
                 .count()
                 >= 3,
-            "scoped seed, walk, and UPDATE must all be bounded to the closure: {scoped}"
+            "seed, walk, and UPDATE must all be bounded to the closure: {scoped}"
         );
     }
 

@@ -93,11 +93,13 @@ pub use self::promotion::{
 };
 pub use self::reachability::{
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
-    eval_anchor_statuses, evals_referencing_derivation,
+    derivations_with_hashes, eval_anchor_statuses, evals_referencing_derivation,
+    producers_of_hashes,
 };
 pub use self::readiness::{
-    AnchorLock, Repaired, became_fetchable, lock_anchors, lost_fetchability, promote,
-    promote_closure, repair_pending, seed_unready_deps, unpromote_drv_owners,
+    AnchorLock, Repaired, advance_fetchable, became_fetchable, lock_anchors, lost_fetchability,
+    promote, promote_closure, repair_pending, seed_unready_deps, unpromote_drv_owners,
+    unpromote_ungated,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;

@@ -11,7 +11,10 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, QueryFilter, QuerySelect,
+    Statement,
+};
 
 /// Build status of every anchor an evaluation needs (one per `build_job`).
 /// Used for graph-derived eval-done.
@@ -92,6 +95,56 @@ pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
         m.entry(j.derivation).or_default().push(j);
         m
     }))
+}
+
+/// The derivations whose outputs carry any of `hashes`: the anchors a store
+/// path's arrival or removal can make fetchable or unfetchable.
+pub async fn producers_of_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<Vec<DerivationId>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
+            [hashes.to_vec().into()],
+        ))
+        .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+        .map(DerivationId::new)
+        .collect())
+}
+
+/// The derivations whose own `.drv` hash is any of `hashes`: the anchors whose
+/// own derivation file just arrived in, or left, the cache.
+pub async fn derivations_with_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<Vec<DerivationId>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT d.id FROM derivation d WHERE d.hash = ANY($1)",
+            [hashes.to_vec().into()],
+        ))
+        .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "id").ok())
+        .map(DerivationId::new)
+        .collect())
 }
 
 /// Whether any surviving evaluation needs `derivation` (a `build_job` exists).

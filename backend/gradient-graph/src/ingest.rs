@@ -23,7 +23,7 @@ use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
-    IntoActiveModel, QueryFilter, Statement, Value,
+    IntoActiveModel, QueryFilter, Statement, TransactionTrait, Value,
 };
 use tracing::{debug, error, warn};
 
@@ -63,10 +63,13 @@ ON CONFLICT (hash, name) DO NOTHING
 
 const RESOLVE_IDS: &str = "SELECT id, hash FROM derivation WHERE hash = ANY($1::text[])";
 
+/// `RETURNING` names exactly the dependents whose edge set GREW, so the readiness
+/// seed runs for those and not for every derivation the batch mentions.
 const EDGE_INSERT: &str = r#"
 INSERT INTO derivation_dependency (derivation, dependency)
 SELECT e.derivation, e.dependency FROM unnest($1::uuid[], $2::uuid[]) AS e(derivation, dependency)
 ON CONFLICT DO NOTHING
+RETURNING derivation
 "#;
 
 /// A stub's anchor exists before the record that carries the derivation's
@@ -79,6 +82,14 @@ WHERE db.derivation = l.derivation
   AND (db.timeout_secs, db.max_silent_secs)
       IS DISTINCT FROM (NULLIF(l.timeout_secs, 0), NULLIF(l.max_silent_secs, 0))
 "#;
+
+/// Every drv path the batch names, resolved twice: by path for the writes that
+/// key on what the worker reported, by hash for the readiness seed, whose input
+/// is the walked-upsert's `RETURNING hash`.
+struct Resolved {
+    by_path: HashMap<String, DerivationId>,
+    by_hash: HashMap<String, DerivationId>,
+}
 
 /// Writes a single batch of discovered derivations, inside the actor's
 /// transaction. Holds what every step shares: the scoped context and the
@@ -210,10 +221,7 @@ impl BatchWriter<'_> {
 
     /// Every drv path the batch names, walked or stub, to the row's id. Read
     /// back from the table after the inserts, never from a local guess.
-    async fn resolve_ids(
-        &self,
-        derivations: &[DiscoveredDerivation],
-    ) -> Result<HashMap<String, DerivationId>> {
+    async fn resolve_ids(&self, derivations: &[DiscoveredDerivation]) -> Result<Resolved> {
         let paths: HashSet<&str> = derivations
             .iter()
             .flat_map(|d| {
@@ -248,13 +256,15 @@ impl BatchWriter<'_> {
             }
         }
 
-        Ok(paths
+        let by_path = paths
             .into_iter()
             .filter_map(|p| {
                 let (hash, _) = drv_hash_name(p)?;
                 by_hash.get(&hash).map(|id| (p.to_owned(), *id))
             })
-            .collect())
+            .collect();
+
+        Ok(Resolved { by_path, by_hash })
     }
 
     /// Outputs and edges of every derivation the batch reports, not only the
@@ -265,7 +275,7 @@ impl BatchWriter<'_> {
         &self,
         derivations: &[DiscoveredDerivation],
         ids: &HashMap<String, DerivationId>,
-    ) -> Result<()> {
+    ) -> Result<Vec<DerivationId>> {
         let now = gradient_types::now();
         let mut outputs: Vec<ADerivationOutput> = Vec::new();
         let mut edge_from: Vec<uuid::Uuid> = Vec::new();
@@ -325,18 +335,25 @@ impl BatchWriter<'_> {
             }
         }
 
-        if !edge_from.is_empty() {
-            self.db()
-                .execute_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    EDGE_INSERT,
-                    [edge_from.into(), edge_to.into()],
-                ))
-                .await
-                .context("insert dependency edges")?;
+        if edge_from.is_empty() {
+            return Ok(Vec::new());
         }
 
-        Ok(())
+        let grew = self
+            .db()
+            .query_all_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                EDGE_INSERT,
+                [edge_from.into(), edge_to.into()],
+            ))
+            .await
+            .context("insert dependency edges")?;
+
+        Ok(grew
+            .iter()
+            .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+            .map(DerivationId::new)
+            .collect())
     }
 
     async fn set_anchor_limits(
@@ -430,7 +447,6 @@ impl BatchWriter<'_> {
                     status,
                     substitutable: upstream.contains(&drv_id),
                     substituted: status == BuildStatus::Substituted,
-                    closure_complete: status == BuildStatus::Substituted,
                     timeout_secs,
                     max_silent_secs,
                     created_at: now,
@@ -536,6 +552,86 @@ impl BatchWriter<'_> {
                 .context("substitute created anchors")?;
             gradient_db::emit_transition_effects(self.ctx, &changes).await;
         }
+
+        Ok(())
+    }
+
+    /// Move the readiness counters this batch changed, in one transaction under one
+    /// ordered lock: the anchors whose substitution it established become
+    /// fetchable and their dependents' counters drop, `unready_deps` is recounted
+    /// from ground truth, and whatever now passes the gates is queued.
+    ///
+    /// ONE lock over the union of the two sets, never one per set: two ordered
+    /// acquisitions in the same transaction are not monotone across each other, and
+    /// that is how an ABBA cycle with a concurrent retire is built. The lock also
+    /// widens the seed from the walked-and-grew set to the union, which is sound
+    /// because the seed is an absolute recount over ground truth: for an anchor
+    /// whose edges did not move it either agrees with the maintained value or the
+    /// maintained value was wrong.
+    ///
+    /// The mark runs BEFORE the seed, and that order is load-bearing. The seed
+    /// EVALUATES the fetchability predicate on each dependency instead of reading
+    /// the column, so a dependency this batch is about to flip already counts as
+    /// ready to it; letting the flip's ripple decrement afterwards would take the
+    /// dependent one BELOW its true count, and a negative counter never satisfies
+    /// `= 0` again. Seeding last makes the absolute write the final word for every
+    /// row this batch names, and leaves the ripple exact for every row outside it.
+    ///
+    /// Promotion is offered the whole locked set rather than the seeded part: an
+    /// anchor this batch just made substitutable passes the gates on its own
+    /// account, and no dependent's flip would ever queue it. Nothing here retracts,
+    /// because a batch only ever ADDS substitution facts, so the symmetric loss
+    /// belongs to the demote and the retire.
+    async fn advance_readiness(
+        &self,
+        batch: &IngestBatch,
+        resolved: &Resolved,
+        newly_walked: &HashSet<String>,
+        grew: Vec<DerivationId>,
+    ) -> Result<()> {
+        let mut to_seed: Vec<DerivationId> = newly_walked
+            .iter()
+            .filter_map(|h| resolved.by_hash.get(h).copied())
+            .collect();
+        to_seed.extend(grew);
+        to_seed.sort_unstable();
+        to_seed.dedup();
+
+        let mut locked = to_seed;
+        locked.extend(
+            batch
+                .truly_substituted
+                .iter()
+                .chain(batch.upstream_substitutable.iter())
+                .filter_map(|p| resolved.by_path.get(p).copied()),
+        );
+        locked.sort_unstable();
+        locked.dedup();
+        if locked.is_empty() {
+            return Ok(());
+        }
+
+        let txn = self
+            .db()
+            .begin()
+            .await
+            .context("begin the readiness transaction")?;
+        let lock = gradient_db::lock_anchors(&txn, &locked).await?;
+        let mut changes = gradient_db::became_fetchable(&lock)
+            .await
+            .context("advance fetchable anchors")?;
+        gradient_db::seed_unready_deps(&lock)
+            .await
+            .context("seed unready_deps")?;
+        changes.extend(
+            gradient_db::promote(&txn, &locked)
+                .await
+                .context("promote the batch's anchors")?,
+        );
+        txn.commit()
+            .await
+            .context("commit the readiness transaction")?;
+        gradient_db::emit_transition_effects(self.ctx, &changes).await;
 
         Ok(())
     }
@@ -796,18 +892,22 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
     if !batch.derivations.is_empty() {
         let newly_walked = writer.upsert_walked(&batch.derivations).await?;
         writer.insert_stubs(&batch.derivations).await?;
-        let ids = writer.resolve_ids(&batch.derivations).await?;
-        writer.insert_records(&batch.derivations, &ids).await?;
-        writer.persist_input_sources(&batch.derivations, &ids).await;
+        let resolved = writer.resolve_ids(&batch.derivations).await?;
+        let ids = &resolved.by_path;
+        let grew = writer.insert_records(&batch.derivations, ids).await?;
+        writer.persist_input_sources(&batch.derivations, ids).await;
         writer.persist_upstream_hits(&batch.upstream_hits).await;
         writer
-            .resolve_anchors(&ids, &batch.derivations, batch)
+            .resolve_anchors(ids, &batch.derivations, batch)
             .await?;
-        writer.add_system_features(&batch.derivations, &ids).await;
+        writer.add_system_features(&batch.derivations, ids).await;
+        writer
+            .advance_readiness(batch, &resolved, &newly_walked, grew)
+            .await?;
         report.entry_points = match batch.task {
             Some(task) => {
                 writer
-                    .process_entry_points(task, &batch.derivations, &ids)
+                    .process_entry_points(task, &batch.derivations, ids)
                     .await
             }
             None => Vec::new(),
@@ -950,7 +1050,8 @@ mod tests {
 
     /// A dependency the batch only names gets a stub row before the edge that
     /// points at it, never a walked one, and the batch reports one walked
-    /// derivation: the one whose record it carried.
+    /// derivation: the one whose record it carried. The readiness pass closes the
+    /// batch: it seeds from edges that exist, so it can only run once they do.
     #[tokio::test]
     async fn a_named_dependency_gets_a_stub_before_its_edge() {
         let evaluation = EvaluationId::now_v7();
@@ -959,10 +1060,13 @@ mod tests {
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
-            .append_exec_results(vec![ok(1); 2])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 3])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -979,11 +1083,12 @@ mod tests {
 
         assert_eq!(report.walked, 1);
         drop(ctx);
-        let log: Vec<String> = pool
-            .into_transaction_log()
-            .iter()
-            .map(|t| format!("{t:?}"))
-            .collect();
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            12,
+            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote: {log:?}"
+        );
         let walked = log
             .iter()
             .position(|s| s.contains("walked = true") && s.contains("WHERE NOT derivation.walked"))
@@ -996,13 +1101,33 @@ mod tests {
             .iter()
             .position(|s| s.contains("INSERT INTO derivation_dependency"))
             .expect("the edge insert runs");
+        let lock = log
+            .iter()
+            .position(|s| s.contains("ORDER BY derivation FOR UPDATE"))
+            .expect("the readiness pass locks its anchors");
+        let mark = log
+            .iter()
+            .position(|s| s.contains("SET fetchable = true"))
+            .expect("the mark runs");
+        let seed = log
+            .iter()
+            .position(|s| s.contains("SET unready_deps = (SELECT count(*)"))
+            .expect("the seed runs");
         assert!(
-            walked < stub && stub < edge,
-            "walked, then stubs, then edges: {log:?}"
+            walked < stub && stub < edge && edge < lock,
+            "walked, then stubs, then edges, and only then the counters: {log:?}"
+        );
+        assert!(
+            lock < mark && mark < seed,
+            "the lock precedes the flip, and the absolute seed is the last word on the batch's own rows: {log:?}"
         );
         assert!(
             log[stub].contains(&b.hash) && !log[walked].contains(&b.hash),
             "the dependency is a stub, not a walked row: {log:?}"
+        );
+        assert!(
+            log[edge].contains("RETURNING derivation"),
+            "the seed set is the edges that actually landed: {log:?}"
         );
     }
 
@@ -1019,10 +1144,11 @@ mod tests {
             .append_query_results([vec![eval]])
             .append_query_results([Vec::<MDerivation>::new()])
             .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
-            .append_exec_results(vec![ok(0); 2])
+            .append_exec_results(vec![ok(0); 1])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1042,11 +1168,7 @@ mod tests {
             "an already walked derivation is not a flip"
         );
         drop(ctx);
-        let log: Vec<String> = pool
-            .into_transaction_log()
-            .iter()
-            .map(|t| format!("{t:?}"))
-            .collect();
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
         let writes: Vec<&String> = log
             .iter()
             .filter(|s| s.contains("INSERT INTO derivation"))
@@ -1060,6 +1182,10 @@ mod tests {
         assert!(
             writes.iter().all(|s| s.contains("ON CONFLICT")),
             "every graph write a re-delivered batch repeats lands on no row: {writes:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains("SET unready_deps = ")),
+            "a batch that flipped nothing walked and grew no edge has no counter to move: {log:?}"
         );
     }
 
@@ -1134,7 +1260,9 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
-            .append_exec_results(vec![ok(1)])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 3])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1165,9 +1293,13 @@ mod tests {
             .iter()
             .position(|s| s.sql.contains("UPDATE derivation_build AS db"))
             .expect("the limits update runs");
+        let seed = log
+            .iter()
+            .position(|s| s.sql.contains("SET unready_deps = (SELECT count(*)"))
+            .expect("the readiness seed runs");
         assert!(
-            anchors < limits,
-            "limits are written once the anchor exists: {log:?}"
+            anchors < limits && limits < seed,
+            "limits are written once the anchor exists, and the counters after both: {log:?}"
         );
         assert!(
             format!("{:?}", log[limits].values).contains("BigInt(Some(3600))"),

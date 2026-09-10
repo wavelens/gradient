@@ -288,14 +288,25 @@ static UNPROMOTE_DRV_OWNERS: LazyLock<String> = LazyLock::new(|| {
     ))
 });
 
+fn unpromote_ungated_sql(scope: &str) -> String {
+    unpromote_sql(&format!(
+        "{scope}NOT {gates}",
+        gates = gates_predicate("db")
+    ))
+}
+
 /// The queue's own backstop: every `Queued` anchor whose gates no longer hold.
 ///
 /// Table-wide with no index-friendly bound - it scans the `Queued` rows and evaluates
 /// three `EXISTS` plus the negated gate for each, unlike [`PROMOTE_ANY`], which
 /// matches a partial index. It is the sweep's most expensive statement and its row
 /// count belongs in whatever the sweep reports.
-static UNPROMOTE_UNGATED: LazyLock<String> =
-    LazyLock::new(|| unpromote_sql(&format!("NOT {gates}", gates = gates_predicate("db"))));
+static UNPROMOTE_UNGATED: LazyLock<String> = LazyLock::new(|| unpromote_ungated_sql(""));
+
+/// [`UNPROMOTE_UNGATED`] bounded to a candidate list, for an event that just
+/// invalidated a known set of gates.
+static UNPROMOTE_UNGATED_IN: LazyLock<String> =
+    LazyLock::new(|| unpromote_ungated_sql("db.derivation = ANY($1::uuid[]) AND "));
 
 /// The pending anchors and their direct dependencies: every row whose `fetchable` a
 /// gate can read this pass, one edge deep. [`pending_scope`] materialises it, so the
@@ -380,7 +391,7 @@ pub async fn lock_anchors<'txn>(
     })
 }
 
-fn ids(derivations: &[DerivationId]) -> Value {
+pub(crate) fn ids(derivations: &[DerivationId]) -> Value {
     derivations
         .iter()
         .map(|d| d.into_inner())
@@ -475,6 +486,33 @@ pub async fn became_fetchable(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCha
     promote(lock.txn, &ready).await
 }
 
+/// [`became_fetchable`] with the transaction and the lock it needs, for an event
+/// that names its anchors and does nothing else to them.
+///
+/// `begin` is a real transaction on a pooled handle and a SAVEPOINT on one that
+/// already stands for a transaction, and a savepoint's locks are held to the OUTER
+/// commit, so this one shape is correct inside the graph actor and outside it. The
+/// caller emits the returned transitions after this returns and never between the
+/// lock and the commit, which is why they are returned rather than emitted here.
+pub async fn advance_fetchable<C>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if derivations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let txn = db.begin().await?;
+    let lock = lock_anchors(&txn, derivations).await?;
+    let changes = became_fetchable(&lock).await?;
+    txn.commit().await?;
+
+    Ok(changes)
+}
+
 /// Flip the locked anchors to not fetchable where the predicate no longer holds,
 /// increment their direct dependents' counters, and pull the queued dependents back to
 /// `Created`. The returned transitions are `Queued` to `Created`; a dependent that was
@@ -566,6 +604,28 @@ pub async fn unpromote_drv_owners<C: ConnectionTrait>(
             DatabaseBackend::Postgres,
             UNPROMOTE_DRV_OWNERS.as_str(),
             [drv_hashes.to_vec().into()],
+        ))
+        .await?,
+    ))
+}
+
+/// Pull back every `Queued` candidate whose gates no longer hold. The gate is
+/// embedded, so the candidate list is a bound and never a claim: an anchor a
+/// concurrent evaluation re-walked between the event and this call keeps its place
+/// in the queue.
+pub async fn unpromote_ungated<C: ConnectionTrait>(
+    db: &C,
+    candidates: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(returned_transitions(
+        db.query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            UNPROMOTE_UNGATED_IN.as_str(),
+            [ids(candidates)],
         ))
         .await?,
     ))

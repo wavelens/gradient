@@ -81,22 +81,12 @@ pub async fn update_derivation_build_status(
     )
     .await;
 
+    // A build-once success is the moment this anchor can serve its outputs: one
+    // locked flip drops its dependents' counters and queues the ones at zero.
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
-        // Recompute closure-completeness up the build-dependency graph from this
-        // anchor, before promoting. A built anchor becomes `closure_complete` once
-        // its build deps are each `closure_complete` or `substitutable`; this also
-        // ripples to dependents that were waiting only on this one. Doing it before
-        // `promote_dependents` is essential - otherwise the last dep to land
-        // strands its dependents behind a flag that flips only afterward.
-        if let Err(e) =
-            crate::promotion::propagate_closure_complete(&ctx.worker_db, updated.derivation).await
-        {
-            error!(error = %e, "failed to propagate closure_complete");
-        }
-
-        match crate::promotion::promote_dependents(&ctx.worker_db, updated.derivation).await {
+        match crate::readiness::advance_fetchable(&ctx.worker_db, &[updated.derivation]).await {
             Ok(changes) => emit_transition_effects(ctx, &changes).await,
-            Err(e) => error!(error = %e, "failed to promote dependents"),
+            Err(e) => error!(error = %e, "failed to advance the dependents"),
         }
     }
 
