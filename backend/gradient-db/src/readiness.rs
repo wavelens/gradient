@@ -639,9 +639,9 @@ pub struct Repaired {
     pub promoted: Vec<TransitionChange>,
     pub unpromoted: Vec<TransitionChange>,
     /// How many anchors the recount locked, twice over. A measurement, not a
-    /// violation: [`repair_scope`] is an unbounded select and each chunk takes
-    /// `FOR UPDATE` on rows every live graph writer also locks, so the cost this
-    /// pass imposes on ingest is worth seeing before it is bounded.
+    /// violation: the scope select is unbounded and each chunk takes `FOR UPDATE`
+    /// on rows every live graph writer also locks, so the cost this pass imposes
+    /// on ingest is worth seeing before it is bounded.
     pub scope: usize,
 }
 

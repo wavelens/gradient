@@ -51,8 +51,9 @@ pub struct ConsistencyReport {
     /// violation: it is the size of an unbounded select, reported so the cost of
     /// the recurring scans this pass adds is visible before they are bounded.
     pub gating_paths: i64,
-    /// How many anchors the readiness repair locked and recounted, the wider of
-    /// the two scans. A measurement, like [`Self::gating_paths`].
+    /// How many anchors the readiness repair locked and recounted. Fewer rows
+    /// than [`Self::gating_paths`] but the costlier scan: each is taken
+    /// `FOR UPDATE`, twice, against rows every live graph writer also locks.
     pub repair_scope: i64,
 }
 
@@ -200,7 +201,10 @@ mod tests {
             report.counter_drift, 8,
             "both readiness recounts are reported, not one of them"
         );
-        assert_eq!(report.repair_scope, 1, "the wider scan's scope is measured");
+        assert_eq!(
+            report.repair_scope, 1,
+            "the readiness repair's scope is measured too"
+        );
 
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
