@@ -9,8 +9,9 @@
 //! surfaces as a warning metric instead of a user-reported stuck evaluation. Reuses the very
 //! gate SQL the reconciler maintains, so a non-zero count means "the healing
 //! pipeline is not converging", never "the checker disagrees with the gates".
-//! Transient non-zero counts between a transition and the next reconcile tick
-//! are expected; persistent counts are the alert.
+//! Transient non-zero counts between a transition and this pass are expected;
+//! persistent counts are the alert. There is no reconcile tick to wait for: the
+//! event that changes a counter moves it, and this sweep is the only backstop.
 //!
 //! One dimension is not read-only: the NAR reference counter is moved rather
 //! than derived, so nothing else would ever notice a lost move. This pass

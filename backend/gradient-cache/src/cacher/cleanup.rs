@@ -148,6 +148,16 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
 const UNSIGNED_GUARD: &str =
     "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)";
 
+/// Evict the cached NARs of derivations no cache has fetched within the TTL.
+///
+/// The retire moves the anchor side with the rows it drops, so evicting the output
+/// of a producer some evaluation still wants takes that producer's `fetchable` down
+/// and returns it to `Created`: a TTL pass CAN schedule a rebuild of what it just
+/// evicted. That is the intended consequence of a readiness flag that means "can
+/// serve its outputs right now"; the alternative is a terminal-success anchor whose
+/// dependents are blocked behind an artifact nobody has, which is the dead zone the
+/// counters replace. `STALE_CACHED_NARS_SELECT` keeps it rare by excluding any
+/// derivation with a non-terminal anchor.
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     let ttl_hours = state.config.storage.nar_ttl_hours;
     if ttl_hours == 0 {

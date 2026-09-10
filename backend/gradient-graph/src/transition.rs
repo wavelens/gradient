@@ -174,9 +174,10 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
     }
 
     // Every edge landed with its batch, so the graph is complete here: run the
-    // canonical healing pipeline scoped to this eval, which thaws its closure,
-    // heals cache trust across it, reconciles the gate flags, and promotes the
-    // ready frontier (see `gradient_db::reconcile`).
+    // healing pipeline scoped to this eval, which thaws its closure, settles the
+    // anchors whose outputs are already whole and advances their dependents, fails
+    // the closure's dependency-failed victims, and promotes the closure (see
+    // `gradient_db::reconcile`). The unbacked-output demote rides `Unstick` only.
     gradient_db::reconcile_build_graph(ctx, gradient_db::ReconcileScope::Eval(evaluation_id)).await;
 
     // Promotion is graph-driven (gradient_db::promotion), independent of eval

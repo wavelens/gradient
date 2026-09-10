@@ -95,9 +95,11 @@
 //! deadlock instead of a permanently false-whole row.
 
 use gradient_entity::build::BuildStatus;
+use gradient_types::DerivationId;
 use sea_orm::{
     ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
+use std::collections::HashSet;
 
 /// The row `{alias}` is stored and every reference resolves to a whole row.
 pub fn whole_predicate(alias: &str) -> String {
@@ -483,7 +485,10 @@ async fn retire(
         .await?;
     }
 
-    let transitions = retire_anchors(db, &gated).await?;
+    let mut anchor_scope = gated;
+    let moved: HashSet<String> = anchor_scope.iter().cloned().collect();
+    anchor_scope.extend(hashes.iter().filter(|h| !moved.contains(*h)).cloned());
+    let transitions = retire_anchors(db, &anchor_scope).await?;
 
     Ok(Retired {
         deleted,
@@ -492,29 +497,42 @@ async fn retire(
     })
 }
 
-/// The readiness half of a retire, over the union of the deleted and the
-/// newly-unwhole hashes: the producers stop being fetchable and their dependents'
-/// counters rise, a terminal-success producer with nothing left to serve becomes a
-/// fresh build intent, and the owner of a `.drv` that is gone leaves the queue.
+/// The readiness half of a retire, over every hash the caller ASKED to retire plus
+/// everything the retire moved: the producers stop being fetchable and their
+/// dependents' counters rise, a terminal-success producer with nothing left to
+/// serve becomes a fresh build intent, and the owner of a `.drv` that is gone
+/// leaves the queue.
+///
+/// The asked-for hashes have to be in the scope, not just the ones that moved. A
+/// hash with no `cached_path` row at all deletes nothing and ripples nothing, yet
+/// it is exactly half of what `unbacked_trusted_outputs_select` matches
+/// (`NOT EXISTS (... cp.file_hash IS NOT NULL)` is true for a missing row and for
+/// an unbacked one alike), and `REQUEUEABLE` excludes terminal success, so nothing
+/// else would ever recover such a producer. Widening costs one lookup and one lock
+/// on a retire that changed nothing, and moves nothing extra: every statement below
+/// is keyed on ground truth and self-limiting, so a path that is still there and
+/// still whole fails all three.
 ///
 /// The reset is keyed on `NOT db.fetchable` rather than on the hash list so it
 /// reads the flag the mark just wrote: a producer an upstream still serves stays
 /// fetchable and keeps its terminal status, and a producer that was already stale
 /// (fetchable false under a terminal status, so the mark moved nothing) is repaired
-/// here rather than waiting for a sweep.
+/// here rather than waiting for a sweep. A reset row re-enters the pending
+/// population, and nothing else recounts a row that does, so it is re-seeded here
+/// on a lock this transaction already holds.
 async fn retire_anchors(
     txn: &DatabaseTransaction,
-    gated: &[String],
+    scope: &[String],
 ) -> Result<Vec<crate::status::TransitionChange>, DbErr> {
-    if gated.is_empty() {
+    if scope.is_empty() {
         return Ok(Vec::new());
     }
 
-    let producers = crate::reachability::producers_of_hashes(txn, gated).await?;
+    let producers = crate::reachability::producers_of_hashes(txn, scope).await?;
     let lock = crate::readiness::lock_anchors(txn, &producers).await?;
     let mut transitions = crate::readiness::lost_fetchability(&lock).await?;
     if !producers.is_empty() {
-        transitions.extend(crate::promotion::returned_transitions(
+        let reset = crate::promotion::returned_transitions(
             txn.query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 format!(
@@ -531,10 +549,17 @@ async fn retire_anchors(
                 [crate::readiness::ids(&producers)],
             ))
             .await?,
-        ));
+        );
+        if !reset.is_empty() {
+            let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
+            let thawed_lock = crate::readiness::lock_anchors(txn, &thawed).await?;
+            crate::readiness::seed_unready_deps(&thawed_lock).await?;
+        }
+
+        transitions.extend(reset);
     }
 
-    transitions.extend(crate::readiness::unpromote_drv_owners(txn, gated).await?);
+    transitions.extend(crate::readiness::unpromote_drv_owners(txn, scope).await?);
 
     Ok(transitions)
 }
@@ -959,13 +984,14 @@ mod tests {
     /// referrer of a row that was already incomplete counted it as missing
     /// already, so it must not be incremented twice. The flag clears and the
     /// readiness side do NOT split that way: `is_cached` follows what was deleted,
-    /// and both the anchor flags and the producer/owner pass follow the union of
-    /// what was deleted and what stopped being whole, because none of them reads
-    /// the counter - a row deleted while it was not whole (`b` here) would
-    /// otherwise keep a stale-true gate and dispatch a build against a `.drv` that
-    /// is gone. The unguarded retire opens with the same hash-ordered lock pass as
-    /// the guarded one: it decides nothing there, but an unordered acquisition
-    /// deadlocks against every other writer's ordered one.
+    /// the anchor flags follow the union of what was deleted and what stopped being
+    /// whole, and the producer/owner pass follows that union plus every hash the
+    /// caller asked for, because none of them reads the counter - a row deleted
+    /// while it was not whole (`b` here) would otherwise keep a stale-true gate and
+    /// dispatch a build against a `.drv` that is gone. The unguarded retire opens
+    /// with the same hash-ordered lock pass as the guarded one: it decides nothing
+    /// there, but an unordered acquisition deadlocks against every other writer's
+    /// ordered one.
     #[tokio::test]
     async fn retire_clears_the_anchor_flags_for_every_retired_path() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1034,9 +1060,59 @@ mod tests {
         );
     }
 
-    /// No producer means no readiness statement at all: an empty producer list
-    /// locks nothing, marks nothing and resets nothing, so a retire of a path no
-    /// derivation produces costs one lookup.
+    /// A hash with no `cached_path` row deletes nothing and ripples nothing, so
+    /// the anchor side has to key on what the caller ASKED to retire and not only
+    /// on what moved. That case is half of what `unbacked_trusted_outputs_select`
+    /// matches, and no requeue path recovers a terminal-success producer, so
+    /// skipping it strands the anchor for good.
+    #[tokio::test]
+    async fn a_retire_of_a_path_with_no_row_still_moves_its_producers() {
+        let producer = gradient_types::DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer.into_inner()),
+            )])]])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer.into_inner()),
+            )])]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                };
+                2
+            ])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        let retired = retire_paths(&txn, &["a".to_owned()]).await.unwrap();
+        txn.commit().await.unwrap();
+
+        assert!(retired.deleted.is_empty() && retired.unwhole.is_empty());
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert!(
+            log.iter()
+                .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
+            "the producers of a hash with no row are still resolved: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("SET fetchable = false")),
+            "and offered to the mark, which decides from the predicate: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("AND NOT db.fetchable")),
+            "so a producer with nothing left to serve is reset: {log:?}"
+        );
+    }
+
+    /// No producer means no readiness statement past the lookup: an empty producer
+    /// list locks nothing, marks nothing and resets nothing.
     #[tokio::test]
     async fn a_retire_with_no_producers_marks_and_resets_nothing() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)

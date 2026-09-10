@@ -197,10 +197,10 @@ pub async fn reconcile_waiting_state(
 /// (nothing to decide).
 ///
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
-/// every pending anchor yet none is dispatchable - the whole set is `Created`,
-/// blocked behind the `closure_complete` gate with no in-flight build to fire
-/// a promotion. `propagate_closure_complete` can't reach this (it runs on
-/// completion events), so we self-heal here: [`attempt_graph_unstick`].
+/// every pending anchor yet none is dispatchable - the whole set is `Created`
+/// with a non-zero `unready_deps` and no in-flight build to drive a promotion.
+/// Every counter move rides an event, and by definition no event is coming, so
+/// we self-heal here: [`attempt_graph_unstick`].
 async fn build_phase_decision(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -250,10 +250,10 @@ async fn assess_buildability(
     Ok(Some((target, reason)))
 }
 
-/// Self-heal a graph-stuck evaluation: reconcile stale `closure_complete`
-/// flags to a fixpoint and re-promote, then re-assess. Recovers to `Building`
-/// when the heal frees a dispatchable anchor; otherwise reports `GraphStuck`
-/// with the blocked count so the stall is legible while later passes retry.
+/// Self-heal a graph-stuck evaluation: run the `Unstick` pipeline over its
+/// closure and re-assess. Recovers to `Building` when the heal frees a
+/// dispatchable anchor; otherwise reports `GraphStuck` with the blocked count so
+/// the stall is legible while later passes retry.
 async fn attempt_graph_unstick(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -261,9 +261,9 @@ async fn attempt_graph_unstick(
 ) -> Result<(EvaluationStatus, Option<WaitingReason>)> {
     info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing");
 
-    // The canonical healing pipeline in Unstick scope: terminal-failed thaw,
-    // cache-trust reconcile, flag fixpoints, promotion (see
-    // `gradient_db::reconcile`).
+    // The healing pipeline in Unstick scope: terminal-failed thaw, unbacked-output
+    // demote, cached-anchor settle with its readiness advance, the closure's
+    // dependency-failed sweep, and promotion (see `gradient_db::reconcile`).
     if let Err(e) = state
         .graph
         .transition(gradient_graph::Transition::Reconcile {

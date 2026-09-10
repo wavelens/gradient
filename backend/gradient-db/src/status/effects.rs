@@ -40,6 +40,33 @@ impl TransitionChange {
     }
 }
 
+/// One entry per derivation, first `from` to last `to`, in first-seen order, with
+/// the derivations that ended where they started dropped entirely.
+///
+/// For a caller that moves the same anchor twice inside ONE transaction: only the
+/// net move committed, so only the net move may fan out. Emitting the steps instead
+/// would announce a status to the board and the CI reactor that no reader can ever
+/// observe, and would apply the dep-count delta of an intermediate state twice.
+pub fn collapse_transitions(changes: Vec<TransitionChange>) -> Vec<TransitionChange> {
+    let mut order: Vec<DerivationId> = Vec::new();
+    let mut net: HashMap<DerivationId, TransitionChange> = HashMap::new();
+    for change in changes {
+        match net.entry(change.derivation) {
+            std::collections::hash_map::Entry::Occupied(mut e) => e.get_mut().to = change.to,
+            std::collections::hash_map::Entry::Vacant(e) => {
+                order.push(change.derivation);
+                e.insert(change);
+            }
+        }
+    }
+
+    order
+        .into_iter()
+        .filter_map(|d| net.remove(&d))
+        .filter(|c| c.from != c.to)
+        .collect()
+}
+
 /// Statuses the CI side reports on: `Queued` (pending), `Building` (running),
 /// and every terminal state. `Created`/`FailedTransient` are internal.
 fn ci_reports(status: BuildStatus) -> bool {
@@ -183,5 +210,59 @@ mod tests {
         let c = TransitionChange::unchanged(d, BuildStatus::Completed);
         assert_eq!(c.from, c.to);
         assert_eq!(c.derivation, d);
+    }
+
+    /// An anchor promoted and then pulled back inside one transaction committed
+    /// nothing, so it must fan out nothing: emitting the two steps announces a
+    /// `Queued` no reader can observe and applies its dep-count delta twice. An
+    /// anchor that genuinely moved keeps its move, and the order of first sight is
+    /// preserved.
+    #[test]
+    fn a_move_and_its_undo_collapse_away_while_a_real_move_survives() {
+        let bounced = DerivationId::now_v7();
+        let promoted = DerivationId::now_v7();
+        let change = |derivation, from, to| TransitionChange {
+            derivation,
+            from,
+            to,
+        };
+
+        let net = collapse_transitions(vec![
+            change(bounced, BuildStatus::Created, BuildStatus::Queued),
+            change(promoted, BuildStatus::Created, BuildStatus::Queued),
+            change(bounced, BuildStatus::Queued, BuildStatus::Created),
+        ]);
+
+        assert_eq!(net.len(), 1, "only the net move survives: {net:?}");
+        assert_eq!(net[0].derivation, promoted);
+        assert_eq!(
+            (net[0].from, net[0].to),
+            (BuildStatus::Created, BuildStatus::Queued)
+        );
+    }
+
+    /// A chain that ends somewhere else collapses to its endpoints, not to its
+    /// last step: the dep-count delta is computed from `from` and `to`.
+    #[test]
+    fn a_chain_collapses_to_its_endpoints() {
+        let d = DerivationId::now_v7();
+        let net = collapse_transitions(vec![
+            TransitionChange {
+                derivation: d,
+                from: BuildStatus::Created,
+                to: BuildStatus::Queued,
+            },
+            TransitionChange {
+                derivation: d,
+                from: BuildStatus::Queued,
+                to: BuildStatus::Building,
+            },
+        ]);
+
+        assert_eq!(net.len(), 1);
+        assert_eq!(
+            (net[0].from, net[0].to),
+            (BuildStatus::Created, BuildStatus::Building)
+        );
     }
 }
