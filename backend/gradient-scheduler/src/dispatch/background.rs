@@ -46,8 +46,7 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
 /// already repaired, so the warning can be a successful self-repair. `gating`
 /// is the size of the NAR repair's scope and `scope` the readiness repair's,
 /// both logged at `info` on the clean branch too, because a healthy instance is
-/// exactly the case whose cost is unmeasured. The pass closes by re-running the
-/// graph-stuck heal, whose per-evaluation repairs no counter can stand in for.
+/// exactly the case whose cost is unmeasured.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report = gradient_db::graph_consistency_report(&scheduler.state.db()).await?;
     if report.total() > 0 {
@@ -70,6 +69,14 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
         );
     }
 
+    Ok(())
+}
+
+/// Re-run the graph-stuck heal for every parked evaluation. Its own pass, not a
+/// tail of the consistency sweep: the two are independent backstops, and sharing
+/// the sweep's budget and its `?` would let a slow or erroring repair scan delete
+/// the only driver `reconcile_cached_anchors_for_eval` has left.
+pub(super) async fn graph_stuck_reheal_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     crate::waiting_state::reheal_graph_stuck_evals(&scheduler.state).await
 }
 

@@ -136,13 +136,22 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
 
     match metrics.graph_consistency_interval_secs {
         0 => info!("graph consistency sweep disabled (graph_consistency_interval_secs = 0)"),
-        secs => children.push(periodic(
-            scheduler,
-            "graph-consistency",
-            Duration::from_secs(secs),
-            CONSISTENCY_BUDGET,
-            background::consistency_sweep_pass,
-        )),
+        secs => {
+            children.push(periodic(
+                scheduler,
+                "graph-consistency",
+                Duration::from_secs(secs),
+                CONSISTENCY_BUDGET,
+                background::consistency_sweep_pass,
+            ));
+            children.push(periodic(
+                scheduler,
+                "graph-stuck-reheal",
+                Duration::from_secs(secs),
+                CONSISTENCY_BUDGET,
+                background::graph_stuck_reheal_pass,
+            ));
+        }
     }
 
     children

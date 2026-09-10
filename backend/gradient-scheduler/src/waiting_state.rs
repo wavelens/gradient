@@ -201,11 +201,12 @@ pub async fn reconcile_waiting_state(
 /// (nothing to decide).
 ///
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
-/// every pending anchor yet none is dispatchable - the whole set is `Created`
+/// every pending anchor yet none is dispatchable: typically the set is `Created`
 /// with some term of `graph_sql::gates_predicate` false (a non-zero
 /// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, or no
-/// `build_job`) and no in-flight build to drive a promotion. Every gate the graph
-/// maintains moves on an event, and by definition no event is coming, so we
+/// `build_job`) and no in-flight build to drive a promotion, though a stalled
+/// substitute or a `FailedTransient` anchor reaches here too. Every gate the
+/// graph maintains moves on an event, and by definition no event is coming, so we
 /// self-heal here: [`attempt_graph_unstick`], gated by [`unstick_due`].
 async fn build_phase_decision(
     state: &Arc<ServerState>,
@@ -236,9 +237,11 @@ async fn build_phase_decision(
     Ok(Some((a.target, a.reason)))
 }
 
-/// The graph-stuck heal runs when an evaluation first parks, or when its
-/// pending set changed since; a stably stuck evaluation is left to the
-/// counters, which promote it the moment whatever it waits on arrives.
+/// The graph-stuck heal runs when an evaluation first parks, or when its pending
+/// set changed since. A stably stuck evaluation is left to the counters, which
+/// promote it as soon as its gates open, and to
+/// [`reheal_graph_stuck_evals`], which re-runs the heal itself on the
+/// consistency sweep's cadence for the repairs no counter can do.
 pub(crate) fn unstick_due(current: Option<&WaitingReason>, pending: u32) -> bool {
     !matches!(current, Some(WaitingReason::GraphStuck { pending_anchors }) if *pending_anchors == pending)
 }
@@ -334,7 +337,9 @@ async fn attempt_graph_unstick(
 /// readiness recount cannot stand in for it, because `fetchable` reads the very
 /// status that heal exists to fix. Its sibling `reconcile_dependency_failed` has
 /// no other driver either. Both run per evaluation, so this iterates the parked
-/// set rather than the graph.
+/// set rather than the graph, unordered and uncapped: a pass cancelled by the
+/// budget re-heals whatever the next pass reaches first, so `stuck` is logged to
+/// make a set large enough for that to matter visible.
 pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
     let waiting = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
@@ -342,6 +347,7 @@ pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
         .await
         .context("fetch waiting evaluations")?;
 
+    let mut stuck = 0u32;
     let mut healed = 0u32;
     for eval in waiting {
         let graph_stuck = eval
@@ -352,6 +358,7 @@ pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
         if !graph_stuck {
             continue;
         }
+        stuck += 1;
 
         if let Err(e) = state
             .graph
@@ -366,8 +373,8 @@ pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
         healed += 1;
     }
 
-    if healed > 0 {
-        info!(healed, "re-healed graph-stuck evaluations");
+    if stuck > 0 {
+        info!(stuck, healed, "re-healed graph-stuck evaluations");
     }
 
     Ok(())

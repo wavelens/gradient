@@ -27,8 +27,8 @@
 //!   evaluations are parked so the server can be stopped safely. Cleared on the
 //!   next startup or when draining is disabled.
 //! - `GraphStuck` - workers can satisfy every pending build, yet none is
-//!   dispatchable: the pending set is non-dispatchable with one of its promotion
-//!   gates false and no in-flight build to fire a promotion. The reconciler heals
+//!   dispatchable: nothing in the pending set passes the dispatch gate and no
+//!   in-flight build is left to fire a promotion. The reconciler heals
 //!   on entry, again when `pending_anchors` changes, and otherwise on the
 //!   consistency sweep's cadence; between those, the counters promote the set as
 //!   soon as its gates open.
@@ -77,9 +77,9 @@ pub enum WaitingReason {
     /// transitions to `Aborted`. The reconciler never unparks this reason.
     Aborting,
     /// The connected pool can build every pending anchor, but none is
-    /// dispatchable - the whole pending set has one of its promotion gates false
-    /// and there is no in-flight build to drive promotion. Which gate it is is
-    /// not recorded here; `pending_anchors` is the blocked count. The reconciler
+    /// dispatchable - nothing in the pending set passes the dispatch gate and no
+    /// in-flight build is left to drive promotion. What blocks it is not recorded
+    /// here; `pending_anchors` is the blocked count. The reconciler
     /// heals on entry and when that count changes, the consistency sweep re-heals
     /// a stably stuck evaluation, and the counters promote the set as soon as its
     /// gates open.
