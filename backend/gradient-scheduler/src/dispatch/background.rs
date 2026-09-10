@@ -44,8 +44,10 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
 /// evaluation. Transient non-zero counts right after a transition are normal;
 /// persistent ones are not - except the drift counts, which report rows this pass
 /// already repaired, so the warning can be a successful self-repair. `gating`
-/// is the size of the NAR repair's scope, logged at `info` on both branches
-/// because a healthy instance is exactly the case whose cost is unmeasured.
+/// is the size of the NAR repair's scope and `scope` the readiness repair's,
+/// both logged at `info` on the clean branch too, because a healthy instance is
+/// exactly the case whose cost is unmeasured. The pass closes by re-running the
+/// graph-stuck heal, whose per-evaluation repairs no counter can stand in for.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report = gradient_db::graph_consistency_report(&scheduler.state.db()).await?;
     if report.total() > 0 {
@@ -57,15 +59,18 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
             nar_counter_drift = report.nar_counter_drift,
             negative_reference_counters = report.negative_reference_counters,
             gating = report.gating_paths,
+            scope = report.repair_scope,
             "graph consistency sweep found invariant violations"
         );
     } else {
         info!(
             gating = report.gating_paths,
+            scope = report.repair_scope,
             "graph consistency sweep clean"
         );
     }
-    Ok(())
+
+    crate::waiting_state::reheal_graph_stuck_evals(&scheduler.state).await
 }
 
 /// Unregister workers that have gone silent past the heartbeat deadline.

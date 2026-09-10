@@ -47,17 +47,20 @@ pub struct ConsistencyReport {
     /// path a pending anchor gates on rescues one, so a persistent count here is
     /// the one state the counter's design calls unrecoverable.
     pub negative_reference_counters: i64,
-    /// How many paths the repair visited this pass. A measurement, not a
+    /// How many paths the NAR repair visited this pass. A measurement, not a
     /// violation: it is the size of an unbounded select, reported so the cost of
-    /// the one recurring scan this pass adds is visible before it is bounded.
+    /// the recurring scans this pass adds is visible before they are bounded.
     pub gating_paths: i64,
+    /// How many anchors the readiness repair locked and recounted, the wider of
+    /// the two scans. A measurement, like [`Self::gating_paths`].
+    pub repair_scope: i64,
 }
 
 impl ConsistencyReport {
     /// Every dimension that warrants a look, summed. `nar_counter_drift` counts
     /// rows this pass already repaired rather than rows still wrong, so a
-    /// non-zero total can be a successful self-repair; `gating_paths` is a
-    /// measurement and is deliberately not summed.
+    /// non-zero total can be a successful self-repair; the two scope sizes are
+    /// measurements and are deliberately not summed.
     pub fn total(&self) -> i64 {
         self.counter_drift
             + self.unpromoted_ready
@@ -107,8 +110,10 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     .await?;
 
     let repaired = crate::readiness::repair_pending(db).await?;
-    crate::status::emit_transition_effects(ctx, &repaired.promoted).await;
+    // Fan out in the order the two statements ran, or a row both moved ends on
+    // the board at the status the earlier statement wrote.
     crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await;
+    crate::status::emit_transition_effects(ctx, &repaired.promoted).await;
 
     let unbacked_trusted_outputs =
         count(db, format!("SELECT count(*) AS n FROM ({unbacked}) u")).await?;
@@ -141,6 +146,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         nar_counter_drift,
         negative_reference_counters,
         gating_paths: gating.len() as i64,
+        repair_scope: repaired.scope as i64,
     })
 }
 
@@ -150,9 +156,18 @@ mod tests {
     use sea_orm::{MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 
+    fn exec(rows_affected: u64) -> MockExecResult {
+        MockExecResult {
+            last_insert_id: 0,
+            rows_affected,
+        }
+    }
+
     /// The repairs are these counters' only backstop, so the report has to
     /// actually run them - the NAR one first, because the readiness recount
     /// reads wholeness. Without this, deleting either leaves the suite green.
+    /// The recounts return different row counts so `counter_drift` cannot pass
+    /// while carrying only one of the two.
     #[tokio::test]
     async fn the_report_repairs_both_counters_before_it_counts() {
         let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
@@ -163,18 +178,13 @@ mod tests {
                 Value::from("h".to_owned()),
             )])]])
             .append_query_results([n()])
-            .append_query_results([empty.clone(), empty.clone(), empty])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(uuid::Uuid::now_v7()),
+            )])]])
+            .append_query_results([empty.clone(), empty])
             .append_query_results([n(), n()])
-            .append_exec_results([
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 0,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 2,
-                },
-            ])
+            .append_exec_results([exec(0), exec(2), exec(0), exec(3), exec(0), exec(5)])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -183,9 +193,15 @@ mod tests {
 
         assert_eq!(
             report.nar_counter_drift, 2,
-            "the repaired rows are reported"
+            "the repaired paths are reported"
         );
-        assert_eq!(report.gating_paths, 1, "the repair's scope is measured");
+        assert_eq!(report.gating_paths, 1, "the NAR repair's scope is measured");
+        assert_eq!(
+            report.counter_drift, 8,
+            "both readiness recounts are reported, not one of them"
+        );
+        assert_eq!(report.repair_scope, 1, "the wider scan's scope is measured");
+
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
             log[0].contains("SELECT d.hash FROM derivation d")
@@ -206,11 +222,19 @@ mod tests {
             "the readiness repair materialises its scope: {log:?}"
         );
         assert!(
-            log[5].contains("SET status = 0") && log[6].contains("SET status = 1"),
+            log[5].contains("FOR UPDATE") && log[6].contains("SET fetchable"),
+            "the fetchable recount runs under its own ordered lock: {log:?}"
+        );
+        assert!(
+            log[7].contains("FOR UPDATE") && log[8].contains("SET unready_deps"),
+            "and the counter recount after it, in a second locked pass: {log:?}"
+        );
+        assert!(
+            log[9].contains("SET status = 0") && log[10].contains("SET status = 1"),
             "the queue is settled against the repaired counters: {log:?}"
         );
         assert!(
-            log[7].contains("SELECT DISTINCT o.hash") && log[8].contains("FROM evaluation ev"),
+            log[11].contains("SELECT DISTINCT o.hash") && log[12].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
         );
     }
@@ -227,6 +251,7 @@ mod tests {
             nar_counter_drift: 6,
             negative_reference_counters: 7,
             gating_paths: 1000,
+            repair_scope: 2000,
         };
         assert_eq!(r.total(), 26);
         assert_eq!(ConsistencyReport::default().total(), 0);
