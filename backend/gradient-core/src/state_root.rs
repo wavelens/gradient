@@ -11,9 +11,11 @@
 //! Nothing below this facade may name `AppState`.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use tokio::sync::{Semaphore, broadcast};
+use uuid::Uuid;
 
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
@@ -24,6 +26,7 @@ use gradient_notify::EmailSender;
 use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
 use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
+use gradient_util::debounce::Debounce;
 use gradient_util::shutdown::Shutdown;
 
 #[derive(Debug)]
@@ -59,6 +62,8 @@ pub struct AppState {
     pub pending_credentials: Arc<PendingCredentialsStore>,
     /// Graceful-shutdown coordination for all long-lived background tasks.
     pub shutdown: Shutdown,
+    /// Auth rows stamped `last_used_at` recently, so a burst of requests writes once.
+    pub last_used_stamps: Debounce<Uuid>,
     /// JWT signing/verification secret loaded once at startup.
     pub jwt_secret: SecretString,
     /// Wall-clock time the process bootstrapped; drives `gradient_uptime_seconds`.
@@ -84,6 +89,13 @@ pub struct AppState {
 /// Kept as an alias so handler signatures and `Arc<ServerState>` call sites in
 /// `gradient-web`/`proto`/`scheduler` stay unchanged. New code uses [`AppState`].
 pub type ServerState = AppState;
+
+/// One `last_used_at` write per API key or session per minute (#629).
+pub const LAST_USED_STAMP_INTERVAL: Duration = Duration::from_secs(60);
+
+pub fn last_used_stamps() -> Debounce<Uuid> {
+    Debounce::new(LAST_USED_STAMP_INTERVAL)
+}
 
 impl AppState {
     /// Storage slice (cheap: clones a handful of `Arc`s / `Clone` handles).

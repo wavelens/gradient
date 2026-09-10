@@ -63,6 +63,7 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http"),
         shutdown: gradient_util::shutdown::Shutdown::new(),
+        last_used_stamps: gradient_core::last_used_stamps(),
         jwt_secret: SecretString::new("test-jwt-secret".into()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
