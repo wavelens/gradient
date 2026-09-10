@@ -18,6 +18,8 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use std::time::Instant;
+use tracing::warn;
 
 /// Session-backed JWT claims. `jti` is the `SessionId` of a row in the
 /// `session` table; auth lookups validate the session is non-revoked and
@@ -154,9 +156,17 @@ pub async fn decode_jwt(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let mut active: ASession = session.into();
-    active.last_used_at = Set(now);
-    let _ = active.update(&state.web_db).await;
+    if state
+        .last_used_stamps
+        .due(session.id.into_inner(), Instant::now())
+    {
+        let mut active: ASession = session.into();
+        active.last_used_at = Set(now);
+
+        if let Err(e) = active.update(&state.web_db).await {
+            warn!(error = %e, "session last_used_at stamp failed");
+        }
+    }
 
     Ok(DecodedRequest::Session {
         user_id: token_data.claims.id,
@@ -199,12 +209,17 @@ async fn decode_api_key(
     };
     let user_id = api_key.owned_by;
 
-    let mut aapi_key: AApi = api_key.into();
-    aapi_key.last_used_at = Set(now);
-    aapi_key
-        .save(&state.web_db)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if state
+        .last_used_stamps
+        .due(api_key.id.into_inner(), Instant::now())
+    {
+        let mut active: AApi = api_key.into();
+        active.last_used_at = Set(now);
+
+        if let Err(e) = active.save(&state.web_db).await {
+            warn!(error = %e, "api key last_used_at stamp failed");
+        }
+    }
 
     Ok(DecodedRequest::ApiKey { user_id, context })
 }

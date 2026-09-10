@@ -115,6 +115,7 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http client"),
         shutdown: gradient_util::shutdown::Shutdown::new(),
+        last_used_stamps: gradient_core::last_used_stamps(),
         jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: Arc::new(std::collections::HashMap::new()),
