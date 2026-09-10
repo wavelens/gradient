@@ -564,10 +564,7 @@ async fn recount(lock: &PathLock<'_>) -> Result<u64, DbErr> {
 /// false-whole there prunes a subtree that is then never walked, recorded or
 /// built - a permanent dead end, not a stall a later build clears.
 pub fn gating_paths() -> String {
-    let pending = crate::status_sql::build_in(&[
-        gradient_entity::build::BuildStatus::Created,
-        gradient_entity::build::BuildStatus::Queued,
-    ]);
+    let pending = crate::status_sql::build_in(&gradient_entity::build::BuildStatus::PENDING);
     format!(
         r#"
     SELECT d.hash FROM derivation d

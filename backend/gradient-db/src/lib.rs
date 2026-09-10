@@ -96,8 +96,8 @@ pub use self::reachability::{
     eval_anchor_statuses, evals_referencing_derivation,
 };
 pub use self::readiness::{
-    Repaired, became_fetchable, lost_fetchability, promote, promote_closure, repair_pending,
-    seed_unready_deps, unpromote_drv_owners,
+    AnchorLock, Repaired, became_fetchable, lock_anchors, lost_fetchability, promote,
+    promote_closure, repair_pending, seed_unready_deps, unpromote_drv_owners,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;
