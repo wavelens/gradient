@@ -82,7 +82,8 @@ pub use self::drv_output_spec::DrvOutputSpec;
 pub use self::eval_watchdog::{LostCompletion, lost_eval_completions};
 pub use self::gc::*;
 pub use self::graph_sql::{
-    ClosureDirection, dependency_closure_cte, eval_closure_cte, reachable_derivations_cte,
+    ClosureDirection, begin_walk, dependency_closure_cte, eval_closure_cte,
+    reachable_derivations_cte,
 };
 pub use self::nar_closure::{
     PathLock, ReferenceLock, lock_paths, lock_reference_endpoints, retire_paths,
