@@ -6,7 +6,6 @@
 
 use super::evaluation_status::update_evaluation_status;
 use super::logging::{PhaseSubjectKind, finalize_build_log, record_phase_events};
-use crate::dep_closure::reconcile_eval_dep_counts;
 use crate::state_machine::EvalStateMachine;
 use crate::{DbContext, fetch_in_chunks, for_each_chunk};
 use gradient_entity::build::BuildStatus;
@@ -150,8 +149,6 @@ pub async fn abort_eval_anchors(
         })
         .await?;
     }
-
-    reconcile_eval_dep_counts(&ctx.worker_db, evaluation.id).await?;
 
     let pe_ids: Vec<uuid::Uuid> = abort_ids.iter().map(|id| id.into_inner()).collect();
     record_phase_events(
