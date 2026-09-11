@@ -93,8 +93,9 @@ pub(super) async fn graph_stuck_reheal_pass(scheduler: Arc<Scheduler>) -> anyhow
 /// only when the TCP connection closes. A hard OOM-kill, a frozen host, or a
 /// network partition can leave the socket half-open with no clean close, so the
 /// worker stays "connected" and its in-flight eval/build jobs sit non-terminal
-/// forever. This pass reads each worker's `last_seen` (stamped in the session
-/// loop) and reuses [`Scheduler::unregister_worker`] - which re-queues the
+/// forever. This pass reads each worker's `last_seen` (stamped by the
+/// connection's reader the moment a frame arrives, before the handler runs)
+/// and reuses [`Scheduler::unregister_worker`] - which re-queues the
 /// orphaned jobs and resets their DB rows - the moment a worker exceeds the deadline.
 pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
