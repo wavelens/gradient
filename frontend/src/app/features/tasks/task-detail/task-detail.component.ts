@@ -233,18 +233,14 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  /// Merge a refreshed window with the rows already shown. The window is the
-  /// first N of the server's order, so anything it does not hold sorts after it
-  /// and simply follows. A tail that no longer lines up - new entry points landed
-  /// inside a window the user had already paged past - is dropped rather than
-  /// rendered with a hole in it, and "show more" fetches it again.
-  private spliceEntryPoints(window: EntryPointSummary[], shown: EntryPointSummary[]): EntryPointSummary[] {
-    const inWindow = new Set(window.map(e => e.id));
-    const tail = shown.filter(e => !inWindow.has(e.id));
-    const last = window.at(-1);
-    if (!last || tail.length === 0) return [...window, ...tail];
-    const follows = tail[0].eval > last.eval || (tail[0].eval === last.eval && tail[0].id > last.id);
-    return follows ? [...window, ...tail] : [...window];
+  /// Merge a refreshed page with the rows already shown. The page is the server's
+  /// rows at offset 0, so every row it does not hold ranks after it and keeps its
+  /// display order behind it; matching on id rather than on position is what lets
+  /// entry points ingested into the page fall out of the tail without a hole.
+  private spliceEntryPoints(page: EntryPointSummary[], shown: EntryPointSummary[]): EntryPointSummary[] {
+    const inPage = new Set(page.map(e => e.id));
+
+    return [...page, ...shown.filter(e => !inPage.has(e.id))];
   }
 
   loadMoreEntryPoints(): void {
