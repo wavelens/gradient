@@ -280,9 +280,9 @@ pub struct Assignment {
     pub job: Job,
     /// Project UUID that owns this job - used for credential lookup.
     pub project_id: ProjectId,
-    /// Scoring/context snapshot for the winning job, persisted best-effort by
-    /// the caller into `dispatched_job`. `None` outside the scored path.
-    pub dispatch_record: Option<DispatchRecord>,
+    /// The `dispatched_job` row the caller writes before the job leaves; an
+    /// assignment whose record cannot be written is withdrawn.
+    pub dispatch_record: DispatchRecord,
     /// The tracker's own record of the job, kept by the session so it can
     /// re-register the job after a scheduler restart.
     pub pending: PendingJob,
@@ -652,17 +652,15 @@ impl JobTracker {
             .into_iter()
             .next()
             .expect("a winner implies a first candidate");
-        let dispatch = DispatchedJobId::now_v7();
-        let dispatch_record = self.dispatch_record_for(
+        let record = self.dispatch_record_for(
             &job_id,
-            dispatch,
+            DispatchedJobId::now_v7(),
             &winner_sc,
             worker_context,
             instance_context,
-        );
-        let mut assignment = self.assign_pending(worker_id, &job_id, dispatch)?;
-        assignment.dispatch_record = dispatch_record;
-        Some(assignment)
+        )?;
+
+        self.assign_pending(worker_id, &job_id, record)
     }
 
     /// Score every eligible pending job of `kind` for this worker, best first;
@@ -876,18 +874,19 @@ impl JobTracker {
         &mut self,
         worker_id: &str,
         job_id: &str,
-        dispatch: DispatchedJobId,
+        record: DispatchRecord,
     ) -> Option<Assignment> {
         let job = self.pending.remove(job_id)?;
         if let Some(ws) = self.scores.get_mut(worker_id) {
             ws.remove(job_id);
         }
+
         let assignment = Assignment {
             job_id: job_id.to_owned(),
-            dispatch,
+            dispatch: record.dispatch,
             job: job.clone().into_job(),
             project_id: job.project_id(),
-            dispatch_record: None,
+            dispatch_record: record,
             pending: job.clone(),
         };
         self.active
@@ -1224,6 +1223,25 @@ mod tests {
         build_job_arch(peer, required, "x86_64-linux", vec![])
     }
 
+    fn record_for(tracker: &JobTracker, job_id: &str) -> DispatchRecord {
+        let sc = ScoredCandidate {
+            total: 1.0,
+            vetoed: false,
+            score_breakdown: serde_json::json!({}),
+            job_context: serde_json::json!({}),
+        };
+
+        tracker
+            .dispatch_record_for(
+                job_id,
+                DispatchedJobId::now_v7(),
+                &sc,
+                serde_json::json!({}),
+                serde_json::json!({}),
+            )
+            .expect("the job is pending")
+    }
+
     fn build_job_arch(
         peer: ProjectId,
         required: Vec<RequiredPath>,
@@ -1361,9 +1379,10 @@ mod tests {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("build:1".into(), build_job(peer, vec![]));
+        let record = record_for(&tracker, "build:1");
         assert!(
             tracker
-                .assign_pending("worker", "build:1", DispatchedJobId::now_v7())
+                .assign_pending("worker", "build:1", record)
                 .is_some(),
             "job should assign"
         );
@@ -2212,7 +2231,8 @@ mod tests {
         tracker.bump_rescore_counts();
         assert_eq!(tracker.rescore_count_of("build:1"), 2);
 
-        tracker.assign_pending("worker", "build:1", DispatchedJobId::now_v7());
+        let record = record_for(&tracker, "build:1");
+        tracker.assign_pending("worker", "build:1", record);
         tracker.bump_rescore_counts();
         assert_eq!(
             tracker.rescore_count_of("build:1"),
