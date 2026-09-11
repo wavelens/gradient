@@ -772,6 +772,27 @@ in {
       ))
       assert gone == 0, "derivation_closure is still there"
 
+      # Give the evaluation one entry point with no build_job, so the predicate
+      # below has something to exclude: without it this row is unstamped forever
+      # and the assertion fires, and if the endpoint counted it, total would
+      # exceed the page. Nothing in a real evaluation produces such a row, which
+      # is why it has to be made here.
+      sql(
+          f"WITH d AS ("
+          f"  INSERT INTO derivation (id, hash, name, architecture, created_at) "
+          f"  VALUES (uuidv7(), 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz', 'unreportable', "
+          f"          'x86_64-linux', now() AT TIME ZONE 'UTC') RETURNING id) "
+          f"INSERT INTO entry_point (id, task, evaluation, derivation, eval, created_at) "
+          f"SELECT uuidv7(), ep.task, ep.evaluation, d.id, 'zz.unreportable', "
+          f"       now() AT TIME ZONE 'UTC' "
+          f"FROM d, entry_point ep WHERE ep.evaluation = '{eval_id}' LIMIT 1;"
+      )
+      planted = int(sql(
+          f"SELECT count(*) FROM entry_point WHERE evaluation = '{eval_id}' "
+          f"AND eval = 'zz.unreportable';"
+      ))
+      assert planted == 1, "the unreportable entry point was not planted"
+
       # An entry point with no build_job in this evaluation is not reportable, so
       # the page never covers it and nothing ever stamps it.
       reportable = (
