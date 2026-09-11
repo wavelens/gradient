@@ -830,7 +830,7 @@ in {
         };
 
         gcWedgedEvalHours = lib.mkOption {
-          description = "Hours after which an untouched active evaluation is presumed wedged and stops blocking the per-task evaluation GC. 0 = block forever.";
+          description = "Hours an active evaluation may stay in one phase before it is presumed wedged and stops blocking the per-task evaluation GC. Measured on the phase it entered, not on when its row was last written. 0 = block forever.";
           type = lib.types.ints.unsigned;
           default = 24;
         };

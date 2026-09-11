@@ -37,8 +37,10 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
         .await
         .context("GC: failed to query evaluations")?;
 
-    let evals: Vec<(EvaluationStatus, chrono::NaiveDateTime)> =
-        all_evals.iter().map(|e| (e.status, e.updated_at)).collect();
+    let evals: Vec<(EvaluationStatus, chrono::NaiveDateTime)> = all_evals
+        .iter()
+        .map(|e| (e.status, last_progress_at(e)))
+        .collect();
     let delete_indices = evaluations_to_gc(
         &evals,
         keep,
@@ -128,16 +130,34 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
     Ok(())
 }
 
+/// When an evaluation last advanced, as opposed to when its row was last
+/// written. A wedged run keeps taking writes, so `updated_at` never goes stale
+/// and the wedged escape hatch never fires for it; the phase stamps move only
+/// when the evaluation enters a new phase, which a stuck one never does.
+fn last_progress_at(e: &MEvaluation) -> chrono::NaiveDateTime {
+    [
+        e.fetch_started_at,
+        e.eval_flake_started_at,
+        e.eval_drv_started_at,
+        e.building_started_at,
+    ]
+    .into_iter()
+    .flatten()
+    .fold(e.created_at, std::cmp::max)
+}
+
 /// Selects, by index into a newest-first evaluation list, which evaluations the
 /// per-task GC should delete for a given `keep` count.
 ///
 /// Returns nothing while any evaluation is genuinely active (Queued/Fetching/
 /// Evaluating*/Building/Waiting): an in-flight run may reuse NARs from older
 /// evaluations before it records its own build rows, so GC waits until the
-/// task is quiescent. An "active" evaluation untouched for more than
-/// `wedged_hours` is presumed wedged and stops blocking - otherwise one stuck
-/// run silently turns a scheduler bug into unbounded storage growth
-/// (`wedged_hours = 0` restores the unconditional block). Wedged evaluations
+/// task is quiescent. An "active" evaluation whose current phase has lasted
+/// more than `wedged_hours` is presumed wedged and stops blocking - otherwise
+/// one stuck run silently turns a scheduler bug into unbounded storage growth
+/// (`wedged_hours = 0` restores the unconditional block). The age comes from
+/// [`last_progress_at`], not `updated_at`, because a wedged run still takes
+/// writes and so never looks stale. Wedged evaluations
 /// are never deleted themselves; the `keep` most recent terminal evaluations
 /// are retained regardless of outcome - `Failed` and `Aborted` runs can still
 /// hold successfully-built NARs, so they are not sacrificed ahead of newer
@@ -654,8 +674,8 @@ mod tests {
         statuses: &[EvaluationStatus],
         age_hours: i64,
     ) -> Vec<(EvaluationStatus, chrono::NaiveDateTime)> {
-        let updated = gradient_types::now() - ChronoDuration::hours(age_hours);
-        statuses.iter().map(|s| (*s, updated)).collect()
+        let progressed = gradient_types::now() - ChronoDuration::hours(age_hours);
+        statuses.iter().map(|s| (*s, progressed)).collect()
     }
 
     fn gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
@@ -683,6 +703,56 @@ mod tests {
         );
         // wedged_hours = 0 restores the unconditional block.
         assert!(evaluations_to_gc(&evals, 1, 0, gradient_types::now()).is_empty());
+    }
+
+    #[test]
+    fn a_heartbeating_wedged_evaluation_still_goes_stale() {
+        // #609: `updated_at` is refreshed by anything that writes the row, so a
+        // run stuck in Building for days never crossed the threshold and froze
+        // its task's GC forever. Measured on the phase stamp it does cross.
+        let now = gradient_types::now();
+        let wedged = MEvaluation {
+            created_at: now - ChronoDuration::hours(72),
+            building_started_at: Some(now - ChronoDuration::hours(71)),
+            updated_at: now - ChronoDuration::minutes(39),
+            ..Default::default()
+        };
+
+        assert_eq!(last_progress_at(&wedged), now - ChronoDuration::hours(71));
+        assert!(now - last_progress_at(&wedged) > ChronoDuration::hours(WEDGED_HOURS));
+        assert!(now - wedged.updated_at < ChronoDuration::hours(WEDGED_HOURS));
+    }
+
+    #[test]
+    fn entering_a_phase_is_progress_and_keeps_the_block() {
+        // The converse, so the fix cannot be read as "active evals stop
+        // blocking after a day": a run that reached a new phase an hour ago is
+        // advancing, however old its earlier stamps are.
+        let now = gradient_types::now();
+        let moving = MEvaluation {
+            created_at: now - ChronoDuration::hours(72),
+            fetch_started_at: Some(now - ChronoDuration::hours(71)),
+            eval_flake_started_at: Some(now - ChronoDuration::hours(70)),
+            building_started_at: Some(now - ChronoDuration::hours(1)),
+            updated_at: now,
+            ..Default::default()
+        };
+
+        assert_eq!(last_progress_at(&moving), now - ChronoDuration::hours(1));
+    }
+
+    #[test]
+    fn an_evaluation_with_no_phase_stamp_ages_from_its_creation() {
+        // A `Queued` run has entered no phase, so creation is the only honest
+        // mark of when it last moved.
+        let now = gradient_types::now();
+        let queued = MEvaluation {
+            created_at: now - ChronoDuration::hours(48),
+            updated_at: now,
+            ..Default::default()
+        };
+
+        assert_eq!(last_progress_at(&queued), now - ChronoDuration::hours(48));
     }
 
     #[test]
