@@ -45,7 +45,7 @@ fn roots_closure_cte() -> String {
 }
 
 /// Forward `derivation_dependency` closure of `roots`; returns every reachable
-/// derivation id (roots included).
+/// derivation id (roots included). Opens and commits its own sized walk.
 pub async fn transitive_closure_reachable<C>(
     db: &C,
     roots: &[DerivationId],
@@ -57,20 +57,34 @@ where
         return Ok(HashSet::new());
     }
 
-    let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
     let walk = crate::graph_sql::begin_walk(db).await?;
-    let reached: HashSet<DerivationId> =
-        DerivationRow::find_by_statement(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            format!("{} SELECT derivation FROM closure", roots_closure_cte()),
-            [ids.into()],
-        ))
-        .all(&walk)
-        .await?
-        .into_iter()
-        .map(|r| DerivationId::new(r.derivation))
-        .collect();
+    let reached = transitive_closure_reachable_in(&walk, roots).await?;
     walk.commit().await?;
+
+    Ok(reached)
+}
+
+/// The same walk on a transaction [`crate::graph_sql::begin_walk`] already sized,
+/// for a caller that walks many root sets and wants one raise for all of them.
+pub async fn transitive_closure_reachable_in(
+    walk: &DatabaseTransaction,
+    roots: &[DerivationId],
+) -> Result<HashSet<DerivationId>, DbErr> {
+    if roots.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
+    let reached = DerivationRow::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        format!("{} SELECT derivation FROM closure", roots_closure_cte()),
+        [ids.into()],
+    ))
+    .all(walk)
+    .await?
+    .into_iter()
+    .map(|r| DerivationId::new(r.derivation))
+    .collect();
 
     Ok(reached)
 }
@@ -294,5 +308,26 @@ mod tests {
 
         let sizes = transitive_closure_sizes(&db, &[root]).await.unwrap();
         assert_eq!(sizes.get(&root).copied(), Some(100));
+    }
+
+    /// #650: a loop of walks used to open one sized transaction per call. On a
+    /// walk the caller opened, two root sets consume one raise between them.
+    #[tokio::test]
+    async fn one_raise_serves_many_root_sets_on_the_same_walk() {
+        let a = DerivationId::now_v7();
+        let b = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([raise()])
+            .append_query_results([vec![node(a)]])
+            .append_query_results([vec![node(b)]])
+            .into_connection();
+
+        let walk = crate::graph_sql::begin_walk(&db).await.unwrap();
+        let first = transitive_closure_reachable_in(&walk, &[a]).await.unwrap();
+        let second = transitive_closure_reachable_in(&walk, &[b]).await.unwrap();
+        walk.commit().await.unwrap();
+
+        assert_eq!(first, HashSet::from([a]));
+        assert_eq!(second, HashSet::from([b]));
     }
 }
