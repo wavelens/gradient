@@ -8862,7 +8862,9 @@ components:
             $ref: '#/components/schemas/EntryPointSummary'
         total:
           type: integer
-          description: Number of entry points in the evaluation.
+          description: >-
+            Number of entry points the evaluation can report, i.e. those with a
+            build in it. Page through with offset until entry_points reaches it.
 
     EntryPointSummary:
       type: object
