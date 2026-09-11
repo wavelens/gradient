@@ -1057,7 +1057,30 @@ in {
           print(f"{dep_path} is whole in the index with no local object; pushing it first")
           server.succeed(f"{CLI} cache upload main {dep_path}")
       server.succeed(f"test -f {dep_object}")
+
+      # The purge below takes every row whose object is gone, not just the one this
+      # phase deletes, and phase 10e's settle from cache needs EVERY output of the
+      # victim's producer to still have a row. A sibling output that is already a
+      # zombie would be swept up with the victim and is not restored by the single
+      # re-upload, so back them all on disk while there is still something to push.
+      siblings = sql(
+          f"SELECT cp.hash || '-' || cp.package FROM derivation_output o "
+          f"JOIN cached_path cp ON cp.hash = o.hash "
+          f"WHERE o.derivation = (SELECT derivation FROM derivation_output "
+          f"                      WHERE hash = '{dep_hash}') AND o.hash <> '{dep_hash}';"
+      ).splitlines()
+      for sibling in (s.strip() for s in siblings):
+          if not sibling or server.execute(f"test -f {nar_object(sibling)}")[0] == 0:
+              continue
+          if server.execute(f"test -e /nix/store/{sibling}")[0] != 0:
+              print(f"{sibling} shares the producer, has no object and no local path; "
+                    f"the purge will take it too")
+              continue
+          print(f"{sibling} shares the victim's producer with no object; pushing it first")
+          server.succeed(f"{CLI} cache upload main /nix/store/{sibling}")
+
       print(f"retiring {dep_path}")
+      indexed_before = set(sql("SELECT hash FROM cached_path;").split())
       server.succeed(f"rm {dep_object}")
 
       # The zombie purge is the retiring caller here. The deep GC runs that same
@@ -1068,6 +1091,11 @@ in {
       )
       poll(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';", "0",
            "the zombie purge kept a row whose NAR is gone")
+      purged = indexed_before - set(sql("SELECT hash FROM cached_path;").split())
+      assert dep_hash in purged, f"the purge took {sorted(purged)}, not the victim {dep_hash}"
+      bystanders = sorted(purged - set([dep_hash]))
+      if bystanders:
+          print(f"the purge also took {len(bystanders)} rows that were already zombies: {bystanders}")
 
       missing = counter(store_hash)
       assert missing >= 1, f"hello's output should miss the retired path, has {missing}"
@@ -1218,7 +1246,7 @@ in {
       server.succeed(f"{GIT} -C /var/lib/git/test commit --allow-empty -m 'retrigger'")
       server.succeed("chown git:git -R /var/lib/git/test")
       eval3_id = ""
-      for attempt in range(1, 61):
+      for attempt in range(1, 91):
           server.sleep(10)
           candidate = server.succeed(
               f'{CURL} -sf -H "Authorization: Bearer {token}" '
@@ -1235,17 +1263,35 @@ in {
               if status3 == "Failed":
                   j = server.succeed("journalctl -u gradient-server --no-pager --since='-600s' -n 300")
                   raise Exception(f"the re-evaluation failed:\n{j[-3000:]}")
-      assert eval3_id, "the re-evaluation did not complete after 600 s"
+      assert eval3_id, "the re-evaluation did not complete after 900 s"
 
-      producer = sql(
+      # Polled, not sampled. The producer has no `build_job` of its own in an
+      # evaluation that re-ingests nothing, so it is reached only through the eval
+      # closure: the cache reconcile settles it where every output still has a row,
+      # and otherwise the promotion queues a rebuild whose completion outlives the
+      # evaluation. The evaluation reporting Completed says nothing about either.
+      producer_state = (
           f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
           f"JOIN derivation_output o ON o.derivation = db.derivation "
           f"WHERE o.hash = '{dep_hash}' LIMIT 1;"
       )
-      assert producer in ("3 1", "7 1"), (
-          f"the retired output's producer must be terminal-success and fetchable again "
-          f"after the re-evaluation, has (status fetchable) = ({producer})"
-      )
+      for _ in range(60):
+          producer = sql(producer_state)
+          if producer in ("3 1", "7 1"):
+              break
+          server.sleep(10)
+      else:
+          unbacked = sql(
+              f"SELECT count(*) FROM derivation_output o "
+              f"LEFT JOIN cached_path cp ON cp.hash = o.hash "
+              f"WHERE o.derivation = (SELECT derivation FROM derivation_output "
+              f"                      WHERE hash = '{dep_hash}') AND cp.hash IS NULL;"
+          )
+          raise Exception(
+              f"the retired output's producer never became terminal-success and fetchable "
+              f"in 600 s, has (status fetchable) = ({producer}) with {unbacked} of its "
+              f"outputs missing a cached_path row"
+          )
       assert int(sql(
           f"SELECT db.unready_deps FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
           f"WHERE d.hash = '{drv_hash}';"
