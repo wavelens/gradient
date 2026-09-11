@@ -58,10 +58,33 @@ pub async fn abandon_open_dispatches_for_worker<C: ConnectionTrait>(
     .await
 }
 
+/// How many rows one startup-recovery statement closes.
+const RECOVERY_CLOSE_CHUNK: u64 = 10_000;
+
 /// Close every open row as `Abandoned`; returns how many closed. Startup
 /// recovery's closer: nothing a previous process handed out is still out.
+///
+/// The predicate stays unbounded and the statement is chunked instead. A
+/// backlog runs to six figures, every close is a non-HOT update because
+/// `finished_at` is indexed, and this runs before the listener binds: one
+/// statement over the whole set is a single transaction holding hundreds of
+/// megabytes of WAL and row locks with nothing able to interleave, where the
+/// same total work split at [`RECOVERY_CLOSE_CHUNK`] rows lets autovacuum keep
+/// up and bounds every lock to one chunk.
 pub async fn abandon_all_open_dispatches<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
-    abandon_open(db, None).await
+    let chunk = format!(
+        "\"dispatched_job\".\"id\" IN (SELECT id FROM dispatched_job \
+         WHERE finished_at IS NULL LIMIT {RECOVERY_CLOSE_CHUNK})"
+    );
+
+    let mut closed = 0;
+    loop {
+        let rows = abandon_open(db, Some(Expr::cust(chunk.clone()))).await?;
+        closed += rows;
+        if rows < RECOVERY_CLOSE_CHUNK {
+            return Ok(closed);
+        }
+    }
 }
 
 /// Close the open rows of the given job keys as `Abandoned`; returns how many closed.
@@ -203,8 +226,10 @@ mod tests {
         assert!(values.contains(&format!("{before:?}")), "{values}");
     }
 
-    /// Startup's closer is unscoped by design: the tracker that knew which
-    /// jobs were out died with the process, so every open row is stale.
+    /// Startup's predicate is unscoped by design: the tracker that knew which
+    /// jobs were out died with the process, so every open row is stale. Only
+    /// the statement is bounded, and a chunk narrower than the backlog is what
+    /// keeps the whole close out of one pre-listener transaction.
     #[tokio::test]
     async fn every_open_row_closes_for_startup_recovery() {
         let db = closed_rows(7).into_connection();
@@ -220,6 +245,45 @@ mod tests {
         assert!(!sql.contains("\"worker_id\""), "{sql}");
         assert!(!sql.contains("\"job_id\""), "{sql}");
         assert!(!sql.contains("\"dispatched_at\""), "{sql}");
+        assert!(sql.contains(&chunk_scope()), "{sql}");
+    }
+
+    fn chunk_scope() -> String {
+        format!(
+            "IN (SELECT id FROM dispatched_job WHERE finished_at IS NULL \
+             LIMIT {RECOVERY_CLOSE_CHUNK})"
+        )
+    }
+
+    /// The loop is the whole of the chunking: a statement that fills its chunk
+    /// means rows may remain, a short one is the end. Exactly two exec results
+    /// are supplied, so a third statement would draw an empty buffer and turn
+    /// the call into an `Err`.
+    #[tokio::test]
+    async fn startup_recovery_closes_a_backlog_one_chunk_per_statement() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: RECOVERY_CLOSE_CHUNK,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 7,
+                },
+            ])
+            .into_connection();
+
+        let closed = abandon_all_open_dispatches(&db).await.expect("update");
+
+        assert_eq!(closed, RECOVERY_CLOSE_CHUNK + 7);
+        let log = db.into_transaction_log();
+        assert_eq!(log.len(), 2);
+        for transaction in &log {
+            let statement = &transaction.statements()[0];
+            assert_closes_open_rows_as_abandoned(statement);
+            assert!(statement.sql.contains(&chunk_scope()), "{}", statement.sql);
+        }
     }
 
     /// The sweep closes its whole backlog in one statement, so the scope has to
