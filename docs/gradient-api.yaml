@@ -2087,7 +2087,7 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Page size, default 100, at most 500. Entry points are ordered by attribute path.
+          description: Page size, default 25, at most 500. Entry points are ordered by attribute path. The default is small because the server walks one dependency closure per entry point returned.
           schema:
             type: integer
         - name: offset
