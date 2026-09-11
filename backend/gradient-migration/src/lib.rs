@@ -48,6 +48,7 @@ mod m20260908_000001_cached_path_missing_references;
 mod m20260908_000002_derivation_build_readiness;
 mod m20260909_000000_build_attempt_indexes;
 mod m20260911_000000_edge_bloat_and_dead_indexes;
+mod m20260911_000001_drop_derivation_closure;
 
 pub struct Migrator;
 
@@ -97,6 +98,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260908_000002_derivation_build_readiness::Migration),
             Box::new(m20260909_000000_build_attempt_indexes::Migration),
             Box::new(m20260911_000000_edge_bloat_and_dead_indexes::Migration),
+            Box::new(m20260911_000001_drop_derivation_closure::Migration),
         ]
     }
 }
