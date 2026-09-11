@@ -177,6 +177,33 @@ in {
         example = "12GB";
       };
 
+      postgresWorkMem = lib.mkOption {
+        description = ''
+          `work_mem` for the cluster `configurePostgres` sets up. This is the
+          floor every ordinary query gets; the graph walks raise their own
+          ceiling above it for one statement. It is charged per sort or hash
+          node, so the ceiling is roughly this times every concurrent query's
+          node count: `"32MB"` suits a host sized for the three server pools
+          (80 connections), and is far too much for a small one. `null` leaves
+          the upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "32MB";
+      };
+
+      postgresMaintenanceWorkMem = lib.mkOption {
+        description = ''
+          `maintenance_work_mem` for the cluster `configurePostgres` sets up:
+          index builds and the autovacuum passes over the edge tables. Each of
+          `autovacuum_max_workers` can claim this much at once, so `"1GB"` needs
+          a host with RAM to spare. `null` leaves the upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "1GB";
+      };
+
       localWorker = lib.mkOption {
         description = ''
           Provision credentials for a `services.gradient.worker` running on this
@@ -1346,13 +1373,15 @@ in {
         ensureDatabases = [ "gradient" ];
         settings = {
           max_connections = lib.mkDefault 200;
-          work_mem = lib.mkDefault "32MB";
-          maintenance_work_mem = lib.mkDefault "1GB";
           random_page_cost = lib.mkDefault 1.1;
         } // lib.optionalAttrs (cfg.postgresSharedBuffers != null) {
           shared_buffers = lib.mkDefault cfg.postgresSharedBuffers;
         } // lib.optionalAttrs (cfg.postgresEffectiveCacheSize != null) {
           effective_cache_size = lib.mkDefault cfg.postgresEffectiveCacheSize;
+        } // lib.optionalAttrs (cfg.postgresWorkMem != null) {
+          work_mem = lib.mkDefault cfg.postgresWorkMem;
+        } // lib.optionalAttrs (cfg.postgresMaintenanceWorkMem != null) {
+          maintenance_work_mem = lib.mkDefault cfg.postgresMaintenanceWorkMem;
         };
 
         ensureUsers = [{

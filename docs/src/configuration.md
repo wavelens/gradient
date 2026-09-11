@@ -132,18 +132,19 @@ that does not depend on the host, every value a `mkDefault` you can override:
 
 | setting | module default | why |
 |---|---|---|
-| `work_mem` | `32MB` | Per sort or hash node, not per connection. This is the floor every ordinary query gets; the graph walks raise their own ceiling above it for the duration of one statement. |
-| `maintenance_work_mem` | `1GB` | Index builds, and the autovacuum passes on the edge tables. |
 | `random_page_cost` | `1.1` | SSD: a random page costs almost what a sequential one does. At the default of 4 the planner picks bitmap heap scans over the index-only scans the edge tables are built for. |
 | `max_connections` | `200` | See below. |
 
-The two settings that scale with the host's RAM have no defensible static
-default, so they are options instead:
+The four settings that scale with the host's RAM have no defensible static
+default, so they are options instead. A module that guessed them would size a
+2 GB test guest the way it sizes the reference deployment:
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `postgresSharedBuffers` | `null` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. `null` leaves the upstream default. |
 | `postgresEffectiveCacheSize` | `null` | `effective_cache_size`: three quarters of the host's RAM, so `"12GB"` on a 16 GB host. A planner hint about what the kernel will cache, not an allocation. |
+| `postgresWorkMem` | `null` | `work_mem`: the floor every ordinary query gets, which the graph walks raise above for one statement. Charged per sort or hash node, so the real ceiling is this times every concurrent query's node count. `"32MB"` suits a host sized for the 80 pooled connections below. |
+| `postgresMaintenanceWorkMem` | `null` | `maintenance_work_mem`: index builds and the autovacuum passes over the edge tables. Each of `autovacuum_max_workers` can claim this much at once, so `"1GB"` wants RAM to spare. |
 
 When `databaseUrl` points at a cluster this module does not configure, set the
 same six values there by hand.

@@ -42,11 +42,12 @@ use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 /// which is why [`begin_walk`] opens the transaction rather than trusting the
 /// caller to be inside one.
 ///
-/// The value has to stay ABOVE the cluster floor or this is an expensive no-op:
-/// `configurePostgres` sets `work_mem = 32MB` for every ordinary query, and a
-/// raise to the same number buys the walk nothing. Raising the floor instead is
-/// the wrong trade, since it multiplies by every sort node of every concurrent
-/// query.
+/// The value has to stay ABOVE the cluster's own `work_mem` or this is an
+/// expensive no-op: a raise to the number the floor already sits at buys the
+/// walk nothing. Raising that floor instead is the wrong trade, since it
+/// multiplies by every sort node of every concurrent query, which is why the
+/// module leaves it to `services.gradient.server.postgresWorkMem` rather than
+/// guessing it.
 pub const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
 
 /// Opens a transaction sized for one graph walk. The caller runs its statement
