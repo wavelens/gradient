@@ -294,6 +294,32 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
            AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)
          RETURNING d.id"
     );
+    // Snapshot the edges INTO the candidates before the delete, never after: the
+    // `dependency` FK is ON DELETE CASCADE, so the rows naming a reclaimed
+    // derivation are gone the moment it is, and a dependent that survived it has
+    // lost part of its record and must be re-walked.
+    let mut dependents: Vec<(Uuid, Uuid)> = Vec::new();
+    for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
+        let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        dependents.extend(
+            db.query_all_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "SELECT e.derivation, e.dependency FROM derivation_dependency e \
+                 WHERE e.dependency = ANY($1)",
+                [ids.into()],
+            ))
+            .await
+            .context("GC: failed to query dependents of the candidates")?
+            .into_iter()
+            .filter_map(|r| {
+                Some((
+                    r.try_get::<Uuid>("", "derivation").ok()?,
+                    r.try_get::<Uuid>("", "dependency").ok()?,
+                ))
+            }),
+        );
+    }
+
     let mut deleted: HashSet<DerivationId> = HashSet::new();
     for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
@@ -316,6 +342,36 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
 
     if deleted.is_empty() {
         return Ok(());
+    }
+
+    // A surviving dependent's record lost an edge, so `walked` is no longer true
+    // of it and every gate that reads it must close until a fresh evaluation
+    // re-walks it. The un-promote re-checks the gates rather than the list, so a
+    // dependent a concurrent eval already re-walked keeps its place in the queue.
+    let orphaned = orphaned_survivors(&dependents, &deleted);
+    if !orphaned.is_empty() {
+        let survivors: Vec<DerivationId> =
+            orphaned.iter().copied().map(DerivationId::new).collect();
+        let settled = async {
+            use sea_orm::TransactionTrait;
+            let txn = db.begin().await?;
+            txn.execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "UPDATE derivation SET walked = false WHERE id = ANY($1)",
+                [orphaned.into()],
+            ))
+            .await?;
+            let changes = crate::readiness::unpromote_ungated(&txn, &survivors).await?;
+            txn.commit().await?;
+            Ok::<_, sea_orm::DbErr>(changes)
+        }
+        .await;
+        match settled {
+            Ok(changes) => crate::status::emit_transition_effects(ctx, &changes).await,
+            Err(e) => {
+                warn!(error = %e, "GC: failed to re-walk the survivors of a deleted dependency")
+            }
+        }
     }
 
     // Reclaim the log files of every attempt whose derivation was just deleted;
@@ -391,17 +447,21 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
 
     // Retire the rows in one transaction per chunk: an anchor and a referrer's
     // reference counter must never trust a `cached_path` this pass just removed,
-    // not even until the next reconcile.
-    if !to_delete.is_empty()
-        && let Err(e) = crate::for_each_chunk(&to_delete, |chunk| async move {
+    // not even until the next reconcile. Each chunk's anchor moves fan out once
+    // its own transaction has committed.
+    for chunk in to_delete.chunks(crate::IN_CHUNK_SIZE) {
+        let retired = async {
             use sea_orm::TransactionTrait;
             let txn = db.begin().await?;
-            crate::nar_closure::retire_paths(&txn, &chunk).await?;
-            txn.commit().await
-        })
-        .await
-    {
-        warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes");
+            let retired = crate::nar_closure::retire_paths(&txn, chunk).await?;
+            txn.commit().await?;
+            Ok::<_, sea_orm::DbErr>(retired)
+        }
+        .await;
+        match retired {
+            Ok(retired) => crate::status::emit_transition_effects(ctx, &retired.transitions).await,
+            Err(e) => warn!(error = %e, "GC: failed to delete cached_path rows for orphan hashes"),
+        }
     }
 
     let _ = ctx
@@ -414,6 +474,29 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         "Orphan derivation GC done"
     );
     Ok(())
+}
+
+/// The derivations that SURVIVED the sweep while at least one of their
+/// dependencies was reclaimed, sorted and deduplicated. Their record is now
+/// incomplete - the edge went with the dependency - so they are exactly the rows
+/// that must lose `walked`. A dependent that was itself deleted is excluded: its
+/// row is gone and updating it would be a no-op on a cascaded id.
+fn orphaned_survivors(
+    dependents: &[(Uuid, Uuid)],
+    deleted: &std::collections::HashSet<DerivationId>,
+) -> Vec<Uuid> {
+    let mut survivors: Vec<Uuid> = dependents
+        .iter()
+        .filter(|(dependent, dependency)| {
+            deleted.contains(&DerivationId::new(*dependency))
+                && !deleted.contains(&DerivationId::new(*dependent))
+        })
+        .map(|(dependent, _)| *dependent)
+        .collect();
+    survivors.sort_unstable();
+    survivors.dedup();
+
+    survivors
 }
 
 /// Of the output hashes belonging to just-deleted derivations, the ones whose
@@ -469,6 +552,40 @@ mod tests {
 
     fn set(items: &[&str]) -> HashSet<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A dependent that survives the sweep while one of its dependencies is
+    /// reclaimed has an incomplete record: it must be re-walked, so it is
+    /// exactly the survivors of deleted dependencies that lose `walked`. A
+    /// dependent of a kept dependency, and one that was itself deleted, are not.
+    #[test]
+    fn survivors_of_a_deleted_dependency_lose_walked() {
+        let gone = DerivationId::now_v7();
+        let kept = DerivationId::now_v7();
+        let survivor = DerivationId::now_v7();
+        let also_gone = DerivationId::now_v7();
+        let dependents = vec![
+            (survivor.into_inner(), gone.into_inner()),
+            (survivor.into_inner(), kept.into_inner()),
+            (also_gone.into_inner(), gone.into_inner()),
+        ];
+        let deleted: HashSet<DerivationId> = [gone, also_gone].into_iter().collect();
+
+        assert_eq!(
+            orphaned_survivors(&dependents, &deleted),
+            vec![survivor.into_inner()]
+        );
+    }
+
+    /// Nothing deleted is nothing to re-walk: an empty deleted set must not read
+    /// as "every dependent lost an edge".
+    #[test]
+    fn no_deletion_orphans_nobody() {
+        let a = DerivationId::now_v7();
+        let b = DerivationId::now_v7();
+        let dependents = vec![(a.into_inner(), b.into_inner())];
+
+        assert!(orphaned_survivors(&dependents, &HashSet::new()).is_empty());
     }
 
     #[test]

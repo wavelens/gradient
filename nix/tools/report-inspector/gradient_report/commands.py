@@ -49,9 +49,15 @@ ATTEMPT_REASON = {
 # evaluation sitting on one of these is waiting rather than finished.
 NON_TERMINAL_BUILD_STATUS = (0, 1, 2, 8)
 
-# Promotion gates, with the table each one lives on: `walked` is a property of
-# the derivation, the closure gates of its anchor.
-GATES = (("d", "walked"), ("db", "closure_complete"), ("db", "drv_closure_cached"))
+# What `why_stuck` needs to weigh the promotion gates. `walked` is a boolean on the
+# derivation and `unready_deps` a count on its anchor, and they cannot share one
+# truthiness test - `not 0` is True, so folding the count into a boolean list would
+# report a ready anchor as blocked and a blocked one as fine. `substitutable` is not
+# a gate of its own: it is one arm of `(substitutable OR drv_whole)`, and the report
+# carries no `.drv` wholeness, so it decides whether that gate is knowable here. The
+# fourth gate, a `build_job` referencing the derivation, is open for every row by
+# construction: the export selects the anchors BY their `build_job`.
+GATE_COLUMNS = ("d.walked", "db.unready_deps", "db.substitutable")
 
 
 def _lines(rows: list[str]) -> str:
@@ -159,11 +165,11 @@ def timeline(conn: sqlite3.Connection) -> str:
 
 def why_stuck(conn: sqlite3.Connection) -> str:
     """For each anchor that never reached a terminal state, name the gate that
-    is false and the dependency holding it there."""
+    is false and the dependency holding it there, and say plainly when the only
+    remaining candidate is the one gate the report does not carry."""
     placeholders = ", ".join("?" for _ in NON_TERMINAL_BUILD_STATUS)
-    gate_columns = ", ".join(f"{table}.{column}" for table, column in GATES)
     anchors = conn.execute(
-        f"SELECT db.id, db.derivation, db.status, d.name, {gate_columns} "
+        f"SELECT db.id, db.derivation, db.status, d.name, {', '.join(GATE_COLUMNS)} "
         f"FROM derivation_build db LEFT JOIN derivation d ON d.id = db.derivation "
         f"WHERE db.status IN ({placeholders})",
         NON_TERMINAL_BUILD_STATUS,
@@ -174,22 +180,44 @@ def why_stuck(conn: sqlite3.Connection) -> str:
 
     out = []
     for a in anchors:
-        blocked = [column for _, column in GATES if not a[column]]
+        blocked = []
+        if not a["walked"]:
+            blocked.append("walked")
+        if a["unready_deps"]:
+            blocked.append(f"unready_deps = {a['unready_deps']}")
+
         label = a["name"] or a["derivation"]
-
+        status = BUILD_STATUS.get(a["status"], a["status"])
         if blocked:
-            out.append(f"{label}: {BUILD_STATUS.get(a['status'], a['status'])}, waiting on {', '.join(blocked)}")
+            out.append(f"{label}: {status}, waiting on {', '.join(blocked)}")
+        elif a["substitutable"]:
+            out.append(f"{label}: {status}, every gate open")
         else:
-            out.append(f"{label}: {BUILD_STATUS.get(a['status'], a['status'])}, every gate open")
+            out.append(
+                f"{label}: {status}, every gate the report carries is open; "
+                f"the one it cannot see is whether this anchor's own .drv is whole"
+            )
 
+        # A dependency that is not fetchable is exactly what holds `unready_deps`
+        # above zero, terminal-success or not, so it is listed alongside the
+        # non-terminal ones. `NULL` is a dependency with no anchor row at all.
         for dep in conn.execute(
-            "SELECT d.name, b.status FROM derivation_dependency dd "
+            "SELECT d.name, b.status, b.fetchable FROM derivation_dependency dd "
             "JOIN derivation d ON d.id = dd.dependency "
             "LEFT JOIN derivation_build b ON b.derivation = dd.dependency "
-            "WHERE dd.derivation = ? AND (b.status IS NULL OR b.status NOT IN (3, 7))",
+            "WHERE dd.derivation = ? "
+            "  AND (b.status IS NULL OR b.status NOT IN (3, 7) OR NOT b.fetchable)",
             (a["derivation"],),
         ):
-            out.append(f"    dep {dep['name']} status {BUILD_STATUS.get(dep['status'], dep['status'])}")
+            if dep["fetchable"] is None:
+                fetchable = "no anchor row"
+            else:
+                fetchable = "fetchable" if dep["fetchable"] else "not fetchable"
+
+            out.append(
+                f"    dep {dep['name']} status "
+                f"{BUILD_STATUS.get(dep['status'], dep['status'])} {fetchable}"
+            )
 
     return _lines(out)
 

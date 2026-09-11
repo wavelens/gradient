@@ -17,10 +17,9 @@ use crate::messages::{DemoteReport, Demotion};
 
 pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteReport> {
     let db = &ctx.worker_db;
-    let nar_storage = &ctx.storage.nar_storage;
     match demotion {
         Demotion::MissingNar { hash } => {
-            let producers = gradient_db::demote_cached_output(db, nar_storage, &hash).await?;
+            let producers = gradient_db::demote_cached_output(ctx, &hash).await?;
             warn!(%hash, producers = producers.len(), "self-heal: NAR missing from storage; cached path demoted");
             Ok(DemoteReport {
                 producers,
@@ -28,7 +27,7 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
             })
         }
         Demotion::Path { hash } => {
-            let producers = gradient_db::demote_cached_output(db, nar_storage, &hash).await?;
+            let producers = gradient_db::demote_cached_output(ctx, &hash).await?;
             for derivation in &producers {
                 revoke_cache_derivation_closure(db, *derivation).await?;
             }
@@ -41,7 +40,7 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
         }
         Demotion::CacheClaim { cache, hash } => cache_claim(ctx, cache, &hash).await,
         Demotion::UnbackedTrustedOutputs => {
-            let demoted = gradient_db::demote_unbacked_trusted_outputs(db, nar_storage).await?;
+            let demoted = gradient_db::demote_unbacked_trusted_outputs(ctx).await?;
             Ok(DemoteReport {
                 demoted,
                 ..Default::default()
@@ -101,8 +100,7 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
     // producer anchor, gate flags and referrer counters reset symmetrically (a
     // bare is_cached clear leaves a Completed producer with no backing NAR).
     if !others_remain {
-        let nar_storage = &ctx.storage.nar_storage;
-        gradient_db::demote_cached_output(db, nar_storage, hash).await?;
+        gradient_db::demote_cached_output(ctx, hash).await?;
     }
 
     let _ = ctx.board_events.send(BoardEvent::CacheChanged);

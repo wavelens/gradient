@@ -20,7 +20,7 @@ pub use derivation_build_status::{
     announce_entry_point_statuses, notify_build_status_for_derivations,
     update_derivation_build_status,
 };
-pub use effects::{TransitionChange, emit_transition_effects};
+pub use effects::{TransitionChange, collapse_transitions, emit_transition_effects};
 pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};
 pub use evaluation_status::{update_evaluation_status, update_evaluation_status_with_error};
 pub use logging::{

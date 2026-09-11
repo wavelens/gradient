@@ -27,19 +27,12 @@ pub struct Model {
     pub status: BuildStatus,
     pub substitutable: bool,
     pub substituted: bool,
-    /// True once this anchor reached a terminal-success status (Completed /
-    /// Substituted) AND every output's full runtime closure is present in our
-    /// cache. Dispatch gates dependents on it: a dep marked done whose closure
-    /// is incomplete would otherwise strand the dependent on `InputsUnavailable`.
-    pub closure_complete: bool,
-    /// True once this anchor's own `.drv` is in our cache AND every build
-    /// dependency is itself `drv_closure_cached` - i.e. the `.drv`'s full
-    /// transitive reference closure (input `.drv`s + input sources) is cached.
-    /// The `.drv`-closure analogue of `closure_complete` (which tracks OUTPUTs):
-    /// a worker can't import a build target's `.drv` until this holds, so
-    /// dispatch gates non-substitutable anchors on it to stop racing the eval's
-    /// progressive `.drv` push.
-    pub drv_closure_cached: bool,
+    /// Dependents can get this anchor's outputs: substitutable, or terminal
+    /// success with every output whole in our cache. Flipped by the event that
+    /// changes it, with the dependents' `unready_deps` moved from that flip.
+    pub fetchable: bool,
+    /// Direct dependencies that are not fetchable. Zero is the readiness gate.
+    pub unready_deps: i32,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,
     pub max_silent_secs: Option<i64>,
