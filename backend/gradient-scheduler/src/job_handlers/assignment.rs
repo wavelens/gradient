@@ -7,6 +7,7 @@
 //! Scoring and job assignment (`RequestJob`).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use sea_orm::EntityTrait;
@@ -174,13 +175,38 @@ impl Scheduler {
     }
 }
 
+/// Hard ceiling on the awaited transition when the liveness watchdog is off,
+/// and the cap the heartbeat-derived budget is clamped to.
+const TRANSITION_CEILING_SECS: u64 = 60;
+
+/// How long `record_dispatch` waits on the `Dispatched` transition.
+///
+/// The graph actor answers within 600 s, which is far longer than the session
+/// may spend on one frame: the worker's heartbeats queue behind it, and a
+/// heartbeat the liveness pass never sees costs the worker its registration,
+/// its anchor and every other build it is running. Half the deadline keeps the
+/// wait well inside it even when the watchdog is configured tighter than the
+/// default; with the watchdog disabled the ceiling still applies, because the
+/// graph actor's own timeout is no bound on a session at all.
+fn transition_budget(heartbeat_timeout_secs: u64) -> Duration {
+    let secs = match heartbeat_timeout_secs {
+        0 => TRANSITION_CEILING_SECS,
+        timeout => (timeout / 2).clamp(1, TRANSITION_CEILING_SECS),
+    };
+
+    Duration::from_secs(secs)
+}
+
 /// The `dispatched_job` row, then for a build the open `build_attempt` and the
 /// anchor's `dispatched_at` through the graph actor. Awaited before the
 /// assignment goes back to the session: the row is the only proof the job is
 /// out, so a worker's first report can never precede it, and an error here
 /// withdraws the claim instead of letting the job run unrecorded. The mirror
 /// holds too: a failed transition closes the row it just wrote, so a withdrawn
-/// claim never leaves an open row parking the anchor's dispatch gate.
+/// claim never leaves an open row parking the anchor's dispatch gate. What the
+/// withdrawal cannot undo is a transition that merely ran late: `Dispatched`
+/// stamps `dispatched_at` once and only once, so a claim dropped on the budget
+/// can still spend it and leave the anchor's real dispatch untimestamped.
 async fn record_dispatch(
     state: &Arc<ServerState>,
     worker_id: &str,
@@ -217,17 +243,25 @@ async fn record_dispatch(
         return Ok(());
     };
 
-    let moved = state
-        .graph
-        .transition(Transition::Dispatched {
+    let budget = transition_budget(state.config.proto.worker_heartbeat_timeout_secs);
+    let moved = match tokio::time::timeout(
+        budget,
+        state.graph.transition(Transition::Dispatched {
             evaluation: rec.evaluation_id,
             anchor: derivation_build,
             dispatched_job: rec.dispatch,
             substitute: rec.substitute,
             build_context: rec.build_context.clone(),
-        })
-        .await
-        .context("Dispatched transition");
+        }),
+    )
+    .await
+    {
+        Ok(moved) => moved.context("Dispatched transition"),
+        Err(_) => Err(anyhow::anyhow!(
+            "Dispatched transition exceeded {}s",
+            budget.as_secs()
+        )),
+    };
 
     if moved.is_err()
         && let Err(e) = gradient_db::abandon_open_dispatch(&state.worker_db, rec.dispatch).await
@@ -236,4 +270,39 @@ async fn record_dispatch(
     }
 
     moved.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The session handles one frame at a time, so the wait on the graph actor
+    /// is also how long the worker's next heartbeat goes unread. Every
+    /// configurable deadline must therefore outlast the budget, or a slow graph
+    /// actor unregisters a healthy worker mid-assignment.
+    #[test]
+    fn the_budget_expires_before_the_liveness_deadline() {
+        for timeout in [2_u64, 10, 30, 60, 120, 600, 3600] {
+            assert!(
+                transition_budget(timeout) < Duration::from_secs(timeout),
+                "budget for a {timeout}s deadline: {:?}",
+                transition_budget(timeout)
+            );
+        }
+    }
+
+    /// A disabled watchdog is not a licence to hold the session for the graph
+    /// actor's ten minutes, and a budget of zero would withdraw every claim.
+    #[test]
+    fn the_budget_is_bounded_at_both_ends() {
+        assert_eq!(
+            transition_budget(0),
+            Duration::from_secs(TRANSITION_CEILING_SECS)
+        );
+        assert_eq!(
+            transition_budget(u64::MAX),
+            Duration::from_secs(TRANSITION_CEILING_SECS)
+        );
+        assert_eq!(transition_budget(1), Duration::from_secs(1));
+    }
 }
