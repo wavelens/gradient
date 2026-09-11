@@ -149,6 +149,11 @@
                 </div>
               }
             </div>
+            @if (entryPoints().length < entryPointsTotal()) {
+              <button type="button" class="pkg-more" (click)="loadMoreEntryPoints()">
+                Show more ({{ entryPoints().length }} of {{ entryPointsTotal() }})
+              </button>
+            }
           } @else {
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />

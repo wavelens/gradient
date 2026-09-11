@@ -93,7 +93,7 @@ function makeTasksService(access: AccessState, overrides: Partial<{
   const extraEvals = overrides.extraEvals ?? [];
   return {
     getTask: () => of(taskFor(access, extraEvals, overrides.primaryStatus)),
-    getEntryPoints: overrides.getEntryPoints ?? (() => of([])),
+    getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0 })),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
     abortEvaluation: overrides.abortEvaluation ?? (() => of('ok')),
@@ -219,10 +219,21 @@ describe('TaskDetailComponent - evaluation selection', () => {
       { managed: false, canEdit: true, canTrigger: true },
       { extraEvals: [e2] },
     );
-    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of([]));
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0 }));
     const component = fixture.componentInstance;
     component.select(component.evaluations()[1]);
-    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id);
+    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 100, 0);
+  });
+
+  it('asks for a larger page when the user wants more packages', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 250 }));
+    const component = fixture.componentInstance;
+    component.loadMoreEntryPoints();
+    const [, , , limit, offset] = spy.mock.calls.at(-1)!;
+    expect(limit).toBe(200);
+    expect(offset).toBe(0);
+    expect(component.entryPointsTotal()).toBe(250);
   });
 
   it('labels a pull-request trigger as "PR #<n>" (#391)', () => {
