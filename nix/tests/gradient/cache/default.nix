@@ -1082,10 +1082,24 @@ in {
            "the re-upload did not ripple hello's output back to whole")
       assert drift() == 0, "counters disagree with their recompute after the re-upload"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-upload"
-      assert int(sql(
-          f"SELECT db.unready_deps FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
-          f"WHERE d.hash = '{drv_hash}';"
-      )) >= 1, "a re-uploaded output does not settle its Created producer; only an evaluation does"
+
+      # A re-upload restores wholeness, not trust. `fetchable` also needs a
+      # terminal-success status, which only an evaluation's ingest or a finished
+      # build writes, so a NAR arriving back in the cache must never re-trust the
+      # producer the retire demoted. Asserted on that producer directly: hello's
+      # own `unready_deps` looks like the same thing but is not, because it counts
+      # one hop of `derivation_dependency` and the retired path is a runtime
+      # reference, whose producer need not be an edge of hello at all. That form
+      # read 0 as soon as wholeness rippled back and failed for the wrong reason.
+      settled = sql(
+          f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
+          f"JOIN derivation_output o ON o.derivation = db.derivation "
+          f"WHERE o.hash = '{dep_hash}' LIMIT 1;"
+      )
+      s_status, s_fetchable = settled.split()
+      assert s_fetchable == "0" or s_status in ("3", "7"), (
+          f"the re-uploaded output's producer is fetchable again with no terminal-success "
+          f"status, so the NAR alone re-trusted it; (status fetchable) = ({settled})")
 
       # The retire demoted the producer too, so the graph may rebuild and re-push
       # the path; phase 12b measures the drain of an *idle* worker, so wait that
