@@ -771,14 +771,28 @@ in {
           "WHERE table_name = 'derivation_closure';"
       ))
       assert gone == 0, "derivation_closure is still there"
+
+      # An entry point with no build_job in this evaluation is not reportable, so
+      # the page never covers it and nothing ever stamps it.
+      reportable = (
+          f"ep.evaluation = '{eval_id}' AND EXISTS ("
+          f"  SELECT 1 FROM build_job bj WHERE bj.evaluation = '{eval_id}'"
+          f"  AND bj.derivation = ep.derivation)"
+      )
+      # Read the version BEFORE the page. The stamp is monotone and is at least the
+      # version the reader saw, so asserting against that floor is race-free, while
+      # comparing with the version afterwards loses to any concurrent anchor move.
+      version_before = int(sql(
+          f"SELECT graph_version FROM evaluation WHERE id = '{eval_id}';"
+      ))
       page = json.loads(api_get(
           token, f"tasks/project/task/entry-points?evaluation_id={eval_id}&limit=500"
       ))["message"]
       assert page["total"] == len(page["entry_points"]) > 0, page
       unstamped = int(sql(
-          f"SELECT count(*) FROM entry_point ep JOIN evaluation e ON e.id = ep.evaluation "
-          f"WHERE ep.evaluation = '{eval_id}' "
-          f"AND ep.dep_counts_version IS DISTINCT FROM e.graph_version;"
+          f"SELECT count(*) FROM entry_point ep WHERE {reportable} "
+          f"AND (ep.dep_counts_version IS NULL "
+          f"     OR ep.dep_counts_version < {version_before});"
       ))
       assert unstamped == 0, f"{unstamped} entry points were not stamped by the read"
 
@@ -806,7 +820,7 @@ in {
       stored_totals = sql(
           f"SELECT ep.id || ':' || coalesce(sum(c.count), 0) FROM entry_point ep "
           f"LEFT JOIN entry_point_dep_count c ON c.entry_point = ep.id "
-          f"WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id;"
+          f"WHERE {reportable} GROUP BY ep.id;"
       ).split()
       for row in stored_totals:
           ep_id, total = row.split(":")
