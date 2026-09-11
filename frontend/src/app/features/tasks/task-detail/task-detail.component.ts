@@ -56,8 +56,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   entryPoints = signal<EntryPointSummary[]>([]);
   entryPointsTotal = signal(0);
   entryPointsLoading = signal(false);
+  // Mirrors the server's own page size and its hard cap, so "show more" pages with
+  // an offset instead of asking for a limit the server would clamp.
   private static readonly ENTRY_POINTS_PAGE = 100;
-  private entryPointsLimit = TaskDetailComponent.ENTRY_POINTS_PAGE;
+  private static readonly ENTRY_POINTS_PAGE_MAX = 500;
+  private entryPointsAppending = false;
   selectedId = signal<string | null>(null);
   starting = signal(false);
   errorMessage = signal<string | null>(null);
@@ -180,6 +183,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
+  private entryPointSignature(eps: EntryPointSummary[]): string {
+    return eps.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
+  }
+
   private loadEntryPoints(evaluationId?: string): void {
     if (!evaluationId) {
       this.entryPoints.set([]);
@@ -190,23 +197,32 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       return;
     }
     this.lastEntryPointsFetch = Date.now();
-    if (evaluationId !== this.entryPointsEvalId) {
-      this.entryPointsLimit = TaskDetailComponent.ENTRY_POINTS_PAGE;
-      this.entryPointsLoading.set(true);
-    }
-    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, this.entryPointsLimit, 0).subscribe({
+    const switching = evaluationId !== this.entryPointsEvalId;
+    if (switching) this.entryPointsLoading.set(true);
+    // A refresh re-reads the window it already shows, capped at the server's
+    // maximum page. Rows the user appended past that cap stay as they are until
+    // the evaluation is selected again, which keeps a live poll at one request.
+    const shown = this.entryPoints().length || TaskDetailComponent.ENTRY_POINTS_PAGE;
+    const limit = switching
+      ? TaskDetailComponent.ENTRY_POINTS_PAGE
+      : Math.min(shown, TaskDetailComponent.ENTRY_POINTS_PAGE_MAX);
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, limit, 0).subscribe({
       next: (page) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
         // evaluation, so a slow earlier request can't clobber a newer selection.
         if (this.selectedId() !== evaluationId) return;
         this.entryPointsLoading.set(false);
         this.entryPointsTotal.set(page.total);
+        // Entry points of one evaluation are immutable and server-ordered, so the
+        // refreshed prefix replaces in place and any appended tail survives.
+        const tail = switching ? [] : this.entryPoints().slice(page.entry_points.length);
+        const next = [...page.entry_points, ...tail];
         // Skip the re-render (and its enter animation) when nothing changed.
-        const sig = page.entry_points.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
+        const sig = this.entryPointSignature(next);
         if (evaluationId === this.entryPointsEvalId && sig === this.entryPointsSig) return;
         this.entryPointsEvalId = evaluationId;
         this.entryPointsSig = sig;
-        this.entryPoints.set(page.entry_points);
+        this.entryPoints.set(next);
       },
       error: (error) => {
         if (this.selectedId() === evaluationId) this.entryPointsLoading.set(false);
@@ -216,8 +232,25 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   loadMoreEntryPoints(): void {
-    this.entryPointsLimit += TaskDetailComponent.ENTRY_POINTS_PAGE;
-    this.loadEntryPoints(this.selected()?.id);
+    const evaluationId = this.selected()?.id;
+    if (!evaluationId || this.entryPointsAppending) return;
+    this.entryPointsAppending = true;
+    const offset = this.entryPoints().length;
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, TaskDetailComponent.ENTRY_POINTS_PAGE, offset).subscribe({
+      next: (page) => {
+        this.entryPointsAppending = false;
+        if (this.selectedId() !== evaluationId) return;
+        this.entryPointsTotal.set(page.total);
+        const next = [...this.entryPoints(), ...page.entry_points];
+        this.entryPointsEvalId = evaluationId;
+        this.entryPointsSig = this.entryPointSignature(next);
+        this.entryPoints.set(next);
+      },
+      error: (error) => {
+        this.entryPointsAppending = false;
+        console.error('Failed to load more entry points:', error);
+      },
+    });
   }
 
   startEvaluation(): void {
@@ -324,6 +357,13 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const parts = path.split('/').pop() ?? path;
     const match = parts.match(/^[a-z0-9]+-(.+?)(?:\.drv)?$/);
     return match ? match[1] : parts;
+  }
+
+  /// Last segment of the Nix attribute path, which is what the server orders the
+  /// page by, so the visible label and the visible order are the same field.
+  attrLabel(attr: string): string {
+    const last = attr.split('.').pop() ?? attr;
+    return last.replace(/^"|"$/g, '') || attr;
   }
 
   statusClass(status: EvaluationStatus): string {
