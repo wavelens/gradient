@@ -6,13 +6,15 @@
 
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::endpoints::builds::closure::{derivation_closure_reachable, sum_output_sizes};
+use crate::endpoints::builds::closure::sum_output_sizes;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::{output_hashes_for_drvs, runtime_closure_size};
+use gradient_db::{
+    begin_walk, output_hashes_for_drvs, runtime_closure_size, transitive_closure_reachable_in,
+};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -102,6 +104,7 @@ pub async fn get_task_metrics(
     }
 
     let mut points = Vec::new();
+    let walk = begin_walk(&state.web_db).await?;
 
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
@@ -121,7 +124,7 @@ pub async fn get_task_metrics(
             .unwrap_or_default();
 
         let entry_point_count = ep_drv_ids.len() as i64;
-        let closure = derivation_closure_reachable(&state.web_db, ep_drv_ids.clone()).await?;
+        let closure = transitive_closure_reachable_in(&walk, &ep_drv_ids).await?;
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
         let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids.clone()).await?;
@@ -144,6 +147,7 @@ pub async fn get_task_metrics(
         });
     }
 
+    walk.commit().await?;
     // Return in chronological order (oldest first for chart x-axis)
     points.reverse();
 
@@ -252,6 +256,7 @@ pub async fn get_entry_point_metrics(
         .unwrap_or_default();
 
     let mut points = Vec::new();
+    let walk = begin_walk(&state.web_db).await?;
 
     for ep in entry_points {
         let (Some(evaluation), Some(anchor), Some(build_job)) = (
@@ -264,7 +269,7 @@ pub async fn get_entry_point_metrics(
 
         let build_time_ms = attempts.get(&anchor.id).and_then(|a| a.duration_ms());
 
-        let closure = derivation_closure_reachable(&state.web_db, vec![ep.derivation]).await?;
+        let closure = transitive_closure_reachable_in(&walk, &[ep.derivation]).await?;
         let dependencies_count = (closure.len() as i64).saturating_sub(1);
 
         let output_size_bytes = sum_output_sizes(&state.web_db, vec![ep.derivation]).await?;
@@ -288,6 +293,7 @@ pub async fn get_entry_point_metrics(
         });
     }
 
+    walk.commit().await?;
     points.reverse();
 
     Ok(ok_json(EntryPointMetricsResponse {
