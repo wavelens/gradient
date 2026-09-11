@@ -1002,8 +1002,7 @@ in {
       assert anchor_drift() == 0, "anchor counters disagree with their recompute before the retire"
       assert counter(store_hash) == 0, "hello's own output is not whole to start with"
 
-      # glibc first, since hello links against it. The path has to be in the
-      # server's own store as well: the re-upload below runs the CLI there.
+      # glibc first, since hello links against it.
       refs = sql(
           f"SELECT cp.hash || '-' || cp.package FROM cached_path_reference r "
           f"JOIN cached_path cp ON cp.hash = r.reference_hash "
@@ -1011,18 +1010,31 @@ in {
           f"  AND cp.file_hash IS NOT NULL AND cp.missing_references = 0 "
           f"ORDER BY (cp.package LIKE 'glibc-%') DESC, cp.package;"
       ).splitlines()
-      dep_path = next(
-          (p for p in (f"/nix/store/{name.strip()}" for name in refs if name.strip())
-           if server.execute(f"test -e {p}")[0] == 0),
-          None,
-      )
-      assert dep_path, f"none of hello's {len(refs)} whole references is in the server store"
-      dep_hash = dep_path.split("/")[-1].split("-")[0]
-      print(f"retiring {dep_path}")
 
       # `NarStore` shards its objects by the store hash, under the module's baseDir.
-      dep_object = f"/var/lib/gradient/nars/{dep_hash[:2]}/{dep_hash[2:]}.nar.zst"
-      server.succeed(f"test -f {dep_object}")
+      def nar_object(name):
+          h = name.split("-")[0]
+          return f"/var/lib/gradient/nars/{h[:2]}/{h[2:]}.nar.zst"
+
+      # Both halves have to be real, and a whole `cached_path` row guarantees neither:
+      # the path must be in the server's own store because the re-upload below runs the
+      # CLI there, and the NAR object must still be on disk because a row outlives its
+      # object until the zombie purge catches up. Picking on the row alone retired a
+      # path whose object was already gone.
+      dep_name = next(
+          (n for n in (name.strip() for name in refs)
+           if n
+           and server.execute(f"test -e /nix/store/{n}")[0] == 0
+           and server.execute(f"test -f {nar_object(n)}")[0] == 0),
+          None,
+      )
+      assert dep_name, (
+          f"none of hello's {len(refs)} whole references has both a path in the server "
+          f"store and a NAR object on disk")
+      dep_path = f"/nix/store/{dep_name}"
+      dep_hash = dep_name.split("-")[0]
+      dep_object = nar_object(dep_name)
+      print(f"retiring {dep_path}")
       server.succeed(f"rm {dep_object}")
 
       # The zombie purge is the retiring caller here. The deep GC runs that same
