@@ -1198,6 +1198,70 @@ mod tests {
         );
     }
 
+    /// Edges are global, so a batch that grew one must bump every evaluation that
+    /// already holds the derivation. The edge insert returns one row per landed
+    /// edge, so a derivation with many new inputs is named many times; binding
+    /// that raw would hand `= ANY($1)` tens of thousands of duplicate uuids on a
+    /// first-delivery batch, which is what flips the planner off the `build_job`
+    /// index. The set is what the bump wants.
+    #[tokio::test]
+    async fn the_cross_evaluation_bump_names_each_derivation_once() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            // the edge insert names the same derivation once per landed edge
+            .append_query_results([vec![drv_row(a.id), drv_row(a.id)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // stubs, lock, seed, the batch's own bump, the cross-evaluation bump
+            .append_exec_results(vec![ok(1); 5])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log: Vec<Statement> = pool
+            .into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .collect();
+        let bump = log
+            .iter()
+            .find(|s| {
+                s.sql
+                    .contains("SELECT evaluation FROM build_job WHERE derivation = ANY")
+            })
+            .expect("a batch that grew an edge bumps the evaluations sharing it");
+        let Some(Value::Array(_, Some(bound))) =
+            bump.values.as_ref().and_then(|v| v.0.first()).cloned()
+        else {
+            panic!("the bump binds one uuid array: {:?}", bump.values);
+        };
+
+        assert_eq!(
+            bound.len(),
+            1,
+            "two edges on one derivation bind it once: {bound:?}"
+        );
+    }
+
     /// The readiness pass has one legal order and the order IS the correctness
     /// argument, so it is asserted literally: mark, ripple, promote, seed, promote,
     /// un-promote.
