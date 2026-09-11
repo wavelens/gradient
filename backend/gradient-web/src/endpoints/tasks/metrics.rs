@@ -12,9 +12,7 @@ use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::{
-    begin_walk, output_hashes_for_drvs, runtime_closure_size, transitive_closure_reachable_in,
-};
+use gradient_db::{output_hashes_for_drvs, runtime_closure_size, transitive_closure_reachable};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -103,11 +101,10 @@ pub async fn get_task_metrics(
             .push(ep.derivation);
     }
 
-    // One raised walk for the whole request (#650), and every query of the loop
-    // runs on it: a second pooled connection taken while this one is held would
-    // deadlock the pool, and a closure kept past its iteration would hold every
-    // evaluation's closure in memory at once.
-    let walk = begin_walk(&state.web_db).await?;
+    // Each iteration opens and commits its own sized walk. Holding one across the
+    // loop would pin one of the web pool's connections for the whole request,
+    // which at nixpkgs scale is minutes of head-of-line blocking for every other
+    // page; keeping the closures instead would hold every evaluation's at once.
     let mut points = Vec::new();
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
@@ -127,14 +124,15 @@ pub async fn get_task_metrics(
             .unwrap_or_default();
 
         let entry_point_count = ep_drv_ids.len() as i64;
-        let closure = transitive_closure_reachable_in(&walk, &ep_drv_ids).await?;
+        let closure = transitive_closure_reachable(&state.web_db, &ep_drv_ids).await?;
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
-        let output_size_bytes = sum_output_sizes(&walk, ep_drv_ids.clone()).await?;
-        let closure_size_bytes = sum_output_sizes(&walk, closure.into_iter().collect()).await?;
+        let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids.clone()).await?;
+        let closure_size_bytes =
+            sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
 
-        let seeds = output_hashes_for_drvs(&walk, &ep_drv_ids).await?;
-        let runtime = runtime_closure_size(&walk, &seeds).await?;
+        let seeds = output_hashes_for_drvs(&state.web_db, &ep_drv_ids).await?;
+        let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
         let runtime_closure_size_bytes = (runtime > 0).then_some(runtime);
 
         points.push(TaskMetricPoint {
@@ -149,8 +147,6 @@ pub async fn get_task_metrics(
         });
     }
 
-    walk.commit().await?;
-
     // Return in chronological order (oldest first for chart x-axis)
     points.reverse();
 
@@ -161,6 +157,35 @@ pub async fn get_task_metrics(
 }
 
 // ── Per-entry-point metrics ──────────────────────────────────────────────────
+
+/// The part of an entry point's metric point fixed by its derivation alone.
+#[derive(Clone, Copy)]
+struct DerivationMetrics {
+    dependencies_count: i64,
+    output_size_bytes: Option<i64>,
+    closure_size_bytes: Option<i64>,
+    runtime_closure_size_bytes: Option<i64>,
+}
+
+/// Size one derivation's build closure. The walk opens and commits its own sized
+/// transaction, so no connection is held across the caller's loop.
+async fn derivation_metrics(
+    state: &Arc<ServerState>,
+    derivation: DerivationId,
+) -> WebResult<DerivationMetrics> {
+    let closure = transitive_closure_reachable(&state.web_db, &[derivation]).await?;
+    let dependencies_count = (closure.len() as i64).saturating_sub(1);
+    let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+    let seeds = output_hashes_for_drvs(&state.web_db, &[derivation]).await?;
+    let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
+
+    Ok(DerivationMetrics {
+        dependencies_count,
+        output_size_bytes: sum_output_sizes(&state.web_db, vec![derivation]).await?,
+        closure_size_bytes,
+        runtime_closure_size_bytes: (runtime > 0).then_some(runtime),
+    })
+}
 
 #[derive(Deserialize)]
 pub struct EntryPointMetricsQuery {
@@ -222,8 +247,8 @@ pub async fn get_entry_point_metrics(
         .await?;
 
     // Evaluation, anchor, build job and attempt for the whole page in four
-    // queries; the closure walks below stay per entry point, each seeded by its
-    // own derivation. The build-job read is narrowed by derivation too, so it
+    // queries; the closure walks below stay per distinct derivation, each seeded
+    // by that derivation. The build-job read is narrowed by derivation too, so it
     // returns the entry points rather than every build of every evaluation.
     let eval_ids: Vec<EvaluationId> = entry_points.iter().map(|ep| ep.evaluation).collect();
     let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
@@ -258,8 +283,10 @@ pub async fn get_entry_point_metrics(
         .await
         .unwrap_or_default();
 
-    // As above: one raised walk for the request, every query of the loop on it.
-    let walk = begin_walk(&state.web_db).await?;
+    // Every number below depends only on the entry point's derivation, and a
+    // package unchanged across evaluations shares one derivation row, so each is
+    // computed once. Only the four scalars are kept, never the closure set.
+    let mut by_derivation: HashMap<DerivationId, DerivationMetrics> = HashMap::new();
     let mut points = Vec::new();
     for ep in entry_points {
         let (Some(evaluation), Some(anchor), Some(build_job)) = (
@@ -272,15 +299,14 @@ pub async fn get_entry_point_metrics(
 
         let build_time_ms = attempts.get(&anchor.id).and_then(|a| a.duration_ms());
 
-        let closure = transitive_closure_reachable_in(&walk, &[ep.derivation]).await?;
-        let dependencies_count = (closure.len() as i64).saturating_sub(1);
-
-        let output_size_bytes = sum_output_sizes(&walk, vec![ep.derivation]).await?;
-        let closure_size_bytes = sum_output_sizes(&walk, closure.into_iter().collect()).await?;
-
-        let seeds = output_hashes_for_drvs(&walk, &[ep.derivation]).await?;
-        let runtime = runtime_closure_size(&walk, &seeds).await?;
-        let runtime_closure_size_bytes = (runtime > 0).then_some(runtime);
+        let metrics = match by_derivation.get(&ep.derivation) {
+            Some(m) => *m,
+            None => {
+                let m = derivation_metrics(&state, ep.derivation).await?;
+                by_derivation.insert(ep.derivation, m);
+                m
+            }
+        };
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
@@ -288,14 +314,13 @@ pub async fn get_entry_point_metrics(
             created_at: evaluation.created_at,
             build_status: anchor.status.for_api(),
             build_time_ms,
-            output_size_bytes,
-            closure_size_bytes,
-            runtime_closure_size_bytes,
-            dependencies_count,
+            output_size_bytes: metrics.output_size_bytes,
+            closure_size_bytes: metrics.closure_size_bytes,
+            runtime_closure_size_bytes: metrics.runtime_closure_size_bytes,
+            dependencies_count: metrics.dependencies_count,
         });
     }
 
-    walk.commit().await?;
     points.reverse();
 
     Ok(ok_json(EntryPointMetricsResponse {
