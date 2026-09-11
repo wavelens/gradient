@@ -1184,8 +1184,9 @@ mod tests {
             .find(|s| s.contains("SET fetchable = false"))
             .expect("the mark runs");
         assert!(
-            mark.contains("\"referrer\""),
-            "the referrer does lose fetchability: {mark}"
+            mark.contains(&gone_producer.into_inner().to_string())
+                && mark.contains(&referrer_producer.into_inner().to_string()),
+            "the mark still covers the referrer's producer: {mark}"
         );
 
         let reset = log
