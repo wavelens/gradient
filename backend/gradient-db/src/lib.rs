@@ -7,6 +7,7 @@
 pub mod admin_tasks;
 pub mod base_workers;
 pub mod build_attempt;
+pub mod cache_metric;
 pub mod cache_reach;
 pub mod cache_storage;
 pub mod cache_upstream;

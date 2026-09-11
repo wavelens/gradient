@@ -4,16 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use chrono::Timelike;
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
 use gradient_graph::{NarCommit, SignTargets};
-use gradient_types::ids::{CacheId, ProjectId};
+use gradient_types::ids::ProjectId;
 use gradient_types::*;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder, Select,
-    Statement, Value,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Select};
 use tracing::warn;
 
 pub(super) struct NarUploadRecord<'a> {
@@ -29,9 +25,10 @@ pub(super) struct NarUploadRecord<'a> {
     pub ca: Option<&'a str>,
 }
 
-/// Resolves the project's cache and increments the traffic counter. `project_id` is
-/// resolved on the session read loop before the commit detaches, so it stays
-/// valid even after the job is evicted from the tracker on completion.
+/// Resolves the project's cache and adds the push to its minute bucket in the
+/// accumulator the flush pass writes (#644). `project_id` is resolved on the
+/// session read loop before the commit detaches, so it stays valid even after
+/// the job is evicted from the tracker on completion.
 pub(super) async fn record_nar_push_metric(
     state: &ServerState,
     project_id: Option<ProjectId>,
@@ -47,41 +44,10 @@ pub(super) async fn record_nar_push_metric(
         .await?
         .ok_or_else(|| anyhow::anyhow!("no cache for project {}", project_id))?;
 
-    let cache_id = project_cache.cache;
-    let now = gradient_types::now();
-    let bucket = now
-        .with_second(0)
-        .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
-        .unwrap_or(now);
-
-    upsert_cache_metric(state, cache_id, bucket, bytes).await
-}
-
-async fn upsert_cache_metric(
-    state: &ServerState,
-    cache_id: CacheId,
-    bucket: chrono::NaiveDateTime,
-    bytes: i64,
-) -> anyhow::Result<()> {
-    // Atomic accumulate keyed on the (cache, bucket_time) unique index: concurrent
-    // NAR commits for the same cache in one minute otherwise race a find-then-insert
-    // into a duplicate-key violation (and the update arm loses each other's writes).
+    let bucket = gradient_db::cache_metric::minute_bucket(gradient_types::now());
     state
-        .worker_db
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count) \
-             VALUES (uuidv7(), $1, $2, $3, 1) \
-             ON CONFLICT (cache, bucket_time) DO UPDATE SET \
-                 bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent, \
-                 nar_count  = cache_metric.nar_count  + 1",
-            [
-                Value::Uuid(Some(cache_id.into_inner())),
-                bucket.into(),
-                bytes.into(),
-            ],
-        ))
-        .await?;
+        .cache_traffic
+        .record(project_cache.cache, bucket, bytes);
 
     Ok(())
 }
@@ -177,7 +143,7 @@ pub(super) async fn project_for_dispatched_job<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{MockDatabase, QueryTrait};
+    use sea_orm::{DatabaseBackend, MockDatabase, QueryTrait};
     use uuid::Uuid;
 
     const JOB: &str = "build:01a07af6-9d9f-7300-8aa1-fb82b0c18446";

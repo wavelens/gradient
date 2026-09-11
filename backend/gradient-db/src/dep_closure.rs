@@ -21,8 +21,8 @@ use gradient_entity::ids::{DerivationId, EntryPointId, EvaluationId};
 use gradient_types::*;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbBackend, DbErr, EntityTrait, IntoActiveModel, QueryFilter,
-    QuerySelect, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, EntityTrait,
+    IntoActiveModel, QueryFilter, QuerySelect, Statement, TransactionTrait,
 };
 use std::collections::HashMap;
 
@@ -54,10 +54,13 @@ pub fn histogram_needs_rebuild(per_root: impl IntoIterator<Item = (i64, i64)>) -
         .any(|(stored_total, closure_size)| closure_size > 0 && stored_total < closure_size)
 }
 
-pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
+pub async fn materialize_entry_point_closures<C>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<usize, DbErr> {
+) -> Result<usize, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let entry_points = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation))
         .all(db)
@@ -164,10 +167,10 @@ pub async fn init_entry_point_dep_counts<C: ConnectionTrait>(
 /// Ensure `evaluation`'s closures are materialised and recompute its maintained
 /// counts from scratch. Used to re-sync after bulk status writes that bypass
 /// [`apply_dep_count_delta`] (restart recovery, abort-on-disconnect).
-pub async fn reconcile_eval_dep_counts<C: ConnectionTrait>(
-    db: &C,
-    evaluation: EvaluationId,
-) -> Result<(), DbErr> {
+pub async fn reconcile_eval_dep_counts<C>(db: &C, evaluation: EvaluationId) -> Result<(), DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     materialize_entry_point_closures(db, evaluation).await?;
     init_entry_point_dep_counts(db, evaluation).await
 }
@@ -176,10 +179,10 @@ pub async fn reconcile_eval_dep_counts<C: ConnectionTrait>(
 /// Returns early (single cheap query) when the evaluation has no entry points,
 /// otherwise materialises closures and recomputes the histogram. Must run before
 /// the first build status transition so subsequent deltas have a baseline.
-pub async fn seed_entry_point_dep_counts<C: ConnectionTrait>(
-    db: &C,
-    evaluation: EvaluationId,
-) -> Result<(), DbErr> {
+pub async fn seed_entry_point_dep_counts<C>(db: &C, evaluation: EvaluationId) -> Result<(), DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let any = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation))
         .limit(1)
@@ -195,7 +198,10 @@ pub async fn seed_entry_point_dep_counts<C: ConnectionTrait>(
 /// Re-sync maintained counts for every in-flight evaluation. Called once after
 /// startup recovery, where bulk re-queue / abort changes build statuses outside
 /// the per-transition hook.
-pub async fn reconcile_inflight_dep_counts<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
+pub async fn reconcile_inflight_dep_counts<C>(db: &C) -> Result<(), DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     use gradient_entity::evaluation::EvaluationStatus;
 
     let evals = EEvaluation::find()

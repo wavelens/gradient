@@ -8,7 +8,7 @@ pub mod state_root;
 pub mod upstream;
 
 pub use gradient_graph::Graph;
-pub use state_root::{AppState, ServerState};
+pub use state_root::{AppState, LAST_USED_STAMP_INTERVAL, ServerState, last_used_stamps};
 
 use gradient_db::{CacheDb, WebDb, WorkerDb, connect_cache_db, connect_db, connect_web_db};
 use gradient_notify::EmailService;
@@ -209,6 +209,8 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         )),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         shutdown: Shutdown::new(),
+        last_used_stamps: last_used_stamps(),
+        cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
         jwt_secret,
         started_at: chrono::Utc::now(),
         pending_project_memberships,

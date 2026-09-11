@@ -24,7 +24,10 @@ use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_types::DerivationId;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, QueryResult, Statement, Value};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, QueryResult, Statement,
+    TransactionTrait, Value,
+};
 
 const CASCADE_TARGET: [BuildStatus; 3] = [
     BuildStatus::Created,
@@ -118,16 +121,22 @@ fn substitute_created_anchors_sql() -> String {
 /// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
 /// never build, so it is failed in one recursive statement. Returns the changes
 /// it made so the caller can feed [`crate::status::emit_transition_effects`].
-pub async fn cascade_dependency_failed<C: ConnectionTrait>(
+pub async fn cascade_dependency_failed<C>(
     db: &C,
     failed_derivation: DerivationId,
-) -> Result<Vec<TransitionChange>, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let cte = dependency_closure_cte(
         "dependents",
         "SELECT $1::uuid",
         ClosureDirection::Dependents,
     );
-    let rows = db
+    // The unbounded upward walk is the widest frontier in the system (940k rows
+    // for 68k distinct nodes), so it gets the raised `work_mem`.
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!(
@@ -147,6 +156,7 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
             [Value::Uuid(Some(failed_derivation.into_inner()))],
         ))
         .await?;
+    walk.commit().await?;
 
     Ok(returned_transitions(rows))
 }
@@ -165,17 +175,22 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
 /// statement (the recursive term traverses the graph structurally, so a whole
 /// poisoned subtree converges per pass). Returns the changes it made so the caller
 /// can fan out the effects and finalize the now-settled evaluations.
-pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
+pub async fn reconcile_dependency_failed<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
-) -> Result<Vec<TransitionChange>, DbErr> {
-    let rows = db
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             dependency_failed_reconcile_sql(),
             [Value::Uuid(Some(evaluation.into_inner()))],
         ))
         .await?;
+    walk.commit().await?;
 
     Ok(returned_transitions(rows))
 }

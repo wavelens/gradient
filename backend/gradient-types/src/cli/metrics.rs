@@ -18,6 +18,16 @@ pub struct MetricsArgs {
     #[arg(long, env = "GRADIENT_METRICS_ROLLUP_INTERVAL", default_value_t = 60)]
     pub metrics_rollup_interval_secs: u64,
 
+    /// Interval in seconds between flushes of the in-memory cache-traffic
+    /// accumulator into `cache_metric`. A flush that fails loses at most this
+    /// much traffic telemetry.
+    #[arg(
+        long,
+        env = "GRADIENT_CACHE_METRIC_FLUSH_INTERVAL",
+        default_value_t = 10
+    )]
+    pub cache_metric_flush_interval_secs: u64,
+
     /// Days to retain raw `phase_event` / `worker_sample` rows. 0 = keep forever.
     #[arg(
         long,
@@ -84,6 +94,7 @@ impl Default for MetricsArgs {
         Self {
             metrics_token_file: None,
             metrics_rollup_interval_secs: 60,
+            cache_metric_flush_interval_secs: 10,
             metrics_retention_raw_days: 14,
             metrics_retention_rollup_days: 400,
             dispatch_retention_days: 30,

@@ -50,10 +50,14 @@ pub struct ClosureGraph {
 
 /// BFS over `derivation_dependency` from `seed_drv_ids`; returns every reachable
 /// derivation id (seeds included). Thin wrapper over the shared core helper.
-pub async fn derivation_closure_reachable<C: sea_orm::ConnectionTrait>(
+pub async fn derivation_closure_reachable<C>(
     db: &C,
     seed_drv_ids: Vec<DerivationId>,
-) -> WebResult<HashSet<DerivationId>> {
+) -> WebResult<HashSet<DerivationId>>
+where
+    C: sea_orm::ConnectionTrait
+        + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
+{
     Ok(gradient_db::transitive_closure_reachable(db, &seed_drv_ids).await?)
 }
 
@@ -69,10 +73,11 @@ pub async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
 
 /// Build a closure graph seeded at `roots`: full reachable derivation set, exact
 /// total size, per-node sizes, and dependency edges restricted to the closure.
-pub async fn build_closure_graph<C: sea_orm::ConnectionTrait>(
-    db: &C,
-    roots: Vec<DerivationId>,
-) -> WebResult<ClosureGraph> {
+pub async fn build_closure_graph<C>(db: &C, roots: Vec<DerivationId>) -> WebResult<ClosureGraph>
+where
+    C: sea_orm::ConnectionTrait
+        + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
+{
     let closure = derivation_closure_reachable(db, roots.clone()).await?;
     let all_ids: Vec<DerivationId> = closure.iter().cloned().collect();
 
@@ -164,10 +169,14 @@ pub async fn get_eval_closure(
 /// Build a runtime closure graph seeded at the output store-path hashes
 /// `seed_hashes`: the transitive `cached_path.references` set with per-node and
 /// exact total NAR sizes. Reachability is only as complete as the cached outputs.
-pub async fn build_runtime_closure_graph<C: sea_orm::ConnectionTrait>(
+pub async fn build_runtime_closure_graph<C>(
     db: &C,
     seed_hashes: Vec<String>,
-) -> WebResult<ClosureGraph> {
+) -> WebResult<ClosureGraph>
+where
+    C: sea_orm::ConnectionTrait
+        + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
+{
     let reached = gradient_db::runtime_closure_reachable(db, &seed_hashes).await?;
 
     let total: i64 = reached.values().filter_map(|r| r.nar_size).sum();
@@ -311,7 +320,12 @@ mod tests {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // derivation_closure_reachable is now one statement
+            // the walk opens with `SET LOCAL work_mem`, which draws an exec result
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            // derivation_closure_reachable is one statement after that
             .append_query_results([vec![node(root), node(child)]])
             // output_sizes_by_drv: outputs for [root, child] (drives both total and per-node)
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
