@@ -307,6 +307,10 @@ in {
           """Loud step header, easy to grep in CI output."""
           print(f"\n=== {msg} ===")
 
+      def sql(query):
+          server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
+          return server.succeed("su postgres -c 'psql -d gradient -At -f /tmp/q.sql'").strip()
+
       def api_get(token, path):
           """GET ``API/<path>``, return the parsed `.message` field as text."""
           return server.succeed(
@@ -600,8 +604,29 @@ in {
               print(f"  [{attempt:>2}/90] eval={eval_detail} builds={builds_summary}")
 
       if not completed:
-          j = server.succeed("journalctl -u gradient-server --no-pager --since='-900s' -n 200")
-          raise Exception(f"Evaluation did not complete after 900 s:\n{j[-2000:]}")
+          # A stall is an anchor that never went terminal, so the anchor states are the
+          # diagnosis and the journal is the supporting evidence. The old dump was the
+          # last 2000 characters of a DEBUG journal, which is six lines of HTTP request
+          # logging and names nothing.
+          anchors = sql(
+              f"SELECT db.status::text || ' fetchable=' || db.fetchable::int::text"
+              f"  || ' unready_deps=' || db.unready_deps || ' count=' || count(*)::text"
+              f" FROM derivation_build db"
+              f" JOIN build_job bj ON bj.derivation_build = db.id"
+              f" WHERE bj.evaluation = '{eval_id}'"
+              f" GROUP BY db.status, db.fetchable, db.unready_deps ORDER BY 1;"
+          )
+          j = server.succeed(
+              "journalctl -u gradient-server --no-pager --since='-900s' -n 4000"
+              " | grep -vE 'gradient_web: (request started|response generated"
+              "|sending chunk|stream closed)'"
+              " | tail -n 80"
+          )
+          raise Exception(
+              f"Evaluation did not complete after 900 s.\n"
+              f"anchors of this evaluation:\n{anchors}\n"
+              f"server log, HTTP request noise removed:\n{j}"
+          )
 
       # ── Phase 5b: the worker committed a non-empty eval cache to disk ─────
       # Regression guard (#386): nix commits the eval-cache AttrDb only on
@@ -650,10 +675,6 @@ in {
       else:
           raise Exception("second evaluation did not complete after 600 s")
       assert eval2_id != eval_id, "task2 must have its own evaluation"
-
-      def sql(query):
-          server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
-          return server.succeed("su postgres -c 'psql -d gradient -At -f /tmp/q.sql'").strip()
 
       builds1 = int(sql(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval_id}';"))
       builds2 = int(sql(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval2_id}';"))
