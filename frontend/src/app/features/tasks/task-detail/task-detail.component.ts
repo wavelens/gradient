@@ -58,7 +58,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   entryPointsLoading = signal(false);
   // Mirrors the server's own page size and its hard cap, so "show more" pages with
   // an offset instead of asking for a limit the server would clamp.
-  private static readonly ENTRY_POINTS_PAGE = 100;
+  private static readonly ENTRY_POINTS_PAGE = 25;
   private static readonly ENTRY_POINTS_PAGE_MAX = 500;
   private entryPointsAppending = false;
   selectedId = signal<string | null>(null);
@@ -199,15 +199,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.lastEntryPointsFetch = Date.now();
     const switching = evaluationId !== this.entryPointsEvalId;
     if (switching) this.entryPointsLoading.set(true);
-    // A refresh re-reads the window it already shows, never below one page (an
-    // evaluation still ingesting entry points must keep filling in) and never
-    // above the server's maximum, which keeps a live poll at one request.
-    const limit = switching
-      ? TaskDetailComponent.ENTRY_POINTS_PAGE
-      : Math.min(
-          Math.max(this.entryPoints().length, TaskDetailComponent.ENTRY_POINTS_PAGE),
-          TaskDetailComponent.ENTRY_POINTS_PAGE_MAX,
-        );
+    // A refresh re-reads the first page only, never the whole scrolled window:
+    // the server walks one dependency closure per entry point it returns, so
+    // re-reading a 500-row window every 4 s costs twenty times what the visible
+    // head costs. Rows past the head keep their last values and are spliced
+    // behind the refreshed page.
+    const limit = TaskDetailComponent.ENTRY_POINTS_PAGE;
     this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, limit, 0).subscribe({
       next: (page) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
@@ -373,12 +370,42 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return match ? match[1] : parts;
   }
 
-  /// Last segment of the Nix attribute path, which is what the server orders the
-  /// page by, so the visible label and the visible order are the same field.
+  // Segments are dot-separated outside quotes, so `pkgs."x.y"` ends at `x.y`.
+  private static attrSegments(attr: string): string[] {
+    const parts = attr.match(/"[^"]*"|[^."]+/g) ?? [];
+    const segments = parts.map(s => s.replace(/^"|"$/g, '')).filter(s => s.length > 0);
+    return segments.length ? segments : [attr];
+  }
+
+  /// The label of each attribute path on the page, with the segments every path
+  /// shares stripped from both ends. The last segment alone does not identify a
+  /// row: a NixOS flake's entry points all end
+  /// `.config.system.build.toplevel`, so every one of them reads `toplevel`.
+  /// Dropping the shared wrapper leaves exactly what distinguishes them, and at
+  /// least one segment always survives.
+  entryPointLabels = computed(() => {
+    const paths = this.entryPoints().map(ep => ep.eval);
+    const labels = new Map<string, string>();
+    if (!paths.length) return labels;
+
+    const segs = paths.map(p => TaskDetailComponent.attrSegments(p));
+    const shortest = segs.reduce((n, s) => Math.min(n, s.length), Infinity);
+    let head = 0;
+    while (head < shortest - 1 && segs.every(s => s[head] === segs[0][head])) head++;
+    let tail = 0;
+    while (
+      head + tail < shortest - 1 &&
+      segs.every(s => s[s.length - 1 - tail] === segs[0][segs[0].length - 1 - tail])
+    ) tail++;
+
+    segs.forEach((s, i) => labels.set(paths[i], s.slice(head, s.length - tail).join('.')));
+    return labels;
+  });
+
   attrLabel(attr: string): string {
-    // Segments are dot-separated outside quotes, so `pkgs."x.y"` ends at `x.y`.
-    const last = (attr.match(/"[^"]*"|[^."]+/g) ?? []).at(-1) ?? attr;
-    return last.replace(/^"|"$/g, '') || attr;
+    const shared = this.entryPointLabels().get(attr);
+    if (shared) return shared;
+    return TaskDetailComponent.attrSegments(attr).at(-1) ?? attr;
   }
 
   statusClass(status: EvaluationStatus): string {
