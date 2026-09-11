@@ -88,8 +88,10 @@ impl WorkerPool {
     }
 
     /// Register a connection, carrying the prior connection's reported sizing
-    /// forward so a reconnect without a fresh `WorkerCapabilities` still builds.
-    /// Returns the `last_seen` handle the session stamps on every inbound frame.
+    /// forward so a reconnect without a fresh `WorkerCapabilities` still builds,
+    /// and its `last_seen` Arc so a reader that kept the old handle still moves
+    /// the value this pool reads. Returns the handle the session stamps on every
+    /// inbound frame.
     pub fn register(
         &mut self,
         id: String,
@@ -106,11 +108,10 @@ impl WorkerPool {
                 s.cpu_count,
                 s.ram_total_mb,
                 s.cpu_core_score,
+                Arc::clone(&s.last_seen),
             )
         });
-        let worker = TypedWorker::<Active>::new(capabilities, authorized_peers, session);
-        let last_seen = Arc::clone(&worker.last_seen);
-        self.workers.insert(id.clone(), WorkerSlot::Active(worker));
+        let mut worker = TypedWorker::<Active>::new(capabilities, authorized_peers, session);
         if let Some((
             architectures,
             system_features,
@@ -118,17 +119,24 @@ impl WorkerPool {
             cpu_count,
             ram_total_mb,
             cpu_core_score,
+            last_seen,
         )) = prior
-            && let Some(slot) = self.workers.get_mut(&id)
         {
-            let s = slot.shared_mut();
-            s.architectures = architectures;
-            s.system_features = system_features;
-            s.max_concurrent_builds = max_concurrent_builds;
-            s.cpu_count = cpu_count;
-            s.ram_total_mb = ram_total_mb;
-            s.cpu_core_score = cpu_core_score;
+            worker.architectures = architectures;
+            worker.system_features = system_features;
+            worker.max_concurrent_builds = max_concurrent_builds;
+            worker.cpu_count = cpu_count;
+            worker.ram_total_mb = ram_total_mb;
+            worker.cpu_core_score = cpu_core_score;
+            last_seen.store(
+                gradient_types::now().and_utc().timestamp_millis(),
+                Ordering::Relaxed,
+            );
+            worker.last_seen = last_seen;
         }
+
+        let last_seen = Arc::clone(&worker.last_seen);
+        self.workers.insert(id, WorkerSlot::Active(worker));
         last_seen
     }
 
@@ -921,6 +929,39 @@ mod tests {
             !pool
                 .stale_worker_ids(real_now, timeout_ms)
                 .contains(&"w2".to_string())
+        );
+    }
+
+    #[test]
+    fn reregistering_a_worker_keeps_the_liveness_handle_its_reader_holds() {
+        let mut pool = WorkerPool::new();
+        let first = pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        let second = pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "a re-registration must hand back the Arc the prior reader still stamps"
+        );
+
+        let now_ms = 1_000_000_000_000i64;
+        let timeout_ms = 30_000i64;
+
+        first.store(now_ms - timeout_ms - 1, Ordering::Relaxed);
+        assert_eq!(
+            pool.stale_worker_ids(now_ms, timeout_ms),
+            vec!["w1".to_string()],
+            "the pool reads the value stamped through the first handle"
+        );
+
+        first.store(now_ms, Ordering::Relaxed);
+        assert!(
+            pool.stale_worker_ids(now_ms, timeout_ms).is_empty(),
+            "a stamp through the first handle keeps the worker live"
+        );
+
+        let other = pool.register("w2".into(), caps(), HashSet::new(), port().0);
+        assert!(
+            !Arc::ptr_eq(&first, &other),
+            "a different worker gets its own handle"
         );
     }
 }
