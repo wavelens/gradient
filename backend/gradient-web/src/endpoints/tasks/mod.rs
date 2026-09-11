@@ -78,11 +78,17 @@ pub struct EntryPointSummary {
     pub architecture: gradient_entity::server::Architecture,
     pub build_time_ms: Option<i64>,
     pub deps: BuildStatusCounts,
-    /// Total build-time dependency-closure size of this entry point, cached on
-    /// the derivation (content-addressed, reused across evals). `null` for evals
-    /// predating the cache.
-    pub deps_total: Option<i64>,
+    /// Size of the entry point's build-time dependency closure within this
+    /// evaluation: the sum of `deps` over every status, substituted and aborted
+    /// included.
+    pub deps_total: i64,
     pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct PaginatedEntryPoints {
+    pub entry_points: Vec<EntryPointSummary>,
+    pub total: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

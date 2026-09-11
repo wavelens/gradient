@@ -2084,6 +2084,18 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: Page size, default 100, at most 500. Entry points are ordered by attribute path.
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          description: Number of entry points to skip.
+          schema:
+            type: integer
       responses:
         '200':
           description: Entry points
@@ -2095,9 +2107,7 @@ paths:
                   - type: object
                     properties:
                       message:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/EntryPointSummary'
+                        $ref: '#/components/schemas/PaginatedEntryPoints'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -8842,9 +8852,21 @@ components:
           type: boolean
           description: True when the caller has Permission::TriggerEvaluation - may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed tasks retain trigger access.
 
+    PaginatedEntryPoints:
+      type: object
+      required: [entry_points, total]
+      properties:
+        entry_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryPointSummary'
+        total:
+          type: integer
+          description: Number of entry points in the evaluation.
+
     EntryPointSummary:
       type: object
-      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, created_at]
+      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, deps_total, created_at]
       properties:
         id: { type: string, format: uuid }
         build_id: { type: string, format: uuid }
@@ -8883,11 +8905,10 @@ components:
           $ref: '#/components/schemas/BuildStatusCounts'
         deps_total:
           type: integer
-          nullable: true
           description: >-
-            Total build-time dependency-closure size, cached on the derivation
-            (content-addressed, reused across evals). null for evals predating
-            the cache.
+            Size of the entry point's build-time dependency closure within this
+            evaluation: the sum of deps over every status, substituted and
+            aborted included.
         created_at: { type: string, format: date-time }
 
     BuildStatusCounts:
