@@ -22,4 +22,4 @@ mod build_status;
 mod eval_status;
 mod logs;
 mod queue;
-mod timeline;
+pub(crate) mod timeline;
