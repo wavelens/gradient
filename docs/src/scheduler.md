@@ -395,9 +395,12 @@ a pooled guarded retire does not compile. Path invalidation goes further and dem
 (`demote_cached_output`), so an invalidated output rebuilds instead of staying
 trusted-but-gone. And because the per-task
 evaluation GC refuses to run while any evaluation is active, a wedged `Building`
-evaluation used to freeze a task's GC forever - an "active" evaluation
-untouched for `gc_wedged_eval_hours` (default 24h) now stops blocking, while
-never being deleted itself.
+evaluation used to freeze a task's GC forever - an "active" evaluation whose
+current phase has lasted longer than `gc_wedged_eval_hours` (default 24h) now
+stops blocking, while never being deleted itself. The age is taken from the
+phase stamps, not from `updated_at`: a wedged run still takes writes, so it
+never looks untouched, and measuring the row's last write left the escape
+hatch firing only for a run that had gone completely silent.
 
 The deeper cause of those orphans is the derivation GC itself. `build_job` rows are
 per-evaluation and pruned with old evals (`keep_evaluations`), but the global
