@@ -249,8 +249,10 @@ started, from being handed the same evaluation twice. The tracker's `untracked`
 filter stays as the in-memory fast path; the row is the durable one.
 
 Four paths close a row that represents work actually out. The worker's own
-terminal report stamps `finished_at` and the outcome, matched on `job_id`; a
-report that finds no open row is dropped with a warning. A worker that vanishes
+terminal report stamps `finished_at` and the outcome, matched on the dispatch
+id the report carries; a report whose dispatch has no row at all is dropped
+with a warning, while one that arrives after another closer got there first
+leaves the recorded outcome alone and still lands its phase timeline. A worker that vanishes
 has its rows closed as `Abandoned` by `requeue_orphaned_jobs`. A worker that
 registers a fresh connection claims no job, so registration closes every row
 still open under its id, which is what reopens the gate right after a server

@@ -9,11 +9,9 @@
 use std::sync::Arc;
 
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
-use tracing::warn;
+use tracing::{debug, warn};
 
-use gradient_entity::dispatched_job::{
-    Column as CDispatchedJob, DispatchedJobOutcome, Entity as EDispatchedJob,
-};
+use gradient_entity::dispatched_job::{DispatchedJobOutcome, Entity as EDispatchedJob};
 use gradient_entity::dispatched_job_phase::Model as MDispatchedJobPhase;
 use gradient_entity::ids::{DispatchedJobId, DispatchedJobPhaseId};
 use gradient_types::proto::{JobPhase, JobPhaseSpan};
@@ -73,6 +71,22 @@ pub(crate) fn phase_rows(
         .collect()
 }
 
+/// What a terminal report found when it went to close out its dispatch row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TimelineLanding {
+    /// The row was open and now carries this report's finish mark and outcome.
+    Closed,
+    /// The row was open but the stamping write failed.
+    CloseFailed,
+    /// A deliberate closer got there first, so the recorded outcome stands.
+    AlreadyClosed,
+    /// No row at all. The record is written before the job leaves, so its
+    /// absence is a broken invariant rather than a race.
+    NoRow,
+    /// The lookup itself failed, so nothing is known about the row.
+    LookupFailed,
+}
+
 impl Scheduler {
     /// Close out a job's telemetry: stamp `finished_at` and the outcome, write
     /// one row per span, and fill the eval phase columns the worker no longer
@@ -96,40 +110,49 @@ impl Scheduler {
         });
     }
 
-    /// Returns whether the report found an open row and closed it. The phase
-    /// rows and evaluation totals are written either way: they key on the
-    /// dispatch, not on the close.
+    /// Reports what the terminal report found. The lookup is by dispatch id
+    /// alone: an already closed row is routine, because registration, the
+    /// orphan requeue, the abandoned sweep and a withdrawn claim all close a
+    /// row a late report can still arrive for. The phase rows and evaluation
+    /// totals are written whenever the row exists, whether or not this report
+    /// is the one that closes it: they key on the dispatch, not on the close.
     pub(crate) async fn persist_job_timeline(
         &self,
         dispatch: DispatchedJobId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
-    ) -> bool {
+    ) -> TimelineLanding {
         let row = match EDispatchedJob::find_by_id(dispatch)
-            .filter(CDispatchedJob::FinishedAt.is_null())
             .one(&self.state.worker_db)
             .await
         {
             Ok(Some(row)) => row,
             Ok(None) => {
-                warn!(%dispatch, ?outcome, "no open dispatched_job row for this report; outcome and phase timeline dropped");
-                return false;
+                warn!(%dispatch, ?outcome, "no dispatched_job row for this report; outcome and phase timeline dropped");
+                return TimelineLanding::NoRow;
             }
             Err(e) => {
                 warn!(%dispatch, error = %e, "dispatched_job lookup for the timeline failed");
-                return false;
+                return TimelineLanding::LookupFailed;
             }
         };
 
         let evaluation_id = row.evaluation_id;
-        let mut active = row.into_active_model();
-        active.finished_at = Set(Some(now()));
-        active.outcome = Set(Some(outcome));
-        let mut closed = true;
-        if let Err(e) = active.update(&self.state.worker_db).await {
-            warn!(%dispatch, error = %e, "failed to close the dispatched_job row");
-            closed = false;
-        }
+        let landing = if row.finished_at.is_some() {
+            debug!(%dispatch, ?outcome, "dispatched_job row was already closed out; keeping the recorded outcome");
+            TimelineLanding::AlreadyClosed
+        } else {
+            let mut active = row.into_active_model();
+            active.finished_at = Set(Some(now()));
+            active.outcome = Set(Some(outcome));
+            match active.update(&self.state.worker_db).await {
+                Ok(_) => TimelineLanding::Closed,
+                Err(e) => {
+                    warn!(%dispatch, error = %e, "failed to close the dispatched_job row");
+                    TimelineLanding::CloseFailed
+                }
+            }
+        };
 
         let rows = phase_rows(dispatch, &spans);
         if !rows.is_empty()
@@ -147,7 +170,7 @@ impl Scheduler {
             self.apply_eval_phase_totals(evaluation_id, totals).await;
         }
 
-        closed
+        landing
     }
 
     /// The eval-metric row is written when `EvalStats` arrives, which is before

@@ -905,11 +905,22 @@ fn dispatched_row(id: DispatchedJobId) -> gradient_entity::dispatched_job::Model
     }
 }
 
-/// With the record written before the job leaves, a report that finds no open
-/// row is a defect, not a race, so it is dropped with a warning instead of
-/// returning silently.
+fn closed_dispatched_row(id: DispatchedJobId) -> gradient_entity::dispatched_job::Model {
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+
+    gradient_entity::dispatched_job::Model {
+        finished_at: Some(gradient_types::now()),
+        outcome: Some(DispatchedJobOutcome::Abandoned),
+        ..dispatched_row(id)
+    }
+}
+
+/// With the record written before the job leaves, a report whose dispatch has
+/// no row at all is a defect, not a race, so it is dropped with a warning
+/// instead of returning silently.
 #[tokio::test]
-async fn a_report_without_an_open_row_is_dropped_loudly() {
+async fn a_report_without_a_dispatch_row_is_dropped_loudly() {
+    use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -918,7 +929,7 @@ async fn a_report_without_an_open_row_is_dropped_loudly() {
         .into_connection();
     let scheduler = test_scheduler_with(db).await;
 
-    let landed = scheduler
+    let landing = scheduler
         .persist_job_timeline(
             DispatchedJobId::now_v7(),
             DispatchedJobOutcome::Completed,
@@ -926,34 +937,150 @@ async fn a_report_without_an_open_row_is_dropped_loudly() {
         )
         .await;
 
-    assert!(!landed);
+    assert_eq!(landing, TimelineLanding::NoRow);
 }
 
+/// A lookup that fails says nothing about whether the row exists, so it must
+/// not be reported as the missing-row defect.
+#[tokio::test]
+async fn a_failed_lookup_is_not_reported_as_a_missing_row() {
+    use crate::job_handlers::timeline::TimelineLanding;
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+    use sea_orm::{DatabaseBackend, DbErr, MockDatabase};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_errors([DbErr::Custom("lookup refused".into())])
+        .into_connection();
+    let scheduler = test_scheduler_with(db).await;
+
+    let landing = scheduler
+        .persist_job_timeline(
+            DispatchedJobId::now_v7(),
+            DispatchedJobOutcome::Completed,
+            vec![],
+        )
+        .await;
+
+    assert_eq!(landing, TimelineLanding::LookupFailed);
+}
+
+/// The open row is stamped with this report's finish mark and outcome, keyed
+/// on the dispatch the report carries.
 #[tokio::test]
 async fn a_report_with_an_open_row_closes_it() {
+    use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     let dispatch = DispatchedJobId::now_v7();
+    let row = dispatched_row(dispatch);
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([
-            vec![dispatched_row(dispatch)],
-            vec![dispatched_row(dispatch)],
-        ])
+        .append_query_results([vec![row.clone()], vec![row]])
         .into_connection();
     let log_db = db.clone();
     let scheduler = test_scheduler_with(db).await;
 
-    let landed = scheduler
+    let landing = scheduler
         .persist_job_timeline(dispatch, DispatchedJobOutcome::Completed, vec![])
         .await;
 
-    assert!(landed);
+    assert_eq!(landing, TimelineLanding::Closed);
     let log = log_db.into_transaction_log();
+    let close = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .find(|s| s.sql.starts_with("UPDATE \"dispatched_job\""))
+        .expect("the report closes its own row");
     assert!(
-        log.iter()
-            .flat_map(|t| t.statements())
-            .any(|s| s.sql.starts_with("UPDATE \"dispatched_job\"")),
-        "the row is closed"
+        close.sql.contains("\"finished_at\"") && close.sql.contains("\"outcome\""),
+        "{}",
+        close.sql
+    );
+    assert!(format!("{:?}", close.values).contains(&dispatch.to_string()));
+}
+
+/// A row that is found but cannot be stamped is not closed, so the report must
+/// not claim it landed.
+#[tokio::test]
+async fn a_close_that_fails_is_reported_as_a_failed_close() {
+    use crate::job_handlers::timeline::TimelineLanding;
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+    use sea_orm::{DatabaseBackend, DbErr, MockDatabase};
+
+    let dispatch = DispatchedJobId::now_v7();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![dispatched_row(dispatch)]])
+        .append_query_errors([DbErr::Custom("close refused".into())])
+        .into_connection();
+    let scheduler = test_scheduler_with(db).await;
+
+    let landing = scheduler
+        .persist_job_timeline(dispatch, DispatchedJobOutcome::Completed, vec![])
+        .await;
+
+    assert_eq!(landing, TimelineLanding::CloseFailed);
+}
+
+/// Registration, the orphan requeue, the abandoned sweep and a withdrawn claim
+/// all close a row a late report can still arrive for, so that is routine: the
+/// outcome on record stands untouched while the phase timeline and the eval
+/// totals, which key on the dispatch rather than on the close, still land.
+#[tokio::test]
+async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
+    use crate::job_handlers::timeline::TimelineLanding;
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+    use gradient_types::proto::{JobPhase, JobPhaseSpan};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let dispatch = DispatchedJobId::now_v7();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![closed_dispatched_row(dispatch)]])
+        .append_query_results([vec![gradient_entity::dispatched_job_phase::Model {
+            id: DispatchedJobPhaseId::now_v7(),
+            dispatched_job: dispatch,
+            ..Default::default()
+        }]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+
+    let landing = scheduler
+        .persist_job_timeline(
+            dispatch,
+            DispatchedJobOutcome::Completed,
+            vec![JobPhaseSpan {
+                phase: JobPhase::Fetch,
+                start_ms: 0,
+                end_ms: 10,
+                ..Default::default()
+            }],
+        )
+        .await;
+
+    assert_eq!(landing, TimelineLanding::AlreadyClosed);
+    let log = log_db.into_transaction_log();
+    let sql: Vec<&str> = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .map(|s| s.sql.as_str())
+        .collect();
+    assert!(
+        !sql.iter()
+            .any(|s| s.starts_with("UPDATE \"dispatched_job\"")),
+        "{sql:?}"
+    );
+    assert!(
+        sql.iter()
+            .any(|s| s.starts_with("INSERT INTO \"dispatched_job_phase\"")),
+        "{sql:?}"
+    );
+    assert!(
+        sql.iter()
+            .any(|s| s.starts_with("UPDATE \"evaluation_metric\"")),
+        "{sql:?}"
     );
 }
