@@ -13,6 +13,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
+use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use tracing::{debug, error};
@@ -28,8 +29,16 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
+    // The open `dispatched_job` row is the durable proof a job is out; the
+    // tracker below is only the in-memory fast path, and it is empty after a
+    // core respawn.
+    let not_in_flight = gradient_db::no_open_dispatch_predicate(&gradient_db::eval_job_key_sql(
+        "\"evaluation\".\"id\"",
+    ));
+
     let evals = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Queued))
+        .filter(Expr::cust(not_in_flight))
         .all(&state.worker_db)
         .await?;
 
