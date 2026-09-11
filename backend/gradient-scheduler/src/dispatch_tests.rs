@@ -229,6 +229,33 @@ async fn dispatch_queued_eval_without_task_is_skipped() {
     );
 }
 
+/// The Queued select carries the open-row gate itself: a core whose tracker
+/// was rebuilt empty, or a worker slow to report it started, must not get the
+/// same evaluation handed out a second time.
+#[tokio::test]
+async fn dispatch_queued_evals_refuses_an_evaluation_whose_dispatch_row_is_open() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<MEvaluation>::new()])
+        .into_connection();
+    let log_db = db.clone();
+
+    let scheduler = make_scheduler(db).await;
+    dispatch::dispatch_queued_evals(&scheduler)
+        .await
+        .expect("dispatch");
+
+    let log = log_db.into_transaction_log();
+    let select = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .find(|s| s.sql.starts_with("SELECT \"evaluation\""))
+        .expect("the queued select ran");
+    let gate = gradient_db::no_open_dispatch_predicate(&gradient_db::eval_job_key_sql(
+        "\"evaluation\".\"id\"",
+    ));
+    assert!(select.sql.contains(&gate), "{}", select.sql);
+}
+
 // ── Group J: trigger dispatch_once ───────────────────────────────────────────
 
 fn make_polling_trigger(

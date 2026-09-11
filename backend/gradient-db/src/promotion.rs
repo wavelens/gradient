@@ -240,6 +240,12 @@ fn dependency_failed_reconcile_sql() -> String {
 /// The dispatch gate reads the invariant: `Queued` means the gates held when the
 /// anchor was promoted, and a regression un-promotes. Reachability still filters
 /// anchors left queued after their last referencing evaluation was torn down.
+///
+/// The open-`dispatched_job` arm is a dispatch gate, not a readiness one, so it
+/// lives here and not in `readiness::promote`: an anchor that is already out is
+/// still perfectly promotable and must stay `Queued` for the report that closes
+/// it. The tracker's in-memory `untracked` filter is empty after a core respawn;
+/// the row is what survives, so the select carries the gate itself.
 pub async fn find_ready_anchors<C: ConnectionTrait>(
     db: &C,
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
@@ -254,11 +260,16 @@ pub async fn find_ready_anchors<C: ConnectionTrait>(
 }
 
 fn find_ready_anchors_sql() -> String {
+    let not_in_flight = crate::dispatch_record::no_open_dispatch_predicate(
+        &crate::dispatch_record::build_job_key_sql("db.id"),
+    );
+
     format!(
         r#"
         SELECT db.*
         FROM derivation_build db
         WHERE db.status = {queued}
+          AND {not_in_flight}
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
         ORDER BY
@@ -656,5 +667,18 @@ mod tests {
         assert!(sql.contains(
             "RETURNING db.derivation, old.status AS from_status, db.status AS to_status"
         ));
+    }
+
+    /// The tracker's `untracked` filter is in memory and empty after a core
+    /// respawn; the row is what survives, so the dispatch select carries the
+    /// open-row gate itself.
+    #[test]
+    fn dispatch_refuses_an_anchor_whose_dispatch_row_is_open() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let gate = norm(crate::dispatch_record::no_open_dispatch_predicate(
+            &crate::dispatch_record::build_job_key_sql("db.id"),
+        ));
+
+        assert!(norm(find_ready_anchors_sql()).contains(&gate));
     }
 }
