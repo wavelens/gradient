@@ -199,13 +199,15 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.lastEntryPointsFetch = Date.now();
     const switching = evaluationId !== this.entryPointsEvalId;
     if (switching) this.entryPointsLoading.set(true);
-    // A refresh re-reads the window it already shows, capped at the server's
-    // maximum page. Rows the user appended past that cap stay as they are until
-    // the evaluation is selected again, which keeps a live poll at one request.
-    const shown = this.entryPoints().length || TaskDetailComponent.ENTRY_POINTS_PAGE;
+    // A refresh re-reads the window it already shows, never below one page (an
+    // evaluation still ingesting entry points must keep filling in) and never
+    // above the server's maximum, which keeps a live poll at one request.
     const limit = switching
       ? TaskDetailComponent.ENTRY_POINTS_PAGE
-      : Math.min(shown, TaskDetailComponent.ENTRY_POINTS_PAGE_MAX);
+      : Math.min(
+          Math.max(this.entryPoints().length, TaskDetailComponent.ENTRY_POINTS_PAGE),
+          TaskDetailComponent.ENTRY_POINTS_PAGE_MAX,
+        );
     this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, limit, 0).subscribe({
       next: (page) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
@@ -213,10 +215,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         if (this.selectedId() !== evaluationId) return;
         this.entryPointsLoading.set(false);
         this.entryPointsTotal.set(page.total);
-        // Entry points of one evaluation are immutable and server-ordered, so the
-        // refreshed prefix replaces in place and any appended tail survives.
-        const tail = switching ? [] : this.entryPoints().slice(page.entry_points.length);
-        const next = [...page.entry_points, ...tail];
+        const next = this.spliceEntryPoints(
+          page.entry_points,
+          switching ? [] : this.entryPoints(),
+        );
         // Skip the re-render (and its enter animation) when nothing changed.
         const sig = this.entryPointSignature(next);
         if (evaluationId === this.entryPointsEvalId && sig === this.entryPointsSig) return;
@@ -231,6 +233,20 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
+  /// Merge a refreshed window with the rows already shown. The window is the
+  /// first N of the server's order, so anything it does not hold sorts after it
+  /// and simply follows. A tail that no longer lines up - new entry points landed
+  /// inside a window the user had already paged past - is dropped rather than
+  /// rendered with a hole in it, and "show more" fetches it again.
+  private spliceEntryPoints(window: EntryPointSummary[], shown: EntryPointSummary[]): EntryPointSummary[] {
+    const inWindow = new Set(window.map(e => e.id));
+    const tail = shown.filter(e => !inWindow.has(e.id));
+    const last = window.at(-1);
+    if (!last || tail.length === 0) return [...window, ...tail];
+    const follows = tail[0].eval > last.eval || (tail[0].eval === last.eval && tail[0].id > last.id);
+    return follows ? [...window, ...tail] : [...window];
+  }
+
   loadMoreEntryPoints(): void {
     const evaluationId = this.selected()?.id;
     if (!evaluationId || this.entryPointsAppending) return;
@@ -241,7 +257,9 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         this.entryPointsAppending = false;
         if (this.selectedId() !== evaluationId) return;
         this.entryPointsTotal.set(page.total);
-        const next = [...this.entryPoints(), ...page.entry_points];
+        const shown = this.entryPoints();
+        const seen = new Set(shown.map(e => e.id));
+        const next = [...shown, ...page.entry_points.filter(e => !seen.has(e.id))];
         this.entryPointsEvalId = evaluationId;
         this.entryPointsSig = this.entryPointSignature(next);
         this.entryPoints.set(next);
@@ -362,7 +380,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   /// Last segment of the Nix attribute path, which is what the server orders the
   /// page by, so the visible label and the visible order are the same field.
   attrLabel(attr: string): string {
-    const last = attr.split('.').pop() ?? attr;
+    // Segments are dot-separated outside quotes, so `pkgs."x.y"` ends at `x.y`.
+    const last = (attr.match(/"[^"]*"|[^."]+/g) ?? []).at(-1) ?? attr;
     return last.replace(/^"|"$/g, '') || attr;
   }
 
