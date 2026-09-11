@@ -233,21 +233,31 @@ the transition. The grace sits above the graph actor's 600s RPC timeout so a slo
 transition is never mistaken for a lost one, and `EvalStreamCompleted` is
 idempotent, so re-driving one that did land changes nothing.
 
-The dispatch telemetry row has the mirror-image problem. `dispatched_job` is
-closed by the worker's own terminal report, which stamps `finished_at` and the
-outcome; a row with neither reads as running on the job board. Two things used
-to leave rows open forever. The report closed whichever row was the newest open
-one for its (worker, evaluation) pair rather than its own, so a worker running
-several jobs of one evaluation - the normal case - attached outcomes and phase
-timelines to the wrong rows and left the surplus open; the row now carries the
-scheduler's `job_id` (`build:<anchor>` / `eval:<evaluation>`, unique among
-in-flight jobs) and is matched on it. And a worker that vanished had no report
-to send at all, so `requeue_orphaned_jobs` now closes its rows as `Abandoned`
-alongside re-queuing the work. A server restart drops the tracker without an
-unregister, which neither path covers, so the `abandoned-dispatch-sweep` pass
-(60s) closes rows still open 1800s after dispatch whose `job_id` the scheduler
-no longer tracks. The tracker, not the clock, decides: a row it still holds is
-never swept, however long the build runs.
+The dispatch record is the one proof that a job is out. The `dispatched_job` row,
+the open `build_attempt` and the anchor's `dispatched_at` are written inside
+`RequestJob`, before the assignment is handed back to the session, so no report can
+precede its own row; a claim whose record cannot be written is released to pending
+and the worker asks again; a record that is written but whose anchor transition then
+fails is closed as `Abandoned` on the way out, so a withdrawn claim never leaves an open
+row shutting the gate. Both dispatch selections refuse work with an open row:
+`find_ready_anchors` and the queued-evaluation select carry a `NOT EXISTS` over
+`dispatched_job` keyed on the scheduler's job key (`build:<anchor>` /
+`eval:<evaluation>`, whose prefixes live in `gradient_db::dispatch_record` next to
+the SQL that rebuilds them), which is what stops a core rebuilt with an empty
+tracker, or a worker slow to report it started, from being handed the same
+evaluation twice. The tracker's `untracked` filter stays as the in-memory fast
+path; the row is the durable one.
+
+Four paths close a row that represents work actually out. The worker's own terminal report stamps `finished_at` and
+the outcome, matched on `job_id`; a report that finds no open row is dropped with a
+warning. A worker that vanishes has its rows closed as `Abandoned` by
+`requeue_orphaned_jobs`. A worker that registers a fresh connection claims no job,
+so registration closes every row still open under its id, which is what reopens
+the gate right after a server restart. Rows whose worker never returns are closed
+by the `abandoned-dispatch-sweep` pass (60s) 1800s after dispatch, provided the
+tracker no longer knows the job; until then the work stays parked behind the gate,
+the price of never running it twice. The tracker, not the clock, decides: a row it
+still holds is never swept, however long the build runs.
 
 `Abandoned` is deliberately distinct from `Failed`. The worker never reported,
 so the build may well have succeeded before contact was lost; recording it as a

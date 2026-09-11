@@ -333,6 +333,8 @@ The "new candidates available" signal is a level-triggered `watch` generation co
 
 Closing the loop on the worker side: after scoring a fresh `JobOffer` the worker sends a capacity-gated `RequestJob` (not just on its 10s heartbeat). Scoring is what clears the server's rescore gate, so the worker's post-completion `RequestJob` would otherwise race ahead of its own scores, miss, and idle until the next heartbeat - collapsing a serial chain to one level per ~10s.
 
+`AssignJob` leaves only after the `dispatched_job` row and, for a build, the open `build_attempt` exist, so a worker that reports at once (a substitute, an immediate failure) always finds its record; a request whose record cannot be written gets no job and asks again.
+
 Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (projects, caches) it has successfully authenticated against.
 
 ### Dispatch Flow
