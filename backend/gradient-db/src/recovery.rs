@@ -143,10 +143,9 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     // anchors referenced only by the now-aborted evals go to Aborted. Anchors a
     // still-live eval also needs are left running (shared-anchor safety). The
     // force-eval below re-drives them - `requeue_failed_anchors` resets
-    // Aborted -> Created on the next evaluation.
-    // The aborted anchors are shared: an evaluation that was already terminal
-    // when the server died still shows them, and step 3b only bumped the lost
-    // evaluations, so their histograms need the bump keyed on the derivations.
+    // Aborted -> Created on the next evaluation. The anchors are shared, and an
+    // evaluation that was already terminal when the server died still shows them,
+    // so the histogram bump is keyed on the derivations rather than on 3b's set.
     if !eval_ids.is_empty() {
         let aborted = abort_anchors_for_evals(conn, &eval_ids).await?;
         report.builds_aborted = aborted.len() as u64;
@@ -344,6 +343,9 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
+            // 4b. the phase-event insert returns its rows on Postgres, so it draws
+            // a query; empty is `RecordNotInserted`, which the recorder ignores
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             // 4c. abort their anchors, naming the derivations they moved
             .append_query_results([vec![
                 derivation_row(DerivationId::now_v7()),
