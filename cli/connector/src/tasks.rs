@@ -78,10 +78,14 @@ pub struct EvaluationSummary {
     pub updated_at: String,
 }
 
+/// The subset of `EntryPointSummary` the CLI needs. `eval` is the Nix attribute
+/// path and the field the server orders a page by; there is no `name`.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EntryPoint {
+    pub id: String,
     pub build_id: String,
-    pub name: String,
+    pub eval: String,
+    pub derivation_path: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
