@@ -85,6 +85,12 @@ pub struct EntryPoint {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct EntryPointPage {
+    pub entry_points: Vec<EntryPoint>,
+    pub total: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TaskMetrics {
     pub keep_evaluations: i64,
     pub points: Vec<serde_json::Value>,
@@ -231,13 +237,29 @@ impl TasksApi<'_> {
         &self,
         project: &str,
         proj: &str,
-    ) -> Result<Vec<EntryPoint>, ConnectorError> {
+        limit: Option<u64>,
+        offset: Option<u64>,
+    ) -> Result<EntryPointPage, ConnectorError> {
+        let mut query: Vec<String> = Vec::new();
+        if let Some(limit) = limit {
+            query.push(format!("limit={limit}"));
+        }
+
+        if let Some(offset) = offset {
+            query.push(format!("offset={offset}"));
+        }
+
+        let query = if query.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", query.join("&"))
+        };
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{project}/{proj}/entry-points"),
+            &format!("tasks/{project}/{proj}/entry-points{query}"),
             true,
         )?;
         http::decode(req.send().await?).await
