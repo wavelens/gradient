@@ -630,9 +630,9 @@ impl<'a> DispatchContext<'a> {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
         if let Some(assignment) = self.scheduler.request_job(self.peer_id, kind).await {
             self.active.insert(
-                assignment.job_id.clone(),
+                assignment.job_id().to_owned(),
                 ActiveJob {
-                    dispatch: assignment.dispatch,
+                    dispatch: assignment.dispatch(),
                     pending: assignment.pending.clone(),
                 },
             );
@@ -648,8 +648,8 @@ impl<'a> DispatchContext<'a> {
             if send_server_msg(
                 self.writer,
                 &ServerMessage::AssignJob {
-                    job_id: assignment.job_id,
-                    dispatch: assignment.dispatch.to_string(),
+                    job_id: assignment.job_id().to_owned(),
+                    dispatch: assignment.dispatch().to_string(),
                     job: assignment.job,
                 },
             )

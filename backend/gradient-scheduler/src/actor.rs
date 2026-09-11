@@ -329,7 +329,7 @@ impl SchedulerCore {
             instance,
         ) {
             Some(assignment) => {
-                self.pool.assign_job(worker, &assignment.job_id);
+                self.pool.assign_job(worker, assignment.job_id());
                 AssignOutcome::Assigned(assignment)
             }
             None => AssignOutcome::Nothing,
