@@ -7,6 +7,9 @@
 //! One actor per worker connection. The reader task delivers each inbound
 //! frame with a call and reads the next only after the reply, so the mailbox
 //! never holds more than one frame plus signals and TCP backpressure holds.
+//! Liveness is therefore the reader's to stamp, not the handler's: with one
+//! frame in flight at a time, a handler waiting on a slow actor would read as
+//! a silent worker and get a healthy connection unregistered mid-assignment.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -72,7 +75,6 @@ pub struct SessionState {
     nar: NarReceiveStore,
     eval_cache: EvalCacheReceiveStore,
     nar_serve_semaphore: Arc<Semaphore>,
-    last_seen: Arc<AtomicI64>,
     offers_seen: u64,
     active: HashMap<String, ActiveJob>,
     draining: bool,
@@ -145,7 +147,9 @@ impl Actor for SessionActor {
             .expect("temp partial dir must be creatable")
         });
         let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
-        let reader = state.shutdown.spawn(read_loop(reader, myself));
+        let reader = state
+            .shutdown
+            .spawn(read_loop(reader, myself, registered.last_seen));
 
         Ok(SessionState {
             peer_id,
@@ -157,7 +161,6 @@ impl Actor for SessionActor {
             nar,
             eval_cache: EvalCacheReceiveStore::new(max_partial_bytes),
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
-            last_seen: registered.last_seen,
             offers_seen: 0,
             active: HashMap::new(),
             draining: false,
@@ -173,10 +176,6 @@ impl Actor for SessionActor {
     ) -> Result<(), ActorProcessingErr> {
         match msg {
             SessionMsg::Frame(inbound, reply) => {
-                st.last_seen.store(
-                    gradient_types::now().and_utc().timestamp_millis(),
-                    Ordering::Relaxed,
-                );
                 let keep = {
                     let mut ctx = DispatchContext {
                         writer: &st.writer,
@@ -305,8 +304,19 @@ async fn offer_jobs(st: &mut SessionState) -> bool {
     true
 }
 
-async fn read_loop(mut reader: ProtoReader, session: ActorRef<SessionMsg>) {
+/// Deliver frames one at a time, stamping the worker's liveness on receipt.
+/// A worker that is talking is alive whether or not the server has finished
+/// answering it, so the stamp belongs here rather than in the handler.
+async fn read_loop(
+    mut reader: ProtoReader,
+    session: ActorRef<SessionMsg>,
+    last_seen: Arc<AtomicI64>,
+) {
     while let Some(inbound) = recv_client_msg(&mut reader).await {
+        last_seen.store(
+            gradient_types::now().and_utc().timestamp_millis(),
+            Ordering::Relaxed,
+        );
         match session
             .call(|reply| SessionMsg::Frame(inbound, reply), None)
             .await
@@ -323,12 +333,43 @@ async fn read_loop(mut reader: ProtoReader, session: ActorRef<SessionMsg>) {
 mod tests {
     use super::*;
     use crate::session::frame::WireMessage;
-    use futures::StreamExt;
+    use futures::{SinkExt, StreamExt};
     use gradient_test_support::prelude::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+    /// Stands in for a session whose handler is busy: it answers the frame
+    /// without ever stamping liveness, so only the reader can have done it.
+    struct DecliningSession;
+
+    impl Actor for DecliningSession {
+        type Msg = SessionMsg;
+        type State = ();
+        type Arguments = ();
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            _args: Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            Ok(())
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            msg: Self::Msg,
+            _st: &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            if let SessionMsg::Frame(_, reply) = msg {
+                let _ = reply.send(false);
+            }
+
+            Ok(())
+        }
+    }
 
     async fn connected_pair() -> (ProtoSocket, WebSocketStream<MaybeTlsStream<TcpStream>>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -398,5 +439,32 @@ mod tests {
         );
         join.await.unwrap();
         assert!(!scheduler.is_worker_connected("w1").await);
+    }
+
+    /// The session handles one frame at a time, so a handler waiting on a slow
+    /// actor must not look like silence to the liveness pass: the reader stamps
+    /// `last_seen` on receipt, before the handler is even called.
+    #[tokio::test]
+    async fn the_reader_stamps_liveness_on_receipt() {
+        let (socket, mut client) = connected_pair().await;
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let (session, join) = Actor::spawn(None, DecliningSession, ()).await.unwrap();
+        let last_seen = Arc::new(AtomicI64::new(0));
+
+        client
+            .send(Message::Binary(
+                ClientMessage::ReauthRequest.encode().unwrap(),
+            ))
+            .await
+            .unwrap();
+        read_loop(reader, session.clone(), Arc::clone(&last_seen)).await;
+        session.stop(None);
+        join.await.unwrap();
+
+        assert!(
+            last_seen.load(Ordering::Relaxed) > 0,
+            "the reader, not the handler, stamps the frame it just received"
+        );
     }
 }
