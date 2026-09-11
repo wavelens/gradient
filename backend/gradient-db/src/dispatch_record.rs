@@ -13,7 +13,7 @@ use gradient_entity::dispatched_job::{
     Column as CDispatchedJob, DispatchedJobOutcome, Entity as EDispatchedJob,
 };
 use gradient_entity::ids::DispatchedJobId;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, Value};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter};
 
 pub const EVAL_KEY_PREFIX: &str = "eval:";
@@ -85,7 +85,9 @@ pub async fn abandon_open_dispatch<C: ConnectionTrait>(
 }
 
 /// Close the open rows of the named dispatches as `Abandoned`; returns how
-/// many closed.
+/// many closed. The scope is one array bind, not one placeholder per id: the
+/// sweep reaps a whole backlog in one statement and `IN (..)` would blow
+/// Postgres' 65535-bind-parameter cap long before it got there.
 pub async fn abandon_open_dispatches<C: ConnectionTrait>(
     db: &C,
     dispatches: &[DispatchedJobId],
@@ -94,7 +96,16 @@ pub async fn abandon_open_dispatches<C: ConnectionTrait>(
         return Ok(0);
     }
 
-    abandon_open(db, Some(CDispatchedJob::Id.is_in(dispatches.to_vec()))).await
+    let ids: Vec<uuid::Uuid> = dispatches.iter().map(|d| d.into_inner()).collect();
+
+    abandon_open(
+        db,
+        Some(Expr::cust_with_values(
+            r#""dispatched_job"."id" = ANY($1)"#,
+            [Value::from(ids)],
+        )),
+    )
+    .await
 }
 
 async fn abandon_open<C: ConnectionTrait>(db: &C, scope: Option<Expr>) -> Result<u64, DbErr> {
@@ -211,8 +222,11 @@ mod tests {
         assert!(!sql.contains("\"dispatched_at\""), "{sql}");
     }
 
+    /// The sweep closes its whole backlog in one statement, so the scope has to
+    /// be a single array bind: one placeholder per id caps the reaper at
+    /// Postgres' 65535 binds and the statement fails outright above that.
     #[tokio::test]
-    async fn the_named_dispatches_open_rows_close_as_abandoned() {
+    async fn the_named_dispatches_close_under_one_array_bind() {
         let db = closed_rows(2).into_connection();
         let reap = [DispatchedJobId::now_v7(), DispatchedJobId::now_v7()];
 
@@ -224,15 +238,18 @@ mod tests {
         assert_closes_open_rows_as_abandoned(statement);
 
         let sql = &statement.sql;
-        assert!(sql.contains("\"dispatched_job\".\"id\" IN ("), "{sql}");
+        assert!(sql.contains("\"dispatched_job\".\"id\" = ANY($3)"), "{sql}");
+        assert!(!sql.contains(" IN ("), "{sql}");
+        assert!(!sql.contains("$4"), "{sql}");
 
         let values = format!("{:?}", statement.values);
-        for dispatch in &reap {
-            assert!(
-                values.contains(&format!("Uuid(Some({dispatch}))")),
-                "{values}"
-            );
-        }
+        assert!(
+            values.contains(&format!(
+                "Array(Uuid, Some([Uuid(Some({})), Uuid(Some({}))]))",
+                reap[0], reap[1]
+            )),
+            "{values}"
+        );
     }
 
     #[tokio::test]
