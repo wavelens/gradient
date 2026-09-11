@@ -32,6 +32,12 @@ const LOST_COMPLETION_GRACE_SECS: i64 = 900;
 /// to check in is never reaped out from under a running job.
 const ABANDONED_DISPATCH_GRACE_SECS: i64 = 1800;
 
+/// How many open rows one sweep may consider. Every row the pass reaps leaves
+/// the `finished_at IS NULL` predicate, so a backlog drains over ticks without
+/// an `ORDER BY`, and the rows the pass deliberately keeps are far too few to
+/// crowd a window this size.
+const ABANDONED_DISPATCH_SWEEP_LIMIT: u64 = 10_000;
+
 /// Liveness poll period, or `None` when the watchdog is disabled by config.
 pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
@@ -194,6 +200,7 @@ pub(super) async fn abandoned_dispatch_pass(scheduler: Arc<Scheduler>) -> anyhow
         .select_only()
         .column(CDispatchedJob::Id)
         .column(CDispatchedJob::JobId)
+        .limit(ABANDONED_DISPATCH_SWEEP_LIMIT)
         .into_tuple()
         .all(&scheduler.state.worker_db)
         .await?;
