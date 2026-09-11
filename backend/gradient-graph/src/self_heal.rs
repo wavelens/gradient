@@ -150,12 +150,17 @@ pub(crate) async fn reconcile_missing_inputs(
     let requeued = if demoted_producers.is_empty() {
         0
     } else {
-        gradient_db::requeue_failed_anchors(db, &demoted_producers)
-            .await
-            .unwrap_or_else(|e| {
+        match gradient_db::requeue_failed_anchors(db, &demoted_producers).await {
+            Ok(changes) => {
+                let thawed = changes.len();
+                gradient_db::emit_transition_effects(ctx, &changes).await;
+                thawed
+            }
+            Err(e) => {
                 warn!(error = %e, "reconcile: requeue failed producers failed");
                 0
-            })
+            }
+        }
     };
 
     if !sources_purged.is_empty() {

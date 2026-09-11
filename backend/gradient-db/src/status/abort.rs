@@ -286,7 +286,7 @@ mod tests {
     /// The query script `abort_eval_anchors` replays, in order: the aborting
     /// evaluation's anchors, which of them are still active, the `build_job`
     /// rows other evaluations hold on those anchors, and those evaluations.
-    /// Everything past the abort write (dep-count deltas, board events, phase
+    /// Everything past the abort write (the graph version, board events, phase
     /// events, log finalize) is answered empty: the decision is made by then and
     /// each of those paths is a no-op on empty input.
     fn scripted_db(
