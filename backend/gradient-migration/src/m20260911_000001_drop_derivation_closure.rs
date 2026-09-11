@@ -9,8 +9,10 @@
 //! every ingest), and the `derivation.dep_closure_count` cache that only it
 //! filled. The per-entry-point histogram is recomputed on demand instead and
 //! cached under `evaluation.graph_version`, which every anchor move bumps; an
-//! entry point carries the version its rows were computed under. The index on
-//! `(evaluation, eval, id)` serves the paged task-page read in attribute order.
+//! entry point carries the version its rows were computed under and the time they
+//! were computed, so a building evaluation (whose version moves constantly) walks
+//! the graph on a damped cadence rather than on every poll of the page. The index
+//! on `(evaluation, eval, id)` serves the paged task-page read in attribute order.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -18,6 +20,7 @@ use sea_orm_migration::sea_orm::ConnectionTrait;
 const UP: &[&str] = &[
     "ALTER TABLE evaluation ADD COLUMN IF NOT EXISTS graph_version bigint NOT NULL DEFAULT 0",
     "ALTER TABLE entry_point ADD COLUMN IF NOT EXISTS dep_counts_version bigint",
+    "ALTER TABLE entry_point ADD COLUMN IF NOT EXISTS dep_counts_computed_at timestamp",
     r#"CREATE INDEX IF NOT EXISTS "idx-entry_point-evaluation-eval"
        ON entry_point (evaluation, eval, id)"#,
     "DROP TABLE IF EXISTS derivation_closure",
@@ -31,6 +34,7 @@ const DOWN: &[&str] = &[
        dep_derivation uuid NOT NULL REFERENCES derivation(id) ON DELETE CASCADE, \
        PRIMARY KEY (root_derivation, dep_derivation))",
     r#"DROP INDEX IF EXISTS "idx-entry_point-evaluation-eval""#,
+    "ALTER TABLE entry_point DROP COLUMN IF EXISTS dep_counts_computed_at",
     "ALTER TABLE entry_point DROP COLUMN IF EXISTS dep_counts_version",
     "ALTER TABLE evaluation DROP COLUMN IF EXISTS graph_version",
 ];
