@@ -349,11 +349,17 @@ impl BatchWriter<'_> {
             .await
             .context("insert dependency edges")?;
 
-        Ok(grew
+        // One row per landed edge, so a derivation with fifty new inputs is named
+        // fifty times; every consumer wants the set.
+        let mut grown: Vec<DerivationId> = grew
             .iter()
             .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
             .map(DerivationId::new)
-            .collect())
+            .collect();
+        grown.sort_unstable();
+        grown.dedup();
+
+        Ok(grown)
     }
 
     async fn set_anchor_limits(
