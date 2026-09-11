@@ -239,7 +239,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0 }));
     const component = fixture.componentInstance;
     component.select(component.evaluations()[1]);
-    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 100, 0);
+    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 25, 0);
   });
 
   /// The server clamps `limit` at 500, so growing one request cannot reach past it;
@@ -258,7 +258,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     component.loadMoreEntryPoints();
     const [, , , limit, offset] = spy.mock.calls.at(-1)!;
 
-    expect(limit).toBe(100);
+    expect(limit).toBe(25);
     expect(offset).toBe(1);
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
     expect(component.entryPointsTotal()).toBe(2);
@@ -274,9 +274,51 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.attrLabel('packages."x86_64-linux"."foo.bar"')).toBe('foo.bar');
   });
 
-  /// An evaluation still ingesting entry points showed a dozen rows on the first
-  /// poll; a window sized from that would have frozen the list there forever.
-  it('refreshes at least a full page however few rows are shown', () => {
+  /// A NixOS flake's entry points all end `.config.system.build.toplevel`, so the
+  /// last segment labelled every row of a 74-host list `toplevel`. The label is
+  /// what the shared wrapper leaves behind, at both ends of the path.
+  it('drops the attribute-path segments every row on the page shares', () => {
+    const host = (n: string) =>
+      epSummary(n, `nixosConfigurations.${n}.config.system.build.toplevel`);
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [host('broker'), host('caveman')], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+
+    expect(component.attrLabel('nixosConfigurations.broker.config.system.build.toplevel'))
+      .toBe('broker');
+    expect(component.attrLabel('nixosConfigurations.caveman.config.system.build.toplevel'))
+      .toBe('caveman');
+  });
+
+  /// Stripping the shared wrapper must never strip the whole path: one row shares
+  /// every segment with itself, and rows with nothing in common keep theirs.
+  it('always leaves at least one segment', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        getEntryPoints: () => of({
+          entry_points: [
+            epSummary('a', 'packages."x86_64-linux".hello'),
+            epSummary('b', 'nixosConfigurations.broker.config.system.build.toplevel'),
+          ],
+          total: 2,
+        }),
+      },
+    );
+    const component = fixture.componentInstance;
+
+    expect(component.attrLabel('packages."x86_64-linux".hello'))
+      .toBe('packages.x86_64-linux.hello');
+    expect(component.attrLabel('nixosConfigurations.broker.config.system.build.toplevel'))
+      .toBe('nixosConfigurations.broker.config.system.build.toplevel');
+  });
+
+  /// The server walks one dependency closure per entry point it returns, so a
+  /// live poll asks for the first page and never the whole scrolled window. The
+  /// rows past it are spliced back on rather than re-read.
+  it('refreshes exactly one page however many rows are shown', () => {
     const { fixture, tasksService } = setup(
       { managed: false, canEdit: true, canTrigger: true },
       { getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 300 }) },
@@ -289,7 +331,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     component.loadTaskData(false);
     const [, , , limit, offset] = spy.mock.calls.at(-1)!;
 
-    expect(limit).toBe(100);
+    expect(limit).toBe(25);
     expect(offset).toBe(0);
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
