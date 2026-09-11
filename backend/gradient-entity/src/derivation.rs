@@ -26,7 +26,6 @@ pub struct Model {
     /// input source. A row a batch only named (a stub) is `false` until walked.
     pub walked: bool,
     pub closure_size: Option<i64>,
-    pub dep_closure_count: Option<i64>,
     pub created_at: NaiveDateTime,
 }
 
