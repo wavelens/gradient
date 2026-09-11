@@ -70,35 +70,11 @@ async fn eval_dispatch_count(state: &Arc<ServerState>, evaluation_id: Evaluation
 /// rows keep `finished_at IS NULL` forever and the job board reports them as
 /// running on a worker that is no longer in the fleet.
 async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
-    use gradient_entity::dispatched_job::{
-        Column as CDispatchedJob, DispatchedJobOutcome, Entity as EDispatchedJob,
-    };
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
     let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
-    if keys.is_empty() {
-        return;
-    }
 
-    match EDispatchedJob::update_many()
-        .col_expr(
-            CDispatchedJob::FinishedAt,
-            sea_orm::sea_query::Expr::value(gradient_types::now()),
-        )
-        .col_expr(
-            CDispatchedJob::Outcome,
-            sea_orm::sea_query::Expr::value(i16::from(DispatchedJobOutcome::Abandoned)),
-        )
-        .filter(CDispatchedJob::JobId.is_in(keys))
-        .filter(CDispatchedJob::FinishedAt.is_null())
-        .exec(&state.worker_db)
-        .await
-    {
-        Ok(res) if res.rows_affected > 0 => {
-            info!(
-                rows = res.rows_affected,
-                "closed dispatch telemetry for orphaned jobs"
-            );
+    match gradient_db::abandon_open_dispatches_for_jobs(&state.worker_db, &keys).await {
+        Ok(rows) if rows > 0 => {
+            info!(rows, "closed dispatch telemetry for orphaned jobs");
         }
         Ok(_) => {}
         Err(e) => warn!(error = %e, "failed to close dispatch telemetry for orphaned jobs"),

@@ -20,6 +20,7 @@ pub mod debug_info;
 pub mod dep_closure;
 pub mod dependency_graph;
 pub mod derivation;
+pub mod dispatch_record;
 pub mod draining;
 pub mod drv_output_spec;
 pub mod eval_watchdog;
@@ -71,6 +72,11 @@ pub use self::debug_info::{
 pub use self::dep_closure::*;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;
+pub use self::dispatch_record::{
+    BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, abandon_open_dispatches_for_jobs,
+    abandon_open_dispatches_for_worker, build_job_key_sql, eval_job_key_sql,
+    no_open_dispatch_predicate,
+};
 pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::drv_output_spec::DrvOutputSpec;
 pub use self::eval_watchdog::{LostCompletion, lost_eval_completions};
