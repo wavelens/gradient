@@ -172,10 +172,12 @@ fn plan_abandoned_reap(
 
 /// Close dispatch rows left open by a job that will never report.
 ///
-/// [`crate::build::requeue_orphaned_jobs`] covers a clean disconnect, but a
-/// server restart drops the tracker without an unregister for the jobs the old
-/// process held, so nothing ever closes their rows and the job board shows them
-/// running forever - often on a worker that has since left the fleet.
+/// The backstop, not the primary path: `requeue_orphaned_jobs` covers a clean
+/// disconnect and `recover_interrupted_work` the restart. What is left is the
+/// row whose session died between the claim and the insert, which no tracker
+/// ever knew, and rows an older process wrote that startup did not reach - both
+/// shown as running forever by the job board, often on a worker that has since
+/// left the fleet.
 ///
 /// The tracker, not the clock, decides what is live: a row whose `job_id` the
 /// scheduler still knows is left alone however old it is, so a legitimately long
