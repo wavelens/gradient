@@ -233,13 +233,15 @@ the transition. The grace sits above the graph actor's 600s RPC timeout so a slo
 transition is never mistaken for a lost one, and `EvalStreamCompleted` is
 idempotent, so re-driving one that did land changes nothing.
 
-The dispatch record is the one proof that a job is out. The `dispatched_job`
-row, the open `build_attempt` and the anchor's `dispatched_at` are written
-inside `RequestJob`, before the assignment is handed back to the session, so no
-report can precede its own row; a claim whose record cannot be written is
-released to pending and the worker asks again; a record that is written but
-whose anchor transition then fails is closed as `Abandoned` on the way out, so a
-withdrawn claim never leaves an open row shutting the gate. Both dispatch
+The dispatch record is the one proof that a job is out. The `dispatched_job` row
+is written inside `RequestJob`, before the assignment is handed back to the
+session, so no report can precede its own row; a claim whose record cannot be
+written is released to pending and the worker asks again; a record that is
+written but whose anchor transition then fails is closed as `Abandoned` on the
+way out, so a withdrawn claim never leaves an open row shutting the gate. A
+build's `Dispatched` transition is awaited on that same path, but the open
+`build_attempt` and the anchor's `dispatched_at` it writes are warn-only inside
+it, so the row is what gates the hand-out and those two are not. Both dispatch
 selections refuse work with an open row: `find_ready_anchors` and the
 queued-evaluation select carry a `NOT EXISTS` over `dispatched_job` keyed on the
 scheduler's job key (`build:<anchor>` / `eval:<evaluation>`, whose prefixes live
@@ -252,11 +254,11 @@ Four paths close a row that represents work actually out. The worker's own
 terminal report stamps `finished_at` and the outcome, matched on the dispatch
 id the report carries; a report whose dispatch has no row at all is dropped
 with a warning, while one that arrives after another closer got there first
-leaves the recorded outcome alone and still lands its phase timeline. A worker that vanishes
-has its rows closed as `Abandoned` by `requeue_orphaned_jobs`. A worker that
-registers a fresh connection claims no job, so registration closes every row
-still open under its id, which is what reopens the gate right after a server
-restart. Rows whose worker never returns are closed by the
+leaves the recorded outcome alone and still lands its phase timeline. A worker
+that vanishes has its rows closed as `Abandoned` by `requeue_orphaned_jobs`. A
+worker that registers a fresh connection claims no job, so registration closes
+every row still open under its id, which is what reopens the gate right after a
+server restart. Rows whose worker never returns are closed by the
 `abandoned-dispatch-sweep` pass (60s) 1800s after dispatch, provided the tracker
 no longer knows the job; until then the work stays parked behind the gate, the
 price of never running it twice. The tracker, not the clock, decides: a row it
