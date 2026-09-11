@@ -17,7 +17,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
     QuerySelect, Set,
 };
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::messages::{NarCommit, NarCommitted, SignTargets};
 
@@ -58,7 +58,7 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     match (was_whole, whole) {
         (false, true) => {
             let moved = gradient_db::ripple_whole(db, vec![sp.hash().to_owned()]).await?;
-            debug!(store_path = %c.store_path, whole = moved.len(), "reference closure ripple");
+            trace!(store_path = %c.store_path, whole = moved.len(), "reference closure ripple");
             advance_anchors(ctx, txn, &moved).await?;
         }
         (true, false) => {
@@ -78,7 +78,7 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         .await
         .context("mark derivation outputs cached")?
         .rows_affected;
-    debug!(store_path = %c.store_path, outputs_marked, created, "cached path committed");
+    trace!(store_path = %c.store_path, outputs_marked, created, "cached path committed");
 
     Ok(NarCommitted {
         cached_path,
