@@ -37,7 +37,7 @@ impl Scheduler {
                     if let Err(e) =
                         record_dispatch(&self.state, worker_id, &a.dispatch_record).await
                     {
-                        warn!(error = %e, %worker_id, job_id = %a.job_id, "dispatch record not written; assignment withdrawn");
+                        warn!(error = format!("{e:#}"), %worker_id, job_id = %a.job_id, "dispatch record not written; assignment withdrawn");
                         self.job_rejected(worker_id, &a.job_id).await;
                         return None;
                     }
