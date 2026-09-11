@@ -78,7 +78,37 @@ async fn abandon_open<C: ConnectionTrait>(db: &C, scope: Expr) -> Result<u64, Db
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement};
+
+    fn closed_one_row() -> MockDatabase {
+        MockDatabase::new(DatabaseBackend::Postgres).append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 2,
+        }])
+    }
+
+    /// The statement's `sql` carries placeholders only, so nothing but the bound
+    /// value pins the outcome the closers write. Built from the enum so a moved
+    /// discriminant stays in step, and rendered the way sea-query's `Value`
+    /// derives `Debug` for a bound `i16`.
+    fn abandoned_bound() -> String {
+        format!(
+            "SmallInt(Some({}))",
+            i16::from(DispatchedJobOutcome::Abandoned)
+        )
+    }
+
+    fn assert_closes_open_rows_as_abandoned(statement: &Statement) {
+        let sql = &statement.sql;
+        assert!(
+            sql.starts_with("UPDATE \"dispatched_job\" SET \"finished_at\" = $1, \"outcome\" = $2"),
+            "{sql}"
+        );
+        assert!(sql.contains("\"finished_at\" IS NULL"), "{sql}");
+
+        let values = format!("{:?}", statement.values);
+        assert!(values.contains(&abandoned_bound()), "{values}");
+    }
 
     #[test]
     fn the_predicate_rebuilds_the_trackers_key() {
@@ -93,12 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_workers_open_rows_close_as_abandoned() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 2,
-            }])
-            .into_connection();
+        let db = closed_one_row().into_connection();
 
         let closed = abandon_open_dispatches_for_worker(&db, "w1")
             .await
@@ -106,15 +131,43 @@ mod tests {
 
         assert_eq!(closed, 2);
         let log = db.into_transaction_log();
-        let sql = &log[0].statements()[0].sql;
-        assert!(
-            sql.starts_with("UPDATE \"dispatched_job\" SET \"finished_at\" = $1, \"outcome\" = $2"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("\"worker_id\" =") && sql.contains("\"finished_at\" IS NULL"),
-            "{sql}"
-        );
+        let statement = &log[0].statements()[0];
+        assert_closes_open_rows_as_abandoned(statement);
+
+        let sql = &statement.sql;
+        assert!(sql.contains("\"worker_id\" ="), "{sql}");
+
+        let values = format!("{:?}", statement.values);
+        assert!(values.contains("String(Some(\"w1\"))"), "{values}");
+    }
+
+    #[tokio::test]
+    async fn the_named_jobs_open_rows_close_as_abandoned() {
+        let db = closed_one_row().into_connection();
+        let keys = vec![
+            format!("{BUILD_KEY_PREFIX}019905f2-0000-7000-8000-000000000001"),
+            format!("{EVAL_KEY_PREFIX}019905f2-0000-7000-8000-000000000002"),
+        ];
+
+        let closed = abandon_open_dispatches_for_jobs(&db, &keys)
+            .await
+            .expect("update");
+
+        assert_eq!(closed, 2);
+        let log = db.into_transaction_log();
+        let statement = &log[0].statements()[0];
+        assert_closes_open_rows_as_abandoned(statement);
+
+        let sql = &statement.sql;
+        assert!(sql.contains("\"job_id\" IN ("), "{sql}");
+
+        let values = format!("{:?}", statement.values);
+        for key in &keys {
+            assert!(
+                values.contains(&format!("String(Some(\"{key}\"))")),
+                "{values}"
+            );
+        }
     }
 
     #[tokio::test]
