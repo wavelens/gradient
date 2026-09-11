@@ -141,7 +141,7 @@ default, so they are options instead. A module that guessed them would size a
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `postgresSharedBuffers` | `null` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. `null` leaves the upstream default. |
+| `postgresSharedBuffers` | `"512MB"` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. The default is a floor, not a target: it is one fixed allocation rather than a per-node one, so it cannot multiply the way the two below can. Raise it on anything larger than 2 GB. |
 | `postgresEffectiveCacheSize` | `null` | `effective_cache_size`: three quarters of the host's RAM, so `"12GB"` on a 16 GB host. A planner hint about what the kernel will cache, not an allocation. |
 | `postgresWorkMem` | `null` | `work_mem`: the floor every ordinary query gets, which the graph walks raise above inside the transaction each one opens. Charged per sort or hash node, so the real ceiling is this times every concurrent query's node count. `"32MB"` suits a host sized for the 80 pooled connections below. |
 | `postgresMaintenanceWorkMem` | `null` | `maintenance_work_mem`: index builds and the autovacuum passes over the edge tables. Each of `autovacuum_max_workers` can claim this much at once, so `"1GB"` wants RAM to spare. |
