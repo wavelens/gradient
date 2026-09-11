@@ -6,7 +6,7 @@
 
 use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
-    QueueSummary, TaskDetailsResponse,
+    PaginatedEntryPoints, QueueSummary, TaskDetailsResponse,
 };
 use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
@@ -30,7 +30,9 @@ use gradient_storage::nar_extract::{
 };
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, Iterable, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{
+    ColumnTrait, EntityTrait, Iterable, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -541,9 +543,25 @@ fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
     }
 }
 
+const ENTRY_POINTS_PAGE: u64 = 100;
+const ENTRY_POINTS_PAGE_MAX: u64 = 500;
+
 #[derive(Deserialize, Debug)]
 pub struct EntryPointsQuery {
     pub evaluation_id: Option<EvaluationId>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+/// The page a request asked for, clamped to the server's maximum; an absent or
+/// zero limit is the default page.
+fn page_bounds(limit: Option<u64>, offset: Option<u64>) -> (u64, u64) {
+    let limit = match limit {
+        Some(0) | None => ENTRY_POINTS_PAGE,
+        Some(n) => n.min(ENTRY_POINTS_PAGE_MAX),
+    };
+
+    (limit, offset.unwrap_or(0))
 }
 
 pub async fn get_task_entry_points(
@@ -552,7 +570,7 @@ pub async fn get_task_entry_points(
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task)): Path<(String, String)>,
     Query(params): Query<EntryPointsQuery>,
-) -> WebResult<Json<BaseResponse<Vec<EntryPointSummary>>>> {
+) -> WebResult<Json<BaseResponse<PaginatedEntryPoints>>> {
     let (_project, task) = load_task(
         &state,
         Caller::from_option(&maybe_user),
@@ -563,12 +581,9 @@ pub async fn get_task_entry_points(
     )
     .await?;
 
-    // Use the requested evaluation ID, or fall back to the task's last evaluation.
     let eval_id = match params.evaluation_id.or(task.last_evaluation) {
         Some(id) => id,
-        None => {
-            return Ok(ok_json(vec![]));
-        }
+        None => return Ok(ok_json(PaginatedEntryPoints::default())),
     };
 
     let evaluation = EEvaluation::find_by_id(eval_id)
@@ -580,19 +595,30 @@ pub async fn get_task_entry_points(
         return Err(WebError::not_found("Evaluation"));
     }
 
-    let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(eval_id))
+    let (limit, offset) = page_bounds(params.limit, params.offset);
+    let scope = EEntryPoint::find().filter(CEntryPoint::Evaluation.eq(eval_id));
+    let total = scope.clone().count(&state.web_db).await?;
+    let entry_points = scope
+        .order_by_asc(CEntryPoint::Eval)
+        .order_by_asc(CEntryPoint::Id)
+        .offset(offset)
+        .limit(limit)
         .all(&state.web_db)
         .await?;
 
     if entry_points.is_empty() {
-        return Ok(ok_json(vec![]));
+        return Ok(ok_json(PaginatedEntryPoints {
+            entry_points: Vec::new(),
+            total,
+        }));
     }
 
-    let data = EntryPointRelatedData::load(&state, &entry_points).await?;
-    let summaries = data.build_summaries(&entry_points);
+    let data = EntryPointRelatedData::load(&state, &evaluation, &entry_points).await?;
 
-    Ok(ok_json(summaries))
+    Ok(ok_json(PaginatedEntryPoints {
+        entry_points: data.build_summaries(&entry_points),
+        total,
+    }))
 }
 
 // ── Entry-point bulk data loader ─────────────────────────────────────────────
@@ -610,6 +636,7 @@ struct EntryPointRelatedData {
     outputs: HashMap<DerivationId, BTreeMap<String, String>>,
     build_time_ms: HashMap<DerivationId, Option<i64>>,
     deps: HashMap<EntryPointId, BuildStatusCounts>,
+    deps_total: HashMap<EntryPointId, i64>,
 }
 
 /// Groups output rows into `output name -> full /nix/store path` per derivation.
@@ -634,23 +661,14 @@ fn output_paths_by_derivation(
 }
 
 impl EntryPointRelatedData {
-    async fn load(state: &Arc<ServerState>, entry_points: &[MEntryPoint]) -> WebResult<Self> {
+    async fn load(
+        state: &Arc<ServerState>,
+        evaluation: &MEvaluation,
+        entry_points: &[MEntryPoint],
+    ) -> WebResult<Self> {
         let db = &state.web_db;
-        let eval_id = entry_points[0].evaluation;
+        let eval_id = evaluation.id;
         let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
-
-        // Heal any entry-point closure materialised empty mid-eval - before its
-        // dependency edges flushed - and frozen at zero, so `deps_total` below
-        // reflects the real closure instead of showing a single dep while the
-        // graph page is correct. Cheap in steady state: only NULL/zero-count
-        // roots recompute; positive counts are trusted and skipped.
-        let healed = match gradient_db::materialize_entry_point_closures(db, eval_id).await {
-            Ok(n) => n > 0,
-            Err(e) => {
-                tracing::warn!(evaluation_id = %eval_id, error = %e, "entry-point closure heal failed");
-                false
-            }
-        };
 
         let derivations: HashMap<DerivationId, MDerivation> =
             gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
@@ -750,55 +768,20 @@ impl EntryPointRelatedData {
                 .collect()
         };
 
-        // Read the incrementally-maintained per-entry-point counts (#383). Evals
-        // predating that machinery have no rows. Backfill them once (a single
-        // closure recompute that persists the counts) instead of running the
-        // live closure CTE on every request, which pegged Postgres for ~10s per
-        // page load (#391); fall back to the live CTE only if the backfill fails.
-        let entry_point_ids: Vec<EntryPointId> = entry_points.iter().map(|ep| ep.id).collect();
-        let mut raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
-        // The incremental deltas are only authoritative once an eval finishes and
-        // reseeds; mid-eval they miss transitions that fire before a dep's closure
-        // edge exists, so a root's counts fall behind its closure (the task page
-        // then shows a handful of deps while the graph is correct). Rebuild when a
-        // closure just healed, when a historical eval has no counts, or when any
-        // root's stored total no longer covers its materialised closure - a cheap
-        // recompute over the already-materialised closure that settles after one
-        // pass, since `apply_dep_count_delta` preserves the per-root total.
-        let histogram_stale = gradient_db::histogram_needs_rebuild(entry_points.iter().map(|ep| {
-            let stored: i64 = raw.get(&ep.id).map(|m| m.values().sum()).unwrap_or(0);
-            let closure = derivations
-                .get(&ep.derivation)
-                .and_then(|d| d.dep_closure_count)
-                .unwrap_or(0);
-            (stored, closure)
-        }));
-        if healed || raw.is_empty() || histogram_stale {
-            match gradient_db::init_entry_point_dep_counts(db, eval_id).await {
-                Ok(()) => {
-                    raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
-                }
-                Err(e) => {
-                    tracing::warn!(evaluation_id = %eval_id, error = %e,
-                        "dep-count rebuild failed; using live closure CTE");
-                    let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
-                        .iter()
-                        .map(|ep| (ep.id, ep.derivation.into_inner()))
-                        .collect();
-                    raw = gradient_db::entry_point_dep_counts(db, eval_id, &seeds).await?;
-                }
+        let raw = gradient_db::cached_entry_point_dep_counts(db, evaluation, entry_points).await?;
+        let mut deps = HashMap::new();
+        let mut deps_total = HashMap::new();
+        for (ep, per_status) in raw {
+            let mut counts = BuildStatusCounts::default();
+            let mut total = 0;
+            for (status, n) in per_status {
+                counts.add(status, n);
+                total += n;
             }
+
+            deps.insert(ep, counts);
+            deps_total.insert(ep, total);
         }
-        let deps: HashMap<EntryPointId, BuildStatusCounts> = raw
-            .into_iter()
-            .map(|(ep, per_status)| {
-                let mut c = BuildStatusCounts::default();
-                for (status, n) in per_status {
-                    c.add(status, n);
-                }
-                (ep, c)
-            })
-            .collect();
 
         Ok(Self {
             anchors,
@@ -808,6 +791,7 @@ impl EntryPointRelatedData {
             outputs,
             build_time_ms,
             deps,
+            deps_total,
         })
     }
 
@@ -841,7 +825,7 @@ impl EntryPointRelatedData {
                 architecture: drv.architecture.clone(),
                 build_time_ms: self.build_time_ms.get(&ep.derivation).copied().flatten(),
                 deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
-                deps_total: drv.dep_closure_count,
+                deps_total: self.deps_total.get(&ep.id).copied().unwrap_or(0),
                 created_at: ep.created_at,
             });
         }
@@ -1096,6 +1080,22 @@ mod tests {
                 .chars()
                 .count(),
             100
+        );
+    }
+}
+
+#[cfg(test)]
+mod page_tests {
+    use super::{ENTRY_POINTS_PAGE, ENTRY_POINTS_PAGE_MAX, page_bounds};
+
+    #[test]
+    fn the_page_defaults_and_clamps() {
+        assert_eq!(page_bounds(None, None), (ENTRY_POINTS_PAGE, 0));
+        assert_eq!(page_bounds(Some(0), Some(30)), (ENTRY_POINTS_PAGE, 30));
+        assert_eq!(page_bounds(Some(40), None), (40, 0));
+        assert_eq!(
+            page_bounds(Some(10_000), Some(5)),
+            (ENTRY_POINTS_PAGE_MAX, 5)
         );
     }
 }
