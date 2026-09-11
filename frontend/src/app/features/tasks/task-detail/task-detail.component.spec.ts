@@ -21,6 +21,23 @@ function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
 }
 
+function epSummary(id: string, attr = `packages."x86_64-linux".${id}`): EntryPointSummary {
+  return {
+    id,
+    build_id: `b-${id}`,
+    derivation_path: `aaaa-${id}.drv`,
+    eval: attr,
+    build_status: 'Completed',
+    has_artefacts: false,
+    outputs: {},
+    architecture: 'x86_64-linux',
+    build_time_ms: null,
+    deps: zeroCounts(),
+    deps_total: 0,
+    created_at: '2026-01-01T00:00:00',
+  } as EntryPointSummary;
+}
+
 function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building'): EvaluationSummary {
   return {
     id,
@@ -225,15 +242,55 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 100, 0);
   });
 
-  it('asks for a larger page when the user wants more packages', () => {
-    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
-    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 250 }));
+  /// The server clamps `limit` at 500, so growing one request cannot reach past it;
+  /// "show more" pages with an offset and appends what comes back.
+  it('appends the next page by offset instead of growing one request', () => {
+    const first = epSummary('a');
+    const second = epSummary('b');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+    );
     const component = fixture.componentInstance;
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a']);
+
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2 }));
     component.loadMoreEntryPoints();
     const [, , , limit, offset] = spy.mock.calls.at(-1)!;
-    expect(limit).toBe(200);
-    expect(offset).toBe(0);
-    expect(component.entryPointsTotal()).toBe(250);
+
+    expect(limit).toBe(100);
+    expect(offset).toBe(1);
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+    expect(component.entryPointsTotal()).toBe(2);
+  });
+
+  /// The row label has to be the field the server sorts by, or the list looks
+  /// unordered; the derivation name it used to show is not that field.
+  it('labels a package by the last segment of its attribute path', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const component = fixture.componentInstance;
+    expect(component.attrLabel('packages."x86_64-linux".hello')).toBe('hello');
+    expect(component.attrLabel('hello')).toBe('hello');
+  });
+
+  /// A refresh re-reads only the window it shows, so an appended tail must not be
+  /// dropped by the next live poll.
+  it('keeps appended packages across a refresh of the first window', () => {
+    const first = epSummary('a');
+    const second = epSummary('b');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2 }));
+    component.loadMoreEntryPoints();
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [first], total: 2 }));
+    component.loadTaskData(false);
+
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
 
   it('labels a pull-request trigger as "PR #<n>" (#391)', () => {
