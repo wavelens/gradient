@@ -18,7 +18,7 @@ use gradient_db::{
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -103,9 +103,27 @@ pub async fn get_task_metrics(
             .push(ep.derivation);
     }
 
-    let mut points = Vec::new();
+    // Every evaluation's closure comes out of ONE raised walk (#650), which is
+    // committed before the size queries below: those take a second connection from
+    // the same pool, so holding the walk across them deadlocks the pool under
+    // concurrency.
+    let mut closures: HashMap<EvaluationId, HashSet<DerivationId>> = HashMap::new();
     let walk = begin_walk(&state.web_db).await?;
+    for evaluation in &evaluations {
+        let roots = entry_points_by_eval
+            .get(&evaluation.id)
+            .cloned()
+            .unwrap_or_default();
+        closures.insert(
+            evaluation.id,
+            transitive_closure_reachable_in(&walk, &roots).await?,
+        );
+    }
 
+    walk.commit().await?;
+
+    let empty = HashSet::new();
+    let mut points = Vec::new();
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
@@ -124,12 +142,12 @@ pub async fn get_task_metrics(
             .unwrap_or_default();
 
         let entry_point_count = ep_drv_ids.len() as i64;
-        let closure = transitive_closure_reachable_in(&walk, &ep_drv_ids).await?;
+        let closure = closures.get(&evaluation.id).unwrap_or(&empty);
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
         let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids.clone()).await?;
         let closure_size_bytes =
-            sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+            sum_output_sizes(&state.web_db, closure.iter().copied().collect()).await?;
 
         let seeds = output_hashes_for_drvs(&state.web_db, &ep_drv_ids).await?;
         let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
@@ -147,7 +165,6 @@ pub async fn get_task_metrics(
         });
     }
 
-    walk.commit().await?;
     // Return in chronological order (oldest first for chart x-axis)
     points.reverse();
 
@@ -255,9 +272,23 @@ pub async fn get_entry_point_metrics(
         .await
         .unwrap_or_default();
 
-    let mut points = Vec::new();
+    // As above: one raised walk for every root, committed before the size queries.
+    let walk_roots: Vec<DerivationId> = entry_points
+        .iter()
+        .map(|ep| ep.derivation)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let mut closures: HashMap<DerivationId, HashSet<DerivationId>> = HashMap::new();
     let walk = begin_walk(&state.web_db).await?;
+    for drv in walk_roots {
+        closures.insert(drv, transitive_closure_reachable_in(&walk, &[drv]).await?);
+    }
 
+    walk.commit().await?;
+
+    let empty = HashSet::new();
+    let mut points = Vec::new();
     for ep in entry_points {
         let (Some(evaluation), Some(anchor), Some(build_job)) = (
             evaluations.get(&ep.evaluation),
@@ -269,12 +300,12 @@ pub async fn get_entry_point_metrics(
 
         let build_time_ms = attempts.get(&anchor.id).and_then(|a| a.duration_ms());
 
-        let closure = transitive_closure_reachable_in(&walk, &[ep.derivation]).await?;
+        let closure = closures.get(&ep.derivation).unwrap_or(&empty);
         let dependencies_count = (closure.len() as i64).saturating_sub(1);
 
         let output_size_bytes = sum_output_sizes(&state.web_db, vec![ep.derivation]).await?;
         let closure_size_bytes =
-            sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+            sum_output_sizes(&state.web_db, closure.iter().copied().collect()).await?;
 
         let seeds = output_hashes_for_drvs(&state.web_db, &[ep.derivation]).await?;
         let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
@@ -293,7 +324,6 @@ pub async fn get_entry_point_metrics(
         });
     }
 
-    walk.commit().await?;
     points.reverse();
 
     Ok(ok_json(EntryPointMetricsResponse {

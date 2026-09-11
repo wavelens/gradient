@@ -30,6 +30,7 @@ use gradient_storage::nar_extract::{
 };
 use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
+use sea_orm::sea_query::Query as SeaQuery;
 use sea_orm::{
     ColumnTrait, EntityTrait, Iterable, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
 };
@@ -595,8 +596,18 @@ pub async fn get_task_entry_points(
         return Err(WebError::not_found("Evaluation"));
     }
 
+    // An entry point with no `build_job` in this evaluation has no build to report,
+    // and the summary drops it; the page and the total have to agree on that or
+    // "show more" can never reach the total.
+    let has_build_job = SeaQuery::select()
+        .column(CBuildJob::Derivation)
+        .from(gradient_entity::build_job::Entity)
+        .and_where(CBuildJob::Evaluation.eq(eval_id))
+        .to_owned();
     let (limit, offset) = page_bounds(params.limit, params.offset);
-    let scope = EEntryPoint::find().filter(CEntryPoint::Evaluation.eq(eval_id));
+    let scope = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(eval_id))
+        .filter(CEntryPoint::Derivation.in_subquery(has_build_job));
     let total = scope.clone().count(&state.web_db).await?;
     let entry_points = scope
         .order_by_asc(CEntryPoint::Eval)
