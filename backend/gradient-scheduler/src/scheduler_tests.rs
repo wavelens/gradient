@@ -890,3 +890,70 @@ async fn a_failed_dispatch_record_withdraws_the_assignment() {
     assert!(scheduler.active_job("j1").await.is_none());
     assert!(scheduler.pending_job("j1").await.is_some());
 }
+
+fn dispatched_row(id: DispatchedJobId) -> gradient_entity::dispatched_job::Model {
+    gradient_entity::dispatched_job::Model {
+        id,
+        worker_id: "w1".into(),
+        job_id: Some("j1".into()),
+        evaluation_id: EvaluationId::now_v7(),
+        project: ProjectId::now_v7(),
+        queued_at: gradient_types::now(),
+        dispatched_at: gradient_types::now(),
+        created_at: gradient_types::now(),
+        ..Default::default()
+    }
+}
+
+/// With the record written before the job leaves, a report that finds no open
+/// row is a defect, not a race, so it is dropped with a warning instead of
+/// returning silently.
+#[tokio::test]
+async fn a_report_without_an_open_row_is_dropped_loudly() {
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<gradient_entity::dispatched_job::Model>::new()])
+        .into_connection();
+    let scheduler = test_scheduler_with(db).await;
+
+    let landed = scheduler
+        .persist_job_timeline(
+            DispatchedJobId::now_v7(),
+            DispatchedJobOutcome::Completed,
+            vec![],
+        )
+        .await;
+
+    assert!(!landed);
+}
+
+#[tokio::test]
+async fn a_report_with_an_open_row_closes_it() {
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let dispatch = DispatchedJobId::now_v7();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([
+            vec![dispatched_row(dispatch)],
+            vec![dispatched_row(dispatch)],
+        ])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+
+    let landed = scheduler
+        .persist_job_timeline(dispatch, DispatchedJobOutcome::Completed, vec![])
+        .await;
+
+    assert!(landed);
+    let log = log_db.into_transaction_log();
+    assert!(
+        log.iter()
+            .flat_map(|t| t.statements())
+            .any(|s| s.sql.starts_with("UPDATE \"dispatched_job\"")),
+        "the row is closed"
+    );
+}
