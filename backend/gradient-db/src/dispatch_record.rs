@@ -14,7 +14,7 @@ use gradient_entity::dispatched_job::{
 };
 use gradient_entity::ids::DispatchedJobId;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter};
 
 pub const EVAL_KEY_PREFIX: &str = "eval:";
 pub const BUILD_KEY_PREFIX: &str = "build:";
@@ -38,12 +38,30 @@ pub fn no_open_dispatch_predicate(job_key_sql: &str) -> String {
     )
 }
 
-/// Close every open row of `worker_id` as `Abandoned`; returns how many closed.
+/// Close every open row of `worker_id` dispatched before `before` as
+/// `Abandoned`; returns how many closed. The cutoff keeps a reconnecting
+/// worker off the rows its own still-landing terminal reports close: only a
+/// process that is gone leaves a row no live closer owns.
 pub async fn abandon_open_dispatches_for_worker<C: ConnectionTrait>(
     db: &C,
     worker_id: &str,
+    before: chrono::NaiveDateTime,
 ) -> Result<u64, DbErr> {
-    abandon_open(db, CDispatchedJob::WorkerId.eq(worker_id)).await
+    abandon_open(
+        db,
+        Some(
+            CDispatchedJob::WorkerId
+                .eq(worker_id)
+                .and(CDispatchedJob::DispatchedAt.lt(before)),
+        ),
+    )
+    .await
+}
+
+/// Close every open row as `Abandoned`; returns how many closed. Startup
+/// recovery's closer: nothing a previous process handed out is still out.
+pub async fn abandon_all_open_dispatches<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
+    abandon_open(db, None).await
 }
 
 /// Close the open rows of the given job keys as `Abandoned`; returns how many closed.
@@ -55,7 +73,7 @@ pub async fn abandon_open_dispatches_for_jobs<C: ConnectionTrait>(
         return Ok(0);
     }
 
-    abandon_open(db, CDispatchedJob::JobId.is_in(job_keys.to_vec())).await
+    abandon_open(db, Some(CDispatchedJob::JobId.is_in(job_keys.to_vec()))).await
 }
 
 /// Close the open row of one dispatch as `Abandoned`; returns how many closed.
@@ -63,11 +81,24 @@ pub async fn abandon_open_dispatch<C: ConnectionTrait>(
     db: &C,
     dispatch: DispatchedJobId,
 ) -> Result<u64, DbErr> {
-    abandon_open(db, CDispatchedJob::Id.eq(dispatch)).await
+    abandon_open(db, Some(CDispatchedJob::Id.eq(dispatch))).await
 }
 
-async fn abandon_open<C: ConnectionTrait>(db: &C, scope: Expr) -> Result<u64, DbErr> {
-    let res = EDispatchedJob::update_many()
+/// Close the open rows of the named dispatches as `Abandoned`; returns how
+/// many closed.
+pub async fn abandon_open_dispatches<C: ConnectionTrait>(
+    db: &C,
+    dispatches: &[DispatchedJobId],
+) -> Result<u64, DbErr> {
+    if dispatches.is_empty() {
+        return Ok(0);
+    }
+
+    abandon_open(db, Some(CDispatchedJob::Id.is_in(dispatches.to_vec()))).await
+}
+
+async fn abandon_open<C: ConnectionTrait>(db: &C, scope: Option<Expr>) -> Result<u64, DbErr> {
+    let mut update = EDispatchedJob::update_many()
         .col_expr(
             CDispatchedJob::FinishedAt,
             Expr::value(gradient_types::now()),
@@ -75,8 +106,12 @@ async fn abandon_open<C: ConnectionTrait>(db: &C, scope: Expr) -> Result<u64, Db
         .col_expr(
             CDispatchedJob::Outcome,
             Expr::value(i16::from(DispatchedJobOutcome::Abandoned)),
-        )
-        .filter(scope)
+        );
+    if let Some(scope) = scope {
+        update = update.filter(scope);
+    }
+
+    let res = update
         .filter(CDispatchedJob::FinishedAt.is_null())
         .exec(db)
         .await?;
@@ -130,11 +165,16 @@ mod tests {
         );
     }
 
+    /// The cutoff is the whole point of the worker-scoped closer: a row this
+    /// process dispatched has a live closer in the report that is landing for
+    /// it, and rewriting it as `Abandoned` would lose that outcome. Only rows
+    /// an earlier process handed out are the registration's to close.
     #[tokio::test]
-    async fn a_workers_open_rows_close_as_abandoned() {
+    async fn a_workers_open_rows_close_as_abandoned_only_below_the_cutoff() {
         let db = closed_rows(2).into_connection();
+        let before = gradient_types::now();
 
-        let closed = abandon_open_dispatches_for_worker(&db, "w1")
+        let closed = abandon_open_dispatches_for_worker(&db, "w1", before)
             .await
             .expect("update");
 
@@ -145,9 +185,64 @@ mod tests {
 
         let sql = &statement.sql;
         assert!(sql.contains("\"worker_id\" ="), "{sql}");
+        assert!(sql.contains("\"dispatched_at\" <"), "{sql}");
 
         let values = format!("{:?}", statement.values);
         assert!(values.contains("String(Some(\"w1\"))"), "{values}");
+        assert!(values.contains(&format!("{before:?}")), "{values}");
+    }
+
+    /// Startup's closer is unscoped by design: the tracker that knew which
+    /// jobs were out died with the process, so every open row is stale.
+    #[tokio::test]
+    async fn every_open_row_closes_for_startup_recovery() {
+        let db = closed_rows(7).into_connection();
+
+        let closed = abandon_all_open_dispatches(&db).await.expect("update");
+
+        assert_eq!(closed, 7);
+        let log = db.into_transaction_log();
+        let statement = &log[0].statements()[0];
+        assert_closes_open_rows_as_abandoned(statement);
+
+        let sql = &statement.sql;
+        assert!(!sql.contains("\"worker_id\""), "{sql}");
+        assert!(!sql.contains("\"job_id\""), "{sql}");
+        assert!(!sql.contains("\"dispatched_at\""), "{sql}");
+    }
+
+    #[tokio::test]
+    async fn the_named_dispatches_open_rows_close_as_abandoned() {
+        let db = closed_rows(2).into_connection();
+        let reap = [DispatchedJobId::now_v7(), DispatchedJobId::now_v7()];
+
+        let closed = abandon_open_dispatches(&db, &reap).await.expect("update");
+
+        assert_eq!(closed, 2);
+        let log = db.into_transaction_log();
+        let statement = &log[0].statements()[0];
+        assert_closes_open_rows_as_abandoned(statement);
+
+        let sql = &statement.sql;
+        assert!(sql.contains("\"dispatched_job\".\"id\" IN ("), "{sql}");
+
+        let values = format!("{:?}", statement.values);
+        for dispatch in &reap {
+            assert!(
+                values.contains(&format!("Uuid(Some({dispatch}))")),
+                "{values}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn no_dispatches_means_no_statement() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+
+        let closed = abandon_open_dispatches(&db, &[]).await.expect("no-op");
+
+        assert_eq!(closed, 0);
+        assert!(db.into_transaction_log().is_empty());
     }
 
     #[tokio::test]

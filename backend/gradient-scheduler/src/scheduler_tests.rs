@@ -791,12 +791,14 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
     assert!(scheduler.is_worker_connected("w1").await);
 }
 
-/// A fresh connection claims no job, so every row still open under that
-/// worker belongs to a process that is gone. Closing them at registration
-/// reopens the dispatch gate the moment the worker is back, instead of after
-/// the abandoned sweep's grace.
+/// A fresh connection claims no job, so a row this process never dispatched
+/// belongs to one that is gone. Closing it at registration reopens the
+/// dispatch gate the moment the worker is back, instead of after the abandoned
+/// sweep's grace - but only below the process's own start, because a row this
+/// process handed out still has a closer in the terminal report landing for
+/// it, and a deploy reconnects the worker inside exactly that window.
 #[tokio::test]
-async fn registering_a_worker_closes_its_open_dispatch_rows() {
+async fn registering_a_worker_closes_only_the_rows_it_never_dispatched() {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -821,7 +823,17 @@ async fn registering_a_worker_closes_its_open_dispatch_rows() {
         "{}",
         close.sql
     );
-    assert!(format!("{:?}", close.values).contains("\"w1\""));
+    assert!(
+        close.sql.contains("\"dispatched_at\" <"),
+        "a blanket close by worker id rewrites the report that is still landing: {}",
+        close.sql
+    );
+    let values = format!("{:?}", close.values);
+    assert!(values.contains("\"w1\""), "{values}");
+    assert!(
+        values.contains(&format!("{:?}", scheduler.state.started_at.naive_utc())),
+        "{values}"
+    );
 }
 
 /// The row is the only proof a job is out, so it exists when the assignment
