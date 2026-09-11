@@ -626,8 +626,8 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     fetch_job.job.steps = vec![FlakeStep::FetchFlake];
     let job_id = format!("eval:{eval_id}");
 
-    // Attach with the job already active: a dispatched assignment would spawn
-    // the dispatched_job insert, which races the ordered mock for the eval row.
+    // Attach with the job already active: a dispatched assignment would draw an
+    // exec result for the dispatch record that this buffer does not seed.
     let (session, _signals) = port();
     scheduler
         .reattach_worker(
