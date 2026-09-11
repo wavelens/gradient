@@ -931,6 +931,10 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             }
             None => Vec::new(),
         };
+
+        gradient_db::bump_graph_version(writer.db(), &[evaluation_id])
+            .await
+            .context("bump the graph version for the batch")?;
         report.walked = newly_walked.len();
         debug!(%evaluation_id, walked = report.walked, named = ids.len(), "batch written");
     }
@@ -1114,7 +1118,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![ok(1); 3])
+            .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1134,8 +1138,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            13,
-            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote: {log:?}"
+            14,
+            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version: {log:?}"
         );
         let walked = log
             .iter()
@@ -1209,7 +1213,7 @@ mod tests {
             .append_query_results([vec![drv_row(a.id)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![transition_row(a.id, 1, 0)]])
-            .append_exec_results(vec![ok(1); 3])
+            .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1275,7 +1279,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
-            .append_exec_results(vec![ok(0); 1])
+            .append_exec_results(vec![ok(0); 2])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1390,7 +1394,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![ok(1); 3])
+            .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 

@@ -10,7 +10,7 @@
 //! (promotion, cascades, reconciles, abort), which return the
 //! [`TransitionChange`]s they made. Routing every mover through one emitter is
 //! what makes it structurally impossible to move an anchor without its
-//! consequences (dep-count deltas, board events, CI checks) firing - the root
+//! consequences (the evaluation graph version, board events, CI checks) firing - the root
 //! cause of the historical dead-zone class.
 
 use crate::DbContext;
@@ -29,7 +29,7 @@ pub struct TransitionChange {
 
 impl TransitionChange {
     /// A "re-announce current status" change (`from == to`): fans out board and
-    /// CI state without shifting dep-count histograms. Used when only the
+    /// CI state without invalidating the histogram cache. Used when only the
     /// derivation set is known, not the transition that produced it.
     pub fn unchanged(derivation: DerivationId, status: BuildStatus) -> Self {
         Self {
@@ -46,7 +46,7 @@ impl TransitionChange {
 /// For a caller that moves the same anchor twice inside ONE transaction: only the
 /// net move committed, so only the net move may fan out. Emitting the steps instead
 /// would announce a status to the board and the CI reactor that no reader can ever
-/// observe, and would apply the dep-count delta of an intermediate state twice.
+/// observe, and would invalidate the histogram cache for a move no reader can see.
 pub fn collapse_transitions(changes: Vec<TransitionChange>) -> Vec<TransitionChange> {
     let mut order: Vec<DerivationId> = Vec::new();
     let mut net: HashMap<DerivationId, TransitionChange> = HashMap::new();
@@ -74,7 +74,8 @@ fn ci_reports(status: BuildStatus) -> bool {
         || crate::state_machine::BuildStateMachine::is_terminal(&status)
 }
 
-/// Fan out the consequences of `changes`: per-entry-point dep-count deltas,
+/// Fan out the consequences of `changes`: the evaluation graph version that
+/// invalidates the per-entry-point histogram cache,
 /// board `BuildStatusChanged` events for every referencing `build_job`, one
 /// `CacheChanged` on any terminal success, and the CI status reactor for entry
 /// points. Reactor calls are spawned (they talk to external forges); everything
@@ -85,17 +86,6 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
     }
 
     let db = &ctx.worker_db;
-
-    for c in changes {
-        if c.from == c.to {
-            continue;
-        }
-        if let Err(e) =
-            crate::dep_closure::apply_dep_count_delta(db, c.derivation, c.from, c.to).await
-        {
-            error!(error = %e, derivation = %c.derivation, "failed to update entry-point dep counts");
-        }
-    }
 
     let derivations: Vec<DerivationId> = changes.iter().map(|c| c.derivation).collect();
     let jobs_by_drv: HashMap<DerivationId, Vec<MBuildJob>> =
@@ -127,6 +117,26 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
         .into_iter()
         .map(|ep| (ep.evaluation, ep.derivation))
         .collect();
+
+    // One bump per emit covers every evaluation a moved anchor belongs to; their
+    // cached histograms recompute on the next read.
+    let moved: Vec<EvaluationId> = changes
+        .iter()
+        .filter(|c| c.from != c.to)
+        .flat_map(|c| {
+            jobs_by_drv
+                .get(&c.derivation)
+                .into_iter()
+                .flatten()
+                .map(|j| j.evaluation)
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    if let Err(e) = crate::dep_counts::bump_graph_version(db, &moved).await {
+        error!(error = %e, evaluations = moved.len(), "failed to bump the graph version");
+    }
 
     for c in changes {
         let Some(jobs) = jobs_by_drv.get(&c.derivation) else {
@@ -214,7 +224,7 @@ mod tests {
 
     /// An anchor promoted and then pulled back inside one transaction committed
     /// nothing, so it must fan out nothing: emitting the two steps announces a
-    /// `Queued` no reader can observe and applies its dep-count delta twice. An
+    /// `Queued` no reader can observe and bumps the graph version for it. An
     /// anchor that genuinely moved keeps its move, and the order of first sight is
     /// preserved.
     #[test]
@@ -242,7 +252,7 @@ mod tests {
     }
 
     /// A chain that ends somewhere else collapses to its endpoints, not to its
-    /// last step: the dep-count delta is computed from `from` and `to`.
+    /// last step: the board and the CI reactor see the endpoints, not the steps.
     #[test]
     fn a_chain_collapses_to_its_endpoints() {
         let d = DerivationId::now_v7();

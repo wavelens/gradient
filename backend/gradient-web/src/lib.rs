@@ -913,12 +913,6 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         Err(e) => tracing::error!(error = ?e, "failed to recover draining-parked evaluations"),
     }
 
-    // Recovery re-queues/aborts builds outside the per-transition hook, so
-    // re-sync the maintained entry-point dependency counts (#383).
-    if let Err(e) = gradient_db::reconcile_inflight_dep_counts(&state.worker_db).await {
-        tracing::error!(error = ?e, "failed to reconcile entry-point dep counts after recovery");
-    }
-
     let app = create_router(Arc::clone(&state))
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 

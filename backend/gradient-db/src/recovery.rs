@@ -7,7 +7,7 @@
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, QueryFilter, Statement,
 };
@@ -98,6 +98,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     report.builds_unpromoted = crate::readiness::unpromote_ungated(conn, &requeued)
         .await?
         .len() as u64;
+    crate::dep_counts::bump_graph_version_for_derivations(conn, &requeued).await?;
 
     // 4a. Collect the evals a restart lost, `Building` included: their anchors
     // and their terminal transition are this sweep's to finish.
@@ -117,6 +118,10 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
             .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Aborted))
             .col_expr(CEvaluation::UpdatedAt, Expr::value(now))
             .col_expr(CEvaluation::FinishedAt, Expr::value(now))
+            .col_expr(
+                CEvaluation::GraphVersion,
+                Expr::col(CEvaluation::GraphVersion).add(1),
+            )
             .filter(CEvaluation::Id.is_in(eval_ids.clone()))
             .exec(conn)
             .await?;
@@ -320,6 +325,11 @@ mod tests {
             ]])
             // 3. the settle pulls one of them straight back
             .append_query_results([vec![unpromoted_row(mid_flight)]])
+            // 3. the requeue bumps the graph version of the evals it touched
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             // 4a. SELECT pre-build inflight evals
             .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
             // 4b. abort those evals

@@ -16,7 +16,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use std::collections::HashSet;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Settle `evaluation_id` if the build graph says it is done: no referenced
 /// anchor is still active (`Created`/`Queued`/`Building`/`FailedTransient`).
@@ -82,15 +82,6 @@ pub async fn check_evaluation_done(
         eval_errors = eval_error_messages.len(),
         "evaluation finished"
     );
-
-    // Authoritative resync of the entry-point histogram now the eval has
-    // settled: a terminal eval has a fixed graph, so one recompute makes the
-    // displayed bar exact even if any incremental delta was missed.
-    if let Err(e) =
-        crate::dep_closure::reconcile_eval_dep_counts(&ctx.worker_db, evaluation_id).await
-    {
-        warn!(error = %e, %evaluation_id, "reconcile_eval_dep_counts at eval settle failed");
-    }
 
     update_evaluation_status(ctx, eval, target).await;
     Ok(())
