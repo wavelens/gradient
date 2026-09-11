@@ -823,3 +823,70 @@ async fn registering_a_worker_closes_its_open_dispatch_rows() {
     );
     assert!(format!("{:?}", close.values).contains("\"w1\""));
 }
+
+/// The row is the only proof a job is out, so it exists when the assignment
+/// is handed back, not on a detached task the worker's first report can
+/// overtake.
+#[tokio::test]
+async fn the_dispatch_record_is_written_before_the_assignment_returns() {
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let ok = MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(vec![ok; 2])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let peer = ProjectId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(peer))
+        .await
+        .unwrap();
+
+    let assigned = scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("assigned");
+
+    let log = log_db.into_transaction_log();
+    let insert = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .find(|s| s.sql.starts_with("INSERT INTO \"dispatched_job\""))
+        .expect("the dispatched_job insert ran before request_job returned");
+    let values = format!("{:?}", insert.values);
+    assert!(values.contains("\"j1\""), "{values}");
+    assert!(values.contains(&assigned.dispatch.to_string()), "{values}");
+}
+
+/// A claim whose record cannot be written is released: the job is pending
+/// again, nothing is active, and the worker gets no job to run unrecorded.
+#[tokio::test]
+async fn a_failed_dispatch_record_withdraws_the_assignment() {
+    use sea_orm::{DatabaseBackend, DbErr, MockDatabase, MockExecResult};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }])
+        .append_exec_errors([DbErr::Custom("dispatched_job insert refused".into())])
+        .into_connection();
+    let scheduler = test_scheduler_with(db).await;
+    let peer = ProjectId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(peer))
+        .await
+        .unwrap();
+
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_none());
+
+    assert_eq!(scheduler.pending_job_count().await, 1);
+    assert!(scheduler.active_job("j1").await.is_none());
+    assert!(scheduler.pending_job("j1").await.is_some());
+}
