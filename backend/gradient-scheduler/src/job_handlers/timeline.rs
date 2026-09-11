@@ -96,7 +96,9 @@ impl Scheduler {
         });
     }
 
-    /// Returns whether the report landed on an open row.
+    /// Returns whether the report found an open row and closed it. The phase
+    /// rows and evaluation totals are written either way: they key on the
+    /// dispatch, not on the close.
     pub(crate) async fn persist_job_timeline(
         &self,
         dispatch: DispatchedJobId,
@@ -123,8 +125,10 @@ impl Scheduler {
         let mut active = row.into_active_model();
         active.finished_at = Set(Some(now()));
         active.outcome = Set(Some(outcome));
+        let mut closed = true;
         if let Err(e) = active.update(&self.state.worker_db).await {
             warn!(%dispatch, error = %e, "failed to close the dispatched_job row");
+            closed = false;
         }
 
         let rows = phase_rows(dispatch, &spans);
@@ -143,7 +147,7 @@ impl Scheduler {
             self.apply_eval_phase_totals(evaluation_id, totals).await;
         }
 
-        true
+        closed
     }
 
     /// The eval-metric row is written when `EvalStats` arrives, which is before
