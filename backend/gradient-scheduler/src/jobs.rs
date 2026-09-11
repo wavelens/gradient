@@ -154,16 +154,15 @@ pub enum PendingJob {
     Build(PendingBuildJob),
 }
 
-/// The tracker's key for an evaluation job. The single definition: it is also
-/// persisted on `dispatched_job.job_id`, and a copy that drifts would silently
-/// stop the abandoned-job sweep from finding the row it has to close.
+/// The tracker's key for an evaluation job, persisted on `dispatched_job.job_id`
+/// and rebuilt in SQL by the dispatch gates from the same prefix.
 pub fn eval_job_key(evaluation: EvaluationId) -> String {
-    format!("eval:{evaluation}")
+    format!("{}{evaluation}", gradient_db::EVAL_KEY_PREFIX)
 }
 
 /// The tracker's key for a build job, keyed on the build-once anchor.
 pub fn build_job_key(anchor: DerivationBuildId) -> String {
-    format!("build:{anchor}")
+    format!("{}{anchor}", gradient_db::BUILD_KEY_PREFIX)
 }
 
 impl PendingJob {
