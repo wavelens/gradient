@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use sea_orm::EntityTrait;
 use sea_orm::IntoActiveModel;
 use tracing::{info, warn};
@@ -33,7 +34,15 @@ impl Scheduler {
         for attempt in 0..3 {
             match self.try_assign(worker_id, &kind, &instance).await {
                 AssignOutcome::Assigned(a) if self.still_queued(&a).await => {
-                    self.record_dispatch(worker_id, &a);
+                    if let Err(e) =
+                        record_dispatch(&self.state, worker_id, &a.dispatch_record).await
+                    {
+                        warn!(error = %e, %worker_id, job_id = %a.job_id, "dispatch record not written; assignment withdrawn");
+                        self.job_rejected(worker_id, &a.job_id).await;
+                        return None;
+                    }
+
+                    self.announce_dispatch(worker_id, &a.dispatch_record);
                     info!(%worker_id, job_id = %a.job_id, ?kind, attempt, "job assigned via RequestJob");
                     return Some(a);
                 }
@@ -117,10 +126,11 @@ impl Scheduler {
         self.active_job(job_id).await.map(|j| j.project_id())
     }
 
-    /// One atomic claim in the actor. The board event and the `dispatched_job`
-    /// row are [`Self::record_dispatch`]'s job, fired by the caller once the
-    /// claim survives its re-check, so a vetoed claim leaves no trace of a
-    /// hand-out that never happened.
+    /// One atomic claim in the actor. The `dispatched_job` row is
+    /// [`record_dispatch`]'s job and the board event
+    /// [`Self::announce_dispatch`]'s, both run by the caller once the claim
+    /// survives its re-check, so a vetoed claim leaves no trace of a hand-out
+    /// that never happened.
     async fn try_assign(
         &self,
         worker_id: &str,
@@ -147,16 +157,9 @@ impl Scheduler {
         }
     }
 
-    /// Announce a hand-out and persist its telemetry. Outside the actor so DB
-    /// latency never blocks the mailbox, and after the queue re-check because
-    /// `Transition::Dispatched` stamps `derivation_build.dispatched_at` once and
-    /// only once: spend it on a claim that is dropped and the anchor's real
-    /// dispatch never gets a timestamp.
-    fn record_dispatch(&self, worker_id: &str, a: &Assignment) {
-        let Some(record) = a.dispatch_record.clone() else {
-            return;
-        };
-
+    /// Announce the hand-out to the job board. Fired only once the record is
+    /// durable, so the board never shows a job that was withdrawn.
+    fn announce_dispatch(&self, worker_id: &str, record: &DispatchRecord) {
         let _ = self
             .state
             .board_events
@@ -168,22 +171,22 @@ impl Scheduler {
                 build_id: record.derivation_build.map(Into::into),
                 evaluation_id: record.evaluation_id.into(),
             });
-        let state = Arc::clone(&self.state);
-        let worker = worker_id.to_owned();
-        self.state.shutdown.spawn(async move {
-            persist_dispatched_job(&state, &worker, record).await;
-        });
     }
 }
 
-/// Persist a `dispatched_job` row, open the `build_attempt`, and stamp the
-/// anchor's `dispatched_at`. Best-effort: failures are logged so instrumentation
-/// can't break dispatch.
-async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: DispatchRecord) {
+/// The `dispatched_job` row, then for a build the open `build_attempt` and the
+/// anchor's `dispatched_at` through the graph actor. Awaited before the
+/// assignment goes back to the session: the row is the only proof the job is
+/// out, so a worker's first report can never precede it, and an error here
+/// withdraws the claim instead of letting the job run unrecorded.
+async fn record_dispatch(
+    state: &Arc<ServerState>,
+    worker_id: &str,
+    rec: &DispatchRecord,
+) -> anyhow::Result<()> {
     let now = now();
-    let dispatched_job_id = rec.dispatch;
     let row = gradient_entity::dispatched_job::Model {
-        id: dispatched_job_id,
+        id: rec.dispatch,
         kind: rec.kind,
         evaluation_id: rec.evaluation_id,
         project: rec.project,
@@ -194,37 +197,35 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         queued_at: rec.queued_at,
         ready_at: Some(rec.ready_at),
         dispatched_at: now,
-        score_breakdown: rec.score_breakdown,
-        worker_context: rec.worker_context,
-        job_context: rec.job_context,
+        score_breakdown: rec.score_breakdown.clone(),
+        worker_context: rec.worker_context.clone(),
+        job_context: rec.job_context.clone(),
         instance_context: Some(rec.instance_context.clone()),
         created_at: now,
         ..Default::default()
     }
     .into_active_model();
 
-    if let Err(e) = gradient_entity::dispatched_job::Entity::insert(row)
-        .exec(&state.worker_db)
+    gradient_entity::dispatched_job::Entity::insert(row)
+        .exec_without_returning(&state.worker_db)
         .await
-    {
-        warn!(error = %e, "failed to insert dispatched_job");
-    }
+        .context("dispatched_job insert")?;
 
     let Some(derivation_build) = rec.derivation_build else {
-        return;
+        return Ok(());
     };
 
-    if let Err(e) = state
+    state
         .graph
         .transition(Transition::Dispatched {
             evaluation: rec.evaluation_id,
             anchor: derivation_build,
-            dispatched_job: dispatched_job_id,
+            dispatched_job: rec.dispatch,
             substitute: rec.substitute,
             build_context: rec.build_context.clone(),
         })
         .await
-    {
-        warn!(error = %e, %derivation_build, "dispatch record did not reach the graph actor");
-    }
+        .context("Dispatched transition")?;
+
+    Ok(())
 }
