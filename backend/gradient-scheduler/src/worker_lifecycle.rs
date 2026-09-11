@@ -108,8 +108,26 @@ impl Scheduler {
                 Vec::new(),
             )
             .await?;
+        self.close_unclaimed_dispatches(worker_id).await;
         self.record_worker_connection(worker_id, caps_json).await;
         Ok(registered)
+    }
+
+    /// A new connection claims no job, so every row still open under this
+    /// worker belongs to a process that is gone; closing it now reopens the
+    /// dispatch gate instead of leaving the work parked for the sweep's grace.
+    async fn close_unclaimed_dispatches(&self, worker_id: &str) {
+        match gradient_db::abandon_open_dispatches_for_worker(&self.state.worker_db, worker_id)
+            .await
+        {
+            Ok(rows) if rows > 0 => {
+                info!(%worker_id, rows, "closed dispatch rows a registering worker no longer runs");
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!(error = %e, %worker_id, "failed to close the worker's open dispatch rows")
+            }
+        }
     }
 
     /// Register without touching the DB: the session is already connected and
