@@ -681,8 +681,23 @@ impl<'a> DispatchContext<'a> {
             info!(peer_id = %self.peer_id, %job_id, "job accepted");
         } else {
             info!(peer_id = %self.peer_id, %job_id, ?reason, "job rejected by worker");
-            self.active.remove(&job_id);
+            self.withdraw_dispatch(&job_id).await;
             self.scheduler.job_rejected(self.peer_id, &job_id).await;
+        }
+    }
+
+    /// A rejected assignment is not out, so its row must not keep gating the
+    /// job: draining and at-capacity are routine, the sweep leaves a row the
+    /// tracker still holds alone, and every re-offer would open another.
+    async fn withdraw_dispatch(&mut self, job_id: &str) {
+        let Some(active) = self.active.remove(job_id) else {
+            return;
+        };
+
+        if let Err(e) =
+            gradient_db::abandon_open_dispatch(&self.state.worker_db, active.dispatch).await
+        {
+            warn!(peer_id = %self.peer_id, %job_id, dispatch = %active.dispatch, error = %e, "rejected assignment left its dispatch row open");
         }
     }
 
@@ -1042,5 +1057,143 @@ mod dispatch_id_tests {
         assert!(!dispatch_matches(Some(current), &other.to_string()));
         assert!(!dispatch_matches(None, &current.to_string()));
         assert!(!dispatch_matches(Some(current), "not-a-uuid"));
+    }
+}
+
+#[cfg(test)]
+mod assignment_response_tests {
+    use super::*;
+    use crate::session::frame::MsgWriter;
+    use gradient_scheduler::jobs::PendingEvalJob;
+    use gradient_test_support::prelude::*;
+    use gradient_types::ids::{CommitId, EvaluationId};
+    use gradient_types::proto::{FlakeJob, FlakeSource, FlakeStep};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use std::marker::PhantomData;
+    use std::time::Duration;
+
+    fn pending_eval() -> PendingJob {
+        PendingJob::Eval(PendingEvalJob {
+            evaluation_id: EvaluationId::now_v7(),
+            task_id: None,
+            project_id: ProjectId::now_v7(),
+            commit_id: CommitId::now_v7(),
+            repository: "https://example.com/repo".into(),
+            job: FlakeJob {
+                steps: vec![FlakeStep::EvaluateDerivations],
+                source: FlakeSource::Repository {
+                    url: "https://example.com/repo".into(),
+                    commit: "abc123".into(),
+                },
+                wildcards: vec!["*".into()],
+                timeout_secs: None,
+                input_overrides: vec![],
+                input_update: None,
+            },
+            required_paths: vec![],
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
+            rescore_count: 0,
+            history: Default::default(),
+        })
+    }
+
+    fn detached_writer() -> ProtoWriter {
+        let (tx, _bulk) = tokio::sync::mpsc::channel(1);
+        let (control_tx, _control) = tokio::sync::mpsc::channel(1);
+        MsgWriter {
+            tx,
+            control_tx,
+            send_chunk_timeout: Duration::from_secs(1),
+            _direction: PhantomData,
+        }
+    }
+
+    /// Draining and at-capacity rejections are routine, and the sweep never
+    /// reaps a row the tracker still holds, so a rejected hand-out that leaves
+    /// its row open parks the job behind its own gate until it completes.
+    #[tokio::test]
+    async fn a_rejected_assignment_closes_its_dispatch_row() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let log_db = db.clone();
+        let state = test_state(db);
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        scheduler.spawn_core(None).await.expect("core actor");
+        let writer = detached_writer();
+        let semaphore = Arc::new(Semaphore::new(1));
+        let dispatch = DispatchedJobId::now_v7();
+        let mut active = HashMap::from([(
+            "j1".to_owned(),
+            ActiveJob {
+                dispatch,
+                pending: pending_eval(),
+            },
+        )]);
+
+        let mut ctx = DispatchContext {
+            writer: &writer,
+            state: &state,
+            scheduler: &scheduler,
+            peer_id: "w1",
+            nar_serve_semaphore: &semaphore,
+            active: &mut active,
+        };
+        ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()))
+            .await;
+
+        assert!(active.is_empty());
+        let log = log_db.into_transaction_log();
+        let close = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .find(|s| s.sql.starts_with("UPDATE \"dispatched_job\""))
+            .expect("the rejection closes the row it was handed");
+        assert!(
+            close.sql.contains("\"finished_at\" IS NULL"),
+            "{}",
+            close.sql
+        );
+        assert!(
+            format!("{:?}", close.values).contains(&dispatch.to_string()),
+            "{:?}",
+            close.values
+        );
+    }
+
+    /// An accepted assignment is out, so its row stays open and keeps gating.
+    #[tokio::test]
+    async fn an_accepted_assignment_keeps_its_row_open() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let log_db = db.clone();
+        let state = test_state(db);
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        scheduler.spawn_core(None).await.expect("core actor");
+        let writer = detached_writer();
+        let semaphore = Arc::new(Semaphore::new(1));
+        let mut active = HashMap::from([(
+            "j1".to_owned(),
+            ActiveJob {
+                dispatch: DispatchedJobId::now_v7(),
+                pending: pending_eval(),
+            },
+        )]);
+
+        let mut ctx = DispatchContext {
+            writer: &writer,
+            state: &state,
+            scheduler: &scheduler,
+            peer_id: "w1",
+            nar_serve_semaphore: &semaphore,
+            active: &mut active,
+        };
+        ctx.on_assign_job_response("j1".into(), true, None).await;
+
+        assert!(active.contains_key("j1"));
+        assert!(log_db.into_transaction_log().is_empty());
     }
 }
