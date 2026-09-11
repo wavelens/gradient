@@ -21,13 +21,27 @@ use super::actor::{SessionPort, SessionSignal, WorkerCapabilities};
 use super::jobs::{PendingBuildJob, PendingEvalJob};
 use tokio::sync::mpsc;
 
-/// A scheduler with its state actor running, backed by a mock DB that returns
-/// empty results.
+/// A scheduler with its core actor running, backed by a mock DB whose queries
+/// return nothing and whose exec buffer answers the scheduler's own writes.
 async fn test_scheduler() -> Arc<Scheduler> {
-    use gradient_test_support::prelude::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
-    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let ok = MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(vec![ok; 32])
+        .into_connection();
+    test_scheduler_with(db).await
+}
+
+/// `db` answers the scheduler's writes in order: one exec result per
+/// registration (the worker's open rows close) and one per assignment (the
+/// dispatch record).
+async fn test_scheduler_with(db: sea_orm::DatabaseConnection) -> Arc<Scheduler> {
+    use gradient_test_support::prelude::*;
+
     let state = test_state(db);
     let scheduler = Arc::new(Scheduler::new(state));
     scheduler.spawn_core(None).await.expect("core actor");
@@ -775,4 +789,37 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
     assert_eq!((counts.workers, counts.active, counts.pending), (1, 1, 0));
     assert!(scheduler.active_job(&assigned.job_id).await.is_some());
     assert!(scheduler.is_worker_connected("w1").await);
+}
+
+/// A fresh connection claims no job, so every row still open under that
+/// worker belongs to a process that is gone. Closing them at registration
+/// reopens the dispatch gate the moment the worker is back, instead of after
+/// the abandoned sweep's grace.
+#[tokio::test]
+async fn registering_a_worker_closes_its_open_dispatch_rows() {
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 2,
+        }])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+
+    let log = log_db.into_transaction_log();
+    let close = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .find(|s| s.sql.starts_with("UPDATE \"dispatched_job\""))
+        .expect("registration closes the worker's open rows");
+    assert!(
+        close.sql.contains("\"worker_id\" = $3") && close.sql.contains("\"finished_at\" IS NULL"),
+        "{}",
+        close.sql
+    );
+    assert!(format!("{:?}", close.values).contains("\"w1\""));
 }
