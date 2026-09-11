@@ -903,11 +903,15 @@ in {
       # ── Phase 10b: the worker reported a phase timeline for the build ────
       # Regression guard (#589): the timeline rides inside JobCompleted, so a
       # protocol or handler mistake shows up as a job with zero phases rather
-      # than as an error anywhere.
+      # than as an error anywhere. A build is dispatched once per anchor and its
+      # record names whichever evaluation first named the derivation, so find it
+      # through the evaluation's own build jobs, not through that attribution.
       banner("Phase 10b: the completed build job has worker phase spans")
       job_id = sql(
-          f"SELECT id FROM dispatched_job WHERE evaluation_id = '{eval_id}' "
-          f"AND kind = 1 AND finished_at IS NOT NULL ORDER BY dispatched_at DESC LIMIT 1;"
+          f"SELECT dj.id FROM dispatched_job dj "
+          f"JOIN build_job bj ON dj.job_id = 'build:' || bj.derivation_build::text "
+          f"WHERE bj.evaluation = '{eval_id}' AND dj.kind = 1 AND dj.finished_at IS NOT NULL "
+          f"ORDER BY dj.dispatched_at DESC LIMIT 1;"
       )
       assert job_id, "no finished build job was recorded for the evaluation"
 
