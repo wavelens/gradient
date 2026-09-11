@@ -12,6 +12,7 @@ use gradient_db::LostCompletion;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::Transition;
 use gradient_types::EvaluationId;
+use gradient_types::ids::DispatchedJobId;
 use gradient_types::proto::BuildFailureKind;
 use tracing::{debug, info, warn};
 
@@ -156,9 +157,9 @@ pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Res
 /// A row the scheduler still tracks is never reaped, however old, so a
 /// legitimately long build keeps its open row.
 fn plan_abandoned_reap(
-    stale: &[(uuid::Uuid, Option<String>)],
+    stale: &[(DispatchedJobId, Option<String>)],
     untracked: &HashSet<String>,
-) -> Vec<uuid::Uuid> {
+) -> Vec<DispatchedJobId> {
     stale
         .iter()
         .filter(|(_, key)| match key {
@@ -182,10 +183,10 @@ fn plan_abandoned_reap(
 /// that way; they are historical by construction and are closed on age alone.
 pub(super) async fn abandoned_dispatch_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, sea_query::Expr};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
     let cutoff = gradient_types::now() - chrono::Duration::seconds(ABANDONED_DISPATCH_GRACE_SECS);
-    let stale: Vec<(uuid::Uuid, Option<String>)> = EDispatchedJob::find()
+    let stale: Vec<(DispatchedJobId, Option<String>)> = EDispatchedJob::find()
         .filter(CDispatchedJob::FinishedAt.is_null())
         .filter(CDispatchedJob::DispatchedAt.lt(cutoff))
         .select_only()
@@ -211,20 +212,7 @@ pub(super) async fn abandoned_dispatch_pass(scheduler: Arc<Scheduler>) -> anyhow
         return Ok(());
     }
 
-    let reaped = reap.len();
-    EDispatchedJob::update_many()
-        .col_expr(
-            CDispatchedJob::FinishedAt,
-            Expr::value(gradient_types::now()),
-        )
-        .col_expr(
-            CDispatchedJob::Outcome,
-            Expr::value(i16::from(DispatchedJobOutcome::Abandoned)),
-        )
-        .filter(CDispatchedJob::Id.is_in(reap))
-        .filter(CDispatchedJob::FinishedAt.is_null())
-        .exec(&scheduler.state.worker_db)
-        .await?;
+    let reaped = gradient_db::abandon_open_dispatches(&scheduler.state.worker_db, &reap).await?;
 
     warn!(
         rows = reaped,
@@ -338,8 +326,8 @@ mod tests {
         }
     }
 
-    fn row(key: Option<&str>) -> (uuid::Uuid, Option<String>) {
-        (uuid::Uuid::now_v7(), key.map(str::to_owned))
+    fn row(key: Option<&str>) -> (DispatchedJobId, Option<String>) {
+        (DispatchedJobId::now_v7(), key.map(str::to_owned))
     }
 
     // The whole point of the sweep: a row the tracker still holds is a running
