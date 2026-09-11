@@ -157,11 +157,19 @@ in {
         description = ''
           `shared_buffers` for the cluster `configurePostgres` sets up. Size it to
           a quarter of the host's RAM: Gradient's working set is the build graph's
-          indexes, and the stock 128 MB cannot keep the hot set resident. `null`
-          leaves the upstream default alone.
+          indexes, and the stock 128 MB cannot keep the hot set resident. On the
+          reference deployment `derivation_dependency` alone is 881 MB, and a
+          graph walk that misses it reads every edge from disk.
+
+          Unlike `work_mem` and `maintenance_work_mem`, this is ONE fixed
+          allocation rather than a per-node or per-worker one, so a default
+          cannot multiply into a host's RAM by surprise; 512 MB is a quarter of
+          the smallest host this module is expected on and never stops Postgres
+          starting. It is a floor, not a target: raise it on anything larger.
+          `null` leaves the upstream default alone.
         '';
         type = lib.types.nullOr lib.types.str;
-        default = null;
+        default = "512MB";
         example = "4GB";
       };
 
@@ -1377,13 +1385,13 @@ in {
           max_connections = lib.mkDefault 200;
           random_page_cost = lib.mkDefault 1.1;
         } // lib.optionalAttrs (cfg.postgresSharedBuffers != null) {
-          shared_buffers = lib.mkDefault cfg.postgresSharedBuffers;
+          shared_buffers = cfg.postgresSharedBuffers;
         } // lib.optionalAttrs (cfg.postgresEffectiveCacheSize != null) {
-          effective_cache_size = lib.mkDefault cfg.postgresEffectiveCacheSize;
+          effective_cache_size = cfg.postgresEffectiveCacheSize;
         } // lib.optionalAttrs (cfg.postgresWorkMem != null) {
-          work_mem = lib.mkDefault cfg.postgresWorkMem;
+          work_mem = cfg.postgresWorkMem;
         } // lib.optionalAttrs (cfg.postgresMaintenanceWorkMem != null) {
-          maintenance_work_mem = lib.mkDefault cfg.postgresMaintenanceWorkMem;
+          maintenance_work_mem = cfg.postgresMaintenanceWorkMem;
         };
 
         ensureUsers = [{

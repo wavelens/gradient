@@ -73,8 +73,13 @@ export interface EntryPointSummary {
   architecture: Architecture;
   build_time_ms: number | null;
   deps: BuildStatusCounts;
-  deps_total: number | null;
+  deps_total: number;
   created_at: string;
+}
+
+export interface PaginatedEntryPoints {
+  entry_points: EntryPointSummary[];
+  total: number;
 }
 
 export interface TaskDetail {

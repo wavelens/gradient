@@ -7,7 +7,7 @@
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, QueryFilter, Statement,
 };
@@ -98,6 +98,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     report.builds_unpromoted = crate::readiness::unpromote_ungated(conn, &requeued)
         .await?
         .len() as u64;
+    crate::dep_counts::bump_graph_version_for_derivations(conn, &requeued).await?;
 
     // 4a. Collect the evals a restart lost, `Building` included: their anchors
     // and their terminal transition are this sweep's to finish.
@@ -117,6 +118,10 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
             .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Aborted))
             .col_expr(CEvaluation::UpdatedAt, Expr::value(now))
             .col_expr(CEvaluation::FinishedAt, Expr::value(now))
+            .col_expr(
+                CEvaluation::GraphVersion,
+                Expr::col(CEvaluation::GraphVersion).add(1),
+            )
             .filter(CEvaluation::Id.is_in(eval_ids.clone()))
             .exec(conn)
             .await?;
@@ -138,9 +143,13 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     // anchors referenced only by the now-aborted evals go to Aborted. Anchors a
     // still-live eval also needs are left running (shared-anchor safety). The
     // force-eval below re-drives them - `requeue_failed_anchors` resets
-    // Aborted -> Created on the next evaluation.
+    // Aborted -> Created on the next evaluation. The anchors are shared, and an
+    // evaluation that was already terminal when the server died still shows them,
+    // so the histogram bump is keyed on the derivations rather than on 3b's set.
     if !eval_ids.is_empty() {
-        report.builds_aborted = abort_anchors_for_evals(conn, &eval_ids).await?;
+        let aborted = abort_anchors_for_evals(conn, &eval_ids).await?;
+        report.builds_aborted = aborted.len() as u64;
+        crate::dep_counts::bump_graph_version_for_derivations(conn, &aborted).await?;
     }
 
     // 4d. Force re-evaluation of the affected tasks.
@@ -166,11 +175,12 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
 /// Abort the non-terminal anchors (`Created`/`Queued`/`Building`) driven by
 /// `eval_ids`, skipping any a still-live (non-terminal) evaluation also needs.
 /// Mirrors the explicit-abort path (`status::abort`): a global build-once anchor
-/// is only aborted when no surviving evaluation depends on it. Returns the count.
+/// is only aborted when no surviving evaluation depends on it. Returns the
+/// derivations it aborted, which name every evaluation whose histogram moved.
 async fn abort_anchors_for_evals<C: ConnectionTrait>(
     conn: &C,
     eval_ids: &[EvaluationId],
-) -> Result<u64, DbErr> {
+) -> Result<Vec<DerivationId>, DbErr> {
     let ids: Vec<uuid::Uuid> = eval_ids.iter().map(|e| e.into_inner()).collect();
     let sql = format!(
         r#"
@@ -185,6 +195,7 @@ async fn abort_anchors_for_evals<C: ConnectionTrait>(
             JOIN evaluation e2 ON e2.id = bj2.evaluation
             WHERE bj2.derivation_build = db.id
               AND e2.status NOT IN ({completed}, {failed}, {eval_aborted}))
+        RETURNING db.derivation
         "#,
         aborted = BuildStatus::Aborted as i32,
         created = BuildStatus::Created as i32,
@@ -195,15 +206,15 @@ async fn abort_anchors_for_evals<C: ConnectionTrait>(
         eval_aborted = EvaluationStatus::Aborted as i32,
     );
 
-    let res = conn
-        .execute_raw(Statement::from_sql_and_values(
+    let rows = conn
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             [ids.into()],
         ))
         .await?;
 
-    Ok(res.rows_affected())
+    Ok(crate::promotion::returned_derivations(rows))
 }
 
 #[cfg(test)]
@@ -320,6 +331,11 @@ mod tests {
             ]])
             // 3. the settle pulls one of them straight back
             .append_query_results([vec![unpromoted_row(mid_flight)]])
+            // 3. the requeue bumps the graph version of the evals it touched
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             // 4a. SELECT pre-build inflight evals
             .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
             // 4b. abort those evals
@@ -327,10 +343,20 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // 4c. abort their anchors
+            // 4b. the phase-event insert returns its rows on Postgres, so it draws
+            // a query; empty is `RecordNotInserted`, which the recorder ignores
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // 4c. abort their anchors, naming the derivations they moved
+            .append_query_results([vec![
+                derivation_row(DerivationId::now_v7()),
+                derivation_row(DerivationId::now_v7()),
+                derivation_row(DerivationId::now_v7()),
+                derivation_row(DerivationId::now_v7()),
+            ]])
+            // 4c. bump the evaluations still showing those anchors
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
-                rows_affected: 4,
+                rows_affected: 2,
             }])
             // 4d. force-eval their tasks
             .append_exec_results([MockExecResult {

@@ -58,7 +58,7 @@ impl ReconcileReport {
     }
 }
 
-/// Run the healing pipeline for `scope`. Effects (dep-count deltas, board events,
+/// Run the healing pipeline for `scope`. Effects (the graph version, board events,
 /// CI checks, eval finalization) fan out through the one emitter for every anchor
 /// a step moved, so a reconciliation can never move an anchor without its
 /// consequences.
@@ -68,7 +68,10 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     let mut report = ReconcileReport::default();
 
     match crate::promotion::requeue_failed_closure_for_eval(db, evaluation).await {
-        Ok(n) => report.thawed = n,
+        Ok(changes) => {
+            report.thawed = changes.len() as u64;
+            emit_transition_effects(ctx, &changes).await;
+        }
         Err(e) => {
             error!(error = %e, %evaluation, "reconcile: requeue_failed_closure_for_eval failed")
         }

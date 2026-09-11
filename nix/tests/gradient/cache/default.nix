@@ -147,6 +147,9 @@ in {
             enable = true;
             reverseProxy.nginx.enable = true;
             configurePostgres = true;
+            # Pinned so the module's production-sized default does not size a
+            # 2 GB guest that also runs the server, nginx and a git daemon.
+            postgresSharedBuffers = "128MB";
             domain = "gradient.local";
             proto.public = true;
             jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
@@ -314,7 +317,7 @@ in {
       def api_get(token, path):
           """GET ``API/<path>``, return the parsed `.message` field as text."""
           return server.succeed(
-              f'{CURL} -sf -H "Authorization: Bearer {token}" {API}/{path}'
+              f'{CURL} -sf -H "Authorization: Bearer {token}" "{API}/{path}"'
           )
 
       def assert_no_server_panic(since_seconds=45):
@@ -728,7 +731,7 @@ in {
       leftover_keys = int(sql(
           "SELECT count(*) FROM information_schema.columns "
           "WHERE column_name = 'id' AND table_name IN "
-          "('derivation_dependency', 'derivation_closure', 'cached_path_reference');"
+          "('derivation_dependency', 'cached_path_reference');"
       ))
       assert leftover_keys == 0, f"{leftover_keys} junction tables kept a surrogate key"
 
@@ -764,22 +767,102 @@ in {
           assert "Nested Loop" in plan, f"the {direction} walk lost its nested loop:\n{plan}"
           assert "Merge Join" not in plan, f"the {direction} walk merge-joins again:\n{plan}"
 
-      # The maintained histogram is what the task page reads; recomputing it from
-      # the materialised closure must give the same totals.
+      # The table is gone; the task page fills the histogram cache for the
+      # page it reads and stamps every entry point with the graph version.
+      gone = int(sql(
+          "SELECT count(*) FROM information_schema.tables "
+          "WHERE table_name = 'derivation_closure';"
+      ))
+      assert gone == 0, "derivation_closure is still there"
+
+      # Give the evaluation one entry point with no build_job, so the predicate
+      # below has something to exclude: without it this row is unstamped forever
+      # and the assertion fires, and if the endpoint counted it, total would
+      # exceed the page. Nothing in a real evaluation produces such a row, which
+      # is why it has to be made here.
+      sql(
+          f"WITH d AS ("
+          f"  INSERT INTO derivation (id, hash, name, architecture, created_at) "
+          f"  VALUES (uuidv7(), 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz', 'unreportable', "
+          f"          'x86_64-linux', now() AT TIME ZONE 'UTC') RETURNING id) "
+          f"INSERT INTO entry_point (id, task, evaluation, derivation, eval, created_at) "
+          f"SELECT uuidv7(), ep.task, ep.evaluation, d.id, 'zz.unreportable', "
+          f"       now() AT TIME ZONE 'UTC' "
+          f"FROM d, entry_point ep WHERE ep.evaluation = '{eval_id}' LIMIT 1;"
+      )
+      planted = int(sql(
+          f"SELECT count(*) FROM entry_point WHERE evaluation = '{eval_id}' "
+          f"AND eval = 'zz.unreportable';"
+      ))
+      assert planted == 1, "the unreportable entry point was not planted"
+
+      # An entry point with no build_job in this evaluation is not reportable, so
+      # the page never covers it and nothing ever stamps it.
+      reportable = (
+          f"ep.evaluation = '{eval_id}' AND EXISTS ("
+          f"  SELECT 1 FROM build_job bj WHERE bj.evaluation = '{eval_id}'"
+          f"  AND bj.derivation = ep.derivation)"
+      )
+      # Read the version BEFORE the page. The stamp is monotone and is at least the
+      # version the reader saw, so asserting against that floor is race-free, while
+      # comparing with the version afterwards loses to any concurrent anchor move.
+      version_before = int(sql(
+          f"SELECT graph_version FROM evaluation WHERE id = '{eval_id}';"
+      ))
+      page = json.loads(api_get(
+          token, f"tasks/project/task/entry-points?evaluation_id={eval_id}&limit=500"
+      ))["message"]
+      assert page["total"] == len(page["entry_points"]) > 0, page
+      unstamped = int(sql(
+          f"SELECT count(*) FROM entry_point ep WHERE {reportable} "
+          f"AND (ep.dep_counts_version IS NULL "
+          f"     OR ep.dep_counts_version < {version_before});"
+      ))
+      assert unstamped == 0, f"{unstamped} entry points were not stamped by the read"
+
+      # What the read stored must be what the root-attributed fenced walk says.
       drift = int(sql(
-          f"WITH stored AS ("
+          f"WITH RECURSIVE stored AS ("
           f"  SELECT ep.id, coalesce(sum(c.count), 0) AS total FROM entry_point ep "
           f"  LEFT JOIN entry_point_dep_count c ON c.entry_point = ep.id "
-          f"  WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id), "
+          f"  WHERE {reportable} GROUP BY ep.id), "
+          f"closure(ep, drv) AS ("
+          f"  SELECT ep.id, ep.derivation FROM entry_point ep WHERE {reportable} "
+          f"  UNION SELECT c.ep, s.next FROM closure c, LATERAL ("
+          f"    SELECT dd.dependency AS next FROM derivation_dependency dd "
+          f"    JOIN build_job bj ON bj.derivation = dd.dependency AND bj.evaluation = '{eval_id}' "
+          f"    WHERE dd.derivation = c.drv OFFSET 0) s), "
           f"live AS ("
           f"  SELECT ep.id, count(*) AS total FROM entry_point ep "
-          f"  JOIN derivation_closure dc ON dc.root_derivation = ep.derivation "
-          f"  JOIN derivation_build b ON b.derivation = dc.dep_derivation "
-          f"  WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id) "
-          f"SELECT count(*) FROM live l JOIN stored s ON s.id = l.id "
-          f"WHERE l.total <> s.total;"
+          f"  JOIN closure c ON c.ep = ep.id AND c.drv <> ep.derivation "
+          f"  JOIN build_job bj ON bj.derivation = c.drv AND bj.evaluation = '{eval_id}' "
+          f"  WHERE {reportable} GROUP BY ep.id) "
+          f"SELECT count(*) FROM live l JOIN stored s ON s.id = l.id WHERE l.total <> s.total;"
       ))
-      assert drift == 0, f"{drift} entry points disagree with their materialised closure"
+      assert drift == 0, f"{drift} entry points disagree with the live walk"
+      by_id = {ep["id"]: ep for ep in page["entry_points"]}
+      stored_totals = sql(
+          f"SELECT ep.id || ':' || coalesce(sum(c.count), 0) FROM entry_point ep "
+          f"LEFT JOIN entry_point_dep_count c ON c.entry_point = ep.id "
+          f"WHERE {reportable} GROUP BY ep.id;"
+      ).split()
+      for row in stored_totals:
+          ep_id, total = row.split(":")
+          assert by_id[ep_id]["deps_total"] == int(total), f"{ep_id}: api {by_id[ep_id]['deps_total']} stored {total}"
+
+      # The planted row has served its purpose, and `GET /evals/{id}` lists entry
+      # points unfiltered, so leaving it would report `zz.unreportable` as Queued
+      # for every later phase.
+      sql(
+          f"DELETE FROM entry_point WHERE evaluation = '{eval_id}' "
+          f"AND eval = 'zz.unreportable';"
+      )
+      sql("DELETE FROM derivation WHERE hash = 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';")
+      left = int(sql(
+          f"SELECT count(*) FROM entry_point WHERE evaluation = '{eval_id}' "
+          f"AND eval = 'zz.unreportable';"
+      ))
+      assert left == 0, "the unreportable entry point outlived its assertions"
 
       # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
       # We hit `/evals/{id}/builds` directly with the eval_id already pinned

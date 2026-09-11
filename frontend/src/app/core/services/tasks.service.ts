@@ -8,7 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { HttpResponse } from '@angular/common/http';
 import { ApiService } from './api.service';
-import { Task, TaskDetail, EntryPointSummary, EvaluationSummary, Paginated } from '@core/models';
+import { Task, TaskDetail, PaginatedEntryPoints, EvaluationSummary, Paginated } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class TasksService {
@@ -55,11 +55,13 @@ export class TasksService {
     return this.api.delete<string>(`tasks/${project}/${task}`);
   }
 
-  getEntryPoints(project: string, task: string, evaluationId?: string): Observable<EntryPointSummary[]> {
-    const url = evaluationId
-      ? `tasks/${project}/${task}/entry-points?evaluation_id=${evaluationId}`
-      : `tasks/${project}/${task}/entry-points`;
-    return this.api.get<EntryPointSummary[]>(url);
+  getEntryPoints(project: string, task: string, evaluationId?: string, limit?: number, offset?: number): Observable<PaginatedEntryPoints> {
+    const params: string[] = [];
+    if (evaluationId) params.push(`evaluation_id=${evaluationId}`);
+    if (limit !== undefined) params.push(`limit=${limit}`);
+    if (offset !== undefined) params.push(`offset=${offset}`);
+    const query = params.length ? `?${params.join('&')}` : '';
+    return this.api.get<PaginatedEntryPoints>(`tasks/${project}/${task}/entry-points${query}`);
   }
 
   getEvaluations(project: string, task: string, limit?: number): Observable<EvaluationSummary[]> {

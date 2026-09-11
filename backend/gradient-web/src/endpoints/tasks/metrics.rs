@@ -6,13 +6,13 @@
 
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::endpoints::builds::closure::{derivation_closure_reachable, sum_output_sizes};
+use crate::endpoints::builds::closure::sum_output_sizes;
 use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::{output_hashes_for_drvs, runtime_closure_size};
+use gradient_db::{output_hashes_for_drvs, runtime_closure_size, transitive_closure_reachable};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -101,8 +101,11 @@ pub async fn get_task_metrics(
             .push(ep.derivation);
     }
 
+    // Each iteration opens and commits its own sized walk. Holding one across the
+    // loop would pin one of the web pool's connections for the whole request,
+    // which at nixpkgs scale is minutes of head-of-line blocking for every other
+    // page; keeping the closures instead would hold every evaluation's at once.
     let mut points = Vec::new();
-
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
@@ -121,7 +124,7 @@ pub async fn get_task_metrics(
             .unwrap_or_default();
 
         let entry_point_count = ep_drv_ids.len() as i64;
-        let closure = derivation_closure_reachable(&state.web_db, ep_drv_ids.clone()).await?;
+        let closure = transitive_closure_reachable(&state.web_db, &ep_drv_ids).await?;
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
         let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids.clone()).await?;
@@ -154,6 +157,43 @@ pub async fn get_task_metrics(
 }
 
 // ── Per-entry-point metrics ──────────────────────────────────────────────────
+
+/// The part of an entry point's metric point fixed by its derivation alone.
+///
+/// Every one of these walks a global table with no evaluation column, which is
+/// what makes `DerivationId` a sound memo key. The same-sounding `deps_total` on
+/// the task page is NOT this number: `task_board::entry_point_dep_counts` joins
+/// `build_job` on the evaluation, so it is scoped. Scope this walk to the
+/// evaluation to match it and the key has to become `(EvaluationId, DerivationId)`
+/// or every point on the chart gets the first evaluation's answer.
+#[derive(Clone, Copy)]
+struct DerivationMetrics {
+    dependencies_count: i64,
+    output_size_bytes: Option<i64>,
+    closure_size_bytes: Option<i64>,
+    runtime_closure_size_bytes: Option<i64>,
+}
+
+/// Size one derivation's build closure. The walk opens and commits its own sized
+/// transaction, so no connection is held across the caller's loop.
+async fn derivation_metrics(
+    state: &Arc<ServerState>,
+    derivation: DerivationId,
+) -> WebResult<DerivationMetrics> {
+    let closure = transitive_closure_reachable(&state.web_db, &[derivation]).await?;
+    let dependencies_count = (closure.len() as i64).saturating_sub(1);
+    let output_size_bytes = sum_output_sizes(&state.web_db, vec![derivation]).await?;
+    let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
+    let seeds = output_hashes_for_drvs(&state.web_db, &[derivation]).await?;
+    let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
+
+    Ok(DerivationMetrics {
+        dependencies_count,
+        output_size_bytes,
+        closure_size_bytes,
+        runtime_closure_size_bytes: (runtime > 0).then_some(runtime),
+    })
+}
 
 #[derive(Deserialize)]
 pub struct EntryPointMetricsQuery {
@@ -215,8 +255,8 @@ pub async fn get_entry_point_metrics(
         .await?;
 
     // Evaluation, anchor, build job and attempt for the whole page in four
-    // queries; the closure walks below stay per entry point, each seeded by its
-    // own derivation. The build-job read is narrowed by derivation too, so it
+    // queries; the closure walks below stay per distinct derivation, each seeded
+    // by that derivation. The build-job read is narrowed by derivation too, so it
     // returns the entry points rather than every build of every evaluation.
     let eval_ids: Vec<EvaluationId> = entry_points.iter().map(|ep| ep.evaluation).collect();
     let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
@@ -251,8 +291,12 @@ pub async fn get_entry_point_metrics(
         .await
         .unwrap_or_default();
 
+    // Only `evaluation_id`, `build_id` and `created_at` below are per evaluation;
+    // the rest, `build_status` and `build_time_ms` included, are determined by the
+    // derivation, because `derivation_build` is unique on it. The four that cost a
+    // query are memoised on it, as scalars, never as the closure set.
+    let mut by_derivation: HashMap<DerivationId, DerivationMetrics> = HashMap::new();
     let mut points = Vec::new();
-
     for ep in entry_points {
         let (Some(evaluation), Some(anchor), Some(build_job)) = (
             evaluations.get(&ep.evaluation),
@@ -264,16 +308,14 @@ pub async fn get_entry_point_metrics(
 
         let build_time_ms = attempts.get(&anchor.id).and_then(|a| a.duration_ms());
 
-        let closure = derivation_closure_reachable(&state.web_db, vec![ep.derivation]).await?;
-        let dependencies_count = (closure.len() as i64).saturating_sub(1);
-
-        let output_size_bytes = sum_output_sizes(&state.web_db, vec![ep.derivation]).await?;
-        let closure_size_bytes =
-            sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
-
-        let seeds = output_hashes_for_drvs(&state.web_db, &[ep.derivation]).await?;
-        let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
-        let runtime_closure_size_bytes = (runtime > 0).then_some(runtime);
+        let metrics = match by_derivation.get(&ep.derivation) {
+            Some(m) => *m,
+            None => {
+                let m = derivation_metrics(&state.0, ep.derivation).await?;
+                by_derivation.insert(ep.derivation, m);
+                m
+            }
+        };
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
@@ -281,10 +323,10 @@ pub async fn get_entry_point_metrics(
             created_at: evaluation.created_at,
             build_status: anchor.status.for_api(),
             build_time_ms,
-            output_size_bytes,
-            closure_size_bytes,
-            runtime_closure_size_bytes,
-            dependencies_count,
+            output_size_bytes: metrics.output_size_bytes,
+            closure_size_bytes: metrics.closure_size_bytes,
+            runtime_closure_size_bytes: metrics.runtime_closure_size_bytes,
+            dependencies_count: metrics.dependencies_count,
         });
     }
 

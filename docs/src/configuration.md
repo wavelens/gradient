@@ -141,9 +141,9 @@ default, so they are options instead. A module that guessed them would size a
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `postgresSharedBuffers` | `null` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. `null` leaves the upstream default. |
+| `postgresSharedBuffers` | `"512MB"` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. The default is a floor, not a target: it is one fixed allocation rather than a per-node one, so it cannot multiply the way the two below can. Raise it on anything larger than 2 GB. |
 | `postgresEffectiveCacheSize` | `null` | `effective_cache_size`: three quarters of the host's RAM, so `"12GB"` on a 16 GB host. A planner hint about what the kernel will cache, not an allocation. |
-| `postgresWorkMem` | `null` | `work_mem`: the floor every ordinary query gets, which the graph walks raise above for one statement. Charged per sort or hash node, so the real ceiling is this times every concurrent query's node count. `"32MB"` suits a host sized for the 80 pooled connections below. |
+| `postgresWorkMem` | `null` | `work_mem`: the floor every ordinary query gets, which the graph walks raise above inside the transaction each one opens. Charged per sort or hash node, so the real ceiling is this times every concurrent query's node count. `"32MB"` suits a host sized for the 80 pooled connections below. |
 | `postgresMaintenanceWorkMem` | `null` | `maintenance_work_mem`: index builds and the autovacuum passes over the edge tables. Each of `autovacuum_max_workers` can claim this much at once, so `"1GB"` wants RAM to spare. |
 
 When `databaseUrl` points at a cluster this module does not configure, set the
@@ -156,13 +156,15 @@ same six values there by hand.
 enough for one server, not for two.
 
 Two things Gradient handles itself, so they do not belong in the host config. The
-three edge tables (`cached_path_reference`, `derivation_dependency`,
-`derivation_closure`) carry per-table autovacuum overrides set by migration: all
-three scale factors go to 0.02, because these tables are append-heavy and read
-through index-only scans, and what keeps those scans index-only is a fresh
-visibility map rather than a low dead-tuple count. And the recursive walks raise
-`work_mem` to 64 MB with `SET LOCAL` inside their own transaction, which has to
-stay above the floor in the table above or it buys the walk nothing.
+two edge tables (`cached_path_reference`, `derivation_dependency`) carry per-table
+autovacuum overrides set by migration: all three scale factors go to 0.02, because
+these tables are append-heavy and read through index-only scans, and what keeps
+those scans index-only is a fresh visibility map rather than a low dead-tuple
+count. (`m20260911_000000` sets the same overrides on a third edge table,
+`derivation_closure`, which the migration right after it drops with the table.)
+And the recursive walks raise `work_mem` to 64 MB with `SET LOCAL` inside their
+own transaction, which has to stay above the floor in the table above or it buys
+the walk nothing.
 
 ## Reverse Proxies
 

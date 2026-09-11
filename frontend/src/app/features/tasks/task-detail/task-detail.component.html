@@ -135,7 +135,7 @@
                 <div class="pkg {{ buildStatusClass(ep.build_status) }}" [style.animation-delay.ms]="$index * 18"
                      [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }">
                   <gr-icon [name]="buildStatusIcon(ep.build_status)" class="si {{ buildStatusClass(ep.build_status) }}" size="sm" />
-                  <span class="pkg-name" [title]="ep.derivation_path">{{ getDerivationName(ep.derivation_path) }}</span>
+                  <span class="pkg-name" [title]="ep.eval + ' - ' + ep.derivation_path">{{ attrLabel(ep.eval) }}</span>
                   <span class="chip-arch mono">{{ ep.architecture }}</span>
                   <app-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
                   <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
@@ -149,6 +149,11 @@
                 </div>
               }
             </div>
+            @if (entryPoints().length < entryPointsTotal()) {
+              <button type="button" class="pkg-more" (click)="loadMoreEntryPoints()">
+                Show more ({{ entryPoints().length }} of {{ entryPointsTotal() }})
+              </button>
+            }
           } @else {
             <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />

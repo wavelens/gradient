@@ -349,11 +349,17 @@ impl BatchWriter<'_> {
             .await
             .context("insert dependency edges")?;
 
-        Ok(grew
+        // One row per landed edge, so a derivation with fifty new inputs is named
+        // fifty times; every consumer wants the set.
+        let mut grown: Vec<DerivationId> = grew
             .iter()
             .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
             .map(DerivationId::new)
-            .collect())
+            .collect();
+        grown.sort_unstable();
+        grown.dedup();
+
+        Ok(grown)
     }
 
     async fn set_anchor_limits(
@@ -601,13 +607,13 @@ impl BatchWriter<'_> {
         batch: &IngestBatch,
         resolved: &Resolved,
         newly_walked: &HashSet<String>,
-        grew: Vec<DerivationId>,
+        grew: &[DerivationId],
     ) -> Result<()> {
         let mut to_seed: Vec<DerivationId> = newly_walked
             .iter()
             .filter_map(|h| resolved.by_hash.get(h).copied())
             .collect();
-        to_seed.extend(grew);
+        to_seed.extend_from_slice(grew);
         to_seed.sort_unstable();
         to_seed.dedup();
 
@@ -921,7 +927,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
         writer
-            .advance_readiness(batch, &resolved, &newly_walked, grew)
+            .advance_readiness(batch, &resolved, &newly_walked, &grew)
             .await?;
         report.entry_points = match batch.task {
             Some(task) => {
@@ -931,6 +937,19 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             }
             None => Vec::new(),
         };
+
+        gradient_db::bump_graph_version(writer.db(), &[evaluation_id])
+            .await
+            .context("bump the graph version for the batch")?;
+
+        // Edges are global: a derivation an older evaluation kept as a stub gains
+        // a closure here, so that evaluation's histogram is stale too.
+        if !grew.is_empty() {
+            gradient_db::bump_graph_version_for_derivations(writer.db(), &grew)
+                .await
+                .context("bump the graph version of evaluations sharing the new edges")?;
+        }
+
         report.walked = newly_walked.len();
         debug!(%evaluation_id, walked = report.walked, named = ids.len(), "batch written");
     }
@@ -1114,7 +1133,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![ok(1); 3])
+            .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1134,8 +1153,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            13,
-            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote: {log:?}"
+            14,
+            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version: {log:?}"
         );
         let walked = log
             .iter()
@@ -1179,6 +1198,79 @@ mod tests {
         );
     }
 
+    /// Edges are global, so a batch that grew one must bump every evaluation that
+    /// already holds the derivation. The edge insert returns one row per landed
+    /// edge, so a derivation with many new inputs is named many times; binding
+    /// that raw would hand `= ANY($1)` tens of thousands of duplicate uuids on a
+    /// first-delivery batch, which is what flips the planner off the `build_job`
+    /// index. The set is what the bump wants.
+    #[tokio::test]
+    async fn the_cross_evaluation_bump_names_each_derivation_once() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            // the edge insert names the same derivation once per landed edge
+            .append_query_results([vec![drv_row(a.id), drv_row(a.id)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // stubs, lock, seed, the batch's own bump, the cross-evaluation bump
+            .append_exec_results(vec![ok(1); 5])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log: Vec<Statement> = pool
+            .into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .collect();
+        let bump = log
+            .iter()
+            .find(|s| {
+                s.sql
+                    .contains("SELECT evaluation FROM build_job WHERE derivation = ANY")
+            })
+            .expect("a batch that grew an edge bumps the evaluations sharing it");
+        let Some(Value::Array(_, Some(bound))) =
+            bump.values.as_ref().and_then(|v| v.0.first()).cloned()
+        else {
+            panic!("the bump binds one uuid array: {:?}", bump.values);
+        };
+
+        assert_eq!(
+            bound.len(),
+            1,
+            "two edges on one derivation bind it once: {bound:?}"
+        );
+        let Some(Value::Uuid(Some(only))) = bound.first().cloned() else {
+            panic!("the bump binds uuids: {bound:?}");
+        };
+
+        assert_eq!(
+            only,
+            a.id.into_inner(),
+            "and the one it keeps is the derivation the edges named"
+        );
+    }
+
     /// The readiness pass has one legal order and the order IS the correctness
     /// argument, so it is asserted literally: mark, ripple, promote, seed, promote,
     /// un-promote.
@@ -1209,7 +1301,7 @@ mod tests {
             .append_query_results([vec![drv_row(a.id)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![transition_row(a.id, 1, 0)]])
-            .append_exec_results(vec![ok(1); 3])
+            .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1275,7 +1367,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
-            .append_exec_results(vec![ok(0); 1])
+            .append_exec_results(vec![ok(0); 2])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1390,7 +1482,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![ok(1); 3])
+            .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 

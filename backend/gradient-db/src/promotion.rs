@@ -304,26 +304,27 @@ fn deterministic_build_failure(alias: &str) -> String {
 /// inheriting the stale failure. Anchors with a [`deterministic_build_failure`]
 /// are excluded: their non-zero builder exit is reproducible, so re-queueing only
 /// loops the fleet. Build-once success states (`Completed`/`Substituted`) are
-/// never touched. Returns the number re-queued.
+/// never touched. Returns the thaws it made, so the caller can feed
+/// [`crate::status::emit_transition_effects`].
 pub async fn requeue_failed_anchors<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
-) -> Result<u64, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr> {
     let sql = requeue_failed_anchors_sql();
-    let mut total = 0;
+    let mut changes = Vec::new();
     for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        total += db
-            .execute_raw(Statement::from_sql_and_values(
+        let rows = db
+            .query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 &sql,
                 [ids.into()],
             ))
-            .await?
-            .rows_affected();
+            .await?;
+        changes.extend(returned_transitions(rows));
     }
 
-    Ok(total)
+    Ok(changes)
 }
 
 /// `WITH RECURSIVE` prelude binding a requeue candidate `closure` (the downward
@@ -362,8 +363,11 @@ fn requeue_failed_anchors_sql() -> String {
         UPDATE derivation_build db
         SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
-        WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
+        FROM derivation_build old
+        WHERE old.id = db.id
+          AND db.derivation = ANY($1) AND db.status IN ({requeueable})
           AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
+        RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         created = status_sql::build(BuildStatus::Created),
         requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
@@ -381,21 +385,21 @@ fn requeue_failed_anchors_sql() -> String {
 /// node to `Created` so promotion (which keys on any `build_job`, not this eval's)
 /// can rebuild the failed subtree bottom-up. Anchors with a
 /// [`deterministic_build_failure`] are excluded, as in [`requeue_failed_anchors`].
-/// Returns the number re-queued.
+/// Returns the thaws it made, so the caller can feed
+/// [`crate::status::emit_transition_effects`].
 pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
-) -> Result<u64, DbErr> {
-    let affected = db
-        .execute_raw(Statement::from_sql_and_values(
+) -> Result<Vec<TransitionChange>, DbErr> {
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             requeue_failed_closure_for_eval_sql(),
             [Value::Uuid(Some(evaluation.into_inner()))],
         ))
-        .await?
-        .rows_affected();
+        .await?;
 
-    Ok(affected)
+    Ok(returned_transitions(rows))
 }
 
 fn requeue_failed_closure_for_eval_sql() -> String {
@@ -406,9 +410,12 @@ fn requeue_failed_closure_for_eval_sql() -> String {
         UPDATE derivation_build db
         SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
-        WHERE db.derivation IN (SELECT derivation FROM closure)
+        FROM derivation_build old
+        WHERE old.id = db.id
+          AND db.derivation IN (SELECT derivation FROM closure)
           AND db.status IN ({requeueable})
           AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
+        RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         created = status_sql::build(BuildStatus::Created),
         requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),

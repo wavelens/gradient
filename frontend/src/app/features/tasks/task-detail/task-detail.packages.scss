@@ -9,6 +9,20 @@
 .pkg-label { margin: $space-section 0 $spacing-sm; h3 { font-size: $font-size-md; } }
 .pkg-list { display: flex; flex-direction: column; gap: $space-pair; }
 
+.pkg-more {
+  width: 100%;
+  margin-top: $space-pair;
+  padding: $spacing-sm $spacing-md;
+  background-color: var(--gr-surface-control);
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+  cursor: pointer;
+
+  &:hover { border-color: var(--gr-text-muted); color: var(--gr-text); }
+}
+
 .pkg {
   background-color: var(--gr-surface-control);
   border: 1px solid var(--gr-border-subtle);

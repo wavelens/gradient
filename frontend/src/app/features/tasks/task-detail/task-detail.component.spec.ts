@@ -21,6 +21,23 @@ function zeroCounts(): BuildStatusCounts {
   return { completed: 0, failed: 0, building: 0, queued: 0, substituted: 0, aborted: 0 };
 }
 
+function epSummary(id: string, attr = `packages."x86_64-linux".${id}`): EntryPointSummary {
+  return {
+    id,
+    build_id: `b-${id}`,
+    derivation_path: `aaaa-${id}.drv`,
+    eval: attr,
+    build_status: 'Completed',
+    has_artefacts: false,
+    outputs: {},
+    architecture: 'x86_64-linux',
+    build_time_ms: null,
+    deps: zeroCounts(),
+    deps_total: 0,
+    created_at: '2026-01-01T00:00:00',
+  } as EntryPointSummary;
+}
+
 function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building'): EvaluationSummary {
   return {
     id,
@@ -93,7 +110,7 @@ function makeTasksService(access: AccessState, overrides: Partial<{
   const extraEvals = overrides.extraEvals ?? [];
   return {
     getTask: () => of(taskFor(access, extraEvals, overrides.primaryStatus)),
-    getEntryPoints: overrides.getEntryPoints ?? (() => of([])),
+    getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0 })),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
     abortEvaluation: overrides.abortEvaluation ?? (() => of('ok')),
@@ -219,10 +236,163 @@ describe('TaskDetailComponent - evaluation selection', () => {
       { managed: false, canEdit: true, canTrigger: true },
       { extraEvals: [e2] },
     );
-    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of([]));
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [], total: 0 }));
     const component = fixture.componentInstance;
     component.select(component.evaluations()[1]);
-    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id);
+    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id, 25, 0);
+  });
+
+  /// The server clamps `limit` at 500, so growing one request cannot reach past it;
+  /// "show more" pages with an offset and appends what comes back.
+  it('appends the next page by offset instead of growing one request', () => {
+    const first = epSummary('a');
+    const second = epSummary('b');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a']);
+
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2 }));
+    component.loadMoreEntryPoints();
+    const [, , , limit, offset] = spy.mock.calls.at(-1)!;
+
+    expect(limit).toBe(25);
+    expect(offset).toBe(1);
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+    expect(component.entryPointsTotal()).toBe(2);
+  });
+
+  /// The row label has to be the field the server sorts by, or the list looks
+  /// unordered; the derivation name it used to show is not that field.
+  it('labels a package by the last segment of its attribute path', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const component = fixture.componentInstance;
+    expect(component.attrLabel('packages."x86_64-linux".hello')).toBe('hello');
+    expect(component.attrLabel('hello')).toBe('hello');
+    expect(component.attrLabel('packages."x86_64-linux"."foo.bar"')).toBe('foo.bar');
+  });
+
+  /// A NixOS flake's entry points all end `.config.system.build.toplevel`, so the
+  /// last segment labelled every row of a 74-host list `toplevel`. The label is
+  /// what the shared wrapper leaves behind, at both ends of the path.
+  it('drops the attribute-path segments every row on the page shares', () => {
+    const host = (n: string) =>
+      epSummary(n, `nixosConfigurations.${n}.config.system.build.toplevel`);
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [host('broker'), host('caveman')], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+
+    expect(component.attrLabel('nixosConfigurations.broker.config.system.build.toplevel'))
+      .toBe('broker');
+    expect(component.attrLabel('nixosConfigurations.caveman.config.system.build.toplevel'))
+      .toBe('caveman');
+  });
+
+  /// Stripping the shared wrapper must never strip the whole path: one row shares
+  /// every segment with itself, and rows with nothing in common keep theirs.
+  it('always leaves at least one segment', () => {
+    const { fixture } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      {
+        getEntryPoints: () => of({
+          entry_points: [
+            epSummary('a', 'packages."x86_64-linux".hello'),
+            epSummary('b', 'nixosConfigurations.broker.config.system.build.toplevel'),
+          ],
+          total: 2,
+        }),
+      },
+    );
+    const component = fixture.componentInstance;
+
+    expect(component.attrLabel('packages."x86_64-linux".hello'))
+      .toBe('packages.x86_64-linux.hello');
+    expect(component.attrLabel('nixosConfigurations.broker.config.system.build.toplevel'))
+      .toBe('nixosConfigurations.broker.config.system.build.toplevel');
+  });
+
+  /// The server walks one dependency closure per entry point it returns, so a
+  /// live poll asks for the first page and never the whole scrolled window. The
+  /// rows past it are spliced back on rather than re-read.
+  it('refreshes exactly one page however many rows are shown', () => {
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 300 }) },
+    );
+    const component = fixture.componentInstance;
+    expect(component.entryPoints().length).toBe(1);
+
+    const spy = vi.spyOn(tasksService, 'getEntryPoints')
+      .mockReturnValue(of({ entry_points: [epSummary('a'), epSummary('b')], total: 300 }));
+    component.loadTaskData(false);
+    const [, , , limit, offset] = spy.mock.calls.at(-1)!;
+
+    expect(limit).toBe(25);
+    expect(offset).toBe(0);
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+  });
+
+  /// "show more" pages by offset, so a page that overlaps what is already shown
+  /// must not repeat a row: `@for ... track ep.id` throws on a duplicate key.
+  it('does not duplicate a row when the appended page overlaps', () => {
+    const first = epSummary('a');
+    const second = epSummary('b');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+    vi.spyOn(tasksService, 'getEntryPoints')
+      .mockReturnValue(of({ entry_points: [first, second], total: 2 }));
+    component.loadMoreEntryPoints();
+
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+  });
+
+  /// The refreshed page is the server's own prefix, so anything not in it belongs
+  /// behind it whatever JS thinks of the boundary pair. Comparing the two in
+  /// code-unit order dropped the paged tail on every poll under a glibc or ICU
+  /// collation, where `abc` sorts before `Zlib` and in JS it does not.
+  it('keeps a paged tail whose attribute sorts before the page in JS order', () => {
+    const inPage = epSummary('a', 'packages."x86_64-linux".abc');
+    const paged = epSummary('b', 'packages."x86_64-linux".Zlib');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [inPage], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [paged], total: 2 }));
+    component.loadMoreEntryPoints();
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [inPage], total: 2 }));
+    component.loadTaskData(false);
+
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+  });
+
+  /// A refresh re-reads only the window it shows, so an appended tail must not be
+  /// dropped by the next live poll.
+  it('keeps appended packages across a refresh of the first window', () => {
+    const first = epSummary('a');
+    const second = epSummary('b');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [second], total: 2 }));
+    component.loadMoreEntryPoints();
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [first], total: 2 }));
+    component.loadTaskData(false);
+
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
 
   it('labels a pull-request trigger as "PR #<n>" (#391)', () => {

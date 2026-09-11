@@ -179,12 +179,6 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
 }
 
 async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<()> {
-    // The build graph is now complete: materialise each entry point's closure
-    // and seed the per-entry-point dependency counts (#383).
-    if let Err(e) = gradient_db::seed_entry_point_dep_counts(&ctx.worker_db, evaluation_id).await {
-        error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
-    }
-
     // Every edge landed with its batch, so the graph is complete here: run the
     // healing pipeline scoped to this eval, which thaws its closure, settles the
     // anchors whose outputs are already whole and advances their dependents, fails

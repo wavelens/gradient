@@ -170,12 +170,34 @@ The consequences of moving an anchor are equally centralized. Bulk sweeps
 return the typed `(derivation, from, to)` transitions they made, and both
 mutation models - the state-machine-guarded single-row path
 (`update_derivation_build_status`) and the bulk SQL sweeps - feed them through
-one `emit_transition_effects`: entry-point dep-count deltas, board events, the
+one `emit_transition_effects`: the evaluation graph version, board events, the
 per-entry-point CI check, cache-changed notifications, and evaluation
 finalization (`check_evaluation_done` fires for every terminal transition, from
 any path). It is structurally impossible to move an anchor without its
 consequences firing, which closes the historical "bulk sweep bypassed the
 reactive hook" dead-zone class.
+
+`evaluation.graph_version` is the invalidation key of the task page's
+per-entry-point histogram. The emitter bumps it once per emit for every
+evaluation a moved anchor belongs to; an ingest batch bumps its own evaluation
+and, because edges are global, every evaluation that already holds one of the
+derivations whose edge set grew; startup recovery bumps what it requeues and what
+it aborts, because it has no emitter. The histogram itself is computed on demand
+by the root-attributed fenced walk (`task_board::entry_point_dep_counts`) for the
+entry points of one page, stored in `entry_point_dep_count`, and each entry point
+records the version and the time it was computed at
+(`entry_point.dep_counts_version`, `dep_counts_computed_at`). No table grows with
+roots times closure and no per-transition write is proportional to the
+evaluation.
+
+The version alone would be a cache that never hits: a building evaluation moves
+anchors continuously, so every poll of the page would find every entry point
+stale and re-walk page-size-times-closure. A read therefore recomputes an entry
+point only if the graph moved AND its rows are older than
+`DEP_COUNTS_REFRESH_SECS`, so the walk runs on a bounded cadence however many
+viewers a page has, and unconditionally once its rows pass
+`DEP_COUNTS_MAX_AGE_SECS`, which is what heals a bump the emitter logged and
+swallowed.
 
 The dependency walk is generated once, by
 `graph_sql::dependency_closure_cte`, and shared by the failure cascades, the

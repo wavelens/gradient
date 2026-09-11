@@ -54,7 +54,13 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   loading = signal(true);
   task = signal<TaskDetail | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
+  entryPointsTotal = signal(0);
   entryPointsLoading = signal(false);
+  // Mirrors the server's own page size and its hard cap, so "show more" pages with
+  // an offset instead of asking for a limit the server would clamp.
+  private static readonly ENTRY_POINTS_PAGE = 25;
+  private static readonly ENTRY_POINTS_PAGE_MAX = 500;
+  private entryPointsAppending = false;
   selectedId = signal<string | null>(null);
   starting = signal(false);
   errorMessage = signal<string | null>(null);
@@ -130,7 +136,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         if (!this.selectedId() && task.last_evaluations.length) {
           this.selectedId.set(task.last_evaluations[0].id);
         }
-        // The entry-point query (dep-closure CTE) is expensive; on live pings
+        // The entry-point page walks the graph for stale histograms; on live pings
         // throttle it so a running evaluation's rapid status stream doesn't
         // hammer the backend. The cheap summary above keeps headline counts live.
         if (!live || Date.now() - this.lastEntryPointsFetch >= this.ENTRY_POINTS_LIVE_INTERVAL_MS) {
@@ -162,6 +168,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       // Drop the previous evaluation's packages immediately so the panel shows a
       // loading state, not stale data, during the (slow) entry-point fetch.
       this.entryPoints.set([]);
+      this.entryPointsTotal.set(0);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
     }
@@ -176,34 +183,83 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
+  private entryPointSignature(eps: EntryPointSummary[]): string {
+    return eps.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
+  }
+
   private loadEntryPoints(evaluationId?: string): void {
     if (!evaluationId) {
       this.entryPoints.set([]);
+      this.entryPointsTotal.set(0);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
       this.entryPointsLoading.set(false);
       return;
     }
     this.lastEntryPointsFetch = Date.now();
-    if (evaluationId !== this.entryPointsEvalId) this.entryPointsLoading.set(true);
-    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId).subscribe({
-      next: (eps) => {
+    const switching = evaluationId !== this.entryPointsEvalId;
+    if (switching) this.entryPointsLoading.set(true);
+    // A refresh re-reads the first page only, never the whole scrolled window:
+    // the server walks one dependency closure per entry point it returns, so
+    // re-reading a 500-row window every 4 s costs twenty times what the visible
+    // head costs. Rows past the head keep their last values and are spliced
+    // behind the refreshed page.
+    const limit = TaskDetailComponent.ENTRY_POINTS_PAGE;
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, limit, 0).subscribe({
+      next: (page) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
         // evaluation, so a slow earlier request can't clobber a newer selection.
         if (this.selectedId() !== evaluationId) return;
         this.entryPointsLoading.set(false);
-        const sorted = [...eps].sort((a, b) =>
-          this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path)));
+        this.entryPointsTotal.set(page.total);
+        const next = this.spliceEntryPoints(
+          page.entry_points,
+          switching ? [] : this.entryPoints(),
+        );
         // Skip the re-render (and its enter animation) when nothing changed.
-        const sig = sorted.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
+        const sig = this.entryPointSignature(next);
         if (evaluationId === this.entryPointsEvalId && sig === this.entryPointsSig) return;
         this.entryPointsEvalId = evaluationId;
         this.entryPointsSig = sig;
-        this.entryPoints.set(sorted);
+        this.entryPoints.set(next);
       },
       error: (error) => {
         if (this.selectedId() === evaluationId) this.entryPointsLoading.set(false);
         console.error('Failed to load entry points:', error);
+      },
+    });
+  }
+
+  /// Merge a refreshed page with the rows already shown. The page is the server's
+  /// rows at offset 0, so every row it does not hold ranks after it and keeps its
+  /// display order behind it; matching on id rather than on position is what lets
+  /// entry points ingested into the page fall out of the tail without a hole.
+  private spliceEntryPoints(page: EntryPointSummary[], shown: EntryPointSummary[]): EntryPointSummary[] {
+    const inPage = new Set(page.map(e => e.id));
+
+    return [...page, ...shown.filter(e => !inPage.has(e.id))];
+  }
+
+  loadMoreEntryPoints(): void {
+    const evaluationId = this.selected()?.id;
+    if (!evaluationId || this.entryPointsAppending) return;
+    this.entryPointsAppending = true;
+    const offset = this.entryPoints().length;
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, TaskDetailComponent.ENTRY_POINTS_PAGE, offset).subscribe({
+      next: (page) => {
+        this.entryPointsAppending = false;
+        if (this.selectedId() !== evaluationId) return;
+        this.entryPointsTotal.set(page.total);
+        const shown = this.entryPoints();
+        const seen = new Set(shown.map(e => e.id));
+        const next = [...shown, ...page.entry_points.filter(e => !seen.has(e.id))];
+        this.entryPointsEvalId = evaluationId;
+        this.entryPointsSig = this.entryPointSignature(next);
+        this.entryPoints.set(next);
+      },
+      error: (error) => {
+        this.entryPointsAppending = false;
+        console.error('Failed to load more entry points:', error);
       },
     });
   }
@@ -312,6 +368,44 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const parts = path.split('/').pop() ?? path;
     const match = parts.match(/^[a-z0-9]+-(.+?)(?:\.drv)?$/);
     return match ? match[1] : parts;
+  }
+
+  // Segments are dot-separated outside quotes, so `pkgs."x.y"` ends at `x.y`.
+  private static attrSegments(attr: string): string[] {
+    const parts = attr.match(/"[^"]*"|[^."]+/g) ?? [];
+    const segments = parts.map(s => s.replace(/^"|"$/g, '')).filter(s => s.length > 0);
+    return segments.length ? segments : [attr];
+  }
+
+  /// The label of each attribute path on the page, with the segments every path
+  /// shares stripped from both ends. The last segment alone does not identify a
+  /// row: a NixOS flake's entry points all end
+  /// `.config.system.build.toplevel`, so every one of them reads `toplevel`.
+  /// Dropping the shared wrapper leaves exactly what distinguishes them, and at
+  /// least one segment always survives.
+  entryPointLabels = computed(() => {
+    const paths = this.entryPoints().map(ep => ep.eval);
+    const labels = new Map<string, string>();
+    if (!paths.length) return labels;
+
+    const segs = paths.map(p => TaskDetailComponent.attrSegments(p));
+    const shortest = segs.reduce((n, s) => Math.min(n, s.length), Infinity);
+    let head = 0;
+    while (head < shortest - 1 && segs.every(s => s[head] === segs[0][head])) head++;
+    let tail = 0;
+    while (
+      head + tail < shortest - 1 &&
+      segs.every(s => s[s.length - 1 - tail] === segs[0][segs[0].length - 1 - tail])
+    ) tail++;
+
+    segs.forEach((s, i) => labels.set(paths[i], s.slice(head, s.length - tail).join('.')));
+    return labels;
+  });
+
+  attrLabel(attr: string): string {
+    const shared = this.entryPointLabels().get(attr);
+    if (shared) return shared;
+    return TaskDetailComponent.attrSegments(attr).at(-1) ?? attr;
   }
 
   statusClass(status: EvaluationStatus): string {
