@@ -34,7 +34,6 @@ pub mod commit;
 pub mod debug_info;
 pub mod derivation;
 pub mod derivation_build;
-pub mod derivation_closure;
 pub mod derivation_dependency;
 pub mod derivation_feature;
 pub mod derivation_input_source;
