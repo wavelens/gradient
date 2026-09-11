@@ -156,9 +156,9 @@ same six values there by hand.
 enough for one server, not for two.
 
 Two things Gradient handles itself, so they do not belong in the host config. The
-three edge tables (`cached_path_reference`, `derivation_dependency`,
-`derivation_closure`) carry per-table autovacuum overrides set by migration: all
-three scale factors go to 0.02, because these tables are append-heavy and read
+two edge tables (`cached_path_reference`, `derivation_dependency`) carry
+per-table autovacuum overrides set by migration: all three scale factors go to
+0.02, because these tables are append-heavy and read
 through index-only scans, and what keeps those scans index-only is a fresh
 visibility map rather than a low dead-tuple count. And the recursive walks raise
 `work_mem` to 64 MB with `SET LOCAL` inside their own transaction, which has to

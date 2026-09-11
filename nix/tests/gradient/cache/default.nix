@@ -314,7 +314,7 @@ in {
       def api_get(token, path):
           """GET ``API/<path>``, return the parsed `.message` field as text."""
           return server.succeed(
-              f'{CURL} -sf -H "Authorization: Bearer {token}" {API}/{path}'
+              f'{CURL} -sf -H "Authorization: Bearer {token}" "{API}/{path}"'
           )
 
       def assert_no_server_panic(since_seconds=45):
@@ -728,7 +728,7 @@ in {
       leftover_keys = int(sql(
           "SELECT count(*) FROM information_schema.columns "
           "WHERE column_name = 'id' AND table_name IN "
-          "('derivation_dependency', 'derivation_closure', 'cached_path_reference');"
+          "('derivation_dependency', 'cached_path_reference');"
       ))
       assert leftover_keys == 0, f"{leftover_keys} junction tables kept a surrogate key"
 
@@ -764,22 +764,53 @@ in {
           assert "Nested Loop" in plan, f"the {direction} walk lost its nested loop:\n{plan}"
           assert "Merge Join" not in plan, f"the {direction} walk merge-joins again:\n{plan}"
 
-      # The maintained histogram is what the task page reads; recomputing it from
-      # the materialised closure must give the same totals.
+      # The table is gone; the task page fills the histogram cache for the
+      # page it reads and stamps every entry point with the graph version.
+      gone = int(sql(
+          "SELECT count(*) FROM information_schema.tables "
+          "WHERE table_name = 'derivation_closure';"
+      ))
+      assert gone == 0, "derivation_closure is still there"
+      page = json.loads(api_get(
+          token, f"tasks/project/task/entry-points?evaluation_id={eval_id}&limit=500"
+      ))["message"]
+      assert page["total"] == len(page["entry_points"]) > 0, page
+      unstamped = int(sql(
+          f"SELECT count(*) FROM entry_point ep JOIN evaluation e ON e.id = ep.evaluation "
+          f"WHERE ep.evaluation = '{eval_id}' "
+          f"AND ep.dep_counts_version IS DISTINCT FROM e.graph_version;"
+      ))
+      assert unstamped == 0, f"{unstamped} entry points were not stamped by the read"
+
+      # What the read stored must be what the root-attributed fenced walk says.
       drift = int(sql(
-          f"WITH stored AS ("
+          f"WITH RECURSIVE stored AS ("
           f"  SELECT ep.id, coalesce(sum(c.count), 0) AS total FROM entry_point ep "
           f"  LEFT JOIN entry_point_dep_count c ON c.entry_point = ep.id "
           f"  WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id), "
+          f"closure(ep, drv) AS ("
+          f"  SELECT ep.id, ep.derivation FROM entry_point ep WHERE ep.evaluation = '{eval_id}' "
+          f"  UNION SELECT c.ep, s.next FROM closure c, LATERAL ("
+          f"    SELECT dd.dependency AS next FROM derivation_dependency dd "
+          f"    JOIN build_job bj ON bj.derivation = dd.dependency AND bj.evaluation = '{eval_id}' "
+          f"    WHERE dd.derivation = c.drv OFFSET 0) s), "
           f"live AS ("
           f"  SELECT ep.id, count(*) AS total FROM entry_point ep "
-          f"  JOIN derivation_closure dc ON dc.root_derivation = ep.derivation "
-          f"  JOIN derivation_build b ON b.derivation = dc.dep_derivation "
+          f"  JOIN closure c ON c.ep = ep.id AND c.drv <> ep.derivation "
+          f"  JOIN build_job bj ON bj.derivation = c.drv AND bj.evaluation = '{eval_id}' "
           f"  WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id) "
-          f"SELECT count(*) FROM live l JOIN stored s ON s.id = l.id "
-          f"WHERE l.total <> s.total;"
+          f"SELECT count(*) FROM live l JOIN stored s ON s.id = l.id WHERE l.total <> s.total;"
       ))
-      assert drift == 0, f"{drift} entry points disagree with their materialised closure"
+      assert drift == 0, f"{drift} entry points disagree with the live walk"
+      by_id = {ep["id"]: ep for ep in page["entry_points"]}
+      stored_totals = sql(
+          f"SELECT ep.id || ':' || coalesce(sum(c.count), 0) FROM entry_point ep "
+          f"LEFT JOIN entry_point_dep_count c ON c.entry_point = ep.id "
+          f"WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id;"
+      ).split()
+      for row in stored_totals:
+          ep_id, total = row.split(":")
+          assert by_id[ep_id]["deps_total"] == int(total), f"{ep_id}: api {by_id[ep_id]['deps_total']} stored {total}"
 
       # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
       # We hit `/evals/{id}/builds` directly with the eval_id already pinned
