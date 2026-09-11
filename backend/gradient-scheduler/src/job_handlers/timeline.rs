@@ -90,28 +90,32 @@ impl Scheduler {
     ) {
         let scheduler = Arc::clone(self);
         self.state.shutdown.spawn(async move {
-            scheduler
+            let _ = scheduler
                 .persist_job_timeline(dispatch, outcome, spans)
                 .await;
         });
     }
 
-    async fn persist_job_timeline(
+    /// Returns whether the report landed on an open row.
+    pub(crate) async fn persist_job_timeline(
         &self,
         dispatch: DispatchedJobId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
-    ) {
+    ) -> bool {
         let row = match EDispatchedJob::find_by_id(dispatch)
             .filter(CDispatchedJob::FinishedAt.is_null())
             .one(&self.state.worker_db)
             .await
         {
             Ok(Some(row)) => row,
-            Ok(None) => return,
+            Ok(None) => {
+                warn!(%dispatch, ?outcome, "no open dispatched_job row for this report; outcome and phase timeline dropped");
+                return false;
+            }
             Err(e) => {
                 warn!(%dispatch, error = %e, "dispatched_job lookup for the timeline failed");
-                return;
+                return false;
             }
         };
 
@@ -138,6 +142,8 @@ impl Scheduler {
         if !totals.is_empty() {
             self.apply_eval_phase_totals(evaluation_id, totals).await;
         }
+
+        true
     }
 
     /// The eval-metric row is written when `EvalStats` arrives, which is before
