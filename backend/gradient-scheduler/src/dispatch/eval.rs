@@ -29,7 +29,8 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // The open `dispatched_job` row is the durable proof a job is out; the tracker below is only the in-memory fast path, empty after a core respawn.
+    // The open `dispatched_job` row is the durable proof a job is out; the
+    // tracker below is only the in-memory fast path, empty after a respawn.
     let not_in_flight = gradient_db::no_open_dispatch_predicate(&gradient_db::eval_job_key_sql(
         "\"evaluation\".\"id\"",
     ));
