@@ -54,7 +54,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   loading = signal(true);
   task = signal<TaskDetail | null>(null);
   entryPoints = signal<EntryPointSummary[]>([]);
+  entryPointsTotal = signal(0);
   entryPointsLoading = signal(false);
+  private static readonly ENTRY_POINTS_PAGE = 100;
+  private entryPointsLimit = TaskDetailComponent.ENTRY_POINTS_PAGE;
   selectedId = signal<string | null>(null);
   starting = signal(false);
   errorMessage = signal<string | null>(null);
@@ -130,7 +133,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         if (!this.selectedId() && task.last_evaluations.length) {
           this.selectedId.set(task.last_evaluations[0].id);
         }
-        // The entry-point query (dep-closure CTE) is expensive; on live pings
+        // The entry-point page walks the graph for stale histograms; on live pings
         // throttle it so a running evaluation's rapid status stream doesn't
         // hammer the backend. The cheap summary above keeps headline counts live.
         if (!live || Date.now() - this.lastEntryPointsFetch >= this.ENTRY_POINTS_LIVE_INTERVAL_MS) {
@@ -162,6 +165,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       // Drop the previous evaluation's packages immediately so the panel shows a
       // loading state, not stale data, during the (slow) entry-point fetch.
       this.entryPoints.set([]);
+      this.entryPointsTotal.set(0);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
     }
@@ -179,33 +183,41 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private loadEntryPoints(evaluationId?: string): void {
     if (!evaluationId) {
       this.entryPoints.set([]);
+      this.entryPointsTotal.set(0);
       this.entryPointsEvalId = undefined;
       this.entryPointsSig = '';
       this.entryPointsLoading.set(false);
       return;
     }
     this.lastEntryPointsFetch = Date.now();
-    if (evaluationId !== this.entryPointsEvalId) this.entryPointsLoading.set(true);
-    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId).subscribe({
-      next: (eps) => {
+    if (evaluationId !== this.entryPointsEvalId) {
+      this.entryPointsLimit = TaskDetailComponent.ENTRY_POINTS_PAGE;
+      this.entryPointsLoading.set(true);
+    }
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId, this.entryPointsLimit, 0).subscribe({
+      next: (page) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
         // evaluation, so a slow earlier request can't clobber a newer selection.
         if (this.selectedId() !== evaluationId) return;
         this.entryPointsLoading.set(false);
-        const sorted = [...eps].sort((a, b) =>
-          this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path)));
+        this.entryPointsTotal.set(page.total);
         // Skip the re-render (and its enter animation) when nothing changed.
-        const sig = sorted.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
+        const sig = page.entry_points.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
         if (evaluationId === this.entryPointsEvalId && sig === this.entryPointsSig) return;
         this.entryPointsEvalId = evaluationId;
         this.entryPointsSig = sig;
-        this.entryPoints.set(sorted);
+        this.entryPoints.set(page.entry_points);
       },
       error: (error) => {
         if (this.selectedId() === evaluationId) this.entryPointsLoading.set(false);
         console.error('Failed to load entry points:', error);
       },
     });
+  }
+
+  loadMoreEntryPoints(): void {
+    this.entryPointsLimit += TaskDetailComponent.ENTRY_POINTS_PAGE;
+    this.loadEntryPoints(this.selected()?.id);
   }
 
   startEvaluation(): void {

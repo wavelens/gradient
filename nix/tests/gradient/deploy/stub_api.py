@@ -87,7 +87,9 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 STATS["entry_points"] += 1
                 entry_points = list(STATE["entry_points"])
-            return self.json_response({"error": False, "message": entry_points})
+            return self.json_response(
+                {"error": False, "message": {"entry_points": entry_points, "total": len(entry_points)}}
+            )
 
         if path.endswith("/live"):
             return self.serve_live()
