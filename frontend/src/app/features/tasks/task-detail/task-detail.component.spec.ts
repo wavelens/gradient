@@ -294,6 +294,45 @@ describe('TaskDetailComponent - evaluation selection', () => {
     expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
 
+  /// "show more" pages by offset, so a page that overlaps what is already shown
+  /// must not repeat a row: `@for ... track ep.id` throws on a duplicate key.
+  it('does not duplicate a row when the appended page overlaps', () => {
+    const first = epSummary('a');
+    const second = epSummary('b');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [first], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+    vi.spyOn(tasksService, 'getEntryPoints')
+      .mockReturnValue(of({ entry_points: [first, second], total: 2 }));
+    component.loadMoreEntryPoints();
+
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+  });
+
+  /// The refreshed page is the server's own prefix, so anything not in it belongs
+  /// behind it whatever JS thinks of the boundary pair. Comparing the two in
+  /// code-unit order dropped the paged tail on every poll under a glibc or ICU
+  /// collation, where `abc` sorts before `Zlib` and in JS it does not.
+  it('keeps a paged tail whose attribute sorts before the page in JS order', () => {
+    const inPage = epSummary('a', 'packages."x86_64-linux".abc');
+    const paged = epSummary('b', 'packages."x86_64-linux".Zlib');
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [inPage], total: 2 }) },
+    );
+    const component = fixture.componentInstance;
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [paged], total: 2 }));
+    component.loadMoreEntryPoints();
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+
+    vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [inPage], total: 2 }));
+    component.loadTaskData(false);
+
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
+  });
+
   /// A refresh re-reads only the window it shows, so an appended tail must not be
   /// dropped by the next live poll.
   it('keeps appended packages across a refresh of the first window', () => {
