@@ -271,6 +271,27 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const component = fixture.componentInstance;
     expect(component.attrLabel('packages."x86_64-linux".hello')).toBe('hello');
     expect(component.attrLabel('hello')).toBe('hello');
+    expect(component.attrLabel('packages."x86_64-linux"."foo.bar"')).toBe('foo.bar');
+  });
+
+  /// An evaluation still ingesting entry points showed a dozen rows on the first
+  /// poll; a window sized from that would have frozen the list there forever.
+  it('refreshes at least a full page however few rows are shown', () => {
+    const { fixture, tasksService } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 300 }) },
+    );
+    const component = fixture.componentInstance;
+    expect(component.entryPoints().length).toBe(1);
+
+    const spy = vi.spyOn(tasksService, 'getEntryPoints')
+      .mockReturnValue(of({ entry_points: [epSummary('a'), epSummary('b')], total: 300 }));
+    component.loadTaskData(false);
+    const [, , , limit, offset] = spy.mock.calls.at(-1)!;
+
+    expect(limit).toBe(100);
+    expect(offset).toBe(0);
+    expect(component.entryPoints().map(e => e.id)).toEqual(['a', 'b']);
   });
 
   /// A refresh re-reads only the window it shows, so an appended tail must not be
