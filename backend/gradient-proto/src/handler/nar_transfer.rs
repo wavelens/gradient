@@ -19,7 +19,7 @@ use gradient_scheduler::Scheduler;
 use gradient_storage::{PartialWriter, StagedFile};
 use gradient_util::shutdown::Shutdown;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::messages::{ArchivedClientMessage, ClientMessage, ServerMessage};
 use crate::session::frame::Frame;
@@ -557,7 +557,7 @@ impl<'a> DispatchContext<'a> {
             return;
         }
 
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, received, "NarStreamHeader (push)");
+        trace!(peer_id = %self.peer_id, %job_id, %store_path, received, "NarStreamHeader (push)");
         let _ = send_server_msg(
             self.writer,
             &ServerMessage::NarPushResume {
@@ -589,7 +589,7 @@ impl<'a> DispatchContext<'a> {
             (offset.to_native(), data.len(), *is_final)
         };
 
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = len, "NarPush");
+        trace!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = len, "NarPush");
         if len == 0 {
             return;
         }
@@ -646,7 +646,7 @@ impl<'a> DispatchContext<'a> {
         ca: Option<String>,
         nar: &mut NarReceiveStore,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, ?ca, "NarUploaded");
+        trace!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, ?ca, "NarUploaded");
 
         // Reject any NarUploaded for a path whose chunked transfer was rejected
         // mid-stream. Without this guard `mark_nar_stored` would record a
@@ -879,7 +879,7 @@ async fn commit_relayed(
         }
     }
 
-    debug!(%peer_id, %job_id, %store_path, file_size, "NAR stored");
+    trace!(%peer_id, %job_id, %store_path, file_size, "NAR stored");
     true
 }
 
@@ -1209,7 +1209,7 @@ pub(super) async fn serve_nar_request(
     total += final_len;
     chunks_sent += 1;
 
-    debug!(%store_path, bytes = total, chunks = chunks_sent, "NarRequest served (streaming)");
+    trace!(%store_path, bytes = total, chunks = chunks_sent, "NarRequest served (streaming)");
     Ok(())
 }
 
