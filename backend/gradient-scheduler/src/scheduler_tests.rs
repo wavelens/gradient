@@ -307,7 +307,7 @@ async fn test_score_assignment_flow() {
     let assignment = scheduler.request_job("w1", JobKind::Flake).await;
 
     assert!(assignment.is_some());
-    assert_eq!(assignment.unwrap().job_id, "j1");
+    assert_eq!(assignment.unwrap().job_id(), "j1");
     assert_eq!(scheduler.pending_job_count().await, 0);
 }
 
@@ -450,7 +450,7 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
         .request_job("w1", JobKind::Flake)
         .await
         .expect("assigned");
-    assert_eq!(assigned.job_id, "j1");
+    assert_eq!(assigned.job_id(), "j1");
     assert_eq!(assigned.pending.evaluation_id(), eval_id);
 
     // An eval job has no anchor, so it stops on the evaluation alone.
@@ -780,14 +780,14 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
             eval_worker_caps(),
             HashSet::new(),
             session,
-            vec![(assigned.job_id.clone(), assigned.pending.clone())],
+            vec![(assigned.job_id().to_owned(), assigned.pending.clone())],
         )
         .await
         .unwrap();
 
     let counts = scheduler.counts().await;
     assert_eq!((counts.workers, counts.active, counts.pending), (1, 1, 0));
-    assert!(scheduler.active_job(&assigned.job_id).await.is_some());
+    assert!(scheduler.active_job(assigned.job_id()).await.is_some());
     assert!(scheduler.is_worker_connected("w1").await);
 }
 
@@ -872,7 +872,10 @@ async fn the_dispatch_record_is_written_before_the_assignment_returns() {
         .expect("the dispatched_job insert ran before request_job returned");
     let values = format!("{:?}", insert.values);
     assert!(values.contains("\"j1\""), "{values}");
-    assert!(values.contains(&assigned.dispatch.to_string()), "{values}");
+    assert!(
+        values.contains(&assigned.dispatch().to_string()),
+        "{values}"
+    );
 }
 
 /// A claim whose record cannot be written is released: the job is pending

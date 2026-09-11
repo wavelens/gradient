@@ -38,17 +38,17 @@ impl Scheduler {
                     if let Err(e) =
                         record_dispatch(&self.state, worker_id, &a.dispatch_record).await
                     {
-                        warn!(error = format!("{e:#}"), %worker_id, job_id = %a.job_id, "dispatch record not written; assignment withdrawn");
-                        self.job_rejected(worker_id, &a.job_id).await;
+                        warn!(error = format!("{e:#}"), %worker_id, job_id = %a.job_id(), "dispatch record not written; assignment withdrawn");
+                        self.job_rejected(worker_id, a.job_id()).await;
                         return None;
                     }
 
                     self.announce_dispatch(worker_id, &a.dispatch_record);
-                    info!(%worker_id, job_id = %a.job_id, ?kind, attempt, "job assigned via RequestJob");
+                    info!(%worker_id, job_id = %a.job_id(), ?kind, attempt, "job assigned via RequestJob");
                     return Some(a);
                 }
                 AssignOutcome::Assigned(a) => {
-                    self.drop_assignment(worker_id, &a.job_id).await;
+                    self.drop_assignment(worker_id, a.job_id()).await;
                     continue;
                 }
                 AssignOutcome::AtCapacity => return None,
@@ -78,11 +78,11 @@ impl Scheduler {
         match gradient_db::anchor_status(&self.state.worker_db, anchor).await {
             Ok(Some(BuildStatus::Queued)) => true,
             Ok(status) => {
-                warn!(job_id = %a.job_id, ?status, "queued job no longer dispatchable; dropped from the tracker");
+                warn!(job_id = %a.job_id(), ?status, "queued job no longer dispatchable; dropped from the tracker");
                 false
             }
             Err(e) => {
-                warn!(job_id = %a.job_id, error = %e, "anchor status lookup failed; dispatching anyway");
+                warn!(job_id = %a.job_id(), error = %e, "anchor status lookup failed; dispatching anyway");
                 true
             }
         }

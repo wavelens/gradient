@@ -274,18 +274,28 @@ impl PendingJob {
 }
 
 pub struct Assignment {
-    pub job_id: String,
-    /// The `dispatched_job` id of this hand-out; the worker echoes it on every report.
-    pub dispatch: DispatchedJobId,
     pub job: Job,
     /// Project UUID that owns this job - used for credential lookup.
     pub project_id: ProjectId,
     /// The `dispatched_job` row the caller writes before the job leaves; an
-    /// assignment whose record cannot be written is withdrawn.
+    /// assignment whose record cannot be written is withdrawn. It also carries
+    /// the hand-out's key and id, so neither has a second copy to drift from.
     pub dispatch_record: DispatchRecord,
     /// The tracker's own record of the job, kept by the session so it can
     /// re-register the job after a scheduler restart.
     pub pending: PendingJob,
+}
+
+impl Assignment {
+    /// The tracker's key for this job.
+    pub fn job_id(&self) -> &str {
+        &self.dispatch_record.job_id
+    }
+
+    /// The `dispatched_job` id of this hand-out; the worker echoes it on every report.
+    pub fn dispatch(&self) -> DispatchedJobId {
+        self.dispatch_record.dispatch
+    }
 }
 
 /// Owned snapshot of a dispatch decision for the `dispatched_job` table.
@@ -882,8 +892,6 @@ impl JobTracker {
         }
 
         let assignment = Assignment {
-            job_id: job_id.to_owned(),
-            dispatch: record.dispatch,
             job: job.clone().into_job(),
             project_id: job.project_id(),
             dispatch_record: record,
@@ -1670,7 +1678,7 @@ mod tests {
         let inst = gradient_score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert!(assignment.is_some());
-        assert_eq!(assignment.unwrap().job_id, "j1");
+        assert_eq!(assignment.unwrap().job_id(), "j1");
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
     }
@@ -1926,7 +1934,7 @@ mod tests {
             }],
         );
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
-        assert_eq!(assignment.unwrap().job_id, "j1");
+        assert_eq!(assignment.unwrap().job_id(), "j1");
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
     }
@@ -1972,7 +1980,9 @@ mod tests {
         let inst = gradient_score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert_eq!(
-            assignment.expect("non-negative build must dispatch").job_id,
+            assignment
+                .expect("non-negative build must dispatch")
+                .job_id(),
             "j1"
         );
         assert_eq!(tracker.pending_count(), 0);
@@ -2057,7 +2067,7 @@ mod tests {
         let inst = gradient_score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         assert!(assignment.is_some());
-        assert_eq!(assignment.unwrap().job_id, "j2");
+        assert_eq!(assignment.unwrap().job_id(), "j2");
     }
 
     #[test]
