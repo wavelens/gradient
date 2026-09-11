@@ -601,13 +601,13 @@ impl BatchWriter<'_> {
         batch: &IngestBatch,
         resolved: &Resolved,
         newly_walked: &HashSet<String>,
-        grew: Vec<DerivationId>,
+        grew: &[DerivationId],
     ) -> Result<()> {
         let mut to_seed: Vec<DerivationId> = newly_walked
             .iter()
             .filter_map(|h| resolved.by_hash.get(h).copied())
             .collect();
-        to_seed.extend(grew);
+        to_seed.extend_from_slice(grew);
         to_seed.sort_unstable();
         to_seed.dedup();
 
@@ -921,7 +921,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
         writer
-            .advance_readiness(batch, &resolved, &newly_walked, grew)
+            .advance_readiness(batch, &resolved, &newly_walked, &grew)
             .await?;
         report.entry_points = match batch.task {
             Some(task) => {
@@ -935,6 +935,15 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
         gradient_db::bump_graph_version(writer.db(), &[evaluation_id])
             .await
             .context("bump the graph version for the batch")?;
+
+        // Edges are global: a derivation an older evaluation kept as a stub gains
+        // a closure here, so that evaluation's histogram is stale too.
+        if !grew.is_empty() {
+            gradient_db::bump_graph_version_for_derivations(writer.db(), &grew)
+                .await
+                .context("bump the graph version of evaluations sharing the new edges")?;
+        }
+
         report.walked = newly_walked.len();
         debug!(%evaluation_id, walked = report.walked, named = ids.len(), "batch written");
     }
