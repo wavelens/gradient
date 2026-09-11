@@ -113,12 +113,24 @@ impl Scheduler {
         Ok(registered)
     }
 
-    /// A new connection claims no job, so every row still open under this
-    /// worker belongs to a process that is gone; closing it now reopens the
-    /// dispatch gate instead of leaving the work parked for the sweep's grace.
+    /// A new connection claims no job, so a row this server never dispatched
+    /// belongs to a process that is gone; closing it now reopens the dispatch
+    /// gate instead of leaving the work parked for the sweep's grace.
+    ///
+    /// The cutoff is what keeps that from stealing another closer's row. A row
+    /// this process handed out still has one: the worker's terminal report
+    /// closes it on a detached task, and a deploy reconnects the worker inside
+    /// that window, so a blanket close by worker id would rewrite a `Completed`
+    /// dispatch as `Abandoned` and drop its eval phase totals. Rows an earlier
+    /// process handed out have no live closer at all, and startup recovery has
+    /// already closed those - this is the backstop for the rows it missed.
     async fn close_unclaimed_dispatches(&self, worker_id: &str) {
-        match gradient_db::abandon_open_dispatches_for_worker(&self.state.worker_db, worker_id)
-            .await
+        match gradient_db::abandon_open_dispatches_for_worker(
+            &self.state.worker_db,
+            worker_id,
+            self.state.started_at.naive_utc(),
+        )
+        .await
         {
             Ok(rows) if rows > 0 => {
                 info!(%worker_id, rows, "closed dispatch rows a registering worker no longer runs");
