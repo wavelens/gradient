@@ -32,10 +32,15 @@ pub type DepCounts = HashMap<EntryPointId, HashMap<BuildStatus, i64>>;
 
 /// How long a histogram the graph has outgrown may still be served. The task page
 /// polls every 4 s per viewer and a building evaluation bumps its version on every
-/// anchor move, so without this the walk runs on every poll of every viewer. The
-/// bar still advances four times a minute, which is invisible against builds that
-/// take minutes, and concurrent viewers of one evaluation collapse onto one walk.
-pub const DEP_COUNTS_REFRESH_SECS: i64 = 15;
+/// anchor move, so without this the walk runs on every poll of every viewer, and
+/// concurrent viewers of one evaluation collapse onto one walk.
+///
+/// It has to stay well ABOVE what the walk costs, or the recomputes overlap and
+/// the queue never drains: at 15 s against a walk measured at 93 s on a
+/// 74-entry-point NixOS flake, this was 80% of the database's time on its own.
+/// The bar advancing every other minute is invisible against builds that take
+/// minutes; a walk that cannot finish before the next one starts is not.
+pub const DEP_COUNTS_REFRESH_SECS: i64 = 120;
 
 /// Age at which rows recompute whatever their stamp says. The emitter logs and
 /// swallows a failed bump (it fans out board events and CI checks that must not be
