@@ -159,6 +159,13 @@ pub async fn get_task_metrics(
 // ── Per-entry-point metrics ──────────────────────────────────────────────────
 
 /// The part of an entry point's metric point fixed by its derivation alone.
+///
+/// Every one of these walks a global table with no evaluation column, which is
+/// what makes `DerivationId` a sound memo key. The same-sounding `deps_total` on
+/// the task page is NOT this number: `task_board::entry_point_dep_counts` joins
+/// `build_job` on the evaluation, so it is scoped. Scope this walk to the
+/// evaluation to match it and the key has to become `(EvaluationId, DerivationId)`
+/// or every point on the chart gets the first evaluation's answer.
 #[derive(Clone, Copy)]
 struct DerivationMetrics {
     dependencies_count: i64,
@@ -175,13 +182,14 @@ async fn derivation_metrics(
 ) -> WebResult<DerivationMetrics> {
     let closure = transitive_closure_reachable(&state.web_db, &[derivation]).await?;
     let dependencies_count = (closure.len() as i64).saturating_sub(1);
+    let output_size_bytes = sum_output_sizes(&state.web_db, vec![derivation]).await?;
     let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
     let seeds = output_hashes_for_drvs(&state.web_db, &[derivation]).await?;
     let runtime = runtime_closure_size(&state.web_db, &seeds).await?;
 
     Ok(DerivationMetrics {
         dependencies_count,
-        output_size_bytes: sum_output_sizes(&state.web_db, vec![derivation]).await?,
+        output_size_bytes,
         closure_size_bytes,
         runtime_closure_size_bytes: (runtime > 0).then_some(runtime),
     })
@@ -283,9 +291,10 @@ pub async fn get_entry_point_metrics(
         .await
         .unwrap_or_default();
 
-    // Every number below depends only on the entry point's derivation, and a
-    // package unchanged across evaluations shares one derivation row, so each is
-    // computed once. Only the four scalars are kept, never the closure set.
+    // Only `evaluation_id`, `build_id` and `created_at` below are per evaluation;
+    // the rest, `build_status` and `build_time_ms` included, are determined by the
+    // derivation, because `derivation_build` is unique on it. The four that cost a
+    // query are memoised on it, as scalars, never as the closure set.
     let mut by_derivation: HashMap<DerivationId, DerivationMetrics> = HashMap::new();
     let mut points = Vec::new();
     for ep in entry_points {
@@ -302,7 +311,7 @@ pub async fn get_entry_point_metrics(
         let metrics = match by_derivation.get(&ep.derivation) {
             Some(m) => *m,
             None => {
-                let m = derivation_metrics(&state, ep.derivation).await?;
+                let m = derivation_metrics(&state.0, ep.derivation).await?;
                 by_derivation.insert(ep.derivation, m);
                 m
             }
