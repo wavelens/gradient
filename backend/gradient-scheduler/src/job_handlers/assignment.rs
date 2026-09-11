@@ -178,7 +178,9 @@ impl Scheduler {
 /// anchor's `dispatched_at` through the graph actor. Awaited before the
 /// assignment goes back to the session: the row is the only proof the job is
 /// out, so a worker's first report can never precede it, and an error here
-/// withdraws the claim instead of letting the job run unrecorded.
+/// withdraws the claim instead of letting the job run unrecorded. The mirror
+/// holds too: a failed transition closes the row it just wrote, so a withdrawn
+/// claim never leaves an open row parking the anchor's dispatch gate.
 async fn record_dispatch(
     state: &Arc<ServerState>,
     worker_id: &str,
@@ -215,7 +217,7 @@ async fn record_dispatch(
         return Ok(());
     };
 
-    state
+    let moved = state
         .graph
         .transition(Transition::Dispatched {
             evaluation: rec.evaluation_id,
@@ -225,7 +227,13 @@ async fn record_dispatch(
             build_context: rec.build_context.clone(),
         })
         .await
-        .context("Dispatched transition")?;
+        .context("Dispatched transition");
 
-    Ok(())
+    if moved.is_err()
+        && let Err(e) = gradient_db::abandon_open_dispatch(&state.worker_db, rec.dispatch).await
+    {
+        warn!(error = %e, dispatch = %rec.dispatch, "dispatch row left open after a failed transition");
+    }
+
+    moved.map(|_| ())
 }

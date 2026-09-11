@@ -73,7 +73,7 @@ pub use self::dep_closure::*;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;
 pub use self::dispatch_record::{
-    BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, abandon_open_dispatches_for_jobs,
+    BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, abandon_open_dispatch, abandon_open_dispatches_for_jobs,
     abandon_open_dispatches_for_worker, build_job_key_sql, eval_job_key_sql,
     no_open_dispatch_predicate,
 };
