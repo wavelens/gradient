@@ -1385,13 +1385,13 @@ in {
           max_connections = lib.mkDefault 200;
           random_page_cost = lib.mkDefault 1.1;
         } // lib.optionalAttrs (cfg.postgresSharedBuffers != null) {
-          shared_buffers = lib.mkDefault cfg.postgresSharedBuffers;
+          shared_buffers = cfg.postgresSharedBuffers;
         } // lib.optionalAttrs (cfg.postgresEffectiveCacheSize != null) {
-          effective_cache_size = lib.mkDefault cfg.postgresEffectiveCacheSize;
+          effective_cache_size = cfg.postgresEffectiveCacheSize;
         } // lib.optionalAttrs (cfg.postgresWorkMem != null) {
-          work_mem = lib.mkDefault cfg.postgresWorkMem;
+          work_mem = cfg.postgresWorkMem;
         } // lib.optionalAttrs (cfg.postgresMaintenanceWorkMem != null) {
-          maintenance_work_mem = lib.mkDefault cfg.postgresMaintenanceWorkMem;
+          maintenance_work_mem = cfg.postgresMaintenanceWorkMem;
         };
 
         ensureUsers = [{
