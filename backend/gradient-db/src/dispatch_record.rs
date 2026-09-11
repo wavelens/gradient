@@ -89,10 +89,10 @@ mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement};
 
-    fn closed_one_row() -> MockDatabase {
+    fn closed_rows(rows_affected: u64) -> MockDatabase {
         MockDatabase::new(DatabaseBackend::Postgres).append_exec_results([MockExecResult {
             last_insert_id: 0,
-            rows_affected: 2,
+            rows_affected,
         }])
     }
 
@@ -132,7 +132,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_workers_open_rows_close_as_abandoned() {
-        let db = closed_one_row().into_connection();
+        let db = closed_rows(2).into_connection();
 
         let closed = abandon_open_dispatches_for_worker(&db, "w1")
             .await
@@ -152,7 +152,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_named_jobs_open_rows_close_as_abandoned() {
-        let db = closed_one_row().into_connection();
+        let db = closed_rows(2).into_connection();
         let keys = vec![
             format!("{BUILD_KEY_PREFIX}019905f2-0000-7000-8000-000000000001"),
             format!("{EVAL_KEY_PREFIX}019905f2-0000-7000-8000-000000000002"),
@@ -181,12 +181,12 @@ mod tests {
 
     #[tokio::test]
     async fn one_dispatchs_open_row_closes_as_abandoned() {
-        let db = closed_one_row().into_connection();
+        let db = closed_rows(1).into_connection();
         let dispatch = DispatchedJobId::now_v7();
 
         let closed = abandon_open_dispatch(&db, dispatch).await.expect("update");
 
-        assert_eq!(closed, 2);
+        assert_eq!(closed, 1);
         let log = db.into_transaction_log();
         let statement = &log[0].statements()[0];
         assert_closes_open_rows_as_abandoned(statement);
