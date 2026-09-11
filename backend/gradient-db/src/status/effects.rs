@@ -10,8 +10,8 @@
 //! (promotion, cascades, reconciles, abort), which return the
 //! [`TransitionChange`]s they made. Routing every mover through one emitter is
 //! what makes it structurally impossible to move an anchor without its
-//! consequences (the evaluation graph version, board events, CI checks) firing - the root
-//! cause of the historical dead-zone class.
+//! consequences (the evaluation graph version, board events, CI checks) firing -
+//! the root cause of the historical dead-zone class.
 
 use crate::DbContext;
 use gradient_entity::build::BuildStatus;
@@ -119,7 +119,9 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
         .collect();
 
     // One bump per emit covers every evaluation a moved anchor belongs to; their
-    // cached histograms recompute on the next read.
+    // cached histograms recompute on the next read. A failed bump is logged rather
+    // than propagated, because the board events and CI checks below must fan out
+    // regardless; `dep_counts::DEP_COUNTS_MAX_AGE_SECS` is what heals a lost one.
     let moved: Vec<EvaluationId> = changes
         .iter()
         .filter(|c| c.from != c.to)
@@ -135,7 +137,12 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
         .collect();
 
     if let Err(e) = crate::dep_counts::bump_graph_version(db, &moved).await {
-        error!(error = %e, evaluations = moved.len(), "failed to bump the graph version");
+        error!(
+            error = %e,
+            evaluations = moved.len(),
+            max_age_secs = crate::dep_counts::DEP_COUNTS_MAX_AGE_SECS,
+            "failed to bump the graph version; the histograms heal on the age ceiling"
+        );
     }
 
     for c in changes {
