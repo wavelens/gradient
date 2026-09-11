@@ -544,7 +544,12 @@ fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
     }
 }
 
-const ENTRY_POINTS_PAGE: u64 = 100;
+/// Every entry point on a page is a seed of one dependency-closure walk, and the
+/// walk carries the seed through the recursion, so its cost is the page size
+/// times the evaluation's build graph. A page of 100 over a 74-entry-point
+/// NixOS flake measured 93 s a call and 80% of the database's time; the tail is
+/// paged in on demand and only for pages someone scrolls to.
+const ENTRY_POINTS_PAGE: u64 = 25;
 const ENTRY_POINTS_PAGE_MAX: u64 = 500;
 
 #[derive(Deserialize, Debug)]
