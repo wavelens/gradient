@@ -333,7 +333,7 @@ The "new candidates available" signal is a level-triggered `watch` generation co
 
 Closing the loop on the worker side: after scoring a fresh `JobOffer` the worker sends a capacity-gated `RequestJob` (not just on its 10s heartbeat). Scoring is what clears the server's rescore gate, so the worker's post-completion `RequestJob` would otherwise race ahead of its own scores, miss, and idle until the next heartbeat - collapsing a serial chain to one level per ~10s.
 
-`AssignJob` leaves only after the `dispatched_job` row exists, so a worker that reports at once (a substitute, an immediate failure) always finds its record; a request whose record cannot be written gets no job and asks again. A build's open `build_attempt` is written by the `Dispatched` transition awaited on that same path, but warn-only inside it, so it is not part of the guarantee.
+`AssignJob` leaves only after the `dispatched_job` row exists, so a worker that reports at once (a substitute, an immediate failure) always finds its record; a request whose record cannot be written gets no job and asks again. A build's open `build_attempt` is written by the `Dispatched` transition awaited on that same path, but warn-only inside it, so it is not part of the guarantee. That await is capped at half `worker_heartbeat_timeout_secs`, because the session reads one frame at a time and a wait longer than the deadline would leave the worker's heartbeats unread until the liveness pass unregisters it mid-assignment. A worker that rejects the assignment closes the row again on its way back to pending.
 
 Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (projects, caches) it has successfully authenticated against.
 
@@ -1434,11 +1434,12 @@ When the server restarts (deploy, crash, maintenance), workers experience a WebS
 
 **Server behavior on startup:** `recover_interrupted_work` runs once, before any session opens.
 
- 1. Abort every orphaned `Running` build attempt - the worker that owned it is gone.
- 2. Reset every `Building` anchor to `Queued` - the worker that was building it is gone.
- 3. Abort every active evaluation a restart loses (every `ACTIVE` status except `Queued`, re-offered by the eval dispatcher, and `Waiting`, picked up by build reconcile) and set `ForceEvaluation` on its task: a partly-walked graph is never merged with a new walk's, and a `Building` evaluation is re-evaluated too rather than resumed.
- 4. Abort the anchors those evaluations drove (`Created`/`Queued`/`Building`), the ones step 2 just re-queued included, unless a still-live evaluation needs them as well. The forced re-evaluation resets them to `Created` and they promote again once their derivations are walked.
- 5. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
+ 1. Close every open `dispatched_job` row as `Abandoned` - nothing the dead process handed out is still out, and an open row gates both dispatch selections against the work step 3 re-queues.
+ 2. Abort every orphaned `Running` build attempt - the worker that owned it is gone.
+ 3. Reset every `Building` anchor to `Queued` - the worker that was building it is gone.
+ 4. Abort every active evaluation a restart loses (every `ACTIVE` status except `Queued`, re-offered by the eval dispatcher, and `Waiting`, picked up by build reconcile) and set `ForceEvaluation` on its task: a partly-walked graph is never merged with a new walk's, and a `Building` evaluation is re-evaluated too rather than resumed.
+ 5. Abort the anchors those evaluations drove (`Created`/`Queued`/`Building`), the ones step 3 just re-queued included, unless a still-live evaluation needs them as well. The forced re-evaluation resets them to `Created` and they promote again once their derivations are walked.
+ 6. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
 
 ```mermaid
 sequenceDiagram
