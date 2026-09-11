@@ -847,6 +847,20 @@ in {
           ep_id, total = row.split(":")
           assert by_id[ep_id]["deps_total"] == int(total), f"{ep_id}: api {by_id[ep_id]['deps_total']} stored {total}"
 
+      # The planted row has served its purpose, and `GET /evals/{id}` lists entry
+      # points unfiltered, so leaving it would report `zz.unreportable` as Queued
+      # for every later phase.
+      sql(
+          f"DELETE FROM entry_point WHERE evaluation = '{eval_id}' "
+          f"AND eval = 'zz.unreportable';"
+      )
+      sql("DELETE FROM derivation WHERE hash = 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';")
+      left = int(sql(
+          f"SELECT count(*) FROM entry_point WHERE evaluation = '{eval_id}' "
+          f"AND eval = 'zz.unreportable';"
+      ))
+      assert left == 0, "the unreportable entry point outlived its assertions"
+
       # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
       # We hit `/evals/{id}/builds` directly with the eval_id already pinned
       # by Phase 5; screen-scraping `gradient task show` is too brittle
