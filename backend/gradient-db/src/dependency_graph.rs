@@ -164,6 +164,15 @@ mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
+    /// The walk opens a transaction and raises `work_mem` before its
+    /// statement, so every mock that reaches one owes an exec result.
+    fn raise() -> sea_orm::MockExecResult {
+        sea_orm::MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }
+    }
+
     fn node(derivation: DerivationId) -> MDerivationDependency {
         gradient_entity::derivation_dependency::Model {
             derivation,
@@ -263,6 +272,7 @@ mod tests {
     async fn no_dependents_returns_only_start() {
         let start = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([raise()])
             .append_query_results([Vec::<MDerivationDependency>::new()])
             .into_connection();
 
@@ -279,6 +289,7 @@ mod tests {
         let a = DerivationId::now_v7();
         let b = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([raise()])
             .append_query_results([vec![node(a), node(b)]])
             .into_connection();
 
