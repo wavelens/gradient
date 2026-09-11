@@ -1037,24 +1037,26 @@ in {
           h = name.split("-")[0]
           return f"/var/lib/gradient/nars/{h[:2]}/{h[2:]}.nar.zst"
 
-      # Both halves have to be real, and a whole `cached_path` row guarantees neither:
-      # the path must be in the server's own store because the re-upload below runs the
-      # CLI there, and the NAR object must still be on disk because a row outlives its
-      # object until the zombie purge catches up. Picking on the row alone retired a
-      # path whose object was already gone.
+      # The path has to be in the server's own store: the re-upload below runs the CLI
+      # there. hello's only runtime reference is glibc, so there is no second candidate
+      # to fall back on and the precondition has to be made rather than looked for.
       dep_name = next(
           (n for n in (name.strip() for name in refs)
-           if n
-           and server.execute(f"test -e /nix/store/{n}")[0] == 0
-           and server.execute(f"test -f {nar_object(n)}")[0] == 0),
+           if n and server.execute(f"test -e /nix/store/{n}")[0] == 0),
           None,
       )
-      assert dep_name, (
-          f"none of hello's {len(refs)} whole references has both a path in the server "
-          f"store and a NAR object on disk")
+      assert dep_name, f"none of hello's {len(refs)} whole references is in the server store"
       dep_path = f"/nix/store/{dep_name}"
       dep_hash = dep_name.split("-")[0]
       dep_object = nar_object(dep_name)
+
+      # A whole `cached_path` row does not imply a local object: the row can be recorded
+      # from an upstream narinfo, or outlive its object until the zombie purge catches
+      # up. Retiring needs something to delete, so push it first when it is not there.
+      if server.execute(f"test -f {dep_object}")[0] != 0:
+          print(f"{dep_path} is whole in the index with no local object; pushing it first")
+          server.succeed(f"{CLI} cache upload main {dep_path}")
+      server.succeed(f"test -f {dep_object}")
       print(f"retiring {dep_path}")
       server.succeed(f"rm {dep_object}")
 
