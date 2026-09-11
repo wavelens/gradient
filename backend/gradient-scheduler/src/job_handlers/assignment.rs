@@ -177,7 +177,11 @@ impl Scheduler {
 
 /// Hard ceiling on the awaited transition when the liveness watchdog is off,
 /// and the cap the heartbeat-derived budget is clamped to.
-const TRANSITION_CEILING_SECS: u64 = 60;
+const TRANSITION_CEILING_MS: u64 = 60_000;
+
+/// Floor on the awaited transition, below one second so the budget stays
+/// strictly inside even the tightest configurable deadline.
+const TRANSITION_FLOOR_MS: u64 = 500;
 
 /// How long `record_dispatch` waits on the `Dispatched` transition.
 ///
@@ -189,12 +193,14 @@ const TRANSITION_CEILING_SECS: u64 = 60;
 /// default; with the watchdog disabled the ceiling still applies, because the
 /// graph actor's own timeout is no bound on a session at all.
 fn transition_budget(heartbeat_timeout_secs: u64) -> Duration {
-    let secs = match heartbeat_timeout_secs {
-        0 => TRANSITION_CEILING_SECS,
-        timeout => (timeout / 2).clamp(1, TRANSITION_CEILING_SECS),
+    let ms = match heartbeat_timeout_secs {
+        0 => TRANSITION_CEILING_MS,
+        timeout => {
+            (timeout.saturating_mul(1000) / 2).clamp(TRANSITION_FLOOR_MS, TRANSITION_CEILING_MS)
+        }
     };
 
-    Duration::from_secs(secs)
+    Duration::from_millis(ms)
 }
 
 /// The `dispatched_job` row, then for a build the open `build_attempt` and the
@@ -282,7 +288,7 @@ mod tests {
     /// actor unregisters a healthy worker mid-assignment.
     #[test]
     fn the_budget_expires_before_the_liveness_deadline() {
-        for timeout in [2_u64, 10, 30, 60, 120, 600, 3600] {
+        for timeout in [1_u64, 2, 10, 30, 60, 120, 600, 3600] {
             assert!(
                 transition_budget(timeout) < Duration::from_secs(timeout),
                 "budget for a {timeout}s deadline: {:?}",
@@ -297,12 +303,15 @@ mod tests {
     fn the_budget_is_bounded_at_both_ends() {
         assert_eq!(
             transition_budget(0),
-            Duration::from_secs(TRANSITION_CEILING_SECS)
+            Duration::from_millis(TRANSITION_CEILING_MS)
         );
         assert_eq!(
             transition_budget(u64::MAX),
-            Duration::from_secs(TRANSITION_CEILING_SECS)
+            Duration::from_millis(TRANSITION_CEILING_MS)
         );
-        assert_eq!(transition_budget(1), Duration::from_secs(1));
+        assert_eq!(
+            transition_budget(1),
+            Duration::from_millis(TRANSITION_FLOOR_MS)
+        );
     }
 }
