@@ -1260,6 +1260,15 @@ mod tests {
             1,
             "two edges on one derivation bind it once: {bound:?}"
         );
+        let Some(Value::Uuid(Some(only))) = bound.first().cloned() else {
+            panic!("the bump binds uuids: {bound:?}");
+        };
+
+        assert_eq!(
+            only,
+            a.id.into_inner(),
+            "and the one it keeps is the derivation the edges named"
+        );
     }
 
     /// The readiness pass has one legal order and the order IS the correctness
