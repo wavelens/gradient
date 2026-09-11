@@ -170,12 +170,24 @@ The consequences of moving an anchor are equally centralized. Bulk sweeps
 return the typed `(derivation, from, to)` transitions they made, and both
 mutation models - the state-machine-guarded single-row path
 (`update_derivation_build_status`) and the bulk SQL sweeps - feed them through
-one `emit_transition_effects`: entry-point dep-count deltas, board events, the
+one `emit_transition_effects`: the evaluation graph version, board events, the
 per-entry-point CI check, cache-changed notifications, and evaluation
 finalization (`check_evaluation_done` fires for every terminal transition, from
 any path). It is structurally impossible to move an anchor without its
 consequences firing, which closes the historical "bulk sweep bypassed the
 reactive hook" dead-zone class.
+
+`evaluation.graph_version` is the invalidation key of the task page's
+per-entry-point histogram. The emitter bumps it once per emit for every
+evaluation a moved anchor belongs to; an ingest batch bumps its own evaluation
+once, and startup recovery bumps what it requeues and aborts, because it has no
+emitter. The histogram itself is computed on demand by the root-attributed fenced
+walk (`task_board::entry_point_dep_counts`) for the entry points of one page,
+stored in `entry_point_dep_count`, and each entry point is stamped with the
+version it was computed under (`entry_point.dep_counts_version`); a read serves
+a matching stamp from the rows and recomputes the rest in one statement. No
+table grows with roots times closure and no per-transition write is
+proportional to the evaluation.
 
 The dependency walk is generated once, by
 `graph_sql::dependency_closure_cte`, and shared by the failure cascades, the
