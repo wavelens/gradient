@@ -991,9 +991,14 @@ async fn a_report_with_an_open_row_closes_it() {
         .flat_map(|t| t.statements())
         .find(|s| s.sql.starts_with("UPDATE \"dispatched_job\""))
         .expect("the report closes its own row");
+    let set = close
+        .sql
+        .split(" RETURNING ")
+        .next()
+        .expect("the update has a body");
     assert!(
-        close.sql.contains("\"finished_at\"") && close.sql.contains("\"outcome\""),
-        "{}",
+        set.contains("\"finished_at\" =") && set.contains("\"outcome\" ="),
+        "the stamp must be in the SET, not only echoed by RETURNING: {}",
         close.sql
     );
     assert!(format!("{:?}", close.values).contains(&dispatch.to_string()));
@@ -1030,7 +1035,7 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use gradient_types::proto::{JobPhase, JobPhaseSpan};
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let dispatch = DispatchedJobId::now_v7();
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1040,10 +1045,6 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
             dispatched_job: dispatch,
             ..Default::default()
         }]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
         .into_connection();
     let log_db = db.clone();
     let scheduler = test_scheduler_with(db).await;
@@ -1079,8 +1080,17 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
         "{sql:?}"
     );
     assert!(
-        sql.iter()
+        !sql.iter()
             .any(|s| s.starts_with("UPDATE \"evaluation_metric\"")),
-        "{sql:?}"
+        "the totals key on the evaluation, so a superseded dispatch must not write them: {sql:?}"
+    );
+
+    let lookup = sql
+        .iter()
+        .find(|s| s.starts_with("SELECT"))
+        .expect("the report looks its row up");
+    assert!(
+        !lookup.contains("\"finished_at\" IS NULL"),
+        "the lookup must see a closed row too, or the already-closed path is unreachable: {lookup}"
     );
 }

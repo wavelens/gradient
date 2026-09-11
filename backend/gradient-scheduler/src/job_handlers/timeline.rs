@@ -113,9 +113,12 @@ impl Scheduler {
     /// Reports what the terminal report found. The lookup is by dispatch id
     /// alone: an already closed row is routine, because registration, the
     /// orphan requeue, the abandoned sweep and a withdrawn claim all close a
-    /// row a late report can still arrive for. The phase rows and evaluation
-    /// totals are written whenever the row exists, whether or not this report
-    /// is the one that closes it: they key on the dispatch, not on the close.
+    /// row a late report can still arrive for. The phase rows are written
+    /// whenever the row exists, closed by this report or not, because they key
+    /// on the dispatch. The evaluation totals do not: they key on the
+    /// evaluation, so a late report for a superseded dispatch would overwrite
+    /// the run that replaced it, and only the report that closes the row
+    /// applies them.
     pub(crate) async fn persist_job_timeline(
         &self,
         dispatch: DispatchedJobId,
@@ -166,7 +169,7 @@ impl Scheduler {
         }
 
         let totals = eval_phase_totals(&spans);
-        if !totals.is_empty() {
+        if landing != TimelineLanding::AlreadyClosed && !totals.is_empty() {
             self.apply_eval_phase_totals(evaluation_id, totals).await;
         }
 
