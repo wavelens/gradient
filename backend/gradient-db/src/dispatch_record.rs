@@ -12,6 +12,7 @@
 use gradient_entity::dispatched_job::{
     Column as CDispatchedJob, DispatchedJobOutcome, Entity as EDispatchedJob,
 };
+use gradient_entity::ids::DispatchedJobId;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
@@ -55,6 +56,14 @@ pub async fn abandon_open_dispatches_for_jobs<C: ConnectionTrait>(
     }
 
     abandon_open(db, CDispatchedJob::JobId.is_in(job_keys.to_vec())).await
+}
+
+/// Close the open row of one dispatch as `Abandoned`; returns how many closed.
+pub async fn abandon_open_dispatch<C: ConnectionTrait>(
+    db: &C,
+    dispatch: DispatchedJobId,
+) -> Result<u64, DbErr> {
+    abandon_open(db, CDispatchedJob::Id.eq(dispatch)).await
 }
 
 async fn abandon_open<C: ConnectionTrait>(db: &C, scope: Expr) -> Result<u64, DbErr> {
@@ -168,6 +177,30 @@ mod tests {
                 "{values}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn one_dispatchs_open_row_closes_as_abandoned() {
+        let db = closed_one_row().into_connection();
+        let dispatch = DispatchedJobId::now_v7();
+
+        let closed = abandon_open_dispatch(&db, dispatch).await.expect("update");
+
+        assert_eq!(closed, 2);
+        let log = db.into_transaction_log();
+        let statement = &log[0].statements()[0];
+        assert_closes_open_rows_as_abandoned(statement);
+
+        let sql = &statement.sql;
+        assert!(sql.contains("\"dispatched_job\".\"id\" = $3"), "{sql}");
+        assert!(!sql.contains("\"job_id\""), "{sql}");
+        assert!(!sql.contains("\"worker_id\""), "{sql}");
+
+        let values = format!("{:?}", statement.values);
+        assert!(
+            values.contains(&format!("Uuid(Some({dispatch}))")),
+            "{values}"
+        );
     }
 
     #[tokio::test]
