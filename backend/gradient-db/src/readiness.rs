@@ -1032,6 +1032,10 @@ mod tests {
             assert!(sql.contains("SET status = 1"), "{sql}");
             assert!(sql.contains(&norm(&promotable_predicate("db"))), "{sql}");
             assert!(sql.contains("RETURNING db.derivation"), "{sql}");
+            assert!(
+                !sql.contains("dispatched_job"),
+                "promotion is a readiness decision, not a dispatch one: {sql}"
+            );
         }
 
         assert!(norm(&PROMOTE).contains("db.derivation = ANY($1::uuid[])"));

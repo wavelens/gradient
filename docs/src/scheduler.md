@@ -233,21 +233,58 @@ the transition. The grace sits above the graph actor's 600s RPC timeout so a slo
 transition is never mistaken for a lost one, and `EvalStreamCompleted` is
 idempotent, so re-driving one that did land changes nothing.
 
-The dispatch telemetry row has the mirror-image problem. `dispatched_job` is
-closed by the worker's own terminal report, which stamps `finished_at` and the
-outcome; a row with neither reads as running on the job board. Two things used
-to leave rows open forever. The report closed whichever row was the newest open
-one for its (worker, evaluation) pair rather than its own, so a worker running
-several jobs of one evaluation - the normal case - attached outcomes and phase
-timelines to the wrong rows and left the surplus open; the row now carries the
-scheduler's `job_id` (`build:<anchor>` / `eval:<evaluation>`, unique among
-in-flight jobs) and is matched on it. And a worker that vanished had no report
-to send at all, so `requeue_orphaned_jobs` now closes its rows as `Abandoned`
-alongside re-queuing the work. A server restart drops the tracker without an
-unregister, which neither path covers, so the `abandoned-dispatch-sweep` pass
-(60s) closes rows still open 1800s after dispatch whose `job_id` the scheduler
-no longer tracks. The tracker, not the clock, decides: a row it still holds is
-never swept, however long the build runs.
+The dispatch record is the one proof that a job is out. The `dispatched_job` row
+is written inside `RequestJob`, before the assignment is handed back to the
+session, so no report can precede its own row; a claim whose record cannot be
+written is released to pending and the worker asks again; a record that is
+written but whose anchor transition then fails is closed as `Abandoned` on the
+way out, so a withdrawn claim never leaves an open row shutting the gate. A
+build's `Dispatched` transition is awaited on that same path, but the open
+`build_attempt` and the anchor's `dispatched_at` it writes are warn-only inside
+it, so the row is what gates the hand-out and those two are not. That await is
+capped at half the heartbeat deadline: the session handles one frame at a time,
+so a graph actor merely queued behind an ingest burst would otherwise hold the
+worker's next heartbeat unread past `worker_heartbeat_timeout_secs` and get a
+healthy worker unregistered mid-assignment. Expiry takes the same withdrawal
+path as a failure, with one thing it cannot undo - a transition that lands late
+still spends the anchor's one-and-only `dispatched_at`. Both dispatch
+selections refuse work with an open row: `find_ready_anchors` and the
+queued-evaluation select carry a `NOT EXISTS` over `dispatched_job` keyed on the
+scheduler's job key (`build:<anchor>` / `eval:<evaluation>`, whose prefixes live
+in `gradient_db::dispatch_record` next to the SQL that rebuilds them), which is
+what stops a core rebuilt with an empty tracker, or a worker slow to report it
+started, from being handed the same evaluation twice. The tracker's `untracked`
+filter stays as the in-memory fast path; the row is the durable one.
+
+The gate is a check-then-act, not an enforced invariant: the partial index it
+reads is not unique, and two rows for one key are reachable today, because a
+fetch-only completion re-enqueues `eval:<id>` while the fetch row's close is
+still on a detached task and a worker re-adopts a job under a new dispatch id.
+What makes it sound is that exactly one scheduler core writes: `assign_pending`
+serialises every claim in the actor, so the window between the select and the
+insert is never open to a second claimer.
+
+Six paths close a row. The worker's own terminal report stamps `finished_at`
+and the outcome, matched on the dispatch id the report carries; a report whose
+dispatch has no row at all is dropped with a warning, while one that arrives
+after another closer got there first leaves the recorded outcome alone and still
+lands its phase timeline. A worker that vanishes has its rows closed as
+`Abandoned` by `requeue_orphaned_jobs`. A worker that rejects the assignment -
+draining or at capacity, both routine - has that one row closed as it goes back
+to pending, because a rejected job is not out and the sweep never reaps a row
+the tracker still holds. Startup recovery closes every open row there is: it
+already asserts that nothing the previous process handed out is still out, and
+the anchors it re-queues in the same pass are refused by their own gate until
+the rows go. Registration then closes what recovery missed, but only rows
+dispatched before this process started: a row this process handed out still has
+a closer in the terminal report landing for it, and a deploy reconnects the
+worker inside exactly that window, so a blanket close by worker id would rewrite
+a `Completed` dispatch as `Abandoned` and lose its eval phase totals. Rows whose
+worker never returns are closed last by the `abandoned-dispatch-sweep` pass
+(60s) 1800s after dispatch, provided the tracker no longer knows the job; with
+recovery closing the restart case, that grace is a backstop rather than the
+primary path. The tracker, not the clock, decides: a row it still holds is never
+swept, however long the build runs.
 
 `Abandoned` is deliberately distinct from `Failed`. The worker never reported,
 so the build may well have succeeded before contact was lost; recording it as a
@@ -802,6 +839,11 @@ waiting for the next enqueue.
 A server restart kills every in-flight job, so `recover_interrupted_work` runs
 once at startup to reconcile the durable state the dead process left behind:
 
+- Every open `dispatched_job` row is closed as `Abandoned`. Nothing the dead
+  process handed out is still out, and both dispatch selections refuse a job
+  whose row is open, so this runs before the requeue below: otherwise every
+  anchor recovery re-queues stays gated until its worker reconnects - which a
+  scaled-down or crashed one never does - or the 1800s sweep reaches it.
 - Orphaned `Running` build attempts are marked `Aborted`.
 - Every `Building` anchor is reset to `Queued`: the worker that was building it
   is gone. This is a blanket reset, not a re-dispatch decision - the eval sweep

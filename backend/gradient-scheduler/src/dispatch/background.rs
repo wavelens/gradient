@@ -12,6 +12,7 @@ use gradient_db::LostCompletion;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::Transition;
 use gradient_types::EvaluationId;
+use gradient_types::ids::DispatchedJobId;
 use gradient_types::proto::BuildFailureKind;
 use tracing::{debug, info, warn};
 
@@ -30,6 +31,12 @@ const LOST_COMPLETION_GRACE_SECS: i64 = 900;
 /// closes it. Well above the heartbeat deadline so a worker that is merely slow
 /// to check in is never reaped out from under a running job.
 const ABANDONED_DISPATCH_GRACE_SECS: i64 = 1800;
+
+/// How many open rows one sweep may consider. Every row the pass reaps leaves
+/// the `finished_at IS NULL` predicate, so a backlog drains over ticks without
+/// an `ORDER BY`, and the rows the pass deliberately keeps are far too few to
+/// crowd a window this size.
+const ABANDONED_DISPATCH_SWEEP_LIMIT: u64 = 10_000;
 
 /// Liveness poll period, or `None` when the watchdog is disabled by config.
 pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
@@ -86,8 +93,9 @@ pub(super) async fn graph_stuck_reheal_pass(scheduler: Arc<Scheduler>) -> anyhow
 /// only when the TCP connection closes. A hard OOM-kill, a frozen host, or a
 /// network partition can leave the socket half-open with no clean close, so the
 /// worker stays "connected" and its in-flight eval/build jobs sit non-terminal
-/// forever. This pass reads each worker's `last_seen` (stamped in the session
-/// loop) and reuses [`Scheduler::unregister_worker`] - which re-queues the
+/// forever. This pass reads each worker's `last_seen` (stamped by the
+/// connection's reader the moment a frame arrives, before the handler runs)
+/// and reuses [`Scheduler::unregister_worker`] - which re-queues the
 /// orphaned jobs and resets their DB rows - the moment a worker exceeds the deadline.
 pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
@@ -156,9 +164,9 @@ pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Res
 /// A row the scheduler still tracks is never reaped, however old, so a
 /// legitimately long build keeps its open row.
 fn plan_abandoned_reap(
-    stale: &[(uuid::Uuid, Option<String>)],
+    stale: &[(DispatchedJobId, Option<String>)],
     untracked: &HashSet<String>,
-) -> Vec<uuid::Uuid> {
+) -> Vec<DispatchedJobId> {
     stale
         .iter()
         .filter(|(_, key)| match key {
@@ -171,10 +179,12 @@ fn plan_abandoned_reap(
 
 /// Close dispatch rows left open by a job that will never report.
 ///
-/// [`crate::build::requeue_orphaned_jobs`] covers a clean disconnect, but a
-/// server restart drops the tracker without an unregister for the jobs the old
-/// process held, so nothing ever closes their rows and the job board shows them
-/// running forever - often on a worker that has since left the fleet.
+/// The backstop, not the primary path: `requeue_orphaned_jobs` covers a clean
+/// disconnect and `recover_interrupted_work` the restart. What is left is the
+/// row whose session died between the claim and the insert, which no tracker
+/// ever knew, and rows an older process wrote that startup did not reach - both
+/// shown as running forever by the job board, often on a worker that has since
+/// left the fleet.
 ///
 /// The tracker, not the clock, decides what is live: a row whose `job_id` the
 /// scheduler still knows is left alone however old it is, so a legitimately long
@@ -182,15 +192,16 @@ fn plan_abandoned_reap(
 /// that way; they are historical by construction and are closed on age alone.
 pub(super) async fn abandoned_dispatch_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, sea_query::Expr};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 
     let cutoff = gradient_types::now() - chrono::Duration::seconds(ABANDONED_DISPATCH_GRACE_SECS);
-    let stale: Vec<(uuid::Uuid, Option<String>)> = EDispatchedJob::find()
+    let stale: Vec<(DispatchedJobId, Option<String>)> = EDispatchedJob::find()
         .filter(CDispatchedJob::FinishedAt.is_null())
         .filter(CDispatchedJob::DispatchedAt.lt(cutoff))
         .select_only()
         .column(CDispatchedJob::Id)
         .column(CDispatchedJob::JobId)
+        .limit(ABANDONED_DISPATCH_SWEEP_LIMIT)
         .into_tuple()
         .all(&scheduler.state.worker_db)
         .await?;
@@ -211,20 +222,7 @@ pub(super) async fn abandoned_dispatch_pass(scheduler: Arc<Scheduler>) -> anyhow
         return Ok(());
     }
 
-    let reaped = reap.len();
-    EDispatchedJob::update_many()
-        .col_expr(
-            CDispatchedJob::FinishedAt,
-            Expr::value(gradient_types::now()),
-        )
-        .col_expr(
-            CDispatchedJob::Outcome,
-            Expr::value(i16::from(DispatchedJobOutcome::Abandoned)),
-        )
-        .filter(CDispatchedJob::Id.is_in(reap))
-        .filter(CDispatchedJob::FinishedAt.is_null())
-        .exec(&scheduler.state.worker_db)
-        .await?;
+    let reaped = gradient_db::abandon_open_dispatches(&scheduler.state.worker_db, &reap).await?;
 
     warn!(
         rows = reaped,
@@ -338,8 +336,8 @@ mod tests {
         }
     }
 
-    fn row(key: Option<&str>) -> (uuid::Uuid, Option<String>) {
-        (uuid::Uuid::now_v7(), key.map(str::to_owned))
+    fn row(key: Option<&str>) -> (DispatchedJobId, Option<String>) {
+        (DispatchedJobId::now_v7(), key.map(str::to_owned))
     }
 
     // The whole point of the sweep: a row the tracker still holds is a running

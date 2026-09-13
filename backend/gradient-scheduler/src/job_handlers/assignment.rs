@@ -7,7 +7,9 @@
 //! Scoring and job assignment (`RequestJob`).
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use anyhow::Context as _;
 use sea_orm::EntityTrait;
 use sea_orm::IntoActiveModel;
 use tracing::{info, warn};
@@ -33,12 +35,20 @@ impl Scheduler {
         for attempt in 0..3 {
             match self.try_assign(worker_id, &kind, &instance).await {
                 AssignOutcome::Assigned(a) if self.still_queued(&a).await => {
-                    self.record_dispatch(worker_id, &a);
-                    info!(%worker_id, job_id = %a.job_id, ?kind, attempt, "job assigned via RequestJob");
+                    if let Err(e) =
+                        record_dispatch(&self.state, worker_id, &a.dispatch_record).await
+                    {
+                        warn!(error = format!("{e:#}"), %worker_id, job_id = %a.job_id(), "dispatch record not written; assignment withdrawn");
+                        self.job_rejected(worker_id, a.job_id()).await;
+                        return None;
+                    }
+
+                    self.announce_dispatch(worker_id, &a.dispatch_record);
+                    info!(%worker_id, job_id = %a.job_id(), ?kind, attempt, "job assigned via RequestJob");
                     return Some(a);
                 }
                 AssignOutcome::Assigned(a) => {
-                    self.drop_assignment(worker_id, &a.job_id).await;
+                    self.drop_assignment(worker_id, a.job_id()).await;
                     continue;
                 }
                 AssignOutcome::AtCapacity => return None,
@@ -68,11 +78,11 @@ impl Scheduler {
         match gradient_db::anchor_status(&self.state.worker_db, anchor).await {
             Ok(Some(BuildStatus::Queued)) => true,
             Ok(status) => {
-                warn!(job_id = %a.job_id, ?status, "queued job no longer dispatchable; dropped from the tracker");
+                warn!(job_id = %a.job_id(), ?status, "queued job no longer dispatchable; dropped from the tracker");
                 false
             }
             Err(e) => {
-                warn!(job_id = %a.job_id, error = %e, "anchor status lookup failed; dispatching anyway");
+                warn!(job_id = %a.job_id(), error = %e, "anchor status lookup failed; dispatching anyway");
                 true
             }
         }
@@ -117,10 +127,11 @@ impl Scheduler {
         self.active_job(job_id).await.map(|j| j.project_id())
     }
 
-    /// One atomic claim in the actor. The board event and the `dispatched_job`
-    /// row are [`Self::record_dispatch`]'s job, fired by the caller once the
-    /// claim survives its re-check, so a vetoed claim leaves no trace of a
-    /// hand-out that never happened.
+    /// One atomic claim in the actor. The `dispatched_job` row is
+    /// [`record_dispatch`]'s job and the board event
+    /// [`Self::announce_dispatch`]'s, both run by the caller once the claim
+    /// survives its re-check, so a vetoed claim leaves no trace of a hand-out
+    /// that never happened.
     async fn try_assign(
         &self,
         worker_id: &str,
@@ -147,16 +158,9 @@ impl Scheduler {
         }
     }
 
-    /// Announce a hand-out and persist its telemetry. Outside the actor so DB
-    /// latency never blocks the mailbox, and after the queue re-check because
-    /// `Transition::Dispatched` stamps `derivation_build.dispatched_at` once and
-    /// only once: spend it on a claim that is dropped and the anchor's real
-    /// dispatch never gets a timestamp.
-    fn record_dispatch(&self, worker_id: &str, a: &Assignment) {
-        let Some(record) = a.dispatch_record.clone() else {
-            return;
-        };
-
+    /// Announce the hand-out to the job board. Fired only once the record is
+    /// durable, so the board never shows a job that was withdrawn.
+    fn announce_dispatch(&self, worker_id: &str, record: &DispatchRecord) {
         let _ = self
             .state
             .board_events
@@ -168,22 +172,55 @@ impl Scheduler {
                 build_id: record.derivation_build.map(Into::into),
                 evaluation_id: record.evaluation_id.into(),
             });
-        let state = Arc::clone(&self.state);
-        let worker = worker_id.to_owned();
-        self.state.shutdown.spawn(async move {
-            persist_dispatched_job(&state, &worker, record).await;
-        });
     }
 }
 
-/// Persist a `dispatched_job` row, open the `build_attempt`, and stamp the
-/// anchor's `dispatched_at`. Best-effort: failures are logged so instrumentation
-/// can't break dispatch.
-async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: DispatchRecord) {
+/// Hard ceiling on the awaited transition when the liveness watchdog is off,
+/// and the cap the heartbeat-derived budget is clamped to.
+const TRANSITION_CEILING_MS: u64 = 60_000;
+
+/// Floor on the awaited transition, below one second so the budget stays
+/// strictly inside even the tightest configurable deadline.
+const TRANSITION_FLOOR_MS: u64 = 500;
+
+/// How long `record_dispatch` waits on the `Dispatched` transition.
+///
+/// The graph actor answers within 600 s, which is far longer than the session
+/// may spend on one frame: the worker's heartbeats queue behind it, and a
+/// heartbeat the liveness pass never sees costs the worker its registration,
+/// its anchor and every other build it is running. Half the deadline keeps the
+/// wait well inside it even when the watchdog is configured tighter than the
+/// default; with the watchdog disabled the ceiling still applies, because the
+/// graph actor's own timeout is no bound on a session at all.
+fn transition_budget(heartbeat_timeout_secs: u64) -> Duration {
+    let ms = match heartbeat_timeout_secs {
+        0 => TRANSITION_CEILING_MS,
+        timeout => {
+            (timeout.saturating_mul(1000) / 2).clamp(TRANSITION_FLOOR_MS, TRANSITION_CEILING_MS)
+        }
+    };
+
+    Duration::from_millis(ms)
+}
+
+/// The `dispatched_job` row, then for a build the open `build_attempt` and the
+/// anchor's `dispatched_at` through the graph actor. Awaited before the
+/// assignment goes back to the session: the row is the only proof the job is
+/// out, so a worker's first report can never precede it, and an error here
+/// withdraws the claim instead of letting the job run unrecorded. The mirror
+/// holds too: a failed transition closes the row it just wrote, so a withdrawn
+/// claim never leaves an open row parking the anchor's dispatch gate. What the
+/// withdrawal cannot undo is a transition that merely ran late: `Dispatched`
+/// stamps `dispatched_at` once and only once, so a claim dropped on the budget
+/// can still spend it and leave the anchor's real dispatch untimestamped.
+async fn record_dispatch(
+    state: &Arc<ServerState>,
+    worker_id: &str,
+    rec: &DispatchRecord,
+) -> anyhow::Result<()> {
     let now = now();
-    let dispatched_job_id = rec.dispatch;
     let row = gradient_entity::dispatched_job::Model {
-        id: dispatched_job_id,
+        id: rec.dispatch,
         kind: rec.kind,
         evaluation_id: rec.evaluation_id,
         project: rec.project,
@@ -194,37 +231,87 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         queued_at: rec.queued_at,
         ready_at: Some(rec.ready_at),
         dispatched_at: now,
-        score_breakdown: rec.score_breakdown,
-        worker_context: rec.worker_context,
-        job_context: rec.job_context,
+        score_breakdown: rec.score_breakdown.clone(),
+        worker_context: rec.worker_context.clone(),
+        job_context: rec.job_context.clone(),
         instance_context: Some(rec.instance_context.clone()),
         created_at: now,
         ..Default::default()
     }
     .into_active_model();
 
-    if let Err(e) = gradient_entity::dispatched_job::Entity::insert(row)
-        .exec(&state.worker_db)
+    gradient_entity::dispatched_job::Entity::insert(row)
+        .exec_without_returning(&state.worker_db)
         .await
-    {
-        warn!(error = %e, "failed to insert dispatched_job");
-    }
+        .context("dispatched_job insert")?;
 
     let Some(derivation_build) = rec.derivation_build else {
-        return;
+        return Ok(());
     };
 
-    if let Err(e) = state
-        .graph
-        .transition(Transition::Dispatched {
+    let budget = transition_budget(state.config.proto.worker_heartbeat_timeout_secs);
+    let moved = match tokio::time::timeout(
+        budget,
+        state.graph.transition(Transition::Dispatched {
             evaluation: rec.evaluation_id,
             anchor: derivation_build,
-            dispatched_job: dispatched_job_id,
+            dispatched_job: rec.dispatch,
             substitute: rec.substitute,
             build_context: rec.build_context.clone(),
-        })
-        .await
+        }),
+    )
+    .await
     {
-        warn!(error = %e, %derivation_build, "dispatch record did not reach the graph actor");
+        Ok(moved) => moved.context("Dispatched transition"),
+        Err(_) => Err(anyhow::anyhow!(
+            "Dispatched transition exceeded {}s",
+            budget.as_secs()
+        )),
+    };
+
+    if moved.is_err()
+        && let Err(e) = gradient_db::abandon_open_dispatch(&state.worker_db, rec.dispatch).await
+    {
+        warn!(error = %e, dispatch = %rec.dispatch, "dispatch row left open after a failed transition");
+    }
+
+    moved.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The session handles one frame at a time, so the wait on the graph actor
+    /// is also how long the worker's next heartbeat goes unread. Every
+    /// configurable deadline must therefore outlast the budget, or a slow graph
+    /// actor unregisters a healthy worker mid-assignment.
+    #[test]
+    fn the_budget_expires_before_the_liveness_deadline() {
+        for timeout in [1_u64, 2, 10, 30, 60, 120, 600, 3600] {
+            assert!(
+                transition_budget(timeout) < Duration::from_secs(timeout),
+                "budget for a {timeout}s deadline: {:?}",
+                transition_budget(timeout)
+            );
+        }
+    }
+
+    /// A disabled watchdog is not a licence to hold the session for the graph
+    /// actor's ten minutes, and a budget of zero would withdraw every claim.
+    #[test]
+    fn the_budget_is_bounded_at_both_ends() {
+        assert_eq!(
+            transition_budget(0),
+            Duration::from_millis(TRANSITION_CEILING_MS)
+        );
+        assert_eq!(
+            transition_budget(u64::MAX),
+            Duration::from_millis(TRANSITION_CEILING_MS)
+        );
+        assert_eq!(
+            transition_budget(1),
+            Duration::from_millis(TRANSITION_FLOOR_MS)
+        );
     }
 }

@@ -35,6 +35,9 @@ fn lost_eval_statuses() -> Vec<EvaluationStatus> {
 
 #[derive(Debug, Default)]
 pub struct RecoveryReport {
+    /// Open `dispatched_job` rows closed as `Abandoned`, each one a dispatch
+    /// gate reopened without waiting for its worker to come back.
+    pub dispatches_closed: u64,
     pub attempts_aborted: u64,
     pub builds_requeued: u64,
     /// How many of `builds_requeued` the gate pulled straight back to `Created`.
@@ -47,9 +50,16 @@ pub struct RecoveryReport {
 pub async fn recover_interrupted_work<C: ConnectionTrait>(
     conn: &C,
 ) -> Result<RecoveryReport, DbErr> {
-    let mut report = RecoveryReport::default();
+    // 1. Nothing the previous process handed out is still out: close its
+    // dispatch rows before the requeue below, or both dispatch selections
+    // refuse the work they re-queue until each worker reconnects - which a
+    // scaled-down or crashed one never does - or the 1800 s sweep runs.
+    let mut report = RecoveryReport {
+        dispatches_closed: crate::dispatch_record::abandon_all_open_dispatches(conn).await?,
+        ..Default::default()
+    };
 
-    // 1. Abort orphaned running attempts.
+    // 2. Abort orphaned running attempts.
     let now = now();
     let res = gradient_entity::build_attempt::Entity::update_many()
         .col_expr(
@@ -65,7 +75,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await?;
     report.attempts_aborted = res.rows_affected;
 
-    // 2. Re-queue anchors that were mid-flight (Building back to Queued). The
+    // 3. Re-queue anchors that were mid-flight (Building back to Queued). The
     // requeue evaluates no gate and since #591 nothing downstream re-checks a
     // `Queued` row, so it settles what it wrote: a mid-flight anchor's dependencies
     // can have regressed while the server was down, and on the first start after
@@ -89,14 +99,14 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await?
         .len() as u64;
 
-    // 3a. Collect the evals a restart lost, `Building` included: their anchors
+    // 4a. Collect the evals a restart lost, `Building` included: their anchors
     // and their terminal transition are this sweep's to finish.
     let inflight_evals = EEvaluation::find()
         .filter(CEvaluation::Status.is_in(lost_eval_statuses()))
         .all(conn)
         .await?;
 
-    // 3b. Abort those evaluations as a complete terminal transition. `finished_at`
+    // 4b. Abort those evaluations as a complete terminal transition. `finished_at`
     // belongs with the status: a reader that sees Aborted with no end time reads
     // it as still running, and retention keys off the column. The live path
     // (`update_evaluation_status`) also runs the reactor effects; startup has no
@@ -123,7 +133,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await;
     }
 
-    // 3c. Abort the anchors those evals drove. When the server dies mid-eval the
+    // 4c. Abort the anchors those evals drove. When the server dies mid-eval the
     // builder aborts the eval's builds, so reflect it: Created/Queued/Building
     // anchors referenced only by the now-aborted evals go to Aborted. Anchors a
     // still-live eval also needs are left running (shared-anchor safety). The
@@ -133,7 +143,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         report.builds_aborted = abort_anchors_for_evals(conn, &eval_ids).await?;
     }
 
-    // 3d. Force re-evaluation of the affected tasks.
+    // 4d. Force re-evaluation of the affected tasks.
     let task_ids: Vec<TaskId> = inflight_evals
         .into_iter()
         .filter_map(|e| e.task)
@@ -293,31 +303,36 @@ mod tests {
         let task_id = TaskId::now_v7();
         let mid_flight = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // 1. abort orphaned attempts
+            // 1. close the dispatch rows of the process that died
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 5,
+            }])
+            // 2. abort orphaned attempts
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 3,
             }])
-            // 2. re-queue Building builds, naming the rows it moved
+            // 3. re-queue Building builds, naming the rows it moved
             .append_query_results([vec![
                 derivation_row(mid_flight),
                 derivation_row(DerivationId::now_v7()),
             ]])
-            // 2. the settle pulls one of them straight back
+            // 3. the settle pulls one of them straight back
             .append_query_results([vec![unpromoted_row(mid_flight)]])
-            // 3a. SELECT pre-build inflight evals
+            // 4a. SELECT pre-build inflight evals
             .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
-            // 3b. abort those evals
+            // 4b. abort those evals
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // 3c. abort their anchors
+            // 4c. abort their anchors
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 4,
             }])
-            // 3d. force-eval their tasks
+            // 4d. force-eval their tasks
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -326,6 +341,7 @@ mod tests {
 
         let report = recover_interrupted_work(&db).await.unwrap();
 
+        assert_eq!(report.dispatches_closed, 5);
         assert_eq!(report.attempts_aborted, 3);
         assert_eq!(report.builds_requeued, 2);
         assert_eq!(report.builds_unpromoted, 1);
@@ -334,22 +350,63 @@ mod tests {
         assert_eq!(report.tasks_forced, 1);
     }
 
+    /// Recovery asserts that nothing the previous process handed out is still
+    /// out, so it owns the dispatch rows too: an anchor requeued while its row
+    /// is still open is refused by `find_ready_anchors` until that worker
+    /// reconnects, which a scaled-down or crashed one never does.
+    #[tokio::test]
+    async fn the_dispatch_rows_close_before_the_anchor_requeue() {
+        let none = MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([none.clone(), none])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<MEval>::new()])
+            .into_connection();
+
+        recover_interrupted_work(&db).await.unwrap();
+
+        let log = db.into_transaction_log();
+        let sql: Vec<&str> = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .map(|s| s.sql.as_str())
+            .collect();
+        let close = sql
+            .iter()
+            .position(|s| s.starts_with("UPDATE \"dispatched_job\""))
+            .expect("recovery closes every open dispatch row");
+        let requeue = sql
+            .iter()
+            .position(|s| s.contains("UPDATE derivation_build SET status"))
+            .expect("recovery requeues the mid-flight anchors");
+        assert!(close < requeue, "{sql:?}");
+    }
+
     #[tokio::test]
     async fn task_force_step_skipped_when_no_pre_build_evals() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // 1. abort orphaned attempts (none)
+            // 1. no dispatch rows were left open
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
             }])
-            // 2. nothing was mid-flight, so the settle issues no statement at all
+            // 2. abort orphaned attempts (none)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            // 3. nothing was mid-flight, so the settle issues no statement at all
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // 3a. SELECT pre-build evals: empty, so steps 3b/3c/3d are skipped
+            // 4a. SELECT pre-build evals: empty, so steps 4b/4c/4d are skipped
             .append_query_results([Vec::<MEval>::new()])
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
 
+        assert_eq!(report.dispatches_closed, 0);
         assert_eq!(report.attempts_aborted, 0);
         assert_eq!(report.builds_requeued, 0);
         assert_eq!(report.builds_unpromoted, 0);

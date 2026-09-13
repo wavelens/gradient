@@ -290,7 +290,7 @@ WorkerMetrics {
 
 The server replaces the previous values immediately on each heartbeat; a worker that never reports metrics is scored against zeroed dynamic fields (its static caps still apply). The reference worker emits `WorkerMetrics` on its ~10 s heartbeat tick, sampling host load off the dispatch thread. `disk_speed_mbps` and `network_speed_mbps` are passive EWMAs: disk from per-build cgroup `io.stat` over build wall-time, network from real NAR transfer bytes over time. Both stay `None` until the first build / NAR transfer.
 
-**Liveness.** The 10 s heartbeat doubles as the server's liveness signal: the session loop stamps each worker's `last_seen` on every inbound frame, and a watchdog (`worker_liveness_loop`) unregisters any worker silent past `worker_heartbeat_timeout_secs` (default 120 s), re-queuing its in-flight jobs via the normal `unregister_worker` path. Without this, a worker that dies without a clean TCP close - a hard OOM-kill, a frozen host, or a network partition leaving the socket half-open - would stay "connected" and its eval/build jobs would sit non-terminal forever. A graceful disconnect is still handled immediately on connection close; the watchdog only covers the silent-death case.
+**Liveness.** The 10 s heartbeat doubles as the server's liveness signal: the connection's reader stamps each worker's `last_seen` the moment a frame arrives, before the handler runs, so liveness measures the connection rather than how long a handler is taking, and a watchdog (`worker_liveness_loop`) unregisters any worker silent past `worker_heartbeat_timeout_secs` (default 120 s), re-queuing its in-flight jobs via the normal `unregister_worker` path. Without this, a worker that dies without a clean TCP close - a hard OOM-kill, a frozen host, or a network partition leaving the socket half-open - would stay "connected" and its eval/build jobs would sit non-terminal forever. A graceful disconnect is still handled immediately on connection close; the watchdog only covers the silent-death case.
 
 ### Ephemeral Workers
 
@@ -332,6 +332,8 @@ The "new candidates available" signal is a level-triggered `watch` generation co
 `build_dispatch_loop` runs on a 5s timer but is also kicked reactively (`Scheduler::dispatch_kick`, `notify_one`) when a job completes **and leaves its worker idle**, so the dependents it unblocks are enqueued and offered immediately. Without this, a serial dependency chain (e.g. the stdenv bootstrap) advances only one level per 5s tick. The idle gate avoids redundant passes while a worker is still busy (e.g. completing 1 of 8 concurrent builds) - that worker keeps pulling on its own and the timer covers the rest.
 
 Closing the loop on the worker side: after scoring a fresh `JobOffer` the worker sends a capacity-gated `RequestJob` (not just on its 10s heartbeat). Scoring is what clears the server's rescore gate, so the worker's post-completion `RequestJob` would otherwise race ahead of its own scores, miss, and idle until the next heartbeat - collapsing a serial chain to one level per ~10s.
+
+`AssignJob` leaves only after the `dispatched_job` row exists, so a worker that reports at once (a substitute, an immediate failure) always finds its record; a request whose record cannot be written gets no job and asks again. A build's open `build_attempt` is written by the `Dispatched` transition awaited on that same path, but warn-only inside it, so it is not part of the guarantee. That await is capped at half `worker_heartbeat_timeout_secs`, because the session reads one frame at a time and a wait longer than the deadline would leave the worker's heartbeats unread until the liveness pass unregisters it mid-assignment. A worker that rejects the assignment closes the row again on its way back to pending.
 
 Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (projects, caches) it has successfully authenticated against.
 
@@ -1432,11 +1434,12 @@ When the server restarts (deploy, crash, maintenance), workers experience a WebS
 
 **Server behavior on startup:** `recover_interrupted_work` runs once, before any session opens.
 
- 1. Abort every orphaned `Running` build attempt - the worker that owned it is gone.
- 2. Reset every `Building` anchor to `Queued` - the worker that was building it is gone.
- 3. Abort every active evaluation a restart loses (every `ACTIVE` status except `Queued`, re-offered by the eval dispatcher, and `Waiting`, picked up by build reconcile) and set `ForceEvaluation` on its task: a partly-walked graph is never merged with a new walk's, and a `Building` evaluation is re-evaluated too rather than resumed.
- 4. Abort the anchors those evaluations drove (`Created`/`Queued`/`Building`), the ones step 2 just re-queued included, unless a still-live evaluation needs them as well. The forced re-evaluation resets them to `Created` and they promote again once their derivations are walked.
- 5. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
+ 1. Close every open `dispatched_job` row as `Abandoned` - nothing the dead process handed out is still out, and an open row gates both dispatch selections against the work step 3 re-queues.
+ 2. Abort every orphaned `Running` build attempt - the worker that owned it is gone.
+ 3. Reset every `Building` anchor to `Queued` - the worker that was building it is gone.
+ 4. Abort every active evaluation a restart loses (every `ACTIVE` status except `Queued`, re-offered by the eval dispatcher, and `Waiting`, picked up by build reconcile) and set `ForceEvaluation` on its task: a partly-walked graph is never merged with a new walk's, and a `Building` evaluation is re-evaluated too rather than resumed.
+ 5. Abort the anchors those evaluations drove (`Created`/`Queued`/`Building`), the ones step 3 just re-queued included, unless a still-live evaluation needs them as well. The forced re-evaluation resets them to `Created` and they promote again once their derivations are walked.
+ 6. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
 
 ```mermaid
 sequenceDiagram

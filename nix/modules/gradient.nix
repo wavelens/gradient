@@ -924,9 +924,11 @@ in {
           description = ''
             Seconds a connected worker may go silent before the server declares
             it dead and re-queues its in-flight jobs. The worker heartbeats every
-            10 s, so the default 120 s tolerates twelve missed beats: liveness is
-            stamped when the server processes a frame, so a briefly stalled
-            server must not false-declare a healthy worker dead. This is the
+            10 s, so the default 120 s tolerates twelve missed beats: liveness
+            is stamped when the connection's reader receives a frame, so it
+            measures the connection rather than how long a handler is taking
+            and a briefly stalled server cannot false-declare a healthy worker
+            dead. This is the
             only detector for a worker that dies without a clean TCP close (hard
             OOM-kill, frozen host, network partition). Set to 0 to disable the
             liveness watchdog.
