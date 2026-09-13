@@ -18,7 +18,10 @@
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte};
 use anyhow::{Context, Result};
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, FromQueryResult, Statement};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, FromQueryResult, Statement,
+    TransactionTrait,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_types::*;
@@ -39,10 +42,13 @@ struct EdgeRow {
 /// edges.
 ///
 /// A start node nothing depends on ⇒ result contains exactly `{start}`.
-pub async fn collect_transitive_dependents<C: ConnectionTrait>(
+pub async fn collect_transitive_dependents<C>(
     db: &C,
     start: DerivationId,
-) -> Result<HashSet<DerivationId>> {
+) -> Result<HashSet<DerivationId>>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let sql = format!(
         "{} SELECT derivation FROM dependents",
         dependency_closure_cte(
@@ -51,14 +57,18 @@ pub async fn collect_transitive_dependents<C: ConnectionTrait>(
             ClosureDirection::Dependents,
         )
     );
+    let walk = crate::graph_sql::begin_walk(db)
+        .await
+        .context("open the reverse-edge walk")?;
     let rows = DerivationRow::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         sql,
         [start.into_inner().into()],
     ))
-    .all(db)
+    .all(&walk)
     .await
     .context("walk derivation_dependency reverse edges")?;
+    walk.commit().await.context("close the reverse-edge walk")?;
 
     Ok(rows
         .into_iter()
@@ -153,6 +163,15 @@ pub fn dependency_layers(
 mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
+
+    /// The walk opens a transaction and raises `work_mem` before its
+    /// statement, so every mock that reaches one owes an exec result.
+    fn raise() -> sea_orm::MockExecResult {
+        sea_orm::MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }
+    }
 
     fn node(derivation: DerivationId) -> MDerivationDependency {
         gradient_entity::derivation_dependency::Model {
@@ -253,6 +272,7 @@ mod tests {
     async fn no_dependents_returns_only_start() {
         let start = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([raise()])
             .append_query_results([Vec::<MDerivationDependency>::new()])
             .into_connection();
 
@@ -269,6 +289,7 @@ mod tests {
         let a = DerivationId::now_v7();
         let b = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([raise()])
             .append_query_results([vec![node(a), node(b)]])
             .into_connection();
 

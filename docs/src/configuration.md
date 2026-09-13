@@ -82,7 +82,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.debugIndexIntervalSecs` | `300` | Interval between DWARF build-id index backfill passes; uploads index their own NAR in place, so this only catches paths cached before the index existed and walks lost to a restart. (`GRADIENT_DEBUG_INDEX_INTERVAL_SECS`) |
 | `settings.narVerifyDigest` | `false` | When set, the S3 presigned NAR commit path GETs the uploaded object and rehashes it against the reported `file_hash` before marking it cached, catching same-length corruption at the cost of a full object read. Off by default: the presigned path still HEAD-checks size; the relayed and REST upload paths always content-verify since they already hold the bytes in memory. (`GRADIENT_NAR_VERIFY_DIGEST`) |
 | `settings.narUploadGraceHours` | `24` | Grace before the orphan-files GC reclaims a NAR object no DB row references (covers the upload commit window). (`GRADIENT_NAR_UPLOAD_GRACE_HOURS`) |
-| `settings.gcWedgedEvalHours` | `24` | Hours after which an untouched active evaluation is presumed wedged and stops blocking evaluation GC; the wedged eval itself is never deleted (0 = block forever). (`GRADIENT_GC_WEDGED_EVAL_HOURS`) |
+| `settings.gcWedgedEvalHours` | `24` | Hours an active evaluation may stay in one phase before it is presumed wedged and stops blocking evaluation GC; measured on the phase it entered, not on when its row was last written, so a stuck run that still takes writes is caught. The wedged eval itself is never deleted (0 = block forever). (`GRADIENT_GC_WEDGED_EVAL_HOURS`) |
 | `s3.readTimeoutSecs` | `60` | Seconds an S3 response may stall before the request fails. An inactivity timer reset by every received chunk, not a cap on transfer duration - a multi-GB NAR streams for as long as it progresses. Gradient sets no total request timeout: object-store's 30s default cancelled any slower download and then spent the retry budget re-running a request certain to be cancelled again. (`GRADIENT_S3_READ_TIMEOUT_SECS`) |
 | `s3.maxRetries` | `3` | How many times a failed S3 request is retried. (`GRADIENT_S3_MAX_RETRIES`) |
 | `s3.retryTimeoutSecs` | `250` | Total seconds from the first attempt after which no further S3 retry starts. Keep above `(maxRetries + 1) * readTimeoutSecs`, or a request dying on the read timeout is never retried - the budget is spent before the first attempt fails. Only consulted on error, so it never interrupts a progressing transfer. Stay under 5 minutes: retries reuse the original credentials and payload. (`GRADIENT_S3_RETRY_TIMEOUT_SECS`) |
@@ -118,6 +118,51 @@ Builds can fail in three distinct ways:
 `FailedTransient` is non-terminal: the build is re-queued automatically with an exponential back-off until `buildMaxAttempts` is exhausted, at which point the status is promoted to `FailedPermanent`. API entry-point queries treat `FailedTransient` as in-progress; the frontend renders all three variants as "Failed".
 
 Per-derivation `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild` override the server defaults when present on a derivation. Note that Nix `meta.*` attributes do **not** propagate to the `.drv`; these must be set as top-level derivation attributes.
+
+## Postgres Sizing
+
+Gradient's working set is the build graph, and it is index-bound rather than
+table-bound. On the reference deployment a 17 GB database carries 8.5 GB of
+indexes, of which `cached_path_reference` alone holds 3.2 GB, so a stock 128 MB
+`shared_buffers` cannot keep even the hot index set resident and every recursive
+graph walk re-reads it from the page cache.
+
+With `configurePostgres = true` the module owns the cluster and sets the sizing
+that does not depend on the host, every value a `mkDefault` you can override:
+
+| setting | module default | why |
+|---|---|---|
+| `random_page_cost` | `1.1` | SSD: a random page costs almost what a sequential one does. At the default of 4 the planner picks bitmap heap scans over the index-only scans the edge tables are built for. |
+| `max_connections` | `200` | See below. |
+
+The four settings that scale with the host's RAM have no defensible static
+default, so they are options instead. A module that guessed them would size a
+2 GB test guest the way it sizes the reference deployment:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `postgresSharedBuffers` | `null` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. `null` leaves the upstream default. |
+| `postgresEffectiveCacheSize` | `null` | `effective_cache_size`: three quarters of the host's RAM, so `"12GB"` on a 16 GB host. A planner hint about what the kernel will cache, not an allocation. |
+| `postgresWorkMem` | `null` | `work_mem`: the floor every ordinary query gets, which the graph walks raise above for one statement. Charged per sort or hash node, so the real ceiling is this times every concurrent query's node count. `"32MB"` suits a host sized for the 80 pooled connections below. |
+| `postgresMaintenanceWorkMem` | `null` | `maintenance_work_mem`: index builds and the autovacuum passes over the edge tables. Each of `autovacuum_max_workers` can claim this much at once, so `"1GB"` wants RAM to spare. |
+
+When `databaseUrl` points at a cluster this module does not configure, set the
+same six values there by hand.
+
+`max_connections` has to cover every server process's three pools at once:
+`databaseMaxConnections` plus `databaseWebMaxConnections` plus
+`databaseCacheMaxConnections` (80 in total by default), with headroom for
+`maintenance_work_mem`-sized autovacuum workers and for `psql`. The stock 100 is
+enough for one server, not for two.
+
+Two things Gradient handles itself, so they do not belong in the host config. The
+three edge tables (`cached_path_reference`, `derivation_dependency`,
+`derivation_closure`) carry per-table autovacuum overrides set by migration: all
+three scale factors go to 0.02, because these tables are append-heavy and read
+through index-only scans, and what keeps those scans index-only is a fresh
+visibility map rather than a low dead-tuple count. And the recursive walks raise
+`work_mem` to 64 MB with `SET LOCAL` inside their own transaction, which has to
+stay above the floor in the table above or it buys the walk nothing.
 
 ## Reverse Proxies
 
@@ -173,6 +218,7 @@ The Job Board records build/eval phase timings, dispatch decisions (with scoring
 | Option / env var | Default | Purpose |
 | --- | --- | --- |
 | `metricsRollupIntervalSecs` / `GRADIENT_METRICS_ROLLUP_INTERVAL` | 60 | Rollup-aggregator pass interval. |
+| `cacheMetricFlushIntervalSecs` / `GRADIENT_CACHE_METRIC_FLUSH_INTERVAL` | 10 | How often served NAR bytes and counts, accumulated in memory per cache and minute, are added into `cache_metric`. A serve never writes that row itself, so a failed flush costs at most this much traffic telemetry and never a request. |
 | `metricsRetentionRawDays` / `GRADIENT_METRICS_RETENTION_RAW_DAYS` | 14 | Retention for raw `phase_event` / `worker_sample` rows (0 = forever). |
 | `metricsRetentionRollupDays` / `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | 400 | Retention for minute/hour rollups; day/week kept (0 = forever). |
 | `dispatchRetentionDays` / `GRADIENT_DISPATCH_RETENTION_DAYS` | 30 | Retention for `dispatched_job` forensic rows (0 = forever). |

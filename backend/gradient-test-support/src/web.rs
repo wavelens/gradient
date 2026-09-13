@@ -132,6 +132,8 @@ fn server_from_cli(db: DatabaseConnection, cli: gradient_types::Cli) -> TestServ
         http: gradient_util::http::build_client().expect("http client"),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         shutdown: gradient_util::shutdown::Shutdown::new(),
+        last_used_stamps: gradient_core::last_used_stamps(),
+        cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
         jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),

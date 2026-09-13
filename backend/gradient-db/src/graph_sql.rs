@@ -27,6 +27,43 @@
 //! already emits 940k rows for 68k distinct nodes; `UNION ALL` would drop the
 //! deduplication and make the walk exponential in depth.
 
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
+
+/// Raises `work_mem` for one walk. The `UNION` in every recursive term above
+/// deduplicates the frontier through an in-memory hash, and the cluster default
+/// of 4 MB is far under what these graphs need: the dependents walk alone emits
+/// 940k rows for 68k distinct nodes, so the hash spills to a temporary file and
+/// is re-spilled on every iteration.
+///
+/// `SET LOCAL` is the only safe form here. A bare `SET` on a pooled connection
+/// outlives the statement that issued it and would raise the ceiling for every
+/// later query that borrows the same connection; `SET LOCAL` reverts with the
+/// transaction, and is silently ignored (with a server warning) outside one,
+/// which is why [`begin_walk`] opens the transaction rather than trusting the
+/// caller to be inside one.
+///
+/// The value has to stay ABOVE the cluster's own `work_mem` or this is an
+/// expensive no-op: a raise to the number the floor already sits at buys the
+/// walk nothing. Raising that floor instead is the wrong trade, since it
+/// multiplies by every sort node of every concurrent query, which is why the
+/// module leaves it to `services.gradient.server.postgresWorkMem` rather than
+/// guessing it.
+pub const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
+
+/// Opens a transaction sized for one graph walk. The caller runs its statement
+/// on the returned handle and commits; a dropped handle rolls back, which for a
+/// read-only walk is equivalent. Handed a connection that already stands for an
+/// open transaction (the graph actor's `WorkerDb`) this is a savepoint, so the
+/// raise lasts to the end of that outer transaction rather than to the release.
+pub async fn begin_walk<C>(db: &C) -> Result<DatabaseTransaction, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let txn = db.begin().await?;
+    txn.execute_unprepared(WALK_WORK_MEM).await?;
+    Ok(txn)
+}
+
 pub enum ClosureDirection {
     /// Walk from the roots toward the inputs they need (the build-time closure).
     Dependencies,
@@ -267,6 +304,37 @@ mod tests {
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// The raise has to be `SET LOCAL` and it has to happen inside the walk's own
+    /// transaction. A bare `SET` on a pooled connection outlives the walk and
+    /// raises the ceiling for every unrelated statement that later borrows the
+    /// same connection; `SET LOCAL` outside a transaction block is a no-op the
+    /// server only warns about, so the walk cannot rely on the caller for one.
+    #[tokio::test]
+    async fn the_walk_raises_work_mem_with_set_local_inside_its_own_transaction() {
+        assert!(WALK_WORK_MEM.starts_with("SET LOCAL "), "{WALK_WORK_MEM}");
+
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .into_connection();
+        begin_walk(&db)
+            .await
+            .expect("the walk opens")
+            .commit()
+            .await
+            .expect("the walk closes");
+
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            1,
+            "one statement, bracketed by the walk: {log:?}"
+        );
+        assert!(log[0].contains(WALK_WORK_MEM), "{log:?}");
     }
 
     /// Dependents direction must walk upward (a dependency edge leads to the

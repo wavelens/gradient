@@ -153,6 +153,57 @@ in {
 
       configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
 
+      postgresSharedBuffers = lib.mkOption {
+        description = ''
+          `shared_buffers` for the cluster `configurePostgres` sets up. Size it to
+          a quarter of the host's RAM: Gradient's working set is the build graph's
+          indexes, and the stock 128 MB cannot keep the hot set resident. `null`
+          leaves the upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "4GB";
+      };
+
+      postgresEffectiveCacheSize = lib.mkOption {
+        description = ''
+          `effective_cache_size` for the cluster `configurePostgres` sets up.
+          Three quarters of the host's RAM: it is a planner hint about what the
+          kernel is expected to cache, not an allocation. `null` leaves the
+          upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "12GB";
+      };
+
+      postgresWorkMem = lib.mkOption {
+        description = ''
+          `work_mem` for the cluster `configurePostgres` sets up. This is the
+          floor every ordinary query gets; the graph walks raise their own
+          ceiling above it for one statement. It is charged per sort or hash
+          node, so the ceiling is roughly this times every concurrent query's
+          node count: `"32MB"` suits a host sized for the three server pools
+          (80 connections), and is far too much for a small one. `null` leaves
+          the upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "32MB";
+      };
+
+      postgresMaintenanceWorkMem = lib.mkOption {
+        description = ''
+          `maintenance_work_mem` for the cluster `configurePostgres` sets up:
+          index builds and the autovacuum passes over the edge tables. Each of
+          `autovacuum_max_workers` can claim this much at once, so `"1GB"` needs
+          a host with RAM to spare. `null` leaves the upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "1GB";
+      };
+
       localWorker = lib.mkOption {
         description = ''
           Provision credentials for a `services.gradient.worker` running on this
@@ -559,6 +610,12 @@ in {
           default = 60;
         };
 
+        cacheMetricFlushIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between flushes of the in-memory cache-traffic accumulator into cache_metric.";
+          type = lib.types.ints.positive;
+          default = 10;
+        };
+
         metricsRetentionRawDays = lib.mkOption {
           description = "Days to retain raw phase_event / worker_sample rows. 0 = keep forever.";
           type = lib.types.ints.unsigned;
@@ -800,7 +857,7 @@ in {
         };
 
         gcWedgedEvalHours = lib.mkOption {
-          description = "Hours after which an untouched active evaluation is presumed wedged and stops blocking the per-task evaluation GC. 0 = block forever.";
+          description = "Hours an active evaluation may stay in one phase before it is presumed wedged and stops blocking the per-task evaluation GC. Measured on the phase it entered, not on when its row was last written. 0 = block forever.";
           type = lib.types.ints.unsigned;
           default = 24;
         };
@@ -1079,6 +1136,7 @@ in {
         GRADIENT_EVAL_CACHE_MAX_AGE_DAYS = toString cfg.settings.evalCacheMaxAgeDays;
         GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS = toString cfg.settings.evalCacheSweepIntervalSecs;
         GRADIENT_METRICS_ROLLUP_INTERVAL = toString cfg.settings.metricsRollupIntervalSecs;
+        GRADIENT_CACHE_METRIC_FLUSH_INTERVAL = toString cfg.settings.cacheMetricFlushIntervalSecs;
         GRADIENT_METRICS_RETENTION_RAW_DAYS = toString cfg.settings.metricsRetentionRawDays;
         GRADIENT_METRICS_RETENTION_ROLLUP_DAYS = toString cfg.settings.metricsRetentionRollupDays;
         GRADIENT_DISPATCH_RETENTION_DAYS = toString cfg.settings.dispatchRetentionDays;
@@ -1313,7 +1371,19 @@ in {
       postgresql = lib.mkIf cfg.configurePostgres {
         enable = true;
         ensureDatabases = [ "gradient" ];
-        settings.max_connections = lib.mkDefault 200;
+        settings = {
+          max_connections = lib.mkDefault 200;
+          random_page_cost = lib.mkDefault 1.1;
+        } // lib.optionalAttrs (cfg.postgresSharedBuffers != null) {
+          shared_buffers = lib.mkDefault cfg.postgresSharedBuffers;
+        } // lib.optionalAttrs (cfg.postgresEffectiveCacheSize != null) {
+          effective_cache_size = lib.mkDefault cfg.postgresEffectiveCacheSize;
+        } // lib.optionalAttrs (cfg.postgresWorkMem != null) {
+          work_mem = lib.mkDefault cfg.postgresWorkMem;
+        } // lib.optionalAttrs (cfg.postgresMaintenanceWorkMem != null) {
+          maintenance_work_mem = lib.mkDefault cfg.postgresMaintenanceWorkMem;
+        };
+
         ensureUsers = [{
           name = "gradient";
           ensureDBOwnership = true;

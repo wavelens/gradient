@@ -13,8 +13,8 @@
 //! outputs are cached.
 
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, FromQueryResult,
-    QueryFilter, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, EntityTrait,
+    FromQueryResult, QueryFilter, Statement, TransactionTrait,
 };
 use std::collections::HashMap;
 
@@ -148,10 +148,13 @@ pub async fn references_for_hashes<C: ConnectionTrait>(
 /// Reference closure of `seed_hashes` as one recursive statement; returns every
 /// reached `cached_path` row keyed by hash. Seeds and references without a
 /// `cached_path` row (NAR not yet uploaded) are simply absent from the result.
-pub async fn runtime_closure_reachable<C: ConnectionTrait>(
+pub async fn runtime_closure_reachable<C>(
     db: &C,
     seed_hashes: &[String],
-) -> Result<HashMap<String, gradient_entity::cached_path::Model>, DbErr> {
+) -> Result<HashMap<String, gradient_entity::cached_path::Model>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     if seed_hashes.is_empty() {
         return Ok(HashMap::new());
     }
@@ -160,17 +163,21 @@ pub async fn runtime_closure_reachable<C: ConnectionTrait>(
         "{} SELECT cp.* FROM cached_path cp JOIN refs r ON cp.hash = r.hash",
         crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
     );
-    Ok(ECachedPath::find()
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let reached: HashMap<String, gradient_entity::cached_path::Model> = ECachedPath::find()
         .from_raw_sql(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             [seed_hashes.to_vec().into()],
         ))
-        .all(db)
+        .all(&walk)
         .await?
         .into_iter()
         .map(|row| (row.hash.clone(), row))
-        .collect())
+        .collect();
+    walk.commit().await?;
+
+    Ok(reached)
 }
 
 /// Store paths in the reference closure of `seed_hashes` that this cache can
@@ -181,11 +188,14 @@ pub async fn runtime_closure_reachable<C: ConnectionTrait>(
 /// hop at a time. Only backed rows come back, so a caller may treat every
 /// returned path as serveable. The walk dedupes on `hash` alone: adding depth to
 /// the key would let a diamond re-enter the frontier and never terminate.
-pub async fn runtime_closure_cached_paths<C: ConnectionTrait>(
+pub async fn runtime_closure_cached_paths<C>(
     db: &C,
     seed_hashes: &[String],
     limit: u64,
-) -> Result<Vec<String>, DbErr> {
+) -> Result<Vec<String>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     if seed_hashes.is_empty() || limit == 0 {
         return Ok(vec![]);
     }
@@ -197,25 +207,24 @@ pub async fn runtime_closure_cached_paths<C: ConnectionTrait>(
          LIMIT $2",
         crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
     );
-    Ok(
-        ReferenceToken::find_by_statement(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
-            [seed_hashes.to_vec().into(), (limit as i64).into()],
-        ))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|r| r.reference)
-        .collect(),
-    )
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let reached = ReferenceToken::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        sql,
+        [seed_hashes.to_vec().into(), (limit as i64).into()],
+    ))
+    .all(&walk)
+    .await?;
+    walk.commit().await?;
+
+    Ok(reached.into_iter().map(|r| r.reference).collect())
 }
 
 /// Total NAR size of the runtime closure seeded at `seed_hashes`.
-pub async fn runtime_closure_size<C: ConnectionTrait>(
-    db: &C,
-    seed_hashes: &[String],
-) -> Result<i64, DbErr> {
+pub async fn runtime_closure_size<C>(db: &C, seed_hashes: &[String]) -> Result<i64, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let reached = runtime_closure_reachable(db, seed_hashes).await?;
     Ok(reached.values().filter_map(|r| r.nar_size).sum())
 }
@@ -261,6 +270,35 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    /// The `cached_path_reference` closure is the widest read in the system, so
+    /// it runs inside the raised-`work_mem` transaction instead of on the bare
+    /// pool where `SET LOCAL` would be ignored.
+    #[tokio::test]
+    async fn the_reference_walk_runs_inside_the_raised_work_mem_transaction() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .into_connection();
+        assert!(
+            runtime_closure_cached_paths(&db, &["abc".to_string()], 10)
+                .await
+                .expect("the walk runs")
+                .is_empty()
+        );
+
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            2,
+            "the raise and the walk, in that order: {log:?}"
+        );
+        assert!(log[0].contains(crate::graph_sql::WALK_WORK_MEM), "{log:?}");
+        assert!(log[1].contains("cached_path_reference"), "{log:?}");
     }
 
     /// The walk must dedupe on `hash` alone. Keying on anything that varies per

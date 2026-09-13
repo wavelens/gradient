@@ -13,15 +13,15 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DerivationId, DerivationInputSourceId};
+use crate::ids::DerivationId;
 use crate::store_path::StorePath;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_input_source")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: DerivationInputSourceId,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub derivation: DerivationId,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub hash: String,
     #[sea_orm(column_type = "Text")]
     pub store_path: StorePath,

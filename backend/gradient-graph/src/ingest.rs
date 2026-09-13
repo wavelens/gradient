@@ -688,7 +688,6 @@ impl BatchWriter<'_> {
 
                 rows.push(
                     MDerivationInputSource {
-                        id: DerivationInputSourceId::now_v7(),
                         derivation: drv_id,
                         hash,
                         store_path,
