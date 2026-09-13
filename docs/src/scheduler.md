@@ -364,9 +364,11 @@ re-substitute of the deleted artifact). Without this the producer would stay
 reset lets it rebuild and the next eval re-marks it substitutable if it is
 genuinely still on an upstream. The reset clears the output's whole availability
 record - `is_cached` **and** `external_url` - not just the our-cache half: leaving
-`external_url` set keeps the node prune-eligible (pruning keys on `external_url`,
-not `is_cached`), so the next eval skips re-walking it, never re-pushes its `.drv`,
-and the reset-to-build anchor dead-ends on a missing `.drv`.
+`external_url` set records an upstream offer for a copy that is gone, so
+`is_cached_anywhere` stays true and the reset-to-build anchor dead-ends on a `.drv`
+nothing serves. The re-walk is a separate decision and belongs to `walked` alone:
+the recovery paths that need one clear the bit explicitly, because a demote on its
+own no longer makes a node prune-ineligible.
 
 When the demanded output's producer is instead terminal-*failed*
 (`FailedPermanent`/`Aborted`/`FailedTimeout`), `reconcile_missing_inputs`
@@ -580,25 +582,23 @@ directly rather than via the daemon's reference walk, which does not reliably
 report them; this mirrors the build-side prefetch so every source a build worker
 will demand is guaranteed pushed by the evaluation that produced it.
 
-The eval closure walk prunes the same way. As the worker walks the graph it
+The eval closure walk prunes on the record alone. As the worker walks the graph it
 asks the server which dependency derivations it already knows
-(`QueryKnownDerivations`); the server prunes a subtree only when **every** output
-is on a real upstream cache (`external_url`), or when every output is whole in our
-own cache (a `cached_path` with its NAR stored and `missing_references = 0`) behind
-a terminal-success anchor. An upstream binary cache serves a *complete closure*, so
-a build worker can fetch the pruned subtree's outputs on demand, and a whole
-`cached_path` carries the same guarantee for our own. A bare `is_cached` hit is
-deliberately not accepted for pruning: the cache is populated output-only
-(substitution relays just the output NAR,
-and a config-specific node's subtree may never have been pushed), so pruning on it
-would strand that subtree - never walked, recorded, or built, and off-upstream so
-unfetchable, a permanent `InputsUnavailable` dead-end (e.g. `unit-*.service` ->
-`X-Restart-Triggers-*`, which exist on no upstream). nixpkgs still prunes via its
-persisted `external_url`; the worker re-walking our own (unreliable) cached
-closures is the correctness price of an output-only cache.
+(`QueryKnownDerivations`); the server prunes exactly those whose
+`derivation.walked` is true. `walked` says the subtree is recorded - its outputs,
+every declared dependency edge, every input source - which is the whole contract of
+the walk, so that bit is the one fact which makes skipping the subtree lose nothing.
+Build and cache state carry no such guarantee: keying the prune on an upstream
+`external_url` or on whole outputs behind a terminal-success anchor re-walked a
+complete record for as long as its anchor had not succeeded, which is most of a
+running evaluation's graph. A record is dropped only where an edge can have been
+lost, and dropping it is what makes the next eval walk the node again: the
+missing-input self-heal flips `walked` on the referrers it demotes (below), and the
+GC's orphan reclaim flips it on the survivors of a deleted dependency. A node that
+is pruned can still be fetched on demand from an upstream cache that serves its
+closure whole.
 
-A stub is never pruned: only a walked derivation whose outputs are on an upstream
-or whole in our cache is.
+A stub is never pruned: `walked = false` means the subtree was never recorded.
 
 #### The cache closure invariant
 
@@ -686,13 +686,13 @@ build target's import needs. The dispatch gate reads both through `whole`.
 
 The repair is bounded to the gating paths - the pending anchors' own `.drv` rows
 and the output rows of their direct dependencies - and that is narrower than the
-readers. The eval-time prune (`gradient_graph::known::prunable`) and the
-substitutability pass ask whether the outputs of arbitrary walked candidates are
-whole, and most of those have no pending anchor, so a ripple lost there is never
-recomputed. It is also the worse failure: a false-whole prune drops a subtree that
-is then never walked, recorded or built - a permanent dead end rather than a stall
-a later build clears. Widening the recompute past the gating set is still open; the
-readiness counters narrowed what a dispatch gate reads, not what a prune does.
+readers. The substitutability pass asks whether the outputs of arbitrary walked
+candidates are whole, and most of those have no pending anchor, so a ripple lost
+there is never recomputed. It is also the worse failure: a false-whole there flags a
+derivation as upstream-substitutable that nothing serves, so the subtree is never
+built - a permanent dead end rather than a stall a later build clears. Widening the
+recompute past the gating set is still open. The eval-time prune is no longer one of
+those readers: it keys on `derivation.walked` and never asks whether a path is whole.
 
 When a build still reports a path missing, `reconcile_missing_inputs` self-heals: a
 missing leaf with a producer is purged and rebuilt (`demote_cached_output`, which
@@ -729,11 +729,11 @@ graph because a referrer's output was cached without its closure under output-on
 substitution), so promotion can never queue it and the gentle flag clear leaves
 the referrer cached, pruned, and never re-walked. When `demote_cached_output`'s
 producer is not reachable (`derivation_is_reachable` is false), the referrers are
-demoted (`demote_referrers_of`) so the next eval re-walks them, re-records the
-dropped edge, and schedules the orphan. Demote leaves `walked` intact: it
-deletes the `cached_path`, so the output is uncached and the next eval re-walks the
-derivation regardless (uncached nodes are never pruned) - clearing the bit would
-only strand a fully-recorded derivation behind the closure gate until that re-walk.
+demoted (`demote_referrers_of`) and their record is dropped
+(`unwalk_derivations`), so the next eval walks them again, re-records the dropped
+edge, and schedules the orphan. The bit looks redundant next to the demote - the
+`cached_path` row is gone, so the node is uncached - but cache presence is not what
+the prune reads any more, so the re-walk has to be asked for explicitly.
 
 An **absent orphan** is the fourth case and the one that makes the whole thing
 self-heal without operator surgery: the missing input has *no* producer row and
@@ -741,8 +741,9 @@ self-heal without operator surgery: the missing input has *no* producer row and
 an admin deleted its rows), so it cannot be reached upward at all. Instead it is
 reached downward from the known failing build: `demote_output_only_cached_deps`
 demotes that build's output-only-cached direct dependencies (output present in our
-cache, no `external_url`), forcing the next eval to re-walk them and re-record the
-orphan plus its now-buildable subtree. Upstream-fetchable deps (`external_url`) are
+cache, no `external_url`) and drops their record, forcing the next eval to walk them
+again and re-record the orphan plus its now-buildable subtree. Upstream-fetchable
+deps (`external_url`) are
 left untouched, since a real upstream serves their closure whole. So an accidental
 cache-row deletion recovers on the next evaluation rather than requiring a manual
 reset.

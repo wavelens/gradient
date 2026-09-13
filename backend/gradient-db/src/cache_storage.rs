@@ -220,10 +220,10 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
 /// Reset a `derivation_output` to "present on no cache": clears the our-cache
 /// link (`is_cached`/`cached_path`) **and** the upstream-availability record
 /// (`external_url` + narinfo metadata). Clearing `external_url` is what makes
-/// `is_cached_anywhere()` false, so the next eval re-walks the node
-/// (`prunable_known_derivations` keys on `external_url`, not `is_cached`) and
-/// re-pushes its `.drv`; leaving it set would keep the node pruned yet reset to a
-/// real build - an unbuildable `InputsUnavailable` dead-end.
+/// `is_cached_anywhere()` false, so nothing trusts an upstream offer for a copy
+/// that is gone; leaving it set would record that offer against a node reset to a
+/// real build - an unbuildable `InputsUnavailable` dead-end. Whether the eval walks
+/// the node again is `walked`'s decision alone ([`crate::unwalk_derivations`]).
 fn demoted_output(
     o: gradient_entity::derivation_output::Model,
 ) -> gradient_entity::derivation_output::ActiveModel {
@@ -325,8 +325,7 @@ pub async fn demote_cached_output(
     // The artifact is gone, so the upstream offer recorded with it is not evidence
     // any more: `demoted_output` cleared `external_url`, and this clears the
     // anchor's `substitutable` so the retire's `fetchable` mark sees the truth. The
-    // next eval re-marks it substitutable if it is genuinely still on an upstream,
-    // having re-walked the node because pruning keys on `external_url`.
+    // next eval re-marks it substitutable if it is genuinely still on an upstream.
     let txn = db.begin().await?;
     let _paths = crate::nar_closure::lock_paths(&txn, &[hash.to_owned()]).await?;
     let _anchors = crate::readiness::lock_anchors(&txn, &producers).await?;
@@ -384,10 +383,10 @@ pub async fn demote_referrers_of(
 /// reference-index referrer, the orphan was pruned out of the graph under one of
 /// this build's cached deps - and being absent, it cannot be reached upward. So
 /// reach it from the known failing build downward: demoting its output-only-cached
-/// deps forces the next eval to re-walk them, re-record the dropped edges, and
-/// schedule the orphan. Upstream-fetchable deps (`external_url`) are left intact -
-/// their closure is served whole by the upstream. Returns producers reset to
-/// `Created`.
+/// deps forces the next eval to re-walk them (`unwalk_derivations` drops their record
+/// and closes their gates), re-record the dropped edges, and schedule the orphan.
+/// Upstream-fetchable deps (`external_url`) are left intact - their closure is served
+/// whole by the upstream. Returns producers reset to `Created`.
 pub async fn demote_output_only_cached_deps(
     ctx: &crate::DbContext,
     derivation: DerivationId,
@@ -418,6 +417,13 @@ pub async fn demote_output_only_cached_deps(
     for h in hashes {
         producers.extend(demote_cached_output(ctx, &h.hash).await?);
     }
+    producers.sort_unstable();
+    producers.dedup();
+
+    // The demote alone no longer re-walks anything: the walk prunes on `walked`, and
+    // the cache facts it used to read are exactly what a demote clears.
+    let changes = crate::readiness::unwalk_derivations(ctx, &producers).await?;
+    crate::status::emit_transition_effects(ctx, &changes).await;
 
     Ok(producers)
 }
@@ -737,8 +743,8 @@ mod tests {
     }
 
     /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
-    /// node stays prune-eligible, never gets re-walked, and its reset-to-build
-    /// anchor dead-ends on a `.drv` the eval never re-pushes.
+    /// node still records an upstream offer for a copy that is gone, and its
+    /// reset-to-build anchor dead-ends on a `.drv` the eval never re-pushes.
     #[test]
     fn demote_clears_upstream_availability() {
         use sea_orm::ActiveValue::Set;
@@ -759,7 +765,7 @@ mod tests {
         assert_eq!(
             am.external_url,
             Set(None),
-            "external_url must be cleared so the node is no longer prune-eligible"
+            "external_url must be cleared so no upstream offer survives the demote"
         );
         assert_eq!(am.nar_hash, Set(None));
         assert_eq!(am.file_hash, Set(None));

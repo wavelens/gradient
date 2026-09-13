@@ -64,7 +64,7 @@ pub(crate) async fn reconcile_missing_inputs(
     let mut demoted_producers: Vec<DerivationId> = Vec::new();
     // Set when a missing input cannot be reached upward: an absent orphan pruned
     // out of the graph, recovered after the loop by demoting the failed build's
-    // cached deps so the next eval re-walks them.
+    // cached deps and dropping their record so the next eval re-walks them.
     let mut needs_dep_rewalk = false;
     for path in missing_paths {
         let Some(hash) = store_path_hash(path) else {
@@ -91,14 +91,24 @@ pub(crate) async fn reconcile_missing_inputs(
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
                 // An orphan producer (no `build_job`) can never be queued, so the
-                // flag clear is not enough: demote the referrers instead, and the
-                // next eval re-walks them, re-records the edge and schedules it.
+                // flag clear is not enough: demote the referrers and drop their
+                // record, so the next eval walks them again, re-records the edge
+                // and schedules it.
                 let orphan = !any_reachable(db, &drvs).await;
                 demoted_producers.extend(drvs);
                 if orphan {
                     match gradient_db::demote_referrers_of(ctx, hash).await {
                         Ok(refs) if !refs.is_empty() => {
                             referrers_demoted += refs.len();
+                            match gradient_db::unwalk_derivations(ctx, &refs).await {
+                                Ok(changes) => {
+                                    gradient_db::emit_transition_effects(ctx, &changes).await
+                                }
+                                Err(e) => {
+                                    warn!(%path, error = %e, "reconcile: re-walk referrers (orphan producer) failed")
+                                }
+                            }
+
                             demoted_producers.extend(refs);
                         }
                         Ok(_) => needs_dep_rewalk = true,
