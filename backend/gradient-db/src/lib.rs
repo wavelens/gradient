@@ -106,7 +106,7 @@ pub use self::reachability::{
 pub use self::readiness::{
     AnchorLock, Repaired, advance_fetchable, became_fetchable, lock_anchors, lost_fetchability,
     promote, promote_closure, repair_pending, seed_unready_deps, unpromote_drv_owners,
-    unpromote_ungated,
+    unpromote_ungated, unwalk_derivations,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;
