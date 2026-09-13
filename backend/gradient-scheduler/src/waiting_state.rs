@@ -142,7 +142,9 @@ pub async fn reconcile_waiting_state(
                 // Build-phase park, or a legacy/untagged row: recover from the
                 // pending builds, falling back to eval recovery when the eval
                 // never produced any (a pre-build park predating EvalWorkers).
-                _ => match build_phase_decision(state, eval.id, worker_caps).await? {
+                _ => match build_phase_decision(state, eval.id, worker_caps, reason.as_ref())
+                    .await?
+                {
                     Some(pair) => Some(pair),
                     None => Some(decide_eval_recovery(
                         EvalCapability::Eval,
@@ -161,7 +163,9 @@ pub async fn reconcile_waiting_state(
                 fetch_capable_workers,
                 connected_workers,
             ),
-            EvaluationStatus::Building => build_phase_decision(state, eval.id, worker_caps).await?,
+            EvaluationStatus::Building => {
+                build_phase_decision(state, eval.id, worker_caps, reason.as_ref()).await?
+            }
             _ => None,
         };
 
@@ -197,26 +201,58 @@ pub async fn reconcile_waiting_state(
 /// (nothing to decide).
 ///
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
-/// every pending anchor yet none is dispatchable - the whole set is `Created`,
-/// blocked behind the `closure_complete` gate with no in-flight build to fire
-/// a promotion. `propagate_closure_complete` can't reach this (it runs on
-/// completion events), so we self-heal here: [`attempt_graph_unstick`].
+/// every pending anchor yet none is dispatchable: typically the set is `Created`
+/// with some term of `graph_sql::gates_predicate` false (a non-zero
+/// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, or no
+/// `build_job`) and no in-flight build to drive a promotion, though a stalled
+/// substitute or a `FailedTransient` anchor reaches here too. Every gate the
+/// graph maintains moves on an event, and by definition no event is coming, so we
+/// self-heal here: [`attempt_graph_unstick`], gated by [`unstick_due`].
 async fn build_phase_decision(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     worker_caps: &[(Vec<String>, Vec<String>)],
+    current: Option<&WaitingReason>,
 ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
-    let outcome = assess_buildability(state, evaluation_id, worker_caps).await?;
+    let Some(a) = assess_buildability(state, evaluation_id, worker_caps).await? else {
+        return Ok(None);
+    };
 
-    if let Some((EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. }))) = &outcome
+    if let (EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. })) =
+        (a.target, &a.reason)
         && unmet.is_empty()
     {
+        if !unstick_due(current, a.pending) {
+            return Ok(Some((
+                EvaluationStatus::Waiting,
+                Some(WaitingReason::graph_stuck(a.pending)),
+            )));
+        }
+
         return Ok(Some(
             attempt_graph_unstick(state, evaluation_id, worker_caps).await?,
         ));
     }
 
-    Ok(outcome)
+    Ok(Some((a.target, a.reason)))
+}
+
+/// The graph-stuck heal runs when an evaluation first parks, or when its pending
+/// set changed since. A stably stuck evaluation is left to the counters, which
+/// promote it as soon as its gates open, and to
+/// [`reheal_graph_stuck_evals`], which re-runs the heal itself on the
+/// consistency sweep's cadence for the repairs no counter can do.
+pub(crate) fn unstick_due(current: Option<&WaitingReason>, pending: u32) -> bool {
+    !matches!(current, Some(WaitingReason::GraphStuck { pending_anchors }) if *pending_anchors == pending)
+}
+
+/// One evaluation's build-phase verdict, with the size of the pending set it
+/// was read from: every caller needs both, and re-reading the set costs a
+/// second query per evaluation per pass.
+struct Assessment {
+    target: EvaluationStatus,
+    reason: Option<WaitingReason>,
+    pending: u32,
 }
 
 /// Decide `Building` vs `Waiting` for an eval's current pending anchors.
@@ -225,7 +261,7 @@ async fn assess_buildability(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     worker_caps: &[(Vec<String>, Vec<String>)],
-) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
+) -> Result<Option<Assessment>> {
     let pending = eval_pending_anchors(state, evaluation_id).await?;
     if pending.is_empty() {
         return Ok(None);
@@ -247,13 +283,17 @@ async fn assess_buildability(
         None
     };
 
-    Ok(Some((target, reason)))
+    Ok(Some(Assessment {
+        target,
+        reason,
+        pending: pending.len() as u32,
+    }))
 }
 
-/// Self-heal a graph-stuck evaluation: reconcile stale `closure_complete`
-/// flags to a fixpoint and re-promote, then re-assess. Recovers to `Building`
-/// when the heal frees a dispatchable anchor; otherwise reports `GraphStuck`
-/// with the blocked count so the stall is legible while later passes retry.
+/// Self-heal a graph-stuck evaluation: run the `Unstick` pipeline over its
+/// closure and re-assess. Recovers to `Building` when the heal frees a
+/// dispatchable anchor; otherwise reports `GraphStuck` with the blocked count so
+/// the stall is legible while later passes retry.
 async fn attempt_graph_unstick(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -261,9 +301,9 @@ async fn attempt_graph_unstick(
 ) -> Result<(EvaluationStatus, Option<WaitingReason>)> {
     info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing");
 
-    // The canonical healing pipeline in Unstick scope: terminal-failed thaw,
-    // cache-trust reconcile, flag fixpoints, promotion (see
-    // `gradient_db::reconcile`).
+    // The healing pipeline in Unstick scope: terminal-failed thaw, unbacked-output
+    // demote, cached-anchor settle with its readiness advance, the closure's
+    // dependency-failed sweep, and promotion (see `gradient_db::reconcile`).
     if let Err(e) = state
         .graph
         .transition(gradient_graph::Transition::Reconcile {
@@ -274,18 +314,70 @@ async fn attempt_graph_unstick(
         error!(error = %e, %evaluation_id, "unstick reconcile did not reach the graph actor");
     }
 
-    if let Some((EvaluationStatus::Building, reason)) =
-        assess_buildability(state, evaluation_id, worker_caps).await?
-    {
-        return Ok((EvaluationStatus::Building, reason));
-    }
-
-    let blocked = eval_pending_anchors(state, evaluation_id).await?.len() as u32;
+    let blocked = match assess_buildability(state, evaluation_id, worker_caps).await? {
+        Some(a) if a.target == EvaluationStatus::Building => {
+            return Ok((EvaluationStatus::Building, a.reason));
+        }
+        Some(a) => a.pending,
+        None => 0,
+    };
 
     Ok((
         EvaluationStatus::Waiting,
         Some(WaitingReason::graph_stuck(blocked)),
     ))
+}
+
+/// The graph-stuck heal's backstop, on the consistency sweep's cadence.
+///
+/// [`reconcile_waiting_state`] runs the heal on entry and again when the pending
+/// set moves, so a stably stuck evaluation would otherwise never re-run the one
+/// repair no counter can do: `reconcile_cached_anchors_for_eval` writes a
+/// non-terminal anchor whose outputs are all cached to `Completed`, and the
+/// readiness recount cannot stand in for it, because `fetchable` reads the very
+/// status that heal exists to fix. Its sibling `reconcile_dependency_failed` has
+/// no other driver either. Both run per evaluation, so this iterates the parked
+/// set rather than the graph, unordered and uncapped: a pass cancelled by the
+/// budget re-heals whatever the next pass reaches first, so `stuck` is logged to
+/// make a set large enough for that to matter visible.
+pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
+    let waiting = EEvaluation::find()
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
+        .all(&state.worker_db)
+        .await
+        .context("fetch waiting evaluations")?;
+
+    let mut stuck = 0u32;
+    let mut healed = 0u32;
+    for eval in waiting {
+        let graph_stuck = eval
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json)
+            .is_some_and(|r| matches!(r, WaitingReason::GraphStuck { .. }));
+        if !graph_stuck {
+            continue;
+        }
+        stuck += 1;
+
+        if let Err(e) = state
+            .graph
+            .transition(gradient_graph::Transition::Reconcile {
+                scope: gradient_db::ReconcileScope::Unstick(eval.id),
+            })
+            .await
+        {
+            error!(error = %e, evaluation_id = %eval.id, "graph-stuck re-heal did not reach the graph actor");
+            continue;
+        }
+        healed += 1;
+    }
+
+    if stuck > 0 {
+        info!(stuck, healed, "re-healed graph-stuck evaluations");
+    }
+
+    Ok(())
 }
 
 /// Re-evaluate evaluations wedged in `graph_stuck` on a `.drv` our cache lost.
@@ -357,8 +449,8 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
 
 /// True when a pending anchor of `evaluation_id` is dispatch-blocked solely by
 /// its own missing `.drv`: its build dependencies are all satisfied and it is
-/// not substitutable, yet neither the build-graph `drv_closure_cached` flag nor
-/// the `.drv`'s own NAR-closure holds. That is the zone-B signature - a `.drv`
+/// not substitutable, yet the `.drv`'s own NAR closure does not hold and its NAR
+/// is absent from our cache entirely. That is the zone-B signature - a `.drv`
 /// our cache never received or lost - distinct from a failed-dependency block,
 /// whose anchors the dependency-failed cascade has already demoted.
 async fn eval_blocked_on_unproducible_drv(
@@ -381,7 +473,6 @@ async fn eval_blocked_on_unproducible_drv(
 }
 
 fn unproducible_drv_block_sql() -> String {
-    let deps_ready = gradient_db::graph_sql::deps_ready_predicate("db");
     let drv_whole = gradient_db::graph_sql::drv_whole_predicate("db");
     let drv_nar_absent = gradient_db::graph_sql::drv_nar_absent_predicate("db");
     let walked = gradient_db::graph_sql::walked_predicate("db");
@@ -395,10 +486,9 @@ fn unproducible_drv_block_sql() -> String {
               AND db.status IN ({created}, {queued})
               AND {walked}
               AND NOT db.substitutable
-              AND NOT db.drv_closure_cached
               AND NOT {drv_whole}
               AND {drv_nar_absent}
-              AND ({deps_ready})
+              AND db.unready_deps = 0
         ) AS blocked
         "#,
         created = BuildStatus::Created as i32,
@@ -564,11 +654,7 @@ mod tests {
             )),
             "only pending anchors: {sql}"
         );
-        for frag in [
-            "w.walked",
-            "NOT db.substitutable",
-            "NOT db.drv_closure_cached",
-        ] {
+        for frag in ["w.walked", "NOT db.substitutable"] {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
@@ -579,8 +665,8 @@ mod tests {
             "must require the .drv not to be whole, through the shared predicate: {sql}"
         );
         assert!(
-            sql.contains("cached_path cp") && sql.contains("derivation_input_source"),
-            "must embed the deps-ready predicate (all build deps and sources cached): {sql}"
+            sql.contains("db.unready_deps = 0"),
+            "must require every dependency ready, through the counter: {sql}"
         );
     }
 
@@ -681,5 +767,22 @@ mod tests {
         let (cap, connected) = eval_workers_view(&reason.expect("refresh carries a reason"));
         assert_eq!(cap, EvalCapability::Fetch);
         assert_eq!(connected, 5);
+    }
+
+    /// The heal is not a tick: it runs once per stuck state, and again only
+    /// when the pending set moved.
+    #[test]
+    fn the_graph_stuck_heal_runs_on_entry_and_on_change_only() {
+        assert!(unstick_due(None, 3));
+        assert!(unstick_due(
+            Some(&WaitingReason::Workers {
+                unmet: vec![],
+                connected_workers: 1,
+                available_architectures: vec![],
+            }),
+            3
+        ));
+        assert!(!unstick_due(Some(&WaitingReason::graph_stuck(3)), 3));
+        assert!(unstick_due(Some(&WaitingReason::graph_stuck(3)), 2));
     }
 }

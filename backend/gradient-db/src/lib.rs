@@ -32,6 +32,7 @@ pub mod project_derivations;
 pub mod project_workers;
 pub mod promotion;
 pub mod reachability;
+pub mod readiness;
 pub mod reconcile;
 pub mod recovery;
 pub mod retention;
@@ -77,22 +78,27 @@ pub use self::graph_sql::{
     ClosureDirection, dependency_closure_cte, eval_closure_cte, reachable_derivations_cte,
 };
 pub use self::nar_closure::{
-    ReferenceLock, lock_reference_endpoints, retire_paths, retire_paths_where, ripple_unwhole,
-    ripple_whole, seed_references,
+    PathLock, ReferenceLock, lock_paths, lock_reference_endpoints, retire_paths,
+    retire_paths_where, ripple_unwhole, ripple_whole, seed_references,
 };
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_cache::project_has_writable_cache;
 pub use self::project_derivations::derivation_ids_for_project;
 pub use self::project_workers::project_has_eval_capable_worker_registration;
 pub use self::promotion::{
-    cascade_dependency_failed, find_ready_anchors, promote_dependents, promote_ready,
-    propagate_closure_complete, reconcile_cached_anchors_for_eval, reconcile_closure_complete,
-    reconcile_dependency_failed, reconcile_drv_closure_cached, requeue_failed_anchors,
-    requeue_failed_closure_for_eval, substitute_created_anchors,
+    cascade_dependency_failed, find_ready_anchors, reconcile_cached_anchors_for_eval,
+    reconcile_dependency_failed, requeue_failed_anchors, requeue_failed_closure_for_eval,
+    substitute_created_anchors,
 };
 pub use self::reachability::{
-    build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
-    eval_anchor_statuses, evals_referencing_derivation,
+    anchor_status, build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
+    derivations_with_hashes, eval_anchor_statuses, evals_referencing_derivation,
+    producers_of_hashes,
+};
+pub use self::readiness::{
+    AnchorLock, Repaired, advance_fetchable, became_fetchable, lock_anchors, lost_fetchability,
+    promote, promote_closure, repair_pending, seed_unready_deps, unpromote_drv_owners,
+    unpromote_ungated,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;

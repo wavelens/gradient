@@ -27,12 +27,10 @@ use gradient_types::proto::{BuildJob, BuildSpec, CacheInfo, DerivationOutput, Re
 
 use super::{DISPATCH_BUDGET, DISPATCH_TICK};
 
-/// Full-backstop (Global) reconcile cadence, in dispatch ticks: 6 x 5s = 30s.
-const GLOBAL_RECONCILE_TICKS: u64 = 6;
-
-/// One dispatch pass. A timer tick also advances the rescore clock and runs
-/// the reconcile scope for `tick_count`; a kick runs only the dispatch half.
-pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool, tick_count: u64) {
+/// One dispatch pass. A timer tick also advances the rescore clock; a kick runs
+/// only the dispatch half. Neither reconciles: every readiness counter is moved by
+/// the event that changes it, and the two remaining scopes are evaluation-driven.
+pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool) {
     // rescore_count is an anti-starvation timeout measured in dispatch
     // intervals, so only the timer advances it - reactive kicks (which can
     // fire many times per interval) just run an extra dispatch pass.
@@ -40,26 +38,6 @@ pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool,
         let _ = scheduler
             .call(|reply| SchedulerMsg::BumpRescore { reply })
             .await;
-
-        // Every timer tick runs promotion (Tick); the anchor-side flag
-        // fixpoints, unbacked-output demote, and failure sweep (Global) run
-        // every GLOBAL_RECONCILE_TICKS - their full-table scans saturated
-        // Postgres when re-run every 5s on a large graph. Active evals keep
-        // their flags fresh via reactive completion propagation and per-flush
-        // Eval passes.
-        let scope = if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
-            gradient_db::ReconcileScope::Global
-        } else {
-            gradient_db::ReconcileScope::Tick
-        };
-        if let Err(e) = scheduler
-            .state
-            .graph
-            .transition(Transition::Reconcile { scope })
-            .await
-        {
-            error!(error = %e, "reconcile did not reach the graph actor");
-        }
     }
 
     if let Err(e) = scheduler
@@ -108,7 +86,6 @@ pub(crate) struct BuildDispatch;
 pub(crate) struct BuildDispatchState {
     scheduler: Arc<Scheduler>,
     ctx: ChildCtx,
-    tick_count: u64,
     kicks_seen: u64,
 }
 
@@ -126,7 +103,6 @@ impl Actor for BuildDispatch {
         Ok(BuildDispatchState {
             scheduler,
             ctx,
-            tick_count: 0,
             kicks_seen: 0,
         })
     }
@@ -142,19 +118,15 @@ impl Actor for BuildDispatch {
         if !timer_tick && kick_gen == state.kicks_seen {
             return Ok(());
         }
-        if timer_tick {
-            state.tick_count = state.tick_count.wrapping_add(1);
-        }
 
         let scheduler = Arc::clone(&state.scheduler);
-        let tick_count = state.tick_count;
         let alive = run_pass(
             "build-dispatch",
             DISPATCH_BUDGET,
             &state.ctx.cancel,
             &state.ctx.health,
             Box::pin(async move {
-                build_dispatch_pass(&scheduler, timer_tick, tick_count).await;
+                build_dispatch_pass(&scheduler, timer_tick).await;
                 Ok(())
             }),
         )
@@ -769,8 +741,9 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // The dispatch gate lives in gradient_db next to promotion so both embed the
-    // one shared readiness predicate; see `gradient_db::find_ready_anchors`.
+    // The select re-derives no readiness term: it trusts `Queued` to mean the gates
+    // held, which holds because of the one rule every writer of that status obeys.
+    // The rule is stated at `graph_sql::promotable_predicate`.
     let started = std::time::Instant::now();
     let anchors = gradient_db::find_ready_anchors(&state.worker_db).await?;
     if anchors.is_empty() {

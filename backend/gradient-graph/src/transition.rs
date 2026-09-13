@@ -8,8 +8,9 @@
 
 use anyhow::{Context, Result};
 use gradient_db::{
-    DbContext, cascade_dependency_failed, fail_latest_attempt, succeed_latest_attempt,
-    update_derivation_build_status, update_evaluation_status, update_evaluation_status_with_error,
+    DbContext, cascade_dependency_failed, emit_transition_effects, fail_latest_attempt,
+    succeed_latest_attempt, unpromote_ungated, update_derivation_build_status,
+    update_evaluation_status, update_evaluation_status_with_error,
 };
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -129,12 +130,23 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 }
             };
 
+            let mut requeued = Vec::new();
             for row in rows
                 .into_iter()
                 .filter(|r| r.status == BuildStatus::Building)
             {
+                let derivation = row.derivation;
                 update_derivation_build_status(ctx, row, BuildStatus::Queued).await;
+                requeued.push(derivation);
             }
+
+            // The move evaluates no gate, and `Building` is outside
+            // `BuildStatus::PENDING`, so nothing recounted `unready_deps` while the
+            // anchor was building and the value the gate reads can be stale either
+            // way. The dispatcher is live here, unlike at startup, so the settle has
+            // to run before it can pick the row up.
+            let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
+            emit_transition_effects(ctx, &settled).await;
 
             Ok(TransitionReport::default())
         }
@@ -174,9 +186,10 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
     }
 
     // Every edge landed with its batch, so the graph is complete here: run the
-    // canonical healing pipeline scoped to this eval, which thaws its closure,
-    // heals cache trust across it, reconciles the gate flags, and promotes the
-    // ready frontier (see `gradient_db::reconcile`).
+    // healing pipeline scoped to this eval, which thaws its closure, settles the
+    // anchors whose outputs are already whole and advances their dependents, fails
+    // the closure's dependency-failed victims, and promotes the closure (see
+    // `gradient_db::reconcile`). The unbacked-output demote rides `Unstick` only.
     gradient_db::reconcile_build_graph(ctx, gradient_db::ReconcileScope::Eval(evaluation_id)).await;
 
     // Promotion is graph-driven (gradient_db::promotion), independent of eval
@@ -538,8 +551,14 @@ async fn build_failed(
         }
         FailureOutcome::Requeue => {
             // Substitute miss: back to the queue without an `attempt` bump or a
-            // permanent mark, and no dependency cascade - nothing failed.
+            // permanent mark, and no dependency cascade - nothing failed. Nothing
+            // failed is not nothing changed: `reconcile_missing_inputs` above purges
+            // stale cached inputs in this same call, which drops a dependency out of
+            // `fetchable` and raises this anchor's `unready_deps`, so the settle is
+            // what makes the write legal. There is no backoff on this path.
             update_derivation_build_status(ctx, anchor, BuildStatus::Queued).await;
+            let settled = unpromote_ungated(&ctx.worker_db, &[derivation_id]).await?;
+            emit_transition_effects(ctx, &settled).await;
             info!(%derivation_build, "substitute unavailable; re-queued for re-dispatch/escalation");
             return Ok(());
         }

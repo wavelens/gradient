@@ -23,6 +23,12 @@ use crate::{DbContext, NoReactor, WebDb, WorkerDb};
 /// requires the handle it is called on to be the last one alive.
 pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
     let dir = std::env::temp_dir().join(format!("gradient-db-{}", uuid::Uuid::now_v7()));
+    ctx_at(db, &dir).await
+}
+
+/// [`ctx`] over a caller-owned directory, for a test that must place a NAR object
+/// where the code under test looks for it.
+pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (DbContext, WorkerDb) {
     let path = dir.to_string_lossy().into_owned();
     let cli = Cli::try_parse_from([
         "gradient-server",
@@ -44,7 +50,7 @@ pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
         config: Arc::new(RuntimeConfig::from_cli(&cli).expect("test config")),
         storage: StorageCtx {
             nar_storage: NarStore::local(&path).expect("test NarStore"),
-            log_storage: Arc::new(FileLogStorage::new(&dir).await.expect("test log storage")),
+            log_storage: Arc::new(FileLogStorage::new(dir).await.expect("test log storage")),
         },
         shutdown: Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(16).0,

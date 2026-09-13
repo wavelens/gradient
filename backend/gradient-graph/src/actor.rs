@@ -134,7 +134,7 @@ impl Actor for GraphActor {
             GraphMsg::CommitNar(commit, reply) => {
                 flush(st).await;
                 let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    nar::commit(&scoped.worker_db, &commit).await
+                    nar::commit(scoped, &commit).await
                 })
                 .await;
                 if let Ok(committed) = &result {

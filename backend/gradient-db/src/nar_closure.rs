@@ -79,6 +79,18 @@
 //! the other side is, measured on the shape where a referrer's hash sorts after
 //! its reference's.
 //!
+//! A retire and a commit now take anchor locks too
+//! ([`crate::readiness::lock_anchors`]), always AFTER the `cached_path` pass and
+//! never before it. One class order across both tables is what keeps the two from
+//! an ABBA cycle; the anchor locks are `derivation`-ordered among themselves, which
+//! is the readiness module's own argument. A writer that touches
+//! `derivation_build` BEFORE it reaches a retire therefore has to take the path
+//! lock itself to keep the order: [`crate::cache_storage::demote_cached_output`]
+//! clears `substitutable` before the retire reads it, so it opens with
+//! [`lock_paths`] over the hash it is about to retire. `gc_orphan_derivations`
+//! holds `derivation` before `derivation_build`, which is a third class and has no
+//! counter-ordered writer.
+//!
 //! The ripples are outside that, and it is not closed. `FORWARD` and `REVERSE`
 //! compute their referrer set inside the statement, so each takes
 //! `FOR NO KEY UPDATE` on rows no ordered lock set covers, in whatever order its
@@ -88,9 +100,12 @@
 //! retries. That is the accepted price of `FOR SHARE` below - a detected, retried
 //! deadlock instead of a permanently false-whole row.
 
+use gradient_entity::build::BuildStatus;
+use gradient_types::DerivationId;
 use sea_orm::{
     ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
+use std::collections::HashSet;
 
 /// The row `{alias}` is stored and every reference resolves to a whole row.
 pub fn whole_predicate(alias: &str) -> String {
@@ -330,39 +345,54 @@ async fn ripple<C: ConnectionTrait>(
     Ok(all)
 }
 
-/// What `retire_paths` removed and what stopped being whole because of it.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+/// What `retire_paths` removed, what stopped being whole because of it, and the
+/// anchor moves it made. The transitions are the caller's to emit: a retire has a
+/// transaction, not a [`crate::DbContext`], and the effects must fan out only once
+/// that transaction has committed.
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Retired {
     pub deleted: Vec<String>,
     pub unwhole: Vec<String>,
+    pub transitions: Vec<crate::status::TransitionChange>,
 }
 
-/// Delete `hashes` from the index and move every counter and flag that trusted
-/// them, in the caller's transaction: the reverse ripple from the rows that were
-/// whole, `is_cached` off the deleted outputs, and the anchor flags
-/// (`drv_closure_cached` on the owner of a deleted or unwholed `.drv`,
-/// `closure_complete` on its producers) off every hash that was DELETED or that
-/// stopped being whole. `Retired::deleted` names the rows that actually went. Use
-/// [`retire_paths_where`] when the caller may drop a path only while some
-/// condition still holds.
+/// Delete `hashes` from the index and move every counter, flag and anchor that
+/// trusted them, in the caller's transaction: the reverse ripple from the rows that
+/// were whole, `is_cached` off the deleted outputs, and then the readiness side -
+/// every affected producer loses `fetchable`, a terminal-success producer whose
+/// artifact is GONE resets to `Created`, and the owner of a `.drv` that is gone
+/// leaves the queue. `Retired::deleted` names the rows that actually went
+/// and `Retired::transitions` the anchor moves the caller must emit after its
+/// commit. Use [`retire_paths_where`] when the caller may drop a path only while
+/// some condition still holds.
 ///
-/// The anchor flags follow the union and not just the unwhole set because neither
-/// reads the counter: `drv_closure_cached` requires the `.drv`'s own row to be
-/// backed plus the dependency recursion, and the Completed arm of
-/// `closure_complete` only that every output has a backed `cached_path`. So a row
-/// that was deleted while it was NOT whole would keep a stale-true gate until the
-/// next `Global` reconcile clears it, and `find_ready_anchors` runs every 5s: six
-/// dispatch passes able to send a build against a `.drv` no longer in the cache.
+/// The MARK follows the union of DELETED and newly-unwhole, not just the unwhole
+/// set, because it does not read the counter: [`crate::graph_sql`]'s
+/// `fetchable_predicate` requires every output to have a whole `cached_path` row
+/// and a deleted row is not whole, so a path dropped while it was ALREADY unwhole
+/// still takes its producer's stale-true `fetchable` down with it. Restricting the
+/// union to the ripple's output would leave exactly that row unrepaired, with a gate
+/// reading true against a path no longer in the cache.
 ///
-/// Every retire opens with the [`LOCK`] pass, so it must run inside a transaction:
-/// a `DELETE` on its own acquires in scan order, and one unordered locker
-/// deadlocks against the hash-ordered acquisition every other writer makes (see
-/// the module doc). Every caller does - the actor's transaction for a demote, a
-/// `begin()` per batch for the zombie purge, per chunk for the orphan GC - and the
-/// connection stays generic only because the unguarded form takes no decision from
-/// the lock; [`retire_paths_where`] does, and its type says so.
-pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Result<Retired, DbErr> {
-    retire(db, hashes, None).await
+/// The RESET is narrower: only the producers of what is actually GONE, the rows this
+/// call deleted plus the hashes it was asked about that had none. A referrer that
+/// merely lost wholeness still has its own output, so it needs `fetchable` to drop
+/// and nothing else; the forward ripple marks it fetchable again when the missing
+/// path returns, which requires the terminal status a reset would have taken away.
+/// See [`retire_anchors`] for what resetting the closure cost when it did.
+///
+/// A producer an upstream still serves keeps `fetchable` and is not reset: the
+/// predicate holds through `substitutable`, so the mark passes it over and the
+/// reset's `NOT db.fetchable` term excludes it.
+///
+/// Every retire opens with the [`LOCK`] pass and now decides from it - which anchors
+/// lost fetchability, and which of those to reset - so it takes a
+/// `&DatabaseTransaction` rather than a connection, exactly as
+/// [`retire_paths_where`] does and for the same reason: on a pooled handle every
+/// lock is released with the statement that took it, and no compiler or mock can
+/// tell the two handles apart. The type is the enforcement.
+pub async fn retire_paths(txn: &DatabaseTransaction, hashes: &[String]) -> Result<Retired, DbErr> {
+    retire(txn, hashes, None).await
 }
 
 /// [`retire_paths`] restricted to the rows that still satisfy `guard`, a
@@ -394,8 +424,8 @@ pub async fn retire_paths_where(
     retire(txn, hashes, Some(guard)).await
 }
 
-async fn retire<C: ConnectionTrait>(
-    db: &C,
+async fn retire(
+    db: &DatabaseTransaction,
     hashes: &[String],
     guard: Option<&str>,
 ) -> Result<Retired, DbErr> {
@@ -443,31 +473,106 @@ async fn retire<C: ConnectionTrait>(
         .await?;
     }
 
-    if !gated.is_empty() {
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build db SET drv_closure_cached = false
-            FROM derivation d
-            WHERE d.id = db.derivation AND db.drv_closure_cached AND d.hash = ANY($1)
-            "#,
-            [gated.clone().into()],
-        ))
-        .await?;
+    // `gone` is what has no artifact any more: the rows this call deleted, plus the
+    // hashes it was asked about that had none to begin with. The wider `anchor_scope`
+    // adds the referrers the ripple un-wholed, whose own outputs are untouched.
+    let mut gone = deleted.clone();
+    let deleted_set: HashSet<String> = deleted.iter().cloned().collect();
+    gone.extend(hashes.iter().filter(|h| !deleted_set.contains(*h)).cloned());
 
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build db SET closure_complete = false
-            WHERE db.closure_complete
-              AND db.derivation IN (SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
-            "#,
-            [gated.into()],
-        ))
-        .await?;
+    let mut anchor_scope = gated;
+    let moved: HashSet<String> = anchor_scope.iter().cloned().collect();
+    anchor_scope.extend(hashes.iter().filter(|h| !moved.contains(*h)).cloned());
+    let transitions = retire_anchors(db, &anchor_scope, &gone).await?;
+
+    Ok(Retired {
+        deleted,
+        unwhole,
+        transitions,
+    })
+}
+
+/// The readiness half of a retire. `scope` is every hash the caller ASKED to retire
+/// plus everything the retire moved; `gone` is the subset whose artifact is actually
+/// absent (deleted, or asked for and never there). The producers of everything in
+/// `scope` stop being fetchable and their dependents' counters rise, the owner of a
+/// `.drv` that is gone leaves the queue, and only the producers of `gone` become a
+/// fresh build intent.
+///
+/// That split is the whole point. Losing wholeness ripples up the reference graph, so
+/// `scope` is the transitive referrer closure of the missing path: on production the
+/// `glibc-2.42` output has 278 direct referrers and the closure above them is most of
+/// the cache. A referrer's OWN output is still on disk, so it needs `fetchable` to
+/// drop until the missing path returns and nothing more; when it returns,
+/// `gradient_graph::nar`'s forward ripple marks its producer fetchable again through
+/// [`crate::readiness::became_fetchable`], which requires the terminal status this
+/// reset would have taken away. Resetting a referrer therefore restores nothing and
+/// rebuilds an artifact that was never missing. Measured on the cache VM test: 107
+/// derivations re-queued and 139 dispatches inside 30 s from deleting ONE NAR.
+///
+/// The asked-for hashes have to be in `gone`, not just the deleted ones. A hash with
+/// no `cached_path` row at all deletes nothing and ripples nothing, yet it is exactly
+/// half of what `unbacked_trusted_outputs_select` matches (`NOT EXISTS (...
+/// cp.file_hash IS NOT NULL)` is true for a missing row and for an unbacked one
+/// alike), and `REQUEUEABLE` excludes terminal success, so nothing else would ever
+/// recover such a producer.
+///
+/// The reset is keyed on `NOT db.fetchable` rather than on the hash list so it
+/// reads the flag the mark just wrote: a producer an upstream still serves stays
+/// fetchable and keeps its terminal status, and a producer that was already stale
+/// (fetchable false under a terminal status, so the mark moved nothing) is repaired
+/// here rather than waiting for a sweep. That key is also what makes a hash the TTL
+/// guard spared safe to leave in `gone`: its row is still there and still whole, so
+/// its producer is still fetchable and the statement passes it over. A reset row
+/// re-enters the pending population, and nothing else recounts a row that does, so it
+/// is re-seeded here on a lock this transaction already holds.
+async fn retire_anchors(
+    txn: &DatabaseTransaction,
+    scope: &[String],
+    gone: &[String],
+) -> Result<Vec<crate::status::TransitionChange>, DbErr> {
+    if scope.is_empty() {
+        return Ok(Vec::new());
     }
 
-    Ok(Retired { deleted, unwhole })
+    let producers = crate::reachability::producers_of_hashes(txn, scope).await?;
+    let lock = crate::readiness::lock_anchors(txn, &producers).await?;
+    let mut transitions = crate::readiness::lost_fetchability(&lock).await?;
+
+    // Every row the reset writes produces a hash in `gone`, a subset of `scope`, so
+    // the lock above already covers it.
+    let rebuildable = crate::reachability::producers_of_hashes(txn, gone).await?;
+    if !rebuildable.is_empty() {
+        let reset = crate::promotion::returned_transitions(
+            txn.query_all_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                format!(
+                    "UPDATE derivation_build db \
+                     SET status = {created}, substituted = false, attempt = 0, \
+                         updated_at = (now() AT TIME ZONE 'UTC') \
+                     FROM derivation_build old \
+                     WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) \
+                       AND db.status IN ({terminal_success}) AND NOT db.fetchable \
+                     RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
+                    created = crate::status_sql::build(BuildStatus::Created),
+                    terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+                ),
+                [crate::readiness::ids(&rebuildable)],
+            ))
+            .await?,
+        );
+        if !reset.is_empty() {
+            let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
+            let thawed_lock = crate::readiness::lock_anchors(txn, &thawed).await?;
+            crate::readiness::seed_unready_deps(&thawed_lock).await?;
+        }
+
+        transitions.extend(reset);
+    }
+
+    transitions.extend(crate::readiness::unpromote_drv_owners(txn, scope).await?);
+
+    Ok(transitions)
 }
 
 fn repair_statement() -> String {
@@ -514,18 +619,27 @@ where
     Ok(repaired)
 }
 
-/// Proof that one repair chunk is held `FOR UPDATE`, hash-ordered, on `txn`.
+/// Proof that a batch of paths is held `FOR UPDATE`, hash-ordered, on `txn`.
 /// Only [`lock_paths`] constructs one and [`recount`] writes exactly the rows it
 /// carries, so a recount cannot run unlocked, in another transaction, or over
 /// rows the lock did not cover. The caveat on [`ReferenceLock`] applies here too:
 /// the proof says the write follows the lock, not that no read preceded it.
-#[must_use = "a lock proves nothing unless the recount runs on it"]
-struct PathLock<'txn> {
+///
+/// It has a second use with no write of its own behind it: a transaction that will
+/// write `derivation_build` and only then reach a retire has to take its
+/// `cached_path` locks FIRST, or it inverts the class order the module doc sets out.
+/// [`crate::cache_storage::demote_cached_output`] holds one for exactly that.
+#[must_use = "a lock proves nothing unless a write follows it in the same transaction"]
+pub struct PathLock<'txn> {
     txn: &'txn DatabaseTransaction,
     hashes: Vec<String>,
 }
 
-async fn lock_paths<'txn>(
+/// Take `hashes` `FOR UPDATE` in one hash-ordered statement, before the caller
+/// decides or writes anything. Re-acquiring a row this transaction already holds is
+/// free, so a caller may take the pass for the ordering alone and let a later
+/// [`retire_paths`] repeat it.
+pub async fn lock_paths<'txn>(
     txn: &'txn DatabaseTransaction,
     hashes: &[String],
 ) -> Result<PathLock<'txn>, DbErr> {
@@ -564,10 +678,7 @@ async fn recount(lock: &PathLock<'_>) -> Result<u64, DbErr> {
 /// false-whole there prunes a subtree that is then never walked, recorded or
 /// built - a permanent dead end, not a stall a later build clears.
 pub fn gating_paths() -> String {
-    let pending = crate::status_sql::build_in(&[
-        gradient_entity::build::BuildStatus::Created,
-        gradient_entity::build::BuildStatus::Queued,
-    ]);
+    let pending = crate::status_sql::build_in(&gradient_entity::build::BuildStatus::PENDING);
     format!(
         r#"
     SELECT d.hash FROM derivation d
@@ -882,51 +993,60 @@ mod tests {
                 rows_affected: 0,
             }])
             .into_connection();
+        let txn = delete_flag.begin().await.unwrap();
         assert!(
-            retire_paths(&delete_flag, &["a".to_owned()]).await.is_err(),
+            retire_paths(&txn, &["a".to_owned()]).await.is_err(),
             "a delete whose wholeness flag does not decode must not skip the ripple"
         );
     }
 
     /// Retiring seeds the reverse ripple only from rows that were whole: a
     /// referrer of a row that was already incomplete counted it as missing
-    /// already, so it must not be incremented twice. The flag clears do NOT
-    /// split that way: `is_cached` follows what was deleted, and the anchor flags
-    /// follow the union of what was deleted and what stopped being whole, because
-    /// neither flag reads the counter - a row deleted while it was not whole (`b`
-    /// here) would otherwise keep a stale-true gate until the next `Global`
-    /// reconcile and dispatch a build against a `.drv` that is gone. The unguarded
-    /// retire opens with the same hash-ordered lock pass as the guarded one: it
-    /// decides nothing there, but an unordered acquisition deadlocks against every
-    /// other writer's ordered one.
+    /// already, so it must not be incremented twice. The anchor side does NOT
+    /// split that way: `is_cached` follows what was deleted, and the mark/owner
+    /// pass follows the union of deleted and newly-unwhole plus every hash the
+    /// caller asked for, because neither statement reads the counter - a row
+    /// deleted while it was not whole (`b` here) would otherwise keep a stale-true
+    /// gate and dispatch a build against a `.drv` that is gone. The RESET is the
+    /// one statement narrower than that union, so the producers are looked up
+    /// twice: once for the union, once for what is actually gone.
+    /// The unguarded retire opens with the same hash-ordered lock pass as the
+    /// guarded one: it decides nothing there, but an unordered acquisition
+    /// deadlocks against every other writer's ordered one.
     #[tokio::test]
-    async fn retire_clears_the_anchor_flags_for_every_retired_path() {
+    async fn the_anchor_side_of_a_retire_covers_every_asked_for_hash() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![
                 row("a", "was_whole", true),
                 row("b", "was_whole", false),
             ]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                4
+                2
             ])
             .into_connection();
 
-        let retired = retire_paths(&db, &["a".to_owned(), "b".to_owned()])
+        let txn = db.begin().await.unwrap();
+        let retired = retire_paths(&txn, &["a".to_owned(), "b".to_owned()])
             .await
             .unwrap();
+        txn.commit().await.unwrap();
 
         assert_eq!(retired.deleted, vec!["a".to_owned(), "b".to_owned()]);
         assert_eq!(retired.unwhole, vec!["a".to_owned()]);
         let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            6,
-            "lock, delete, one ripple level, three flag clears: {log:?}"
+            7,
+            "lock, delete, one ripple level, is_cached, producers of the union, \
+             producers of what is gone, owners: {log:?}"
         );
         assert!(log[0].contains("FOR UPDATE") && !log[0].contains("DELETE"));
         assert!(log[1].contains("DELETE FROM cached_path") && log[1].contains("RETURNING"));
@@ -941,23 +1061,259 @@ mod tests {
                 && log[3].contains("\"b\""),
             "is_cached follows every deleted hash: {log:?}"
         );
-        for clear in &log[4..] {
+        for anchor_side in &log[4..] {
             assert!(
-                clear.contains("\"a\"") && clear.contains("\"b\""),
-                "the anchor flags follow every retired path, whole or not: {log:?}"
+                anchor_side.contains("\"a\"") && anchor_side.contains("\"b\""),
+                "the anchor side follows every retired path, whole or not: {log:?}"
             );
         }
 
-        assert!(log[4].contains("drv_closure_cached = false"));
-        assert!(log[5].contains("closure_complete = false"));
+        assert!(
+            log[4].contains("FROM derivation_output o WHERE o.hash = ANY($1)"),
+            "the producers of every retired path are resolved: {log:?}"
+        );
+        assert!(
+            log[6].contains(&format!(
+                "SET status = {created}",
+                created = crate::status_sql::build(BuildStatus::Created)
+            )) && log[6].contains("d.hash = ANY($1::text[])"),
+            "the owner of a `.drv` that is gone leaves the queue: {log:?}"
+        );
+    }
+
+    /// A hash with no `cached_path` row deletes nothing and ripples nothing, so
+    /// the anchor side has to key on what the caller ASKED to retire and not only
+    /// on what moved. That case is half of what `unbacked_trusted_outputs_select`
+    /// matches, and no requeue path recovers a terminal-success producer, so
+    /// skipping it strands the anchor for good.
+    #[tokio::test]
+    async fn a_retire_of_a_path_with_no_row_still_moves_its_producers() {
+        let producer = gradient_types::DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer.into_inner()),
+            )])]])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer.into_inner()),
+            )])]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer.into_inner()),
+            )])]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                };
+                2
+            ])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        let retired = retire_paths(&txn, &["a".to_owned()]).await.unwrap();
+        txn.commit().await.unwrap();
+
+        assert!(retired.deleted.is_empty() && retired.unwhole.is_empty());
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert!(
+            log.iter()
+                .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
+            "the producers of a hash with no row are still resolved: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("SET fetchable = false")),
+            "and offered to the mark, which decides from the predicate: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("AND NOT db.fetchable")),
+            "so a producer with nothing left to serve is reset: {log:?}"
+        );
+    }
+
+    /// Losing wholeness ripples up the reference graph, so the retire's mark covers
+    /// the whole referrer closure of the missing path. The RESET must not: a
+    /// referrer's own output is still on disk, and when the missing path returns the
+    /// forward ripple marks its producer fetchable again through `became_fetchable`,
+    /// which needs the terminal status the reset would have taken away. Resetting it
+    /// restores nothing and rebuilds an artifact that never went missing - measured
+    /// as 107 re-queued derivations and 139 dispatches from deleting one NAR.
+    #[tokio::test]
+    async fn the_reset_spares_the_producer_of_a_referrer_that_only_lost_wholeness() {
+        let gone_producer = gradient_types::DerivationId::now_v7();
+        let referrer_producer = gradient_types::DerivationId::now_v7();
+        let drv = |id: gradient_types::DerivationId| {
+            BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // the delete takes the one path that was whole
+            .append_query_results([vec![row("gone", "was_whole", true)]])
+            // the reverse ripple reaches one referrer, then stops
+            .append_query_results([vec![row("referrer", "was_whole", true)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // producers of the union: both
+            .append_query_results([vec![drv(gone_producer), drv(referrer_producer)]])
+            // the mark reports both as no longer fetchable, and the counter ripple
+            .append_query_results([vec![drv(gone_producer), drv(referrer_producer)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // producers of what is actually gone: only the deleted path's
+            .append_query_results([vec![drv(gone_producer)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                3
+            ])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        retire_paths(&txn, &["gone".to_owned()]).await.unwrap();
+        txn.commit().await.unwrap();
+
+        let log = crate::pool::statements(db.into_transaction_log());
+        let mark = log
+            .iter()
+            .find(|s| s.contains("SET fetchable = false"))
+            .expect("the mark runs");
+        assert!(
+            mark.contains(&gone_producer.into_inner().to_string())
+                && mark.contains(&referrer_producer.into_inner().to_string()),
+            "the mark still covers the referrer's producer: {mark}"
+        );
+
+        let reset = log
+            .iter()
+            .find(|s| s.contains("AND NOT db.fetchable"))
+            .expect("the reset runs");
+        assert!(
+            reset.contains(&gone_producer.into_inner().to_string()),
+            "the deleted path's producer has nothing left to serve: {reset}"
+        );
+        assert!(
+            !reset.contains(&referrer_producer.into_inner().to_string()),
+            "but the referrer's producer keeps its terminal status, or the next \
+             evaluation rebuilds an output that is still in the cache: {reset}"
+        );
+    }
+
+    /// A producer the retire thaws back to `Created` re-enters the pending
+    /// population, and nothing else recounts a row that does: the ripples only move
+    /// a counter, and the sweep is an interval away. So the reset is followed by an
+    /// absolute recount of exactly the rows it moved, on the lock this transaction
+    /// already holds.
+    #[tokio::test]
+    async fn a_thawed_producer_is_recounted_before_it_re_enters_the_queue() {
+        let producer = gradient_types::DerivationId::now_v7();
+        let drv = |id: gradient_types::DerivationId| {
+            BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv(producer)]])
+            .append_query_results([vec![drv(producer)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv(producer)]])
+            .append_query_results([vec![BTreeMap::from([
+                ("derivation".to_owned(), Value::from(producer.into_inner())),
+                (
+                    "from_status".to_owned(),
+                    Value::from(crate::status_sql::build(BuildStatus::Completed)),
+                ),
+                (
+                    "to_status".to_owned(),
+                    Value::from(crate::status_sql::build(BuildStatus::Created)),
+                ),
+            ])]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                4
+            ])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        let retired = retire_paths(&txn, &["a".to_owned()]).await.unwrap();
+        txn.commit().await.unwrap();
+
+        assert_eq!(retired.transitions.len(), 1);
+        assert_eq!(retired.transitions[0].derivation, producer);
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            11,
+            "lock, delete, producers, anchor lock, mark, ripple, producers of what is \
+             gone, reset, thawed lock, seed, owners: {log:?}"
+        );
+        let reset = log
+            .iter()
+            .position(|s| s.contains("AND NOT db.fetchable"))
+            .expect("the reset runs");
+        let seed = log
+            .iter()
+            .position(|s| s.contains("SET unready_deps = (SELECT count(*)"))
+            .expect("the thawed rows are recounted");
+        assert!(reset < seed, "the recount follows the thaw: {log:?}");
+        assert!(
+            log[seed].contains(&producer.into_inner().to_string()),
+            "and covers exactly the rows the reset moved: {log:?}"
+        );
+    }
+
+    /// No producer means no readiness statement past the lookup: an empty producer
+    /// list locks nothing, marks nothing and resets nothing.
+    #[tokio::test]
+    async fn a_retire_with_no_producers_marks_and_resets_nothing() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row("a", "was_whole", false)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                4
+            ])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        let retired = retire_paths(&txn, &["a".to_owned()]).await.unwrap();
+        txn.commit().await.unwrap();
+
+        assert!(retired.transitions.is_empty());
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert!(
+            !log.iter().any(|s| s.contains("SET fetchable = false")),
+            "nothing to mark: {log:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains("substituted = false")),
+            "nothing to reset: {log:?}"
+        );
     }
 
     /// Nothing to retire is a no-op: no statement at all.
     #[tokio::test]
     async fn retiring_nothing_issues_no_statement() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let retired = retire_paths(&db, &[]).await.unwrap();
+        let txn = db.begin().await.unwrap();
+        let retired = retire_paths(&txn, &[]).await.unwrap();
+        txn.commit().await.unwrap();
+
         assert!(retired.deleted.is_empty() && retired.unwhole.is_empty());
+        assert!(retired.transitions.is_empty());
         assert!(crate::pool::statements(db.into_transaction_log()).is_empty());
     }
 
@@ -990,13 +1346,13 @@ mod tests {
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 0,
-                };
-                4
-            ])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -1016,8 +1372,14 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            2,
-            "a guard that spared every row leaves nothing to clear: {log:?}"
+            5,
+            "a guard that spared every row leaves nothing to clear, but the anchor \
+             side still runs over the hash the caller asked for: lock, delete, \
+             producers, owners: {log:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains("SET fetchable = false")),
+            "and moves nothing, because the path it asked about is still whole: {log:?}"
         );
     }
 

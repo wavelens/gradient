@@ -202,8 +202,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_build",
-            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, closure_complete INTEGER, drv_closure_cached INTEGER)",
-            "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.closure_complete::int::text, db.drv_closure_cached::int::text FROM derivation_build db WHERE db.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
+            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER)",
+            "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text FROM derivation_build db WHERE db.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
             "the evaluation's derivations, shared with every other evaluation that built them",
             [
                 "id",
@@ -219,8 +219,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "queued_at",
                 "ready_at",
                 "dispatched_at",
-                "closure_complete",
-                "drv_closure_cached"
+                "fetchable",
+                "unready_deps"
             ]
         ),
         spec!(
@@ -577,6 +577,26 @@ mod tests {
         }
     }
 
+    /// The report inspector's `why_stuck` tells an operator that the `build_job`
+    /// promotion gate is open for every anchor it carries, which is only true
+    /// because this spec selects its anchors BY their `build_job`. Nothing else
+    /// ties the two, so a rewrite that scopes `derivation_build` some other way
+    /// would silently make that claim wrong.
+    #[test]
+    fn the_anchor_spec_is_scoped_by_build_job_so_that_gate_is_always_open() {
+        let specs = eval_scope_tables();
+        let spec = specs
+            .iter()
+            .find(|s| s.name == "derivation_build")
+            .expect("the report exports derivation_build");
+        assert!(
+            spec.sql
+                .contains("SELECT derivation FROM build_job WHERE evaluation = $1"),
+            "why_stuck reports the build_job gate as open by construction: {}",
+            spec.sql
+        );
+    }
+
     #[test]
     fn every_spec_is_scoped_and_internally_consistent() {
         for spec in eval_scope_tables().iter().chain(instance_tables()) {
@@ -695,6 +715,24 @@ mod tests {
         assert!(spec.columns.contains(&"outcome"), "{:?}", spec.columns);
         assert!(spec.ddl.contains("outcome INTEGER"), "{}", spec.ddl);
         assert!(spec.sql.contains("outcome::text"), "{}", spec.sql);
+    }
+
+    /// `fetchable` and `unready_deps` are what a stalled anchor is waiting on,
+    /// so a report that stops at `status` cannot say why nothing dispatched.
+    #[test]
+    fn an_anchor_exports_its_readiness_counters() {
+        let spec = spec_named("derivation_build");
+        for column in ["fetchable", "unready_deps"] {
+            assert!(spec.columns.contains(&column), "{:?}", spec.columns);
+            assert!(
+                spec.ddl.contains(&format!("{column} INTEGER")),
+                "{}",
+                spec.ddl
+            );
+        }
+
+        assert!(spec.sql.contains("db.fetchable::int::text"), "{}", spec.sql);
+        assert!(spec.sql.contains("db.unready_deps::text"), "{}", spec.sql);
     }
 
     /// A stuck evaluation is exactly the one worth reporting on, and

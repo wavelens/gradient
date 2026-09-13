@@ -145,9 +145,10 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
         error!(error = ?e, "NAR TTL GC failed");
     }
     // The GC passes above retire the `cached_path` rows they drop, so the counters
-    // and trust flags those rows backed move in the deleting transaction. This
-    // stays the backstop for an anchor a retire cannot reach - one trusted with no
-    // backing NAR at all - so its dependents stop failing `InputsUnavailable` and
+    // and the anchor side move in the deleting transaction, for every hash they ask
+    // about and not only the ones that moved. This stays the backstop for an anchor
+    // NO retire is invoked for - trusted, with an output nothing ever asked to drop
+    // and no backing NAR - so its dependents stop failing `InputsUnavailable` and
     // the next eval rebuilds it.
     match state.graph.demote(Demotion::UnbackedTrustedOutputs).await {
         Ok(report) if report.demoted > 0 => info!(

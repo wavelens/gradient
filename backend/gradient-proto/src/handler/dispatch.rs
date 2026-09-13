@@ -14,7 +14,7 @@ use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_exec::strip_nix_store_prefix;
 use gradient_types::ids::{DispatchedJobId, ProjectId};
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::messages::{
     ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind,
@@ -110,7 +110,7 @@ impl<'a> DispatchContext<'a> {
         nar: &mut NarReceiveStore,
         eval_cache: &mut EvalCacheReceiveStore,
     ) {
-        debug!(variant = frame.variant_name(), "received bulk frame");
+        trace!(variant = frame.variant_name(), "received bulk frame");
         match frame.archived() {
             ArchivedClientMessage::NarPush {
                 job_id, store_path, ..
@@ -153,9 +153,9 @@ impl<'a> DispatchContext<'a> {
         nar: &mut NarReceiveStore,
         eval_cache: &mut EvalCacheReceiveStore,
     ) -> bool {
-        // Log the variant, never the message: `NarUploaded` carries long path
-        // lists that would flood the test VM's serial console.
-        debug!(variant = msg.variant_name(), "received client message");
+        // Per-message and per-frame lines stay at trace: at debug a closure push
+        // logs thousands of lines a second and stalls a test VM on its serial console.
+        trace!(variant = msg.variant_name(), "received client message");
         match msg {
             ClientMessage::InitConnection { .. } => {
                 send_error(self.writer, 400, "unexpected InitConnection".into()).await;

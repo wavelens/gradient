@@ -42,8 +42,10 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
 /// one's stale cache artifact (delete the `cached_path` row + the NAR object,
 /// clear the output's `is_cached` / `cached_path`) and reset its producer to
 /// `Created`, leaving the derivation graph intact. The producer then rebuilds
-/// in-eval and the failed build - marked `FailedTransient`, not permanent -
-/// retries once the input is back (the dispatch gate holds it until then).
+/// in-eval and the failed build - marked `FailedTransient`, not permanent - is
+/// retried by `requeue::transient_retries` once its backoff elapses, and that
+/// requeue's own settle is what holds it out of the queue until the input is back:
+/// the dispatch gate reads the status, so it re-checks nothing.
 ///
 /// A missing input with no producing derivation (a `.drv` file or a source
 /// path) is only purged when its NAR is genuinely gone: `demote_cached_output`
@@ -56,7 +58,6 @@ pub(crate) async fn reconcile_missing_inputs(
     missing_paths: &[String],
 ) -> Result<()> {
     let db = &ctx.worker_db;
-    let nar_storage = &ctx.storage.nar_storage;
     let mut purged = 0usize;
     let mut referrers_demoted = 0usize;
     let mut sources_purged: Vec<&str> = Vec::new();
@@ -86,7 +87,7 @@ pub(crate) async fn reconcile_missing_inputs(
             Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
         }
 
-        match gradient_db::demote_cached_output(db, nar_storage, hash).await {
+        match gradient_db::demote_cached_output(ctx, hash).await {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
                 // An orphan producer (no `build_job`) can never be queued, so the
@@ -95,7 +96,7 @@ pub(crate) async fn reconcile_missing_inputs(
                 let orphan = !any_reachable(db, &drvs).await;
                 demoted_producers.extend(drvs);
                 if orphan {
-                    match gradient_db::demote_referrers_of(db, nar_storage, hash).await {
+                    match gradient_db::demote_referrers_of(ctx, hash).await {
                         Ok(refs) if !refs.is_empty() => {
                             referrers_demoted += refs.len();
                             demoted_producers.extend(refs);
@@ -112,7 +113,7 @@ pub(crate) async fn reconcile_missing_inputs(
                 // No producing derivation (a source / `.drv`): it only returns to
                 // the cache as part of a referrer's closure, so demote the
                 // rebuildable output referrers - their rebuild re-pushes it.
-                match gradient_db::demote_referrers_of(db, nar_storage, hash).await {
+                match gradient_db::demote_referrers_of(ctx, hash).await {
                     Ok(drvs) if !drvs.is_empty() => {
                         referrers_demoted += drvs.len();
                         demoted_producers.extend(drvs);
@@ -128,8 +129,7 @@ pub(crate) async fn reconcile_missing_inputs(
     // Absent orphan: unreachable upward, so reach it downward from the failing
     // build and demote its output-only-cached direct deps.
     if needs_dep_rewalk {
-        match gradient_db::demote_output_only_cached_deps(db, nar_storage, failed_derivation).await
-        {
+        match gradient_db::demote_output_only_cached_deps(ctx, failed_derivation).await {
             Ok(drvs) => {
                 referrers_demoted += drvs.len();
                 demoted_producers.extend(&drvs);

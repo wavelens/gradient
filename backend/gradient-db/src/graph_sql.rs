@@ -123,40 +123,14 @@ pub fn reference_closure_cte_body(name: &str, seed_select: &str) -> String {
     )
 }
 
-/// Dependency-readiness of anchor `{alias}`: every build dependency is
-/// terminal-success AND `closure_complete`, or itself `substitutable`; and
-/// every recorded input source is fully cached. This is THE readiness
-/// definition - shared verbatim by promotion (`promote_ready`/
-/// `promote_dependents`) and the dispatch gate (`find_ready_anchors`) so a
-/// drift between them (a latent dead zone) is impossible by construction.
-pub fn deps_ready_predicate(alias: &str) -> String {
-    let terminal_success =
-        crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
-    format!(
-        r#"NOT EXISTS (
-        SELECT 1 FROM derivation_dependency e
-        LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-        WHERE e.derivation = {alias}.derivation
-          AND (dep.status IS NULL
-               OR NOT (((dep.status IN ({terminal_success})) AND dep.closure_complete)
-                       OR dep.substitutable)))
-      AND NOT EXISTS (
-        SELECT 1 FROM derivation_input_source s
-        WHERE s.derivation = {alias}.derivation
-          AND NOT EXISTS (
-            SELECT 1 FROM cached_path cp
-            WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))"#
-    )
-}
-
 /// The build target `{alias}`'s own `.drv` is whole: its NAR is stored and every
 /// reference counted by `cached_path.missing_references` resolves. A `.drv` is an
 /// ordinary compressed-NAR store path, so this is the authoritative "the worker
 /// can fetch and import the whole input-`.drv` closure" signal - computed over the
-/// actual `.drv` NAR references, not the eval-time build graph. The build-graph
-/// `drv_closure_cached` flag mirrors it but diverges when eval pruning leaves a
-/// dependency unwalked, dead-zoning a build whose `.drv` closure is in fact fully
-/// cached; the dispatch gate accepts either signal.
+/// actual `.drv` NAR references, not the eval-time build graph. It is a term of
+/// [`gates_predicate`], so a build-graph mirror of it would only diverge from the
+/// NAR ground truth when eval pruning leaves a dependency unwalked, and dead-zone
+/// a build whose `.drv` closure is in fact fully cached.
 pub fn drv_whole_predicate(alias: &str) -> String {
     format!(
         r#"EXISTS (
@@ -189,6 +163,72 @@ pub fn drv_nar_absent_predicate(alias: &str) -> String {
 /// otherwise be queued as dependency-free.
 pub fn walked_predicate(alias: &str) -> String {
     format!("EXISTS (SELECT 1 FROM derivation w WHERE w.id = {alias}.derivation AND w.walked)")
+}
+
+/// Dependents can get the outputs of anchor `{alias}`: an upstream serves them,
+/// or the anchor succeeded and every output is whole in our cache. This is the one
+/// readiness fact a dependent reads, and it recurses over nothing - a
+/// dependency's own dependencies are already summarised in its `unready_deps`.
+///
+/// The `EXISTS` over `derivation_output` is load-bearing and not a tautology. The
+/// `NOT EXISTS` under it is vacuously true for an anchor with NO output rows, so
+/// without the guard a terminal-success anchor whose outputs were never recorded
+/// reads as fetchable, stops counting toward its dependents' `unready_deps`, and
+/// those dependents are promoted and dispatched against an input nothing can
+/// provide: the unbacked-output dead zone, measured on a live cluster. An anchor
+/// with no outputs is therefore NOT fetchable until its outputs are recorded.
+/// `m20260908_000002`'s frozen copy carries the same guard, and the two must agree
+/// or the backfill and the first ripple disagree about the same row.
+pub fn fetchable_predicate(alias: &str) -> String {
+    format!(
+        r#"({alias}.substitutable
+    OR ({alias}.status IN ({terminal_success})
+        AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = {alias}.derivation)
+        AND NOT EXISTS (
+            SELECT 1 FROM derivation_output o
+            LEFT JOIN cached_path cp ON cp.hash = o.hash
+            WHERE o.derivation = {alias}.derivation AND NOT {whole})))"#,
+        terminal_success =
+            crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS),
+        whole = crate::nar_closure::whole_predicate("cp"),
+    )
+}
+
+/// The gates a `Created` anchor must pass to be queued, minus the status term:
+/// walked, no unready dependency, wanted by some evaluation, and its own `.drv`
+/// importable unless an upstream serves it.
+///
+/// It must stay free of any reference to `status`, which is why the term lives in
+/// [`promotable_predicate`] instead. `m20260908_000002` runs its demote and its
+/// promote in sequence in one transaction and they cannot interfere only because
+/// this never reads the column the demote writes; the same holds for
+/// `readiness::repair_pending`. A status term migrating in here starts
+/// double-moving rows, silently.
+pub fn gates_predicate(alias: &str) -> String {
+    format!(
+        r#"({walked}
+    AND {alias}.unready_deps = 0
+    AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = {alias}.derivation)
+    AND ({alias}.substitutable OR {drv_whole}))"#,
+        walked = walked_predicate(alias),
+        drv_whole = drv_whole_predicate(alias),
+    )
+}
+
+/// [`gates_predicate`] on a `Created` anchor: what promotion writes.
+///
+/// Dispatch does not re-derive this: it reads the status. So the invariant rests on
+/// one rule, which every writer of `Queued` obeys in one of two ways: embed this
+/// predicate in the write, or settle the rows just written with
+/// [`crate::readiness::unpromote_ungated`] in the same call.
+/// [`crate::readiness::repair_pending`] is the backstop for a counter that drifted
+/// under a lost move.
+pub fn promotable_predicate(alias: &str) -> String {
+    format!(
+        "({alias}.status = {created} AND {gates})",
+        created = crate::status_sql::build(gradient_entity::build::BuildStatus::Created),
+        gates = gates_predicate(alias),
+    )
 }
 
 /// Closure of the derivations an evaluation directly references (its
@@ -271,31 +311,11 @@ mod tests {
         );
     }
 
-    /// The readiness predicate must require terminal-success + closure_complete
-    /// (or substitutable) on every dependency AND every input source cached -
-    /// dropping either arm re-opens the InputsUnavailable poison class.
-    #[test]
-    fn readiness_predicate_gates_deps_and_input_sources() {
-        let p = norm(&deps_ready_predicate("db"));
-        let terminal_success =
-            crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
-        assert!(
-            p.contains(&format!(
-                "(((dep.status IN ({terminal_success})) AND dep.closure_complete) OR dep.substitutable)"
-            )),
-            "deps must be terminal-success + closure_complete or substitutable: {p}"
-        );
-        assert!(
-            p.contains("FROM derivation_input_source s") && p.contains("cp.file_hash IS NOT NULL"),
-            "every input source must be fully cached: {p}"
-        );
-    }
-
     /// A `.drv` is an ordinary NAR store path, so the authoritative "the worker
     /// can import the whole input-`.drv` closure" signal is the `.drv` row's own
-    /// reference counter (computed over real NAR references), not the
-    /// eval-build-graph `drv_closure_cached` flag that diverges when pruning
-    /// leaves a dependency unwalked. The predicate must key on that.
+    /// reference counter (computed over real NAR references), not an
+    /// eval-build-graph mirror of it that diverges when pruning leaves a
+    /// dependency unwalked. The predicate must key on that.
     #[test]
     fn drv_whole_predicate_reads_the_reference_counter() {
         let p = norm(&drv_whole_predicate("db"));
@@ -305,6 +325,72 @@ mod tests {
                 && p.contains("cp.file_hash IS NOT NULL")
                 && p.contains("cp.missing_references = 0"),
             "must assert the build target's own .drv row is whole: {p}"
+        );
+    }
+
+    /// Fetchable is the one readiness fact dependents read: an upstream copy, or
+    /// terminal success with every output whole. No recursion over deps.
+    #[test]
+    fn fetchable_reads_upstream_or_whole_outputs_and_nothing_recursive() {
+        let p = norm(&fetchable_predicate("db"));
+        assert!(
+            p.starts_with("(db.substitutable OR (db.status IN (3, 7)"),
+            "{p}"
+        );
+        assert!(
+            p.contains("NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)"),
+            "{p}"
+        );
+        assert!(
+            !p.contains("derivation_dependency"),
+            "no walk over the build graph: {p}"
+        );
+    }
+
+    /// The `NOT EXISTS` over the outputs is vacuously true for an anchor with no
+    /// output rows, so terminal success alone would backfill `fetchable` on one
+    /// and stop it counting toward its dependents' `unready_deps` - the
+    /// unbacked-output dead zone. The `EXISTS` guard is the fix and must stay.
+    #[test]
+    fn an_anchor_with_no_outputs_is_not_fetchable() {
+        let p = norm(&fetchable_predicate("db"));
+        assert!(
+            p.contains(
+                "AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) AND NOT EXISTS"
+            ),
+            "the output guard must precede the NOT EXISTS: {p}"
+        );
+    }
+
+    /// Promotable is a per-row check: walked, zero unready deps, wanted, and a
+    /// whole `.drv` (or an upstream copy). Dispatchable is the same on Queued.
+    #[test]
+    fn promotable_is_created_plus_the_gates() {
+        let p = norm(&promotable_predicate("db"));
+        assert!(p.starts_with("(db.status = 0 AND ("), "{p}");
+        assert!(p.contains("w.walked"), "{p}");
+        assert!(p.contains("db.unready_deps = 0"), "{p}");
+        assert!(
+            p.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
+            "{p}"
+        );
+        assert!(p.contains("db.substitutable OR EXISTS"), "{p}");
+        assert!(
+            !p.contains("derivation_input_source"),
+            "sources are references of the .drv: {p}"
+        );
+    }
+
+    /// The gates must not read `status`, or a demote-then-promote pair in one
+    /// transaction (the readiness migration, `readiness::repair_pending`) starts
+    /// double-moving rows: the demote writes the column the promote would read.
+    #[test]
+    fn the_gates_never_read_the_status_column() {
+        let gates = gates_predicate("db");
+        assert!(!gates.contains("status"), "{gates}");
+        assert!(
+            promotable_predicate("db").contains("db.status = 0 AND"),
+            "the status term belongs to promotable alone"
         );
     }
 

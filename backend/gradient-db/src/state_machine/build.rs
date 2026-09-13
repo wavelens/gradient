@@ -18,7 +18,7 @@ impl fmt::Display for InvalidBuildTransition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid build status transition: {:?} → {:?}",
+            "invalid build status transition: {:?} to {:?}",
             self.from, self.to
         )
     }
@@ -29,12 +29,13 @@ impl std::error::Error for InvalidBuildTransition {}
 /// Validates and enforces [`BuildStatus`] state transitions.
 ///
 /// ```text
-/// Created → Queued
-/// Queued  → Building
-/// Building → Completed | Substituted | FailedPermanent | FailedTransient | FailedTimeout
-/// FailedTransient → Queued | FailedPermanent
-/// * → Aborted          (except terminal states)
-/// * → DependencyFailed (except terminal states)
+/// Created          to  Queued
+/// Queued           to  Building | Created
+/// Building         to  Queued
+/// FailedTransient  to  Queued
+/// any non-terminal to  Completed | Substituted | FailedPermanent | FailedTransient
+///                      | FailedTimeout | Aborted | DependencyFailed
+/// any state        to  itself            (checked before the terminal guard)
 /// ```
 /// Terminal states (`Completed`, `FailedPermanent`, `FailedTimeout`, `Aborted`,
 /// `DependencyFailed`, `Substituted`) cannot be transitioned away from.
@@ -42,6 +43,10 @@ pub struct BuildStateMachine;
 
 impl BuildStateMachine {
     /// Returns `Ok(to)` if the transition is valid, `Err` otherwise.
+    ///
+    /// `Queued` back to `Created` is un-promotion: a gate regressed under a
+    /// promoted anchor, so it returns to the queue's waiting room instead of
+    /// being dispatched with a missing input. No other state may move there.
     pub fn validate(
         from: BuildStatus,
         to: BuildStatus,
@@ -66,6 +71,7 @@ impl BuildStateMachine {
         match (from, to) {
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Building) => Ok(to),
+            (BuildStatus::Queued, BuildStatus::Created) => Ok(to),
 
             // FailedTransient can be retried (back to Queued) or promoted to permanent.
             (BuildStatus::FailedTransient, BuildStatus::Queued) => Ok(to),
@@ -113,6 +119,14 @@ mod tests {
         assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Building).is_ok());
     }
 
+    /// Un-promotion: a retired input or a demoted dependency pulls a queued
+    /// anchor back to Created; only Queued may move there.
+    #[test]
+    fn build_sm_queued_to_created_for_unpromotion() {
+        assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Created).is_ok());
+        assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Created).is_err());
+    }
+
     #[test]
     fn build_sm_building_to_completed() {
         assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Completed).is_ok());
@@ -142,7 +156,7 @@ mod tests {
         ] {
             assert!(
                 BuildStateMachine::validate(from, BuildStatus::Aborted).is_ok(),
-                "{from:?} → Aborted should be valid"
+                "{from:?} to Aborted should be valid"
             );
         }
     }
@@ -156,7 +170,7 @@ mod tests {
         ] {
             assert!(
                 BuildStateMachine::validate(from, BuildStatus::DependencyFailed).is_ok(),
-                "{from:?} → DependencyFailed should be valid"
+                "{from:?} to DependencyFailed should be valid"
             );
         }
     }
@@ -178,7 +192,7 @@ mod tests {
             ] {
                 assert!(
                     BuildStateMachine::validate(*from, to).is_err(),
-                    "{from:?} → {to:?} should be rejected"
+                    "{from:?} to {to:?} should be rejected"
                 );
             }
         }
@@ -220,7 +234,7 @@ mod tests {
             for to in &terminal_states {
                 assert!(
                     BuildStateMachine::validate(*from, *to).is_ok(),
-                    "{from:?} → {to:?} should be valid (terminal shortcut)"
+                    "{from:?} to {to:?} should be valid (terminal shortcut)"
                 );
             }
         }

@@ -148,6 +148,21 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
 const UNSIGNED_GUARD: &str =
     "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)";
 
+/// Evict the cached NARs of derivations no cache has fetched within the TTL.
+///
+/// The retire moves the anchor side with the rows it drops, and its producer reset
+/// returns a terminal-success anchor with nothing left to serve to `Created`, which
+/// a `build_job` can then re-promote into a rebuild. This pass never triggers that:
+/// `STALE_CACHED_NARS_SELECT` admits a row only when the derivation's anchor is in
+/// the terminal-FAILURE set, and the reset keys on terminal SUCCESS, so an age-based
+/// eviction cannot schedule a rebuild of what it just evicted. The reset belongs to
+/// the paths where the artifact is genuinely gone (a zombie row, a demote), where a
+/// rebuild is the recovery and the alternative is a terminal-success anchor whose
+/// dependents block behind an artifact nobody has.
+///
+/// One case does reach it: a hash a terminal-success derivation ALSO produces, whose
+/// `cached_path` row is shared and goes with this eviction. That producer has really
+/// lost its artifact, so the rebuild is correct rather than churn.
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     let ttl_hours = state.config.storage.nar_ttl_hours;
     if ttl_hours == 0 {
@@ -226,10 +241,11 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .await
             .context("TTL GC: failed to delete cached_path_signature rows")?;
 
-            gradient_db::retire_paths_where(&txn, &output_hashes, UNSIGNED_GUARD)
+            let retired = gradient_db::retire_paths_where(&txn, &output_hashes, UNSIGNED_GUARD)
                 .await
                 .context("TTL GC: failed to retire cached paths")?;
             txn.commit().await?;
+            gradient_db::emit_transition_effects(&state.db(), &retired.transitions).await;
         }
 
         // NAR file is shared by every cache for this output, so only delete when
@@ -341,11 +357,14 @@ async fn purge_zombie_cached_paths(
             let txn = state.worker_db.begin().await?;
             let retired = gradient_db::retire_paths(&txn, chunk).await?;
             txn.commit().await?;
-            Ok::<u64, sea_orm::DbErr>(retired.deleted.len() as u64)
+            Ok::<_, sea_orm::DbErr>(retired)
         }
         .await;
         match deleted {
-            Ok(n) => purged += n,
+            Ok(retired) => {
+                purged += retired.deleted.len() as u64;
+                gradient_db::emit_transition_effects(&state.db(), &retired.transitions).await;
+            }
             Err(e) => {
                 warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch")
             }
@@ -658,9 +677,9 @@ mod tests {
             nar_hash: Some("sha256:zombie".into()),
             ..Default::default()
         };
-        // The purge retires the row: the ordered lock pass, then the DELETE that
-        // reports what it removed, then the three flag clears (no reverse ripple,
-        // the zombie was not whole).
+        // The purge retires the row: the ordered lock pass, the DELETE that reports
+        // what it removed, the `is_cached` clear (no reverse ripple, the zombie was
+        // not whole), then the anchor side over the hash it asked about.
         let mut retired = BTreeMap::new();
         retired.insert("hash".to_string(), Value::String(Some(zombie_hash.into())));
         retired.insert("was_whole".to_string(), Value::Bool(Some(false)));
@@ -668,6 +687,9 @@ mod tests {
             .append_query_results([vec![hash_row(live)]])
             .append_query_results([vec![zombie_row.clone()]])
             .append_query_results([vec![retired]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 sea_orm::MockExecResult {
                     last_insert_id: 0,
@@ -677,7 +699,7 @@ mod tests {
             ])
             .into_connection();
 
-        let state = test_server_state(nar_storage, db, |_| {});
+        let state = test_server_state(nar_storage, db.clone(), |_| {});
 
         let report = cleanup_orphaned_cache_files(Arc::clone(&state))
             .await
@@ -686,6 +708,15 @@ mod tests {
         assert_eq!(
             report.zombie_cached_paths_purged, 1,
             "the zombie row must be retired"
+        );
+
+        drop(state);
+        let log = gradient_db::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            8,
+            "keep-set, zombie scan, retire lock, delete, is_cached, producers of the \
+             union, producers of what is gone, owners: {log:?}"
         );
     }
 
@@ -717,13 +748,16 @@ mod tests {
             .append_query_results([vec![stale]])
             .append_query_results([vec![output]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<gradient_entity::cache_derivation::Model>::new()])
             .append_exec_results(vec![
                 sea_orm::MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                6
+                3
             ])
             .into_connection();
         let state = state_with_worker_db(tmp.path(), db.clone());
@@ -731,6 +765,13 @@ mod tests {
         cleanup_stale_cached_nars(state).await.unwrap();
 
         let log = gradient_db::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            10,
+            "stale scan, outputs, cache_derivation delete, signature delete, retire lock, \
+             guarded delete, producers of the union, producers of what is gone, owners, \
+             still-held check: {log:?}"
+        );
         assert!(
             log.iter().any(|s| s.contains("DELETE FROM cached_path cp")
                 && s.contains("FROM cached_path_signature s")),

@@ -13,6 +13,7 @@ use sea_orm::IntoActiveModel;
 use tracing::{info, warn};
 
 use gradient_core::ServerState;
+use gradient_entity::build::BuildStatus;
 use gradient_graph::Transition;
 use gradient_types::proto::{CandidateScore, JobKind};
 use gradient_types::*;
@@ -29,29 +30,64 @@ impl Scheduler {
     /// has nothing for a build request, refresh from the DB once and retry.
     pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
         let instance = self.instance.load_full();
-        match self.try_assign(worker_id, &kind, &instance).await {
-            AssignOutcome::Assigned(a) => {
-                info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
-                return Some(a);
+        for attempt in 0..3 {
+            match self.try_assign(worker_id, &kind, &instance).await {
+                AssignOutcome::Assigned(a) if self.still_queued(&a).await => {
+                    self.record_dispatch(worker_id, &a);
+                    info!(%worker_id, job_id = %a.job_id, ?kind, attempt, "job assigned via RequestJob");
+                    return Some(a);
+                }
+                AssignOutcome::Assigned(a) => {
+                    self.drop_assignment(worker_id, &a.job_id).await;
+                    continue;
+                }
+                AssignOutcome::AtCapacity => return None,
+                AssignOutcome::Nothing => {}
             }
-            AssignOutcome::AtCapacity => return None,
-            AssignOutcome::Nothing => {}
+
+            if attempt == 0 && matches!(kind, JobKind::Build) {
+                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
+                    warn!(error = %e, "on-demand dispatch_ready_builds failed");
+                }
+                self.kick_dispatch();
+            } else {
+                return None;
+            }
         }
 
-        if matches!(kind, JobKind::Build) {
-            if let Err(e) = dispatch::dispatch_ready_builds(self).await {
-                warn!(error = %e, "on-demand dispatch_ready_builds failed");
-            }
-            self.kick_dispatch();
-        }
+        None
+    }
 
-        match self.try_assign(worker_id, &kind, &instance).await {
-            AssignOutcome::Assigned(a) => {
-                info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob (after DB refresh)");
-                Some(a)
+    /// `Queued` is an invariant the counters keep; a job enqueued before a
+    /// gate regressed is still in the tracker and must not go out.
+    async fn still_queued(&self, a: &Assignment) -> bool {
+        let Some(anchor) = a.pending.derivation_build() else {
+            return true;
+        };
+
+        match gradient_db::anchor_status(&self.state.worker_db, anchor).await {
+            Ok(Some(BuildStatus::Queued)) => true,
+            Ok(status) => {
+                warn!(job_id = %a.job_id, ?status, "queued job no longer dispatchable; dropped from the tracker");
+                false
             }
-            _ => None,
+            Err(e) => {
+                warn!(job_id = %a.job_id, error = %e, "anchor status lookup failed; dispatching anyway");
+                true
+            }
         }
+    }
+
+    async fn drop_assignment(&self, worker_id: &str, job_id: &str) {
+        let worker = worker_id.to_owned();
+        let job_id = job_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::Release {
+                worker,
+                job_id,
+                reply,
+            })
+            .await;
     }
 
     pub async fn record_scores(&self, worker_id: &str, scores: Vec<CandidateScore>) {
@@ -81,8 +117,10 @@ impl Scheduler {
         self.active_job(job_id).await.map(|j| j.project_id())
     }
 
-    /// One atomic claim in the actor; the board event and the `dispatched_job`
-    /// row follow outside it so DB latency never blocks the mailbox.
+    /// One atomic claim in the actor. The board event and the `dispatched_job`
+    /// row are [`Self::record_dispatch`]'s job, fired by the caller once the
+    /// claim survives its re-check, so a vetoed claim leaves no trace of a
+    /// hand-out that never happened.
     async fn try_assign(
         &self,
         worker_id: &str,
@@ -92,7 +130,7 @@ impl Scheduler {
         let worker = worker_id.to_owned();
         let kind = kind.clone();
         let instance = Arc::clone(instance);
-        let outcome = match self
+        match self
             .call(|reply| SchedulerMsg::Assign {
                 worker,
                 kind,
@@ -104,30 +142,37 @@ impl Scheduler {
             Ok(outcome) => outcome,
             Err(e) => {
                 warn!(error = %e, %worker_id, "RequestJob did not reach the scheduler");
-                return AssignOutcome::Nothing;
+                AssignOutcome::Nothing
             }
-        };
-        if let AssignOutcome::Assigned(a) = &outcome
-            && let Some(record) = a.dispatch_record.clone()
-        {
-            let _ = self
-                .state
-                .board_events
-                .send(crate::BoardEvent::JobDispatched {
-                    project: record.project.into(),
-                    worker_id: worker_id.to_owned(),
-                    kind: i16::from(record.kind),
-                    score: record.score,
-                    build_id: record.derivation_build.map(Into::into),
-                    evaluation_id: record.evaluation_id.into(),
-                });
-            let state = Arc::clone(&self.state);
-            let worker = worker_id.to_owned();
-            self.state.shutdown.spawn(async move {
-                persist_dispatched_job(&state, &worker, record).await;
-            });
         }
-        outcome
+    }
+
+    /// Announce a hand-out and persist its telemetry. Outside the actor so DB
+    /// latency never blocks the mailbox, and after the queue re-check because
+    /// `Transition::Dispatched` stamps `derivation_build.dispatched_at` once and
+    /// only once: spend it on a claim that is dropped and the anchor's real
+    /// dispatch never gets a timestamp.
+    fn record_dispatch(&self, worker_id: &str, a: &Assignment) {
+        let Some(record) = a.dispatch_record.clone() else {
+            return;
+        };
+
+        let _ = self
+            .state
+            .board_events
+            .send(crate::BoardEvent::JobDispatched {
+                project: record.project.into(),
+                worker_id: worker_id.to_owned(),
+                kind: i16::from(record.kind),
+                score: record.score,
+                build_id: record.derivation_build.map(Into::into),
+                evaluation_id: record.evaluation_id.into(),
+            });
+        let state = Arc::clone(&self.state);
+        let worker = worker_id.to_owned();
+        self.state.shutdown.spawn(async move {
+            persist_dispatched_job(&state, &worker, record).await;
+        });
     }
 }
 
