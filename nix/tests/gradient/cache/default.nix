@@ -1072,8 +1072,8 @@ in {
       for sibling in (s.strip() for s in siblings):
           if not sibling or server.execute(f"test -f {nar_object(sibling)}")[0] == 0:
               continue
-          if server.execute(f"test -e /nix/store/{sibling}")[0] != 0:
-              print(f"{sibling} shares the producer, has no object and no local path; "
+          if server.execute(f"nix-store --check-validity /nix/store/{sibling} >/dev/null 2>&1")[0] != 0:
+              print(f"{sibling} shares the producer, has no object and the store cannot realize its path; "
                     f"the purge will take it too")
               continue
           print(f"{sibling} shares the victim's producer with no object; pushing it first")
