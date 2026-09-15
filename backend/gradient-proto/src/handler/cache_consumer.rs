@@ -72,6 +72,7 @@ pub(crate) async fn pull_paths(
         query_id: uuid::Uuid::now_v7().to_string(),
         paths: paths.to_vec(),
         mode: QueryMode::Pull,
+        nar_sizes: Vec::new(),
     };
     if socket.send_client_msg(&query).await.is_err() {
         return vec![];

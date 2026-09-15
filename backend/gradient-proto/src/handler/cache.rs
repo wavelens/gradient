@@ -243,6 +243,39 @@ fn pull_fields(
     }
 }
 
+/// How a NAR crosses between worker and storage: over the proto stream through
+/// the server, or straight to object storage on a presigned URL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Transport {
+    Relay,
+    Presigned,
+}
+
+/// Upload transport for an uncached path: relay unless the store can presign
+/// and the NAR is over the small-NAR threshold.
+pub(crate) fn push_transport(nar_size: u64, small_nar_bytes: u64, presigner: bool) -> Transport {
+    if presigner && nar_size > small_nar_bytes {
+        Transport::Presigned
+    } else {
+        Transport::Relay
+    }
+}
+
+/// Download transport for a cached path: relay unless the store can presign,
+/// the object is confirmed there, and it is over the threshold.
+pub(crate) fn pull_transport(
+    confirmed: bool,
+    file_size: u64,
+    small_nar_bytes: u64,
+    presigner: bool,
+) -> Transport {
+    if presigner && confirmed && file_size > small_nar_bytes {
+        Transport::Presigned
+    } else {
+        Transport::Relay
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "one wire entry; splitting it would only move the arguments"
@@ -279,11 +312,24 @@ async fn build_cached_entry(
 
     let (url, fields) = match mode {
         QueryMode::Pull | QueryMode::PullClosure => {
-            let url = match state.nar_storage.presigned_get_url(hash, expire).await {
-                Ok(u) => u,
-                Err(e) => {
-                    warn!(%hash, error = %e, "failed to generate presigned GET URL");
-                    None
+            let confirmed = row.is_none_or(|r| r.confirmed);
+            let size = file_size.unwrap_or(0).max(0) as u64;
+            let transport = pull_transport(
+                confirmed,
+                size,
+                state.config.storage.small_nar_bytes,
+                state.nar_storage.presigner_available(),
+            );
+            let url = match transport {
+                Transport::Relay => None,
+                Transport::Presigned => {
+                    match state.nar_storage.presigned_get_url(hash, expire).await {
+                        Ok(u) => u,
+                        Err(e) => {
+                            warn!(%hash, error = %e, "failed to generate presigned GET URL");
+                            None
+                        }
+                    }
                 }
             };
             (url, pull_fields(row, meta))
@@ -314,22 +360,31 @@ async fn build_uncached_push_entry(
     state: &ServerState,
     hash: &str,
     path: &str,
+    nar_size: u64,
     expire: std::time::Duration,
 ) -> gradient_types::proto::CachedPath {
     use gradient_types::proto::CachedPath;
 
-    let url = match state.nar_storage.presigned_put_url(hash, expire).await {
-        Ok(u) => u,
-        Err(e) => {
-            error!(
-                %hash,
-                error = %e,
-                "S3 presigned PUT URL generation failed; worker will fall back to \
-                 direct NarPush (this defeats S3 - check S3 credentials / endpoint / \
-                 region config)"
-            );
-            None
-        }
+    let transport = push_transport(
+        nar_size,
+        state.config.storage.small_nar_bytes,
+        state.nar_storage.presigner_available(),
+    );
+    let url = match transport {
+        Transport::Relay => None,
+        Transport::Presigned => match state.nar_storage.presigned_put_url(hash, expire).await {
+            Ok(u) => u,
+            Err(e) => {
+                error!(
+                    %hash,
+                    error = %e,
+                    "S3 presigned PUT URL generation failed; worker will fall back to \
+                     direct NarPush (this defeats S3 - check S3 credentials / endpoint / \
+                     region config)"
+                );
+                None
+            }
+        },
     };
 
     CachedPath {
@@ -568,9 +623,18 @@ async fn query(
     state: &ServerState,
     project_id: Option<ProjectId>,
     paths: &[String],
+    nar_sizes: &[u64],
     mode: gradient_types::proto::QueryMode,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
     use gradient_types::proto::QueryMode;
+
+    if matches!(mode, QueryMode::Push) && nar_sizes.len() != paths.len() {
+        return Err(DbErr::Custom(format!(
+            "nar_sizes has {} entries for {} paths",
+            nar_sizes.len(),
+            paths.len()
+        )));
+    }
 
     // Widen the answer with everything else the caller needs from the same
     // closure, then drop any bonus entry the cache cannot serve - so an uncached
@@ -578,7 +642,7 @@ async fn query(
     // as fatal.
     if matches!(mode, QueryMode::PullClosure) {
         let widened = expand_pull_closure(state, paths).await?;
-        let out = Box::pin(query(state, project_id, &widened, QueryMode::Pull)).await?;
+        let out = Box::pin(query(state, project_id, &widened, &[], QueryMode::Pull)).await?;
         return Ok(drop_unserveable_bonus(paths, out));
     }
 
@@ -600,6 +664,11 @@ async fn query(
     }
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
+    let size_by_path: HashMap<&str, u64> = paths
+        .iter()
+        .map(String::as_str)
+        .zip(nar_sizes.iter().copied())
+        .collect();
 
     // One read of `cached_path` feeds both the size map and the Pull metadata;
     // it used to be queried three times over, once here, once for the sizes, and
@@ -653,7 +722,8 @@ async fn query(
                 .await,
             );
         } else if matches!(mode, QueryMode::Push) {
-            result.push(build_uncached_push_entry(state, hash, path, expire).await);
+            let nar_size = size_by_path.get(*path).copied().unwrap_or(u64::MAX);
+            result.push(build_uncached_push_entry(state, hash, path, nar_size, expire).await);
         }
     }
 
@@ -893,9 +963,10 @@ pub(super) async fn handle_cache_query(
     state: &ServerState,
     project_id: Option<ProjectId>,
     paths: &[String],
+    nar_sizes: &[u64],
     mode: gradient_types::proto::QueryMode,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
-    query(state, project_id, paths, mode).await
+    query(state, project_id, paths, nar_sizes, mode).await
 }
 
 fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
@@ -933,6 +1004,98 @@ mod tests {
         Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap()
     }
 
+    #[test]
+    fn push_transport_relays_small_nars_and_presigns_large_ones() {
+        let threshold = 1024 * 1024;
+        assert_eq!(push_transport(1024, threshold, true), Transport::Relay);
+        assert_eq!(push_transport(threshold, threshold, true), Transport::Relay);
+        assert_eq!(
+            push_transport(threshold + 1, threshold, true),
+            Transport::Presigned
+        );
+        assert_eq!(
+            push_transport(u64::MAX, threshold, true),
+            Transport::Presigned
+        );
+        assert_eq!(push_transport(u64::MAX, threshold, false), Transport::Relay);
+    }
+
+    #[test]
+    fn pull_transport_relays_unconfirmed_small_and_presignerless_paths() {
+        let threshold = 1024 * 1024;
+        assert_eq!(
+            pull_transport(true, threshold + 1, threshold, true),
+            Transport::Presigned
+        );
+        assert_eq!(
+            pull_transport(false, threshold + 1, threshold, true),
+            Transport::Relay
+        );
+        assert_eq!(
+            pull_transport(true, threshold, threshold, true),
+            Transport::Relay
+        );
+        assert_eq!(
+            pull_transport(true, threshold + 1, threshold, false),
+            Transport::Relay
+        );
+    }
+
+    #[tokio::test]
+    async fn a_push_query_with_mismatched_sizes_is_an_error() {
+        let state = make_state();
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
+        assert!(
+            query(&state, None, &paths, &[], QueryMode::Push)
+                .await
+                .is_err(),
+            "a Push query must carry one size per path"
+        );
+    }
+
+    fn make_s3_state() -> ServerState {
+        let mut state = make_state();
+        state.nar_storage = gradient_storage::NarStore::s3(
+            "bucket",
+            "us-east-1",
+            Some("http://127.0.0.1:1"),
+            Some("key"),
+            Some("secret"),
+            "",
+            false,
+            gradient_storage::S3Timeouts::default(),
+        )
+        .expect("an S3 client builds and presigns without a network");
+        state
+    }
+
+    /// The server's routing rule on the wire: a small path relays (no URL), a
+    /// large one gets the presigned PUT.
+    #[tokio::test]
+    async fn push_answers_small_paths_without_a_url_and_large_ones_with_one() {
+        let state = make_s3_state();
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-small".to_string(),
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-large".to_string(),
+        ];
+        let sizes = [1024, 8 * 1024 * 1024];
+        let result = query(&state, None, &paths, &sizes, QueryMode::Push)
+            .await
+            .unwrap();
+        let has_url: HashMap<&str, bool> = result
+            .iter()
+            .map(|c| (c.path.as_str(), c.url.is_some()))
+            .collect();
+        assert!(
+            !has_url[paths[0].as_str()],
+            "a small path relays over NarPush"
+        );
+        assert!(
+            has_url[paths[1].as_str()],
+            "a large path uploads on a presigned PUT"
+        );
+    }
+
     #[tokio::test]
     async fn cache_query_propagates_db_error_as_err() {
         // A DB error (e.g. pool exhaustion) must surface as Err so the handler
@@ -948,7 +1111,9 @@ mod tests {
         let state = Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
-            query(&state, None, &paths, QueryMode::Pull).await.is_err(),
+            query(&state, None, &paths, &[], QueryMode::Pull)
+                .await
+                .is_err(),
             "DB error must propagate as Err, not a confident uncached result"
         );
     }
@@ -1017,19 +1182,19 @@ mod tests {
         let state = make_state();
 
         assert!(
-            query(&state, None, &[], QueryMode::Normal)
+            query(&state, None, &[], &[], QueryMode::Normal)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &[], QueryMode::Push)
+            query(&state, None, &[], &[], QueryMode::Push)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &[], QueryMode::Pull)
+            query(&state, None, &[], &[], QueryMode::Pull)
                 .await
                 .unwrap()
                 .is_empty()
@@ -1045,19 +1210,19 @@ mod tests {
             "/nix/store/short-name".to_string(),
         ];
         assert!(
-            query(&state, None, &paths, QueryMode::Normal)
+            query(&state, None, &paths, &[], QueryMode::Normal)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &paths, QueryMode::Push)
+            query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &paths, QueryMode::Pull)
+            query(&state, None, &paths, &[], QueryMode::Pull)
                 .await
                 .unwrap()
                 .is_empty()
@@ -1068,7 +1233,7 @@ mod tests {
     async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
-        let result = query(&state, None, &paths, QueryMode::Normal)
+        let result = query(&state, None, &paths, &[], QueryMode::Normal)
             .await
             .unwrap();
         assert!(
@@ -1092,7 +1257,9 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, QueryMode::Pull).await.unwrap();
+        let result = query(&state, None, &paths, &[], QueryMode::Pull)
+            .await
+            .unwrap();
         assert_eq!(result.len(), 2, "Pull must return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "uncached path: {}", cp.path);
@@ -1123,7 +1290,9 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, QueryMode::Push).await.unwrap();
+        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push)
+            .await
+            .unwrap();
         assert_eq!(result.len(), 2, "Push should return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
@@ -1152,7 +1321,12 @@ mod tests {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
-            let result = query(&state, None, &paths, mode).await.unwrap();
+            let sizes: &[u64] = if matches!(mode, QueryMode::Push) {
+                &[u64::MAX]
+            } else {
+                &[]
+            };
+            let result = query(&state, None, &paths, sizes, mode).await.unwrap();
             assert!(result.is_empty(), "33-char hash must be filtered out");
         }
     }
@@ -1164,7 +1338,9 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
         ];
-        let result = query(&state, None, &paths, QueryMode::Push).await.unwrap();
+        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push)
+            .await
+            .unwrap();
         for cp in &result {
             assert!(!cp.cached);
         }

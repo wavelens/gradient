@@ -126,6 +126,21 @@ pub struct StorageArgs {
     /// content-verify since they already hold the bytes in memory.
     #[arg(long, env = "GRADIENT_NAR_VERIFY_DIGEST", default_value_t = false)]
     pub nar_verify_digest: bool,
+    /// A NAR at or under this many bytes is relayed through the server on upload,
+    /// pulled through it on download and admitted to the hot cache. Defaults to 1 MiB.
+    #[arg(long, env = "GRADIENT_SMALL_NAR_BYTES", default_value_t = 1024 * 1024)]
+    pub small_nar_bytes: u64,
+    /// Weighted capacity of the in-memory NAR cache in bytes; 0 disables it.
+    /// Defaults to 512 MiB.
+    #[arg(
+        long,
+        env = "GRADIENT_HOT_NAR_CACHE_BYTES",
+        default_value_t = 512 * 1024 * 1024
+    )]
+    pub hot_nar_cache_bytes: u64,
+    /// Background uploads of staged NARs to S3 in flight at once. Defaults to 4.
+    #[arg(long, env = "GRADIENT_NAR_UPLOAD_CONCURRENCY", default_value_t = 4)]
+    pub nar_upload_concurrency: usize,
 }
 
 impl Default for StorageArgs {
@@ -150,6 +165,9 @@ impl Default for StorageArgs {
             sign_sweep_interval_secs: 60,
             debug_index_interval_secs: 300,
             nar_verify_digest: false,
+            small_nar_bytes: 1024 * 1024,
+            hot_nar_cache_bytes: 512 * 1024 * 1024,
+            nar_upload_concurrency: 4,
         }
     }
 }

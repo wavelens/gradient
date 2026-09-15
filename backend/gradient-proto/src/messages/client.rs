@@ -258,6 +258,10 @@ pub enum ClientMessage {
         paths: Vec<String>,
         /// Defaults to [`QueryMode::Normal`] when deserialized from an older client.
         mode: QueryMode,
+        /// [`QueryMode::Push`] only: the uncompressed NAR size of `paths[i]`,
+        /// `u64::MAX` when unknown, so the server can route small NARs over the
+        /// stream. Empty in every other mode.
+        nar_sizes: Vec<u64>,
     },
 
     /// Surface an infrastructure-level message tied to the active job's
