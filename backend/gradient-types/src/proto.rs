@@ -322,7 +322,7 @@ pub enum QueryMode {
 /// path info the worker needs to construct a `ValidPathInfo` and call
 /// `add_to_store_nar` on its local nix-daemon. They are `None` for other
 /// modes and for uncached paths.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CachedPath {
     pub path: String,
