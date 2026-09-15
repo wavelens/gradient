@@ -130,6 +130,38 @@ impl LocalNixStore {
             .map_err(|e| anyhow::anyhow!("is_valid_path failed for {store_path}: {e}"))
     }
 
+    /// The uncompressed NAR size of each path, `u64::MAX` when the daemon cannot
+    /// report one, so an unknown size routes as a large NAR instead of relaying.
+    pub async fn nar_sizes(&self, store_paths: &[String]) -> Vec<u64> {
+        let mut sizes = Vec::with_capacity(store_paths.len());
+        for path in store_paths {
+            let size = self.nar_size(path).await.unwrap_or_else(|e| {
+                warn!(path = %path, error = %e, "nar size unknown; routing as large");
+                u64::MAX
+            });
+            sizes.push(size);
+        }
+
+        sizes
+    }
+
+    async fn nar_size(&self, store_path: &str) -> Result<u64> {
+        let base = strip_store_prefix(store_path);
+        let sp = StorePath::from_base_path(base)
+            .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
+
+        let mut guard = self.acquire().await?;
+        let info = guard
+            .execute(|client| async move { client.query_path_info(&sp).await })
+            .await
+            .map_err(|e| anyhow::anyhow!("query_path_info failed for {store_path}: {e}"))?
+            .ok_or_else(|| {
+                anyhow::anyhow!("query_path_info: path not in local store: {store_path}")
+            })?;
+
+        Ok(info.nar_size)
+    }
+
     /// Query the daemon for `store_path`'s direct runtime references.
     ///
     /// Returns canonical `/nix/store/<hash>-<name>` strings. Missing-path or

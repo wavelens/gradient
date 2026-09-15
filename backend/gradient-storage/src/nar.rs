@@ -516,6 +516,11 @@ impl NarStore {
         self.local_base.as_deref()
     }
 
+    /// Whether this store can mint presigned URLs (S3); a local store cannot.
+    pub fn presigner_available(&self) -> bool {
+        self.s3_signer.is_some()
+    }
+
     /// Generate a presigned GET URL valid for `expires_in` for the NAR
     /// identified by `hash`.
     ///

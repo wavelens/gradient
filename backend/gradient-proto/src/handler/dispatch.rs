@@ -329,8 +329,9 @@ impl<'a> DispatchContext<'a> {
                 query_id,
                 paths,
                 mode,
+                nar_sizes,
             } => {
-                self.spawn_cache_query(job_id, query_id, paths, mode);
+                self.spawn_cache_query(job_id, query_id, paths, nar_sizes, mode);
                 true
             }
             ClientMessage::QueryKnownDerivations {
@@ -414,12 +415,14 @@ impl<'a> DispatchContext<'a> {
         job_id: String,
         query_id: String,
         paths: Vec<String>,
+        nar_sizes: Vec<u64>,
         mode: QueryMode,
     ) {
         let rpc = self.rpc();
-        self.state
-            .shutdown
-            .spawn(async move { rpc.on_cache_query(job_id, query_id, paths, mode).await });
+        self.state.shutdown.spawn(async move {
+            rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode)
+                .await
+        });
     }
 
     fn spawn_query_known_derivations(
@@ -935,6 +938,7 @@ impl RpcContext {
         job_id: String,
         query_id: String,
         paths: Vec<String>,
+        nar_sizes: Vec<u64>,
         mode: gradient_types::proto::QueryMode,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, "CacheQuery");
@@ -946,7 +950,7 @@ impl RpcContext {
         // `InputsUnavailable`, which fails the whole eval).
         let reply = match tokio::time::timeout(
             CACHE_QUERY_BUDGET,
-            handle_cache_query(&self.state, project_id, &paths, mode),
+            handle_cache_query(&self.state, project_id, &paths, &nar_sizes, mode),
         )
         .await
         {

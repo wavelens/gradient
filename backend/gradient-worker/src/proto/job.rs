@@ -340,7 +340,36 @@ impl JobUpdater {
     ) -> Result<Vec<CachedPath>> {
         let mut guard = self.phase(JobPhase::CacheQueryWait);
         guard.record(paths.len() as u32, 0);
-        cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
+        cache_query_with_timeout(
+            &self.job_id,
+            &self.writer,
+            &self.cache_waiters,
+            paths,
+            Vec::new(),
+            mode,
+        )
+        .await
+    }
+
+    /// `CacheQuery { Push }` with each path's uncompressed size, so the server
+    /// can route small NARs over the stream. Without a store every size is unknown.
+    pub async fn query_push(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
+        let nar_sizes = match &self.store {
+            Some(store) => store.nar_sizes(&paths).await,
+            None => vec![u64::MAX; paths.len()],
+        };
+
+        let mut guard = self.phase(JobPhase::CacheQueryWait);
+        guard.record(paths.len() as u32, 0);
+        cache_query_with_timeout(
+            &self.job_id,
+            &self.writer,
+            &self.cache_waiters,
+            paths,
+            nar_sizes,
+            QueryMode::Push,
+        )
+        .await
     }
 
     /// Send `NarRequest { paths }` and wait for every requested path to
@@ -585,11 +614,26 @@ async fn cache_query_with_timeout(
     writer: &ProtoWriter,
     cache_waiters: &CacheWaiters,
     paths: Vec<String>,
+    nar_sizes: Vec<u64>,
     mode: QueryMode,
 ) -> Result<Vec<CachedPath>> {
-    let chunks = paths.chunks(CACHE_QUERY_MAX_PATHS).map(<[String]>::to_vec);
+    let chunks: Vec<(Vec<String>, Vec<u64>)> = paths
+        .chunks(CACHE_QUERY_MAX_PATHS)
+        .enumerate()
+        .map(|(i, chunk)| {
+            let sizes = nar_sizes
+                .iter()
+                .skip(i * CACHE_QUERY_MAX_PATHS)
+                .take(chunk.len())
+                .copied()
+                .collect();
+            (chunk.to_vec(), sizes)
+        })
+        .collect();
     let answers: Vec<Vec<CachedPath>> = futures::stream::iter(chunks)
-        .map(|chunk| cache_query_chunk(job_id, writer, cache_waiters, chunk, mode.clone()))
+        .map(|(chunk, sizes)| {
+            cache_query_chunk(job_id, writer, cache_waiters, chunk, sizes, mode.clone())
+        })
         .buffered(CACHE_QUERY_WINDOW)
         .try_collect()
         .await?;
@@ -604,6 +648,7 @@ async fn cache_query_chunk(
     writer: &ProtoWriter,
     cache_waiters: &CacheWaiters,
     paths: Vec<String>,
+    nar_sizes: Vec<u64>,
     mode: QueryMode,
 ) -> Result<Vec<CachedPath>> {
     let path_count = paths.len();
@@ -615,6 +660,7 @@ async fn cache_query_chunk(
             query_id: query_id.clone(),
             paths,
             mode,
+            nar_sizes,
         })
         .await?;
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
@@ -647,7 +693,15 @@ impl JobReporter for JobUpdater {
         paths: Vec<String>,
         mode: QueryMode,
     ) -> Result<Vec<CachedPath>> {
-        cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
+        cache_query_with_timeout(
+            &self.job_id,
+            &self.writer,
+            &self.cache_waiters,
+            paths,
+            Vec::new(),
+            mode,
+        )
+        .await
     }
 
     async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
@@ -1125,6 +1179,45 @@ mod tests {
             CACHE_QUERY_WINDOW,
             "the window must fill"
         );
+        pump.abort();
+    }
+
+    /// Without a local store no size is known, and an unknown size must route
+    /// as a large NAR: `u64::MAX`, never `0`.
+    #[tokio::test]
+    async fn a_push_query_without_a_store_marks_every_size_unknown() {
+        use gradient_proto::messages::ServerMessage;
+        let (conn, server_task, job_id) = server_then_client!("job-sizes", |sc| {
+            let msg = sc.recv().await.unwrap();
+            let ClientMessage::CacheQuery {
+                query_id,
+                paths,
+                nar_sizes,
+                mode,
+                ..
+            } = msg
+            else {
+                panic!("expected a CacheQuery");
+            };
+            assert_eq!(mode, QueryMode::Push);
+            assert_eq!(nar_sizes, vec![u64::MAX; paths.len()]);
+            let cached = paths.iter().map(|p| cached(p)).collect();
+            sc.send(ServerMessage::CacheStatus { query_id, cached })
+                .await
+                .unwrap();
+        });
+
+        let (mut updater, reader) = make_updater(job_id, conn);
+        let pump = pump_replies(
+            reader,
+            updater.cache_waiters.clone(),
+            updater.known_derivation_waiters.clone(),
+        );
+        let paths: Vec<String> = (0..3).map(|i| format!("/nix/store/path-{i}")).collect();
+        let got = updater.query_push(paths.clone()).await.unwrap();
+
+        assert_eq!(got.into_iter().map(|c| c.path).collect::<Vec<_>>(), paths);
+        server_task.await.unwrap();
         pump.abort();
     }
 

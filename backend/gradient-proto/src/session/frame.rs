@@ -1053,6 +1053,7 @@ mod tests {
             query_id: "6c1a5e2c-0f52-4f9e-9a0e-2f1b7c4d8e90".to_owned(),
             paths: paths.clone(),
             mode: gradient_types::proto::QueryMode::Push,
+            nar_sizes: vec![u64::MAX; paths.len()],
         };
 
         let cached: Vec<CachedPath> = paths
