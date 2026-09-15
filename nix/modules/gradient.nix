@@ -691,7 +691,7 @@ in {
         };
 
         substituteMissEscalationThreshold = lib.mkOption {
-          description = "Consecutive substitute misses before a substitutable build escalates to a real arch-bound build (must be ≥ 1).";
+          description = "Substitute misses (SubstituteUnavailable attempts within one evaluation) after which the anchor stops being substitutable and is built like any other (must be >= 1).";
           type = lib.types.ints.positive;
           default = 2;
         };
