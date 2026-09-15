@@ -74,24 +74,47 @@ next flush fails the same way.
 #### Promotion
 
 Readiness is two maintained columns on the anchor. `fetchable` says a dependent
-can get this anchor's outputs: an upstream serves them (`substitutable`), or the
-anchor succeeded and every output is whole in our cache
-(`cached_path.missing_references = 0`). `unready_deps` is how many of the
-anchor's direct dependencies are not fetchable. Neither is ever derived by a
-sweep: the event that changes fetchability writes the flip with a `RETURNING`
-that names exactly the anchors that changed, and their direct dependents'
-counter moves from that set in one statement (`gradient_db::readiness`).
-Fetchability of a dependent does not depend on its own dependencies, so nothing
-recurses over `derivation_dependency`; the only recursion left is the reference
-ripple on the NAR side.
+can get this anchor's outputs **from our own cache**: the anchor succeeded and
+every output is whole here (`cached_path.missing_references = 0`). An upstream
+copy does not count - a dependent of an unrelayed substitutable anchor waits for
+the relay - so a build pulls every input out of our cache and the relay is on the
+critical path once instead of every dependent re-fetching upstream itself.
+`unready_deps` is how many of the anchor's direct dependencies are not fetchable.
+Neither is ever derived by a sweep: the event that changes fetchability writes
+the flip with a `RETURNING` that names exactly the anchors that changed, and
+their direct dependents' counter moves from that set in one statement
+(`gradient_db::readiness`). Fetchability of a dependent does not depend on its
+own dependencies, so nothing recurses over `derivation_dependency`; the only
+recursion left is the reference ripple on the NAR side.
 
-An anchor is promoted `Created` to `Queued` when its derivation is walked, its
-`unready_deps` is zero, some evaluation wants it (a `build_job`), and its own
-`.drv` is whole in the cache unless an upstream serves it. Those four terms are
-`graph_sql::gates_predicate`, generated once. The events that can open one
-promote the anchors they touched: a batch that walked it, a dependency becoming
-fetchable, its `.drv` NAR arriving, an upstream hit, a thaw at stream
-completion.
+An anchor is promoted `Created` to `Queued` when its derivation is walked, some
+evaluation wants it (a `build_job`), and then one arm per kind of work: a build
+needs `unready_deps = 0` and its own `.drv` whole in the cache, a relay needs
+demand. Those terms are `graph_sql::gates_predicate`, generated once. The events
+that can open one promote the anchors they touched: a batch that walked it, a
+dependency becoming fetchable, its `.drv` NAR arriving, an upstream hit, a thaw
+at stream completion.
+
+Demand is what keeps the fleet from relaying half of nixpkgs on every
+evaluation. A substitutable anchor is queued while something wants its outputs in
+our cache: an entry point of a retained evaluation names it, or a direct
+dependent that will itself be built (walked, not substitutable, pending, with a
+`build_job`) lists it as an input. That is one hop over `derivation_dependency`,
+evaluated inside the promotion statement, so there is no counter to keep and
+nothing to propagate: a dependent that will be built demands its own inputs by
+the same rule. An undemanded substitutable anchor stays `Created`, recorded as
+available upstream and costing nothing.
+
+Because demand is a property of the anchors around it, every transition that
+carries an anchor into or out of the builder statuses (`Created`, `Queued`,
+`Building`, `FailedTransient`) re-gates that anchor's direct inputs, and the
+transition-effects emitter is where that happens - the same one place the graph
+version bump and the board events fan out from, so a new mover cannot forget it.
+Both moves it makes stay inside those four statuses, so one round of re-gating is
+the whole fixpoint. The two events that move demand without moving any status do
+it explicitly: ingest (a newly walked builder, a new entry point, an anchor an
+upstream just claimed) and the per-task evaluation GC (an anchor whose last
+`build_job` went away).
 
 The dispatcher does not re-derive the gates - it reads the status - so `Queued`
 carries the claim that they held. That rests on one rule, which every writer of
@@ -344,9 +367,10 @@ therefore does not poison every later evaluation that needs the derivation - the
 world (upstream cache, network) may have changed since it failed.
 
 Only a *genuine* miss counts toward the substitute-miss budget. The worker reports
-`SubstituteUnavailable` (escalation-eligible) only when an output is on no upstream;
-a transient relay failure - the Pull RPC timing out, the NAR download, or the
-presigned PUT into our own store - is reported as a retryable `Transient` instead.
+`SubstituteUnavailable` (escalation-eligible) only when an output or a member of its
+runtime closure is on no upstream; a transient relay failure - the Pull RPC timing
+out, the NAR download, or the presigned PUT into our own store - is reported as a
+retryable `Transient` instead.
 So a couple of unlucky infra timeouts can no longer escalate a substitutable build
 into a from-scratch one (whose `.drv` may never have been pushed). The probe pool
 also bounds how long a single narinfo probe waits for a permit, so a large eval
@@ -542,20 +566,38 @@ upstream caches. A derivation is marked substitutable only when *every* one of
 its outputs is cached somewhere (the gradient cache or an upstream); otherwise it
 is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
 onto `derivation_output` (`external_url`, `nar_hash`, `file_size`,
-`references_list`, `deriver`), so the narinfo lookup runs only once. Substitutable
-anchors dispatch through the existing `external_cached` path. The dispatch carries
-the derivation's output `(name, store_path)` pairs in the `BuildSpec` so the worker
-fetches the outputs directly and never touches the `.drv`: a substitution needs
-only the output NAR plus its runtime closure, never the `.drv`'s build-time
+`references_list`, `deriver`), so the narinfo lookup runs only once.
+
+A substitutable anchor dispatches as a relay job on any worker once something
+demands it (see [Promotion](#promotion)). The dispatch carries the derivation's
+output `(name, store_path)` pairs in the `BuildSpec` so the worker fetches the
+outputs directly and never touches the `.drv`: a substitution needs only the
+output NAR plus its runtime closure, never the `.drv`'s build-time
 `input_sources` (binary caches do not serve those, so importing the `.drv` would
-fail with a spurious `SubstituteUnavailable`). The worker reads each output's
-persisted URL via `CacheQuery`, downloads the NAR directly from the upstream,
-relays it verbatim when it is already zstd-compressed at our 2 MiB level-6
-window (else recompresses), and pushes it into the gradient cache (`use_substitutes` stays
-off in the daemon - substitution always goes through gradient, never the worker's
-own nix config). Existing build-once anchors a prior eval left not-yet-succeeded
-are flipped substitutable when an upstream is newly found, so a previously-failed
-fetcher substitutes instead of rebuilding.
+fail with a spurious `SubstituteUnavailable`). The worker walks the upstream
+references breadth-first from the outputs and pushes every member our cache
+lacks - relaying each NAR verbatim when it is already zstd-compressed at our
+2 MiB level-6 window, else recompressing - so the outputs land whole
+(`missing_references = 0`) and the binary-cache invariant holds for substituted
+anchors exactly as for built ones. Relaying the outputs alone is what used to
+break it: the closure members below a pruned node have no anchor of their own, so
+nothing ever fetched them and every dependent's build fell back to the upstream.
+`use_substitutes` stays off in the daemon - substitution always goes through
+gradient, never the worker's own nix config. Existing build-once anchors a prior
+eval left not-yet-succeeded are flipped substitutable when an upstream is newly
+found, so a previously-failed fetcher substitutes instead of rebuilding; the
+anchors that flipped stop being builders, so what they demanded is released.
+
+A `SubstituteUnavailable` miss re-queues the relay penalty-free. At
+`substituteMissEscalationThreshold` misses within one evaluation the graph actor
+exhausts the substitution instead: `substitutable` is cleared, the outputs forget
+their upstream columns, and the anchor goes back to `Created` to be built through
+the ordinary gates. That is a graph transition rather than a dispatch mode, so the
+dispatcher reads the flag and nothing else - it used to escalate a
+still-substitutable anchor to a real build and then stall it forever when no
+worker of its architecture was connected. An unwalked stub waits for the next
+evaluation, which no longer prunes it as upstream-served because nothing is
+recorded on its outputs any more.
 
 Upstream object fetches use a redirect-following HTTP client, separate from the
 client that carries API traffic (forges, OIDC), which refuses redirects so a 3xx
@@ -622,20 +664,20 @@ direct edge). So completeness is tracked explicitly:
 
 `derivation_build.fetchable` is the anchor-side reading of that invariant (see
 [Promotion](#promotion)): an anchor is fetchable once every one of its outputs is
-whole in our cache, or an upstream serves them. A build's runtime references are a
-subset of its build inputs, so an output whose own reference closure is whole is
-everything a dependent's dispatch needs from it - closing the runtime-vs-build
-edge gap without a runtime walk. Its dependents' `unready_deps` is moved from its
-flips, so a dependent that finished before its dependency did needs no
-re-derivation of its own readiness: the dependency's flip writes it.
+whole in our cache. A build's runtime references are a subset of its build inputs,
+so an output whose own reference closure is whole is everything a dependent's
+dispatch needs from it - closing the runtime-vs-build edge gap without a runtime
+walk. Its dependents' `unready_deps` is moved from its flips, so a dependent that
+finished before its dependency did needs no re-derivation of its own readiness:
+the dependency's flip writes it.
 
-A `substitutable` anchor skips the dependency gate entirely and dispatches out of
-order (#456); its substitute job carries no `required_paths`, so the worker pulls
-no build deps and the job scores a uniform zero. The gate itself stays a single
-integer comparison, and partial indexes on `derivation_build` keep both scans off
-the full anchor table: the dispatch queue matches `status = Queued` in
-`updated_at` order, and the table-wide promote matches
-`status = Created AND unready_deps = 0`.
+A substituted anchor's outputs are whole the moment its relay finishes, so it is
+fetchable like a built one. Its relay job carries no `required_paths`, so the
+worker pulls no build deps and the job scores a uniform zero. The gate itself
+stays a single integer comparison, and partial indexes on `derivation_build` keep
+both scans off the full anchor table: the dispatch queue matches `status = Queued`
+in `updated_at` order, and the table-wide promote matches
+`status = Created AND (unready_deps = 0 OR substitutable)`.
 
 The NAR side of that invariant is a counter, not a flag.
 `cached_path.missing_references` is the number of a path's references (self

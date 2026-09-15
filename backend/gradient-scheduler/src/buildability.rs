@@ -17,7 +17,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use crate::dispatch_mode::{BuildDispatchMode, arch_available, decide_dispatch_mode};
+use crate::dispatch_mode::{BuildDispatchMode, decide_dispatch_mode};
 
 /// Pre-loaded derivation and feature data for a set of pending anchors.
 ///
@@ -26,44 +26,22 @@ use crate::dispatch_mode::{BuildDispatchMode, arch_available, decide_dispatch_mo
 /// without re-querying the DB per evaluation.
 pub(crate) struct BuildabilityChecker {
     drv_by_id: HashMap<DerivationId, MDerivation>,
-    /// derivation_build → `SubstituteUnavailable` miss count. A substitutable
-    /// anchor is only treated as buildable-anywhere while it is below the
-    /// escalation threshold; past it, it is checked against real arch/features
-    /// like any other anchor (so the parker can park it when no arch worker exists).
-    substitute_misses: HashMap<DerivationBuildId, i64>,
-    substitute_miss_escalation_threshold: i64,
     /// Maps derivation ID → list of required feature IDs.
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_name: HashMap<FeatureId, String>,
-    connected_architectures: std::collections::HashSet<String>,
 }
 
 impl BuildabilityChecker {
-    /// Query the DB for all derivations, required features, and substitute-miss
-    /// counts referenced by `anchors`, returning a checker ready to call
-    /// [`any_buildable`].
+    /// Query the DB for all derivations and required features referenced by
+    /// `anchors`, returning a checker ready to call [`any_buildable`].
     ///
     /// [`any_buildable`]: BuildabilityChecker::any_buildable
     pub(crate) async fn load(
         state: &Arc<ServerState>,
         anchors: &[MDerivationBuild],
-        connected_architectures: std::collections::HashSet<String>,
-        evaluation_id: EvaluationId,
     ) -> Result<Self> {
         let db = &state.worker_db;
         let drv_ids: Vec<DerivationId> = anchors.iter().map(|a| a.derivation).collect();
-        let anchor_ids: Vec<DerivationBuildId> = anchors.iter().map(|a| a.id).collect();
-        // A count-query failure → 0 misses → substitute-mode, same as the dispatch side.
-        // Scoped to this evaluation so a fresh eval is not parked on a previous
-        // eval's exhausted substitute budget.
-        let substitute_misses = gradient_db::substitute_miss_counts(db, &anchor_ids)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|((anchor, eval), misses)| {
-                (eval == evaluation_id).then_some((anchor, misses))
-            })
-            .collect();
 
         let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivation::find()
@@ -106,22 +84,16 @@ impl BuildabilityChecker {
 
         Ok(Self {
             drv_by_id,
-            substitute_misses,
-            substitute_miss_escalation_threshold: state
-                .config
-                .eval
-                .substitute_miss_escalation_threshold
-                as i64,
             features_by_drv,
             feature_name,
-            connected_architectures,
         })
     }
 
     /// Whether any pending anchor can run on the connected pool. `Queued` means
     /// the gates held, so a queued or `Building` anchor is dispatchable and a
-    /// `Created` anchor is still behind its readiness counters. Substitutable
-    /// anchors run anywhere until they exhaust the miss budget.
+    /// `Created` anchor is still behind its readiness counters. A substitutable
+    /// anchor is a relay and runs anywhere; once its miss budget is spent the graph
+    /// actor has already cleared the flag, so there is nothing to escalate here.
     pub(crate) fn any_buildable(
         &self,
         anchors: &[MDerivationBuild],
@@ -137,16 +109,8 @@ impl BuildabilityChecker {
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 return false;
             };
-            let miss = self.substitute_misses.get(&a.id).copied().unwrap_or(0);
-            let arch_has_worker = arch_available(&self.connected_architectures, &drv.architecture);
-            match decide_dispatch_mode(
-                a.substitutable,
-                miss,
-                self.substitute_miss_escalation_threshold,
-                arch_has_worker,
-            ) {
+            match decide_dispatch_mode(a.substitutable) {
                 BuildDispatchMode::SubstituteBuiltin => true,
-                BuildDispatchMode::SubstituteStalled => false,
                 BuildDispatchMode::RealArch => {
                     let required: Vec<&str> = self.required_features_for(&a.derivation);
                     worker_caps.iter().any(|(arch, feats)| {
@@ -186,19 +150,8 @@ impl BuildabilityChecker {
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
         for a in anchors {
-            let miss = self.substitute_misses.get(&a.id).copied().unwrap_or(0);
-            let arch_has_worker = self
-                .drv_by_id
-                .get(&a.derivation)
-                .map(|d| arch_available(&self.connected_architectures, &d.architecture))
-                .unwrap_or(false);
             if matches!(
-                decide_dispatch_mode(
-                    a.substitutable,
-                    miss,
-                    self.substitute_miss_escalation_threshold,
-                    arch_has_worker
-                ),
+                decide_dispatch_mode(a.substitutable),
                 BuildDispatchMode::SubstituteBuiltin
             ) {
                 continue;
@@ -301,11 +254,8 @@ mod tests {
         }
         BuildabilityChecker {
             drv_by_id,
-            substitute_misses: HashMap::new(),
-            substitute_miss_escalation_threshold: 2,
             features_by_drv,
             feature_name,
-            connected_architectures: std::collections::HashSet::new(),
         }
     }
 
@@ -418,13 +368,16 @@ mod tests {
         }
     }
 
+    /// A relay moves bytes between two caches, so it never needs a worker of the
+    /// derivation's own architecture and never counts as an unmet requirement. An
+    /// anchor whose miss budget is spent is no longer substitutable at all by the
+    /// time it reaches here, so nothing is parked on a stalled relay.
     #[test]
-    fn substitutable_below_threshold_is_buildable_anywhere() {
+    fn a_relay_is_buildable_anywhere_whatever_its_architecture() {
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "aarch64-linux");
         let build = substitutable_build(d.id, eval_id);
-        let mut checker = checker_with(vec![d], vec![]);
-        checker.substitute_misses.insert(build.id, 1);
+        let checker = checker_with(vec![d], vec![]);
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let builds = [build];
@@ -434,16 +387,16 @@ mod tests {
         assert!(unmet.is_empty());
     }
 
+    /// The exhausted anchor: `substitutable` cleared, so it is checked against the
+    /// real pool and surfaces as an unmet requirement the parker can act on.
     #[test]
-    fn substitutable_at_threshold_escalates_to_real_arch_check() {
+    fn an_exhausted_relay_is_an_ordinary_build_with_an_unmet_architecture() {
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "aarch64-linux");
-        let build = substitutable_build(d.id, eval_id);
-        let mut checker = checker_with(vec![d], vec![]);
-        checker.substitute_misses.insert(build.id, 2);
+        let mut build = substitutable_build(d.id, eval_id);
+        build.substitutable = false;
+        let checker = checker_with(vec![d], vec![]);
 
-        // No aarch64 worker: the escalated build is no longer buildable-anywhere
-        // and surfaces as an unmet aarch64 requirement so the parker can park it.
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
         let builds = [build];
         assert!(!checker.any_buildable(&builds, &caps));
@@ -454,25 +407,6 @@ mod tests {
     }
 
     #[test]
-    fn stalled_substitute_is_not_buildable_and_appears_in_unmet() {
-        let eval_id = EvaluationId::now_v7();
-        let d = drv(DerivationId::now_v7(), "i686-linux");
-        let mut b = build_for(d.id, eval_id);
-        b.substitutable = true;
-        let mut checker = checker_with(vec![d.clone()], vec![]);
-        checker.substitute_misses.insert(b.id, 2);
-        checker
-            .connected_architectures
-            .insert("x86_64-linux".into());
-        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
-        assert!(!checker.any_buildable(&[b.clone()], &caps));
-        let reason = checker.compute_waiting_reason(&[b], &caps);
-        let (unmet, _, available) = workers_view(&reason);
-        assert!(unmet.iter().any(|u| u.architecture == "i686-linux"));
-        assert_eq!(available, ["x86_64-linux"]);
-    }
-
-    #[test]
     fn dependency_blocked_anchor_is_not_buildable() {
         // A `Created` anchor still has unsatisfied dependency anchors, so it is
         // not dispatchable even when a matching worker is connected.
@@ -480,10 +414,7 @@ mod tests {
         let d = drv(DerivationId::now_v7(), "x86_64-linux");
         let mut b = build_for(d.id, eval_id);
         b.status = BuildStatus::Created;
-        let mut checker = checker_with(vec![d], vec![]);
-        checker
-            .connected_architectures
-            .insert("x86_64-linux".into());
+        let checker = checker_with(vec![d], vec![]);
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
         assert!(!checker.any_buildable(&[b], &caps));
     }
@@ -506,10 +437,7 @@ mod tests {
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "x86_64-linux");
         let b = build_for(d.id, eval_id);
-        let mut checker = checker_with(vec![d], vec![]);
-        checker
-            .connected_architectures
-            .insert("x86_64-linux".into());
+        let checker = checker_with(vec![d], vec![]);
         let anchors = std::slice::from_ref(&b);
         assert!(checker.any_buildable(anchors, &[(vec!["x86_64-linux".to_string()], vec![])]));
         assert!(!checker.any_buildable(anchors, &[(vec!["aarch64-linux".to_string()], vec![])]));

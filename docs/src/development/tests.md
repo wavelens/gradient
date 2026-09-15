@@ -76,7 +76,10 @@ Assert on what the response says, not on how many queries were consumed.
 filesystem or the network is behind a trait; implement the trait in
 `test-support/src/fakes/` and record the calls. Recording fakes
 (`RecordingJobReporter`, `RecordingWebhookClient`) let a test assert on the
-sequence of effects rather than on internal state.
+sequence of effects rather than on internal state. When the trait exists only to
+lift one algorithm out of its I/O (`RelayIo` under the worker's closure relay),
+the fake stays in that module's own `tests`: it is a fixture for one walk, not a
+double anything else will reuse.
 
 **Closure and scheduling work uses `StoreFixture`.** It carries a real
 derivation graph, so dependency ordering, readiness and cache-presence logic get

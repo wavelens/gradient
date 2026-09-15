@@ -64,6 +64,8 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
         "Running per-task evaluation GC"
     );
 
+    let unqueued = anchors_losing_an_evaluation(ctx, &to_delete).await?;
+
     // Break the linked list so deletions never violate previous/next FKs:
     // NULL the deleted rows' own pointers and any surviving pointer into them.
     for eval in &all_evals {
@@ -126,8 +128,52 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
         warn!(error = %e, "GC: failed to delete orphaned commits");
     }
 
+    // The other half of the `Queued` invariant: an anchor whose last `build_job`
+    // just went away fails its own gate, and one whose last builder did stops being
+    // demanded. Neither is a status transition, so nothing else would notice.
+    let mut changes = Vec::new();
+    for chunk in unqueued.chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(
+            crate::readiness::unpromote_ungated(&ctx.worker_db, chunk)
+                .await
+                .context("GC: failed to settle the queue after deleting evaluations")?,
+        );
+    }
+    crate::status::emit_transition_effects(ctx, &changes).await;
+
     info!(task_id = %task_id, deleted = to_delete.len(), "Per-task evaluation GC done");
     Ok(())
+}
+
+/// Every anchor whose queue membership the deletion of `evaluations` can close: the
+/// derivations they name (a lost `build_job` or `entry_point` row) and the direct
+/// inputs of those, which lose a demander with them.
+///
+/// Collected BEFORE the delete, because the rows it reads are what cascades away.
+async fn anchors_losing_an_evaluation(
+    ctx: &DbContext,
+    evaluations: &[MEvaluation],
+) -> Result<Vec<DerivationId>> {
+    let ids: Vec<Uuid> = evaluations.iter().map(|e| e.id.into_inner()).collect();
+    let rows = ctx
+        .worker_db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT derivation FROM build_job WHERE evaluation = ANY($1::uuid[]) \
+             UNION SELECT derivation FROM entry_point WHERE evaluation = ANY($1::uuid[]) \
+             UNION SELECT e.dependency AS derivation FROM derivation_dependency e \
+             JOIN build_job bj ON bj.derivation = e.derivation \
+             WHERE bj.evaluation = ANY($1::uuid[])",
+            [ids.into()],
+        ))
+        .await
+        .context("GC: failed to collect the derivations of the evaluations to delete")?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<Uuid>("", "derivation").ok())
+        .map(DerivationId::new)
+        .collect())
 }
 
 /// When an evaluation last advanced, as opposed to when its row was last
