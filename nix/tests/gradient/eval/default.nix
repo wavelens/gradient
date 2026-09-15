@@ -72,21 +72,32 @@
           {"op": "fingerprint", "repository": REPO},
           {"op": "shutdown"},
       ]
-      payload = "".join(json.dumps(r) + "\n" for r in requests)
-      b64 = base64.b64encode(payload.encode()).decode()
-      machine.succeed(f"echo {b64} | base64 -d > /root/reqs.jsonl")
-
-      status, _ = machine.execute(
+      DRIVER = (
           "HOME=/root GRADIENT_WORKER_SERVER_URL=ws://dummy/proto "
           "GRADIENT_EVAL_CACHE_DIR=/root/eval-cache "
-          "${worker} --eval-driver /root/reqs.jsonl > /root/out.jsonl 2> /root/eval.log"
+          "${worker} --eval-driver"
       )
-      print(machine.succeed("cat /root/out.jsonl || true"))
-      print(machine.succeed("cat /root/eval.log || true"))
-      assert status == 0, f"eval driver exited {status}; see eval.log above"
 
-      responses = [json.loads(l) for l in machine.succeed("cat /root/out.jsonl").splitlines() if l.strip()]
-      assert len(responses) == 5, f"expected 5 responses, got {len(responses)}: {responses}"
+      def drive(tag):
+          payload = "".join(json.dumps(r) + "\n" for r in requests)
+          b64 = base64.b64encode(payload.encode()).decode()
+          machine.succeed(f"echo {b64} | base64 -d > /root/reqs-{tag}.jsonl")
+
+          status, _ = machine.execute(
+              f"start=$(date +%s%3N); {DRIVER} /root/reqs-{tag}.jsonl"
+              f" > /root/out-{tag}.jsonl 2> /root/eval-{tag}.log; rc=$?;"
+              f" echo $(( $(date +%s%3N) - start )) > /root/ms-{tag}; exit $rc"
+          )
+          print(machine.succeed(f"cat /root/out-{tag}.jsonl || true"))
+          print(machine.succeed(f"cat /root/eval-{tag}.log || true"))
+          assert status == 0, f"eval driver ({tag}) exited {status}; see the log above"
+
+          out = machine.succeed(f"cat /root/out-{tag}.jsonl").splitlines()
+          responses = [json.loads(l) for l in out if l.strip()]
+          assert len(responses) == 5, f"expected 5 responses, got {len(responses)}: {responses}"
+          return responses, int(machine.succeed(f"cat /root/ms-{tag}").strip())
+
+      responses, cold_ms = drive("cold")
 
       # ── Wildcard parity ────────────────────────────────────────────────────
       banner("Assert wildcard parity")
@@ -127,6 +138,21 @@
       fp = responses[4].get("fingerprint")
       assert fp, f"expected a fingerprint for the committed flake, got {fp}"
       machine.succeed(f"test -f /root/eval-cache/eval-cache-v6/{fp}.sqlite")
+
+      # ── The second eval of an unchanged flake is served from that blob (#657) ─
+      # The fixture costs seconds of evaluation to derive hello's drvPath, so a
+      # re-eval that pays it again is a re-eval that read nothing back. The
+      # fingerprint has to match too: a different key is a different blob, which
+      # would be cold for a reason the timing alone cannot tell apart.
+      banner("Assert the second eval runs warm off the eval cache")
+      warm, warm_ms = drive("warm")
+      assert warm[4].get("fingerprint") == fp, f"fingerprint moved: {fp} -> {warm[4].get('fingerprint')}"
+
+      warm_items = {it["attr"]: it for it in warm[3]["items"]}
+      assert warm_items[hello].get("drv_path") == h["drv_path"], f"warm resolve disagrees: {warm_items[hello]}"
+
+      print(f"cold={cold_ms}ms warm={warm_ms}ms")
+      assert warm_ms * 2 < cold_ms, f"second eval was not warm: cold={cold_ms}ms warm={warm_ms}ms"
 
       banner("Eval test PASSED")
       '';
