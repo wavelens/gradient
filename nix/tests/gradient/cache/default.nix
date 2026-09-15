@@ -671,8 +671,10 @@ in {
       # `task2` polls the same repository, so its evaluation of the same commit
       # ran on the second worker while the first was still streaming batches.
       # Every write went through the graph actor: one derivation row per hash,
-      # identical build sets, no anchor left without its edges, and no pool
-      # exhaustion or dropped call in the server log.
+      # identical build closures, no anchor left without its edges, and no pool
+      # exhaustion or dropped call in the server log. A walk prunes whatever the
+      # other worker's batch recorded first and names only the pruned root, so
+      # the two `build_job` sets agree on the closure they reach, not on their size.
       banner("Phase 5c: a concurrent evaluation of the same commit merged cleanly")
       eval2_id = ""
       for attempt in range(1, 61):
@@ -695,24 +697,45 @@ in {
           raise Exception("second evaluation did not complete after 600 s")
       assert eval2_id != eval_id, "task2 must have its own evaluation"
 
+      def reach(name, evaluation):
+          return (
+              f"{name}(derivation) AS ("
+              f"  SELECT derivation FROM build_job WHERE evaluation = '{evaluation}'"
+              f"  UNION SELECT e.dependency FROM derivation_dependency e "
+              f"  JOIN {name} c ON e.derivation = c.derivation)"
+          )
+
+      reach1 = reach("reach1", eval_id)
+      reach2 = reach("reach2", eval2_id)
       builds1 = int(sql(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval_id}';"))
       builds2 = int(sql(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval2_id}';"))
-      print(f"build jobs: eval1={builds1} eval2={builds2}")
-      assert builds1 > 0 and builds1 == builds2, "both evaluations record the same number of builds"
-      only_in_one = int(sql(
-          f"SELECT count(*) FROM ("
-          f"  SELECT derivation FROM build_job WHERE evaluation = '{eval_id}'"
-          f"  EXCEPT SELECT derivation FROM build_job WHERE evaluation = '{eval2_id}'"
-          f") x;"
+      closure1 = int(sql(f"WITH RECURSIVE {reach1} SELECT count(*) FROM reach1;"))
+      closure2 = int(sql(f"WITH RECURSIVE {reach2} SELECT count(*) FROM reach2;"))
+      print(f"build jobs: eval1={builds1} eval2={builds2}; closures: eval1={closure1} eval2={closure2}")
+      assert builds1 > 0 and builds2 > 0, "both evaluations record builds"
+      assert closure1 > 0 and closure1 == closure2, "both evaluations reach the same number of derivations"
+      differ = int(sql(
+          f"WITH RECURSIVE {reach1}, {reach2} "
+          f"SELECT (SELECT count(*) FROM (SELECT derivation FROM reach1 "
+          f"        EXCEPT SELECT derivation FROM reach2) a) "
+          f"     + (SELECT count(*) FROM (SELECT derivation FROM reach2 "
+          f"        EXCEPT SELECT derivation FROM reach1) b);"
       ))
-      assert only_in_one == 0, f"{only_in_one} derivations are in the first evaluation only"
+      assert differ == 0, f"the two evaluations' closures differ on {differ} derivations"
+      unnamed = int(sql(
+          f"WITH RECURSIVE {reach1} "
+          f"SELECT count(*) FROM reach1 r WHERE NOT EXISTS ("
+          f"  SELECT 1 FROM build_job bj WHERE bj.derivation = r.derivation "
+          f"  AND bj.evaluation IN ('{eval_id}', '{eval2_id}'));"
+      ))
+      assert unnamed == 0, f"{unnamed} derivations of the closure were named by neither walk"
       duplicates = int(sql("SELECT count(*) - count(DISTINCT hash) FROM derivation;"))
       assert duplicates == 0, f"{duplicates} duplicate derivation rows"
       unwalked = int(sql(
-          f"SELECT count(*) FROM build_job bj JOIN derivation d ON d.id = bj.derivation "
-          f"WHERE bj.evaluation IN ('{eval_id}', '{eval2_id}') AND NOT d.walked;"
+          f"WITH RECURSIVE {reach1} "
+          f"SELECT count(*) FROM reach1 r JOIN derivation d ON d.id = r.derivation WHERE NOT d.walked;"
       ))
-      assert unwalked == 0, f"{unwalked} derivations of the two evaluations are stubs"
+      assert unwalked == 0, f"{unwalked} derivations of the closure are stubs"
       edges = int(sql("SELECT count(*) FROM derivation_dependency;"))
       assert edges > 0, "the graph recorded no dependency edge at all"
       unwalked_deps = int(sql(
