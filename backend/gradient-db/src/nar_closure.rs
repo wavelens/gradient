@@ -671,12 +671,13 @@ async fn recount(lock: &PathLock<'_>) -> Result<u64, DbErr> {
 
 /// The paths the pending anchors gate on: their own `.drv` rows and the output
 /// rows of their direct dependencies. This is what bounds [`repair_counters_for`],
-/// so every path a DISPATCH gate reads is repaired on each sweep. An eval-time
-/// prune reads a wider set and is NOT repaired: `gradient_graph::known::prunable`
-/// and the scheduler's substitutability pass ask whether the outputs of arbitrary
-/// walked candidates are whole, and most of those have no pending anchor. A
-/// false-whole there prunes a subtree that is then never walked, recorded or
-/// built - a permanent dead end, not a stall a later build clears.
+/// so every path a DISPATCH gate reads is repaired on each sweep. A reader that
+/// asks whether arbitrary walked candidates are whole is NOT repaired: the
+/// scheduler's substitutability pass asks exactly that, and most of those
+/// candidates have no pending anchor. A false-whole there flags a subtree as
+/// upstream-served that nothing serves - a permanent dead end, not a stall a later
+/// build clears. The eval-time prune is no longer such a reader: it keys on
+/// `derivation.walked` alone.
 pub fn gating_paths() -> String {
     let pending = crate::status_sql::build_in(&gradient_entity::build::BuildStatus::PENDING);
     format!(

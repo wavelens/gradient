@@ -21,6 +21,8 @@ pub struct Model {
     pub eval: String,
     pub created_at: NaiveDateTime,
     pub repo_check_id: Option<i64>,
+    pub dep_counts_version: Option<i64>,
+    pub dep_counts_computed_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

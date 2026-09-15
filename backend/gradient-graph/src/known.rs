@@ -6,229 +6,27 @@
 
 //! Which derivations an evaluation walk may prune, answered after every queued write.
 
-use std::collections::{HashMap, HashSet};
-
 use gradient_db::WorkerDb;
-use gradient_types::ids::DerivationId;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 /// The prunable-derivations lookup. Any error propagates: the caller prunes nothing.
+///
+/// `walked` alone decides it: the bit says the subtree is recorded, which is the
+/// whole contract of the walk, and it is cleared exactly where a record is lost
+/// ([`gradient_db::unwalk_derivations`], the GC's orphan reclaim). Build and cache
+/// state say nothing about whether the graph is recorded, so keying on them re-walked
+/// a complete record for as long as its anchor had not succeeded.
 pub(crate) async fn prunable(
     db: &WorkerDb,
     drv_hashes: Vec<String>,
 ) -> Result<Vec<String>, sea_orm::DbErr> {
-    let candidates = EDerivation::find()
+    Ok(EDerivation::find()
         .filter(CDerivation::Hash.is_in(drv_hashes))
-        .all(db)
-        .await?;
-    if candidates.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
-    let outputs = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.is_in(drv_ids.clone()))
-        .all(db)
-        .await?;
-
-    let walked: HashSet<DerivationId> = candidates
-        .iter()
-        .filter(|d| d.walked)
-        .map(|d| d.id)
-        .collect();
-    let anchors = EDerivationBuild::find()
-        .filter(CDerivationBuild::Derivation.is_in(drv_ids))
-        .all(db)
-        .await?;
-    // Local-prune precondition: the anchor succeeded and its record is whole,
-    // so skipping the walk loses nothing the graph needs.
-    let complete_anchors: HashSet<DerivationId> = anchors
-        .iter()
-        .filter(|b| b.status.is_terminal_success())
-        .map(|b| b.derivation)
-        .collect();
-
-    let out_hashes: Vec<String> = outputs
-        .iter()
-        .map(|o| o.hash.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let whole: HashSet<String> = ECachedPath::find()
-        .filter(CCachedPath::Hash.is_in(out_hashes))
+        .filter(CDerivation::Walked.eq(true))
         .all(db)
         .await?
         .into_iter()
-        .filter(|cp| cp.is_whole())
-        .map(|cp| cp.hash)
-        .collect();
-
-    let candidates: Vec<(DerivationId, String)> = candidates
-        .into_iter()
-        .map(|d| (d.id, d.store_path()))
-        .collect();
-
-    Ok(prunable_known_derivations(
-        candidates,
-        &outputs,
-        &walked,
-        &complete_anchors,
-        &whole,
-    ))
-}
-
-/// Decide which `(derivation_id, store_path)` candidates the eval BFS may prune.
-///
-/// A derivation is prunable only when walked: a stub's subtree was never
-/// recorded. Upstream arm: every output is on a real upstream (`external_url`),
-/// which serves a complete closure, so a build worker fetches the pruned subtree
-/// on demand. Local arm: the anchor is terminal-success and every output has a
-/// whole `cached_path` row; bare `is_cached` is not enough, because our own
-/// cache is populated output-only and pruning on it stranded never-pushed
-/// closure members as permanent `InputsUnavailable` dead-ends.
-fn prunable_known_derivations(
-    candidates: Vec<(DerivationId, String)>,
-    outputs: &[MDerivationOutput],
-    walked: &HashSet<DerivationId>,
-    complete_anchors: &HashSet<DerivationId>,
-    whole: &HashSet<String>,
-) -> Vec<String> {
-    let mut counts: HashMap<DerivationId, (usize, usize, usize)> = HashMap::new();
-    for o in outputs {
-        let entry = counts.entry(o.derivation).or_insert((0, 0, 0));
-        entry.0 += 1;
-        if o.external_url.is_none() {
-            entry.1 += 1;
-        }
-        if !whole.contains(&o.hash) {
-            entry.2 += 1;
-        }
-    }
-
-    candidates
-        .into_iter()
-        .filter(|(id, _)| {
-            let (total, off_upstream, off_local) = counts.get(id).copied().unwrap_or((0, 0, 0));
-            let upstream_ok = off_upstream == 0;
-            let local_ok = off_local == 0 && complete_anchors.contains(id);
-            total > 0 && walked.contains(id) && (upstream_ok || local_ok)
-        })
-        .map(|(_, store_path)| store_path)
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::prunable_known_derivations;
-    use gradient_types::MDerivationOutput;
-    use gradient_types::ids::{DerivationId, DerivationOutputId};
-    use std::collections::HashSet;
-
-    fn output(drv: DerivationId, hash: &str) -> MDerivationOutput {
-        MDerivationOutput {
-            id: DerivationOutputId::now_v7(),
-            derivation: drv,
-            hash: hash.to_string(),
-            ..Default::default()
-        }
-    }
-
-    fn prune(
-        candidates: Vec<(DerivationId, String)>,
-        outputs: &[MDerivationOutput],
-        walked: &HashSet<DerivationId>,
-        complete_anchors: &HashSet<DerivationId>,
-        whole: &HashSet<String>,
-    ) -> Vec<String> {
-        prunable_known_derivations(candidates, outputs, walked, complete_anchors, whole)
-    }
-
-    #[test]
-    fn prunes_only_outputs_on_a_real_upstream() {
-        let local = DerivationId::now_v7(); // is_cached in our cache, NOT upstream
-        let upstream = DerivationId::now_v7(); // every output on an upstream
-        let partial = DerivationId::now_v7(); // one output upstream, one not
-        let output_less = DerivationId::now_v7(); // recorded drv, no outputs
-        let unknown = DerivationId::now_v7(); // no rows at all
-
-        let mut o_local = output(local, "aaa");
-        o_local.is_cached = true;
-        let mut o_upstream = output(upstream, "bbb");
-        o_upstream.external_url = Some("https://cache.example/bbb.narinfo".to_string());
-        let mut o_partial_a = output(partial, "ddd");
-        o_partial_a.external_url = Some("https://cache.example/ddd.narinfo".to_string());
-        let mut o_partial_b = output(partial, "eee");
-        o_partial_b.is_cached = true;
-
-        let outputs = vec![o_local, o_upstream, o_partial_a, o_partial_b];
-
-        let candidates = vec![
-            (local, "/nix/store/aaa-local".to_string()),
-            (upstream, "/nix/store/bbb-upstream".to_string()),
-            (partial, "/nix/store/ddd-partial".to_string()),
-            (output_less, "/nix/store/fff-output-less".to_string()),
-            (unknown, "/nix/store/ggg-unknown".to_string()),
-        ];
-        let walked = HashSet::from([local, upstream, partial, output_less, unknown]);
-
-        let prunable = prune(
-            candidates,
-            &outputs,
-            &walked,
-            &HashSet::new(),
-            &HashSet::new(),
-        );
-
-        assert_eq!(prunable, vec!["/nix/store/bbb-upstream".to_string()]);
-    }
-
-    /// Both local-arm preconditions are load-bearing: a whole output without
-    /// the recorded-graph anchor, or a complete anchor with one output that is
-    /// not whole, must keep walking.
-    #[test]
-    fn a_locally_whole_anchor_prunes() {
-        let complete = DerivationId::now_v7(); // anchor complete + output whole
-        let no_anchor = DerivationId::now_v7(); // output whole, no complete anchor
-        let half_cached = DerivationId::now_v7(); // anchor complete, one output not whole
-
-        let outputs = vec![
-            output(complete, "aaa"),
-            output(no_anchor, "bbb"),
-            output(half_cached, "ccc"),
-            output(half_cached, "ddd"),
-        ];
-        let candidates = vec![
-            (complete, "/nix/store/aaa-complete".to_string()),
-            (no_anchor, "/nix/store/bbb-no-anchor".to_string()),
-            (half_cached, "/nix/store/ccc-half".to_string()),
-        ];
-        let walked = HashSet::from([complete, no_anchor, half_cached]);
-        let complete_anchors = HashSet::from([complete, half_cached]);
-        let whole: HashSet<String> = ["aaa", "bbb", "ccc"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        let prunable = prune(candidates, &outputs, &walked, &complete_anchors, &whole);
-
-        assert_eq!(prunable, vec!["/nix/store/aaa-complete".to_string()]);
-    }
-
-    /// A stub (named by a batch, never walked) has no recorded subtree, so
-    /// pruning it would skip the walk that records it.
-    #[test]
-    fn an_unwalked_derivation_is_never_prunable() {
-        let upstream = DerivationId::now_v7();
-        let mut o = output(upstream, "bbb");
-        o.external_url = Some("https://cache.example/bbb.narinfo".to_string());
-        let candidates = vec![(upstream, "/nix/store/bbb-upstream".to_string())];
-        let complete_anchors = HashSet::from([upstream]);
-        let whole: HashSet<String> = HashSet::from(["bbb".to_string()]);
-
-        assert!(
-            prune(candidates, &[o], &HashSet::new(), &complete_anchors, &whole).is_empty(),
-            "an unwalked derivation must be walked, not pruned"
-        );
-    }
+        .map(|d| d.store_path())
+        .collect())
 }

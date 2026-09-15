@@ -111,16 +111,23 @@
     };
   }) // {
     overlays = {
+      gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
+      gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
+      gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli gradient-cli-full; };
+      default = final: prev: {
+        inherit (self.packages.${final.stdenv.hostPlatform.system})
+          gradient
+          gradient-frontend
+          gradient-cli
+          gradient-cli-full
+          gradient-nix;
+      };
+
       nix = final: prev: {
-        # Nixpkgs' latest Nix, carrying the eval-metrics and eval-cache C API that nix-bindings links against.
         gradient-nix = ((prev.nixVersions.nixComponents_2_35.appendPatches (
           map (patch: ./nix/patches/nix + "/${patch}") (builtins.attrNames (builtins.readDir ./nix/patches/nix))
         )).overrideScope (finalScope: prevScope: { withAWS = false; })).nix-everything;
       };
-      gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
-      gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
-      gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli gradient-cli-full; };
-      default = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient gradient-frontend gradient-cli gradient-cli-full gradient-nix; };
     };
 
     nixosModules = rec {

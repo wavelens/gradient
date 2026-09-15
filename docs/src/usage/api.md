@@ -253,7 +253,7 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 | `GET/PATCH/DELETE` | `/tasks/{project}/{task}` | Get / update / delete |
 | `GET` | `/tasks/{project}/{task}/details` | Aggregated task data |
 | `GET` | `/tasks/{project}/{task}/evaluations` | List / search evaluations (`?limit=`, `?commit=`, `?status=`, `?attr=`) |
-| `GET` | `/tasks/{project}/{task}/entry-points` | Root builds |
+| `GET` | `/tasks/{project}/{task}/entry-points` | Root builds, paged by attribute path (`?limit=`, `?offset=`) |
 | `POST` | `/tasks/{project}/{task}/check-repository` | Test repo access |
 | `POST` | `/tasks/{project}/{task}/evaluate` | Trigger evaluation |
 | `POST/DELETE` | `/tasks/{project}/{task}/active` | Enable / disable |
@@ -440,13 +440,16 @@ curl -s -G "https://gradient.example.com/api/v1/tasks/my-project/my-task/entry-p
 ```json
 {
   "error": false,
-  "message": [
-    {
-      "eval": "packages.x86_64-linux.my-package",
-      "build_status": "Completed",
-      "outputs": { "out": "/nix/store/7g0q1x3j...-my-package-1.0.0" }
-    }
-  ]
+  "message": {
+    "entry_points": [
+      {
+        "eval": "packages.x86_64-linux.my-package",
+        "build_status": "Completed",
+        "outputs": { "out": "/nix/store/7g0q1x3j...-my-package-1.0.0" }
+      }
+    ],
+    "total": 1
+  }
 }
 ```
 

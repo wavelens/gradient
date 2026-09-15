@@ -63,7 +63,7 @@ deletions (`Gc`, #597) and the debug indexer's flag stay outside the actor.
 The maintenance deletions are the exception that matters for the cache index. TTL
 eviction, the zombie purge and the orphan GC retire `cached_path` rows in their own
 transactions, so `cached_path.missing_references` - the reference counter every
-dispatch gate and eval prune reads - is moved inside the actor's transaction on a
+dispatch gate reads - is moved inside the actor's transaction on a
 commit and inside the deletion's own transaction on a retire. The consistency sweep's
 bounded repair is a fourth writer, also outside the actor. Nothing serialises them
 against a commit but row locks: a commit takes `FOR SHARE` on its reference endpoints,

@@ -204,14 +204,8 @@ pub async fn get_evaluation_builds(
             .await?
             .ok_or_else(|| WebError::not_found("build"))?
             .derivation;
-        let mut allowed: HashSet<DerivationId> = EDerivationClosure::find()
-            .filter(CDerivationClosure::RootDerivation.eq(root))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|c| c.dep_derivation)
-            .collect();
-        allowed.insert(root);
+        let allowed = gradient_db::transitive_closure_reachable(&state.web_db, &[root]).await?;
+
         jobs.into_iter()
             .filter(|j| allowed.contains(&j.derivation))
             .collect()

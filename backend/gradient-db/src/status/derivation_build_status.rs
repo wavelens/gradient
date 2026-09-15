@@ -6,9 +6,9 @@
 
 //! State-machine-guarded transitions of the global `derivation_build` anchor.
 //! One anchor transition fans out to every evaluation that references the
-//! derivation (its `build_job`s): board events, per-eval CI reactor calls, and
-//! a single global entry-point dep-count delta. Graph-driven promotion runs on
-//! terminal-success; dependency-failure cascades on terminal-failure.
+//! derivation (its `build_job`s): board events, per-eval CI reactor calls, and one
+//! bump of every referencing evaluation's graph version. Graph-driven promotion
+//! runs on terminal-success; dependency-failure cascades on terminal-failure.
 
 use super::effects::{TransitionChange, emit_transition_effects};
 use super::logging::{PhaseSubjectKind, finalize_build_log, record_phase_event};
@@ -68,9 +68,9 @@ pub async fn update_derivation_build_status(
         }
     };
 
-    // All fan-out (dep-count delta, board events, CI reactor, cache-changed)
-    // goes through the one effects emitter - the same path the bulk sweeps
-    // feed - so the reactive and proactive models can never drift apart.
+    // All fan-out (graph version, board events, CI reactor, cache-changed) goes
+    // through the one effects emitter - the same path the bulk sweeps feed - so
+    // the reactive and proactive models can never drift apart.
     emit_transition_effects(
         ctx,
         &[TransitionChange {

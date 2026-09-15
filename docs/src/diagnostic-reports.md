@@ -129,9 +129,9 @@ The raw signature is never exported, only whether one exists.
 
 `cached_path` carries `missing_references`, the number of the path's references
 that are absent, unbacked or themselves not whole. A path is *whole* - what the
-dispatch gate and the eval prune read - when `file_hash IS NOT NULL AND
-missing_references = 0`, so a non-zero counter is a path no dispatch or eval prune
-will trust, and a negative one is a ripple that was lost:
+dispatch gate reads - when `file_hash IS NOT NULL AND
+missing_references = 0`, so a non-zero counter is a path no dispatch will trust,
+and a negative one is a ripple that was lost:
 
 ```sh
 sqlite3 gradient-report-01a05a38-2026-09-01.db \

@@ -857,7 +857,7 @@
 
       base_worker = mkOption {
         type = types.bool;
-        default = false;
+        default = true;
         description = "When true this entry is a base worker (server-level, available to every project) rather than a per-project registration. `projects` then lists projects to pre-enable.";
       };
 
@@ -870,8 +870,8 @@
 
       auto_enable = mkOption {
         type = types.bool;
-        default = false;
-        description = "When true, every project enables this base worker the moment it is created, instead of opting in from the UI. A project that later opts out stays opted out. Ignored for non-base workers.";
+        default = true;
+        description = "When true, every project enables this base worker the moment it is created, instead of opting in from the UI. Ignored for non-base workers.";
       };
 
       enabled = mkOption {
@@ -1169,38 +1169,36 @@ in
     };
   };
 
-  config.assertions =
-    let
-      bad = flatten (mapAttrsToList (pName: p:
-        mapAttrsToList (iName: o: {
-          task = pName;
-          input = iName;
-          valid = (o.url != null) != o.keep_url;
-        }) p.flake_input_overrides
-      ) config.services.gradient.state.tasks);
-      invalid = filter (b: !b.valid) bad;
+  config.assertions = let
+    bad = flatten (mapAttrsToList (pName: p:
+      mapAttrsToList (iName: o: {
+        task = pName;
+        input = iName;
+        valid = (o.url != null) != o.keep_url;
+      }) p.flake_input_overrides
+    ) config.services.gradient.state.tasks);
+    invalid = filter (b: !b.valid) bad;
 
-      badActions = flatten (mapAttrsToList (pName: p:
-        map (a: {
-          task = pName;
-          action = a.name;
-          valid = !(a.type == "forge_status_report" && a.events != []);
-        }) p.actions
-      ) config.services.gradient.state.tasks);
-      invalidActions = filter (b: !b.valid) badActions;
-    in
-    map (b: {
-      assertion = false;
-      message = ''
-        services.gradient.state.tasks.${b.task}.flake_input_overrides.${b.input}: \
-        exactly one of `url` (string) or `keep_url = true` must be set.
-      '';
-    }) invalid
-    ++ map (b: {
-      assertion = false;
-      message = ''
-        services.gradient.state.tasks.${b.task}.actions.${b.action}: \
-        forge_status_report actions cannot declare custom `events`.
-      '';
-    }) invalidActions;
+    badActions = flatten (mapAttrsToList (pName: p:
+      map (a: {
+        task = pName;
+        action = a.name;
+        valid = !(a.type == "forge_status_report" && a.events != []);
+      }) p.actions
+    ) config.services.gradient.state.tasks);
+
+    invalidActions = filter (b: !b.valid) badActions;
+  in map (b: {
+    assertion = false;
+    message = ''
+      services.gradient.state.tasks.${b.task}.flake_input_overrides.${b.input}: \
+      exactly one of `url` (string) or `keep_url = true` must be set.
+    '';
+  }) invalid ++ map (b: {
+    assertion = false;
+    message = ''
+      services.gradient.state.tasks.${b.task}.actions.${b.action}: \
+      forge_status_report actions cannot declare custom `events`.
+    '';
+  }) invalidActions;
 }

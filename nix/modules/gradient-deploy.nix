@@ -190,15 +190,15 @@ in {
               return
             fi
 
-            entry_points=$(api "${apiUrl}/tasks/${cfg.task}/entry-points?evaluation_id=$evaluation_id") || { echo "wait"; return; }
+            entry_points=$(api "${apiUrl}/tasks/${cfg.task}/entry-points?evaluation_id=$evaluation_id&limit=500") || { echo "wait"; return; }
 
             # Output paths are written at evaluation time from the resolved .drv,
             # so the deployment is identifiable before, and independently of, its
             # build. Entry points are absent entirely until derivations resolve.
             path=$(echo "$entry_points" | jq -r --arg re '${systemPathRegex}' \
-              'first(.message[] | select((.outputs.out // "") | test($re))) | .outputs.out // empty')
+              'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .outputs.out // empty')
             status=$(echo "$entry_points" | jq -r --arg re '${systemPathRegex}' \
-              'first(.message[] | select((.outputs.out // "") | test($re))) | .build_status // empty')
+              'first(.message.entry_points[] | select((.outputs.out // "") | test($re))) | .build_status // empty')
 
             if [ -n "$path" ]; then
               current=$(readlink /run/current-system || true)

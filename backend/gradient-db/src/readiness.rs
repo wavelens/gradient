@@ -637,6 +637,37 @@ pub async fn unpromote_ungated<C: ConnectionTrait>(
     ))
 }
 
+/// Drop the record of `derivations` and close the gates that read `walked`, so the
+/// next evaluation walks them again: the un-promoted anchors come back as transitions
+/// for the caller to fan out with [`crate::status::emit_transition_effects`].
+///
+/// The UPDATE runs first, because it locks `derivation` rows before [`lock_anchors`]
+/// and [`unpromote_ungated`] reach `derivation_build` - the class order ingest
+/// (`upsert_walked`, then the anchor locks) and the GC's orphan reclaim both take. The
+/// anchor pass that follows acquires the un-promoted rows in `derivation` order instead
+/// of the one `unpromote_ungated`'s own UPDATE would pick.
+pub async fn unwalk_derivations(
+    ctx: &crate::DbContext,
+    derivations: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    if derivations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let txn = ctx.worker_db.begin().await?;
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "UPDATE derivation SET walked = false WHERE id = ANY($1)",
+        [ids(derivations)],
+    ))
+    .await?;
+    let _anchors = lock_anchors(&txn, derivations).await?;
+    let changes = unpromote_ungated(&txn, derivations).await?;
+    txn.commit().await?;
+
+    Ok(changes)
+}
+
 /// What the consistency sweep repaired.
 #[derive(Debug, Default)]
 pub struct Repaired {

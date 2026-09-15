@@ -237,6 +237,7 @@ pub struct Model {
     pub eval_drv_started_at: Option<NaiveDateTime>,
     pub building_started_at: Option<NaiveDateTime>,
     pub finished_at: Option<NaiveDateTime>,
+    pub graph_version: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
