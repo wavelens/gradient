@@ -436,9 +436,23 @@ pub async fn evaluate_derivations(
 }
 
 /// Write a pulled eval-cache blob to `path`, creating its parent directory.
+///
+/// A previous evaluation of the same flake leaves `-wal`/`-shm` sidecars next to
+/// the blob, and SQLite reads them as belonging to whatever main file it finds:
+/// staging over them hands the evaluation a database half from the server and
+/// half from the last local eval, so they go before the bytes land.
 async fn write_eval_cache_blob(path: &str, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = std::path::Path::new(path).parent() {
         tokio::fs::create_dir_all(parent).await?;
+    }
+
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = format!("{path}{suffix}");
+        match tokio::fs::remove_file(&sidecar).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => warn!(path = %sidecar, error = %e, "failed to drop stale eval-cache sidecar"),
+        }
     }
 
     tokio::fs::write(path, bytes).await?;
