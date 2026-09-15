@@ -14,7 +14,7 @@ The parent side lives in `gradient-worker/src/worker_pool/`, split along its sea
 |---|---|---|
 | Parallelism model | Spawn pool of long-lived eval-workers; one eval is sharded by system and fanned across the pool | Fork short-lived children from a warm parent |
 | Cross-run warmth | Persistent on-disk eval-cache keyed by flake fingerprint, so a repeat eval of the same locked flake is mostly cache hits (skips forcing and daemon round-trips) | None; cold every run, since copy-on-write warmth lives only within one run |
-| Cross-machine cache | Fleet-shared eval-cache (pull and push of `<fp>.sqlite`), so a warm cache propagates across the worker fleet | None |
+| Cross-machine cache | Fleet-shared eval-cache (pull and push of `<fp>.sqlite`), so a warm cache propagates across the worker fleet; staging a pulled blob drops the `-wal`/`-shm` sidecars of the previous local eval, which SQLite would otherwise read as belonging to it | None |
 | Concurrent shared cache | Concurrent shards write one eval-cache without deadlock (WAL-append commits plus a single end-of-eval checkpoint) | Not applicable, as there is no shared cache |
 | Memory safety | Automatic pool sizing so `pool_size * maxEvalRss` stays within a host-RAM share; a many-system flake completes even on a small host (degrading to one shard) and never OOMs | Manual `--workers` and `--max-memory-size` |
 | Pipeline integration | Native: discovery feeds DB rows and build dispatch starts mid-eval (incremental flush); the closure walk prunes server-known derivations and marks cache-status substitution | Emits a JSON job stream that the consumer (Hydra and similar) integrates |
