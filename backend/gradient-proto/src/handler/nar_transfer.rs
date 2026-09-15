@@ -340,7 +340,7 @@ impl NarReceiveStore {
 
         let key = self.key(job_id, hash);
         let received = self.store.received_len(&key, token).await.unwrap_or(0);
-        let writer = match self.store.open_writer(&key, token, received).await {
+        let writer = match self.store.open_writer(&key, token, received, 0).await {
             Ok(writer) => writer,
             Err(e) => {
                 let reason = format!("failed to open the staged partial for {store_path}: {e}");
