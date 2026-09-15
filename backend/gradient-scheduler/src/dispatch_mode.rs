@@ -8,33 +8,21 @@
 pub(crate) enum BuildDispatchMode {
     RealArch,
     SubstituteBuiltin,
-    SubstituteStalled,
 }
 
-/// Decide how a ready build should be dispatched.
+/// A relay runs on any worker, since it only moves bytes between two caches;
+/// everything else needs a worker of its own architecture.
 ///
-/// - non-substitutable        → `RealArch`
-/// - substitutable, under the miss budget → `SubstituteBuiltin` (builtin, any worker)
-/// - substitutable, budget spent, a worker for its arch IS connected → `RealArch` (escalate)
-/// - substitutable, budget spent, NO worker for its arch → `SubstituteStalled`
-pub(crate) fn arch_available(connected: &std::collections::HashSet<String>, arch: &str) -> bool {
-    arch == gradient_types::BUILTIN_ARCH || connected.contains(arch)
-}
-
-pub(crate) fn decide_dispatch_mode(
-    substitutable: bool,
-    miss_count: i64,
-    threshold: i64,
-    arch_has_worker: bool,
-) -> BuildDispatchMode {
-    if !substitutable {
-        BuildDispatchMode::RealArch
-    } else if miss_count < threshold {
+/// Whether an anchor is still worth relaying is not decided here. A spent miss
+/// budget clears `substitutable` in the graph actor, on the failure that spends it,
+/// so this reads the flag and nothing else - the dispatcher used to escalate a
+/// still-substitutable anchor to a real build and then stall it forever when no
+/// worker for its architecture was connected.
+pub(crate) fn decide_dispatch_mode(substitutable: bool) -> BuildDispatchMode {
+    if substitutable {
         BuildDispatchMode::SubstituteBuiltin
-    } else if arch_has_worker {
-        BuildDispatchMode::RealArch
     } else {
-        BuildDispatchMode::SubstituteStalled
+        BuildDispatchMode::RealArch
     }
 }
 
@@ -43,57 +31,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn non_substitutable_is_real_arch() {
+    fn substitutable_is_a_builtin_relay_and_everything_else_needs_its_arch() {
         assert_eq!(
-            decide_dispatch_mode(false, 0, 2, false),
-            BuildDispatchMode::RealArch
-        );
-        assert_eq!(
-            decide_dispatch_mode(false, 5, 2, true),
-            BuildDispatchMode::RealArch
-        );
-    }
-
-    #[test]
-    fn substitutable_under_threshold_is_builtin() {
-        assert_eq!(
-            decide_dispatch_mode(true, 0, 2, false),
+            decide_dispatch_mode(true),
             BuildDispatchMode::SubstituteBuiltin
         );
-        assert_eq!(
-            decide_dispatch_mode(true, 1, 2, false),
-            BuildDispatchMode::SubstituteBuiltin
-        );
-    }
-
-    #[test]
-    fn escalates_only_when_arch_worker_present() {
-        assert_eq!(
-            decide_dispatch_mode(true, 2, 2, true),
-            BuildDispatchMode::RealArch
-        );
-    }
-
-    #[test]
-    fn stalls_when_budget_spent_and_no_arch_worker() {
-        assert_eq!(
-            decide_dispatch_mode(true, 2, 2, false),
-            BuildDispatchMode::SubstituteStalled
-        );
-        assert_eq!(
-            decide_dispatch_mode(true, 9, 2, false),
-            BuildDispatchMode::SubstituteStalled
-        );
-    }
-
-    #[test]
-    fn arch_available_builtin_always_true() {
-        let empty = std::collections::HashSet::new();
-        assert!(arch_available(&empty, "builtin"));
-        let mut connected = std::collections::HashSet::new();
-        connected.insert("x86_64-linux".to_string());
-        assert!(arch_available(&connected, "builtin"));
-        assert!(arch_available(&connected, "x86_64-linux"));
-        assert!(!arch_available(&connected, "aarch64-linux"));
+        assert_eq!(decide_dispatch_mode(false), BuildDispatchMode::RealArch);
     }
 }

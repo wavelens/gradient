@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::dispatch_mode::{BuildDispatchMode, arch_available, decide_dispatch_mode};
+use crate::dispatch_mode::{BuildDispatchMode, decide_dispatch_mode};
 use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::{RequeueScope, Transition};
@@ -197,21 +197,14 @@ struct BuildDispatchMaps {
     /// derivation_id → historical resource prediction (default when the
     /// derivation has no `pname` or no matching history).
     histories: HashMap<DerivationId, gradient_score::HistoryPrediction>,
-    /// (derivation_build, driving evaluation) → `SubstituteUnavailable` miss count,
-    /// scoped to that evaluation so a new eval retries substitution from zero.
-    /// Absent ⇒ 0.
-    substitute_misses: HashMap<(DerivationBuildId, EvaluationId), i64>,
     /// derivation_build → the evaluation driving this anchor's dispatch (used for
     /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
-    connected_architectures: HashSet<String>,
     config: DispatchConfig,
 }
 
 /// The scalar dispatch knobs, split from the per-pass lookup maps.
 struct DispatchConfig {
-    substitute_miss_escalation_threshold: i64,
-    build_retry_backoff_secs: u64,
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
 }
@@ -219,12 +212,6 @@ struct DispatchConfig {
 impl DispatchConfig {
     fn from_state(state: &ServerState) -> Self {
         Self {
-            substitute_miss_escalation_threshold: state
-                .config
-                .eval
-                .substitute_miss_escalation_threshold
-                as i64,
-            build_retry_backoff_secs: state.config.eval.build_retry_backoff_secs,
             default_timeout_secs: nonzero(state.config.eval.build_default_timeout_secs),
             default_max_silent_secs: nonzero(state.config.eval.build_default_max_silent_secs),
         }
@@ -237,16 +224,13 @@ impl BuildDispatchMaps {
         state: &Arc<ServerState>,
         anchors: &[MDerivationBuild],
         uses_history: bool,
-        connected_architectures: HashSet<String>,
     ) -> anyhow::Result<Self> {
         // Every load below propagates its error: a failed query must abort the
         // dispatch pass (retried next tick) instead of masquerading as "no
         // rows", which dispatched builds against phantom-empty inputs.
         let drv_ids: Vec<DerivationId> = anchors.iter().map(|a| a.derivation).collect();
-        let anchor_ids: Vec<DerivationBuildId> = anchors.iter().map(|a| a.id).collect();
 
         let db = &state.worker_db;
-        let substitute_misses = gradient_db::substitute_miss_counts(db, &anchor_ids).await?;
 
         // Resolve the eval driving each anchor's dispatch: any referencing
         // build_job, preferring one whose evaluation is not terminal. The driving
@@ -489,9 +473,7 @@ impl BuildDispatchMaps {
             closure_sizes,
             computed_sizes,
             histories,
-            substitute_misses,
             driving_eval,
-            connected_architectures,
             config: DispatchConfig::from_state(state),
         })
     }
@@ -531,33 +513,7 @@ impl BuildDispatchMaps {
             return DispatchOutcome::Skip("could not resolve project_id for anchor");
         };
 
-        let miss_count = self
-            .substitute_misses
-            .get(&(anchor.id, eval_id))
-            .copied()
-            .unwrap_or(0);
-        let arch_has_worker =
-            arch_available(&self.connected_architectures, &derivation.architecture);
-        let mode = decide_dispatch_mode(
-            anchor.substitutable,
-            miss_count,
-            self.config.substitute_miss_escalation_threshold,
-            arch_has_worker,
-        );
-
-        if mode == BuildDispatchMode::SubstituteStalled
-            && !gradient_graph::retry_backoff_elapsed(
-                miss_count as i32,
-                anchor.updated_at,
-                now(),
-                self.config.build_retry_backoff_secs,
-            )
-        {
-            return DispatchOutcome::Defer(
-                "substitute stalled (no arch worker); backing off re-probe",
-            );
-        }
-
+        let mode = decide_dispatch_mode(anchor.substitutable);
         let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, project_id, mode);
         DispatchOutcome::Dispatch(job_id, Box::new(pending))
     }
@@ -572,10 +528,7 @@ impl BuildDispatchMaps {
         mode: BuildDispatchMode,
     ) -> (String, PendingBuildJob) {
         let job_id = crate::jobs::build_job_key(anchor.id);
-        let substitute = matches!(
-            mode,
-            BuildDispatchMode::SubstituteBuiltin | BuildDispatchMode::SubstituteStalled
-        );
+        let substitute = mode == BuildDispatchMode::SubstituteBuiltin;
         // The worker round-trips this anchor uuid as the opaque BuildSpec.build_id.
         let outputs = if substitute {
             self.self_outputs
@@ -657,12 +610,12 @@ impl BuildDispatchMaps {
     }
 }
 
-/// The dispatch decision for one ready anchor.
+/// The dispatch decision for one ready anchor. `Queued` already means the gates
+/// held, so there is no third "deliberately held this pass" outcome: an anchor that
+/// should not run yet is not in the queue.
 enum DispatchOutcome {
     /// Enqueue this job now.
     Dispatch(String, Box<PendingBuildJob>),
-    /// Deliberately held this pass (re-probed on a later tick).
-    Defer(&'static str),
     /// A required lookup failed; the anchor cannot be assembled.
     Skip(&'static str),
 }
@@ -766,20 +719,8 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let ready_ids: Vec<_> = new_anchors.iter().map(|a| a.id).collect();
 
-    let connected_architectures: HashSet<String> = scheduler
-        .board_workers()
-        .await
-        .into_iter()
-        .flat_map(|w| w.architectures)
-        .collect();
-
-    let maps = BuildDispatchMaps::load(
-        state,
-        &new_anchors,
-        scheduler.policy.uses_history(),
-        connected_architectures,
-    )
-    .await?;
+    let maps =
+        BuildDispatchMaps::load(state, &new_anchors, scheduler.policy.uses_history()).await?;
 
     let mut enqueued = 0usize;
     for anchor in new_anchors {
@@ -790,9 +731,6 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
                     continue;
                 }
                 enqueued += 1;
-            }
-            DispatchOutcome::Defer(reason) => {
-                debug!(derivation_build = %anchor.id, reason, "dispatch deferred");
             }
             DispatchOutcome::Skip(reason) => {
                 error!(derivation_build = %anchor.id, reason, "dispatch skipped");
@@ -832,23 +770,6 @@ fn resolve_limit(stored: Option<i64>, default: Option<u64>) -> Option<u64> {
         Some(0) => None,
         Some(v) if v > 0 => Some(v as u64),
         _ => default,
-    }
-}
-
-#[cfg(test)]
-mod dispatch_mode_tests {
-    use crate::dispatch_mode::{BuildDispatchMode, decide_dispatch_mode};
-
-    #[test]
-    fn stalled_substitute_stays_builtin() {
-        assert_eq!(
-            decide_dispatch_mode(true, 2, 2, false),
-            BuildDispatchMode::SubstituteStalled
-        );
-        assert_eq!(
-            decide_dispatch_mode(true, 2, 2, true),
-            BuildDispatchMode::RealArch
-        );
     }
 }
 

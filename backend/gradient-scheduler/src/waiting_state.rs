@@ -267,11 +267,7 @@ async fn assess_buildability(
         return Ok(None);
     }
 
-    let arches: std::collections::HashSet<String> = worker_caps
-        .iter()
-        .flat_map(|(a, _)| a.iter().cloned())
-        .collect();
-    let checker = BuildabilityChecker::load(state, &pending, arches, evaluation_id).await?;
+    let checker = BuildabilityChecker::load(state, &pending).await?;
     let target = if checker.any_buildable(&pending, worker_caps) {
         EvaluationStatus::Building
     } else {

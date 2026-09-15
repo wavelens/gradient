@@ -30,6 +30,8 @@ pub struct EvalArgs {
     pub max_evaluations_per_worker: usize,
     #[arg(long, env = "GRADIENT_BUILD_MAX_ATTEMPTS", value_parser = greater_than_zero::<u32>, default_value = "3")]
     pub build_max_attempts: u32,
+    /// Substitute misses (`SubstituteUnavailable` attempts within one evaluation)
+    /// after which the anchor stops being substitutable and is built like any other.
     #[arg(long, env = "GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD", value_parser = greater_than_zero::<u32>, default_value = "2")]
     pub substitute_miss_escalation_threshold: u32,
     /// Max `InputsUnavailable` self-heal loops per build before the circuit

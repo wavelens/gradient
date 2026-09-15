@@ -507,11 +507,15 @@ async fn build_failed(
 
     // `InputsUnavailable` retries in-eval (the self-heal re-queues its input),
     // but once the breaker trips the input is unrecoverable - stop retrying.
-    let outcome =
-        match policy::decide_failure_outcome(kind, attempt, max_attempts, anchor.substitutable) {
-            FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,
-            other => other,
-        };
+    let substitution = policy::Substitution {
+        substitutable: anchor.substitutable,
+        misses: substitute_misses(ctx, derivation_build, kind).await,
+        threshold: i64::from(ctx.config.eval.substitute_miss_escalation_threshold),
+    };
+    let outcome = match policy::decide_failure_outcome(kind, attempt, max_attempts, substitution) {
+        FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,
+        other => other,
+    };
 
     // Recorded after the outcome is decided: the stored reason depends on it,
     // and the breaker above deliberately counts only prior attempts.
@@ -556,6 +560,12 @@ async fn build_failed(
             info!(%derivation_build, "substitute unavailable; re-queued for re-dispatch/escalation");
             return Ok(());
         }
+        FailureOutcome::Exhausted => {
+            let misses = substitution.misses + 1;
+            exhaust_substitution(ctx, &anchor, misses).await?;
+            info!(%derivation_build, misses, "substitute misses exhausted; the anchor will be built");
+            return Ok(());
+        }
         FailureOutcome::Aborted => {
             update_derivation_build_status(ctx, anchor, BuildStatus::Aborted).await;
             info!(%derivation_build, "build aborted by server; anchor left requeueable");
@@ -571,6 +581,96 @@ async fn build_failed(
 
     cascade_dependency_failed(&ctx.worker_db, derivation_id).await?;
     check_referencing_evals_done(ctx, derivation_id).await
+}
+
+/// The anchor's prior `SubstituteUnavailable` attempts within the evaluation that
+/// drove this one. Zero for any other failure kind: nothing else spends the budget,
+/// so nothing else needs to read it.
+async fn substitute_misses(
+    ctx: &DbContext,
+    derivation_build: DerivationBuildId,
+    kind: BuildFailureKind,
+) -> i64 {
+    if !matches!(kind, BuildFailureKind::SubstituteUnavailable) {
+        return 0;
+    }
+
+    let Ok(Some(evaluation)) =
+        gradient_db::latest_attempt_evaluation(&ctx.worker_db, derivation_build).await
+    else {
+        return 0;
+    };
+
+    gradient_db::substitute_miss_counts(&ctx.worker_db, &[derivation_build])
+        .await
+        .unwrap_or_default()
+        .get(&(derivation_build, evaluation))
+        .copied()
+        .unwrap_or(0)
+}
+
+/// The anchor stops being a relay: it forgets the upstream its outputs were
+/// recorded on and goes back to `Created`, where the ordinary build gates apply.
+///
+/// Clearing the output columns is what makes the next evaluation retry from a clean
+/// slate rather than prune the anchor as upstream-served: `assess_substitutability`
+/// probes the outputs again and finds nothing recorded. The anchor is a builder
+/// again the moment its status lands, so the emitter promotes what it now demands;
+/// the explicit promote here is for the anchor itself, whose own gate just swapped
+/// arms.
+async fn exhaust_substitution(
+    ctx: &DbContext,
+    anchor: &MDerivationBuild,
+    misses: i64,
+) -> Result<()> {
+    let db = &ctx.worker_db;
+    db.execute_raw(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "UPDATE derivation_build SET substitutable = false, status = $2, attempt = 0, \
+         updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
+        [
+            anchor.id.into_inner().into(),
+            i32::from(BuildStatus::Created).into(),
+        ],
+    ))
+    .await
+    .context("clear the anchor's substitution")?;
+    db.execute_raw(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
+         file_size = NULL, nar_size = NULL, \"references\" = NULL, deriver = NULL \
+         WHERE derivation = $1",
+        [anchor.derivation.into_inner().into()],
+    ))
+    .await
+    .context("clear the outputs' upstream record")?;
+
+    let mut changes = vec![gradient_db::TransitionChange {
+        derivation: anchor.derivation,
+        from: anchor.status,
+        to: BuildStatus::Created,
+    }];
+    changes.extend(gradient_db::promote(db, &[anchor.derivation]).await?);
+    emit_transition_effects(ctx, &changes).await;
+
+    if let Ok(Some(drv)) = EDerivation::find_by_id(anchor.derivation).one(db).await {
+        let jobs = gradient_db::build_jobs_for_derivations(db, &[anchor.derivation]).await?;
+        for job in jobs.values().flatten() {
+            gradient_db::insert_evaluation_message(
+                db,
+                job.evaluation,
+                MessageLevel::Warning,
+                format!(
+                    "substitution of {} exhausted after {misses} misses; it will be built",
+                    drv.store_path()
+                ),
+                Some("scheduler".to_owned()),
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
 }
 
 /// After an anchor reaches a terminal status, sweep every evaluation that
