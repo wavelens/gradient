@@ -63,9 +63,10 @@
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-cache";
-    # Phases 10e and 10f add a second evaluation of the same commit plus a
-    # two-session lock handshake to what was already a full build-and-cache run.
-    globalTimeout = 2400;
+    # Phases 10e to 10g add three more evaluations of the repository, a
+    # two-session lock handshake and two retire-and-recover cycles to what was
+    # already a full build-and-cache run.
+    globalTimeout = 3600;
 
     defaults = {
       networking.firewall.enable = false;
@@ -89,6 +90,13 @@ in {
         ];
 
         nix.settings.substituters = lib.mkForce [ ];
+
+        # Phase 10g serves busybox's closure from this host as a file binary
+        # cache. An anchor is substitutable only when EVERY output is on an
+        # upstream, so the `debug` output has to be in the store to be copied
+        # there; `systemPackages` brings only `out`.
+        virtualisation.additionalPaths = [ pkgs.busybox.debug ];
+
         environment = {
           variables.TEST_PKGS = [ self.inputs.nixpkgs ];
           systemPackages = with pkgs; [
@@ -227,6 +235,12 @@ in {
           nginx.virtualHosts."gradient.local" = {
             enableACME = lib.mkForce false;
             forceSSL = lib.mkForce false;
+            # Phase 10g's upstream binary cache, served off disk from this same
+            # host so the VM needs no network.
+            locations."/upstream/" = {
+              alias = "/srv/upstream/";
+              extraConfig = "autoindex off;";
+            };
           };
 
           postgresql = {
@@ -268,8 +282,10 @@ in {
 
         systemd.tmpfiles.rules = [
           "d /var/lib/git 0755 git git"
+          "d /srv/upstream 0755 nginx nginx"
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
           "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
+          "L+ /var/lib/git/flake-busywrap.nix 0755 git git - ${./flake_repository_busywrap.nix}"
         ];
       };
 
@@ -1079,7 +1095,8 @@ in {
       # for an anchor with no output rows, and without it every output-less
       # terminal-success anchor reads as fetchable, which is the unbacked-output
       # dead zone. The dependency count LEFT JOINs for the same reason the gate
-      # does: a dependency with no anchor row at all counts as unready.
+      # does: a dependency with no anchor row at all counts as unready. Since #593
+      # an upstream copy is NOT fetchable: a dependent waits for the relay.
       def anchor_drift():
           return int(sql(
               "SELECT count(*) FROM derivation_build db WHERE db.unready_deps <> ("
@@ -1087,12 +1104,12 @@ in {
               "  LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
               "  WHERE e.derivation = db.derivation "
               "    AND (dep.derivation IS NULL OR NOT dep.fetchable)) "
-              "OR db.fetchable <> (db.substitutable OR (db.status IN (3, 7) AND EXISTS ("
+              "OR db.fetchable <> (db.status IN (3, 7) AND EXISTS ("
               "  SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) "
               "AND NOT EXISTS ("
               "  SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash "
               "  WHERE o.derivation = db.derivation "
-              "    AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0))));"
+              "    AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)));"
           ))
 
       def poll(query, want, what, timeout=180):
@@ -1492,6 +1509,190 @@ in {
           f"counters disagree with their recompute after the lock race "
           f"(nar {race_drift}, anchor {race_anchor_drift})"
       )
+
+      # ── Phase 10g: a relay happens when, and only when, something wants it ─
+      # Half of all worker jobs used to be relays of outputs nothing had asked
+      # for, and each one relayed the output ALONE: the members of its runtime
+      # closure below a pruned node have no anchor of their own, so nothing ever
+      # fetched them and every dependent's build fell back to the upstream. #593
+      # is both halves - a substitutable anchor is queued only while an entry
+      # point or a pending builder one hop above it demands it, and the relay
+      # mirrors the whole closure so the output lands whole in our cache.
+      #
+      # busybox is the probe: served only by a file binary cache on this host,
+      # wanted only by busywrap, which is built here. Every assertion is on the
+      # database, because "was it relayed" is a `build_attempt` row and "did the
+      # closure come with it" is `missing_references`.
+      banner("Phase 10g: demand-driven substitution (#593)")
+
+      # A narinfo whose Sig does not verify against the upstream's configured
+      # public key is dropped, so the file cache is signed on the way out.
+      server.succeed(
+          f"{NIX} --extra-experimental-features nix-command key generate-secret "
+          f"--key-name file-upstream-1 > /root/upstream.key"
+      )
+      up_pub = server.succeed(
+          f"{NIX} --extra-experimental-features nix-command key convert-secret-to-public "
+          f"< /root/upstream.key"
+      ).strip()
+      server.succeed(
+          f"{NIX} --extra-experimental-features 'nix-command flakes' copy "
+          f"--to 'file:///srv/upstream?secret-key=/root/upstream.key' --no-check-sigs "
+          f"${pkgs.busybox.out} ${pkgs.busybox.debug}"
+      )
+      server.succeed("chown -R nginx:nginx /srv/upstream && systemctl reload nginx")
+      server.succeed(f"{CURL} -sf http://gradient.local/upstream/nix-cache-info > /dev/null")
+
+      server.succeed(
+          f'{CURL} -sf -X PUT -H "Authorization: Bearer {token}" '
+          f'-H "Content-Type: application/json" '
+          f'-d \'{{"type":"http","display_name":"file-upstream",'
+          f'"url":"http://gradient.local/upstream","public_key":"{up_pub}"}}\' '
+          f'{API}/caches/main/upstreams'
+      )
+      assert "file-upstream" in api_get(token, "caches/main/upstreams"), "the upstream was not registered"
+
+      def anchor_of(name):
+          """`<status> <substitutable> <relay attempts>` of the newest such anchor."""
+          return sql(newest_anchor(
+              name,
+              "db.status::text || ' ' || db.substitutable::int::text || ' ' || "
+              "(SELECT count(*) FROM build_attempt a "
+              " WHERE a.derivation_build = db.id AND a.substitute)::text",
+          ))
+
+      def newest_anchor(name, column):
+          """`column` of the newest anchor whose derivation name starts with `name`."""
+          return (
+              f"SELECT {column} FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
+              f"WHERE d.name LIKE '{name}%' ORDER BY d.created_at DESC LIMIT 1;"
+          )
+
+      def relay_attempts(name):
+          return newest_anchor(
+              name,
+              "(SELECT count(*) FROM build_attempt a "
+              " WHERE a.derivation_build = db.id AND a.substitute)::text",
+          )
+
+      def output_missing(name):
+          return sql(
+              f"SELECT cp.missing_references::text FROM cached_path cp "
+              f"JOIN derivation_output o ON o.hash = cp.hash "
+              f"JOIN derivation d ON d.id = o.derivation "
+              f"WHERE d.name LIKE '{name}%' AND o.name = 'out' "
+              f"ORDER BY d.created_at DESC LIMIT 1;"
+          )
+
+      def output_hash(name):
+          return sql(
+              f"SELECT o.hash FROM derivation_output o JOIN derivation d ON d.id = o.derivation "
+              f"WHERE d.name LIKE '{name}%' AND o.name = 'out' "
+              f"ORDER BY d.created_at DESC LIMIT 1;"
+          )
+
+      def wait_for_new_eval(known, timeout=900):
+          """The id of the next evaluation to reach a terminal status."""
+          for _ in range(timeout // 10):
+              server.sleep(10)
+              candidate = server.succeed(
+                  f'{CURL} -sf -H "Authorization: Bearer {token}" '
+                  f'{API}/tasks/project/task | {JQ} -rj ".message.last_evaluation // empty"'
+              ).strip()
+              if not candidate or candidate in known:
+                  continue
+              status = server.succeed(
+                  f'{CURL} -sf -H "Authorization: Bearer {token}" '
+                  f'{API}/evals/{candidate} | {JQ} -rj ".message.status"'
+              ).strip()
+              if status == "Completed":
+                  return candidate
+              if status in ("Failed", "Aborted"):
+                  j = server.succeed("journalctl -u gradient-server --no-pager --since='-600s' -n 300")
+                  raise Exception(f"evaluation {candidate} ended {status}:\n{j[-3000:]}")
+          raise Exception(f"no new evaluation completed within {timeout} s")
+
+      # busywrap links a binary out of busybox, so it needs busybox's output in
+      # our cache before it can be built.
+      server.succeed("cp /var/lib/git/flake-busywrap.nix /var/lib/git/test/flake.nix")
+      server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
+      server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'busywrap'")
+      server.succeed("chown git:git -R /var/lib/git/test")
+      eval4_id = wait_for_new_eval({eval_id, eval2_id, eval3_id})
+
+      assert anchor_of("busywrap").startswith("3 0"), (
+          f"busywrap must be built here, not relayed: {anchor_of('busywrap')}"
+      )
+      assert anchor_of("busybox") == "3 1 1", (
+          f"busybox must be relayed exactly once off the upstream: {anchor_of('busybox')}"
+      )
+      # The whole of decision 3: the relay walked the upstream references and
+      # pushed every member we lacked, so the output is whole and its dependents
+      # can be built entirely out of our cache. Relaying the output alone leaves
+      # this above zero.
+      assert output_missing("busybox") == "0", (
+          f"busybox's relayed output is missing closure members: {output_missing('busybox')}"
+      )
+      assert drift() == 0, "counters disagree with their recompute after the relay"
+      assert anchor_drift() == 0, "anchor counters disagree with their recompute after the relay"
+
+      # A re-evaluation demands the same anchor, which is already whole, so the
+      # gate holds and nothing is relayed again. 14k anchors on production were
+      # re-relayed exactly here.
+      server.succeed(f"{GIT} -C /var/lib/git/test commit --allow-empty -m 'busywrap again'")
+      server.succeed("chown git:git -R /var/lib/git/test")
+      eval5_id = wait_for_new_eval({eval_id, eval2_id, eval3_id, eval4_id})
+      assert anchor_of("busybox") == "3 1 1", (
+          f"the second evaluation re-relayed a whole anchor: {anchor_of('busybox')}"
+      )
+
+      # Retire busybox's NAR. Its anchor loses fetchability and is reset to a
+      # fresh build intent, but busywrap is terminal and no entry point names
+      # busybox, so nothing demands it: it stays `Created` and is never
+      # dispatched. This is the assertion the old undemanded-relay behaviour
+      # cannot pass.
+      bb_hash = output_hash("busybox")
+      assert bb_hash, "busybox has no cached output row to retire"
+      server.succeed(f"rm -f {nar_object(bb_hash)}")
+      server.succeed(
+          f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
+          f"{API}/admin/maintenance/deep-gc"
+      )
+      poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bb_hash}';", "0",
+           "the zombie purge kept busybox's row after its NAR was deleted")
+      poll(newest_anchor("busybox", "db.status::text"), "0",
+           "the retire left busybox terminal-success with nothing to serve")
+
+      # Three dispatch ticks and a maintenance pass: the consistency sweep is the
+      # other claimant for a `Created` anchor and its promote embeds the same
+      # gate, so if demand were not part of that gate it would queue busybox here.
+      server.sleep(45)
+      assert anchor_of("busybox") == "0 1 1", (
+          f"an undemanded relay was dispatched again: {anchor_of('busybox')}"
+      )
+
+      # Retire busywrap's own output. Its producer is reset, which makes it a
+      # builder again, which demands busybox: the relay runs a second time and
+      # both anchors come back.
+      bw_hash = output_hash("busywrap")
+      assert bw_hash, "busywrap has no cached output row to retire"
+      server.succeed(f"rm -f {nar_object(bw_hash)}")
+      server.succeed(
+          f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
+          f"{API}/admin/maintenance/deep-gc"
+      )
+      poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}';", "0",
+           "the zombie purge kept busywrap's row after its NAR was deleted")
+      poll(relay_attempts("busybox"), "2",
+           "a demanded relay was not re-dispatched after its NAR was retired",
+           timeout=600)
+      poll(newest_anchor("busywrap", "db.status::text"), "3",
+           "busywrap was not rebuilt once its input was relayed again", timeout=600)
+      assert output_missing("busybox") == "0", (
+          f"the second relay left closure members behind: {output_missing('busybox')}"
+      )
+      assert drift() == 0, "counters disagree with their recompute after the re-relay"
+      assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-relay"
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
