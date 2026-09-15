@@ -614,10 +614,12 @@ async fn substitute_misses(
 ///
 /// Clearing the output columns is what makes the next evaluation retry from a clean
 /// slate rather than prune the anchor as upstream-served: `assess_substitutability`
-/// probes the outputs again and finds nothing recorded. The anchor is a builder
-/// again the moment its status lands, so the emitter promotes what it now demands;
-/// the explicit promote here is for the anchor itself, whose own gate just swapped
-/// arms.
+/// probes the outputs again and finds nothing recorded.
+///
+/// Both the anchor and its direct inputs are re-gated here rather than left to the
+/// emitter. `Building` to `Created` stays inside the builder statuses, so the
+/// transition carries no demand move, and what changed is that this anchor is now a
+/// builder at all: its own gate swapped arms, and its inputs gained a demander.
 async fn exhaust_substitution(
     ctx: &DbContext,
     anchor: &MDerivationBuild,
@@ -650,7 +652,9 @@ async fn exhaust_substitution(
         from: anchor.status,
         to: BuildStatus::Created,
     }];
-    changes.extend(gradient_db::promote(db, &[anchor.derivation]).await?);
+    let mut candidates = gradient_db::direct_dependencies_of(db, &[anchor.derivation]).await?;
+    candidates.push(anchor.derivation);
+    changes.extend(gradient_db::promote(db, &candidates).await?);
     emit_transition_effects(ctx, &changes).await;
 
     if let Ok(Some(drv)) = EDerivation::find_by_id(anchor.derivation).one(db).await {

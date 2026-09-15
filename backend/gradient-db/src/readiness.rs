@@ -623,6 +623,13 @@ const DIRECT_DEPENDENCIES: &str = "SELECT DISTINCT e.dependency FROM derivation_
 /// that creates, thaws, finishes or drops a builder hands to [`promote`] or
 /// [`unpromote_ungated`], because that builder is exactly the demand its inputs gained
 /// or lost.
+///
+/// A STATUS move across [`crate::graph_sql::BUILDER_STATUSES`] is handled once, in
+/// [`crate::status::emit_transition_effects`], so no mover has to remember it. The
+/// three events that change what an anchor IS rather than where it is - writing
+/// `substitutable` - are the exception, because they turn a relay into a builder (or
+/// back) at an unchanged status: `ingest`'s upstream flip, `demote_cached_output`'s
+/// clear, and the graph actor's exhausted substitution each call this themselves.
 pub async fn direct_dependencies_of<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],

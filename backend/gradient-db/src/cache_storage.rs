@@ -266,17 +266,19 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 /// (see [`preserve_missing_artifact`]) since nothing else can restore it.
 ///
 /// The producer reset lives in the retire, which decides it from the `fetchable`
-/// flag it has just written rather than from this hash: what this does here is
-/// drop the upstream trust the demoted output carried, since an anchor an upstream
-/// still offers is fetchable through `substitutable` and would otherwise keep a
-/// terminal status against an artifact nothing serves.
+/// flag it has just written rather than from this hash: what this does here is drop
+/// the upstream trust the demoted output carried, so the anchor stops being a relay
+/// against an artifact nothing serves.
 ///
-/// That clear runs at every status, and `substitutable` is one of the two ways
-/// `gates_predicate` can be satisfied, so a `Queued` anchor whose only satisfier it
-/// was would be left queued with its gates false - and dispatch reads the status
-/// rather than the gates, so it would dispatch that anchor against a `.drv` nothing
-/// can serve. The un-promote that follows is what closes that, and it shares the
-/// retire's transaction so a crash cannot separate the two.
+/// That clear runs at every status, and it decides which arm of `gates_predicate`
+/// the anchor takes, so a `Queued` relay whose demand was its only satisfier would
+/// be left queued with its gates false - and dispatch reads the status rather than
+/// the gates, so it would dispatch that anchor against a `.drv` nothing can serve.
+/// The un-promote that follows is what closes that, and it shares the retire's
+/// transaction so a crash cannot separate the two. The promote AFTER the commit is
+/// the other half: an anchor that stops being a relay becomes a builder, at an
+/// unchanged status the transition emitter cannot notice, and a builder demands its
+/// direct inputs.
 ///
 /// Because the clear has to run inside that transaction AND before the retire reads
 /// `substitutable`, this is the one path that would write `derivation_build` before
@@ -345,6 +347,14 @@ pub async fn demote_cached_output(
         .transitions
         .extend(crate::readiness::unpromote_ungated(&txn, &producers).await?);
     txn.commit().await?;
+
+    // Every producer is offered, not just the ones the clear moved: `promote`
+    // embeds the gate, so a candidate list is a bound and never a claim, and that
+    // is cheaper than a `RETURNING` round trip to narrow it.
+    let wanted = crate::readiness::direct_dependencies_of(db, &producers).await?;
+    retired
+        .transitions
+        .extend(crate::readiness::promote(db, &wanted).await?);
     crate::status::emit_transition_effects(ctx, &retired.transitions).await;
 
     if let Err(e) = nar_storage.delete(hash).await {
@@ -602,6 +612,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
@@ -625,10 +636,10 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            12,
+            13,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
              is_cached, producers of the union, producers of what is gone, owners, \
-             un-promote: {log:?}"
+             un-promote, and what the producers now demand: {log:?}"
         );
         let paths = log
             .iter()
@@ -701,6 +712,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
@@ -717,10 +729,10 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            15,
+            16,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
              producers of the union, anchor lock, mark, ripple, producers of what is \
-             gone, reset, owners, un-promote: {log:?}"
+             gone, reset, owners, un-promote, and what the producers now demand: {log:?}"
         );
         assert!(
             !log.iter()
