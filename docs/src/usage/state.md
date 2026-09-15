@@ -519,7 +519,7 @@ On the worker machine, the `peersFile` authenticates with `<project_id>:<token>`
 
 ### Base workers
 
-Setting `base_worker = true` makes the entry a server-level worker that appears in every project's worker list, disabled by default. Projects can enable or disable it from the UI but cannot edit or delete it (it is state-managed).
+Setting `base_worker = true` makes the entry a server-level worker that appears in every project's worker list. Projects can enable or disable it from the UI but cannot edit or delete it (it is state-managed).
 
 ```nix
 services.gradient.state.workers = {
@@ -567,10 +567,10 @@ The `peerFile` options for a base worker in order of preference:
 | `enable_fetch` | `true` | Server-side gate for the `fetch` capability |
 | `enable_eval` | `true` | Server-side gate for the `eval` capability |
 | `enable_build` | `true` | Server-side gate for the `build` capability |
-| `base_worker` | `false` | When true, makes this a server-level base worker visible to every project |
+| `base_worker` | `true` | When true, makes this a server-level base worker visible to every project |
 | `enabled` | `true` | Global on/off for a base worker. Ignored for non-base workers |
 | `authorize_against` | `null` | Fixed UUID identity a base worker authenticates as. Ignored for non-base workers |
-| `auto_enable` | `false` | Every project enables this base worker at creation time instead of opting in from the UI. Ignored for non-base workers |
+| `auto_enable` | `true` | Every project enables this base worker at creation time instead of opting in from the UI. Ignored for non-base workers |
 | `created_by` | `null` | Username of creator. Null leaves the registration unattributed |
 
 ## Triggers
