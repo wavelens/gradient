@@ -132,9 +132,10 @@
 //! membership is not a function of its own `fetchable`, so neither flip touches it:
 //! [`lost_fetchability`] moves the DEPENDENTS of the anchors it flipped and never the
 //! anchors themselves. The other three inputs each need their own call. A finished walk
-//! setting `walked` is [`promote_closure`]; a `build_job` appearing and a `.drv`
-//! becoming whole are [`promote`]; a `.drv` ceasing to be whole is
-//! [`unpromote_drv_owners`]. `substitutable` being cleared on a `Queued` anchor is the
+//! setting `walked` is [`promote_closure`]; a `build_job` appearing, a `.drv` becoming
+//! whole and demand arriving are [`promote`]; a `.drv` ceasing to be whole is
+//! [`unpromote_drv_owners`]; demand going away is [`unpromote_ungated`] over
+//! [`direct_dependencies_of`] the builder that lost it. `substitutable` being cleared on a `Queued` anchor is the
 //! one with no entry point here, because it both unfetches the anchor and fails the
 //! anchor's own gate: the caller that clears it owes that anchor a re-check of its own
 //! gate, and until it does, [`repair_pending`]'s un-promote pass settles it one sweep
@@ -149,8 +150,7 @@
 //! That agreement is verified once, by review, at the commit that introduces both.
 
 use crate::graph_sql::{
-    drv_whole_predicate, eval_closure_cte, fetchable_predicate, gates_predicate,
-    promotable_predicate,
+    eval_closure_cte, fetchable_predicate, gates_predicate, promotable_predicate,
 };
 use crate::promotion::{returned_derivations, returned_transitions, transitions_from};
 use crate::status::TransitionChange;
@@ -255,10 +255,13 @@ fn promote_sql(scope: &str) -> String {
 static PROMOTE: LazyLock<String> =
     LazyLock::new(|| promote_sql("db.derivation = ANY($1::uuid[]) AND "));
 
-/// `Created` to `Queued` table-wide. Bounded by `idx-derivation_build-promotable`
-/// (`status = 0 AND unready_deps = 0`), so this is a partial-index lookup and not a
-/// table pass.
-static PROMOTE_ANY: LazyLock<String> = LazyLock::new(|| promote_sql(""));
+/// `Created` to `Queued` table-wide. The leading conjunct is implied by the gate (a
+/// relay takes the `substitutable` arm, a build the `unready_deps = 0` one) and is
+/// written out anyway: it is the predicate of `idx-derivation_build-promotable`, and
+/// spelling it makes the implication syntactic, so this stays a partial-index lookup
+/// instead of a table pass.
+static PROMOTE_ANY: LazyLock<String> =
+    LazyLock::new(|| promote_sql("(db.unready_deps = 0 OR db.substitutable) AND "));
 
 static PROMOTE_CLOSURE: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -280,21 +283,19 @@ fn unpromote_sql(reason: &str) -> String {
     )
 }
 
-static UNPROMOTE_DRV_OWNERS: LazyLock<String> = LazyLock::new(|| {
-    unpromote_sql(&format!(
-        "EXISTS (SELECT 1 FROM derivation d \
-                 WHERE d.id = db.derivation AND d.hash = ANY($1::text[])) \
-         AND NOT (db.substitutable OR {drv_whole})",
-        drv_whole = drv_whole_predicate("db"),
-    ))
-});
-
 fn unpromote_ungated_sql(scope: &str) -> String {
     unpromote_sql(&format!(
         "{scope}NOT {gates}",
         gates = gates_predicate("db")
     ))
 }
+
+static UNPROMOTE_DRV_OWNERS: LazyLock<String> = LazyLock::new(|| {
+    unpromote_ungated_sql(
+        "EXISTS (SELECT 1 FROM derivation d \
+                 WHERE d.id = db.derivation AND d.hash = ANY($1::text[])) AND ",
+    )
+});
 
 /// The queue's own backstop: every `Queued` anchor whose gates no longer hold.
 ///
@@ -593,10 +594,11 @@ where
     ))
 }
 
-/// A `.drv` that is no longer whole cannot be imported, so its owner leaves the queue
-/// unless an upstream serves it. The statement re-checks that ground truth rather than
-/// trusting the hash list: a `.drv` re-pushed between the loss and this call must keep
-/// its anchor queued.
+/// Pull back every `Queued` anchor whose own `.drv` is among `drv_hashes`, and whose
+/// gates the loss of that `.drv` closed. The full gate is embedded rather than the
+/// `.drv` term alone, so this is [`unpromote_ungated`] scoped by hash: a `.drv`
+/// re-pushed between the loss and this call keeps its anchor queued, and a relay,
+/// whose arm of the gate never reads the `.drv`, is left alone.
 pub async fn unpromote_drv_owners<C: ConnectionTrait>(
     db: &C,
     drv_hashes: &[String],
@@ -613,6 +615,33 @@ pub async fn unpromote_drv_owners<C: ConnectionTrait>(
         ))
         .await?,
     ))
+}
+
+const DIRECT_DEPENDENCIES: &str = "SELECT DISTINCT e.dependency FROM derivation_dependency e WHERE e.derivation = ANY($1::uuid[])";
+
+/// The direct inputs of `derivations`, one statement and one hop. What every event
+/// that creates, thaws, finishes or drops a builder hands to [`promote`] or
+/// [`unpromote_ungated`], because that builder is exactly the demand its inputs gained
+/// or lost.
+pub async fn direct_dependencies_of<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<DerivationId>, DbErr> {
+    if derivations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            DIRECT_DEPENDENCIES,
+            [ids(derivations)],
+        ))
+        .await?
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "dependency").ok())
+        .map(DerivationId::new)
+        .collect())
 }
 
 /// Pull back every `Queued` candidate whose gates no longer hold. The gate is
@@ -906,6 +935,8 @@ mod tests {
 
         assert!(promote(&db, &[]).await.unwrap().is_empty());
         assert!(unpromote_drv_owners(&db, &[]).await.unwrap().is_empty());
+        assert!(unpromote_ungated(&db, &[]).await.unwrap().is_empty());
+        assert!(direct_dependencies_of(&db, &[]).await.unwrap().is_empty());
         assert!(statements(db.into_transaction_log()).is_empty());
     }
 
@@ -1070,6 +1101,11 @@ mod tests {
         }
 
         assert!(norm(&PROMOTE).contains("db.derivation = ANY($1::uuid[])"));
+        assert!(
+            norm(&PROMOTE_ANY).contains("(db.unready_deps = 0 OR db.substitutable) AND"),
+            "the table-wide promote must spell out its partial-index bound: {}",
+            norm(&PROMOTE_ANY)
+        );
 
         let closure = norm(&PROMOTE_CLOSURE);
         assert!(
@@ -1086,23 +1122,81 @@ mod tests {
         );
     }
 
-    /// A `.drv` owner leaves the queue only while the `.drv` really is unimportable, so
-    /// a re-push between the loss and this call keeps its anchor queued.
+    /// A `.drv` owner leaves the queue only while its gates really are shut, so a
+    /// re-push between the loss and this call keeps its anchor queued - and a relay,
+    /// whose arm of the gate never reads the `.drv`, is never pulled back by one.
     #[test]
-    fn unpromoting_a_drv_owner_rechecks_the_drv_itself() {
+    fn unpromoting_a_drv_owner_rechecks_the_whole_gate() {
         let sql = norm(&UNPROMOTE_DRV_OWNERS);
         assert!(sql.contains("d.hash = ANY($1::text[])"), "{sql}");
         assert!(
-            sql.contains(&format!(
-                "AND NOT (db.substitutable OR {})",
-                norm(&drv_whole_predicate("db"))
-            )),
+            sql.contains(&format!("AND NOT {}", norm(&gates_predicate("db")))),
             "{sql}"
         );
         assert!(sql.contains("db.status = 1"), "queued rows only: {sql}");
         assert!(
             sql.contains("RETURNING db.derivation, old.status AS from_status"),
             "{sql}"
+        );
+    }
+
+    /// Demand is read one hop at a time, so every event that creates or drops a
+    /// builder needs that builder's direct inputs and nothing deeper. One statement,
+    /// no walk.
+    #[tokio::test]
+    async fn direct_dependencies_of_is_one_distinct_select_and_never_a_walk() {
+        let d = DerivationId::now_v7();
+        let dep = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([(
+                "dependency".to_owned(),
+                Value::from(dep.into_inner()),
+            )])]])
+            .into_connection();
+
+        assert_eq!(direct_dependencies_of(&db, &[d]).await.unwrap(), vec![dep]);
+
+        let log = statements(db.into_transaction_log());
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert!(
+            log[0].contains(
+                "SELECT DISTINCT e.dependency FROM derivation_dependency e \
+                 WHERE e.derivation = ANY($1::uuid[])"
+            ),
+            "{log:?}"
+        );
+        assert!(!log[0].contains("WITH RECURSIVE"), "{log:?}");
+    }
+
+    /// The generic un-promote is what every demand loss runs, so it must move
+    /// `Queued` rows only and report the move as the transition the emitter fans out.
+    #[tokio::test]
+    async fn unpromote_ungated_moves_queued_rows_back_to_created() {
+        let d = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![transition_row(
+                d,
+                i32::from(BuildStatus::Queued),
+                i32::from(BuildStatus::Created),
+            )]])
+            .into_connection();
+
+        let changes = unpromote_ungated(&db, &[d]).await.unwrap();
+
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            (changes[0].from, changes[0].to),
+            (BuildStatus::Queued, BuildStatus::Created)
+        );
+        let log = statements(db.into_transaction_log());
+        assert!(log[0].contains("SET status = 0"), "{log:?}");
+        assert!(
+            log[0].contains("db.derivation = ANY($1::uuid[]) AND NOT ("),
+            "{log:?}"
+        );
+        assert!(
+            log[0].contains("db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
+            "the embedded gate carries the demand arm: {log:?}"
         );
     }
 
