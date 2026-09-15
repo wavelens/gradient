@@ -149,6 +149,7 @@ in {
               workers.statebaseworker2 = {
                 worker_id = "a0000000-0000-0000-0000-0000000000cc";
                 base_worker = true;
+                auto_enable = false;
                 projects = [ ];
                 token_file = toString stateWorkerToken;
                 display_name = "State Base Worker 2";
