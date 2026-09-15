@@ -48,6 +48,9 @@ pub struct Model {
     /// True once the NAR has been walked for `lib/debug/.build-id` members.
     /// Set even when the walk found none, so the backfill never re-reads it.
     pub debug_info_indexed: bool,
+    /// The object is durably in `nar_storage`. False only while a relayed NAR
+    /// waits in `nar-staged/` for the background upload on the S3 backend.
+    pub confirmed: bool,
     pub created_at: NaiveDateTime,
 }
 
