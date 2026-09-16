@@ -223,7 +223,10 @@ in {
                   upstreams = [{
                     type = "external";
                     display_name = "file-upstream";
-                    url = "http://gradient.local/upstream";
+                    # `server`, not `gradient.local`: the RELAY runs on a builder,
+                    # and only the server node maps the gradient.local name. An
+                    # upstream a worker cannot resolve is not an upstream.
+                    url = "http://server/upstream";
                     public_key = "file-upstream-1:CF7rch65Q3JWRsHM8viCggLfNh5Cqw7TNervR0fbs5E=";
                   }];
                 };
@@ -1591,6 +1594,10 @@ in {
       )
       server.succeed("chown -R nginx:nginx /srv/upstream && systemctl reload nginx")
       server.succeed(f"{CURL} -sf http://gradient.local/upstream/nix-cache-info > /dev/null")
+      # The relay downloads the upstream NAR from the BUILDER, so the upstream has
+      # to answer there too. Asserted here because the alternative symptom is the
+      # phase timing out 900 s later on an evaluation that never finishes.
+      builder.succeed(f"{CURL} -sf http://server/upstream/nix-cache-info > /dev/null")
 
       assert "file-upstream" in api_get(token, "caches/main/upstreams"), "the declared upstream was not provisioned"
 

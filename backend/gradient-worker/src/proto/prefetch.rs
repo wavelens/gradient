@@ -201,7 +201,14 @@ pub(crate) async fn download_one_presigned(
         };
 
         if attempt < PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
-            warn!(%path, attempt, error = %attempt_err, "presigned download failed; retrying");
+            // `{:#}` so the chain reaches the log: the outermost context names the
+            // URL, and the cause underneath is what says why it never answered.
+            warn!(
+                %path,
+                attempt,
+                error = format!("{attempt_err:#}"),
+                "presigned download failed; retrying"
+            );
             tokio::time::sleep(backoff).await;
             backoff *= 2;
         } else {
