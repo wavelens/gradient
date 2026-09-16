@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "schema export builds its statement from a table name the test owns"
+)]
+
 //! Every export query, run against a real Postgres.
 //!
 //! The specs are hand-written SQL naming columns one by one, so nothing else in

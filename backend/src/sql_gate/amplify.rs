@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the amplifier writes test data and is not a statement the gate measures"
+)]
+
 //! Grows the cache VM's real rows to production shape. A sequential scan of 951
 //! derivations is the planner's correct choice, so a budget measured at that
 //! size means nothing. Clones copy real rows rather than generating uniform

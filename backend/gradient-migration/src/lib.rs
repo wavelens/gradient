@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "migrations are not gated: they are not independently executable"
+)]
+
 pub use sea_orm_migration::prelude::*;
 
 mod m20241101_000000_baseline;
