@@ -345,9 +345,12 @@ static RECOUNT_UNREADY: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-const LOCK_ANCHORS: &str = "SELECT 1 FROM derivation_build \
-                            WHERE derivation = ANY($1::uuid[]) \
-                            ORDER BY derivation FOR UPDATE";
+crate::sql! {
+    LOCK_ANCHORS = "SELECT 1 FROM derivation_build \
+                    WHERE derivation = ANY($1::uuid[]) \
+                    ORDER BY derivation FOR UPDATE",
+        params = [DerivationIds(64)];
+}
 
 /// Proof that a batch of anchors is held `FOR UPDATE`, `derivation`-ordered, on `txn`.
 /// Only [`lock_anchors`] constructs one, and [`seed_unready_deps`],
@@ -379,12 +382,8 @@ pub async fn lock_anchors<'txn>(
     derivations: &[DerivationId],
 ) -> Result<AnchorLock<'txn>, DbErr> {
     if !derivations.is_empty() {
-        txn.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            LOCK_ANCHORS,
-            [ids(derivations)],
-        ))
-        .await?;
+        txn.execute_raw(LOCK_ANCHORS.bind([ids(derivations)]))
+            .await?;
     }
 
     Ok(AnchorLock {
