@@ -225,13 +225,18 @@ path = "src/sql_gate/main.rs"
 required-features = ["sql-gate"]
 
 [features]
-sql-gate = ["dep:anyhow", "dep:gradient-db", "dep:sea-orm", "dep:serde_json", "dep:uuid"]
+sql-gate = ["dep:anyhow", "dep:gradient-db", "dep:gradient-ci", "dep:gradient-graph", "dep:gradient-proto", "dep:gradient-report", "dep:gradient-scheduler", "dep:sea-orm", "dep:serde_json", "dep:uuid"]
 
 [dependencies]
 gradient-cache     = { workspace = true }
 clap               = { workspace = true }
 anyhow             = { workspace = true, optional = true }
 gradient-db        = { workspace = true, optional = true }
+gradient-ci        = { workspace = true, optional = true }
+gradient-graph     = { workspace = true, optional = true }
+gradient-proto     = { workspace = true, optional = true }
+gradient-report    = { workspace = true, optional = true }
+gradient-scheduler = { workspace = true, optional = true }
 sea-orm            = { workspace = true, optional = true }
 serde_json         = { workspace = true, optional = true }
 uuid               = { workspace = true, optional = true }
