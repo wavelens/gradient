@@ -11,7 +11,7 @@ use gradient_entity::cache_upstream::{
 use gradient_entity::project_cache::{
     CacheSubscriptionMode, Column as CProjectCache, Entity as EProjectCache,
 };
-use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 use gradient_types::ids::{CacheId, CacheUpstreamId, ProjectId};
 
@@ -165,12 +165,11 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
     project_id: ProjectId,
     window_minutes: i64,
 ) -> Result<Vec<UpstreamEndpoint>> {
-    let sql = upstream_endpoints_sql(window_minutes);
-
+    // window_minutes is baked into the text rather than bound, so the exemplar
+    // above is what the gate plans.
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
+        .query_all_raw(UPSTREAM_ENDPOINTS_FOR_PROJECT.bind_built(
+            upstream_endpoints_sql(window_minutes),
             [project_id.into_inner().into()],
         ))
         .await?;
@@ -249,10 +248,10 @@ pub async fn upstream_urls_for_projects<C: ConnectionTrait>(
     db: &C,
     project_list: &str,
 ) -> Result<std::collections::HashSet<String>> {
-    let sql = upstream_urls_for_projects_sql(project_list);
-
     Ok(db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(
+            UPSTREAM_URLS_FOR_PROJECTS.bind_built(upstream_urls_for_projects_sql(project_list), []),
+        )
         .await?
         .into_iter()
         .filter_map(|r| r.try_get::<String>("", "url").ok())

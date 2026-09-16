@@ -8,8 +8,7 @@ use anyhow::{Context, Result};
 use gradient_migration::Migrator;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
-    DatabaseBackend, DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter,
-    QuerySelect, Statement, Value,
+    DatabaseConnection, DbErr, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect, Value,
 };
 use sea_orm_migration::prelude::*;
 use std::time::Duration;
@@ -164,13 +163,13 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
     if known.is_empty() {
         return Ok(());
     }
-    let sql = prune_removed_migrations_sql(&known);
+    // The placeholder count tracks the registered migration list, so it grows
+    // with the codebase; PRUNE_REMOVED_MIGRATIONS above is the plan gate's
+    // representative instantiation of the shape.
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
-            known,
-        ))
+        .query_all_raw(
+            PRUNE_REMOVED_MIGRATIONS.bind_built(prune_removed_migrations_sql(&known), known),
+        )
         .await?;
     if !rows.is_empty() {
         let pruned: Vec<String> = rows

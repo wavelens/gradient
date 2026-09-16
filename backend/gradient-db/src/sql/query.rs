@@ -90,6 +90,18 @@ impl Query {
         Statement::from_sql_and_values(DatabaseBackend::Postgres, self.text(), values)
     }
 
+    /// Builds a statement whose text this call assembled, anchored to the
+    /// exemplar that stands for its shape. A few statements bake a value into
+    /// their text or grow a placeholder list per call: the exemplar is what the
+    /// gate plans, and this is what runs.
+    pub fn bind_built<S, I>(&self, sql: S, values: I) -> Statement
+    where
+        S: Into<String>,
+        I: IntoIterator<Item = Value>,
+    {
+        Statement::from_sql_and_values(DatabaseBackend::Postgres, sql, values)
+    }
+
     pub fn stmt(&self) -> Statement {
         self.bind([])
     }
