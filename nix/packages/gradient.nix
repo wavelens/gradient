@@ -38,6 +38,9 @@ let
       (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "nix") unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "sql") unfilteredRoot)
+      # The plan gate's unit tests read these EXPLAIN fixtures at run time, so
+      # they have to survive the cargo-source filter that drops every non-source.
+      (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-db/tests)
     ];
   };
 
