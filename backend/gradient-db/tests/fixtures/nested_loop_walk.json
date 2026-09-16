@@ -1,0 +1,27 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Aggregate",
+      "Actual Rows": 1,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 190000,
+      "Shared Read Blocks": 0,
+      "Plans": [
+        {
+          "Node Type": "CTE Scan",
+          "CTE Name": "fenced",
+          "Actual Rows": 44000,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Nested Loop",
+              "Actual Rows": 2,
+              "Actual Loops": 44000
+            }
+          ]
+        }
+      ]
+    },
+    "Execution Time": 955.2
+  }
+]

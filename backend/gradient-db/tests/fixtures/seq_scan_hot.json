@@ -1,0 +1,23 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Aggregate",
+      "Actual Rows": 1,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 48000,
+      "Shared Read Blocks": 213,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Relation Name": "derivation_build",
+          "Actual Rows": 412880,
+          "Actual Loops": 1,
+          "Rows Removed by Filter": 412816,
+          "Shared Hit Blocks": 48000,
+          "Shared Read Blocks": 213
+        }
+      ]
+    },
+    "Execution Time": 918.4
+  }
+]

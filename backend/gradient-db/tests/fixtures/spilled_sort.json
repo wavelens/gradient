@@ -1,0 +1,14 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Sort",
+      "Sort Space Type": "Disk",
+      "Sort Space Used": 51200,
+      "Actual Rows": 120000,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 900,
+      "Shared Read Blocks": 100
+    },
+    "Execution Time": 412.0
+  }
+]
