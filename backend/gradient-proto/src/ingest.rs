@@ -104,7 +104,7 @@ pub async fn put_nar_idempotent<C: ConnectionTrait>(
     file_hash: &str,
     nar_bytes: Vec<u8>,
 ) -> anyhow::Result<bool> {
-    if !nar_write_needed(db, nar_storage, hash, file_hash).await? {
+    if nar_write_needed(db, nar_storage, hash, file_hash).await? == WriteNeeded::Stored {
         return Ok(false);
     }
     nar_storage.put(hash, nar_bytes).await?;
@@ -125,7 +125,7 @@ where
     C: ConnectionTrait,
     R: AsyncRead + Unpin + Send,
 {
-    if !nar_write_needed(db, nar_storage, hash, file_hash).await? {
+    if nar_write_needed(db, nar_storage, hash, file_hash).await? == WriteNeeded::Stored {
         return Ok(false);
     }
     nar_storage.put_reader(hash, reader).await?;
@@ -150,28 +150,48 @@ pub async fn nar_write_needed<C: ConnectionTrait>(
     nar_storage: &NarStore,
     hash: &str,
     file_hash: &str,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<WriteNeeded> {
     let incoming = normalize_nar_hash(file_hash);
-    let recorded_match = match ECachedPath::find()
+    let recorded = match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
         .one(db)
         .await
     {
-        Ok(row) => row
-            .and_then(|r| r.file_hash)
-            .is_some_and(|fh| fh == incoming),
+        Ok(row) => row.filter(|r| r.file_hash.as_deref() == Some(incoming.as_str())),
         Err(e) => {
             warn!(%hash, error = %e, "idempotency lookup failed; writing NAR unconditionally");
-            false
+            None
         }
     };
 
-    if recorded_match && nar_storage.exists(hash).await? {
-        debug!(%hash, "NAR already stored with matching file_hash; skipping re-upload");
-        return Ok(false);
+    let Some(row) = recorded else {
+        return Ok(WriteNeeded::Write);
+    };
+
+    if !row.confirmed
+        && let Some(staged) = nar_storage.staged()
+        && staged.exists(hash).await
+    {
+        debug!(%hash, "NAR already staged for the uploader; skipping re-upload");
+        return Ok(WriteNeeded::Staged);
     }
 
-    Ok(true)
+    if row.confirmed && nar_storage.exists(hash).await? {
+        debug!(%hash, "NAR already stored with matching file_hash; skipping re-upload");
+        return Ok(WriteNeeded::Stored);
+    }
+
+    Ok(WriteNeeded::Write)
+}
+
+/// Where the bytes a commit carries already live, if anywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteNeeded {
+    Write,
+    /// Identical bytes are already in the object store.
+    Stored,
+    /// Identical bytes are already staged for the uploader.
+    Staged,
 }
 
 #[cfg(test)]
@@ -210,6 +230,7 @@ mod tests {
             nar_size: Some(5),
             nar_hash: Some("sha256:def".to_string()),
             created_at: now(),
+            confirmed: true,
             ..Default::default()
         }
     }
@@ -375,5 +396,49 @@ mod tests {
             .unwrap();
         assert!(!wrote, "must skip when an identical NAR is already stored");
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
+    }
+
+    /// An unconfirmed row's pending write is the staged file, not the object.
+    #[tokio::test]
+    async fn an_unconfirmed_row_consults_the_staged_store_not_the_object_store() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = NarStore::local(dir.path().to_str().unwrap())
+            .unwrap()
+            .with_staging(
+                gradient_storage::StagedNars::new(dir.path().join("nar-staged")).unwrap(),
+            );
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let row = gradient_entity::cached_path::Model {
+            hash: hash.into(),
+            file_hash: Some("sha256:abc".into()),
+            confirmed: false,
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row.clone()], vec![row]])
+            .into_connection();
+
+        assert!(
+            matches!(
+                nar_write_needed(&db, &storage, hash, "sha256:abc")
+                    .await
+                    .unwrap(),
+                WriteNeeded::Write
+            ),
+            "nothing staged yet"
+        );
+
+        let claim = dir.path().join("claim");
+        tokio::fs::write(&claim, b"x").await.unwrap();
+        storage.staged().unwrap().adopt(hash, &claim).await.unwrap();
+        assert!(
+            matches!(
+                nar_write_needed(&db, &storage, hash, "sha256:abc")
+                    .await
+                    .unwrap(),
+                WriteNeeded::Staged
+            ),
+            "the staged file is the pending write"
+        );
     }
 }

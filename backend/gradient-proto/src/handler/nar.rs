@@ -23,6 +23,8 @@ pub(super) struct NarUploadRecord<'a> {
     pub deriver: Option<&'a str>,
     /// Content address of the path in narinfo form, if content-addressed.
     pub ca: Option<&'a str>,
+    /// The object is durably in `nar_storage`; false while the uploader owes it.
+    pub confirmed: bool,
 }
 
 /// Resolves the project's cache and adds the push to its minute bucket in the
@@ -81,7 +83,7 @@ pub(super) async fn mark_nar_stored(
             deriver: record.deriver.map(str::to_owned),
             ca: record.ca.map(str::to_owned),
             targets,
-            confirmed: true,
+            confirmed: record.confirmed,
         })
         .await?;
 
