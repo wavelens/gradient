@@ -376,7 +376,8 @@ mod tests {
     use crate::test_ctx::ctx;
     use gradient_types::ids::ProjectId;
     use sea_orm::{
-        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, TransactionTrait, Value,
+        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement,
+        TransactionTrait, Value,
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -446,6 +447,48 @@ mod tests {
         gradient_db::pool::statements(db.into_transaction_log())
     }
 
+    /// The statements as sea-orm built them. The shared helper formats each with
+    /// `{:?}`, which escapes the quotes sea-orm puts around every identifier, so
+    /// an assertion on a generated statement reads the raw `sql` instead.
+    fn raw_statements(db: WorkerDb) -> Vec<Statement> {
+        db.into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .filter(|s| !matches!(s.sql.trim().to_uppercase().as_str(), "BEGIN" | "COMMIT"))
+            .collect()
+    }
+
+    /// The value a generated statement binds to `column`, through the placeholder
+    /// the SET clause or the insert's column list gives it. Searching the value
+    /// list for the bare `Bool(Some(false))` would match the `debug_info_indexed`
+    /// these same statements write, and pass while `confirmed` went the other way.
+    fn bound(stmt: &Statement, column: &str) -> Value {
+        let quoted = format!("\"{column}\"");
+        let position = match stmt.sql.split_once(&format!("{quoted} = $")) {
+            Some((_, rest)) => rest
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse::<usize>()
+                .expect("a placeholder number"),
+            None => {
+                let columns = stmt
+                    .sql
+                    .split_once('(')
+                    .and_then(|(_, rest)| rest.split_once(')'))
+                    .expect("an insert column list")
+                    .0;
+                columns
+                    .split(", ")
+                    .position(|c| c == quoted)
+                    .unwrap_or_else(|| panic!("{column} is not written: {}", stmt.sql))
+                    + 1
+            }
+        };
+
+        stmt.values.as_ref().expect("the statement binds values").0[position - 1].clone()
+    }
+
     /// `commit` runs in the graph actor's transaction and rejects a pooled handle,
     /// so every test drives one. The mock records the whole transaction as a single
     /// log entry whose synthetic `BEGIN`/`COMMIT` the shared helper drops, so the
@@ -472,6 +515,15 @@ mod tests {
         drop(ctx);
 
         statements(pool)
+    }
+
+    /// [`commit_and_log`] over the raw statements.
+    async fn commit_and_raw_log(db: DatabaseConnection, c: &NarCommit) -> Vec<Statement> {
+        let (ctx, pool) = ctx(db).await;
+        commit_in_transaction(&ctx, c).await.expect("commit");
+        drop(ctx);
+
+        raw_statements(pool)
     }
 
     /// An existing whole row re-pushed with `references`, seeded back to whole so
@@ -873,7 +925,7 @@ mod tests {
             .append_exec_results([exec(0), exec(0), exec(0)])
             .into_connection();
 
-        let log = commit_and_log(
+        let log = commit_and_raw_log(
             db,
             &NarCommit {
                 confirmed: false,
@@ -884,10 +936,13 @@ mod tests {
 
         let insert = log
             .iter()
-            .find(|s| s.starts_with("INSERT INTO \"cached_path\""))
+            .find(|s| s.sql.starts_with("INSERT INTO \"cached_path\""))
             .expect("the insert");
-        assert!(insert.contains("\"confirmed\""), "{insert}");
-        assert!(insert.contains("Bool(Some(false))"), "{insert}");
+        assert_eq!(
+            bound(insert, "confirmed"),
+            Value::Bool(Some(false)),
+            "{insert:?}"
+        );
     }
 
     /// New bytes under an old hash on S3 are unconfirmed again until uploaded.
@@ -904,7 +959,7 @@ mod tests {
             .append_exec_results([exec(0), exec(1), exec(1)])
             .into_connection();
 
-        let log = commit_and_log(
+        let log = commit_and_raw_log(
             db,
             &NarCommit {
                 confirmed: false,
@@ -915,10 +970,13 @@ mod tests {
 
         let update = log
             .iter()
-            .find(|s| s.starts_with("UPDATE \"cached_path\""))
+            .find(|s| s.sql.starts_with("UPDATE \"cached_path\""))
             .expect("the update");
-        assert!(update.contains("\"confirmed\""), "{update}");
-        assert!(update.contains("Bool(Some(false))"), "{update}");
+        assert_eq!(
+            bound(update, "confirmed"),
+            Value::Bool(Some(false)),
+            "{update:?}"
+        );
     }
 
     #[tokio::test]
@@ -940,16 +998,23 @@ mod tests {
         drop(ctx);
 
         assert!(!confirmed, "no row matched the uploaded file hash");
-        let log = statements(pool);
+        let log = raw_statements(pool);
         let update = log.first().expect("one statement");
         assert!(
-            update.starts_with("UPDATE \"cached_path\" SET \"confirmed\" = "),
-            "{update}"
+            update
+                .sql
+                .starts_with("UPDATE \"cached_path\" SET \"confirmed\" = "),
+            "{update:?}"
         );
-        assert!(update.contains("\"file_hash\" = "), "{update}");
+        assert_eq!(
+            bound(update, "confirmed"),
+            Value::Bool(Some(true)),
+            "{update:?}"
+        );
+        assert!(update.sql.contains("\"file_hash\" = "), "{update:?}");
         assert!(
-            update.contains("\"confirmed\" = false") || update.contains("Bool(Some(false))"),
-            "{update}"
+            format!("{:?}", update.values).contains("Bool(Some(false))"),
+            "only an unconfirmed row matches: {update:?}"
         );
     }
 }
