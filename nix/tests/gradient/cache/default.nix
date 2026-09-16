@@ -1843,7 +1843,8 @@ in {
       print(names)
       for want in ["graph", "build-dispatch", "eval-dispatch", "trigger-dispatch",
                    "cache-maintenance", "sign-sweep", "debug-index",
-                   "eval-cache-sweep", "retention", "rollup", "outbound-connect"]:
+                   "eval-cache-sweep", "retention", "rollup", "outbound-connect",
+                   "nar-uploader"]:
           assert want in names, f"{want} missing from supervised loops: {names}"
       bad = [l for l in health["supervised"] if l["restarts"] or l["pass_timeouts"]]
       assert not bad, f"restarted or stalled loops: {bad}"

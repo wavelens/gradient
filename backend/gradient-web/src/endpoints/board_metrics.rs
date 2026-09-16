@@ -581,6 +581,29 @@ pub struct BoardHealth {
     pub draining: bool,
     pub supervised: Vec<SupervisedLoop>,
     pub proto_sessions: usize,
+    pub unconfirmed_nars: u64,
+    pub hot_nar_cache: HotNarCacheHealth,
+}
+
+#[derive(Serialize)]
+pub struct HotNarCacheHealth {
+    pub entries: u64,
+    pub bytes: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub evictions: u64,
+}
+
+impl From<gradient_storage::HotNarStats> for HotNarCacheHealth {
+    fn from(s: gradient_storage::HotNarStats) -> Self {
+        Self {
+            entries: s.entries,
+            bytes: s.bytes,
+            hits: s.hits,
+            misses: s.misses,
+            evictions: s.evictions,
+        }
+    }
 }
 
 pub async fn get_board_health(
@@ -623,6 +646,8 @@ pub async fn get_board_health(
             .load(std::sync::atomic::Ordering::Relaxed),
         supervised: loops_view(scheduler.loop_health(), std::time::Instant::now()),
         proto_sessions: limiter.in_use(),
+        unconfirmed_nars: gradient_db::unconfirmed_cached_path_count(&state.web_db).await?,
+        hot_nar_cache: state.nar_storage.hot().stats().into(),
     }))
 }
 
