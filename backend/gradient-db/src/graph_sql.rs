@@ -121,6 +121,7 @@ pub fn bounded_dependency_closure_cte_body(
         "{name}(derivation) AS ({seed_select} UNION {})",
         lateral_step(
             name,
+            "s.next",
             &format!(
                 "SELECT {project} AS next FROM derivation_dependency e \
                  WHERE {probe} = c.derivation{restrict}"
@@ -132,10 +133,11 @@ pub fn bounded_dependency_closure_cte_body(
 /// One fenced recursive term: join the working table `{name}` (aliased `c`) to
 /// `probe_select` through a `LATERAL` subquery that `OFFSET 0` keeps the planner
 /// from pulling up. See the module docs for why the fence is load-bearing rather
-/// than decorative. `probe_select` projects a single column aliased `next` and
-/// correlates to the working-table row through `c`.
-fn lateral_step(name: &str, probe_select: &str) -> String {
-    format!("SELECT s.next FROM {name} c, LATERAL ({probe_select} OFFSET 0) s")
+/// than decorative. `probe_select` projects a column aliased `next`, plus whatever
+/// else `project` carries out of `s`, and correlates to the working-table row
+/// through `c`.
+fn lateral_step(name: &str, project: &str, probe_select: &str) -> String {
+    format!("SELECT {project} FROM {name} c, LATERAL ({probe_select} OFFSET 0) s")
 }
 
 /// A `WITH RECURSIVE {name}(hash) AS (...)` prelude closing `seed_select` over
@@ -156,6 +158,7 @@ pub fn reference_closure_cte_body(name: &str, seed_select: &str) -> String {
         "{name}(hash) AS ({seed_select} UNION {})",
         lateral_step(
             name,
+            "s.next",
             "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash",
         )
     )
@@ -214,6 +217,17 @@ pub const BUILDER_STATUSES: [BuildStatus; 4] = [
     BuildStatus::FailedTransient,
 ];
 
+/// Anchor `{anchor}` (its `derivation` row aliased `{walked}`) is a builder:
+/// recorded, not a relay, and in a status an evaluation will still have built.
+/// The one definition of what demands its inputs and of what the adoption walk
+/// steps through, so the two can never disagree.
+pub fn builder_predicate(anchor: &str, walked: &str) -> String {
+    format!(
+        "{walked}.walked AND NOT {anchor}.substitutable AND {anchor}.status IN ({pending})",
+        pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+    )
+}
+
 /// Dependents can get the outputs of anchor `{alias}` from OUR cache: it reached
 /// terminal success and every output is whole here. An upstream copy does not
 /// count (#593): a dependent of an unrelayed substitutable anchor waits for the
@@ -257,11 +271,9 @@ pub fn demanded_predicate(alias: &str) -> String {
         JOIN derivation_build p ON p.derivation = e.derivation
         JOIN derivation w ON w.id = p.derivation
         WHERE e.dependency = {alias}.derivation
-          AND w.walked
-          AND NOT p.substitutable
-          AND p.status IN ({pending})
+          AND {builder}
           AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)))"#,
-        pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+        builder = builder_predicate("p", "w"),
     )
 }
 
@@ -333,6 +345,33 @@ pub fn reachable_derivations_cte() -> String {
         "reachable",
         "SELECT derivation FROM entry_point UNION SELECT derivation FROM build_job",
         ClosureDirection::Dependencies,
+    )
+}
+
+/// `WITH RECURSIVE pending(evaluation, derivation, builder) AS (...)`: from the
+/// `(evaluation, derivation, builder)` rows of `seed_select`, every anchor in a
+/// builder status that the evaluation reaches walking dependencies through
+/// builders. A relay is reached and never stepped through, since it fetches
+/// finished bytes and waits on nothing below it; a terminal anchor stops the walk
+/// the same way, because what is below a finished build is served from its
+/// outputs and what is below a failed one is the requeue's to thaw first. This is
+/// what names a pruned subtree for the evaluations that build against it.
+pub fn pending_closure_cte(seed_select: &str) -> String {
+    format!(
+        "WITH RECURSIVE pending(evaluation, derivation, builder) AS ({seed_select} UNION {})",
+        lateral_step(
+            "pending",
+            "c.evaluation, s.next, s.builder",
+            &format!(
+                "SELECT e.dependency AS next, ({builder}) AS builder \
+                 FROM derivation_dependency e \
+                 JOIN derivation_build dep ON dep.derivation = e.dependency \
+                 JOIN derivation w ON w.id = dep.derivation \
+                 WHERE e.derivation = c.derivation AND c.builder AND dep.status IN ({pending})",
+                builder = builder_predicate("dep", "w"),
+                pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+            ),
+        )
     )
 }
 
@@ -605,6 +644,7 @@ mod tests {
                 ClosureDirection::Dependents,
             )),
             norm(&reference_closure_cte("refs", "SELECT $1::text")),
+            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true")),
         ] {
             assert!(
                 cte.contains("LATERAL ("),
@@ -661,6 +701,53 @@ mod tests {
                 "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash"
             ),
             "must walk referrer to referenced hash: {cte}"
+        );
+    }
+
+    /// Demand and adoption read one definition of a builder, so an anchor an
+    /// evaluation adopts is one whose gate demands its inputs, never the other
+    /// way round.
+    #[test]
+    fn demand_and_adoption_share_one_definition_of_a_builder() {
+        let builder = norm(&builder_predicate("p", "w"));
+        assert_eq!(
+            builder,
+            "w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"
+        );
+        assert!(norm(&demanded_predicate("db")).contains(&builder));
+        assert!(
+            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"))
+                .contains(&norm(&builder_predicate("dep", "w")))
+        );
+    }
+
+    /// The adoption walk carries the evaluation it walks for, steps only out of a
+    /// builder, and only into anchors an evaluation will still have built: a relay
+    /// or a terminal anchor is reached and never expanded.
+    #[test]
+    fn the_pending_closure_walks_dependencies_through_builders_only() {
+        let cte = norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"));
+        assert!(
+            cte.starts_with(
+                "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
+                 (SELECT $1::uuid, $2::uuid, true UNION \
+                 SELECT c.evaluation, s.next, s.builder FROM pending c, LATERAL ("
+            ),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(
+                "SELECT e.dependency AS next, \
+                 (w.walked AND NOT dep.substitutable AND dep.status IN (0, 1, 2, 8)) AS builder"
+            ),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(
+                "WHERE e.derivation = c.derivation AND c.builder \
+                 AND dep.status IN (0, 1, 2, 8) OFFSET 0) s"
+            ),
+            "{cte}"
         );
     }
 }
