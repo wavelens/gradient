@@ -16,6 +16,11 @@ use super::{Budget, Param};
 #[derive(Copy, Clone, Debug)]
 pub enum Sql {
     Static(&'static str),
+    /// A statement assembled once into a `LazyLock<String>`: borrowed, so the
+    /// hot path that runs it does not rebuild or clone it per call.
+    Lazy(fn() -> &'static str),
+    /// A statement assembled per call. The closure is the exemplar the gate
+    /// plans, so a fence is checked in generated SQL and not in a copy of it.
     Built(fn() -> String),
 }
 
@@ -58,6 +63,7 @@ impl Query {
     pub fn text(&self) -> Cow<'static, str> {
         match self.sql {
             Sql::Static(sql) => Cow::Borrowed(sql),
+            Sql::Lazy(borrow) => Cow::Borrowed(borrow()),
             Sql::Built(build) => Cow::Owned(build()),
         }
     }
