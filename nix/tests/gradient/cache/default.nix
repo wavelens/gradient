@@ -16,6 +16,14 @@
     skipDirectories = false;
   };
 
+  # Phase 10g relays busybox off the upstream and must never BUILD it, but its
+  # build closure reaches for github (nixpkgs patches busybox's unzip applet with
+  # the madler/unzip CVE patches) and this VM has no network. Ship the INPUTS so a
+  # dispatch that slips through builds offline instead of failing permanently; the
+  # outputs stay upstream-only, which is what `anchor_of("busybox") == "3 1 1"`
+  # proves arrived by relay.
+  busyboxBuildInputs = pkgs.busybox.inputDerivation;
+
   builderNode = workerId: { config, pkgs, lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix ];
 
@@ -24,7 +32,7 @@
     # every derivation the worker walks is already substituted.  Without
     # this the worker would try to fetch tarballs from the internet -
     # which the test VM cannot reach - and every build would fail.
-    virtualisation.additionalPaths = [ testStore ];
+    virtualisation.additionalPaths = [ testStore busyboxBuildInputs ];
 
     nix.settings = {
       trusted-users = [
@@ -63,10 +71,11 @@
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-cache";
-    # Phases 10e to 10h add three more evaluations of the repository, a
-    # two-session lock handshake and three retire-and-recover cycles to what was
-    # already a full build-and-cache run.
-    globalTimeout = 3600;
+    # Phases 10e to 10h add five more evaluations of the repository, a two-session
+    # lock handshake and four retire-and-recover cycles to what was already a full
+    # build-and-cache run. 3600 s aborted mid-10g once that phase stopped failing
+    # in its first seconds and began relaying for real.
+    globalTimeout = 5400;
 
     defaults = {
       networking.firewall.enable = false;
