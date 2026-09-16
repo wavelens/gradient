@@ -25,6 +25,13 @@ use crate::actor::{AssignOutcome, SchedulerMsg};
 use crate::dispatch;
 use crate::jobs::{Assignment, DispatchRecord};
 
+/// Whether a job assembled for an anchor now in `state` may still go out as a
+/// `substitute` (or not). `Queued` is an invariant the counters keep, and the
+/// relay mode is read again because the job was assembled from a snapshot.
+fn dispatchable(state: Option<(BuildStatus, bool)>, substitute: bool) -> bool {
+    matches!(state, Some((BuildStatus::Queued, relay)) if relay == substitute)
+}
+
 impl Scheduler {
     // ── Scoring / assignment ──────────────────────────────────────────────────
 
@@ -69,16 +76,25 @@ impl Scheduler {
     }
 
     /// `Queued` is an invariant the counters keep; a job enqueued before a
-    /// gate regressed is still in the tracker and must not go out.
+    /// gate regressed is still in the tracker and must not go out. The relay mode
+    /// is re-read with it: an upstream probe that lands after the job was
+    /// assembled turns a build into a relay, and handing out the stale build
+    /// rebuilds bytes the upstream already has (#593).
     async fn still_queued(&self, a: &Assignment) -> bool {
         let Some(anchor) = a.pending.derivation_build() else {
             return true;
         };
 
-        match gradient_db::anchor_status(&self.state.worker_db, anchor).await {
-            Ok(Some(BuildStatus::Queued)) => true,
-            Ok(status) => {
-                warn!(job_id = %a.job_id(), ?status, "queued job no longer dispatchable; dropped from the tracker");
+        let substitute = matches!(&a.pending, crate::jobs::PendingJob::Build(b) if b.substitute);
+        match gradient_db::anchor_dispatch_state(&self.state.worker_db, anchor).await {
+            Ok(state) if dispatchable(state, substitute) => true,
+            Ok(state) => {
+                warn!(
+                    job_id = %a.job_id(),
+                    ?state,
+                    substitute,
+                    "queued job no longer dispatchable; dropped from the tracker"
+                );
                 false
             }
             Err(e) => {
@@ -281,6 +297,35 @@ async fn record_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The dispatcher assembles a job from a snapshot of the anchor. An upstream
+    /// probe that lands between that snapshot and the hand-out turns a build into
+    /// a relay, and a job assembled as a real build must not go out afterwards:
+    /// it would build a derivation whose bytes an upstream already has, and in an
+    /// offline fleet its inputs may not even be buildable (#593).
+    #[test]
+    fn a_job_whose_relay_mode_went_stale_is_not_handed_out() {
+        use gradient_entity::build::BuildStatus;
+
+        assert!(dispatchable(Some((BuildStatus::Queued, false)), false));
+        assert!(dispatchable(Some((BuildStatus::Queued, true)), true));
+        assert!(
+            !dispatchable(Some((BuildStatus::Queued, true)), false),
+            "the anchor became relayable after the job was assembled as a build"
+        );
+        assert!(
+            !dispatchable(Some((BuildStatus::Queued, false)), true),
+            "the relay was exhausted after the job was assembled as one"
+        );
+        assert!(
+            !dispatchable(Some((BuildStatus::Building, false)), false),
+            "the status gate still applies"
+        );
+        assert!(
+            !dispatchable(None, false),
+            "a vanished anchor never goes out"
+        );
+    }
 
     /// The session handles one frame at a time, so the wait on the graph actor
     /// is also how long the worker's next heartbeat goes unread. Every
