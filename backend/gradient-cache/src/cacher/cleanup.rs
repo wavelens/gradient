@@ -15,7 +15,6 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 /// Per-pass counters returned by `cleanup_orphaned_cache_files`. The deep-GC
 /// sweep threads these into its progress report; the hourly loop just logs
@@ -111,53 +110,8 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
 }
 
 gradient_db::sql! {
-    /// Cache NAR TTL pass: deletes `cache_derivation` rows whose `last_fetched_at`
-    /// is older than `nar_ttl_hours` **and** whose derivation has no active build
-    /// (status not in `Failed` / `Aborted` / `DependencyFailed`). For each expired
-    /// row, deletes the NAR file from storage and drops the row. The derivation
-    /// and its outputs stay (other caches may still hold them).
-    ///
-    /// The active-build guard makes the TTL pass an orphan-eviction step in the
-    /// design "old evals/builds deleted by `keep_evaluations` → derivation
-    /// becomes orphan → NAR kept for `nar_ttl_hours` → evicted". It prevents
-    /// evicting NARs of derivations that are still referenced by an active
-    /// evaluation just because no one happened to fetch them recently.
-    ///
-    /// Fixed-output derivations (any `derivation_output` with `ca IS NOT NULL`)
-    /// are skipped entirely: their NARs come from external sources that may no
-    /// longer be reachable (404s, deleted release tarballs), so a transient gap
-    /// in build references must not delete the only cached copy. FOD NARs are
-    /// reclaimed only by `gc_orphan_derivations`, which fires after the grace
-    /// period and zero remaining build references.
-    STALE_CACHED_NARS_SELECT = r#"SELECT cd.id, cd.cache, cd.derivation
-               FROM cache_derivation cd
-               WHERE cd.last_fetched_at IS NOT NULL
-                 AND cd.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')
-                 AND NOT EXISTS (
-                     SELECT 1 FROM derivation_build b
-                     WHERE b.derivation = cd.derivation
-                       AND b.status NOT IN ($2, $3, $4, $5)
-                 )
-                 AND NOT EXISTS (
-                     SELECT 1 FROM derivation_output dout
-                     WHERE dout.derivation = cd.derivation
-                       AND dout.ca IS NOT NULL
-                 )"#,
-        params = [Int(24), Int(4), Int(5), Int(6), Int(9)],
-        tier = Sweep;
-
-    /// The TTL eviction's DELETE that drops this cache's signatures on the
-    /// evicted derivation's outputs, before the paths are considered for retire.
-    DELETE_CACHE_SIGNATURES_FOR_HASHES = r#"
-                DELETE FROM cached_path_signature s
-                USING cached_path cp
-                WHERE s.cached_path = cp.id AND s.cache = $1 AND cp.hash = ANY($2)
-                "#,
-        params = [CacheId, CachedPathHashes(64)],
-        tier = Sweep;
-
     /// Keep-set query for the orphan-files pass. Outputs (clause 1) stay gated on
-    /// build status - they are rebuildable and TTL-evicted by `cleanup_stale_cached_nars`.
+    /// build status - they are rebuildable and evicted by `evict_stale_cached_paths`.
     /// The `.drv` (clause 4) and input sources (clause 3) are producerless and kept
     /// for any anchor regardless of status; only `gc_orphan_derivations` reclaims them.
     ACTIVE_HASHES_SELECT = r#"
@@ -182,119 +136,61 @@ gradient_db::sql! {
         tier = Sweep;
 }
 
-/// The TTL eviction's retire guard: a path only goes once no cache signs it.
-const UNSIGNED_GUARD: &str =
-    "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)";
+/// The bound the eviction measures against: the fetch TTL, never below the
+/// upload grace, so a closure member is never reclaimed between its own commit
+/// and its referrer's.
+fn keep_hours(ttl_hours: u64, grace_hours: i64) -> i64 {
+    (ttl_hours as i64).max(grace_hours)
+}
 
-/// Evict the cached NARs of derivations no cache has fetched within the TTL.
+/// Evict every cached path outside the live closure that nobody fetched within
+/// `nar_ttl_hours`. The live set is the NAR reference closure of every retained
+/// evaluation's outputs and `.drv` files, so what goes here is what no retained
+/// evaluation can reach and what no client has asked for since the bound.
 ///
-/// The retire moves the anchor side with the rows it drops, and its producer reset
-/// returns a terminal-success anchor with nothing left to serve to `Created`, which
-/// a `build_job` can then re-promote into a rebuild. This pass never triggers that:
-/// `STALE_CACHED_NARS_SELECT` admits a row only when the derivation's anchor is in
-/// the terminal-FAILURE set, and the reset keys on terminal SUCCESS, so an age-based
-/// eviction cannot schedule a rebuild of what it just evicted. The reset belongs to
-/// the paths where the artifact is genuinely gone (a zombie row, a demote), where a
-/// rebuild is the recovery and the alternative is a terminal-success anchor whose
-/// dependents block behind an artifact nobody has.
-///
-/// One case does reach it: a hash a terminal-success derivation ALSO produces, whose
-/// `cached_path` row is shared and goes with this eviction. That producer has really
-/// lost its artifact, so the rebuild is correct rather than churn.
-pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
-    let ttl_hours = state.config.storage.nar_ttl_hours;
-    if ttl_hours == 0 {
-        return Ok(());
+/// The retire moves the anchor side with the rows it drops, and a terminal-success
+/// producer left with nothing to serve resets to `Created`. Such a producer is
+/// outside the reachable set and has no `build_job`, so nothing promotes it into
+/// a rebuild of what this pass just evicted.
+pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
+    let keep = keep_hours(
+        state.config.storage.nar_ttl_hours,
+        state.config.storage.nar_upload_grace_hours,
+    );
+    let stale = gradient_db::stale_cached_paths(&state.worker_db, keep)
+        .await
+        .context("stale cached-path selection failed")?;
+    if stale.is_empty() {
+        return Ok(0);
     }
 
-    let rows = state
-        .worker_db
-        .query_all_raw(STALE_CACHED_NARS_SELECT.bind([
-            sea_orm::Value::BigInt(Some(ttl_hours as i64)),
-            sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
-            sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
-            sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
-            sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
-        ]))
-        .await
-        .context("Failed to query stale cache_derivation rows")?;
-
-    for row in rows {
-        let cd_id: Uuid = match row.try_get("", "id") {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let cache_id: Uuid = match row.try_get("", "cache") {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let drv_id: Uuid = match row.try_get("", "derivation") {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        // Every reference check below propagates its error: a row whose check
-        // failed is skipped this pass (retried next hour), never treated as
-        // unreferenced and reclaimed.
-        let output_hashes: Vec<String> = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.eq(drv_id))
-            .all(&state.worker_db)
-            .await
-            .context("TTL GC: failed to load derivation outputs")?
-            .into_iter()
-            .map(|o| o.hash)
-            .collect();
-
-        // Drop the cache_derivation row first; revocation of dependents follows.
-        ECacheDerivation::delete_many()
-            .filter(CCacheDerivation::Id.eq(cd_id))
-            .exec(&state.worker_db)
-            .await
-            .context("TTL GC: failed to delete cache_derivation row")?;
-
-        // Drop THIS cache's signatures on the outputs' cached paths, then retire any
-        // cached_path no cache signs anymore, in the same transaction: the
-        // "still signed" test rides in the retiring DELETE, behind the lock pass
-        // that makes its snapshot see a signature another cache committed while we
-        // waited (neither half is sufficient alone; see `retire_paths_where`).
-        // Without the signature cleanup the "compressed stored" metric
-        // (SUM(file_size) via cached_path_signature) would stay inflated after TTL
-        // eviction even though the NAR file is gone.
-        if !output_hashes.is_empty() {
-            use sea_orm::TransactionTrait;
-            let txn = state.worker_db.begin().await?;
-            txn.execute_raw(
-                DELETE_CACHE_SIGNATURES_FOR_HASHES
-                    .bind([cache_id.into(), output_hashes.clone().into()]),
-            )
-            .await
-            .context("TTL GC: failed to delete cached_path_signature rows")?;
-
-            let retired = gradient_db::retire_paths_where(&txn, &output_hashes, UNSIGNED_GUARD)
-                .await
-                .context("TTL GC: failed to retire cached paths")?;
-            txn.commit().await?;
-            gradient_db::emit_transition_effects(&state.db(), &retired.transitions).await;
-        }
-
-        // NAR file is shared by every cache for this output, so only delete when
-        // no cache_derivation row remains for the derivation.
-        let still_held = ECacheDerivation::find()
-            .filter(CCacheDerivation::Derivation.eq(drv_id))
-            .one(&state.worker_db)
-            .await
-            .context("TTL GC: failed to check surviving cache_derivation rows")?
-            .is_some();
-        if !still_held {
-            for hash in &output_hashes {
-                if let Err(e) = state.nar_storage.delete(hash).await {
-                    warn!(error = %e, %hash, "Failed to remove stale compressed NAR");
-                }
+    let ctx = state.db();
+    let mut evicted = 0u64;
+    for chunk in stale.chunks(gradient_db::IN_CHUNK_SIZE) {
+        for hash in chunk {
+            if let Err(e) = state.nar_storage.delete(hash).await {
+                warn!(error = %e, %hash, "failed to remove stale NAR");
             }
         }
+
+        let retired = async {
+            use sea_orm::TransactionTrait;
+            let txn = state.worker_db.begin().await?;
+            let retired = gradient_db::retire_paths(&txn, chunk).await?;
+            txn.commit().await?;
+            Ok::<_, sea_orm::DbErr>(retired)
+        }
+        .await
+        .context("retire stale paths")?;
+
+        gradient_db::emit_transition_effects(&ctx, &retired.transitions).await;
+        evicted += retired.deleted.len() as u64;
     }
 
-    Ok(())
+    let _ = state
+        .board_events
+        .send(gradient_types::BoardEvent::CacheChanged);
+    Ok(evicted)
 }
 
 pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<CleanupReport> {
@@ -437,9 +333,9 @@ async fn purge_zombie_cached_paths(
 ///    `gc_orphan_derivations` when the derivation row goes orphan.
 ///
 /// Note: this is intentionally more permissive than the old `is_cached=true`
-/// check. `gc_orphan_derivations` and `cleanup_stale_cached_nars` are the
-/// passes that actively remove NARs once their derivations are no longer
-/// referenced; this pass is a safety net for stray files only.
+/// check. `evict_stale_cached_paths` is the pass that actively removes NARs
+/// once no retained evaluation reaches them; this pass is a safety net for
+/// stray files only.
 async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
     let rows = state
         .worker_db
@@ -567,58 +463,12 @@ mod tests {
         assert!(nar_file_exists(tmp.path(), drv));
     }
 
-    /// `cleanup_stale_cached_nars` is a no-op when `nar_ttl_hours = 0`: it must
-    /// not even issue the SELECT, so a state with an empty mock DB doesn't
-    /// blow up.
-    #[tokio::test]
-    async fn stale_nars_disabled_when_ttl_zero() {
-        let tmp = tempfile::tempdir().unwrap();
-        let h = "ffeeddcc66666666666666666666666666";
-        write_nar_file(tmp.path(), h);
-
-        let mut state = make_state(tmp.path(), vec![]);
-        // SAFETY: only this test holds a clone; mutate before any await.
-        Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config)
-            .storage
-            .nar_ttl_hours = 0;
-
-        cleanup_stale_cached_nars(state).await.unwrap();
-        assert!(nar_file_exists(tmp.path(), h));
-    }
-
-    /// When the orphan-aware SELECT returns no `cache_derivation` rows, the
-    /// TTL pass leaves on-disk NARs untouched - covering the case where
-    /// every cache_derivation is either fresh or still tied to an active
-    /// build.
-    #[tokio::test]
-    async fn stale_nars_no_eligible_rows() {
-        let tmp = tempfile::tempdir().unwrap();
-        let h = "abcdef00777777777777777777777777";
-        write_nar_file(tmp.path(), h);
-
-        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results::<BTreeMap<String, Value>, _, _>([vec![]])
-            .into_connection();
-        let state = test_server_state(nar_storage, db, |config| {
-            config.storage.nar_ttl_hours = 24;
-        });
-
-        cleanup_stale_cached_nars(state).await.unwrap();
-        assert!(nar_file_exists(tmp.path(), h));
-    }
-
-    /// Regression for #107: the TTL SELECT must exclude any derivation that
-    /// owns a fixed-output `derivation_output` (`ca IS NOT NULL`), because a
-    /// FOD's NAR may not be re-fetchable from upstream and is reclaimed only
-    /// by `gc_orphan_derivations`.
+    /// The bound the eviction passes is the larger of the TTL and the upload
+    /// grace, so `cacheTtlHours = 0` still keeps a fresh commit for the grace.
     #[test]
-    fn ttl_select_skips_fixed_output_derivations() {
-        let sql = STALE_CACHED_NARS_SELECT.text();
-        assert!(
-            sql.contains("derivation_output") && sql.contains("ca IS NOT NULL"),
-            "TTL SELECT lost its FOD guard: {sql}"
-        );
+    fn eviction_bound_never_undercuts_the_upload_grace() {
+        assert_eq!(keep_hours(0, 24), 24);
+        assert_eq!(keep_hours(336, 24), 336);
     }
 
     /// Empty keep set ⇒ every on-disk NAR is removed.
@@ -727,74 +577,6 @@ mod tests {
             8,
             "keep-set, zombie scan, retire lock, delete, is_cached, producers of the \
              union, producers of what is gone, owners: {log:?}"
-        );
-    }
-
-    /// The TTL eviction may only drop a path no cache signs any more. That test
-    /// has to be made by the retiring DELETE - a statement that decides it earlier
-    /// decides from its own snapshot and misses a signature another cache commits
-    /// meanwhile, cascading it away and 404ing a narinfo committed seconds ago -
-    /// and it has to be preceded by a pure lock pass, or the DELETE blocks on that
-    /// insert's RI key lock and proceeds without ever re-reading the signature.
-    #[tokio::test]
-    async fn ttl_eviction_guards_the_retiring_delete_itself() {
-        let tmp = tempfile::tempdir().unwrap();
-        let drv = DerivationId::now_v7();
-        let stale = BTreeMap::from([
-            ("id".to_string(), Value::Uuid(Some(Uuid::now_v7()))),
-            ("cache".to_string(), Value::Uuid(Some(Uuid::now_v7()))),
-            (
-                "derivation".to_string(),
-                Value::Uuid(Some(drv.into_inner())),
-            ),
-        ]);
-        let output = gradient_entity::derivation_output::Model {
-            derivation: drv,
-            hash: "cccc33333333333333333333333333cccc".into(),
-            ..Default::default()
-        };
-
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![stale]])
-            .append_query_results([vec![output]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<gradient_entity::cache_derivation::Model>::new()])
-            .append_exec_results(vec![
-                sea_orm::MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                };
-                3
-            ])
-            .into_connection();
-        let state = state_with_worker_db(tmp.path(), db.clone());
-
-        cleanup_stale_cached_nars(state).await.unwrap();
-
-        let log = gradient_db::pool::statements(db.into_transaction_log());
-        assert_eq!(
-            log.len(),
-            10,
-            "stale scan, outputs, cache_derivation delete, signature delete, retire lock, \
-             guarded delete, producers of the union, producers of what is gone, owners, \
-             still-held check: {log:?}"
-        );
-        assert!(
-            log.iter().any(|s| s.contains("DELETE FROM cached_path cp")
-                && s.contains("FROM cached_path_signature s")),
-            "the still-signed guard belongs inside the retiring delete: {log:?}"
-        );
-        assert!(
-            !log.iter()
-                .any(|s| s.contains("FOR UPDATE") && s.contains("cached_path_signature")),
-            "the still-signed test may not be made by a statement other than the delete: {log:?}"
-        );
-        assert!(
-            log.iter().any(|s| s.contains("FOR UPDATE")),
-            "the delete must be preceded by a pure lock pass: {log:?}"
         );
     }
 
