@@ -65,6 +65,35 @@ macro_rules! sql_fn {
     )+};
 }
 
+/// The `sql!` of a statement held in a `LazyLock<String>`. The closure borrows
+/// it, so nothing is rebuilt or cloned on the path that runs it.
+#[macro_export]
+macro_rules! sql_lazy {
+    ($(
+        $(#[$meta:meta])*
+        $vis:vis $name:ident = $borrow:expr,
+        params = [$($param:ident $(($arg:expr))?),* $(,)?]
+        $(, tier = $tier:ident)?
+        $(, budget = $budget:expr)?
+        $(, flags = [$($flag:ident),* $(,)?])?
+        $(,)? ;
+    )+) => {$(
+        $(#[$meta])*
+        $vis static $name: $crate::sql::Query = $crate::sql::Query {
+            name: stringify!($name),
+            sql: $crate::sql::Sql::Lazy($borrow),
+            file: file!(),
+            line: line!(),
+            params: &[$($crate::sql::Param::$param $(($arg))?),*],
+            tier: $crate::sql_tier!($($tier)?),
+            budget: $crate::sql_budget!($($budget)? ; $($tier)?),
+            flags: &[$($($crate::sql::Flag::$flag),*)?],
+        };
+
+        $crate::sql::inventory::submit! { &$name }
+    )+};
+}
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! sql_tier {
@@ -97,6 +126,14 @@ mod tests {
             params = [DerivationIds(8)];
     }
 
+    static TEST_LAZY_SQL: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| "SELECT 2 FROM derivation".to_string());
+
+    crate::sql_lazy! {
+        pub TEST_LAZY = || TEST_LAZY_SQL.as_str(),
+            params = [];
+    }
+
     crate::sql_fn! {
         pub TEST_BUILT = || format!("SELECT {} FROM derivation", 1),
             params = [],
@@ -118,6 +155,12 @@ mod tests {
         assert_eq!(TEST_BUILT.text(), "SELECT 1 FROM derivation");
         assert_eq!(TEST_BUILT.tier, Tier::Sweep);
         assert_eq!(TEST_BUILT.budget.buffers, Budget::SWEEP.buffers);
+    }
+
+    #[test]
+    fn a_lazy_statement_is_borrowed_not_rebuilt() {
+        assert_eq!(TEST_LAZY.text(), "SELECT 2 FROM derivation");
+        assert!(matches!(TEST_LAZY.text(), std::borrow::Cow::Borrowed(_)));
     }
 
     #[test]
