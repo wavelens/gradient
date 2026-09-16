@@ -2632,17 +2632,22 @@ dependencies = [
 name = "gradient-server"
 version = "1.3.0"
 dependencies = [
+ "anyhow",
  "clap",
  "gradient-cache",
  "gradient-core",
+ "gradient-db",
  "gradient-state",
  "gradient-types",
  "gradient-util",
  "gradient-web",
+ "sea-orm",
  "sentry",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
