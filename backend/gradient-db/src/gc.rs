@@ -42,7 +42,7 @@ crate::sql! {
 fn gc_orphan_candidates_sql() -> String {
     format!(
         "{reachable}
-         SELECT d.id, d.hash FROM derivation d
+         SELECT d.id FROM derivation d
          WHERE d.created_at < $1
            AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)",
         reachable = crate::graph_sql::reachable_derivations_cte(),
