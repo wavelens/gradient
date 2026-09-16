@@ -14,6 +14,7 @@ the catalogue, and a per-test list goes stale and collides on every merge.
 | CLI | `cli/tests/*.rs`, `cli/connector/tests/*.rs` | the installed `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | components and services under vitest |
 | NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
+| SQL plan gate | `backend/src/sql_gate/`, run by the cache VM test | every registered statement's plan at production scale |
 
 A crate's own `tests/` directory is for anything that has to go through a public
 entry point (an HTTP route, a CLI invocation). Everything else belongs in a
@@ -100,6 +101,21 @@ join) and bills the run through `pg_stat_statements` (`shared_preload_libraries`
 the test's Postgres, statements filtered to the server's role). Keep the thresholds
 loose enough to be pathology detectors on a slow shared VM, and print the top
 statements so a human reads the numbers the assertion cannot.
+
+**Every hand-written statement is registered and explained.** `gradient_db::sql!`
+declares a statement, its parameter kinds and its tier, and registers it;
+`backend/clippy.toml` forbids building a `Statement` any other way, so the list
+cannot fall behind. The cache test's last phase amplifies its database to
+production scale and runs `gradient-sql-gate`, which draws real parameter values
+out of that data, explains each statement in a rolled-back transaction (an
+`EXPLAIN ANALYZE` of an `INSERT` really does insert) and fails on a sequential
+scan of a large relation, a buffer or amplification budget overrun, a per-row
+rescan or a disk spill. Tier `Hot` is the default, `Walk` covers the recursive
+closure walks and also asserts the `OFFSET 0` fence survived, `Sweep` covers
+timer-driven work that is allowed to scan. Nothing is asserted on wall clock: the
+runner is shared and slow, so a millisecond budget would measure the runner. A
+statement whose relations are empty is reported unmeasured rather than passed,
+and the phase fails if the unmeasured count grows.
 
 **Two database sessions, held against each other, prove a lock is load-bearing.**
 Each `psql` helper is a fresh process, so a phase that replays statements in order
