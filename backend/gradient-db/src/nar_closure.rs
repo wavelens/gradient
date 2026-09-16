@@ -35,8 +35,8 @@
 //! The graph actor handles one message at a time, so a commit never overlaps
 //! another commit or one of the actor's own retires (`demote_cached_output` and
 //! the demote passes around it). Three maintenance deletions run OUTSIDE the
-//! actor, each in a transaction of its own: TTL eviction and the zombie purge in
-//! `gradient_cache::cacher::cleanup`, and the orphan GC in [`crate::gc`]. Nothing
+//! actor, each in a transaction of its own: the stale-path eviction and the zombie
+//! purge in `gradient_cache::cacher::cleanup`, and the orphan GC in [`crate::gc`]. Nothing
 //! serialises those against a commit except the locks below, and
 //! [`repair_counters_for`] is no backstop for them either - it visits
 //! [`gating_paths`] alone.
@@ -280,8 +280,7 @@ crate::sql_fn! {
     DELETE_STATEMENT = || delete_statement(None),
         params = [CachedPathHashes(64)];
 
-    // The guarded shape TTL eviction actually runs; see
-    // `gradient-cache`'s `UNSIGNED_GUARD`.
+    // The shape a guarded retire runs; see `retire_paths_where`.
     DELETE_STATEMENT_GUARDED = || delete_statement(Some(
         "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)"
     )),
@@ -417,10 +416,10 @@ pub async fn retire_paths(txn: &DatabaseTransaction, hashes: &[String]) -> Resul
 }
 
 /// [`retire_paths`] restricted to the rows that still satisfy `guard`, a
-/// predicate over the row being deleted (aliased `cp`). The TTL eviction passes
-/// `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)`, since
-/// `cached_path_signature.cached_path` is `ON DELETE CASCADE` and a retire takes
-/// every cache's signature with it.
+/// predicate over the row being deleted (aliased `cp`), such as
+/// `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)` for a caller that may
+/// drop a path only while no cache signs it: `cached_path_signature.cached_path`
+/// is `ON DELETE CASCADE`, so a retire takes every cache's signature with it.
 ///
 /// Two statements, and neither is sufficient alone. The guard has to be evaluated
 /// by the DELETE, because a preceding statement would decide from its own snapshot;

@@ -462,7 +462,7 @@ that needs it is itself stuck `Building` - without manual intervention.
 
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to a later sweep: every pass that deletes `cached_path` rows
-(orphan-derivation GC, zombie purge, TTL eviction, path invalidation) goes through
+(orphan-derivation GC, zombie purge, stale-path eviction, path invalidation) goes through
 `nar_closure::retire_paths`, which in the **same transaction** raises the
 `missing_references` counter of every referrer that trusted the deleted rows and
 moves the anchor side of every hash it deleted, every hash that stopped being
@@ -483,8 +483,7 @@ that reads the counter, so binding it to what MOVED would leave two rows behind:
 which deletes nothing and ripples nothing yet is half of what the unbacked-output
 sweep matches. Every statement in that pass is ground-truth keyed, so widening the
 set moves nothing extra. A caller
-that may only drop a path while some condition still holds (the TTL eviction drops
-one no cache signs any more) hands that condition to the retiring DELETE through
+that may only drop a path while some condition still holds hands that condition to the retiring DELETE through
 `retire_paths_where` rather than deciding it in a statement of its own, which would
 decide from its own snapshot and cascade away a signature another cache wrote
 meanwhile.
@@ -529,13 +528,20 @@ the input sources and `.drv` hashes of every derivation with a build anchor - no
 just outputs, and *regardless of build status*. These are producerless (only an eval
 re-pushes them), so a terminal-failed anchor a later eval requeues must still find
 its `.drv`; gating that clause on status purged the `.drv` of a failed-but-requeueable
-build and dead-ended its retry on `InputsUnavailable`. Outputs stay status-gated (they
-are rebuildable, TTL-evicted), and `gc_orphan_derivations` reclaims a derivation's
-`.drv`/sources once it leaves the live closure. Because attempts now outlive their
+build and dead-ended its retry on `InputsUnavailable`. Outputs stay status-gated
+(they are rebuildable, and the eviction pass below reclaims them). Because attempts now outlive their
 evaluations (set-null'd onto the anchor), the same pass also deletes the
 `log_storage` files of every reclaimed derivation's attempts - the DB rows cascade,
 but the log objects live outside the database, so they are reclaimed by hand like
 the NARs. `pass_logs` in the deep GC is the backstop for any log object left behind.
+
+The same reachability is the cache's keep-set. A cached path is live while the NAR
+reference closure of a reachable derivation's outputs or `.drv` contains it; the
+eviction pass (`evict_stale_cached_paths`, every cache-maintenance tick) removes
+every path outside that set whose last fetch or commit is older than `cacheTtlHours`,
+retiring the row through `retire_paths` so the closure counters and any producer's
+`fetchable` follow. Derivation rows outside the reachable set are collected
+separately after `keepOrphanDerivationsHours`; nothing else reclaims a NAR.
 
 The keep-set is built from committed DB rows, so it cannot reference a NAR that is
 already on disk but whose `derivation`/`cached_path` rows have not been written yet
@@ -715,7 +721,7 @@ is the one definition every gate reads. The graph actor seeds the counter when i
 commits a NAR, from the references the worker reported, and when that flips the path
 to whole it decrements every referrer, then every referrer of the referrers that
 just reached zero, one statement per level. Deleting a row (`retire_paths`: the
-orphan GC, the zombie purge, TTL eviction, every demote) runs the same ripple in
+orphan GC, the zombie purge, the stale-path eviction, every demote) runs the same ripple in
 reverse from the rows that were whole, and moves the anchor side of what those rows
 backed in the same transaction. Every ripple is driven by a **transition**, never by a
 state: rippling from a row that did not just flip moves its referrers past zero, and
@@ -723,7 +729,7 @@ a negative counter never satisfies `= 0` again.
 
 The graph actor handles one message at a time, so a commit never overlaps another
 commit or one of its own demotes. Three of those deletions do run outside it, each
-in its own transaction - TTL eviction, the zombie purge and the orphan GC - and
+in its own transaction - the stale-path eviction, the zombie purge and the orphan GC - and
 nothing serialises them against a commit but row locks. A commit therefore locks its
 reference endpoints first: the references it reports, the ones already indexed for
 it, and its own row, in one hash-ordered `FOR SHARE` statement taken before the row

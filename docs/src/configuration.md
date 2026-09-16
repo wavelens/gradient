@@ -76,7 +76,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.prCommitName` | `null` | Git author/committer name for the commits the `open_pr` action pushes. `null` lets each forge pick attribution: GitHub credits the App bot and signs it verified; Gitea/Forgejo and GitLab use the token owner (needs the `read:user` / `read_user` scope), falling back to a `Gradient <gradient@users.noreply.HOST>` bot identity when that scope is missing. Set both this and `prCommitEmail` to force an explicit identity. (`GRADIENT_PR_COMMIT_NAME`) |
 | `settings.prCommitEmail` | `null` | Git author/committer email for `open_pr` commits; see `prCommitName`. (`GRADIENT_PR_COMMIT_EMAIL`) |
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
-| `settings.cacheTtlHours` | `336` | TTL in hours for cached NARs not fetched recently (0 = disabled) |
+| `settings.cacheTtlHours` | `336` | Hours a cached path outside the live closure is kept after its last fetch or commit (0 = only `narUploadGraceHours`) |
 | `settings.cacheMaintenanceIntervalSecs` | `3600` | Interval in seconds between cache maintenance GC passes. (`GRADIENT_CACHE_MAINTENANCE_INTERVAL_SECS`) |
 | `settings.signSweepIntervalSecs` | `3600` | Fallback interval between NAR signature backfill sweeps; a freshly uploaded NAR is signed in place by the upload handler, so this only covers subscription placeholders and any row left unsigned. (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`) |
 | `settings.debugIndexIntervalSecs` | `300` | Interval between DWARF build-id index backfill passes; uploads index their own NAR in place, so this only catches paths cached before the index existed and walks lost to a restart. (`GRADIENT_DEBUG_INDEX_INTERVAL_SECS`) |

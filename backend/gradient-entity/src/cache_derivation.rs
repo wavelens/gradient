@@ -24,7 +24,6 @@ pub struct Model {
     pub cache: CacheId,
     pub derivation: DerivationId,
     pub cached_at: NaiveDateTime,
-    pub last_fetched_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
