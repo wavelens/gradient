@@ -60,8 +60,7 @@ nix build .#checks.x86_64-linux.gradient-local-worker -L
 The cargo suites are checks of their own, not part of `nix build .#gradient`:
 
 ```sh
-nix build .#checks.x86_64-linux.tests     -L   # cargo nextest, workspace
-nix build .#checks.x86_64-linux.doc-tests -L
+nix build .#checks.x86_64-linux.tests     -L   # cargo nextest plus the doc tests
 nix build .#checks.x86_64-linux.cli-tests -L
 ```
 

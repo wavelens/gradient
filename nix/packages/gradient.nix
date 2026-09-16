@@ -99,6 +99,12 @@ let
     pname = "gradient-server-test";
     inherit dummyrs;
     CARGO_PROFILE = "test";
+
+    # crane leads with `cargo check --all-targets` to cache check artifacts.
+    # Only clippy reads those and clippy reads the release layer, so here that
+    # pass is six minutes for nothing. The check phase's `cargo test --no-run`
+    # still brings in the dev-dependencies.
+    buildPhaseCargoCommand = "cargoWithProfile build --locked";
   });
 in
 craneLib.buildPackage (commonArgs // {
@@ -113,20 +119,23 @@ craneLib.buildPackage (commonArgs // {
   # everything that only needs the binary.
   doCheck = false;
 
+  # The SQL plan gate the cache VM test runs comes out of this same cargo
+  # invocation instead of a second one over the whole workspace: no code sits
+  # behind `cfg(feature = "sql-gate")`, the feature only flips optional
+  # dependencies of the root crate, and `required-features` keeps the bin out
+  # of a default build. The `gate` output keeps it out of the server's closure.
+  outputs = [ "out" "gate" ];
+  cargoExtraArgs = "--locked --features sql-gate";
+
+  postInstall = ''
+    mkdir -p $gate/bin
+    mv $out/bin/gradient-sql-gate $gate/bin/
+  '';
+
   # Reuses cargoArtifacts so clippy only recompiles workspace crates.
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
     inherit cargoArtifacts;
     cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
-  });
-
-  # The SQL plan gate the cache VM test runs. Behind `required-features`, so a
-  # default build never compiles it and it never lands in this package.
-  passthru.sqlGate = craneLib.buildPackage (commonArgs // {
-    inherit cargoArtifacts;
-    pname = "gradient-sql-gate";
-    version = "1.3.0";
-    cargoExtraArgs = "--features sql-gate --bin gradient-sql-gate";
-    doCheck = false;
   });
 
   passthru.tests = craneLib.cargoNextest (commonArgs // {
@@ -139,14 +148,13 @@ craneLib.buildPackage (commonArgs // {
     preCheck = ''
       ln -s ${testStore} ./test-store
     '';
-  });
 
-  # nextest cannot run doc tests, so they get their own check rather than
-  # silently dropping out of the suite.
-  passthru.docTests = craneLib.cargoDocTest (commonArgs // {
-    cargoArtifacts = testArtifacts;
-    version = "1.3.0";
-    CARGO_PROFILE = "test";
+    # nextest runs no doc tests. Here the workspace is already compiled and
+    # they cost 24 s; a derivation of their own spent six minutes rebuilding
+    # it to run the two that exist.
+    postCheck = ''
+      cargoWithProfile test --doc --locked
+    '';
   });
 
   meta = {
