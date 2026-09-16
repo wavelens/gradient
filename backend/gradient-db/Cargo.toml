@@ -29,6 +29,7 @@ async-trait       = { workspace = true }
 bytes             = { workspace = true }
 chrono            = { workspace = true }
 futures           = { workspace = true }
+inventory         = { workspace = true }
 sea-orm           = { workspace = true }
 sea-orm-migration = { workspace = true }
 serde_json        = { workspace = true }

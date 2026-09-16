@@ -40,6 +40,7 @@ pub mod recovery;
 pub mod retention;
 pub mod rollup;
 pub mod runtime_closure;
+pub mod sql;
 pub mod state_machine;
 pub mod status;
 pub mod status_reactor;

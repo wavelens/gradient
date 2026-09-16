@@ -76,6 +76,7 @@ uuid   = { version = "1.23", default-features = false, features = ["std", "v7", 
 rkyv       = { version = "0.8", default-features = false, features = ["alloc", "bytecheck", "unaligned"] }
 serde      = { version = "1", default-features = false, features = ["std", "derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
+inventory  = { version = "0.3", default-features = false }
 
 # Crypto / encoding
 base64          = { version = "0.23", default-features = false, features = ["std"] }

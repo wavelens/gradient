@@ -2364,6 +2364,7 @@ dependencies = [
  "gradient-storage",
  "gradient-types",
  "gradient-util",
+ "inventory",
  "sea-orm",
  "sea-orm-migration",
  "serde_json",
