@@ -19,7 +19,7 @@ use sea_orm::{
 };
 use tracing::{debug, trace, warn};
 
-use crate::messages::{NarCommit, NarCommitted, SignTargets};
+use crate::messages::{NarCommit, NarCommitted, NarConfirm, SignTargets};
 
 /// Record a stored NAR: the row, its reference index, the counter seeded from it,
 /// the wholeness flip that counter makes, and the anchor side of that flip.
@@ -193,11 +193,15 @@ async fn upsert_cached_path(
             // Different bytes under the same store path: the recorded build-id
             // members no longer describe the NAR, so re-open it to the indexer.
             let rescan_debug_info = row.file_hash.as_deref() != Some(file_hash.as_str());
+            let was_confirmed = row.confirmed;
             let mut active = row.into_active_model();
             active.file_size = Set(Some(c.file_size));
             active.file_hash = Set(Some(file_hash));
             if rescan_debug_info {
                 active.debug_info_indexed = Set(false);
+                active.confirmed = Set(c.confirmed);
+            } else if c.confirmed && !was_confirmed {
+                active.confirmed = Set(true);
             }
 
             active.nar_size = Set(Some(c.nar_size));
@@ -229,6 +233,7 @@ async fn upsert_cached_path(
                 deriver: c.deriver.clone(),
                 ca: c.ca.clone(),
                 created_at: now(),
+                confirmed: c.confirmed,
                 ..Default::default()
             }
             .into_active_model();
@@ -241,6 +246,22 @@ async fn upsert_cached_path(
             })
         }
     }
+}
+
+/// Mark a relayed path's object as stored. Answers `false` when the row's bytes
+/// moved on since the upload began.
+pub(crate) async fn confirm(ctx: &DbContext, c: &NarConfirm) -> anyhow::Result<bool> {
+    let updated = ECachedPath::update_many()
+        .col_expr(CCachedPath::Confirmed, Expr::value(true))
+        .filter(CCachedPath::Hash.eq(c.hash.as_str()))
+        .filter(CCachedPath::FileHash.eq(normalize_nar_hash(&c.file_hash)))
+        .filter(CCachedPath::Confirmed.eq(false))
+        .exec(&ctx.worker_db)
+        .await
+        .context("confirm cached path")?
+        .rows_affected;
+
+    Ok(updated == 1)
 }
 
 /// Record a path's hash-name references in the normalized `cached_path_reference`
@@ -405,6 +426,7 @@ mod tests {
             deriver: None,
             ca: None,
             targets: SignTargets::None,
+            confirmed: true,
         }
     }
 
@@ -838,5 +860,96 @@ mod tests {
         let committed = commit_in_transaction(&ctx, &commit_for(SP)).await.unwrap();
         assert!(committed.created);
         assert_eq!(committed.outputs_marked, 2);
+    }
+
+    /// A relayed NAR on S3 is committed before its object exists, so the row
+    /// must say so.
+    #[tokio::test]
+    async fn a_relayed_commit_on_s3_inserts_the_row_unconfirmed() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(false)])
+            .append_exec_results([exec(0), exec(0), exec(0)])
+            .into_connection();
+
+        let log = commit_and_log(
+            db,
+            &NarCommit {
+                confirmed: false,
+                ..commit_for(SP)
+            },
+        )
+        .await;
+
+        let insert = log
+            .iter()
+            .find(|s| s.starts_with("INSERT INTO \"cached_path\""))
+            .expect("the insert");
+        assert!(insert.contains("\"confirmed\""), "{insert}");
+        assert!(insert.contains("Bool(Some(false))"), "{insert}");
+    }
+
+    /// New bytes under an old hash on S3 are unconfirmed again until uploaded.
+    #[tokio::test]
+    async fn a_recommit_with_new_bytes_takes_the_commits_confirmed_flag() {
+        let existing = MCachedPath {
+            confirmed: true,
+            file_hash: Some("sha256:old".to_owned()),
+            ..returned_cached_path(HASH)
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![existing.clone()], vec![existing]])
+            .append_query_results([seed_reply(true)])
+            .append_exec_results([exec(0), exec(1), exec(1)])
+            .into_connection();
+
+        let log = commit_and_log(
+            db,
+            &NarCommit {
+                confirmed: false,
+                ..commit_for(SP)
+            },
+        )
+        .await;
+
+        let update = log
+            .iter()
+            .find(|s| s.starts_with("UPDATE \"cached_path\""))
+            .expect("the update");
+        assert!(update.contains("\"confirmed\""), "{update}");
+        assert!(update.contains("Bool(Some(false))"), "{update}");
+    }
+
+    #[tokio::test]
+    async fn confirm_updates_only_the_row_whose_bytes_are_still_the_uploaded_ones() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0)])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let confirmed = confirm(
+            &ctx,
+            &NarConfirm {
+                hash: HASH.to_owned(),
+                file_hash: "sha256:abc".to_owned(),
+            },
+        )
+        .await
+        .expect("confirm");
+        drop(ctx);
+
+        assert!(!confirmed, "no row matched the uploaded file hash");
+        let log = statements(pool);
+        let update = log.first().expect("one statement");
+        assert!(
+            update.starts_with("UPDATE \"cached_path\" SET \"confirmed\" = "),
+            "{update}"
+        );
+        assert!(update.contains("\"file_hash\" = "), "{update}");
+        assert!(
+            update.contains("\"confirmed\" = false") || update.contains("Bool(Some(false))"),
+            "{update}"
+        );
     }
 }
