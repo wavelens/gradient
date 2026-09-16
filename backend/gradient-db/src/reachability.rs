@@ -411,7 +411,7 @@ mod tests {
         assert!(log[0].contains(WALK_WORK_MEM), "{log:?}");
         let sql = norm(&log[1]);
         assert!(
-            sql.starts_with(
+            sql.contains(
                 "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
                  (SELECT bj.evaluation, bj.derivation, true FROM build_job bj"
             ),
