@@ -58,11 +58,17 @@ fn rustls_config() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
-fn client_builder() -> reqwest::ClientBuilder {
+/// The shared user agent and TLS roots, with no total request timeout: for a
+/// caller whose transfers legitimately outlive one and that polices progress
+/// another way (the S3 client, whose read timeout is an inactivity timer).
+pub fn untimed_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
-        .timeout(DEFAULT_TIMEOUT)
         .user_agent(user_agent())
         .use_preconfigured_tls(rustls_config())
+}
+
+fn client_builder() -> reqwest::ClientBuilder {
+    untimed_client_builder().timeout(DEFAULT_TIMEOUT)
 }
 
 /// Client for API traffic (forges, webhooks, OIDC, upstream narinfo probes).

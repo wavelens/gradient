@@ -47,6 +47,38 @@ impl Default for S3Timeouts {
 /// one takes the whole connection's commit path down with it.
 const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// Hands object_store the workspace's HTTP client instead of letting it build its
+/// own. reqwest's platform verifier refuses to construct a client where the
+/// system CA store is empty - every nix build sandbox, and any host without a CA
+/// bundle - while our roots fold webpki's in; this was the last client in the
+/// workspace not going through `gradient_util::http`. Bypassing object_store's
+/// builder bypasses its own rules too, so they are restated here: no content
+/// encoding, because compression rewrites the `Content-Length` object sizes are
+/// read from.
+#[derive(Debug)]
+struct SharedHttpConnector {
+    read_timeout: std::time::Duration,
+    allow_http: bool,
+}
+
+impl object_store::client::HttpConnector for SharedHttpConnector {
+    fn connect(&self, _: &ClientOptions) -> object_store::Result<object_store::client::HttpClient> {
+        let client = gradient_util::http::untimed_client_builder()
+            .read_timeout(self.read_timeout)
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .https_only(!self.allow_http)
+            .build()
+            .map_err(|e| object_store::Error::Generic {
+                store: "S3",
+                source: Box::new(e),
+            })?;
+
+        Ok(object_store::client::HttpClient::new(client))
+    }
+}
+
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
 ///
 /// All NARs are stored pre-compressed (`.nar.zst`). The key path within the store is
@@ -165,16 +197,10 @@ impl NarStore {
             .with_bucket_name(bucket)
             .with_region(region)
             .with_retry(retry_config)
-            .with_client_options(
-                ClientOptions::new()
-                    .with_user_agent(
-                        gradient_util::http::user_agent()
-                            .parse()
-                            .expect("static UA is valid"),
-                    )
-                    .with_timeout_disabled()
-                    .with_read_timeout(timeouts.read_timeout),
-            );
+            .with_http_connector(SharedHttpConnector {
+                read_timeout: timeouts.read_timeout,
+                allow_http: endpoint.is_some(),
+            });
 
         if let Some(ep) = endpoint {
             builder = builder
