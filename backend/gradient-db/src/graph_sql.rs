@@ -341,10 +341,34 @@ pub fn eval_closure_cte_body() -> String {
 /// its own: `build_job` rows are pruned with old evals while dependency edges
 /// and anchors persist.
 pub fn reachable_derivations_cte() -> String {
-    dependency_closure_cte(
+    format!("WITH RECURSIVE {}", reachable_derivations_cte_body())
+}
+
+/// The reachable-roots CTE body (no `WITH RECURSIVE` prefix), for statements
+/// that bind it alongside a second closure under one `WITH RECURSIVE`.
+pub fn reachable_derivations_cte_body() -> String {
+    dependency_closure_cte_body(
         "reachable",
         "SELECT derivation FROM entry_point UNION SELECT derivation FROM build_job",
         ClosureDirection::Dependencies,
+    )
+}
+
+/// Every cached path a retained evaluation can reach: the outputs and `.drv`
+/// NARs of the reachable derivations, closed over their references. Input
+/// sources are references of the `.drv` NAR, so the walk from `derivation.hash`
+/// covers them. This is the cache's keep-set; everything outside it is the
+/// eviction pass's to reclaim once past the fetch TTL.
+pub fn live_cached_paths_cte() -> String {
+    format!(
+        "WITH RECURSIVE {reachable}, \
+         roots(hash) AS (\
+         SELECT o.hash FROM derivation_output o JOIN reachable r ON r.derivation = o.derivation \
+         UNION \
+         SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id), \
+         {live}",
+        reachable = reachable_derivations_cte_body(),
+        live = reference_closure_cte_body("live", "SELECT hash FROM roots"),
     )
 }
 
@@ -381,6 +405,34 @@ mod tests {
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// The live set starts at the outputs and `.drv` hashes of every reachable
+    /// derivation and closes over `cached_path_reference` with the fenced step.
+    #[test]
+    fn live_cached_paths_close_reachable_outputs_and_drvs_over_references() {
+        let cte = norm(&live_cached_paths_cte());
+
+        assert!(
+            cte.starts_with("WITH RECURSIVE reachable(derivation) AS ("),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(concat!(
+                "roots(hash) AS (SELECT o.hash FROM derivation_output o ",
+                "JOIN reachable r ON r.derivation = o.derivation UNION ",
+                "SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id)",
+            )),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(concat!(
+                "live(hash) AS (SELECT hash FROM roots UNION SELECT s.next FROM live c, ",
+                "LATERAL (SELECT r.reference_hash AS next FROM cached_path_reference r ",
+                "WHERE r.referrer = c.hash OFFSET 0) s)",
+            )),
+            "{cte}"
+        );
     }
 
     /// The raise has to be `SET LOCAL` and it has to happen inside the walk's own
