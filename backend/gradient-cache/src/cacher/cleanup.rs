@@ -318,6 +318,14 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<Cle
     Ok(report)
 }
 
+/// Rows whose object should be in storage: an unconfirmed row's object is
+/// legitimately absent while the uploader owes it.
+fn zombie_candidates() -> sea_orm::Select<ECachedPath> {
+    ECachedPath::find()
+        .filter(CCachedPath::FileHash.is_not_null())
+        .filter(CCachedPath::Confirmed.eq(true))
+}
+
 /// Drop `cached_path` rows whose `file_hash IS NOT NULL` but whose NAR is no
 /// longer in `nar_storage`. `gc_orphan_derivations` and external storage
 /// lifecycle policies (S3 expiration, manual cleanup) can leave the row + its
@@ -329,8 +337,7 @@ async fn purge_zombie_cached_paths(
     state: &Arc<ServerState>,
     on_disk: &HashSet<String>,
 ) -> Result<u64> {
-    let rows = ECachedPath::find()
-        .filter(CCachedPath::FileHash.is_not_null())
+    let rows = zombie_candidates()
         .all(&state.worker_db)
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
@@ -894,5 +901,19 @@ mod tests {
         let state = state_with_worker_db(tmp.path(), db);
 
         cleanup_expired_upload_sessions(state).await.unwrap();
+    }
+
+    #[test]
+    fn the_zombie_purge_never_reads_an_unconfirmed_row() {
+        use sea_orm::QueryTrait;
+        let sql = zombie_candidates()
+            .build(DatabaseBackend::Postgres)
+            .to_string()
+            .to_uppercase();
+        assert!(sql.contains(r#""CACHED_PATH"."CONFIRMED" = TRUE"#), "{sql}");
+        assert!(
+            sql.contains(r#""CACHED_PATH"."FILE_HASH" IS NOT NULL"#),
+            "{sql}"
+        );
     }
 }
