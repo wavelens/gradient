@@ -31,6 +31,9 @@
   {
     checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
       clippy = self.packages.${system}.gradient.clippy;
+      tests = self.packages.${system}.gradient.tests;
+      doc-tests = self.packages.${system}.gradient.docTests;
+      cli-tests = self.packages.${system}.gradient-cli-full.tests;
     };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {

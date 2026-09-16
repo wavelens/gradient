@@ -59,6 +59,10 @@ let
     inherit src cargoVendorDir;
     strictDeps = true;
 
+    # A sandbox starts with no incremental cache to reuse, so the bookkeeping
+    # is pure overhead and it fattens the target dir crane packs between layers.
+    CARGO_INCREMENTAL = "0";
+
     nativeBuildInputs = [
       installShellFiles
       pkg-config
@@ -86,12 +90,28 @@ let
     src = depsSrc;
     inherit dummyrs;
   });
+
+  # The suite builds under `[profile.test]`, so it cannot share the release
+  # layer. `[profile.dev.package."*"]` keeps the dependencies optimised, which
+  # is what stops an unoptimised argon2 from outlasting the compile it saves.
+  testArtifacts = craneLib.buildDepsOnly (commonArgs // {
+    src = depsSrc;
+    pname = "gradient-server-test";
+    inherit dummyrs;
+    CARGO_PROFILE = "test";
+  });
 in
 craneLib.buildPackage (commonArgs // {
   inherit cargoArtifacts;
   pname = "gradient";
   version = "1.3.0";
   separateDebugInfo = true;
+
+  # `separateDebugInfo` exports `NIX_RUSTFLAGS=-g -C strip=none` for the whole
+  # derivation. Keep that on the shipped binary and off the ~105 test targets:
+  # the suite is its own check, so it neither carries full DWARF nor blocks
+  # everything that only needs the binary.
+  doCheck = false;
 
   # Reuses cargoArtifacts so clippy only recompiles workspace crates.
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
@@ -109,10 +129,25 @@ craneLib.buildPackage (commonArgs // {
     doCheck = false;
   });
 
-  nativeCheckInputs = [ git ];
-  preCheck = ''
-    ln -s ${testStore} ./test-store
-  '';
+  passthru.tests = craneLib.cargoNextest (commonArgs // {
+    cargoArtifacts = testArtifacts;
+    version = "1.3.0";
+    CARGO_PROFILE = "test";
+    cargoExtraArgs = "--locked";
+
+    nativeCheckInputs = [ git ];
+    preCheck = ''
+      ln -s ${testStore} ./test-store
+    '';
+  });
+
+  # nextest cannot run doc tests, so they get their own check rather than
+  # silently dropping out of the suite.
+  passthru.docTests = craneLib.cargoDocTest (commonArgs // {
+    cargoArtifacts = testArtifacts;
+    version = "1.3.0";
+    CARGO_PROFILE = "test";
+  });
 
   meta = {
     description = "Nix Continuous Integration System Backend";

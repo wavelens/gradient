@@ -13,6 +13,7 @@
 , openssl
 , pkg-config
 , stdenv
+, writeText
 , cargoFeatures ? [ ]
 }:
 let
@@ -58,11 +59,20 @@ let
     ++ lib.optional (cargoFeatures != [ ]) "--features ${lib.concatStringsSep "," cargoFeatures}"
   );
 
+  # crane's default dummy trips the workspace lints; this one compiles under them.
+  dummyrs = writeText "dummy.rs" ''
+    #![allow(clippy::all)]
+    #![allow(dead_code)]
+    pub fn main() {}
+  '';
+
   commonArgs = {
     inherit src cargoExtraArgs cargoVendorDir;
     strictDeps = true;
     sourceRoot = "${src.name}/cli";
     cargoToml = cliSrc + "/Cargo.toml";
+
+    CARGO_INCREMENTAL = "0";
 
     nativeBuildInputs = [
       installShellFiles
@@ -79,15 +89,32 @@ let
   } // lib.optionalAttrs stdenv.hostPlatform.isLinux {
     BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${stdenv.cc.libc.dev}";
   });
+
+  # The cli workspace sits in a subdirectory because the `eval` feature pulls
+  # gradient-eval from backend/. `mkDummySrc` keeps the source's store name, so
+  # `sourceRoot` resolves in the dummy tree too, but it only carries over a
+  # Cargo.lock sitting at the source root: this one has to be put back by hand.
+  cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+    inherit dummyrs;
+    extraDummyScript = ''
+      cp ${cliSrc + "/Cargo.lock"} $out/cli/Cargo.lock
+    '';
+  });
 in
-# Deps and crate build in one pass: the `eval` feature pulls gradient-eval from
-# backend/, so the cli workspace lives in a subdirectory of the source tree, and
-# crane's split deps layer assumes the workspace is at the source root.
 craneLib.buildPackage (commonArgs // {
-  cargoArtifacts = null;
+  inherit cargoArtifacts;
   pname = "gradient-cli";
   version = "1.3.0";
   separateDebugInfo = true;
+
+  # Same split as the server: the binary keeps the debug output, the suite runs
+  # as its own check instead of inside the package.
+  doCheck = false;
+
+  passthru.tests = craneLib.cargoNextest (commonArgs // {
+    inherit cargoArtifacts;
+    version = "1.3.0";
+  });
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd gradient \
