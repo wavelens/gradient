@@ -137,6 +137,15 @@ in {
               text = "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
             };
 
+            # Signs the file binary cache phase 10g substitutes from. Fixed
+            # rather than generated in the test: the cache is state-managed, so
+            # its upstream is declared below and the public half has to be known
+            # at evaluation time.
+            "gradient/secrets/upstream_key" = {
+              mode = "0600";
+              text = "file-upstream-1:eZPukjHYgRpJ+hLlnUgG+qpi/k4QMTr3bd4ftngZJwkIXutyHrlDclZGwczy+IKCAt82HkKrDtM16u9HR9uzkQ==";
+            };
+
             "gradient/secrets/worker_token" = {
               mode = "0600";
               user = "gradient";
@@ -211,6 +220,12 @@ in {
                   projects = [ "project" ];
                   public = true;
                   created_by = "admin";
+                  upstreams = [{
+                    type = "external";
+                    display_name = "file-upstream";
+                    url = "http://gradient.local/upstream";
+                    public_key = "file-upstream-1:CF7rch65Q3JWRsHM8viCggLfNh5Cqw7TNervR0fbs5E=";
+                  }];
                 };
               };
 
@@ -1549,31 +1564,19 @@ in {
       banner("Phase 10g: demand-driven substitution (#593)")
 
       # A narinfo whose Sig does not verify against the upstream's configured
-      # public key is dropped, so the file cache is signed on the way out.
-      server.succeed(
-          f"{NIX} --extra-experimental-features nix-command key generate-secret "
-          f"--key-name file-upstream-1 > /root/upstream.key"
-      )
-      up_pub = server.succeed(
-          f"{NIX} --extra-experimental-features nix-command key convert-secret-to-public "
-          f"< /root/upstream.key"
-      ).strip()
+      # public key is dropped, so the file cache is signed on the way out with
+      # the key the cache declares. The upstream is declared rather than PUT:
+      # `main` is state-managed, and every mutating cache endpoint refuses a
+      # managed cache, so provisioning is the only way it can have one.
       server.succeed(
           f"{NIX} --extra-experimental-features 'nix-command flakes' copy "
-          f"--to 'file:///srv/upstream?secret-key=/root/upstream.key' --no-check-sigs "
+          f"--to 'file:///srv/upstream?secret-key=/etc/gradient/secrets/upstream_key' --no-check-sigs "
           f"${pkgs.busybox.out} ${pkgs.busybox.debug}"
       )
       server.succeed("chown -R nginx:nginx /srv/upstream && systemctl reload nginx")
       server.succeed(f"{CURL} -sf http://gradient.local/upstream/nix-cache-info > /dev/null")
 
-      server.succeed(
-          f'{CURL} -sf -X PUT -H "Authorization: Bearer {token}" '
-          f'-H "Content-Type: application/json" '
-          f'-d \'{{"type":"http","display_name":"file-upstream",'
-          f'"url":"http://gradient.local/upstream","public_key":"{up_pub}"}}\' '
-          f'{API}/caches/main/upstreams'
-      )
-      assert "file-upstream" in api_get(token, "caches/main/upstreams"), "the upstream was not registered"
+      assert "file-upstream" in api_get(token, "caches/main/upstreams"), "the declared upstream was not provisioned"
 
       def anchor_of(name):
           """`<status> <substitutable> <relay attempts>` of the newest such anchor."""
