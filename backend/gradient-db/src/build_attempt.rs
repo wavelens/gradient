@@ -154,12 +154,10 @@ pub async fn latest_attempts<C: ConnectionTrait>(
     db: &C,
     anchors: &[DerivationBuildId],
 ) -> Result<std::collections::HashMap<DerivationBuildId, Model>, DbErr> {
-    use sea_orm::{DbBackend, Statement};
-
+    // Each chunk's ids become the IN list, so the text grows per chunk.
     let rows = crate::fetch_in_chunks(anchors, |chunk| async move {
-        let sql = latest_attempts_sql(&chunk);
         Entity::find()
-            .from_raw_sql(Statement::from_string(DbBackend::Postgres, sql))
+            .from_raw_sql(LATEST_ATTEMPTS.bind_built(latest_attempts_sql(&chunk), []))
             .all(db)
             .await
     })

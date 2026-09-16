@@ -21,7 +21,7 @@
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::EvaluationId;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
+use sea_orm::{ConnectionTrait, DbErr};
 
 use crate::status_sql;
 
@@ -68,10 +68,10 @@ pub async fn lost_eval_completions<C: ConnectionTrait>(
     db: &C,
     grace_secs: i64,
 ) -> Result<Vec<LostCompletion>, DbErr> {
-    let sql = lost_eval_completions_sql(grace_secs);
-
+    // grace_secs is baked into the text rather than bound, so the exemplar
+    // above is what the gate plans.
     let rows = db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(LOST_EVAL_COMPLETIONS.bind_built(lost_eval_completions_sql(grace_secs), []))
         .await?;
 
     Ok(rows

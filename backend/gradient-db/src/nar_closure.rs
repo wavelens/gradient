@@ -102,9 +102,7 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
-use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
-};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 use std::collections::HashSet;
 
 /// The row `{alias}` is stored and every reference resolves to a whole row.
@@ -447,6 +445,11 @@ pub async fn retire_paths_where(
     retire(txn, hashes, Some(guard)).await
 }
 
+crate::sql! {
+    SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
+        params = [CachedPathHashes(64)];
+}
+
 async fn retire(
     db: &DatabaseTransaction,
     hashes: &[String],
@@ -459,17 +462,16 @@ async fn retire(
     db.execute_raw(LOCK_QUERY.bind([hashes.to_vec().into()]))
         .await?;
 
-    // `guard` is an arbitrary caller-supplied fragment (TTL eviction's own
-    // `UNSIGNED_GUARD`), so unlike every other site here the executed text is
-    // not one of a statically enumerable set; DELETE_STATEMENT and
-    // DELETE_STATEMENT_GUARDED above are the plan gate's representative
-    // instantiations of the two shapes production actually runs.
+    // `guard` is a caller-supplied fragment, so the two exemplars above stand
+    // for the two shapes production runs.
+    let exemplar = if guard.is_some() {
+        &DELETE_STATEMENT_GUARDED
+    } else {
+        &DELETE_STATEMENT
+    };
+
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            delete_statement(guard),
-            [hashes.to_vec().into()],
-        ))
+        .query_all_raw(exemplar.bind_built(delete_statement(guard), [hashes.to_vec().into()]))
         .await?;
 
     let mut deleted = Vec::with_capacity(rows.len());
@@ -489,12 +491,8 @@ async fn retire(
     gated.extend(unwhole.iter().filter(|h| !seen.contains(*h)).cloned());
 
     if !deleted.is_empty() {
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
-            [deleted.clone().into()],
-        ))
-        .await?;
+        db.execute_raw(SET_OUTPUTS_UNCACHED.bind([deleted.clone().into()]))
+            .await?;
     }
 
     // `gone` is what has no artifact any more: the rows this call deleted, plus the
@@ -514,6 +512,25 @@ async fn retire(
         unwhole,
         transitions,
     })
+}
+
+fn reset_uncached_producers_sql() -> String {
+    format!(
+        "UPDATE derivation_build db \
+         SET status = {created}, substituted = false, attempt = 0, \
+             updated_at = (now() AT TIME ZONE 'UTC') \
+         FROM derivation_build old \
+         WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) \
+           AND db.status IN ({terminal_success}) AND NOT db.fetchable \
+         RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
+        created = crate::status_sql::build(BuildStatus::Created),
+        terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+    )
+}
+
+crate::sql_fn! {
+    RESET_UNCACHED_PRODUCERS = reset_uncached_producers_sql,
+        params = [DerivationIds(64)];
 }
 
 /// The readiness half of a retire. `scope` is every hash the caller ASKED to retire
@@ -568,22 +585,8 @@ async fn retire_anchors(
     let rebuildable = crate::reachability::producers_of_hashes(txn, gone).await?;
     if !rebuildable.is_empty() {
         let reset = crate::promotion::returned_transitions(
-            txn.query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                format!(
-                    "UPDATE derivation_build db \
-                     SET status = {created}, substituted = false, attempt = 0, \
-                         updated_at = (now() AT TIME ZONE 'UTC') \
-                     FROM derivation_build old \
-                     WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) \
-                       AND db.status IN ({terminal_success}) AND NOT db.fetchable \
-                     RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
-                    created = crate::status_sql::build(BuildStatus::Created),
-                    terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
-                ),
-                [crate::readiness::ids(&rebuildable)],
-            ))
-            .await?,
+            txn.query_all_raw(RESET_UNCACHED_PRODUCERS.bind([crate::readiness::ids(&rebuildable)]))
+                .await?,
         );
         if !reset.is_empty() {
             let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
@@ -607,6 +610,11 @@ fn repair_statement() -> String {
          WHERE cp.hash = x.hash AND cp.missing_references = x.old AND x.old <> x.n",
         count = unwhole_reference_count("c"),
     )
+}
+
+crate::sql_fn! {
+    REPAIR_STATEMENT_QUERY = repair_statement,
+        params = [CachedPathHashes(64)];
 }
 
 /// Recompute the counter for `hashes` from their references and write the rows
@@ -667,12 +675,8 @@ pub async fn lock_paths<'txn>(
     txn: &'txn DatabaseTransaction,
     hashes: &[String],
 ) -> Result<PathLock<'txn>, DbErr> {
-    txn.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        LOCK,
-        [hashes.to_vec().into()],
-    ))
-    .await?;
+    txn.execute_raw(LOCK_QUERY.bind([hashes.to_vec().into()]))
+        .await?;
 
     Ok(PathLock {
         txn,
@@ -684,11 +688,7 @@ pub async fn lock_paths<'txn>(
 async fn recount(lock: &PathLock<'_>) -> Result<u64, DbErr> {
     Ok(lock
         .txn
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            repair_statement(),
-            [lock.hashes.clone().into()],
-        ))
+        .execute_raw(REPAIR_STATEMENT_QUERY.bind([lock.hashes.clone().into()]))
         .await?
         .rows_affected())
 }
