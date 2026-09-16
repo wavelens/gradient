@@ -96,6 +96,16 @@ craneLib.buildPackage (commonArgs // {
     cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
   });
 
+  # The SQL plan gate the cache VM test runs. Behind `required-features`, so a
+  # default build never compiles it and it never lands in this package.
+  passthru.sqlGate = craneLib.buildPackage (commonArgs // {
+    inherit cargoArtifacts;
+    pname = "gradient-sql-gate";
+    version = "1.3.0";
+    cargoExtraArgs = "--features sql-gate --bin gradient-sql-gate";
+    doCheck = false;
+  });
+
   nativeCheckInputs = [ git ];
   preCheck = ''
     ln -s ${testStore} ./test-store
