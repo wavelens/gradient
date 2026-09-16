@@ -59,7 +59,7 @@ use crate::input::InputError;
 /// # Example
 ///
 /// ```
-/// use gradient_core::wildcard::Wildcard;
+/// use gradient_types::wildcard::Wildcard;
 ///
 /// let w: Wildcard = r#"packages.*.*,!packages.x86_64-linux.broken,my."wild.card".*"#
 ///     .parse().unwrap();
@@ -86,7 +86,7 @@ impl Wildcard {
     /// # Example
     ///
     /// ```
-    /// use gradient_core::wildcard::Wildcard;
+    /// use gradient_types::wildcard::Wildcard;
     ///
     /// let w: Wildcard = r#"my."wild.card".*,my.*.test,!my.ignored.pkg"#.parse().unwrap();
     /// let s = w.get_eval_str();
