@@ -172,7 +172,14 @@ in {
             proto.public = true;
             jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
-            settings.logLevel.default = "debug";
+            settings = {
+              logLevel.default = "debug";
+              # Phase 10i waits out a cache-maintenance pass, and the hourly
+              # default would outlast the test. Every step of that pass is a
+              # no-op at this scale except the one the phase drives.
+              cacheMaintenanceIntervalSecs = 20;
+              cacheTtlHours = 1;
+            };
             state = {
               users = {
                 admin = {
@@ -1769,8 +1776,8 @@ in {
       # driving evaluation and eval-done all read `build_job` (#663). The fix
       # hands the names over: a live evaluation adopts the pending anchors it
       # reaches through its own builders, from the GC's own pass, the graph-stuck
-      # heal and the consistency sweep. The maintenance pass that runs the
-      # evaluation GC is hourly here, so this phase makes the state by hand - the
+      # heal and the consistency sweep. The evaluation GC only deletes past
+      # `keep_evaluations`, which this task never reaches, so this phase makes the state by hand - the
       # interior's names are dropped, its outputs are retired for real so the
       # chain is pending, task2's evaluation is put back into Building over it -
       # and asserts the outcome end to end: adopted, queued, attributed to task2's
@@ -1875,6 +1882,67 @@ in {
       assert drift() == 0, "counters disagree with their recompute after the adopted rebuild"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the adopted rebuild"
       print(server.succeed("journalctl -u gradient-server --no-pager | grep -i 'adopt' | tail -n 5"))
+
+      # ── Phase 10i: retention follows the live closure (#594) ──────────────
+      # One keep-set decides what stays in the cache: the NAR reference closure
+      # of the outputs and `.drv` files of every derivation a retained
+      # evaluation reaches. Phase 9's probe is a store path no derivation
+      # produced and no evaluation names, so it has been outside that set since
+      # the moment it was uploaded and only its fetch recency keeps it; hello is
+      # inside it until nothing names hello any more.
+      banner("Phase 10i: live-closure retention (#594)")
+
+      probe_object = nar_object(f"{upload_hash}-probe")
+      assert sql(f"SELECT count(*) FROM cached_path WHERE hash = '{upload_hash}';") == "1", \
+          "phase 9's probe left the cache before this phase could evict it"
+      server.succeed(f"test -e {probe_object}")
+
+      def age(hashes, hours):
+          """Backdate the commit and the last fetch of `hashes` by `hours`."""
+          listed = "', '".join(hashes)
+          sql(f"UPDATE cached_path SET created_at = created_at - interval '{hours} hours' "
+              f"WHERE hash IN ('{listed}');")
+          sql(f"UPDATE cached_path_signature SET last_fetched_at = last_fetched_at - interval '{hours} hours' "
+              f"WHERE cached_path IN (SELECT id FROM cached_path WHERE hash IN ('{listed}'));")
+
+      # 26 hours, not 2: the bound is the fetch TTL floored at the upload grace
+      # (`cacheTtlHours = 1`, `narUploadGraceHours = 24`), so a closure member is
+      # never reclaimed between its own commit and its referrer's.
+      age([upload_hash], 26)
+      poll(f"SELECT count(*) FROM cached_path WHERE hash = '{upload_hash}';", "0",
+           "the eviction kept a path no retained evaluation reaches", timeout=240)
+      server.fail(f"test -e {probe_object}")
+      assert sql(
+          f"SELECT count(*) FROM cached_path WHERE hash IN ('{store_hash}', '{dep_hash}');"
+      ) == "2", "the eviction took a path the live closure still reaches"
+      assert drift() == 0, "counters disagree with their recompute after the eviction"
+
+      # `build_job` and `entry_point` are what seed the reachable walk, so hello
+      # leaves the live set when its names go; the pollers would write them back,
+      # so the triggers go first. Its derivation row then ages past the orphan
+      # grace, and the eviction pass owns the NARs the derivation GC used to.
+      sql("DELETE FROM task_trigger;")
+      hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
+      assert hello_drv, "hello's derivation row is gone before this phase deleted anything"
+      hello_paths = [h for h in (store_hash, drv_hash)
+                     if sql(f"SELECT count(*) FROM cached_path WHERE hash = '{h}';") == "1"]
+      assert store_hash in hello_paths, "hello's output is not cached; the eviction would prove nothing"
+
+      sql(f"DELETE FROM build_job WHERE derivation = '{hello_drv}';")
+      sql(f"DELETE FROM entry_point WHERE derivation = '{hello_drv}';")
+      sql(f"UPDATE derivation SET created_at = created_at - interval '48 hours' WHERE id = '{hello_drv}';")
+      age(hello_paths, 26)
+
+      poll(f"SELECT count(*) FROM derivation WHERE id = '{hello_drv}';", "0",
+           "the orphan GC kept a derivation nothing reaches", timeout=240)
+      listed = "', '".join(hello_paths)
+      poll(f"SELECT count(*) FROM cached_path WHERE hash IN ('{listed}');", "0",
+           "hello's paths outlived the only derivation that reached them", timeout=240)
+      for h in hello_paths:
+          server.fail(f"test -e {nar_object(h + '-hello')}")
+      assert sql(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';") == "1", \
+          "a path its own name still reaches left the cache with hello"
+      assert drift() == 0, "counters disagree with their recompute after the GC and the eviction"
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
