@@ -36,6 +36,9 @@ pub struct ConsistencyReport {
     pub counter_drift: i64,
     /// Promotable anchors found unpromoted, queued by this pass.
     pub unpromoted_ready: i64,
+    /// `build_job` rows this pass inserted for pending anchors a live evaluation
+    /// reaches and nobody named. A repair, like the drift counts.
+    pub adopted: i64,
     /// Outputs of terminal-success producers with no backing artifact.
     pub unbacked_trusted_outputs: i64,
     /// `Building` evaluations with zero non-terminal anchors left.
@@ -69,6 +72,7 @@ impl ConsistencyReport {
             + self.wedged_building_evals
             + self.nar_counter_drift
             + self.negative_reference_counters
+            + self.adopted
     }
 }
 
@@ -116,6 +120,22 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await;
     crate::status::emit_transition_effects(ctx, &repaired.promoted).await;
 
+    // The one naming repair: the events that can leave a pending anchor unnamed
+    // each repair it on their own path, and this is the backstop for a lost move.
+    let adopted = if crate::reachability::pending_orphan_frontier(db).await? {
+        let adopted = crate::reachability::adopt_pending_closures(db).await?;
+        let mut queued = Vec::new();
+        for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+            queued.extend(crate::readiness::promote(db, chunk).await?);
+        }
+
+        crate::bump_graph_version(db, &adopted.evaluations()).await?;
+        crate::status::emit_transition_effects(ctx, &queued).await;
+        adopted.pairs.len() as i64
+    } else {
+        0
+    };
+
     let unbacked_trusted_outputs =
         count(db, format!("SELECT count(*) AS n FROM ({unbacked}) u")).await?;
 
@@ -142,6 +162,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     Ok(ConsistencyReport {
         counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
         unpromoted_ready: repaired.promoted.len() as i64,
+        adopted,
         unbacked_trusted_outputs,
         wedged_building_evals,
         nar_counter_drift,
@@ -164,6 +185,44 @@ mod tests {
         }
     }
 
+    /// The sweep's statement script: the gating select, the NAR repair, the
+    /// readiness repair, the queue settle, the naming probe (and the walk it
+    /// guards when `hole` is set), then the two read-only alarms.
+    fn scripted(hole: bool) -> sea_orm::DatabaseConnection {
+        let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
+        let empty = Vec::<BTreeMap<String, Value>>::new();
+        let mut db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([(
+                "hash".to_owned(),
+                Value::from("h".to_owned()),
+            )])]])
+            .append_exec_results([exec(0), exec(2)])
+            .append_query_results([n()])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(uuid::Uuid::now_v7()),
+            )])]])
+            .append_exec_results([exec(0), exec(3), exec(0), exec(5)])
+            .append_query_results([empty.clone(), empty.clone()]);
+        db = if hole {
+            db.append_query_results([vec![BTreeMap::from([(
+                "?column?".to_owned(),
+                Value::Int(Some(1)),
+            )])]])
+            .append_exec_results([exec(0)])
+            .append_query_results([vec![BTreeMap::from([
+                ("evaluation".to_owned(), Value::from(uuid::Uuid::now_v7())),
+                ("derivation".to_owned(), Value::from(uuid::Uuid::now_v7())),
+            ])]])
+            .append_query_results([empty.clone()])
+            .append_exec_results([exec(1)])
+        } else {
+            db.append_query_results([empty.clone()])
+        };
+
+        db.append_query_results([n(), n()]).into_connection()
+    }
+
     /// The repairs are these counters' only backstop, so the report has to
     /// actually run them - the NAR one first, because the readiness recount
     /// reads wholeness. Without this, deleting either leaves the suite green.
@@ -171,24 +230,7 @@ mod tests {
     /// while carrying only one of the two.
     #[tokio::test]
     async fn the_report_repairs_both_counters_before_it_counts() {
-        let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
-        let empty = Vec::<BTreeMap<String, Value>>::new();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![BTreeMap::from([(
-                "hash".to_owned(),
-                Value::from("h".to_owned()),
-            )])]])
-            .append_query_results([n()])
-            .append_query_results([vec![BTreeMap::from([(
-                "derivation".to_owned(),
-                Value::from(uuid::Uuid::now_v7()),
-            )])]])
-            .append_query_results([empty.clone(), empty])
-            .append_query_results([n(), n()])
-            .append_exec_results([exec(0), exec(2), exec(0), exec(3), exec(0), exec(5)])
-            .into_connection();
-
-        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        let (ctx, pool) = crate::test_ctx::ctx(scripted(false)).await;
         let report = graph_consistency_report(&ctx).await.unwrap();
         drop(ctx);
 
@@ -205,6 +247,7 @@ mod tests {
             report.repair_scope, 1,
             "the readiness repair's scope is measured too"
         );
+        assert_eq!(report.adopted, 0);
 
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
@@ -238,8 +281,40 @@ mod tests {
             "the queue is settled against the repaired counters: {log:?}"
         );
         assert!(
-            log[11].contains("SELECT DISTINCT o.hash") && log[12].contains("FROM evaluation ev"),
+            log[11].contains(
+                "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
+            ),
+            "the naming backstop asks before it walks: {log:?}"
+        );
+        assert!(
+            log[12].contains("SELECT DISTINCT o.hash") && log[13].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
+        );
+        assert_eq!(log.len(), 14, "{log:?}");
+    }
+
+    /// A pending anchor nobody names below a live evaluation's builder is the one
+    /// hole no counter repair can close: the sweep walks, names, queues what it
+    /// named, and reports the rows as a repair.
+    #[tokio::test]
+    async fn the_sweep_adopts_when_a_live_evaluation_reaches_an_unnamed_pending_anchor() {
+        let (ctx, pool) = crate::test_ctx::ctx(scripted(true)).await;
+        let report = graph_consistency_report(&ctx).await.unwrap();
+        drop(ctx);
+
+        assert_eq!(report.adopted, 1);
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert!(
+            log[11].contains("LIMIT 1")
+                && log[12].contains("SET LOCAL work_mem")
+                && log[13].contains("INSERT INTO build_job")
+                && log[14].contains("SET status = 1")
+                && log[15].contains("graph_version = e.graph_version + 1"),
+            "probe, walk, queue what was named, bump: {log:?}"
+        );
+        assert!(
+            log[16].contains("SELECT DISTINCT o.hash") && log[17].contains("FROM evaluation ev"),
+            "the read-only alarms still come last: {log:?}"
         );
     }
 
@@ -256,8 +331,9 @@ mod tests {
             negative_reference_counters: 7,
             gating_paths: 1000,
             repair_scope: 2000,
+            adopted: 2,
         };
-        assert_eq!(r.total(), 26);
+        assert_eq!(r.total(), 28);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }
