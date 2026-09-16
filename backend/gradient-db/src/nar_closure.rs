@@ -145,6 +145,11 @@ fn seed_statement() -> String {
     )
 }
 
+crate::sql_fn! {
+    SEED_STATEMENT_QUERY = seed_statement,
+        params = [CachedPathHash];
+}
+
 /// Serialising pass ahead of every delete, guarded or not: it is the retire's half
 /// of the module doc's one hash-ordered acquisition, and `FOR UPDATE` conflicts
 /// with the RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds
@@ -152,6 +157,11 @@ fn seed_statement() -> String {
 /// opens its snapshot after it (see the module doc on READ COMMITTED). It reads
 /// nothing and decides nothing; see [`retire_paths`].
 const LOCK: &str = "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
+
+crate::sql! {
+    LOCK_QUERY = LOCK,
+        params = [CachedPathHashes(64)];
+}
 
 /// The rows a commit's seed can count from: the references it reports (tokens,
 /// so the hash is their prefix), the references currently indexed for it, and its
@@ -164,6 +174,11 @@ const LOCK_REFERENCES: &str = "\
                    UNION \
                    SELECT $2::text) \
     ORDER BY hash FOR SHARE";
+
+crate::sql! {
+    LOCK_REFERENCES_QUERY = LOCK_REFERENCES,
+        params = [CachedPathHashes(64), CachedPathHash];
+}
 
 /// Lock every row a commit's counter will be counted from, before the commit
 /// decides anything.
@@ -200,12 +215,8 @@ pub async fn lock_reference_endpoints<'txn>(
     hash: &str,
     references: &[String],
 ) -> Result<ReferenceLock<'txn>, DbErr> {
-    txn.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        LOCK_REFERENCES,
-        [references.to_vec().into(), hash.into()],
-    ))
-    .await?;
+    txn.execute_raw(LOCK_REFERENCES_QUERY.bind([references.to_vec().into(), hash.into()]))
+        .await?;
 
     Ok(ReferenceLock {
         txn,
@@ -238,6 +249,11 @@ const FORWARD: &str = r#"
     RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS whole
 "#;
 
+crate::sql! {
+    FORWARD_QUERY = FORWARD,
+        params = [CachedPathHashes(64)];
+}
+
 const REVERSE: &str = r#"
     UPDATE cached_path cp
     SET missing_references = cp.missing_references + c.n
@@ -248,6 +264,11 @@ const REVERSE: &str = r#"
     RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = c.n) AS was_whole
 "#;
 
+crate::sql! {
+    REVERSE_QUERY = REVERSE,
+        params = [CachedPathHashes(64)];
+}
+
 fn delete_statement(guard: Option<&str>) -> String {
     let guard = guard.map(|g| format!(" AND ({g})")).unwrap_or_default();
     format!(
@@ -255,6 +276,18 @@ fn delete_statement(guard: Option<&str>) -> String {
          RETURNING cp.hash, {whole} AS was_whole",
         whole = whole_predicate("cp"),
     )
+}
+
+crate::sql_fn! {
+    DELETE_STATEMENT = || delete_statement(None),
+        params = [CachedPathHashes(64)];
+
+    // The guarded shape TTL eviction actually runs; see
+    // `gradient-cache`'s `UNSIGNED_GUARD`.
+    DELETE_STATEMENT_GUARDED = || delete_statement(Some(
+        "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)"
+    )),
+        params = [CachedPathHashes(64)];
 }
 
 /// Recount the row the lock names from its references and report whether the
@@ -272,11 +305,7 @@ fn delete_statement(guard: Option<&str>) -> String {
 pub async fn seed_references(lock: &ReferenceLock<'_>) -> Result<bool, DbErr> {
     let Some(row) = lock
         .txn
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            seed_statement(),
-            [lock.hash.as_str().into()],
-        ))
+        .query_one_raw(SEED_STATEMENT_QUERY.bind([lock.hash.as_str().into()]))
         .await?
     else {
         return Ok(false);
@@ -297,7 +326,7 @@ pub async fn ripple_whole<C: ConnectionTrait>(
     db: &C,
     became_whole: Vec<String>,
 ) -> Result<Vec<String>, DbErr> {
-    ripple(db, FORWARD, "whole", became_whole).await
+    ripple(db, &FORWARD_QUERY, "whole", became_whole).await
 }
 
 /// The reverse: increment the referrers of the frontier and continue from
@@ -311,25 +340,19 @@ pub async fn ripple_unwhole<C: ConnectionTrait>(
     db: &C,
     stopped_being_whole: Vec<String>,
 ) -> Result<Vec<String>, DbErr> {
-    ripple(db, REVERSE, "was_whole", stopped_being_whole).await
+    ripple(db, &REVERSE_QUERY, "was_whole", stopped_being_whole).await
 }
 
 async fn ripple<C: ConnectionTrait>(
     db: &C,
-    statement: &str,
+    query: &crate::sql::Query,
     flag: &str,
     seeds: Vec<String>,
 ) -> Result<Vec<String>, DbErr> {
     let mut all = seeds.clone();
     let mut frontier = seeds;
     while !frontier.is_empty() {
-        let rows = db
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                statement,
-                [frontier.into()],
-            ))
-            .await?;
+        let rows = db.query_all_raw(query.bind([frontier.into()])).await?;
 
         let mut next = Vec::new();
         for row in rows {
@@ -433,13 +456,14 @@ async fn retire(
         return Ok(Retired::default());
     }
 
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        LOCK,
-        [hashes.to_vec().into()],
-    ))
-    .await?;
+    db.execute_raw(LOCK_QUERY.bind([hashes.to_vec().into()]))
+        .await?;
 
+    // `guard` is an arbitrary caller-supplied fragment (TTL eviction's own
+    // `UNSIGNED_GUARD`), so unlike every other site here the executed text is
+    // not one of a statically enumerable set; DELETE_STATEMENT and
+    // DELETE_STATEMENT_GUARDED above are the plan gate's representative
+    // instantiations of the two shapes production actually runs.
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,

@@ -24,10 +24,7 @@ use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_types::DerivationId;
-use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, QueryResult, Statement,
-    TransactionTrait, Value,
-};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait, Value};
 
 const CASCADE_TARGET: [BuildStatus; 3] = [
     BuildStatus::Created,
@@ -91,11 +88,7 @@ pub async fn substitute_created_anchors<C: ConnectionTrait>(
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            substitute_created_anchors_sql(),
-            [ids.into()],
-        ))
+        .query_all_raw(SUBSTITUTE_CREATED_ANCHORS.bind([ids.into()]))
         .await?;
 
     Ok(returned_transitions(rows))
@@ -116,6 +109,40 @@ fn substitute_created_anchors_sql() -> String {
     )
 }
 
+crate::sql_fn! {
+    SUBSTITUTE_CREATED_ANCHORS = substitute_created_anchors_sql,
+        params = [DerivationIds(64)];
+}
+
+fn cascade_dependency_failed_sql() -> String {
+    let cte = dependency_closure_cte(
+        "dependents",
+        "SELECT $1::uuid",
+        ClosureDirection::Dependents,
+    );
+    format!(
+        r#"
+    {cte}
+    UPDATE derivation_build AS db
+    SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
+    FROM derivation_build old
+    WHERE old.id = db.id
+      AND db.status IN ({cascade_target})
+      AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
+    RETURNING db.derivation, old.status AS from_status, db.status AS to_status
+    "#,
+        dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
+        cascade_target = status_sql::build_in(&CASCADE_TARGET),
+    )
+}
+
+crate::sql_fn! {
+    CASCADE_DEPENDENCY_FAILED = cascade_dependency_failed_sql,
+        params = [DerivationId],
+        tier = Walk,
+        flags = [Walk];
+}
+
 /// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
 /// Walks the global `derivation_dependency` graph upward: any non-terminal
 /// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
@@ -128,33 +155,13 @@ pub async fn cascade_dependency_failed<C>(
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let cte = dependency_closure_cte(
-        "dependents",
-        "SELECT $1::uuid",
-        ClosureDirection::Dependents,
-    );
     // The unbounded upward walk is the widest frontier in the system (940k rows
     // for 68k distinct nodes), so it gets the raised `work_mem`.
     let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            format!(
-                r#"
-            {cte}
-            UPDATE derivation_build AS db
-            SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
-            FROM derivation_build old
-            WHERE old.id = db.id
-              AND db.status IN ({cascade_target})
-              AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
-            RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-            "#,
-                dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
-                cascade_target = status_sql::build_in(&CASCADE_TARGET),
-            ),
-            [Value::Uuid(Some(failed_derivation.into_inner()))],
-        ))
+        .query_all_raw(
+            CASCADE_DEPENDENCY_FAILED.bind([Value::Uuid(Some(failed_derivation.into_inner()))]),
+        )
         .await?;
     walk.commit().await?;
 
@@ -184,11 +191,9 @@ where
 {
     let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            dependency_failed_reconcile_sql(),
-            [Value::Uuid(Some(evaluation.into_inner()))],
-        ))
+        .query_all_raw(
+            DEPENDENCY_FAILED_RECONCILE.bind([Value::Uuid(Some(evaluation.into_inner()))]),
+        )
         .await?;
     walk.commit().await?;
 
@@ -237,6 +242,13 @@ fn dependency_failed_reconcile_sql() -> String {
     )
 }
 
+crate::sql_fn! {
+    DEPENDENCY_FAILED_RECONCILE = dependency_failed_reconcile_sql,
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
+}
+
 /// The dispatch gate reads the invariant: `Queued` means the gates held when the
 /// anchor was promoted, and a regression un-promotes. Reachability still filters
 /// anchors left queued after their last referencing evaluation was torn down.
@@ -251,10 +263,7 @@ pub async fn find_ready_anchors<C: ConnectionTrait>(
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
     use sea_orm::EntityTrait;
     gradient_types::EDerivationBuild::find()
-        .from_raw_sql(Statement::from_string(
-            DatabaseBackend::Postgres,
-            find_ready_anchors_sql(),
-        ))
+        .from_raw_sql(FIND_READY_ANCHORS.stmt())
         .all(db)
         .await
 }
@@ -280,6 +289,11 @@ fn find_ready_anchors_sql() -> String {
         "#,
         queued = status_sql::build(BuildStatus::Queued),
     )
+}
+
+crate::sql_fn! {
+    FIND_READY_ANCHORS = find_ready_anchors_sql,
+        params = [];
 }
 
 /// SQL predicate: the `derivation_build` aliased `alias` has a recorded
@@ -310,16 +324,11 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
 ) -> Result<Vec<TransitionChange>, DbErr> {
-    let sql = requeue_failed_anchors_sql();
     let mut changes = Vec::new();
     for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
         let rows = db
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                &sql,
-                [ids.into()],
-            ))
+            .query_all_raw(REQUEUE_FAILED_ANCHORS.bind([ids.into()]))
             .await?;
         changes.extend(returned_transitions(rows));
     }
@@ -374,6 +383,13 @@ fn requeue_failed_anchors_sql() -> String {
     )
 }
 
+crate::sql_fn! {
+    REQUEUE_FAILED_ANCHORS = requeue_failed_anchors_sql,
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
+
 /// Re-queue terminal-failed anchors across the full build-dependency **closure**
 /// of an evaluation's anchors, not just the derivations its walk re-reported.
 /// `requeue_failed_anchors` only thaws the eval's own derivations; a transitive
@@ -394,11 +410,9 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
     evaluation: gradient_types::EvaluationId,
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            requeue_failed_closure_for_eval_sql(),
-            [Value::Uuid(Some(evaluation.into_inner()))],
-        ))
+        .query_all_raw(
+            REQUEUE_FAILED_CLOSURE_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),
+        )
         .await?;
 
     Ok(returned_transitions(rows))
@@ -424,6 +438,13 @@ fn requeue_failed_closure_for_eval_sql() -> String {
     )
 }
 
+crate::sql_fn! {
+    REQUEUE_FAILED_CLOSURE_FOR_EVAL = requeue_failed_closure_for_eval_sql,
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
+}
+
 /// Reconcile anchor state from cache state across an evaluation's dependency
 /// closure: any anchor whose outputs are **all** present in our cache
 /// (`cached_path.file_hash`) is marked `Completed`, even if a
@@ -441,35 +462,44 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
 ) -> Result<Vec<TransitionChange>, DbErr> {
-    let cte = eval_closure_cte();
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            format!(
-                r#"
-            {cte}
-            UPDATE derivation_build db
-            SET status = CASE WHEN db.status IN ({terminal_success}) THEN db.status ELSE {completed} END,
-                updated_at = (now() AT TIME ZONE 'UTC')
-            FROM derivation_build old
-            WHERE old.id = db.id
-              AND db.derivation IN (SELECT derivation FROM closure)
-              AND db.status NOT IN ({terminal_success})
-              AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
-              AND NOT EXISTS (
-                SELECT 1 FROM derivation_output o
-                LEFT JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
-                WHERE o.derivation = db.derivation AND cp.hash IS NULL)
-            RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-            "#,
-                terminal_success = status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
-                completed = status_sql::build(BuildStatus::Completed),
-            ),
-            [Value::Uuid(Some(evaluation.into_inner()))],
-        ))
+        .query_all_raw(
+            RECONCILE_CACHED_ANCHORS_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),
+        )
         .await?;
 
     Ok(returned_transitions(rows))
+}
+
+fn reconcile_cached_anchors_for_eval_sql() -> String {
+    let cte = eval_closure_cte();
+    format!(
+        r#"
+    {cte}
+    UPDATE derivation_build db
+    SET status = CASE WHEN db.status IN ({terminal_success}) THEN db.status ELSE {completed} END,
+        updated_at = (now() AT TIME ZONE 'UTC')
+    FROM derivation_build old
+    WHERE old.id = db.id
+      AND db.derivation IN (SELECT derivation FROM closure)
+      AND db.status NOT IN ({terminal_success})
+      AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
+      AND NOT EXISTS (
+        SELECT 1 FROM derivation_output o
+        LEFT JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
+        WHERE o.derivation = db.derivation AND cp.hash IS NULL)
+    RETURNING db.derivation, old.status AS from_status, db.status AS to_status
+    "#,
+        terminal_success = status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+        completed = status_sql::build(BuildStatus::Completed),
+    )
+}
+
+crate::sql_fn! {
+    RECONCILE_CACHED_ANCHORS_FOR_EVAL = reconcile_cached_anchors_for_eval_sql,
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
 }
 
 #[cfg(test)]

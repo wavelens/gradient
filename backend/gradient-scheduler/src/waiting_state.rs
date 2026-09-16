@@ -17,9 +17,7 @@ use gradient_db::update_evaluation_status;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_types::*;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement, Value,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Value};
 use tracing::{error, info, warn};
 
 /// How long an evaluation must have sat `graph_stuck` before `.drv`-recovery
@@ -455,17 +453,18 @@ async fn eval_blocked_on_unproducible_drv(
 ) -> Result<bool> {
     let row = state
         .worker_db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            unproducible_drv_block_sql(),
-            [Value::Uuid(Some(evaluation_id.into_inner()))],
-        ))
+        .query_one_raw(UNPRODUCIBLE_DRV_BLOCK.bind([Value::Uuid(Some(evaluation_id.into_inner()))]))
         .await
         .context("detect unproducible-drv block")?;
 
     Ok(row
         .and_then(|r| r.try_get::<bool>("", "blocked").ok())
         .unwrap_or(false))
+}
+
+gradient_db::sql_fn! {
+    UNPRODUCIBLE_DRV_BLOCK = unproducible_drv_block_sql,
+        params = [EvaluationId];
 }
 
 fn unproducible_drv_block_sql() -> String {

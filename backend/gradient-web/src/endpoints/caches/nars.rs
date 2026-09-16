@@ -83,6 +83,48 @@ pub struct NarAvailable {
 const DEFAULT_PER_PAGE: u64 = 50;
 const MAX_PER_PAGE: u64 = 200;
 
+fn nars_count_sql(where_sql: &str) -> String {
+    format!(
+        "SELECT COUNT(*) AS total \
+         FROM cached_path_signature cps \
+         JOIN cached_path cp ON cp.id = cps.cached_path \
+         WHERE {where_sql}"
+    )
+}
+
+fn nars_select_sql(
+    where_sql: &str,
+    sort_col: &str,
+    order_dir: &str,
+    limit_idx: usize,
+    offset_idx: usize,
+) -> String {
+    format!(
+        "SELECT cp.hash, cp.hash || '-' || cp.package AS store_path, cp.package, \
+                cp.nar_size, cp.file_size, cp.created_at, cps.last_fetched_at \
+         FROM cached_path_signature cps \
+         JOIN cached_path cp ON cp.id = cps.cached_path \
+         WHERE {where_sql} \
+         ORDER BY {sort_col} {order_dir} NULLS LAST, cp.id ASC \
+         LIMIT ${limit_idx} OFFSET ${offset_idx}"
+    )
+}
+
+// Representative instantiation for the plan gate: every optional filter engaged.
+gradient_db::sql_fn! {
+    NARS_LIST_COUNT = || nars_count_sql("cps.cache = $1 AND cp.hash LIKE $2 AND cp.package LIKE $3"),
+        params = [CacheId, Text("abc%"), Text("%hello%")];
+
+    NARS_LIST_SELECT = || nars_select_sql(
+        "cps.cache = $1 AND cp.hash LIKE $2 AND cp.package LIKE $3",
+        "cp.created_at",
+        "DESC",
+        4,
+        5,
+    ),
+        params = [CacheId, Text("abc%"), Text("%hello%"), Int(50), Int(0)];
+}
+
 pub async fn list(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -136,12 +178,7 @@ pub async fn list(
         total: i64,
     }
 
-    let count_sql = format!(
-        "SELECT COUNT(*) AS total \
-         FROM cached_path_signature cps \
-         JOIN cached_path cp ON cp.id = cps.cached_path \
-         WHERE {where_sql}"
-    );
+    let count_sql = nars_count_sql(&where_sql);
     let total = CountRow::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         &count_sql,
@@ -157,15 +194,7 @@ pub async fn list(
     // separate page fetches return disjoint sets.
     let limit_idx = values.len() + 1;
     let offset_idx = values.len() + 2;
-    let select_sql = format!(
-        "SELECT cp.hash, cp.hash || '-' || cp.package AS store_path, cp.package, \
-                cp.nar_size, cp.file_size, cp.created_at, cps.last_fetched_at \
-         FROM cached_path_signature cps \
-         JOIN cached_path cp ON cp.id = cps.cached_path \
-         WHERE {where_sql} \
-         ORDER BY {sort_col} {order_dir} NULLS LAST, cp.id ASC \
-         LIMIT ${limit_idx} OFFSET ${offset_idx}"
-    );
+    let select_sql = nars_select_sql(&where_sql, sort_col, order_dir, limit_idx, offset_idx);
     values.push(sea_orm::Value::BigInt(Some(per_page as i64)));
     values.push(sea_orm::Value::BigInt(Some(offset as i64)));
 
@@ -230,13 +259,25 @@ pub async fn show(
     }))
 }
 
+gradient_db::sql! {
+    NAR_STATS = "SELECT COUNT(*) AS total_nars, \
+                COALESCE(SUM(cp.nar_size),0)::bigint AS total_nar_size, \
+                COALESCE(SUM(cp.file_size),0)::bigint AS total_file_size, \
+                MAX(cp.created_at) AS last_uploaded_at, \
+                MIN(cps.last_fetched_at) AS oldest_fetched_at \
+         FROM cached_path_signature cps \
+         JOIN cached_path cp ON cp.id = cps.cached_path \
+         WHERE cps.cache = $1",
+        params = [CacheId];
+}
+
 pub async fn stats(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache_name): Path<String>,
 ) -> WebResult<Json<BaseResponse<NarStats>>> {
-    use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
+    use sea_orm::FromQueryResult;
     let cache = load_cache(
         &state,
         Caller::from_option(&maybe_user),
@@ -255,21 +296,11 @@ pub async fn stats(
         oldest_fetched_at: Option<NaiveDateTime>,
     }
 
-    let row = Row::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "SELECT COUNT(*) AS total_nars, \
-                COALESCE(SUM(cp.nar_size),0)::bigint AS total_nar_size, \
-                COALESCE(SUM(cp.file_size),0)::bigint AS total_file_size, \
-                MAX(cp.created_at) AS last_uploaded_at, \
-                MIN(cps.last_fetched_at) AS oldest_fetched_at \
-         FROM cached_path_signature cps \
-         JOIN cached_path cp ON cp.id = cps.cached_path \
-         WHERE cps.cache = $1",
-        [sea_orm::Value::Uuid(Some(cache.id.into_inner()))],
-    ))
-    .one(&state.web_db)
-    .await?
-    .ok_or_else(|| WebError::internal("stats query returned no row"))?;
+    let row =
+        Row::find_by_statement(NAR_STATS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))
+            .one(&state.web_db)
+            .await?
+            .ok_or_else(|| WebError::internal("stats query returned no row"))?;
 
     Ok(ok_json(NarStats {
         total_nars: row.total_nars,

@@ -9,8 +9,8 @@
 use anyhow::{Context, Result};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait,
-    IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, Statement,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    QueryFilter, QueryOrder, QuerySelect,
 };
 use serde_json::Value as JsonValue;
 
@@ -170,22 +170,23 @@ pub async fn mark_failed<C: ConnectionTrait>(
 
 pub const STARTUP_FAILURE_MESSAGE: &str = "server restarted before completion";
 
-pub async fn mark_all_active_failed<C: ConnectionTrait>(conn: &C) -> Result<u64> {
-    let res = conn
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"UPDATE admin_task
+crate::sql! {
+    MARK_ALL_ACTIVE_FAILED = r#"UPDATE admin_task
                SET status = $1,
                    error = COALESCE(error, $2),
                    finished_at = NOW() AT TIME ZONE 'UTC'
                WHERE status IN ($3, $4)"#,
-            [
-                sea_orm::Value::Int(Some(AdminTaskStatus::Failed as i32)),
-                sea_orm::Value::String(Some(STARTUP_FAILURE_MESSAGE.into())),
-                sea_orm::Value::Int(Some(AdminTaskStatus::Pending as i32)),
-                sea_orm::Value::Int(Some(AdminTaskStatus::Running as i32)),
-            ],
-        ))
+        params = [Int(3), Text("server restarted before completion"), Int(0), Int(1)];
+}
+
+pub async fn mark_all_active_failed<C: ConnectionTrait>(conn: &C) -> Result<u64> {
+    let res = conn
+        .execute_raw(MARK_ALL_ACTIVE_FAILED.bind([
+            sea_orm::Value::Int(Some(AdminTaskStatus::Failed as i32)),
+            sea_orm::Value::String(Some(STARTUP_FAILURE_MESSAGE.into())),
+            sea_orm::Value::Int(Some(AdminTaskStatus::Pending as i32)),
+            sea_orm::Value::Int(Some(AdminTaskStatus::Running as i32)),
+        ]))
         .await
         .context("mark_all_active_failed")?;
     Ok(res.rows_affected())

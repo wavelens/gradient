@@ -9,8 +9,7 @@ use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
-    QueryFilter, Statement,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use serde::Serialize;
 use std::collections::HashSet;
@@ -111,25 +110,26 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     Ok(())
 }
 
-/// Cache NAR TTL pass: deletes `cache_derivation` rows whose `last_fetched_at`
-/// is older than `nar_ttl_hours` **and** whose derivation has no active build
-/// (status not in `Failed` / `Aborted` / `DependencyFailed`). For each expired
-/// row, deletes the NAR file from storage and drops the row. The derivation
-/// and its outputs stay (other caches may still hold them).
-///
-/// The active-build guard makes the TTL pass an orphan-eviction step in the
-/// design "old evals/builds deleted by `keep_evaluations` → derivation
-/// becomes orphan → NAR kept for `nar_ttl_hours` → evicted". It prevents
-/// evicting NARs of derivations that are still referenced by an active
-/// evaluation just because no one happened to fetch them recently.
-///
-/// Fixed-output derivations (any `derivation_output` with `ca IS NOT NULL`)
-/// are skipped entirely: their NARs come from external sources that may no
-/// longer be reachable (404s, deleted release tarballs), so a transient gap
-/// in build references must not delete the only cached copy. FOD NARs are
-/// reclaimed only by `gc_orphan_derivations`, which fires after the grace
-/// period and zero remaining build references.
-const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
+gradient_db::sql! {
+    /// Cache NAR TTL pass: deletes `cache_derivation` rows whose `last_fetched_at`
+    /// is older than `nar_ttl_hours` **and** whose derivation has no active build
+    /// (status not in `Failed` / `Aborted` / `DependencyFailed`). For each expired
+    /// row, deletes the NAR file from storage and drops the row. The derivation
+    /// and its outputs stay (other caches may still hold them).
+    ///
+    /// The active-build guard makes the TTL pass an orphan-eviction step in the
+    /// design "old evals/builds deleted by `keep_evaluations` → derivation
+    /// becomes orphan → NAR kept for `nar_ttl_hours` → evicted". It prevents
+    /// evicting NARs of derivations that are still referenced by an active
+    /// evaluation just because no one happened to fetch them recently.
+    ///
+    /// Fixed-output derivations (any `derivation_output` with `ca IS NOT NULL`)
+    /// are skipped entirely: their NARs come from external sources that may no
+    /// longer be reachable (404s, deleted release tarballs), so a transient gap
+    /// in build references must not delete the only cached copy. FOD NARs are
+    /// reclaimed only by `gc_orphan_derivations`, which fires after the grace
+    /// period and zero remaining build references.
+    STALE_CACHED_NARS_SELECT = r#"SELECT cd.id, cd.cache, cd.derivation
                FROM cache_derivation cd
                WHERE cd.last_fetched_at IS NOT NULL
                  AND cd.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')
@@ -142,7 +142,45 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
                      SELECT 1 FROM derivation_output dout
                      WHERE dout.derivation = cd.derivation
                        AND dout.ca IS NOT NULL
-                 )"#;
+                 )"#,
+        params = [Int(24), Int(4), Int(5), Int(6), Int(9)],
+        tier = Sweep;
+
+    /// The TTL eviction's DELETE that drops this cache's signatures on the
+    /// evicted derivation's outputs, before the paths are considered for retire.
+    DELETE_CACHE_SIGNATURES_FOR_HASHES = r#"
+                DELETE FROM cached_path_signature s
+                USING cached_path cp
+                WHERE s.cached_path = cp.id AND s.cache = $1 AND cp.hash = ANY($2)
+                "#,
+        params = [CacheId, CachedPathHashes(64)],
+        tier = Sweep;
+
+    /// Keep-set query for the orphan-files pass. Outputs (clause 1) stay gated on
+    /// build status - they are rebuildable and TTL-evicted by `cleanup_stale_cached_nars`.
+    /// The `.drv` (clause 4) and input sources (clause 3) are producerless and kept
+    /// for any anchor regardless of status; only `gc_orphan_derivations` reclaims them.
+    ACTIVE_HASHES_SELECT = r#"
+    SELECT DISTINCT dout.hash AS hash
+    FROM derivation_output dout
+    JOIN derivation_build b ON b.derivation = dout.derivation
+    WHERE b.status NOT IN ($1, $2, $3, $4)
+    UNION
+    SELECT cp.hash AS hash
+    FROM cached_path cp
+    WHERE cp.file_hash IS NOT NULL
+    UNION
+    SELECT s.hash AS hash
+    FROM derivation_input_source s
+    JOIN derivation_build b ON b.derivation = s.derivation
+    UNION
+    SELECT d.hash AS hash
+    FROM derivation d
+    JOIN derivation_build b ON b.derivation = d.id
+"#,
+        params = [Int(4), Int(5), Int(6), Int(9)],
+        tier = Sweep;
+}
 
 /// The TTL eviction's retire guard: a path only goes once no cache signs it.
 const UNSIGNED_GUARD: &str =
@@ -171,17 +209,13 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
 
     let rows = state
         .worker_db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            STALE_CACHED_NARS_SELECT,
-            [
-                sea_orm::Value::BigInt(Some(ttl_hours as i64)),
-                sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
-                sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
-                sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
-                sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
-            ],
-        ))
+        .query_all_raw(STALE_CACHED_NARS_SELECT.bind([
+            sea_orm::Value::BigInt(Some(ttl_hours as i64)),
+            sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
+            sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
+            sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
+            sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
+        ]))
         .await
         .context("Failed to query stale cache_derivation rows")?;
 
@@ -229,15 +263,10 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         if !output_hashes.is_empty() {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;
-            txn.execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                r#"
-                DELETE FROM cached_path_signature s
-                USING cached_path cp
-                WHERE s.cached_path = cp.id AND s.cache = $1 AND cp.hash = ANY($2)
-                "#,
-                [cache_id.into(), output_hashes.clone().into()],
-            ))
+            txn.execute_raw(
+                DELETE_CACHE_SIGNATURES_FOR_HASHES
+                    .bind([cache_id.into(), output_hashes.clone().into()]),
+            )
             .await
             .context("TTL GC: failed to delete cached_path_signature rows")?;
 
@@ -388,29 +417,6 @@ async fn purge_zombie_cached_paths(
     Ok(purged)
 }
 
-/// Keep-set query for the orphan-files pass. Outputs (clause 1) stay gated on
-/// build status - they are rebuildable and TTL-evicted by `cleanup_stale_cached_nars`.
-/// The `.drv` (clause 4) and input sources (clause 3) are producerless and kept
-/// for any anchor regardless of status; only `gc_orphan_derivations` reclaims them.
-const ACTIVE_HASHES_SELECT: &str = r#"
-    SELECT DISTINCT dout.hash AS hash
-    FROM derivation_output dout
-    JOIN derivation_build b ON b.derivation = dout.derivation
-    WHERE b.status NOT IN ($1, $2, $3, $4)
-    UNION
-    SELECT cp.hash AS hash
-    FROM cached_path cp
-    WHERE cp.file_hash IS NOT NULL
-    UNION
-    SELECT s.hash AS hash
-    FROM derivation_input_source s
-    JOIN derivation_build b ON b.derivation = s.derivation
-    UNION
-    SELECT d.hash AS hash
-    FROM derivation d
-    JOIN derivation_build b ON b.derivation = d.id
-"#;
-
 /// Returns the set of NAR-storage hashes that must NOT be garbage-collected by
 /// the orphan-files pass. A hash is kept when either:
 ///
@@ -437,16 +443,12 @@ const ACTIVE_HASHES_SELECT: &str = r#"
 async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
     let rows = state
         .worker_db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            ACTIVE_HASHES_SELECT,
-            [
-                sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
-                sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
-                sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
-                sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
-            ],
-        ))
+        .query_all_raw(ACTIVE_HASHES_SELECT.bind([
+            sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
+            sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
+            sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
+            sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
+        ]))
         .await
         .context("Failed to query active NAR hashes")?;
 
@@ -464,7 +466,7 @@ mod tests {
     use super::*;
     use crate::cacher::test_support::test_server_state;
     use gradient_storage::NarStore;
-    use sea_orm::{MockDatabase, Value};
+    use sea_orm::{DatabaseBackend, MockDatabase, Value};
     use std::collections::BTreeMap;
     use std::path::Path;
 
@@ -532,6 +534,7 @@ mod tests {
     #[test]
     fn keep_set_protects_drv_and_sources_for_any_anchor() {
         let sql = ACTIVE_HASHES_SELECT
+            .text()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -611,10 +614,10 @@ mod tests {
     /// by `gc_orphan_derivations`.
     #[test]
     fn ttl_select_skips_fixed_output_derivations() {
+        let sql = STALE_CACHED_NARS_SELECT.text();
         assert!(
-            STALE_CACHED_NARS_SELECT.contains("derivation_output")
-                && STALE_CACHED_NARS_SELECT.contains("ca IS NOT NULL"),
-            "TTL SELECT lost its FOD guard: {STALE_CACHED_NARS_SELECT}"
+            sql.contains("derivation_output") && sql.contains("ca IS NOT NULL"),
+            "TTL SELECT lost its FOD guard: {sql}"
         );
     }
 

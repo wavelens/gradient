@@ -16,8 +16,8 @@ use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::{CacheId, DerivationId, ProjectId};
 use sea_orm::sea_query::{Alias, Expr};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Select, Statement,
+    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, Select,
 };
 use tracing::warn;
 
@@ -253,6 +253,12 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
     !has_producer && object_present
 }
 
+crate::sql! {
+    CLEAR_SUBSTITUTABLE_TRUST = "UPDATE derivation_build SET substitutable = false \
+             WHERE derivation = ANY($1) AND substitutable",
+        params = [DerivationIds(64)];
+}
+
 /// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
@@ -335,13 +341,8 @@ pub async fn demote_cached_output(
     let _anchors = crate::readiness::lock_anchors(&txn, &producers).await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
-        txn.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "UPDATE derivation_build SET substitutable = false \
-             WHERE derivation = ANY($1) AND substitutable",
-            [ids.into()],
-        ))
-        .await?;
+        txn.execute_raw(CLEAR_SUBSTITUTABLE_TRUST.bind([ids.into()]))
+            .await?;
     }
 
     let mut retired = crate::nar_closure::retire_paths(&txn, &[hash.to_owned()]).await?;
@@ -389,6 +390,17 @@ pub async fn demote_referrers_of(
     Ok(producers)
 }
 
+crate::sql! {
+    OUTPUT_ONLY_CACHED_DEP_HASHES = r#"
+        SELECT DISTINCT o.hash
+        FROM derivation_dependency e
+        JOIN derivation_output o ON o.derivation = e.dependency
+        JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
+        WHERE e.derivation = $1 AND o.external_url IS NULL
+        "#,
+        params = [DerivationId];
+}
+
 /// Demote every output-only-cached **direct build dependency** of `derivation`
 /// (output present in our cache, not on a real upstream). Recovers an *absent
 /// orphan*: when a build fails on an input that has no producer row and no
@@ -411,17 +423,9 @@ pub async fn demote_output_only_cached_deps(
     }
 
     let db = &ctx.worker_db;
-    let hashes = OutputHash::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        r#"
-        SELECT DISTINCT o.hash
-        FROM derivation_dependency e
-        JOIN derivation_output o ON o.derivation = e.dependency
-        JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
-        WHERE e.derivation = $1 AND o.external_url IS NULL
-        "#,
-        [derivation.into_inner().into()],
-    ))
+    let hashes = OutputHash::find_by_statement(
+        OUTPUT_ONLY_CACHED_DEP_HASHES.bind([derivation.into_inner().into()]),
+    )
     .all(db)
     .await?;
 
@@ -481,6 +485,11 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
     )
 }
 
+crate::sql_fn! {
+    UNBACKED_TRUSTED_OUTPUTS = unbacked_trusted_outputs_select,
+        params = [];
+}
+
 pub async fn demote_unbacked_trusted_outputs(
     ctx: &crate::DbContext,
 ) -> Result<u64, sea_orm::DbErr> {
@@ -491,12 +500,9 @@ pub async fn demote_unbacked_trusted_outputs(
         hash: String,
     }
 
-    let hashes = OutputHash::find_by_statement(Statement::from_string(
-        DatabaseBackend::Postgres,
-        unbacked_trusted_outputs_select(),
-    ))
-    .all(&ctx.worker_db)
-    .await?;
+    let hashes = OutputHash::find_by_statement(UNBACKED_TRUSTED_OUTPUTS.stmt())
+        .all(&ctx.worker_db)
+        .await?;
 
     let mut reset = 0u64;
     for h in hashes {
@@ -504,6 +510,14 @@ pub async fn demote_unbacked_trusted_outputs(
     }
 
     Ok(reset)
+}
+
+crate::sql! {
+    OUTPUT_REFERRERS_SELECT = "SELECT DISTINCT r.referrer \
+     FROM cached_path_reference r \
+     WHERE r.reference_hash = $1 \
+       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)",
+        params = [CachedPathHash];
 }
 
 /// Referrers of `missing_hash` that are **rebuildable outputs**: a
@@ -514,11 +528,6 @@ pub async fn demote_unbacked_trusted_outputs(
 /// `.drv`/source the cache cannot re-supply without a full re-eval, rebuilds
 /// nothing, and strands the deleted `.drv`'s own live dependents behind the
 /// `.drv`-importable promotion gate - the exact dead zone this filter prevents.
-const OUTPUT_REFERRERS_SELECT: &str = "SELECT DISTINCT r.referrer \
-     FROM cached_path_reference r \
-     WHERE r.reference_hash = $1 \
-       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)";
-
 async fn output_referrers_of_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
@@ -530,16 +539,14 @@ async fn output_referrers_of_hash<C: ConnectionTrait>(
         referrer: String,
     }
 
-    Ok(Referrer::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        OUTPUT_REFERRERS_SELECT,
-        [hash.into()],
-    ))
-    .all(db)
-    .await?
-    .into_iter()
-    .map(|r| r.referrer)
-    .collect())
+    Ok(
+        Referrer::find_by_statement(OUTPUT_REFERRERS_SELECT.bind([hash.into()]))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|r| r.referrer)
+            .collect(),
+    )
 }
 
 /// A `cached_path` row whose object the uploader still owes to storage.
@@ -910,6 +917,7 @@ mod tests {
     #[test]
     fn output_referrers_exclude_producerless_drv_and_source() {
         let sql = OUTPUT_REFERRERS_SELECT
+            .text()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -951,7 +959,7 @@ mod tests {
 
     #[test]
     fn the_uploader_scan_reads_the_partial_index_oldest_first() {
-        use sea_orm::QueryTrait;
+        use sea_orm::{DatabaseBackend, QueryTrait};
 
         let sql = unconfirmed_select(1000)
             .build(DatabaseBackend::Postgres)

@@ -264,6 +264,27 @@ pub(crate) async fn confirm(ctx: &DbContext, c: &NarConfirm) -> anyhow::Result<b
     Ok(updated == 1)
 }
 
+gradient_db::sql! {
+    SYNC_REFERENCE_INDEX = r#"
+        WITH reported(reference, ord) AS (
+            SELECT DISTINCT ON (t.tok) t.tok, t.ord
+            FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
+            WHERE t.tok <> ''
+            ORDER BY t.tok, t.ord
+        ), dropped AS (
+            DELETE FROM cached_path_reference r
+            WHERE r.referrer = $1
+              AND NOT EXISTS (SELECT 1 FROM reported n WHERE n.reference = r.reference)
+        )
+        INSERT INTO cached_path_reference (referrer, reference, reference_hash, position)
+        SELECT $1, n.reference, split_part(n.reference, '-', 1), n.ord FROM reported n
+        ON CONFLICT (referrer, reference) DO UPDATE
+        SET position = EXCLUDED.position
+        WHERE cached_path_reference.position IS DISTINCT FROM EXCLUDED.position
+        "#,
+        params = [CachedPathHash, CachedPathHashes(64)];
+}
+
 /// Record a path's hash-name references in the normalized `cached_path_reference`
 /// relation: `reference_hash` indexes referrer lookups, and `position` preserves
 /// the worker's order (nix store-path order) so the narinfo `References:` line and
@@ -289,28 +310,8 @@ async fn sync_reference_index(
     hash: &str,
     references: &[String],
 ) -> Result<(), sea_orm::DbErr> {
-    db.execute_raw(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        r#"
-        WITH reported(reference, ord) AS (
-            SELECT DISTINCT ON (t.tok) t.tok, t.ord
-            FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
-            WHERE t.tok <> ''
-            ORDER BY t.tok, t.ord
-        ), dropped AS (
-            DELETE FROM cached_path_reference r
-            WHERE r.referrer = $1
-              AND NOT EXISTS (SELECT 1 FROM reported n WHERE n.reference = r.reference)
-        )
-        INSERT INTO cached_path_reference (referrer, reference, reference_hash, position)
-        SELECT $1, n.reference, split_part(n.reference, '-', 1), n.ord FROM reported n
-        ON CONFLICT (referrer, reference) DO UPDATE
-        SET position = EXCLUDED.position
-        WHERE cached_path_reference.position IS DISTINCT FROM EXCLUDED.position
-        "#,
-        [hash.into(), references.to_vec().into()],
-    ))
-    .await?;
+    db.execute_raw(SYNC_REFERENCE_INDEX.bind([hash.into(), references.to_vec().into()]))
+        .await?;
 
     Ok(())
 }

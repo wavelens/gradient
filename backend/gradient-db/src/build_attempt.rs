@@ -16,10 +16,28 @@ use gradient_entity::ids::{
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, Statement,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
+    PaginatorTrait, QueryFilter, QueryOrder,
 };
 use uuid::Uuid;
+
+crate::sql! {
+    // No Param kind names a `derivation_build`/`evaluation`/`entry_point` id array;
+    // BuildId(s) stands in as the closest UUID-shaped kind the registry offers.
+    SUBSTITUTE_MISS_COUNTS = r#"SELECT ba.derivation_build AS anchor, bj.evaluation AS evaluation,
+                          count(*) AS misses
+                   FROM build_attempt ba
+                   JOIN build_job bj ON bj.id = ba.build_job
+                   WHERE ba.derivation_build = ANY($1) AND ba.reason = $2
+                   GROUP BY ba.derivation_build, bj.evaluation"#,
+        params = [BuildIds(64), Int(0)];
+
+    LATEST_ATTEMPT_EVALUATION = "SELECT bj.evaluation FROM build_attempt ba \
+             JOIN build_job bj ON bj.id = ba.build_job \
+             WHERE ba.derivation_build = $1 \
+             ORDER BY ba.created_at DESC LIMIT 1",
+        params = [BuildId];
+}
 
 /// Open a new attempt for an anchor (`derivation_build`), attributed to
 /// `build_job`, under `dispatched_job`.
@@ -67,19 +85,10 @@ pub async fn substitute_miss_counts<C: ConnectionTrait>(
     let rows = crate::fetch_in_chunks(anchors, |chunk| {
         let ids: Vec<Uuid> = chunk.iter().map(|a| a.into_inner()).collect();
         async move {
-            db.query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                r#"SELECT ba.derivation_build AS anchor, bj.evaluation AS evaluation,
-                          count(*) AS misses
-                   FROM build_attempt ba
-                   JOIN build_job bj ON bj.id = ba.build_job
-                   WHERE ba.derivation_build = ANY($1) AND ba.reason = $2
-                   GROUP BY ba.derivation_build, bj.evaluation"#,
-                [
-                    ids.into(),
-                    (AttemptFailureReason::SubstituteUnavailable as i32).into(),
-                ],
-            ))
+            db.query_all_raw(SUBSTITUTE_MISS_COUNTS.bind([
+                ids.into(),
+                (AttemptFailureReason::SubstituteUnavailable as i32).into(),
+            ]))
             .await
         }
     })
@@ -103,14 +112,7 @@ pub async fn latest_attempt_evaluation<C: ConnectionTrait>(
     derivation_build: DerivationBuildId,
 ) -> Result<Option<EvaluationId>, DbErr> {
     let row = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT bj.evaluation FROM build_attempt ba \
-             JOIN build_job bj ON bj.id = ba.build_job \
-             WHERE ba.derivation_build = $1 \
-             ORDER BY ba.created_at DESC LIMIT 1",
-            [derivation_build.into_inner().into()],
-        ))
+        .query_one_raw(LATEST_ATTEMPT_EVALUATION.bind([derivation_build.into_inner().into()]))
         .await?;
 
     row.map(|r| r.try_get::<Uuid>("", "evaluation").map(EvaluationId::new))
@@ -129,6 +131,23 @@ pub async fn latest_attempt<C: ConnectionTrait>(
         .await
 }
 
+fn latest_attempts_sql(chunk: &[DerivationBuildId]) -> String {
+    let in_list = chunk
+        .iter()
+        .map(|id| format!("'{}'", id.into_inner()))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "SELECT DISTINCT ON (derivation_build) * FROM build_attempt \
+         WHERE derivation_build IN ({in_list}) ORDER BY derivation_build, created_at DESC"
+    )
+}
+
+crate::sql_fn! {
+    LATEST_ATTEMPTS = || latest_attempts_sql(&[DerivationBuildId::nil(); 64]),
+        params = [];
+}
+
 /// Most recent attempt for each anchor, fetched in one `DISTINCT ON` query per
 /// chunk. Replaces per-anchor [`latest_attempt`] loops.
 pub async fn latest_attempts<C: ConnectionTrait>(
@@ -138,15 +157,7 @@ pub async fn latest_attempts<C: ConnectionTrait>(
     use sea_orm::{DbBackend, Statement};
 
     let rows = crate::fetch_in_chunks(anchors, |chunk| async move {
-        let in_list = chunk
-            .iter()
-            .map(|id| format!("'{}'", id.into_inner()))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
-            "SELECT DISTINCT ON (derivation_build) * FROM build_attempt \
-             WHERE derivation_build IN ({in_list}) ORDER BY derivation_build, created_at DESC"
-        );
+        let sql = latest_attempts_sql(&chunk);
         Entity::find()
             .from_raw_sql(Statement::from_string(DbBackend::Postgres, sql))
             .all(db)

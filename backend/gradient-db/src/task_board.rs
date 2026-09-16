@@ -13,8 +13,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_entity::ids::{EntryPointId, EvaluationId, TaskId};
 use sea_orm::{
-    ActiveEnum, ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, FromQueryResult, Statement,
-    TransactionTrait,
+    ActiveEnum, ConnectionTrait, DatabaseTransaction, DbErr, FromQueryResult, TransactionTrait,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -26,6 +25,16 @@ struct EvalStatusCountRow {
     cnt: i64,
 }
 
+crate::sql! {
+    // No Param kind names an `evaluation` id array; BuildIds stands in as the
+    // closest UUID-shaped kind the registry offers.
+    BUILD_STATUS_COUNTS_BY_EVALUATION = "SELECT bj.evaluation AS evaluation, db.status AS status, COUNT(*) AS cnt \
+         FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build \
+         WHERE bj.evaluation = ANY($1) \
+         GROUP BY bj.evaluation, db.status",
+        params = [BuildIds(64)];
+}
+
 /// `(evaluation, build.status) -> count`, one grouped query per chunk of ids.
 pub async fn build_status_counts_by_evaluation<C: ConnectionTrait>(
     db: &C,
@@ -33,16 +42,9 @@ pub async fn build_status_counts_by_evaluation<C: ConnectionTrait>(
 ) -> Result<HashMap<EvaluationId, HashMap<BuildStatus, i64>>, DbErr> {
     let rows = fetch_in_chunks(eval_ids, |chunk| async move {
         let ids: Vec<Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
-        EvalStatusCountRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "SELECT bj.evaluation AS evaluation, db.status AS status, COUNT(*) AS cnt \
-             FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build \
-             WHERE bj.evaluation = ANY($1) \
-             GROUP BY bj.evaluation, db.status",
-            [ids.into()],
-        ))
-        .all(db)
-        .await
+        EvalStatusCountRow::find_by_statement(BUILD_STATUS_COUNTS_BY_EVALUATION.bind([ids.into()]))
+            .all(db)
+            .await
     })
     .await?;
 
@@ -66,6 +68,13 @@ struct EvalLevelCountRow {
     cnt: i64,
 }
 
+crate::sql! {
+    EVALUATION_MESSAGE_COUNTS = "SELECT evaluation, level, COUNT(*) AS cnt \
+         FROM evaluation_message WHERE evaluation = ANY($1) \
+         GROUP BY evaluation, level",
+        params = [BuildIds(64)];
+}
+
 /// `(evaluation, message.level) -> count`.
 pub async fn evaluation_message_counts<C: ConnectionTrait>(
     db: &C,
@@ -73,15 +82,9 @@ pub async fn evaluation_message_counts<C: ConnectionTrait>(
 ) -> Result<HashMap<EvaluationId, HashMap<MessageLevel, i64>>, DbErr> {
     let rows = fetch_in_chunks(eval_ids, |chunk| async move {
         let ids: Vec<Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
-        EvalLevelCountRow::find_by_statement(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "SELECT evaluation, level, COUNT(*) AS cnt \
-             FROM evaluation_message WHERE evaluation = ANY($1) \
-             GROUP BY evaluation, level",
-            [ids.into()],
-        ))
-        .all(db)
-        .await
+        EvalLevelCountRow::find_by_statement(EVALUATION_MESSAGE_COUNTS.bind([ids.into()]))
+            .all(db)
+            .await
     })
     .await?;
 
@@ -104,13 +107,8 @@ struct StatusCountRow {
     cnt: i64,
 }
 
-/// Live `building` / `queued` build counts across the task's non-finished
-/// evaluations. Powers the "N building · M queued" header chip.
-pub async fn task_queue_summary<C: ConnectionTrait>(
-    db: &C,
-    task: TaskId,
-) -> Result<(i64, i64), DbErr> {
-    let sql = format!(
+fn task_queue_summary_sql() -> String {
+    format!(
         "SELECT b.status AS status, COUNT(*) AS cnt \
          FROM build_job bj \
          JOIN evaluation e ON e.id = bj.evaluation \
@@ -126,14 +124,26 @@ pub async fn task_queue_summary<C: ConnectionTrait>(
             BuildStatus::Building,
             BuildStatus::FailedTransient,
         ]),
-    );
-    let rows = StatusCountRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        sql,
-        [task.into_inner().into()],
-    ))
-    .all(db)
-    .await?;
+    )
+}
+
+crate::sql_fn! {
+    // No Param kind names a `task` id; BuildId stands in as the closest
+    // UUID-shaped kind the registry offers.
+    TASK_QUEUE_SUMMARY = task_queue_summary_sql,
+        params = [BuildId];
+}
+
+/// Live `building` / `queued` build counts across the task's non-finished
+/// evaluations. Powers the "N building · M queued" header chip.
+pub async fn task_queue_summary<C: ConnectionTrait>(
+    db: &C,
+    task: TaskId,
+) -> Result<(i64, i64), DbErr> {
+    let rows =
+        StatusCountRow::find_by_statement(TASK_QUEUE_SUMMARY.bind([task.into_inner().into()]))
+            .all(db)
+            .await?;
 
     let mut building = 0i64;
     let mut queued = 0i64;
@@ -194,6 +204,19 @@ const DEP_COUNTS_SQL: &str = "WITH RECURSIVE seeds(ep, root_drv) AS (SELECT * FR
     WHERE c.drv <> s.root_drv \
     GROUP BY c.ep, b.status";
 
+crate::sql! {
+    // No Param kind names an `entry_point` id array; BuildIds stands in as the
+    // closest UUID-shaped kind the registry offers.
+    DEP_COUNTS_SQL_QUERY = DEP_COUNTS_SQL,
+        params = [
+            BuildIds(64),
+            DerivationIds(64),
+            EvaluationId,
+        ],
+        tier = Walk,
+        flags = [Walk];
+}
+
 /// For each `(entry_point, root derivation)` seed, count this evaluation's
 /// builds whose derivation lies in the entry point's build-time dependency
 /// closure, excluding the entry point's own build. The walk is pruned to
@@ -217,11 +240,11 @@ where
         .map(|(ep, drv)| (ep.into_inner(), *drv))
         .unzip();
     let walk = crate::graph_sql::begin_walk(db).await?;
-    let rows = DepCountRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        DEP_COUNTS_SQL,
-        [eps.into(), drvs.into(), evaluation.into_inner().into()],
-    ))
+    let rows = DepCountRow::find_by_statement(DEP_COUNTS_SQL_QUERY.bind([
+        eps.into(),
+        drvs.into(),
+        evaluation.into_inner().into(),
+    ]))
     .all(&walk)
     .await?;
     walk.commit().await?;

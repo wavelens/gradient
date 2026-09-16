@@ -60,6 +60,22 @@ pub fn write_rows(conn: &Connection, spec: &TableSpec, rows: &[Row]) -> Result<(
     Ok(())
 }
 
+/// Representative instantiation for the plan gate: every spec shares the same
+/// single-`$1` shape, so the "evaluation" spec's own query stands for all of them.
+fn report_scope_query_sql() -> String {
+    crate::tables::eval_scope_tables()
+        .iter()
+        .find(|s| s.name == "evaluation")
+        .expect("evaluation spec always present")
+        .sql
+        .to_string()
+}
+
+gradient_db::sql_fn! {
+    REPORT_SCOPE_QUERY = report_scope_query_sql,
+        params = [EvaluationId];
+}
+
 /// Every spec is scoped by one id. Bound as a uuid rather than its text form:
 /// Postgres has no `uuid = text` operator, so a stringly-typed scope fails the
 /// whole export with `42883` instead of matching nothing.

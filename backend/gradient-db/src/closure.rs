@@ -15,8 +15,8 @@
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, EntityTrait,
-    FromQueryResult, QueryFilter, Statement, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, FromQueryResult,
+    QueryFilter, TransactionTrait,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -42,6 +42,32 @@ fn roots_closure_cte() -> String {
         "SELECT unnest($1::uuid[])",
         ClosureDirection::Dependencies,
     )
+}
+
+fn transitive_closure_reachable_sql() -> String {
+    format!("{} SELECT derivation FROM closure", roots_closure_cte())
+}
+
+crate::sql_fn! {
+    TRANSITIVE_CLOSURE_REACHABLE = transitive_closure_reachable_sql,
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
+
+fn transitive_closure_edges_sql() -> String {
+    format!(
+        "{} SELECT e.derivation, e.dependency FROM derivation_dependency e \
+         JOIN closure c ON e.derivation = c.derivation",
+        roots_closure_cte()
+    )
+}
+
+crate::sql_fn! {
+    TRANSITIVE_CLOSURE_EDGES = transitive_closure_edges_sql,
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
 }
 
 /// Forward `derivation_dependency` closure of `roots`; returns every reachable
@@ -75,16 +101,12 @@ pub async fn transitive_closure_reachable_in(
     }
 
     let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
-    let reached = DerivationRow::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        format!("{} SELECT derivation FROM closure", roots_closure_cte()),
-        [ids.into()],
-    ))
-    .all(walk)
-    .await?
-    .into_iter()
-    .map(|r| DerivationId::new(r.derivation))
-    .collect();
+    let reached = DerivationRow::find_by_statement(TRANSITIVE_CLOSURE_REACHABLE.bind([ids.into()]))
+        .all(walk)
+        .await?
+        .into_iter()
+        .map(|r| DerivationId::new(r.derivation))
+        .collect();
 
     Ok(reached)
 }
@@ -169,17 +191,9 @@ where
 
     let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
     let walk = crate::graph_sql::begin_walk(db).await?;
-    let edges = EdgeRow::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        format!(
-            "{} SELECT e.derivation, e.dependency FROM derivation_dependency e \
-             JOIN closure c ON e.derivation = c.derivation",
-            roots_closure_cte()
-        ),
-        [ids.into()],
-    ))
-    .all(&walk)
-    .await?;
+    let edges = EdgeRow::find_by_statement(TRANSITIVE_CLOSURE_EDGES.bind([ids.into()]))
+        .all(&walk)
+        .await?;
     walk.commit().await?;
 
     let mut adjacency: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();

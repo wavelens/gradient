@@ -14,22 +14,26 @@ use anyhow::{Context as _, Result};
 use gradient_entity::ids::BuildAttemptId;
 use gradient_storage::LogStorage;
 use rusqlite::Connection;
+use sea_orm::ConnectionTrait;
 use sea_orm::prelude::Uuid;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
 use crate::redact::Redactor;
 use crate::schema::ManifestRow;
 
-/// Attempts that did not succeed: `AttemptOutcome::Failed` is 3 and `Aborted`
-/// is 4. An abort is included because its partial log is often the only record
-/// of what a worker was doing before it went quiet. Running, Built and
-/// Substituted are the cases deliberately skipped.
-const FAILED_ATTEMPT_SQL: &str = "SELECT a.id::text FROM build_attempt a \
+gradient_db::sql! {
+    /// Attempts that did not succeed: `AttemptOutcome::Failed` is 3 and `Aborted`
+    /// is 4. An abort is included because its partial log is often the only record
+    /// of what a worker was doing before it went quiet. Running, Built and
+    /// Substituted are the cases deliberately skipped.
+    FAILED_ATTEMPT_SQL = "SELECT a.id::text FROM build_attempt a \
      WHERE a.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1) \
-       AND a.outcome IN (3, 4)";
+       AND a.outcome IN (3, 4)",
+        params = [EvaluationId];
 
-const ALL_ATTEMPT_SQL: &str = "SELECT count(*)::text FROM build_attempt a \
-     WHERE a.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1)";
+    ALL_ATTEMPT_SQL = "SELECT count(*)::text FROM build_attempt a \
+     WHERE a.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1)",
+        params = [EvaluationId];
+}
 
 pub fn create_log_table(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -65,11 +69,7 @@ pub async fn fetch_failed_logs<C: ConnectionTrait>(
     evaluation: Uuid,
 ) -> Result<FetchedLogs> {
     let failed = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            FAILED_ATTEMPT_SQL,
-            [sea_orm::Value::Uuid(Some(evaluation))],
-        ))
+        .query_all_raw(FAILED_ATTEMPT_SQL.bind([sea_orm::Value::Uuid(Some(evaluation))]))
         .await
         .context("query failed attempts")?;
 
@@ -90,11 +90,7 @@ pub async fn fetch_failed_logs<C: ConnectionTrait>(
     }
 
     let attempts_available = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            ALL_ATTEMPT_SQL,
-            [sea_orm::Value::Uuid(Some(evaluation))],
-        ))
+        .query_one_raw(ALL_ATTEMPT_SQL.bind([sea_orm::Value::Uuid(Some(evaluation))]))
         .await
         .context("count attempts")?
         .and_then(|r| r.try_get_by_index::<Option<String>>(0).ok().flatten())
@@ -202,8 +198,9 @@ mod tests {
     /// so rather than relying on the caller to remember.
     #[test]
     fn only_failed_attempts_are_selected() {
-        assert!(FAILED_ATTEMPT_SQL.contains("outcome IN (3, 4)"));
-        assert!(FAILED_ATTEMPT_SQL.contains("$1"), "must be eval-scoped");
-        assert!(!FAILED_ATTEMPT_SQL.contains('*'));
+        let sql = FAILED_ATTEMPT_SQL.text();
+        assert!(sql.contains("outcome IN (3, 4)"));
+        assert!(sql.contains("$1"), "must be eval-scoped");
+        assert!(!sql.contains('*'));
     }
 }

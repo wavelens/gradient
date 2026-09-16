@@ -14,7 +14,7 @@ use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, IntoActiveModel,
-    QueryFilter, Set, Statement,
+    QueryFilter, Set,
 };
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
@@ -116,20 +116,8 @@ async fn build_signer<C: ConnectionTrait>(
     }
 }
 
-/// True iff the path is produced by at least one task and every producing
-/// task has `sign_cache=false` - mirrors the sweep's skip gate. The reserved
-/// per-project `build-request` task is always signable. Paths with no producing
-/// task (`.drv` files, direct uploads) return false -> signed normally.
-async fn producing_tasks_all_private<C: ConnectionTrait>(db: &C, hash: &str) -> bool {
-    #[derive(FromQueryResult)]
-    struct Flags {
-        producers: i64,
-        signable: i64,
-    }
-
-    let stmt = Statement::from_sql_and_values(
-        db.get_database_backend(),
-        r#"
+gradient_db::sql! {
+    PRODUCER_SIGN_FLAGS = r#"
             SELECT count(*)::bigint AS producers,
                    count(*) FILTER (
                        WHERE p.sign_cache OR p.name = 'build-request'
@@ -141,8 +129,21 @@ async fn producing_tasks_all_private<C: ConnectionTrait>(db: &C, hash: &str) -> 
             JOIN task p    ON p.id = e.task
             WHERE do_.hash = $1
         "#,
-        [hash.into()],
-    );
+        params = [CachedPathHash];
+}
+
+/// True iff the path is produced by at least one task and every producing
+/// task has `sign_cache=false` - mirrors the sweep's skip gate. The reserved
+/// per-project `build-request` task is always signable. Paths with no producing
+/// task (`.drv` files, direct uploads) return false -> signed normally.
+async fn producing_tasks_all_private<C: ConnectionTrait>(db: &C, hash: &str) -> bool {
+    #[derive(FromQueryResult)]
+    struct Flags {
+        producers: i64,
+        signable: i64,
+    }
+
+    let stmt = PRODUCER_SIGN_FLAGS.bind([hash.into()]);
 
     match Flags::find_by_statement(stmt).one(db).await {
         Ok(Some(f)) => f.producers > 0 && f.signable == 0,

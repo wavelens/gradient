@@ -11,10 +11,16 @@ use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
 use gradient_types::{ActionConfig, MTaskAction, MTaskActionDelivery, TaskActionDeliveryId};
-use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseBackend, IntoActiveModel, Statement};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 use serde_json::Value as JsonValue;
 use std::time::Instant;
 use tracing::warn;
+
+gradient_db::sql! {
+    TOUCH_ACTION_LAST_FIRED = "UPDATE task_action SET last_fired_at = $1, updated_at = $1 \
+             WHERE id IN (SELECT id FROM task_action WHERE id = $2 FOR UPDATE SKIP LOCKED)",
+        params = [Now, Text("11111111-1111-1111-1111-111111111111")];
+}
 
 pub async fn execute_action(
     ctx: &CiContext,
@@ -113,15 +119,10 @@ pub async fn execute_action(
         // equivalent timestamp to this one row, so skip when another writer
         // holds the lock instead of convoying pool connections behind it.
         let stamp = gradient_types::now();
-        let update = Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "UPDATE task_action SET last_fired_at = $1, updated_at = $1 \
-             WHERE id IN (SELECT id FROM task_action WHERE id = $2 FOR UPDATE SKIP LOCKED)",
-            [
-                stamp.into(),
-                sea_orm::Value::Uuid(Some(action_id.into_inner())),
-            ],
-        );
+        let update = TOUCH_ACTION_LAST_FIRED.bind([
+            stamp.into(),
+            sea_orm::Value::Uuid(Some(action_id.into_inner())),
+        ]);
         if let Err(e) = ctx.db.worker_db.execute_raw(update).await {
             warn!(error = %e, %action_id, "Failed to update action last_fired_at");
         }

@@ -137,19 +137,8 @@ pub(super) async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &M
     gradient_ci::actions::dispatch_evaluation_created(&state.ci(), eval).await;
 }
 
-async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {
-    // `evaluation.check_run_ids` is a JSON map keyed by check-context name; any
-    // stored id can match the clicked check, so scan the map's values.
-    use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
-
-    #[derive(FromQueryResult)]
-    struct Row {
-        id: uuid::Uuid,
-    }
-
-    let row = Row::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        r#"SELECT id FROM evaluation
+gradient_db::sql! {
+    EVAL_BY_CHECK_RUN_ID = r#"SELECT id FROM evaluation
            WHERE check_run_ids IS NOT NULL
              AND EXISTS (
                  SELECT 1
@@ -157,12 +146,25 @@ async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Optio
                  WHERE (kv.value)::text::bigint = $1
              )
            LIMIT 1"#,
-        [sea_orm::Value::BigInt(Some(check_id))],
-    ))
-    .one(&state.web_db)
-    .await
-    .ok()
-    .flatten()?;
+        params = [Int(123456)];
+}
+
+async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Option<MEvaluation> {
+    // `evaluation.check_run_ids` is a JSON map keyed by check-context name; any
+    // stored id can match the clicked check, so scan the map's values.
+    use sea_orm::FromQueryResult;
+
+    #[derive(FromQueryResult)]
+    struct Row {
+        id: uuid::Uuid,
+    }
+
+    let row =
+        Row::find_by_statement(EVAL_BY_CHECK_RUN_ID.bind([sea_orm::Value::BigInt(Some(check_id))]))
+            .one(&state.web_db)
+            .await
+            .ok()
+            .flatten()?;
 
     EEvaluation::find_by_id(gradient_entity::ids::EvaluationId::new(row.id))
         .one(&state.web_db)
