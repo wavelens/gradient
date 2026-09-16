@@ -27,7 +27,7 @@ use prometheus::{
     Encoder, Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
     Opts, Registry, TextEncoder,
 };
-use sea_orm::{DatabaseBackend, FromQueryResult, Iterable, Statement};
+use sea_orm::{FromQueryResult, Iterable};
 use subtle::ConstantTimeEq;
 
 use crate::error::{WebError, WebResult};
@@ -512,13 +512,10 @@ pub(crate) async fn collect(
     scheduler: &Scheduler,
 ) -> WebResult<Observations> {
     // Single CTE-style query returning typed rows for every counter we need.
-    let sql = observations_sql();
-
-    let rows: Vec<CountRow> =
-        CountRow::find_by_statement(Statement::from_string(DatabaseBackend::Postgres, sql))
-            .all(&state.web_db)
-            .await
-            .map_err(WebError::from)?;
+    let rows: Vec<CountRow> = CountRow::find_by_statement(OBSERVATIONS.stmt())
+        .all(&state.web_db)
+        .await
+        .map_err(WebError::from)?;
 
     let mut obs = Observations {
         version: env!("CARGO_PKG_VERSION").to_string(),

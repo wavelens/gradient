@@ -17,7 +17,7 @@ use gradient_scheduler::Scheduler;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DbBackend, EntityTrait, Statement, Value};
+use sea_orm::{ActiveModelTrait, EntityTrait, Value};
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -495,8 +495,7 @@ async fn load_active_triggers_for_integration(
     // Match by project (each project has one inbound integration per forge_type), not by
     // config integration_id: the GitHub App seed migration rewrites integration
     // rows, so a pre-migration trigger's stale UUID would stop matching.
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Postgres,
+    let stmt = ACTIVE_TRIGGERS_FOR_INTEGRATION.bind_built(
         active_triggers_sql(trigger_type),
         [Value::Uuid(Some(integration_id.into_inner()))],
     );

@@ -15,7 +15,7 @@ use gradient_core::ServerState;
 use gradient_db::cache_metric;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+use sea_orm::ConnectionTrait;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -112,9 +112,8 @@ async fn cache_series<C: sea_orm::ConnectionTrait>(
     );
 
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            &sql,
+        .query_all_raw(CACHE_SERIES.bind_built(
+            sql,
             [
                 sea_orm::Value::String(Some(metric.to_owned())),
                 sea_orm::Value::String(Some(cache_id.to_string())),
@@ -263,7 +262,7 @@ pub async fn get_cache_stats(
 mod tests {
     use super::*;
     use chrono::Timelike;
-    use sea_orm::MockDatabase;
+    use sea_orm::{DatabaseBackend, MockDatabase};
 
     /// The serving path must only add into the accumulator: it takes no
     /// connection, so the `cache_metric` row cannot be written per NAR (#644).
