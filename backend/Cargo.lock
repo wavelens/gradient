@@ -2225,6 +2225,7 @@ dependencies = [
  "gradient-types",
  "gradient-util",
  "mockall",
+ "ractor",
  "ring",
  "sea-orm",
  "serde",

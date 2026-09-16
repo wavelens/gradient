@@ -858,6 +858,24 @@ in {
           default = false;
         };
 
+        smallNarBytes = lib.mkOption {
+          description = "A NAR at or under this many bytes is relayed through the server on upload, pulled through it on download and admitted to the hot RAM cache; larger NARs keep their presigned S3 URLs.";
+          type = lib.types.ints.unsigned;
+          default = 1048576;
+        };
+
+        hotNarCacheBytes = lib.mkOption {
+          description = "Capacity in bytes of the in-memory NAR cache, ranked by hits per byte. 0 disables it.";
+          type = lib.types.ints.unsigned;
+          default = 536870912;
+        };
+
+        narUploadConcurrency = lib.mkOption {
+          description = "Background uploads of relayed NARs to S3 in flight at once.";
+          type = lib.types.ints.positive;
+          default = 4;
+        };
+
         narUploadGraceHours = lib.mkOption {
           description = "Grace period in hours before the orphan-files GC reclaims a NAR object no database row references (covers the upload commit window).";
           type = lib.types.ints.unsigned;
@@ -1179,6 +1197,9 @@ in {
         GRADIENT_SIGN_SWEEP_INTERVAL_SECS = toString cfg.settings.signSweepIntervalSecs;
         GRADIENT_DEBUG_INDEX_INTERVAL_SECS = toString cfg.settings.debugIndexIntervalSecs;
         GRADIENT_NAR_VERIFY_DIGEST = lib.boolToString cfg.settings.narVerifyDigest;
+        GRADIENT_SMALL_NAR_BYTES = toString cfg.settings.smallNarBytes;
+        GRADIENT_HOT_NAR_CACHE_BYTES = toString cfg.settings.hotNarCacheBytes;
+        GRADIENT_NAR_UPLOAD_CONCURRENCY = toString cfg.settings.narUploadConcurrency;
         GRADIENT_NAR_UPLOAD_GRACE_HOURS = toString cfg.settings.narUploadGraceHours;
         GRADIENT_GC_WEDGED_EVAL_HOURS = toString cfg.settings.gcWedgedEvalHours;
         GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.settings.narStorageOpenTimeoutSecs;
