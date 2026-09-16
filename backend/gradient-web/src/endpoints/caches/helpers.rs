@@ -13,10 +13,12 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
 use bytes::Bytes;
+use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_sources::get_path_from_derivation_output;
+use gradient_storage::NarSource;
 use gradient_types::*;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
@@ -381,12 +383,22 @@ pub async fn fetch_nar_stream(
 ) -> WebResult<(String, u64, BoxStream<'static, anyhow::Result<Bytes>>)> {
     let effective_hash =
         crate::endpoints::caches::nar::resolve_effective_hash_db(&state.web_db, path_hash).await?;
-    let (size, stream) = state
+    let source = state
         .nar_storage
-        .get_stream(&effective_hash)
+        .open(&effective_hash, 0)
         .await
         .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
         .or_not_found("Path")?;
+    let (size, stream) = match source {
+        NarSource::Hot(bytes) => {
+            let size = bytes.len() as u64;
+            (
+                size,
+                futures::stream::once(async move { Ok(bytes) }).boxed(),
+            )
+        }
+        NarSource::Stream { size, stream } => (size, stream),
+    };
     Ok((effective_hash, size, stream))
 }
 
@@ -412,6 +424,7 @@ pub(super) async fn delete_nar_from_cache(
         .await
         .map_err(|e| WebError::internal(e.to_string()))?;
     let cached_path = report.cached_path.or_not_found("Nar")?;
+    state.nar_storage.hot().invalidate(hash);
 
     Ok((
         cached_path,

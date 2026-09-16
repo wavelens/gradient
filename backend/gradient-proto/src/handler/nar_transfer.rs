@@ -16,11 +16,12 @@ use futures::StreamExt;
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_scheduler::Scheduler;
-use gradient_storage::{PartialWriter, StagedFile};
+use gradient_storage::{NarSource, PartialWriter, StagedFile};
 use gradient_util::shutdown::Shutdown;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, trace, warn};
 
+use crate::ingest::WriteNeeded;
 use crate::messages::{ArchivedClientMessage, ClientMessage, ServerMessage};
 use crate::session::frame::Frame;
 
@@ -169,6 +170,9 @@ pub(super) struct NarReceiveStore {
     shutdown: Shutdown,
     peer_id: String,
     max_bytes: u64,
+    /// A stream no longer than this is kept in memory as it is staged, so the
+    /// commit can hand the bytes straight to the hot cache.
+    retain_up_to: u64,
     max_streams: usize,
     ended_grace: Duration,
     active: HashMap<String, PathState>,
@@ -195,6 +199,7 @@ impl NarReceiveStore {
         peer_id: &str,
         ttl: std::time::Duration,
         max_bytes: u64,
+        retain_up_to: u64,
         shutdown: Shutdown,
     ) -> anyhow::Result<Self> {
         Ok(Self {
@@ -202,6 +207,7 @@ impl NarReceiveStore {
             shutdown,
             peer_id: peer_id.to_owned(),
             max_bytes,
+            retain_up_to,
             max_streams: MAX_ACTIVE_STREAMS,
             ended_grace: ENDED_STREAM_GRACE,
             idle_timeout: ttl,
@@ -340,7 +346,11 @@ impl NarReceiveStore {
 
         let key = self.key(job_id, hash);
         let received = self.store.received_len(&key, token).await.unwrap_or(0);
-        let writer = match self.store.open_writer(&key, token, received, 0).await {
+        let writer = match self
+            .store
+            .open_writer(&key, token, received, self.retain_up_to)
+            .await
+        {
             Ok(writer) => writer,
             Err(e) => {
                 let reason = format!("failed to open the staged partial for {store_path}: {e}");
@@ -755,11 +765,23 @@ struct CommitUploadedNar {
     staged: Option<StagedNar>,
 }
 
+/// What a relayed commit left behind for the index and the hot cache.
+struct Relayed {
+    confirmed: bool,
+    hot: HotUpdate,
+}
+
+enum HotUpdate {
+    Insert(bytes::Bytes),
+    Invalidate,
+    Keep,
+}
+
 /// Detached storage commit plus DB effects for one `NarUploaded`.
 async fn commit_uploaded_nar(c: CommitUploadedNar) {
-    let committed = match c.staged {
+    let relayed = match c.staged {
         Some(staged) => {
-            commit_relayed(
+            match commit_relayed(
                 &c.writer,
                 &c.state,
                 &c.scheduler,
@@ -772,9 +794,13 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
                 staged,
             )
             .await
+            {
+                Some(relayed) => relayed,
+                None => return,
+            }
         }
         None => {
-            commit_presigned(
+            if !commit_presigned(
                 &c.writer,
                 &c.state,
                 &c.scheduler,
@@ -786,11 +812,16 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
                 c.file_size,
             )
             .await
+            {
+                return;
+            }
+
+            Relayed {
+                confirmed: true,
+                hot: HotUpdate::Invalidate,
+            }
         }
     };
-    if !committed {
-        return;
-    }
 
     let file_size_i64 = c.file_size as i64;
     let nar_record = NarUploadRecord {
@@ -801,9 +832,23 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
         references: &c.references,
         deriver: c.deriver.as_deref(),
         ca: c.ca.as_deref(),
+        confirmed: relayed.confirmed,
     };
-    if let Err(e) = mark_nar_stored(&c.state, c.project_id, &c.store_path, &nar_record).await {
-        warn!(store_path = %c.store_path, error = %e, "failed to mark NAR as stored");
+    match mark_nar_stored(&c.state, c.project_id, &c.store_path, &nar_record).await {
+        Ok(()) => {
+            match relayed.hot {
+                HotUpdate::Insert(bytes) => c.state.nar_storage.hot().insert(&c.hash, bytes),
+                HotUpdate::Invalidate => c.state.nar_storage.hot().invalidate(&c.hash),
+                HotUpdate::Keep => {}
+            }
+
+            if !relayed.confirmed
+                && let Some(staged) = c.state.nar_storage.staged()
+            {
+                staged.wake();
+            }
+        }
+        Err(e) => warn!(store_path = %c.store_path, error = %e, "failed to mark NAR as stored"),
     }
     if let Err(e) = record_nar_push_metric(&c.state, c.project_id, file_size_i64).await {
         debug!(error = %e, "failed to record cache metric for NarUploaded");
@@ -812,8 +857,8 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
 
 /// Commit a direct-mode (relayed) push: wait for the staging task to flush,
 /// check the length and hash it reports against the ones the worker reported,
-/// then move the staged file into `nar_storage` (a rename on local disk).
-/// Returns `false` (after failing the build transiently) if any step fails.
+/// then put the staged file where it is served from. Returns `None` (after
+/// failing the build transiently) if any step fails.
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -829,14 +874,14 @@ async fn commit_relayed(
     file_hash: &str,
     file_size: u64,
     staged: StagedNar,
-) -> bool {
+) -> Option<Relayed> {
     let file = match staged.finish().await {
         Ok(file) => file,
         Err(e) => {
             let reason = format!("failed to stage NAR: {e}");
             error!(%peer_id, %job_id, %store_path, error = %e, "NAR staging failed");
             fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-            return false;
+            return None;
         }
     };
 
@@ -848,7 +893,7 @@ async fn commit_relayed(
         error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
         fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
         discard_staged(&file.path).await;
-        return false;
+        return None;
     }
 
     if !gradient_storage::file_hash_matches(file_hash, &file.sha256) {
@@ -856,31 +901,71 @@ async fn commit_relayed(
         error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
         fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
         discard_staged(&file.path).await;
-        return false;
+        return None;
     }
 
     match crate::ingest::nar_write_needed(&state.worker_db, &state.nar_storage, hash, file_hash)
         .await
     {
-        Ok(true) => {
-            if let Err(e) = state.nar_storage.adopt_file(hash, &file.path).await {
-                let reason = format!("failed to write NAR to storage: {e}");
-                error!(%peer_id, %job_id, %store_path, error = %e, "nar_storage.adopt_file failed");
-                fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-                return false;
+        Ok(WriteNeeded::Write) => match place_relayed(&state.nar_storage, hash, &file.path).await {
+            Ok(confirmed) => {
+                let hot = match file.bytes {
+                    Some(bytes) if state.nar_storage.hot().admits(bytes.len() as u64) => {
+                        HotUpdate::Insert(bytes)
+                    }
+                    _ => HotUpdate::Invalidate,
+                };
+                trace!(%peer_id, %job_id, %store_path, file_size, confirmed, "NAR placed");
+                Some(Relayed { confirmed, hot })
             }
+            Err(e) => {
+                let reason = format!("failed to write NAR to storage: {e}");
+                error!(%peer_id, %job_id, %store_path, error = %e, "place_relayed failed");
+                fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+                None
+            }
+        },
+        Ok(WriteNeeded::Stored) => {
+            discard_staged(&file.path).await;
+            Some(Relayed {
+                confirmed: true,
+                hot: HotUpdate::Keep,
+            })
         }
-        Ok(false) => discard_staged(&file.path).await,
+        Ok(WriteNeeded::Staged) => {
+            discard_staged(&file.path).await;
+            Some(Relayed {
+                confirmed: false,
+                hot: HotUpdate::Keep,
+            })
+        }
         Err(e) => {
             let reason = format!("failed to check for a stored NAR: {e}");
             error!(%peer_id, %job_id, %store_path, error = %e, "NAR idempotency check failed");
             fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-            return false;
+            None
         }
     }
+}
 
-    trace!(%peer_id, %job_id, %store_path, file_size, "NAR stored");
-    true
+/// Put a verified claim where it is served from: the object store by rename on
+/// the local backend, `nar-staged/` on an S3 backend with staging so the
+/// uploader moves it on, or straight into S3 where there is no staging.
+/// Returns whether the object is in storage now.
+async fn place_relayed(
+    store: &gradient_storage::NarStore,
+    hash: &str,
+    claim: &std::path::Path,
+) -> anyhow::Result<bool> {
+    if store.local_base().is_none()
+        && let Some(staged) = store.staged()
+    {
+        staged.adopt(hash, claim).await?;
+        return Ok(false);
+    }
+
+    store.adopt_file(hash, claim).await?;
+    Ok(true)
 }
 
 /// Drop a staged file `nar_storage` did not adopt. A leftover is reclaimed by
@@ -1049,15 +1134,11 @@ pub(super) async fn serve_nar_request(
     };
 
     let open = |offset: u64| async move {
-        tokio::time::timeout(
-            storage_open_timeout,
-            state.nar_storage.get_stream_from(hash, offset),
-        )
-        .await
+        tokio::time::timeout(storage_open_timeout, state.nar_storage.open(hash, offset)).await
     };
 
-    let (size, mut stream) = match open(resume_from).await {
-        Ok(Ok(Some((size, s)))) => (size, s),
+    let mut source = match open(resume_from).await {
+        Ok(Ok(Some(source))) => source,
         Ok(Ok(None)) => {
             invalidate_cached_path(state, hash, store_path).await;
             let reason = format!("NAR not found in cache for {store_path}");
@@ -1066,7 +1147,7 @@ pub(super) async fn serve_nar_request(
             );
         }
         Ok(Err(e)) => {
-            let reason = format!("nar_storage.get_stream({hash}) failed: {e}");
+            let reason = format!("nar_storage.open({hash}) failed: {e}");
             error!(%store_path, error = %e, "NAR storage read error");
             return Err(
                 fail_transfer(writer, job_id, store_path, FailKind::Unavailable, reason).await,
@@ -1074,7 +1155,7 @@ pub(super) async fn serve_nar_request(
         }
         Err(_) => {
             let reason = format!(
-                "nar_storage.get_stream({hash}) timed out after {}s",
+                "nar_storage.open({hash}) timed out after {}s",
                 storage_open_timeout.as_secs()
             );
             warn!(%store_path, "NAR storage open timed out");
@@ -1083,6 +1164,8 @@ pub(super) async fn serve_nar_request(
             );
         }
     };
+
+    let size = source.size();
 
     // The stored `.nar.zst` is immutable per hash, so the pull token is just
     // its size. A worker resuming with a stale token (or claiming more bytes
@@ -1093,8 +1176,8 @@ pub(super) async fn serve_nar_request(
     let mut start = resume_from;
     if resume_from > size || token_mismatch {
         match open(0).await {
-            Ok(Ok(Some((_s, s)))) => {
-                stream = s;
+            Ok(Ok(Some(s))) => {
+                source = s;
                 start = 0;
             }
             _ => {
@@ -1122,6 +1205,14 @@ pub(super) async fn serve_nar_request(
     )
     .await
     .ok();
+
+    let mut stream = match source {
+        NarSource::Hot(bytes) => {
+            let tail = bytes.slice(usize::try_from(start).unwrap_or(0)..);
+            futures::stream::once(async move { Ok(tail) }).boxed()
+        }
+        NarSource::Stream { stream, .. } => stream,
+    };
 
     let mut buf: Vec<u8> = Vec::with_capacity(BULK_CHUNK_SIZE);
     let mut offset: u64 = start;
@@ -1220,6 +1311,12 @@ pub(super) async fn serve_nar_request(
 /// letting the next build either rebuild from source or pick the path up from a
 /// configured upstream. The derivation graph is untouched.
 async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
+    if awaiting_upload(state, hash).await {
+        warn!(%hash, %store_path, "NAR not on this instance yet; the row is a fresh staged upload");
+        return;
+    }
+
+    state.nar_storage.hot().invalidate(hash);
     match state
         .graph
         .demote(Demotion::MissingNar {
@@ -1235,6 +1332,23 @@ async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path
         Err(e) => {
             warn!(%hash, %store_path, error = %e, "self-heal: failed to demote cached output")
         }
+    }
+}
+
+/// An unconfirmed row younger than the upload grace is a NAR another instance
+/// has staged and not yet uploaded, not a missing one.
+async fn awaiting_upload(state: &Arc<ServerState>, hash: &str) -> bool {
+    use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
+    use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _};
+
+    let grace = chrono::Duration::hours(state.config.storage.nar_upload_grace_hours.max(0));
+    match ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(&state.worker_db)
+        .await
+    {
+        Ok(Some(row)) => !row.confirmed && row.created_at > gradient_types::now() - grace,
+        _ => false,
     }
 }
 
@@ -1267,6 +1381,7 @@ mod nar_receive_store_tests {
             "peer-1",
             Duration::from_secs(3600),
             max_bytes,
+            0,
             Shutdown::new(),
         )
         .unwrap();
@@ -1696,6 +1811,7 @@ mod nar_receive_store_tests {
             "peer-1",
             Duration::from_secs(3600),
             1024,
+            0,
             Shutdown::new(),
         )
         .unwrap();
@@ -1708,6 +1824,60 @@ mod nar_receive_store_tests {
             reason.contains("open the staged partial"),
             "the reason must name the staging failure, got: {reason}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_relayed_nar_lands_in_the_object_store_on_the_local_backend() {
+        let dir = TempDir::new().unwrap();
+        let store = gradient_storage::NarStore::local(dir.path().to_str().unwrap()).unwrap();
+        let claim = dir.path().join("claim");
+        tokio::fs::write(&claim, b"nar").await.unwrap();
+
+        let confirmed = super::place_relayed(&store, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &claim)
+            .await
+            .unwrap();
+
+        assert!(confirmed);
+        assert!(
+            store
+                .exists("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .await
+                .unwrap()
+        );
+        assert!(!claim.exists());
+    }
+
+    #[tokio::test]
+    async fn a_relayed_nar_is_staged_unconfirmed_on_an_s3_backend() {
+        let dir = TempDir::new().unwrap();
+        let store = gradient_storage::NarStore::s3(
+            "bucket",
+            "us-east-1",
+            Some("http://127.0.0.1:1"),
+            Some("key"),
+            Some("secret"),
+            "",
+            false,
+            gradient_storage::S3Timeouts::default(),
+        )
+        .unwrap()
+        .with_staging(gradient_storage::StagedNars::new(dir.path().join("nar-staged")).unwrap());
+        let claim = dir.path().join("claim");
+        tokio::fs::write(&claim, b"nar").await.unwrap();
+
+        let confirmed = super::place_relayed(&store, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &claim)
+            .await
+            .unwrap();
+
+        assert!(!confirmed, "the object is owed to S3");
+        assert!(
+            store
+                .staged()
+                .unwrap()
+                .exists("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .await
+        );
+        assert!(!claim.exists());
     }
 
     /// A push stream is append-only once open: a sender that restarts at 0
@@ -1886,5 +2056,121 @@ mod serve_nar_tests {
             rx.try_recv().is_err(),
             "no further frames after NarUnavailable"
         );
+    }
+
+    /// RAM answers a request the object store could not: the hash is only in
+    /// the hot cache.
+    #[tokio::test]
+    async fn serve_answers_a_hot_entry_in_bulk_chunks() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let cli = gradient_test_support::prelude::test_cli();
+        let storage = gradient_storage::NarStore::local(&cli.storage.base_path)
+            .unwrap()
+            .with_hot_cache(gradient_storage::HotNarCache::new(
+                4 * 1024 * 1024,
+                2 * 1024 * 1024,
+            ));
+        let state = gradient_test_support::prelude::test_state_with_storage(db, storage);
+        let payload: Vec<u8> = (0..(1024 * 1024 + 123)).map(|i| i as u8).collect();
+        let hash = "abcdefghijklmnopqrstuvwxyz012345";
+        state
+            .nar_storage
+            .hot()
+            .insert(hash, Bytes::from(payload.clone()));
+
+        let (writer, mut rx) = spy_writer(Duration::from_secs(5));
+        let store_path = format!("/nix/store/{hash}-test-pkg");
+        serve_nar_request(&state, &writer, "job-1", &store_path, 0, None)
+            .await
+            .expect("serve from RAM");
+
+        let mut assembled = Vec::new();
+        let mut frames = 0u32;
+        while let Ok(bytes) = rx.try_recv() {
+            match decode(bytes) {
+                ServerMessage::NarStreamHeader { total_bytes, .. } => {
+                    assert_eq!(total_bytes as usize, payload.len());
+                }
+                ServerMessage::NarPush { data, .. } => {
+                    assembled.extend_from_slice(&data);
+                    frames += 1;
+                }
+                other => panic!("unexpected frame: {}", other.variant_name()),
+            }
+        }
+        assert_eq!(assembled, payload);
+        assert!(
+            frames >= 3,
+            "1 MiB in 512 KiB chunks is at least three frames"
+        );
+        assert_eq!(state.nar_storage.hot().stats().hits, 1);
+    }
+
+    #[tokio::test]
+    async fn serve_reads_a_staged_file_when_the_object_is_absent() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let cli = gradient_test_support::prelude::test_cli();
+        let staged_root = std::path::PathBuf::from(&cli.storage.base_path).join("nar-staged");
+        let storage = gradient_storage::NarStore::local(&cli.storage.base_path)
+            .unwrap()
+            .with_staging(gradient_storage::StagedNars::new(&staged_root).unwrap());
+        let state = gradient_test_support::prelude::test_state_with_storage(db, storage);
+        let claim = std::path::PathBuf::from(&cli.storage.base_path).join("claim");
+        tokio::fs::write(&claim, b"staged payload").await.unwrap();
+        let hash = "abcdefghijklmnopqrstuvwxyz012345";
+        state
+            .nar_storage
+            .staged()
+            .unwrap()
+            .adopt(hash, &claim)
+            .await
+            .unwrap();
+
+        let (writer, mut rx) = spy_writer(Duration::from_secs(5));
+        serve_nar_request(
+            &state,
+            &writer,
+            "job-1",
+            &format!("/nix/store/{hash}-pkg"),
+            0,
+            None,
+        )
+        .await
+        .expect("serve from staging");
+
+        let mut assembled = Vec::new();
+        while let Ok(bytes) = rx.try_recv() {
+            if let ServerMessage::NarPush { data, .. } = decode(bytes) {
+                assembled.extend_from_slice(&data);
+            }
+        }
+        assert_eq!(assembled, b"staged payload");
+    }
+
+    #[tokio::test]
+    async fn a_young_unconfirmed_row_is_awaiting_upload_and_an_old_or_confirmed_one_is_not() {
+        fn row(confirmed: bool, age: chrono::Duration) -> gradient_entity::cached_path::Model {
+            gradient_entity::cached_path::Model {
+                hash: "abcdefghijklmnopqrstuvwxyz012345".into(),
+                file_hash: Some("sha256:x".into()),
+                confirmed,
+                created_at: gradient_types::now() - age,
+                ..Default::default()
+            }
+        }
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([
+                vec![row(false, chrono::Duration::minutes(1))],
+                vec![row(true, chrono::Duration::minutes(1))],
+                vec![row(false, chrono::Duration::hours(48))],
+            ])
+            .into_connection();
+        let state = test_state(db);
+        let hash = "abcdefghijklmnopqrstuvwxyz012345";
+
+        assert!(awaiting_upload(&state, hash).await, "young and unconfirmed");
+        assert!(!awaiting_upload(&state, hash).await, "confirmed");
+        assert!(!awaiting_upload(&state, hash).await, "older than the grace");
     }
 }
