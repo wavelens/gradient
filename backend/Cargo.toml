@@ -213,9 +213,28 @@ publish.workspace     = true
 [lints]
 workspace = true
 
+[[bin]]
+name = "gradient-server"
+path = "src/main.rs"
+
+# The SQL plan gate. `required-features` keeps it out of a default build, so it
+# is compiled only by the nix passthru the cache VM test runs and never ships.
+[[bin]]
+name = "gradient-sql-gate"
+path = "src/sql_gate/main.rs"
+required-features = ["sql-gate"]
+
+[features]
+sql-gate = ["dep:anyhow", "dep:gradient-db", "dep:sea-orm", "dep:serde_json", "dep:uuid"]
+
 [dependencies]
 gradient-cache     = { workspace = true }
 clap               = { workspace = true }
+anyhow             = { workspace = true, optional = true }
+gradient-db        = { workspace = true, optional = true }
+sea-orm            = { workspace = true, optional = true }
+serde_json         = { workspace = true, optional = true }
+uuid               = { workspace = true, optional = true }
 gradient-core      = { workspace = true }
 gradient-state     = { workspace = true }
 gradient-util      = { workspace = true }
