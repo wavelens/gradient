@@ -102,7 +102,7 @@ pub use self::promotion::{
     substitute_created_anchors,
 };
 pub use self::reachability::{
-    Adopted, adopt_pending_closure, adopt_pending_closures, anchor_status,
+    Adopted, adopt_pending_closure, adopt_pending_closures, anchor_dispatch_state, anchor_status,
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
     derivations_with_hashes, eval_anchor_statuses, evals_referencing_derivation,
     pending_orphan_frontier, pending_orphans_among, producers_of_hashes,
