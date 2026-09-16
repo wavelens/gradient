@@ -1423,10 +1423,33 @@ in {
               f"in 600 s, has (status fetchable) = ({producer}) with {unbacked} of its "
               f"outputs missing a cached_path row"
           )
-      assert int(sql(
-          f"SELECT db.unready_deps FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
-          f"WHERE d.hash = '{drv_hash}';"
-      )) == 0, "hello's counter must return to zero"
+      # The ripple decrements the dependents inside the same transaction that
+      # flips the producer, so this is settled the moment the poll above sees it.
+      # The short window is for a SECOND dependency still being re-pushed, and is
+      # deliberately far inside the 300 s sweep: a ripple this missed must fail
+      # here rather than be repaired into a pass.
+      hello_unready = (
+          f"SELECT db.unready_deps FROM derivation_build db "
+          f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';"
+      )
+      for _ in range(12):
+          if sql(hello_unready) == "0":
+              break
+          server.sleep(5)
+      else:
+          raise Exception(
+              f"hello's counter must return to zero, is {sql(hello_unready)} with these "
+              f"unfetchable inputs: " + sql(
+                  f"SELECT string_agg(d.name || ' status=' || dep.status::text "
+                  f"  || ' fetchable=' || dep.fetchable::int::text "
+                  f"  || ' unready=' || dep.unready_deps::text, ', ') "
+                  f"FROM derivation_dependency e "
+                  f"JOIN derivation_build dep ON dep.derivation = e.dependency "
+                  f"JOIN derivation d ON d.id = e.dependency "
+                  f"WHERE e.derivation = (SELECT id FROM derivation WHERE hash = '{drv_hash}') "
+                  f"  AND NOT dep.fetchable;"
+              )
+          )
       unsettled = int(sql(
           f"SELECT count(*) FROM build_job bj "
           f"JOIN derivation_build db ON db.derivation = bj.derivation "
