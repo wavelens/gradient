@@ -829,7 +829,7 @@ in {
         };
 
         cacheTtlHours = lib.mkOption {
-          description = "TTL in hours for cached NAR files that have not been fetched recently. 0 disables TTL-based GC";
+          description = "Hours a cached path outside the live closure (the NAR closure of every retained evaluation's outputs and .drv files) is kept after its last fetch, or its commit if never fetched. 0 keeps nothing beyond narUploadGraceHours, which always applies.";
           type = lib.types.ints.unsigned;
           default = 336;
         };

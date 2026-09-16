@@ -330,7 +330,6 @@ fn cache_derivation_row() -> gradient_entity::cache_derivation::Model {
         cache: cache_id(),
         derivation: deriv_id(),
         cached_at: test_date(),
-        ..Default::default()
     }
 }
 

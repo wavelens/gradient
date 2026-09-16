@@ -449,7 +449,7 @@ pub async fn demote_output_only_cached_deps(
 /// our cache (`cached_path` with a NAR) or on a configured upstream
 /// (`external_url`). Three ways the invariant breaks, all the same dead zone: the
 /// cache GC deletes a `cached_path` row when its NAR object is gone (zombie purge,
-/// TTL eviction); an old global cache hit marks an anchor `Completed` + `is_cached`
+/// stale-path eviction); an old global cache hit marks an anchor `Completed` + `is_cached`
 /// without ever building it; or a partial cache-hit / substitution marks an anchor
 /// `Completed` with an output that was never cached at all (`is_cached = false`, no
 /// build attempt - observed on multi-output CUDA derivations whose `out` was never

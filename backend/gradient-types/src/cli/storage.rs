@@ -35,9 +35,11 @@ pub struct StorageArgs {
         default_value_t = DEFAULT_KEEP_EVALUATIONS as usize
     )]
     pub keep_evaluations: usize,
-    /// TTL in hours for cached NAR files that have not been fetched recently.
-    /// When expired the NAR is removed from storage and its GC root is deleted.
-    /// Defaults to 336 (2 weeks). Set to 0 to disable.
+    /// Hours a cached path outside the live closure (the NAR closure of every
+    /// retained evaluation's outputs and `.drv` files) is kept after its last
+    /// fetch, or its commit if never fetched. `0` keeps nothing beyond
+    /// `nar_upload_grace_hours`, which always applies so a closure member is
+    /// never evicted between its own commit and its referrer's.
     #[arg(long, env = "GRADIENT_NAR_TTL_HOURS", default_value_t = 336)]
     pub nar_ttl_hours: u64,
     /// Grace period in hours before the GC pass deletes a `derivation` row
