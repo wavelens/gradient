@@ -32,8 +32,9 @@ nix flake check                         # every check below
 VM tests are discovered by directory: any folder added under
 `nix/tests/gradient/` becomes the check `gradient-<folder>` with no wiring.
 
-The cargo suites are checks (`tests`, `doc-tests`, `cli-tests`) rather than the
-check phase of the packages: `nix build .#gradient` produces the binary only.
+The cargo suites are checks (`tests`, `cli-tests`) rather than the check phase
+of the packages: `nix build .#gradient` produces the binary only. Doc tests run
+in `tests` after nextest, where the workspace is already compiled.
 They build under `[profile.test]`, so a test target compiles unoptimised and
 without the full DWARF that `separateDebugInfo` puts on the shipped binary,
 while `[profile.dev.package."*"]` keeps their dependencies optimised.

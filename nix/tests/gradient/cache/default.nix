@@ -2004,7 +2004,7 @@ in {
       server.succeed("systemctl stop gradient-server.service")
 
       print(server.succeed(
-          "${pkgs.gradient.sqlGate}/bin/gradient-sql-gate "
+          "${pkgs.gradient.gate}/bin/gradient-sql-gate "
           "--database-url postgresql://postgres@127.0.0.1/gradient "
           "--max-unmeasured 0 2>&1"
       ))
