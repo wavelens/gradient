@@ -131,12 +131,31 @@ status once more at hand-out, so a job the tracker still holds from before the
 regression is dropped instead of dispatched.
 
 Reachability is one of the four gates: an anchor is queued and dispatched only
-while some `build_job` references its derivation. Every name a batch reports
-gets an anchor and this evaluation's `build_job`, pruned subtrees included, so
-an evaluation stays `Building` until its whole named closure is terminal.
-Without the gate, promotion would queue derivations no surviving evaluation
-needs, leaving the dispatcher unable to attribute the build to a driving
-evaluation.
+while some `build_job` references its derivation. A batch names what it walked
+and the direct inputs of that, and a walk prunes on `walked` alone, so the
+interior of a subtree another evaluation walked first is named by that
+evaluation and by nobody else; the pruning evaluation waits on it through the
+pruned root, whose own gate reads the interior's readiness. Without the gate,
+promotion would queue derivations no surviving evaluation needs, leaving the
+dispatcher unable to attribute the build to a driving evaluation.
+
+That sparse naming holds only while the walking evaluation lives. When
+`keep_evaluations` deletes it while the pruning one is still `Building`, the
+interior's names cascade away with it and every reader of the row - the gate,
+the dispatch select, the dispatcher's driving evaluation, eval-done, the
+abort's shared set - loses the subtree at once (#663). The GC therefore hands
+the names over before it settles the queue: `reachability::adopt_pending_closures`
+walks from every `build_job` of a live evaluation on a builder (walked, not
+substitutable, in a builder status) down through builders into every anchor
+still in a builder status, and inserts the `(evaluation, derivation)` rows that
+are missing. A relay is reached and never walked through, since nothing below
+it is waited on, and a terminal anchor stops the walk the same way. The walk
+is bounded by pending work, never by closure size, and runs only when a name
+the deletion cascaded belonged to a pending anchor. The graph reconciler runs
+the same walk for the one evaluation it heals, because a thaw or a reset inside
+a pruned closure leaves a pending anchor unnamed the same way, and the
+consistency sweep is the backstop, walking only when a pending anchor nobody
+names sits one edge below a builder a live evaluation names.
 
 `derivation.walked` is what makes the counters safe on a graph that is still
 being written. A batch names its dependencies by path, and the graph actor
@@ -185,7 +204,9 @@ finishes flushing its graph, and `Unstick(id)` when a Building evaluation is
 graph-stuck. Each thaws the terminal-failed anchors in the closure, settles the
 anchors whose outputs are already whole (cache presence is the ground truth for
 "built") and advances their dependents' counters, fails the dependents of a
-deterministic failure, and promotes the closure; `Unstick` also demotes a
+deterministic failure, names for the evaluation every pending anchor it
+reaches through builders (`reachability::adopt_pending_closure`), and
+promotes the closure; `Unstick` also demotes a
 trusted producer whose output is gone. No step here iterates to convergence.
 Every future dead-zone fix has exactly one place to live.
 
@@ -232,7 +253,9 @@ counters, because both of them are moved rather than derived and nothing else
 would ever notice a lost move. It repairs `cached_path.missing_references` over
 the paths the pending anchors gate on, then recomputes `fetchable` and
 `unready_deps` over the pending anchors and their direct dependencies, writes
-what differs, settles the queue against the gates in both directions, and logs
+what differs, settles the queue against the gates in both directions, names for
+the live evaluations the pending anchors they reach through builders that nobody
+names any more (`adopted`, a repair like the drift counts), and logs
 what it repaired next to the two read-only alarms: terminal-success producers
 with an unbacked output, and `Building` evaluations with no non-terminal anchor
 left. The NAR repair runs first because the readiness recount reads wholeness,
@@ -496,7 +519,12 @@ input of a retained closure - its own evals long gone - got swept away, strandin
 dependents on `InputsUnavailable`. `gc_orphan_derivations` is now a mark-and-sweep:
 it reclaims a derivation only when it lies *outside the build-dependency closure of
 every live root* (`entry_point` ∪ `build_job` derivations, walked over
-`derivation_dependency`). The orphan-NAR keep-set (`active_hashes`) likewise pins
+`derivation_dependency`). The per-task evaluation GC pairs with it from the other
+side: a `build_job` is how an evaluation names what it waits on and deleting an
+evaluation cascades its names, so before that GC settles the queue the live
+evaluations adopt the pending anchors they reach through builders
+(`reachability::adopt_pending_closures`), which is what keeps a pruned interior
+queued, attributable and built once its walker is gone (#663). The orphan-NAR keep-set (`active_hashes`) likewise pins
 the input sources and `.drv` hashes of every derivation with a build anchor - not
 just outputs, and *regardless of build status*. These are producerless (only an eval
 re-pushes them), so a terminal-failed anchor a later eval requeues must still find
@@ -806,9 +834,10 @@ is visible without opening the log.
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,
 `/graph`) accept requests from members of any project whose evaluation
 references the derivation (a `build_job` exists for it in one of that project's
-evaluations). The same reachability refcounts the anchor for garbage
-collection: a derivation with no surviving `build_job` is collected once past
-its grace period.
+evaluations). Garbage collection reads reachability
+differently: a derivation is reclaimed only when it lies outside the
+build-dependency closure of every `entry_point` and `build_job` root, not when it
+merely has no `build_job` of its own.
 
 ### Log substitution from upstream caches
 
@@ -862,7 +891,7 @@ cannot make progress, auto-unparking once the blocker clears:
   the pending set passes the dispatch gate and no in-flight build is left to fire
   a promotion. What blocks it is not recorded on the reason; `pending_anchors` is
   the blocked count. The reconciler
-  detects it and self-heals in five steps: `requeue_failed_closure_for_eval`
+  detects it and self-heals in six steps: `requeue_failed_closure_for_eval`
   thaws any terminal-failed anchor in the eval's full dependency closure (a
   transitive dep a prior eval left failed and this eval pruned has no `build_job`
   here, so `requeue_failed_anchors` never reaches it and it blocks its dependents
@@ -872,8 +901,10 @@ cannot make progress, auto-unparking once the blocker clears:
   (build-graph state desyncs from the durable cache state - a derivation whose
   artifacts exist sits `Created` after a requeue/cascade/demote and blocks its
   dependents, so cache presence is trusted as the ground truth) and advances the
-  dependents of what it settled; then the dependency-failed sweep over the closure
-  and `promote_closure`. It re-assesses: recovers
+  dependents of what it settled; then the dependency-failed sweep over the closure;
+  then it names for the evaluation every pending anchor it reaches through
+  builders and nobody names any more (`adopt_pending_closure`, a pruned interior
+  whose walker was deleted); then `promote_closure`. It re-assesses: recovers
   to `Building` when the heal frees an anchor, else parks `graph_stuck` (the blocked
   count). The heal runs on entry, again whenever `pending_anchors` changes, and
   otherwise on the consistency sweep's cadence, because
