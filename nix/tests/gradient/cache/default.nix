@@ -811,15 +811,8 @@ in {
           ))
           assert disagree == 0, f"the fenced {direction} walk disagrees on {disagree} nodes"
 
-          # A lateral correlation can only be executed as a nested loop, so the
-          # fence holding is exactly "no merge join survived in the plan".
-          plan = sql(
-              f"EXPLAIN WITH RECURSIVE fenced(derivation) AS ({seed} UNION "
-              f"  SELECT s.next FROM fenced c, LATERAL ({fenced_step} OFFSET 0) s) "
-              f"SELECT count(*) FROM fenced;"
-          )
-          assert "Nested Loop" in plan, f"the {direction} walk lost its nested loop:\n{plan}"
-          assert "Merge Join" not in plan, f"the {direction} walk merge-joins again:\n{plan}"
+          # The plan shape of this walk (a nested loop, never a merge join) is
+          # asserted for every registered walk by the SQL plan gate in phase 13.
 
       # The table is gone; the task page fills the histogram cache for the
       # page it reads and stamps every entry point with the graph version.
@@ -1886,6 +1879,20 @@ in {
       assert builder.succeed(
           "systemctl show -p Result --value gradient-worker.service"
       ).strip() == "success"
+
+      # ── Phase 13: every registered statement plans sanely (#651) ──────────
+      # The gate amplifies this database to production scale, so it runs last and
+      # the server is stopped first: nothing else should ever see those rows. It
+      # explains each statement in a transaction it rolls back, which is what
+      # makes a registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
+      banner("Phase 13: the SQL plan gate")
+      server.succeed("systemctl stop gradient-server.service")
+
+      print(server.succeed(
+          "${pkgs.gradient.sqlGate}/bin/gradient-sql-gate "
+          "--database-url postgresql://postgres@127.0.0.1/gradient "
+          "--max-unmeasured 0 2>&1"
+      ))
 
       banner("Cache test PASSED")
       '';
