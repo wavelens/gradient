@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the gate wraps a registered statement in EXPLAIN, which no registered statement can express"
+)]
+
 //! Runs one registered query through the planner. `EXPLAIN (GENERIC_PLAN)` comes
 //! first because it plans without values and names the relations: a query whose
 //! relations are empty is unmeasured, and executing it would prove nothing. The

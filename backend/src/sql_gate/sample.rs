@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the samplers draw parameter values and are not statements the gate measures"
+)]
+
 //! Turns a declared [`Param`] into a real value drawn from the database under
 //! test. A kind with no rows behind it yields `None`, which is what makes the
 //! query that declared it unmeasured rather than passed.

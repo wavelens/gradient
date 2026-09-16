@@ -3,4 +3,6 @@ allow-unwrap-in-tests = true
 disallowed-methods = [
     { path = "tokio::task::spawn", reason = "use Shutdown::spawn for a tracked task or Shutdown::supervise for a loop" },
     { path = "reqwest::Client::new", reason = "use gradient_util::http::build_client, build_download_client or the process-wide download_client; a bare client leaks a pool and panics without a CA bundle" },
+    { path = "sea_orm::Statement::from_sql_and_values", reason = "declare the query with gradient_db::sql! and run it through Query::bind or bind_built, so the plan gate sees it" },
+    { path = "sea_orm::Statement::from_string", reason = "declare the query with gradient_db::sql!, or use execute_unprepared for DDL and SET" },
 ]

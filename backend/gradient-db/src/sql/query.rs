@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "Query::bind and bind_built are the constructors the lint points every other call site at"
+)]
+
 //! A declared statement and the registry that collects them. `Query::bind` is
 //! the one constructor of a raw `Statement` in the backend; `backend/clippy.toml`
 //! denies the sea-orm constructors so nothing can reach SQL around the registry.
