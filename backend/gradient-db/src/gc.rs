@@ -74,6 +74,51 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
+/// The bound is one parameter, and `make_interval` takes an `integer`, so the
+/// cast is in the text rather than in whatever the caller happened to bind.
+fn stale_cached_paths_sql() -> String {
+    format!(
+        "{live}
+         SELECT cp.hash FROM cached_path cp
+         WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = cp.hash)
+           AND coalesce((SELECT max(s.last_fetched_at) FROM cached_path_signature s
+                         WHERE s.cached_path = cp.id), cp.created_at)
+               < (now() AT TIME ZONE 'UTC') - make_interval(hours => $1::int)",
+        live = crate::graph_sql::live_cached_paths_cte(),
+    )
+}
+
+crate::sql_fn! {
+    STALE_CACHED_PATHS = stale_cached_paths_sql,
+        params = [Int(336)],
+        tier = Walk,
+        flags = [Walk];
+}
+
+/// Paths no retained evaluation reaches whose last fetch (or commit, if never
+/// fetched) is older than `keep_hours`. The live set is the same `reachable`
+/// walk the derivation GC keeps its rows by, so a path is never live while its
+/// derivation is collectable and never collectable while its derivation lives.
+pub async fn stale_cached_paths<C>(db: &C, keep_hours: i64) -> Result<Vec<String>, sea_orm::DbErr>
+where
+    C: ConnectionTrait
+        + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>
+        + Sync,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk
+        .query_all_raw(STALE_CACHED_PATHS.bind([sea_orm::Value::Int(Some(
+            i32::try_from(keep_hours).unwrap_or(i32::MAX),
+        ))]))
+        .await?;
+    walk.commit().await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "hash").ok())
+        .collect())
+}
+
 /// Deletes evaluations for `task_id`, retaining the most recent `keep`
 /// terminal evaluations (see [`evaluations_to_gc`]).
 ///
@@ -684,6 +729,53 @@ mod tests {
 
     fn set(items: &[&str]) -> HashSet<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn norm(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Stale means outside the live set and untouched (fetched or committed)
+    /// for `keep_hours`; the bound is one parameter.
+    #[tokio::test]
+    async fn stale_cached_paths_selects_outside_the_live_set_past_the_bound() {
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use std::collections::BTreeMap;
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .append_query_results([vec![BTreeMap::from([(
+                "hash".to_owned(),
+                Value::String(Some("abc".into())),
+            )])]])
+            .into_connection();
+
+        let stale = stale_cached_paths(&db, 336).await.unwrap();
+
+        assert_eq!(stale, vec!["abc".to_owned()]);
+        let log = db.into_transaction_log();
+        let stmt = log[0]
+            .statements()
+            .iter()
+            .find(|s| s.sql.contains("FROM cached_path cp"))
+            .expect("the walk issues the stale selection");
+        let sql = norm(&stmt.sql);
+        assert!(
+            sql.contains("WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = cp.hash)"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(concat!(
+                "coalesce((SELECT max(s.last_fetched_at) FROM cached_path_signature s ",
+                "WHERE s.cached_path = cp.id), cp.created_at) < ",
+                "(now() AT TIME ZONE 'UTC') - make_interval(hours => $1::int)",
+            )),
+            "{sql}"
+        );
+        assert_eq!(stmt.values.as_ref().map(|v| v.0.len()), Some(1));
     }
 
     /// A dependent that survives the sweep while one of its dependencies is
