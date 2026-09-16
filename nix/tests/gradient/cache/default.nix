@@ -16,13 +16,20 @@
     skipDirectories = false;
   };
 
-  # Phase 10g relays busybox off the upstream and must never BUILD it, but its
-  # build closure reaches for github (nixpkgs patches busybox's unzip applet with
-  # the madler/unzip CVE patches) and this VM has no network. Ship the INPUTS so a
-  # dispatch that slips through builds offline instead of failing permanently; the
-  # outputs stay upstream-only, which is what `anchor_of("busybox") == "3 1 1"`
-  # proves arrived by relay.
-  busyboxBuildInputs = pkgs.busybox.inputDerivation;
+  # Phase 10g relays busybox off the upstream and must never BUILD it, but the
+  # graph walks its whole build closure and dispatches each derivation, and those
+  # reach for the network (nixpkgs patches busybox's unzip applet with the
+  # madler/unzip CVE patches). A dispatch that slips through must build offline,
+  # or it fails permanently and poisons busybox with DependencyFailed on the next
+  # retire. This is hello's treatment applied to busybox: the closure of its
+  # `.drv`, which carries every input but none of busybox's own outputs - those
+  # stay upstream-only, which is what `anchor_of("busybox") == "3 1 1"` proves
+  # arrived by relay.
+  busyboxStore = import ../../../scripts/store.nix {
+    inherit pkgs;
+    package = pkgs.busybox;
+    skipDirectories = false;
+  };
 
   builderNode = workerId: { config, pkgs, lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix ];
@@ -32,7 +39,7 @@
     # every derivation the worker walks is already substituted.  Without
     # this the worker would try to fetch tarballs from the internet -
     # which the test VM cannot reach - and every build would fail.
-    virtualisation.additionalPaths = [ testStore busyboxBuildInputs ];
+    virtualisation.additionalPaths = [ testStore busyboxStore ];
 
     nix.settings = {
       trusted-users = [
