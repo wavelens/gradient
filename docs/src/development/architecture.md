@@ -26,6 +26,8 @@ root
 │   abandoned-dispatch-sweep             periodic passes (60s)
 ├── cache-maintenance, sign-sweep,
 │   debug-index, eval-cache-sweep        cache sweeps
+├── nar-uploader                         actor: streams staged NARs to S3,
+│                                        reconciles unconfirmed rows
 ├── retention, rollup, otlp-snapshot     metrics pipeline
 └── outbound-connect                     dials workers with a registered URL
 ```
@@ -59,6 +61,15 @@ ordering (`CacheQuery`, board and API queries) stay on the pools. Effects that
 leave the process (forge reports, notifications) are still spawned after the
 write; #597 moves them into an outbox. Startup recovery, the maintenance
 deletions (`Gc`, #597) and the debug indexer's flag stay outside the actor.
+
+A relayed NAR on the S3 backend is committed before its object exists: the row
+carries `confirmed = false` and the file waits in `nar-staged/`. The
+`nar-uploader` child uploads what this instance staged, confirms each row
+through the graph actor, and on its first pass at boot classifies every
+unconfirmed row: staged file present, upload it; object present with the row's
+size, confirm; neither and older than the upload grace, demote. Served NARs
+resolve through `NarStore::open`: a hits-per-byte RAM cache for small objects,
+then the staged file, then storage.
 
 The maintenance deletions are the exception that matters for the cache index. TTL
 eviction, the zombie purge and the orphan GC retire `cached_path` rows in their own
@@ -109,7 +120,8 @@ cache          cache sweeps: maintenance, signing, debug index, retention
 ci             evaluation triggers, forge checks, declarative apply
 forge          per-forge reporters, webhook parsing, signature checks
 state          declarative state DTOs and apply
-storage        NAR and log storage (local FS or S3)
+storage        NAR and log storage (local FS or S3), the staged upload queue
+               and the hot RAM cache
 worker         gradient-worker binary (fetch, eval, build, sign)
 eval           standalone flake evaluator used by the worker
 nix, sources   nix bindings and store-path/source helpers
