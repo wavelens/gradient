@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use gradient_proto::messages::{BuildSpec, CACHE_QUERY_MAX_PATHS, CachedPath, QueryMode};
+use gradient_types::proto::JobPhase;
 use sha2::{Digest as _, Sha256};
 use tracing::debug;
 
@@ -179,9 +180,11 @@ async fn relay_one_path(
     target: Option<&CachedPath>,
 ) -> Result<Vec<String>> {
     let path = &upstream.path;
+    let fetch = updater.phase(JobPhase::SubstituteFetch);
     let (_, fetched) = download_one_presigned(crate::http::download_client(), upstream.clone())
         .await
         .with_context(|| format!("download upstream NAR for {path}"))?;
+    drop(fetch);
     let (compressed, meta) = fetched.ok_or_else(|| {
         // The Pull reply said cached but the GET 404'd: the same typed self-heal
         // signal as a missing prefetch input, so the server can demote the stale
@@ -236,6 +239,8 @@ async fn relay_one_path(
         // Weaker/absent upstream compression: decompress (verifying against the
         // upstream nar_hash) and recompress at our level-6 threshold. Multi-MB CPU
         // work, so it runs on the blocking pool.
+        let mut compress = updater.phase(JobPhase::Compress);
+        compress.record(1, compressed.len() as u64);
         let claimed = meta.nar_hash.clone();
         let p = path.clone();
         tokio::task::spawn_blocking(move || {
@@ -259,6 +264,8 @@ async fn relay_one_path(
 
     // Transport: S3-backed caches expose a presigned PUT URL; local-disk caches
     // return none and accept the bytes via direct NarPush frames.
+    let mut push = updater.phase(JobPhase::NarPush);
+    push.record(1, bytes.len() as u64);
     crate::proto::nar::upload_nar(
         &updater.job_id,
         path,

@@ -534,6 +534,7 @@ pub enum JobPhase {
     DrvClosurePush,
     Prefetch,
     SubstituteRelay,
+    SubstituteFetch,
     Build,
     Compress,
     NarPush,
@@ -554,6 +555,7 @@ impl JobPhase {
             Self::DrvClosurePush => "drv_closure_push",
             Self::Prefetch => "prefetch",
             Self::SubstituteRelay => "substitute_relay",
+            Self::SubstituteFetch => "substitute_fetch",
             Self::Build => "build",
             Self::Compress => "compress",
             Self::NarPush => "nar_push",
@@ -579,6 +581,7 @@ impl JobPhase {
             Self::Compress => 11,
             Self::NarPush => 12,
             Self::CacheQueryWait => 13,
+            Self::SubstituteFetch => 14,
         }
     }
 
@@ -598,6 +601,7 @@ impl JobPhase {
             11 => Self::Compress,
             12 => Self::NarPush,
             13 => Self::CacheQueryWait,
+            14 => Self::SubstituteFetch,
             _ => return None,
         })
     }
