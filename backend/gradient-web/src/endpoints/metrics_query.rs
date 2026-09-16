@@ -20,7 +20,7 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, Value};
+use sea_orm::{ConnectionTrait, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -200,7 +200,6 @@ pub async fn get_metrics_query(
     });
     let from = parse_ts(params.from.as_deref());
     let to = parse_ts(params.to.as_deref());
-    let sql = metrics_query_sql(project_list.as_deref(), from.is_some(), to.is_some());
 
     let mut values: Vec<Value> = vec![
         Value::from(params.metric.clone()),
@@ -216,9 +215,8 @@ pub async fn get_metrics_query(
 
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
+        .query_all_raw(METRICS_QUERY.bind_built(
+            metrics_query_sql(project_list.as_deref(), from.is_some(), to.is_some()),
             values,
         ))
         .await?;

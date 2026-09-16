@@ -24,10 +24,7 @@ use gradient_scheduler::{BoardEvent, Scheduler};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, Statement,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -845,11 +842,12 @@ pub async fn get_expensive_jobs(
     }
 
     let window = params.window_days.unwrap_or(30).max(1);
-    let sql = expensive_jobs_sql(window, project_filter.as_deref());
 
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(
+            EXPENSIVE_JOBS.bind_built(expensive_jobs_sql(window, project_filter.as_deref()), []),
+        )
         .await?;
 
     let out = rows
@@ -961,11 +959,12 @@ pub async fn get_scoring_summary(
         return Ok(ok_json(ScoringSummary::default()));
     }
 
-    let sql = scoring_summary_sql(window, limit, project_filter.as_deref());
-
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(SCORING_SUMMARY.bind_built(
+            scoring_summary_sql(window, limit, project_filter.as_deref()),
+            [],
+        ))
         .await?;
 
     let mut scores: Vec<f64> = Vec::with_capacity(rows.len());
@@ -1088,11 +1087,12 @@ pub async fn get_top_projects_by_buildtime(
 ) -> WebResult<Json<BaseResponse<Vec<TopProjectBuildTime>>>> {
     require_superuser(&user)?;
     let window = params.window_days.unwrap_or(30).max(1);
-    let sql = top_projects_by_buildtime_sql(window);
 
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(
+            TOP_PROJECTS_BY_BUILDTIME.bind_built(top_projects_by_buildtime_sql(window), []),
+        )
         .await?;
 
     let out = rows
@@ -1202,11 +1202,13 @@ pub async fn get_expensive_by_resource(
     };
 
     let window = params.window_days.unwrap_or(30).max(1);
-    let sql = expensive_by_resource_sql(value_expr, not_null, window, &project_filter);
 
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(EXPENSIVE_BY_RESOURCE.bind_built(
+            expensive_by_resource_sql(value_expr, not_null, window, &project_filter),
+            [],
+        ))
         .await?;
 
     let out = rows
@@ -1388,11 +1390,13 @@ pub async fn get_expensive_evals_by_resource(
     }
 
     let window = params.window_days.unwrap_or(30).max(1);
-    let sql = expensive_evals_by_resource_sql(value_expr, window, project_filter.as_deref());
 
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(EXPENSIVE_EVALS_BY_RESOURCE.bind_built(
+            expensive_evals_by_resource_sql(value_expr, window, project_filter.as_deref()),
+            [],
+        ))
         .await?;
 
     let out = rows

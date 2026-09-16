@@ -11,7 +11,7 @@
 use anyhow::{Context as _, Result};
 use rusqlite::Connection;
 use sea_orm::prelude::Uuid;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+use sea_orm::{ConnectionTrait, Statement};
 
 use crate::redact::Redactor;
 use crate::schema::ManifestRow;
@@ -80,11 +80,7 @@ gradient_db::sql_fn! {
 /// Postgres has no `uuid = text` operator, so a stringly-typed scope fails the
 /// whole export with `42883` instead of matching nothing.
 pub fn scope_statement(spec: &TableSpec, scope: Uuid) -> Statement {
-    Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        spec.sql,
-        [sea_orm::Value::Uuid(Some(scope))],
-    )
+    REPORT_SCOPE_QUERY.bind_built(spec.sql, [sea_orm::Value::Uuid(Some(scope))])
 }
 
 /// Run one spec's query and hand back its rows as text. The only part that

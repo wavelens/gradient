@@ -133,8 +133,6 @@ pub async fn list(
     Query(q): Query<ListQuery>,
     Query(pagination): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<NarSummary>>>>> {
-    use sea_orm::{DatabaseBackend, Statement};
-
     let cache = load_cache(
         &state,
         Caller::from_option(&maybe_user),
@@ -178,12 +176,9 @@ pub async fn list(
         total: i64,
     }
 
-    let count_sql = nars_count_sql(&where_sql);
-    let total = CountRow::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        &count_sql,
-        values.clone(),
-    ))
+    let total = CountRow::find_by_statement(
+        NARS_LIST_COUNT.bind_built(nars_count_sql(&where_sql), values.clone()),
+    )
     .one(&state.web_db)
     .await?
     .map(|r| r.total.max(0) as u64)
@@ -198,13 +193,9 @@ pub async fn list(
     values.push(sea_orm::Value::BigInt(Some(per_page as i64)));
     values.push(sea_orm::Value::BigInt(Some(offset as i64)));
 
-    let items = NarSummary::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        &select_sql,
-        values,
-    ))
-    .all(&state.web_db)
-    .await?;
+    let items = NarSummary::find_by_statement(NARS_LIST_SELECT.bind_built(select_sql, values))
+        .all(&state.web_db)
+        .await?;
 
     Ok(ok_json(Paginated {
         items,

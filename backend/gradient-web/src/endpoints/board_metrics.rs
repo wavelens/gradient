@@ -23,7 +23,7 @@ use gradient_core::ServerState;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_scheduler::Scheduler;
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+use sea_orm::ConnectionTrait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -64,14 +64,8 @@ async fn infra_series(
     metric: &str,
     window_hours: i64,
 ) -> WebResult<Vec<SeriesPoint>> {
-    let sql = infra_series_sql(window_hours);
-
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
-            [metric.into()],
-        ))
+        .query_all_raw(INFRA_SERIES.bind_built(infra_series_sql(window_hours), [metric.into()]))
         .await?;
 
     Ok(rows
@@ -180,15 +174,9 @@ pub async fn get_board_upstreams(
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let window = window_clause(&params);
 
-    let sql = board_upstreams_sql(window);
-
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
-            [],
-        ))
+        .query_all_raw(BOARD_UPSTREAMS.bind_built(board_upstreams_sql(window), []))
         .await?;
 
     use std::collections::HashMap;
@@ -365,10 +353,9 @@ pub async fn get_board_network(
         }));
     }
 
-    let sql = board_network_sql(project_filter.as_deref());
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(BOARD_NETWORK.bind_built(board_network_sql(project_filter.as_deref()), []))
         .await?;
 
     let workers = rows
@@ -443,10 +430,11 @@ pub async fn get_board_fleet(
         return Ok(ok_json(vec![]));
     }
 
-    let sql = board_fleet_sql(window, project_filter.as_deref());
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(
+            BOARD_FLEET.bind_built(board_fleet_sql(window, project_filter.as_deref()), []),
+        )
         .await?;
 
     let out = rows
@@ -548,11 +536,12 @@ pub async fn get_board_durations_heatmap(
         }));
     }
 
-    let sql = board_durations_heatmap_sql(window, project_filter.as_deref());
-
     let rows = state
         .web_db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(BOARD_DURATIONS_HEATMAP.bind_built(
+            board_durations_heatmap_sql(window, project_filter.as_deref()),
+            [],
+        ))
         .await?;
 
     let mut times: Vec<chrono::NaiveDateTime> = Vec::new();
@@ -692,10 +681,7 @@ pub async fn get_board_health(
 
     let latest: Option<chrono::NaiveDateTime> = state
         .web_db
-        .query_one_raw(Statement::from_string(
-            DatabaseBackend::Postgres,
-            latest_rollup_bucket_sql(),
-        ))
+        .query_one_raw(LATEST_ROLLUP_BUCKET.stmt())
         .await?
         .and_then(|r| r.try_get("", "m").ok().flatten());
 
