@@ -403,7 +403,7 @@ impl BatchWriter<'_> {
         ids: &HashMap<String, DerivationId>,
         derivations: &[DiscoveredDerivation],
         batch: &IngestBatch,
-    ) -> Result<()> {
+    ) -> Result<Vec<DerivationId>> {
         let now = gradient_types::now();
         let all_ids: Vec<DerivationId> = ids
             .values()
@@ -530,26 +530,7 @@ impl BatchWriter<'_> {
             }
         }
 
-        if !upstream.is_empty() {
-            let upstream_ids: Vec<DerivationId> = upstream.iter().copied().collect();
-            gradient_db::for_each_chunk(&upstream_ids, |chunk| async move {
-                EDerivationBuild::update_many()
-                    .col_expr(
-                        CDerivationBuild::Substitutable,
-                        sea_orm::sea_query::Expr::value(true),
-                    )
-                    .filter(CDerivationBuild::Derivation.is_in(chunk))
-                    .filter(CDerivationBuild::Substitutable.eq(false))
-                    .filter(CDerivationBuild::Status.is_not_in([
-                        i32::from(BuildStatus::Completed),
-                        i32::from(BuildStatus::Substituted),
-                    ]))
-                    .exec(db)
-                    .await
-            })
-            .await
-            .context("flag anchors substitutable from upstream")?;
-        }
+        let newly_substitutable = self.flip_substitutable(&upstream).await?;
 
         if !truly.is_empty() {
             let truly_ids: Vec<DerivationId> = truly.iter().copied().collect();
@@ -559,7 +540,48 @@ impl BatchWriter<'_> {
             gradient_db::emit_transition_effects(self.ctx, &changes).await;
         }
 
-        Ok(())
+        Ok(newly_substitutable)
+    }
+
+    /// Set `substitutable` on the anchors an upstream now serves, returning the ones
+    /// that were not already flagged. Those stop being builders, so whatever they
+    /// listed as an input has just lost a demander, and nothing about that is a
+    /// status transition the emitter could notice.
+    ///
+    /// A terminal-success anchor is left alone: its outputs are already ours, and
+    /// flipping it would send it back through a relay for bytes we hold.
+    async fn flip_substitutable(
+        &self,
+        upstream: &HashSet<DerivationId>,
+    ) -> Result<Vec<DerivationId>> {
+        if upstream.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let ids: Vec<uuid::Uuid> = upstream.iter().map(|d| d.into_inner()).collect();
+        let rows = self
+            .db()
+            .query_all_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                format!(
+                    "UPDATE derivation_build SET substitutable = true, \
+                     updated_at = (now() AT TIME ZONE 'UTC') \
+                     WHERE derivation = ANY($1::uuid[]) AND NOT substitutable \
+                       AND status NOT IN ({terminal_success}) \
+                     RETURNING derivation",
+                    terminal_success =
+                        gradient_db::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+                ),
+                [ids.into()],
+            ))
+            .await
+            .context("flag anchors substitutable from upstream")?;
+
+        Ok(rows
+            .iter()
+            .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+            .map(DerivationId::new)
+            .collect())
     }
 
     /// Move the readiness counters this batch changed, in one transaction under one
@@ -602,12 +624,20 @@ impl BatchWriter<'_> {
     /// The transitions are collapsed for the same reason: such a row accumulates
     /// `Created` to `Queued` and `Queued` to `Created` in one transaction, and only
     /// the net move committed, so only the net move may fan out.
+    ///
+    /// The demand this batch created and removed is settled afterwards, on the
+    /// pooled handle: it writes rows no ordered lock names (the direct inputs of
+    /// every new builder), and both statements re-check the gate, so it is a
+    /// re-gate rather than a counter move and does not belong inside the counters'
+    /// transaction.
     async fn advance_readiness(
         &self,
         batch: &IngestBatch,
         resolved: &Resolved,
         newly_walked: &HashSet<String>,
         grew: &[DerivationId],
+        newly_substitutable: &[DerivationId],
+        entry_points: &[DerivationId],
     ) -> Result<()> {
         let mut to_seed: Vec<DerivationId> = newly_walked
             .iter()
@@ -617,7 +647,7 @@ impl BatchWriter<'_> {
         to_seed.sort_unstable();
         to_seed.dedup();
 
-        let mut locked = to_seed;
+        let mut locked = to_seed.clone();
         locked.extend(
             batch
                 .truly_substituted
@@ -658,6 +688,50 @@ impl BatchWriter<'_> {
             .context("commit the readiness transaction")?;
         let net = gradient_db::collapse_transitions(changes);
         gradient_db::emit_transition_effects(self.ctx, &net).await;
+        self.move_batch_demand(&to_seed, newly_substitutable, entry_points)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Settle the two demands a batch moves without moving any anchor's status, so
+    /// the transition emitter cannot see them: a newly walked or newly grown builder
+    /// wants its direct inputs relayed, an entry point wants its own derivation, and
+    /// an anchor an upstream just claimed stops wanting anything.
+    async fn move_batch_demand(
+        &self,
+        builders: &[DerivationId],
+        newly_substitutable: &[DerivationId],
+        entry_points: &[DerivationId],
+    ) -> Result<()> {
+        let db = self.db();
+        let mut wanted = gradient_db::direct_dependencies_of(db, builders)
+            .await
+            .context("load what this batch's builders demand")?;
+        wanted.extend_from_slice(entry_points);
+        wanted.sort_unstable();
+        wanted.dedup();
+
+        let released = gradient_db::direct_dependencies_of(db, newly_substitutable)
+            .await
+            .context("load what an upstream-claimed anchor stops demanding")?;
+
+        let mut changes = Vec::new();
+        for chunk in wanted.chunks(gradient_db::IN_CHUNK_SIZE) {
+            changes.extend(
+                gradient_db::promote(db, chunk)
+                    .await
+                    .context("promote what this batch demands")?,
+            );
+        }
+        for chunk in released.chunks(gradient_db::IN_CHUNK_SIZE) {
+            changes.extend(
+                gradient_db::unpromote_ungated(db, chunk)
+                    .await
+                    .context("release undemanded relays")?,
+            );
+        }
+        gradient_db::emit_transition_effects(self.ctx, &changes).await;
 
         Ok(())
     }
@@ -922,13 +996,11 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
         let grew = writer.insert_records(&batch.derivations, ids).await?;
         writer.persist_input_sources(&batch.derivations, ids).await;
         writer.persist_upstream_hits(&batch.upstream_hits).await;
-        writer
+        let newly_substitutable = writer
             .resolve_anchors(ids, &batch.derivations, batch)
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
-        writer
-            .advance_readiness(batch, &resolved, &newly_walked, &grew)
-            .await?;
+        // Entry points are demand, so their rows exist before the gates are read.
         report.entry_points = match batch.task {
             Some(task) => {
                 writer
@@ -937,6 +1009,16 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             }
             None => Vec::new(),
         };
+        writer
+            .advance_readiness(
+                batch,
+                &resolved,
+                &newly_walked,
+                &grew,
+                &newly_substitutable,
+                &report.entry_points,
+            )
+            .await?;
 
         gradient_db::bump_graph_version(writer.db(), &[evaluation_id])
             .await
@@ -1066,6 +1148,13 @@ mod tests {
         BTreeMap::from([("hash".to_owned(), Value::from(hash.to_owned()))])
     }
 
+    fn dep_row(dependency: DerivationId) -> BTreeMap<String, Value> {
+        BTreeMap::from([(
+            "dependency".to_owned(),
+            Value::from(dependency.into_inner()),
+        )])
+    }
+
     fn drv_row(derivation: DerivationId) -> BTreeMap<String, Value> {
         BTreeMap::from([(
             "derivation".to_owned(),
@@ -1133,6 +1222,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1153,8 +1243,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            14,
-            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version: {log:?}"
+            15,
+            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, demand: {log:?}"
         );
         let walked = log
             .iter()
@@ -1217,6 +1307,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1301,6 +1392,7 @@ mod tests {
             .append_query_results([vec![drv_row(a.id)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![transition_row(a.id, 1, 0)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1347,6 +1439,72 @@ mod tests {
         assert!(
             seed < promotes[1] && promotes[1] < unpromote,
             "the seed's own promote and the un-promote that undoes a stale-low queueing come last: {log:?}"
+        );
+    }
+
+    /// A newly walked builder wants its direct inputs in our cache, and nothing
+    /// about that is a status transition the effects emitter could notice: the
+    /// anchors already exist, at the status they already had. So the batch asks for
+    /// them itself, after its counters have committed, and the promote it issues is
+    /// the ordinary gated one (the candidate list is a bound, never a claim).
+    #[tokio::test]
+    async fn a_batch_promotes_what_its_new_builders_demand() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // what the batch's builders depend on, then the relay it queues
+            .append_query_results([vec![dep_row(b.id)]])
+            .append_query_results([vec![drv_row(b.id)]])
+            .append_exec_results(vec![ok(1); 4])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let deps = log
+            .iter()
+            .position(|s| s.contains("SELECT DISTINCT e.dependency FROM derivation_dependency"))
+            .expect("the batch loads what its builders demand");
+        let seed = log
+            .iter()
+            .position(|s| s.contains("SET unready_deps = (SELECT count(*)"))
+            .expect("the seed runs");
+        let promote = log
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.contains("queued_at = coalesce(db.queued_at"))
+            .map(|(i, _)| i)
+            .next_back()
+            .expect("the demanded relay is promoted");
+
+        assert!(
+            seed < deps && deps < promote,
+            "demand settles after the counters, and its promote reads the settled gate: {log:?}"
+        );
+        assert!(
+            log[promote].contains("db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
+            "the promote carries the demand arm of the gate: {log:?}"
         );
     }
 
@@ -1479,6 +1637,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])

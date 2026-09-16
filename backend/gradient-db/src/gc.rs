@@ -64,6 +64,8 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
         "Running per-task evaluation GC"
     );
 
+    let lost = anchors_losing_an_evaluation(ctx, &to_delete).await?;
+
     // Break the linked list so deletions never violate previous/next FKs:
     // NULL the deleted rows' own pointers and any surviving pointer into them.
     for eval in &all_evals {
@@ -126,8 +128,88 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
         warn!(error = %e, "GC: failed to delete orphaned commits");
     }
 
-    info!(task_id = %task_id, deleted = to_delete.len(), "Per-task evaluation GC done");
+    let (adopted, changes) = settle_after_delete(ctx, &lost).await?;
+    crate::status::emit_transition_effects(ctx, &changes).await;
+
+    info!(task_id = %task_id, deleted = to_delete.len(), adopted, "Per-task evaluation GC done");
     Ok(())
+}
+
+/// Settle the queue after the deletions. A pruned subtree is named by the
+/// evaluation that walked it and by nobody else, so its pending interior can lose
+/// every name here while another evaluation still builds against it: the live
+/// evaluations that reach it take the names over BEFORE the lost set is re-gated,
+/// so nothing a live evaluation waits on leaves the queue, and what they adopted
+/// is queued where its gates hold. Returns the adopted pair count and the moves.
+async fn settle_after_delete(
+    ctx: &DbContext,
+    lost: &[DerivationId],
+) -> Result<(usize, Vec<crate::status::TransitionChange>)> {
+    let db = &ctx.worker_db;
+    let adopted = if crate::reachability::pending_orphans_among(db, lost)
+        .await
+        .context("GC: failed to look for pending anchors the deletion left unnamed")?
+    {
+        crate::reachability::adopt_pending_closures(db)
+            .await
+            .context("GC: failed to hand the deleted evaluations' names to the live ones")?
+    } else {
+        crate::reachability::Adopted::default()
+    };
+
+    let mut changes = Vec::new();
+    for chunk in lost.chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(
+            crate::readiness::unpromote_ungated(db, chunk)
+                .await
+                .context("GC: failed to settle the queue after deleting evaluations")?,
+        );
+    }
+
+    for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(
+            crate::readiness::promote(db, chunk)
+                .await
+                .context("GC: failed to queue what the live evaluations adopted")?,
+        );
+    }
+
+    crate::bump_graph_version(db, &adopted.evaluations())
+        .await
+        .context("GC: failed to bump the graph version of the adopting evaluations")?;
+
+    Ok((adopted.pairs.len(), changes))
+}
+
+/// Every anchor whose queue membership the deletion of `evaluations` can close: the
+/// derivations they name (a lost `build_job` or `entry_point` row) and the direct
+/// inputs of those, which lose a demander with them.
+///
+/// Collected BEFORE the delete, because the rows it reads are what cascades away.
+async fn anchors_losing_an_evaluation(
+    ctx: &DbContext,
+    evaluations: &[MEvaluation],
+) -> Result<Vec<DerivationId>> {
+    let ids: Vec<Uuid> = evaluations.iter().map(|e| e.id.into_inner()).collect();
+    let rows = ctx
+        .worker_db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT derivation FROM build_job WHERE evaluation = ANY($1::uuid[]) \
+             UNION SELECT derivation FROM entry_point WHERE evaluation = ANY($1::uuid[]) \
+             UNION SELECT e.dependency AS derivation FROM derivation_dependency e \
+             JOIN build_job bj ON bj.derivation = e.derivation \
+             WHERE bj.evaluation = ANY($1::uuid[])",
+            [ids.into()],
+        ))
+        .await
+        .context("GC: failed to collect the derivations of the evaluations to delete")?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<Uuid>("", "derivation").ok())
+        .map(DerivationId::new)
+        .collect())
 }
 
 /// When an evaluation last advanced, as opposed to when its row was last
@@ -777,5 +859,97 @@ mod tests {
     #[test]
     fn keep_zero_deletes_nothing() {
         assert!(gc(&[Completed, Aborted], 0).is_empty());
+    }
+
+    fn exec(rows_affected: u64) -> sea_orm::MockExecResult {
+        sea_orm::MockExecResult {
+            last_insert_id: 0,
+            rows_affected,
+        }
+    }
+
+    /// The names go over before the queue is settled, so an interior a live
+    /// evaluation still builds against never leaves the queue in between; what
+    /// was adopted is then queued where its gates hold, and the adopting
+    /// evaluations' graph version moves because their build list did.
+    #[tokio::test]
+    async fn the_live_evaluations_adopt_before_the_lost_names_are_regated() {
+        use sea_orm::{DatabaseBackend, MockDatabase, Value};
+        use std::collections::BTreeMap;
+
+        let live = EvaluationId::now_v7();
+        let orphan = DerivationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([(
+                "?column?".to_owned(),
+                Value::Int(Some(1)),
+            )])]])
+            .append_exec_results([exec(0)])
+            .append_query_results([vec![BTreeMap::from([
+                ("evaluation".to_owned(), Value::from(live.into_inner())),
+                ("derivation".to_owned(), Value::from(orphan.into_inner())),
+            ])]])
+            .append_query_results([empty.clone(), empty])
+            .append_exec_results([exec(1)])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        let (adopted, changes) = settle_after_delete(&ctx, &[orphan]).await.unwrap();
+        drop(ctx);
+
+        assert_eq!(adopted, 1);
+        assert!(changes.is_empty());
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert_eq!(log.len(), 6, "{log:?}");
+        assert!(
+            log[0].contains(
+                "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
+            ),
+            "the GC asks before it walks: {log:?}"
+        );
+        assert!(
+            log[1].contains("SET LOCAL work_mem") && log[2].contains("INSERT INTO build_job"),
+            "the walk runs under its own raise: {log:?}"
+        );
+        assert!(
+            log[3].contains("SET status = 0") && log[3].contains("db.derivation = ANY($1::uuid[])"),
+            "the lost set is re-gated only after the names moved: {log:?}"
+        );
+        assert!(
+            log[4].contains("SET status = 1"),
+            "what was adopted is queued where its gates hold: {log:?}"
+        );
+        assert!(
+            log[5].contains("graph_version = e.graph_version + 1"),
+            "{log:?}"
+        );
+    }
+
+    /// Nothing pending lost its last name: no walk is paid for, and the lost set
+    /// is re-gated as before.
+    #[tokio::test]
+    async fn a_deletion_that_orphans_nothing_pending_walks_nothing() {
+        use sea_orm::{DatabaseBackend, MockDatabase, Value};
+        use std::collections::BTreeMap;
+
+        let d = DerivationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([empty.clone(), empty])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        let (adopted, changes) = settle_after_delete(&ctx, &[d]).await.unwrap();
+        drop(ctx);
+
+        assert_eq!(adopted, 0);
+        assert!(changes.is_empty());
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert_eq!(log.len(), 2, "{log:?}");
+        assert!(
+            log[0].contains("LIMIT 1") && log[1].contains("SET status = 0"),
+            "{log:?}"
+        );
     }
 }

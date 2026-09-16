@@ -98,7 +98,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.trustedProxies` | `127.0.0.1/32,::1/128` | Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For` (`GRADIENT_TRUSTED_PROXIES`). |
 | `settings.localIps` | `10.0.0.0/8` | Comma-separated CIDR allowlist whose resolved client IPs receive each cache's `local_priority` value (`GRADIENT_LOCAL_IPS`). |
 | `settings.buildMaxAttempts` | `3` | Maximum number of build attempts before a transient failure is promoted to `FailedPermanent`. (`GRADIENT_BUILD_MAX_ATTEMPTS`) |
-| `settings.substituteMissEscalationThreshold` | `2` | Substitute attempts before a substitutable build escalates to a real arch-bound build. (`GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD`) |
+| `settings.substituteMissEscalationThreshold` | `2` | Substitute misses (`SubstituteUnavailable` attempts within one evaluation) after which the anchor stops being substitutable and is built like any other. (`GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD`) |
 | `settings.inputsUnavailableMaxLoops` | `3` | Max `InputsUnavailable` self-heal loops per build before the circuit breaker opens and the build fails fast instead of churning the cache. (`GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS`) |
 | `settings.buildRetryBackoffSecs` | `30` | Base back-off in seconds before retrying a transient build failure; doubled after each prior attempt (exponential). (`GRADIENT_BUILD_RETRY_BACKOFF_SECS`) |
 | `settings.buildDefaultTimeoutSecs` | `14400` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
@@ -230,7 +230,7 @@ The Job Board records build/eval phase timings, dispatch decisions (with scoring
 | `otlpPushIntervalSecs` / `GRADIENT_OTLP_PUSH_INTERVAL` | 30 | OTLP push interval. |
 | `dispatchRecordCandidates` / `GRADIENT_DISPATCH_RECORD_CANDIDATES` | false | Persist runner-up scoring candidates per dispatch. |
 | `instanceMetricsIntervalSecs` / `GRADIENT_INSTANCE_METRICS_INTERVAL` | 30 | InstanceContext window recomputation interval. |
-| `graphConsistencyIntervalSecs` / `GRADIENT_GRAPH_CONSISTENCY_INTERVAL` | 300 | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it repairs `cached_path.missing_references` over the paths pending anchors gate on, recounts `fetchable` and `unready_deps` over the pending anchors and their direct dependencies, settles the queue against them, and re-heals graph-stuck evaluations. 0 disables all of that. |
+| `graphConsistencyIntervalSecs` / `GRADIENT_GRAPH_CONSISTENCY_INTERVAL` | 300 | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it repairs `cached_path.missing_references` over the paths pending anchors gate on, recounts `fetchable` and `unready_deps` over the pending anchors and their direct dependencies, settles the queue against them, names for the live evaluations the pending anchors they reach that no evaluation names any more, and re-heals graph-stuck evaluations. 0 disables all of that. |
 
 ## OIDC
 

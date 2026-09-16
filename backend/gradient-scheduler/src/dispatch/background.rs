@@ -60,6 +60,7 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
         warn!(
             counter_drift = report.counter_drift,
             unpromoted_ready = report.unpromoted_ready,
+            adopted = report.adopted,
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,
             wedged_building_evals = report.wedged_building_evals,
             nar_counter_drift = report.nar_counter_drift,

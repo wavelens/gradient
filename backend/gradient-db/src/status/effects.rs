@@ -10,10 +10,12 @@
 //! (promotion, cascades, reconciles, abort), which return the
 //! [`TransitionChange`]s they made. Routing every mover through one emitter is
 //! what makes it structurally impossible to move an anchor without its
-//! consequences (the evaluation graph version, board events, CI checks) firing -
-//! the root cause of the historical dead-zone class.
+//! consequences (the evaluation graph version, board events, CI checks, the
+//! demand its direct inputs gain or lose) firing - the root cause of the
+//! historical dead-zone class.
 
 use crate::DbContext;
+use crate::graph_sql::BUILDER_STATUSES;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use std::collections::{HashMap, HashSet};
@@ -74,13 +76,89 @@ fn ci_reports(status: BuildStatus) -> bool {
         || crate::state_machine::BuildStateMachine::is_terminal(&status)
 }
 
-/// Fan out the consequences of `changes`: the evaluation graph version that
-/// invalidates the per-entry-point histogram cache,
-/// board `BuildStatusChanged` events for every referencing `build_job`, one
+/// Fan out the consequences of `changes`: everything [`announce`] does, then the
+/// demand its direct inputs gained or lost, whose own moves are announced in turn.
+///
+/// That second round cannot need a third. It only ever moves rows between
+/// `Created` and `Queued`, both of which are in [`BUILDER_STATUSES`], so no row it
+/// touches crosses the boundary [`demand_moves`] keys on.
+pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChange]) {
+    if changes.is_empty() {
+        return;
+    }
+
+    announce(ctx, changes).await;
+    let regated = move_demand(ctx, changes).await;
+    if !regated.is_empty() {
+        announce(ctx, &regated).await;
+    }
+}
+
+/// Whether anchor `{status}` is one an evaluation will still have built, and so
+/// one that still needs its inputs in our cache.
+fn is_builder(status: BuildStatus) -> bool {
+    BUILDER_STATUSES.contains(&status)
+}
+
+/// The anchors whose transition carried them INTO the builder statuses (their
+/// direct inputs gained demand) and those it carried OUT (their inputs lost it).
+///
+/// A substitutable anchor is a relay rather than a builder and demands nothing, but
+/// the flag is not on a [`TransitionChange`]; both statements below embed the gate,
+/// so naming one is a wasted row and never a wrong move.
+fn demand_moves(changes: &[TransitionChange]) -> (Vec<DerivationId>, Vec<DerivationId>) {
+    let mut gained = Vec::new();
+    let mut lost = Vec::new();
+    for c in changes {
+        match (is_builder(c.from), is_builder(c.to)) {
+            (false, true) => gained.push(c.derivation),
+            (true, false) => lost.push(c.derivation),
+            _ => {}
+        }
+    }
+
+    (gained, lost)
+}
+
+/// Re-gate the direct inputs of every anchor that just became, or stopped being,
+/// something this fleet will build. Both statements embed
+/// [`crate::graph_sql::gates_predicate`], so the candidate list is a bound and
+/// never a claim.
+async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Vec<TransitionChange> {
+    let (gained, lost) = demand_moves(changes);
+    let db = &ctx.worker_db;
+    let mut regated = Vec::new();
+    for (anchors, gained) in [(gained, true), (lost, false)] {
+        for chunk in anchors.chunks(crate::IN_CHUNK_SIZE) {
+            let moved = async {
+                let deps = crate::readiness::direct_dependencies_of(db, chunk).await?;
+                let mut changes = Vec::new();
+                for deps in deps.chunks(crate::IN_CHUNK_SIZE) {
+                    changes.extend(if gained {
+                        crate::readiness::promote(db, deps).await?
+                    } else {
+                        crate::readiness::unpromote_ungated(db, deps).await?
+                    });
+                }
+                Ok::<_, sea_orm::DbErr>(changes)
+            }
+            .await;
+            match moved {
+                Ok(changes) => regated.extend(changes),
+                Err(e) => error!(error = %e, gained, "failed to re-gate what an anchor demands"),
+            }
+        }
+    }
+
+    regated
+}
+
+/// The graph version that invalidates the per-entry-point histogram cache, board
+/// `BuildStatusChanged` events for every referencing `build_job`, one
 /// `CacheChanged` on any terminal success, and the CI status reactor for entry
 /// points. Reactor calls are spawned (they talk to external forges); everything
 /// else is awaited so a failure is visible at the call site's log context.
-pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChange]) {
+async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
     if changes.is_empty() {
         return;
     }
@@ -227,6 +305,62 @@ mod tests {
         let c = TransitionChange::unchanged(d, BuildStatus::Completed);
         assert_eq!(c.from, c.to);
         assert_eq!(c.derivation, d);
+    }
+
+    /// Demand is one hop and it follows the builder boundary, not "terminal": an
+    /// anchor thawed back into the queue makes its inputs wanted again, and one
+    /// that leaves for ANY non-builder status (a success and an abort alike) stops
+    /// wanting them.
+    #[test]
+    fn demand_moves_key_on_crossing_the_builder_boundary() {
+        let thawed = DerivationId::now_v7();
+        let finished = DerivationId::now_v7();
+        let aborted = DerivationId::now_v7();
+        let promoted = DerivationId::now_v7();
+        let change = |derivation, from, to| TransitionChange {
+            derivation,
+            from,
+            to,
+        };
+
+        let (gained, lost) = demand_moves(&[
+            change(thawed, BuildStatus::FailedPermanent, BuildStatus::Created),
+            change(finished, BuildStatus::Building, BuildStatus::Completed),
+            change(aborted, BuildStatus::Queued, BuildStatus::Aborted),
+            change(promoted, BuildStatus::Created, BuildStatus::Queued),
+        ]);
+
+        assert_eq!(gained, vec![thawed]);
+        assert_eq!(lost, vec![finished, aborted]);
+    }
+
+    /// The second announce round is only safe because nothing it moves can cross
+    /// the boundary again: promotion and un-promotion both stay inside the builder
+    /// statuses, so one round of re-gating is the whole fixpoint.
+    #[test]
+    fn re_gating_can_never_demand_a_third_round() {
+        let d = DerivationId::now_v7();
+        for (from, to) in [
+            (BuildStatus::Created, BuildStatus::Queued),
+            (BuildStatus::Queued, BuildStatus::Created),
+        ] {
+            let (gained, lost) = demand_moves(&[TransitionChange {
+                derivation: d,
+                from,
+                to,
+            }]);
+            assert!(gained.is_empty() && lost.is_empty(), "{from:?} to {to:?}");
+        }
+    }
+
+    /// A re-announce carries no move, so it must re-gate nothing.
+    #[test]
+    fn an_unchanged_announcement_moves_no_demand() {
+        let (gained, lost) = demand_moves(&[TransitionChange::unchanged(
+            DerivationId::now_v7(),
+            BuildStatus::Completed,
+        )]);
+        assert!(gained.is_empty() && lost.is_empty());
     }
 
     /// An anchor promoted and then pulled back inside one transaction committed

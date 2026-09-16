@@ -95,6 +95,28 @@ pub async fn substitute_miss_counts<C: ConnectionTrait>(
     Ok(counts)
 }
 
+/// The evaluation that drove `derivation_build`'s newest attempt, if it still has
+/// one. The substitute-miss budget is scoped per evaluation, so this is what says
+/// which of [`substitute_miss_counts`]'s buckets a fresh failure belongs to.
+pub async fn latest_attempt_evaluation<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+) -> Result<Option<EvaluationId>, DbErr> {
+    let row = db
+        .query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT bj.evaluation FROM build_attempt ba \
+             JOIN build_job bj ON bj.id = ba.build_job \
+             WHERE ba.derivation_build = $1 \
+             ORDER BY ba.created_at DESC LIMIT 1",
+            [derivation_build.into_inner().into()],
+        ))
+        .await?;
+
+    row.map(|r| r.try_get::<Uuid>("", "evaluation").map(EvaluationId::new))
+        .transpose()
+}
+
 /// Most recent attempt for an anchor (by created_at desc), if any.
 pub async fn latest_attempt<C: ConnectionTrait>(
     db: &C,

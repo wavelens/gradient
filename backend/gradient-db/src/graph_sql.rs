@@ -27,6 +27,7 @@
 //! already emits 940k rows for 68k distinct nodes; `UNION ALL` would drop the
 //! deduplication and make the walk exponential in depth.
 
+use gradient_entity::build::BuildStatus;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 
 /// Raises `work_mem` for one walk. The `UNION` in every recursive term above
@@ -120,6 +121,7 @@ pub fn bounded_dependency_closure_cte_body(
         "{name}(derivation) AS ({seed_select} UNION {})",
         lateral_step(
             name,
+            "s.next",
             &format!(
                 "SELECT {project} AS next FROM derivation_dependency e \
                  WHERE {probe} = c.derivation{restrict}"
@@ -131,10 +133,11 @@ pub fn bounded_dependency_closure_cte_body(
 /// One fenced recursive term: join the working table `{name}` (aliased `c`) to
 /// `probe_select` through a `LATERAL` subquery that `OFFSET 0` keeps the planner
 /// from pulling up. See the module docs for why the fence is load-bearing rather
-/// than decorative. `probe_select` projects a single column aliased `next` and
-/// correlates to the working-table row through `c`.
-fn lateral_step(name: &str, probe_select: &str) -> String {
-    format!("SELECT s.next FROM {name} c, LATERAL ({probe_select} OFFSET 0) s")
+/// than decorative. `probe_select` projects a column aliased `next`, plus whatever
+/// else `project` carries out of `s`, and correlates to the working-table row
+/// through `c`.
+fn lateral_step(name: &str, project: &str, probe_select: &str) -> String {
+    format!("SELECT {project} FROM {name} c, LATERAL ({probe_select} OFFSET 0) s")
 }
 
 /// A `WITH RECURSIVE {name}(hash) AS (...)` prelude closing `seed_select` over
@@ -155,6 +158,7 @@ pub fn reference_closure_cte_body(name: &str, seed_select: &str) -> String {
         "{name}(hash) AS ({seed_select} UNION {})",
         lateral_step(
             name,
+            "s.next",
             "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash",
         )
     )
@@ -202,52 +206,98 @@ pub fn walked_predicate(alias: &str) -> String {
     format!("EXISTS (SELECT 1 FROM derivation w WHERE w.id = {alias}.derivation AND w.walked)")
 }
 
-/// Dependents can get the outputs of anchor `{alias}`: an upstream serves them,
-/// or the anchor succeeded and every output is whole in our cache. This is the one
-/// readiness fact a dependent reads, and it recurses over nothing - a
-/// dependency's own dependencies are already summarised in its `unready_deps`.
+/// The statuses of an anchor that will still be built, and so still needs its
+/// inputs. Closed under both promotion moves (`Created` to `Queued` and back),
+/// which is what lets [`demanded_predicate`] read a *dependent's* status without
+/// reopening the double-move hazard [`gates_predicate`] documents.
+pub const BUILDER_STATUSES: [BuildStatus; 4] = [
+    BuildStatus::Created,
+    BuildStatus::Queued,
+    BuildStatus::Building,
+    BuildStatus::FailedTransient,
+];
+
+/// Anchor `{anchor}` (its `derivation` row aliased `{walked}`) is a builder:
+/// recorded, not a relay, and in a status an evaluation will still have built.
+/// The one definition of what demands its inputs and of what the adoption walk
+/// steps through, so the two can never disagree.
+pub fn builder_predicate(anchor: &str, walked: &str) -> String {
+    format!(
+        "{walked}.walked AND NOT {anchor}.substitutable AND {anchor}.status IN ({pending})",
+        pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+    )
+}
+
+/// Dependents can get the outputs of anchor `{alias}` from OUR cache: it reached
+/// terminal success and every output is whole here. An upstream copy does not
+/// count (#593): a dependent of an unrelayed substitutable anchor waits for the
+/// relay, so a build pulls every input out of our own cache and the relay is on
+/// the critical path exactly once, instead of every dependent re-fetching from
+/// the upstream itself. This is the one readiness fact a dependent reads, and it
+/// recurses over nothing - a dependency's own dependencies are already summarised
+/// in its `unready_deps`.
 ///
 /// The `EXISTS` over `derivation_output` is load-bearing and not a tautology. The
 /// `NOT EXISTS` under it is vacuously true for an anchor with NO output rows, so
 /// without the guard a terminal-success anchor whose outputs were never recorded
 /// reads as fetchable, stops counting toward its dependents' `unready_deps`, and
 /// those dependents are promoted and dispatched against an input nothing can
-/// provide: the unbacked-output dead zone, measured on a live cluster. An anchor
-/// with no outputs is therefore NOT fetchable until its outputs are recorded.
-/// `m20260908_000002`'s frozen copy carries the same guard, and the two must agree
-/// or the backfill and the first ripple disagree about the same row.
+/// provide: the unbacked-output dead zone, measured on a live cluster.
 pub fn fetchable_predicate(alias: &str) -> String {
     format!(
-        r#"({alias}.substitutable
-    OR ({alias}.status IN ({terminal_success})
-        AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = {alias}.derivation)
-        AND NOT EXISTS (
-            SELECT 1 FROM derivation_output o
-            LEFT JOIN cached_path cp ON cp.hash = o.hash
-            WHERE o.derivation = {alias}.derivation AND NOT {whole})))"#,
-        terminal_success =
-            crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS),
+        r#"({alias}.status IN ({terminal_success})
+    AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = {alias}.derivation)
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_output o
+        LEFT JOIN cached_path cp ON cp.hash = o.hash
+        WHERE o.derivation = {alias}.derivation AND NOT {whole}))"#,
+        terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
         whole = crate::nar_closure::whole_predicate("cp"),
     )
 }
 
-/// The gates a `Created` anchor must pass to be queued, minus the status term:
-/// walked, no unready dependency, wanted by some evaluation, and its own `.drv`
-/// importable unless an upstream serves it.
+/// Something still wants anchor `{alias}`'s outputs in our cache: an entry point
+/// names it, or a direct dependent that will itself be built lists it as an input.
 ///
-/// It must stay free of any reference to `status`, which is why the term lives in
-/// [`promotable_predicate`] instead. `m20260908_000002` runs its demote and its
-/// promote in sequence in one transaction and they cannot interfere only because
-/// this never reads the column the demote writes; the same holds for
-/// `readiness::repair_pending`. A status term migrating in here starts
-/// double-moving rows, silently.
+/// One hop over `derivation_dependency` and never a walk. A dependent that will be
+/// built is a builder, and demands its own inputs by this same rule, so the
+/// "top-down propagation" the issue asks for is what evaluating this per row
+/// already gives - with nothing to backfill, ripple or repair.
+pub fn demanded_predicate(alias: &str) -> String {
+    format!(
+        r#"(EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = {alias}.derivation)
+    OR EXISTS (
+        SELECT 1 FROM derivation_dependency e
+        JOIN derivation_build p ON p.derivation = e.derivation
+        JOIN derivation w ON w.id = p.derivation
+        WHERE e.dependency = {alias}.derivation
+          AND {builder}
+          AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)))"#,
+        builder = builder_predicate("p", "w"),
+    )
+}
+
+/// The gates a `Created` anchor must pass to be queued, minus its own status term:
+/// walked and wanted by some evaluation, then one arm per kind of work. A relay
+/// needs demand and nothing else - it fetches finished bytes, so neither its
+/// inputs nor its `.drv` matter. A build needs every input fetchable from our
+/// cache and its own `.drv` importable.
+///
+/// It must stay free of any reference to `{alias}`'s OWN `status`, which is why
+/// that term lives in [`promotable_predicate`] instead. `m20260908_000002` and
+/// `m20260909_000001` run a demote and a promote in sequence in one transaction
+/// and they cannot interfere only because this never reads the column the demote
+/// writes; the same holds for `readiness::repair_pending`. The demand arm reads a
+/// DEPENDENT's status, which is safe for a different reason: both moves stay
+/// inside [`BUILDER_STATUSES`], so neither can change what the other's gate sees.
 pub fn gates_predicate(alias: &str) -> String {
     format!(
         r#"({walked}
-    AND {alias}.unready_deps = 0
     AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = {alias}.derivation)
-    AND ({alias}.substitutable OR {drv_whole}))"#,
+    AND (({alias}.substitutable AND {demanded})
+         OR (NOT {alias}.substitutable AND {alias}.unready_deps = 0 AND {drv_whole})))"#,
         walked = walked_predicate(alias),
+        demanded = demanded_predicate(alias),
         drv_whole = drv_whole_predicate(alias),
     )
 }
@@ -263,7 +313,7 @@ pub fn gates_predicate(alias: &str) -> String {
 pub fn promotable_predicate(alias: &str) -> String {
     format!(
         "({alias}.status = {created} AND {gates})",
-        created = crate::status_sql::build(gradient_entity::build::BuildStatus::Created),
+        created = crate::status_sql::build(BuildStatus::Created),
         gates = gates_predicate(alias),
     )
 }
@@ -295,6 +345,33 @@ pub fn reachable_derivations_cte() -> String {
         "reachable",
         "SELECT derivation FROM entry_point UNION SELECT derivation FROM build_job",
         ClosureDirection::Dependencies,
+    )
+}
+
+/// `WITH RECURSIVE pending(evaluation, derivation, builder) AS (...)`: from the
+/// `(evaluation, derivation, builder)` rows of `seed_select`, every anchor in a
+/// builder status that the evaluation reaches walking dependencies through
+/// builders. A relay is reached and never stepped through, since it fetches
+/// finished bytes and waits on nothing below it; a terminal anchor stops the walk
+/// the same way, because what is below a finished build is served from its
+/// outputs and what is below a failed one is the requeue's to thaw first. This is
+/// what names a pruned subtree for the evaluations that build against it.
+pub fn pending_closure_cte(seed_select: &str) -> String {
+    format!(
+        "WITH RECURSIVE pending(evaluation, derivation, builder) AS ({seed_select} UNION {})",
+        lateral_step(
+            "pending",
+            "c.evaluation, s.next, s.builder",
+            &format!(
+                "SELECT e.dependency AS next, ({builder}) AS builder \
+                 FROM derivation_dependency e \
+                 JOIN derivation_build dep ON dep.derivation = e.dependency \
+                 JOIN derivation w ON w.id = dep.derivation \
+                 WHERE e.derivation = c.derivation AND c.builder AND dep.status IN ({pending})",
+                builder = builder_predicate("dep", "w"),
+                pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+            ),
+        )
     )
 }
 
@@ -396,18 +473,20 @@ mod tests {
         );
     }
 
-    /// Fetchable is the one readiness fact dependents read: an upstream copy, or
-    /// terminal success with every output whole. No recursion over deps.
+    /// Fetchable is the one readiness fact dependents read, and since #593 it is
+    /// about OUR cache only: terminal success with every output whole. An anchor
+    /// an upstream happens to serve is not fetchable until its relay lands.
     #[test]
-    fn fetchable_reads_upstream_or_whole_outputs_and_nothing_recursive() {
+    fn fetchable_is_terminal_success_with_whole_outputs_in_our_own_cache() {
         let p = norm(&fetchable_predicate("db"));
-        assert!(
-            p.starts_with("(db.substitutable OR (db.status IN (3, 7)"),
-            "{p}"
-        );
+        assert!(p.starts_with("(db.status IN (3, 7)"), "{p}");
         assert!(
             p.contains("NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)"),
             "{p}"
+        );
+        assert!(
+            !p.contains("substitutable"),
+            "an upstream copy is not our cache: {p}"
         );
         assert!(
             !p.contains("derivation_dependency"),
@@ -430,8 +509,65 @@ mod tests {
         );
     }
 
-    /// Promotable is a per-row check: walked, zero unready deps, wanted, and a
-    /// whole `.drv` (or an upstream copy). Dispatchable is the same on Queued.
+    /// Demand is one hop: an entry point, or a walked, non-substitutable, pending
+    /// builder with a `build_job` that lists this anchor as a direct input. Never
+    /// a walk - a dependent that will be built demands its own inputs by the same
+    /// rule, so the propagation is the per-row evaluation.
+    #[test]
+    fn demanded_is_entry_points_or_a_pending_builder_one_hop_away() {
+        let p = norm(&demanded_predicate("db"));
+        assert!(
+            p.contains("FROM entry_point ep WHERE ep.derivation = db.derivation"),
+            "{p}"
+        );
+        assert!(p.contains("WHERE e.dependency = db.derivation"), "{p}");
+        assert!(
+            p.contains("AND w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"),
+            "{p}"
+        );
+        assert!(
+            p.contains("FROM build_job bj WHERE bj.derivation = p.derivation"),
+            "{p}"
+        );
+        assert!(!p.contains("WITH RECURSIVE"), "demand is one hop: {p}");
+    }
+
+    /// The demand arm reads a DEPENDENT's status, which is only safe while both
+    /// promotion moves stay inside the set it tests: a demote-then-promote pair in
+    /// one transaction would otherwise change what the second statement's gate
+    /// sees for an unrelated row.
+    #[test]
+    fn the_demanded_status_set_is_closed_under_both_promotion_moves() {
+        for status in [BuildStatus::Created, BuildStatus::Queued] {
+            assert!(
+                BUILDER_STATUSES.contains(&status),
+                "{status:?} is an endpoint of a promotion move"
+            );
+        }
+    }
+
+    /// The gate has two arms: a relay needs demand and nothing else, a build needs
+    /// ready inputs and an importable `.drv`.
+    #[test]
+    fn gates_split_on_substitutable() {
+        let g = norm(&gates_predicate("db"));
+        assert!(
+            g.contains("(db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
+            "{g}"
+        );
+        assert!(
+            g.contains("OR (NOT db.substitutable AND db.unready_deps = 0 AND EXISTS ("),
+            "{g}"
+        );
+        assert!(
+            g.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
+            "{g}"
+        );
+    }
+
+    /// Promotable is a per-row check: walked, wanted, and then either demand (a
+    /// relay) or zero unready deps plus a whole `.drv` (a build). Dispatchable is
+    /// the same on Queued.
     #[test]
     fn promotable_is_created_plus_the_gates() {
         let p = norm(&promotable_predicate("db"));
@@ -442,20 +578,19 @@ mod tests {
             p.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
             "{p}"
         );
-        assert!(p.contains("db.substitutable OR EXISTS"), "{p}");
         assert!(
             !p.contains("derivation_input_source"),
             "sources are references of the .drv: {p}"
         );
     }
 
-    /// The gates must not read `status`, or a demote-then-promote pair in one
-    /// transaction (the readiness migration, `readiness::repair_pending`) starts
-    /// double-moving rows: the demote writes the column the promote would read.
+    /// The gates must not read the anchor's OWN `status`, or a demote-then-promote
+    /// pair in one transaction (the readiness migrations, `readiness::repair_pending`)
+    /// starts double-moving rows: the demote writes the column the promote would read.
     #[test]
-    fn the_gates_never_read_the_status_column() {
+    fn the_gates_never_read_the_anchors_own_status_column() {
         let gates = gates_predicate("db");
-        assert!(!gates.contains("status"), "{gates}");
+        assert!(!gates.contains("db.status"), "{gates}");
         assert!(
             promotable_predicate("db").contains("db.status = 0 AND"),
             "the status term belongs to promotable alone"
@@ -509,6 +644,7 @@ mod tests {
                 ClosureDirection::Dependents,
             )),
             norm(&reference_closure_cte("refs", "SELECT $1::text")),
+            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true")),
         ] {
             assert!(
                 cte.contains("LATERAL ("),
@@ -565,6 +701,53 @@ mod tests {
                 "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash"
             ),
             "must walk referrer to referenced hash: {cte}"
+        );
+    }
+
+    /// Demand and adoption read one definition of a builder, so an anchor an
+    /// evaluation adopts is one whose gate demands its inputs, never the other
+    /// way round.
+    #[test]
+    fn demand_and_adoption_share_one_definition_of_a_builder() {
+        let builder = norm(&builder_predicate("p", "w"));
+        assert_eq!(
+            builder,
+            "w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"
+        );
+        assert!(norm(&demanded_predicate("db")).contains(&builder));
+        assert!(
+            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"))
+                .contains(&norm(&builder_predicate("dep", "w")))
+        );
+    }
+
+    /// The adoption walk carries the evaluation it walks for, steps only out of a
+    /// builder, and only into anchors an evaluation will still have built: a relay
+    /// or a terminal anchor is reached and never expanded.
+    #[test]
+    fn the_pending_closure_walks_dependencies_through_builders_only() {
+        let cte = norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"));
+        assert!(
+            cte.starts_with(
+                "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
+                 (SELECT $1::uuid, $2::uuid, true UNION \
+                 SELECT c.evaluation, s.next, s.builder FROM pending c, LATERAL ("
+            ),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(
+                "SELECT e.dependency AS next, \
+                 (w.walked AND NOT dep.substitutable AND dep.status IN (0, 1, 2, 8)) AS builder"
+            ),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(
+                "WHERE e.derivation = c.derivation AND c.builder \
+                 AND dep.status IN (0, 1, 2, 8) OFFSET 0) s"
+            ),
+            "{cte}"
         );
     }
 }
