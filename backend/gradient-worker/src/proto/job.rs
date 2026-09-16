@@ -617,6 +617,13 @@ async fn cache_query_with_timeout(
     nar_sizes: Vec<u64>,
     mode: QueryMode,
 ) -> Result<Vec<CachedPath>> {
+    // A Push carries one size per path or the server rejects it. A caller that
+    // cannot know them yet - the substitute relay asks for PUT targets before it
+    // pulls any narinfo - says so with the unknown sentinel rather than nothing.
+    let nar_sizes = match mode {
+        QueryMode::Push if nar_sizes.len() != paths.len() => vec![u64::MAX; paths.len()],
+        _ => nar_sizes,
+    };
     let chunks: Vec<(Vec<String>, Vec<u64>)> = paths
         .chunks(CACHE_QUERY_MAX_PATHS)
         .enumerate()
@@ -1215,6 +1222,49 @@ mod tests {
         );
         let paths: Vec<String> = (0..3).map(|i| format!("/nix/store/path-{i}")).collect();
         let got = updater.query_push(paths.clone()).await.unwrap();
+
+        assert_eq!(got.into_iter().map(|c| c.path).collect::<Vec<_>>(), paths);
+        server_task.await.unwrap();
+        pump.abort();
+    }
+
+    /// The substitute relay asks for PUT targets before it has pulled a single
+    /// narinfo, so it queries through the unsized `query_cache`. A Push the server
+    /// accepts still carries one size per path: unknown, never absent.
+    #[tokio::test]
+    async fn an_unsized_push_query_still_carries_one_size_per_path() {
+        use gradient_proto::messages::ServerMessage;
+        let (conn, server_task, job_id) = server_then_client!("job-unsized-push", |sc| {
+            let msg = sc.recv().await.unwrap();
+            let ClientMessage::CacheQuery {
+                query_id,
+                paths,
+                nar_sizes,
+                mode,
+                ..
+            } = msg
+            else {
+                panic!("expected a CacheQuery");
+            };
+            assert_eq!(mode, QueryMode::Push);
+            assert_eq!(nar_sizes, vec![u64::MAX; paths.len()]);
+            let cached = paths.iter().map(|p| cached(p)).collect();
+            sc.send(ServerMessage::CacheStatus { query_id, cached })
+                .await
+                .unwrap();
+        });
+
+        let (mut updater, reader) = make_updater(job_id, conn);
+        let pump = pump_replies(
+            reader,
+            updater.cache_waiters.clone(),
+            updater.known_derivation_waiters.clone(),
+        );
+        let paths: Vec<String> = (0..2).map(|i| format!("/nix/store/path-{i}")).collect();
+        let got = updater
+            .query_cache(paths.clone(), QueryMode::Push)
+            .await
+            .unwrap();
 
         assert_eq!(got.into_iter().map(|c| c.path).collect::<Vec<_>>(), paths);
         server_task.await.unwrap();
