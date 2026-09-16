@@ -47,9 +47,10 @@ NAR push sits under the compress that started it.
 | `drv_closure_push` | Pushing a batch's `.drv` runtime closure. |
 | `prefetch` | Importing a build's cache-resident inputs. |
 | `substitute_relay` | Relaying an output that an upstream cache already has. |
+| `substitute_fetch` | Downloading one upstream NAR; nested under `substitute_relay`. |
 | `build` | One derivation build. |
-| `compress` | The post-build compress and push loop. |
-| `nar_push` | One output NAR upload; nested under `compress`. |
+| `compress` | The post-build compress and push loop, and a relayed NAR's recompress. |
+| `nar_push` | One output NAR upload; nested under `compress` or `substitute_relay`. |
 | `cache_query_wait` | Waiting for a cache-status reply. |
 
 A job records at most 2000 spans. A large evaluation pushes one NAR per closure

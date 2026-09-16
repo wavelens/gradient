@@ -1036,9 +1036,10 @@ milliseconds from job acceptance, never from the enclosing span.
 | `drv_closure_push` | pushing a batch's `.drv` runtime closure |
 | `prefetch` | importing a build's cache-resident inputs |
 | `substitute_relay` | relaying an `external_cached` output |
+| `substitute_fetch` | downloading one upstream NAR, nested under `substitute_relay` |
 | `build` | one derivation build |
-| `compress` | the post-build compress and push loop |
-| `nar_push` | one output NAR upload, nested under `compress` |
+| `compress` | the post-build compress and push loop, and a relayed NAR's recompress |
+| `nar_push` | one output NAR upload, nested under `compress` or `substitute_relay` |
 | `cache_query_wait` | waiting for a `CacheStatus` or `CacheError` reply |
 
 The server writes one `dispatched_job_phase` row per span, derives the eval
