@@ -26,7 +26,7 @@ pub use self::eval_cache_sweep::evict_eval_cache;
 
 pub use self::cleanup::{
     CleanupReport, cleanup_expired_upload_sessions, cleanup_old_evaluations,
-    cleanup_orphaned_cache_files, cleanup_stale_build_request_blobs, cleanup_stale_cached_nars,
+    cleanup_orphaned_cache_files, cleanup_stale_build_request_blobs, evict_stale_cached_paths,
 };
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::sign_sweep::sign_missing_signatures;
@@ -139,10 +139,10 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     } else {
         info!("Derivation GC completed successfully");
     }
-    if state.config.storage.nar_ttl_hours > 0
-        && let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await
-    {
-        error!(error = ?e, "NAR TTL GC failed");
+    match evict_stale_cached_paths(Arc::clone(&state)).await {
+        Ok(n) if n > 0 => info!(evicted = n, "Stale cached-path eviction completed"),
+        Ok(_) => {}
+        Err(e) => error!(error = ?e, "Stale cached-path eviction failed"),
     }
     // The GC passes above retire the `cached_path` rows they drop, so the counters
     // and the anchor side move in the deleting transaction, for every hash they ask
