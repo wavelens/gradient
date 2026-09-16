@@ -63,8 +63,8 @@
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-cache";
-    # Phases 10e to 10g add three more evaluations of the repository, a
-    # two-session lock handshake and two retire-and-recover cycles to what was
+    # Phases 10e to 10h add three more evaluations of the repository, a
+    # two-session lock handshake and three retire-and-recover cycles to what was
     # already a full build-and-cache run.
     globalTimeout = 3600;
 
@@ -1716,6 +1716,122 @@ in {
       )
       assert drift() == 0, "counters disagree with their recompute after the re-relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-relay"
+
+      # ── Phase 10h: a pruned interior outlives the evaluation that walked it ─
+      # A batch names what it walked plus the direct inputs of that, and a walk
+      # prunes on `walked` alone, so the interior of a subtree another evaluation
+      # walked first is named by that evaluation and by nobody else. Delete it
+      # while this one still builds against the subtree and every gate in the
+      # interior shuts at once: promotion, the dispatch select, the dispatcher's
+      # driving evaluation and eval-done all read `build_job` (#663). The fix
+      # hands the names over: a live evaluation adopts the pending anchors it
+      # reaches through its own builders, from the GC's own pass, the graph-stuck
+      # heal and the consistency sweep. The maintenance pass that runs the
+      # evaluation GC is hourly here, so this phase makes the state by hand - the
+      # interior's names are dropped, its outputs are retired for real so the
+      # chain is pending, task2's evaluation is put back into Building over it -
+      # and asserts the outcome end to end: adopted, queued, attributed to task2's
+      # evaluation, rebuilt, and that evaluation completes with everything whole.
+      banner("Phase 10h: a pruned interior is adopted, attributed and rebuilt (#663)")
+
+      hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
+      assert hello_drv, "hello's derivation row is gone"
+
+      def built_input_of(derivation, needs_inputs):
+          """The least-shared direct input that is a walked, non-substitutable,
+          terminal-success builder with whole outputs and a whole .drv: ready to
+          be queued the moment it is reset."""
+          inputs = (
+              "AND EXISTS (SELECT 1 FROM derivation_dependency i WHERE i.derivation = e.dependency) "
+              if needs_inputs else ""
+          )
+          return sql(
+              f"SELECT e.dependency FROM derivation_dependency e "
+              f"JOIN derivation_build db ON db.derivation = e.dependency "
+              f"JOIN derivation d ON d.id = e.dependency "
+              f"JOIN cached_path drv ON drv.hash = d.hash "
+              f"WHERE e.derivation = '{derivation}' AND d.walked AND NOT db.substitutable "
+              f"  AND db.status IN (3, 7) AND db.fetchable AND db.unready_deps = 0 "
+              f"  AND drv.file_hash IS NOT NULL AND drv.missing_references = 0 {inputs}"
+              f"ORDER BY (SELECT count(*) FROM derivation_dependency r WHERE r.dependency = e.dependency), "
+              f"         d.name LIMIT 1;"
+          )
+
+      d1 = built_input_of(hello_drv, needs_inputs=True)
+      d2 = built_input_of(d1, needs_inputs=False) if d1 else ""
+      assert d1 and d2, f"hello has no two-deep chain of rebuildable inputs (d1={d1!r}, d2={d2!r})"
+      chain = f"'{hello_drv}', '{d1}', '{d2}'"
+      print("chain under test: " + sql(
+          f"SELECT string_agg(d.name, ' > ' ORDER BY d.id = '{hello_drv}' DESC, d.id = '{d1}' DESC) "
+          f"FROM derivation d WHERE d.id IN ({chain});"
+      ))
+      outputs = sql(f"SELECT o.hash FROM derivation_output o WHERE o.derivation IN ({chain});").split()
+      assert len(outputs) >= 3, f"the chain has only {len(outputs)} outputs"
+
+      # What keep_evaluations leaves behind for a pruned interior once its walker
+      # is gone: no evaluation names it. hello keeps its names.
+      sql(f"DELETE FROM build_job WHERE derivation IN ('{d1}', '{d2}');")
+      assert sql(f"SELECT count(*) FROM build_job WHERE derivation IN ('{d1}', '{d2}');") == "0"
+
+      # Retire the chain's outputs for real, so the producers are reset and the
+      # counters move by the retire's own ripple rather than by hand.
+      for h in outputs:
+          server.succeed(f"rm -f {nar_object(h)}")
+      server.succeed(
+          f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
+          f"{API}/admin/maintenance/deep-gc"
+      )
+      for h in outputs:
+          poll(f"SELECT count(*) FROM cached_path WHERE hash = '{h}';", "0",
+               f"the zombie purge kept {h}'s row after its NAR was deleted")
+      poll(f"SELECT count(*) FROM derivation_build WHERE derivation IN ({chain}) AND status = 0;", "3",
+           "the retire did not reset every producer of the chain")
+      assert drift() == 0, "counters disagree with their recompute after the retire"
+      assert anchor_drift() == 0, "anchor counters disagree with their recompute after the retire"
+
+      # The dead zone, stated: nothing queues an unnamed anchor, however ready.
+      server.sleep(20)
+      assert sql(f"SELECT status::text FROM derivation_build WHERE derivation = '{d2}';") == "0", (
+          "an interior with no name was queued before anything adopted it"
+      )
+
+      # task2's evaluation is the one still building against the subtree.
+      sql(f"UPDATE evaluation SET status = 3, "
+          f"building_started_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC') "
+          f"WHERE id = '{eval2_id}';")
+
+      poll(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval2_id}' AND derivation IN ('{d1}', '{d2}');",
+           "2", "task2's evaluation did not adopt the interior it never walked", timeout=420)
+      status2 = ""
+      for _ in range(60):
+          status2 = server.succeed(
+              f'{CURL} -sf -H "Authorization: Bearer {token}" '
+              f'{API}/evals/{eval2_id} | {JQ} -rj ".message.status"'
+          ).strip()
+          if status2 == "Completed":
+              break
+          if status2 in ("Failed", "Aborted"):
+              j = server.succeed("journalctl -u gradient-server --no-pager --since='-600s' -n 300")
+              raise Exception(f"task2's evaluation ended {status2} over the adopted chain:\n{j[-3000:]}")
+          server.sleep(10)
+      else:
+          raise Exception(f"task2's evaluation did not complete over the adopted chain in 600 s (still {status2!r})")
+
+      assert sql(
+          f"SELECT count(*) FROM derivation_build WHERE derivation IN ({chain}) AND status IN (3, 7) AND fetchable;"
+      ) == "3", "the chain is not terminal-success and fetchable again"
+      for h in outputs:
+          assert sql(
+              f"SELECT count(*) FROM cached_path WHERE hash = '{h}' AND file_hash IS NOT NULL AND missing_references = 0;"
+          ) == "1", f"{h} did not come back whole"
+      attributed = int(sql(
+          f"SELECT count(DISTINCT bj.derivation) FROM build_attempt a JOIN build_job bj ON bj.id = a.build_job "
+          f"WHERE bj.evaluation = '{eval2_id}' AND bj.derivation IN ('{d1}', '{d2}');"
+      ))
+      assert attributed == 2, f"the interior's rebuilds were attributed to {attributed} of the 2 adopted names"
+      assert drift() == 0, "counters disagree with their recompute after the adopted rebuild"
+      assert anchor_drift() == 0, "anchor counters disagree with their recompute after the adopted rebuild"
+      print(server.succeed("journalctl -u gradient-server --no-pager | grep -i 'adopt' | tail -n 5"))
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
