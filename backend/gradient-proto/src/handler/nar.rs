@@ -81,6 +81,7 @@ pub(super) async fn mark_nar_stored(
             deriver: record.deriver.map(str::to_owned),
             ca: record.ca.map(str::to_owned),
             targets,
+            confirmed: true,
         })
         .await?;
 

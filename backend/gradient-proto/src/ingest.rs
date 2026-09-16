@@ -42,6 +42,7 @@ impl IngestInput<'_> {
             deriver: self.deriver.map(str::to_owned),
             ca: self.ca.map(str::to_owned),
             targets,
+            confirmed: true,
         }
     }
 }
