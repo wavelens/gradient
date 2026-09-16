@@ -13,8 +13,8 @@ pub use state_root::{AppState, LAST_USED_STAMP_INTERVAL, ServerState, last_used_
 use gradient_db::{CacheDb, WebDb, WorkerDb, connect_cache_db, connect_db, connect_web_db};
 use gradient_notify::EmailService;
 use gradient_state::load_and_apply_state;
-use gradient_storage::NarStore;
 use gradient_storage::{FileLogStorage, S3LogStorage};
+use gradient_storage::{HotNarCache, NarStore, StagedNars};
 use gradient_types::*;
 use gradient_util::shutdown::Shutdown;
 use sea_orm::{
@@ -174,6 +174,15 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         tracing::info!(path = %cli.storage.base_path, "NAR storage: local");
         store
     };
+
+    let staged = StagedNars::new(format!("{}/nar-staged", cli.storage.base_path))
+        .map_err(|e| InitError::LocalStorage(e.to_string()))?;
+    let nar_storage = nar_storage
+        .with_staging(staged)
+        .with_hot_cache(HotNarCache::new(
+            cli.storage.hot_nar_cache_bytes,
+            cli.storage.small_nar_bytes,
+        ));
 
     let log_storage: Arc<dyn gradient_storage::LogStorage> = if cli.s3_config().is_some() {
         tracing::info!("Log storage: S3 (with local cache)");
