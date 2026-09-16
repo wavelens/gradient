@@ -239,3 +239,8 @@ pub(crate) mod test_ctx {
         (ctx, worker_db)
     }
 }
+
+/// Pulls this crate into a binary that otherwise references nothing from it, so
+/// the statements it declares with `gradient_db::sql!` reach the plan gate's
+/// registry. A linker drops an rlib nothing mentions, registry entries included.
+pub const fn link() {}
