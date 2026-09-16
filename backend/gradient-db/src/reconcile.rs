@@ -24,7 +24,8 @@ use tracing::{debug, error};
 pub enum ReconcileScope {
     /// An evaluation just flushed its graph: thaw the terminal-failed anchors in
     /// its closure, settle the anchors whose outputs are already whole, fail the
-    /// dependents of a deterministic failure, promote the closure.
+    /// dependents of a deterministic failure, name the pending anchors it reaches
+    /// for the evaluation, promote the closure.
     Eval(EvaluationId),
     /// A wedged evaluation: the `Eval` steps plus the unbacked-output demote.
     Unstick(EvaluationId),
@@ -44,6 +45,7 @@ pub struct ReconcileReport {
     pub thawed: u64,
     pub demoted_producers: u64,
     pub cached_reconciled: usize,
+    pub adopted: usize,
     pub dependency_failed: Vec<TransitionChange>,
     pub promoted: Vec<TransitionChange>,
 }
@@ -53,6 +55,7 @@ impl ReconcileReport {
         self.thawed == 0
             && self.demoted_producers == 0
             && self.cached_reconciled == 0
+            && self.adopted == 0
             && self.dependency_failed.is_empty()
             && self.promoted.is_empty()
     }
@@ -113,6 +116,18 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         Err(e) => error!(error = %e, "reconcile: reconcile_dependency_failed failed"),
     }
 
+    // A pruned interior in this closure that a thaw or a reset left with no name
+    // fails the gate the promote embeds; this evaluation names it first.
+    match crate::reachability::adopt_pending_closure(db, evaluation).await {
+        Ok(adopted) => {
+            report.adopted = adopted.pairs.len();
+            if let Err(e) = crate::bump_graph_version(db, &adopted.evaluations()).await {
+                error!(error = %e, %evaluation, "reconcile: graph version bump after adoption failed");
+            }
+        }
+        Err(e) => error!(error = %e, %evaluation, "reconcile: adopt_pending_closure failed"),
+    }
+
     match crate::readiness::promote_closure(db, evaluation).await {
         Ok(changes) => {
             emit_transition_effects(ctx, &changes).await;
@@ -127,6 +142,7 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
             thawed = report.thawed,
             demoted = report.demoted_producers,
             cached_reconciled = report.cached_reconciled,
+            adopted = report.adopted,
             dependency_failed = report.dependency_failed.len(),
             promoted = report.promoted.len(),
             "graph reconciliation made progress"
@@ -147,5 +163,74 @@ mod tests {
         let eval = EvaluationId::now_v7();
         assert_eq!(ReconcileScope::Eval(eval).evaluation(), eval);
         assert_eq!(ReconcileScope::Unstick(eval).evaluation(), eval);
+    }
+
+    /// The heal names what it thawed and reset before it promotes: a pruned
+    /// interior in this closure that no evaluation names any more would otherwise
+    /// fail the gate the promote embeds, and the heal would loop on it forever.
+    #[tokio::test]
+    async fn the_heal_adopts_the_closure_before_it_promotes_it() {
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use std::collections::BTreeMap;
+
+        let eval = EvaluationId::now_v7();
+        let d = gradient_types::DerivationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new();
+        let exec = |rows_affected| MockExecResult {
+            last_insert_id: 0,
+            rows_affected,
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // the thaw and the cache reconcile move nothing
+            .append_query_results([empty.clone(), empty.clone()])
+            // the dependency-failed sweep opens a walk and moves nothing
+            .append_exec_results([exec(0)])
+            .append_query_results([empty.clone()])
+            // the adoption opens a walk and takes one name on
+            .append_exec_results([exec(0)])
+            .append_query_results([vec![BTreeMap::from([
+                ("evaluation".to_owned(), Value::from(eval.into_inner())),
+                ("derivation".to_owned(), Value::from(d.into_inner())),
+            ])]])
+            // the adopting evaluation's graph version
+            .append_exec_results([exec(1)])
+            // the closure promote opens a walk and finds nothing ready yet
+            .append_exec_results([exec(0)])
+            .append_query_results([empty])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        let report = reconcile_build_graph(&ctx, ReconcileScope::Eval(eval)).await;
+        drop(ctx);
+
+        assert_eq!(report.adopted, 1);
+        assert!(!report.is_noop(), "an adoption is progress");
+        let log = crate::pool::statements(pool.into_transaction_log());
+        let adopt = log
+            .iter()
+            .position(|s| s.contains("INSERT INTO build_job"))
+            .expect("the heal adopts");
+        let bump = log
+            .iter()
+            .position(|s| s.contains("graph_version = e.graph_version + 1"))
+            .expect("the adoption bumps the graph version");
+        let promote = log
+            .iter()
+            .position(|s| s.contains("SET status = 1"))
+            .expect("the heal promotes the closure");
+        assert!(
+            log[adopt].contains("WHERE bj.evaluation = $1"),
+            "scoped to the healed evaluation: {log:?}"
+        );
+        assert!(
+            adopt < bump && bump < promote,
+            "adopt, bump, then promote: {log:?}"
+        );
+        assert!(
+            log[..adopt]
+                .iter()
+                .any(|s| s.contains("deterministic_blocked")),
+            "the thaw runs before the adoption: {log:?}"
+        );
     }
 }

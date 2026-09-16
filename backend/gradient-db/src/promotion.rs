@@ -382,8 +382,10 @@ fn requeue_failed_anchors_sql() -> String {
 /// blocks its dependents with no dispatch (hence no failure) to trigger any
 /// reactive heal. Walks `derivation_dependency` down from the eval's anchors and
 /// resets every `FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`
-/// node to `Created` so promotion (which keys on any `build_job`, not this eval's)
-/// can rebuild the failed subtree bottom-up. Anchors with a
+/// node to `Created`; the reconciler then names the thawed closure for this
+/// evaluation (`reachability::adopt_pending_closure`), because a thawed anchor
+/// this evaluation pruned may have no `build_job` left at all, and promotes it so
+/// the failed subtree rebuilds bottom-up. Anchors with a
 /// [`deterministic_build_failure`] are excluded, as in [`requeue_failed_anchors`].
 /// Returns the thaws it made, so the caller can feed
 /// [`crate::status::emit_transition_effects`].
