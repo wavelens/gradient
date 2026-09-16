@@ -74,16 +74,18 @@ fn require_supported_pg_version(server_version_num: i32) -> Result<()> {
     Ok(())
 }
 
+crate::sql! {
+    SERVER_VERSION_NUM = "SELECT current_setting('server_version_num')::int4 AS v",
+        params = [];
+}
+
 async fn server_version_num(db: &DatabaseConnection) -> Result<i32> {
-    db.query_one_raw(Statement::from_string(
-        DatabaseBackend::Postgres,
-        "SELECT current_setting('server_version_num')::int4 AS v",
-    ))
-    .await
-    .context("Failed to query PostgreSQL server version")?
-    .context("PostgreSQL returned no server_version_num")?
-    .try_get::<i32>("", "v")
-    .context("Failed to read server_version_num")
+    db.query_one_raw(SERVER_VERSION_NUM.stmt())
+        .await
+        .context("Failed to query PostgreSQL server version")?
+        .context("PostgreSQL returned no server_version_num")?
+        .try_get::<i32>("", "v")
+        .context("Failed to read server_version_num")
 }
 
 pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
@@ -132,6 +134,28 @@ async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
 /// "Applied migrations not found in migration list" on installs that ran
 /// migrations later removed from the codebase. The set of registered names is
 /// derived from `Migrator::migrations()` so it cannot drift from reality.
+fn prune_removed_migrations_sql(known: &[Value]) -> String {
+    let placeholders: Vec<String> = (1..=known.len()).map(|i| format!("${i}")).collect();
+    format!(
+        "DELETE FROM seaql_migrations WHERE version NOT IN ({}) RETURNING version",
+        placeholders.join(", ")
+    )
+}
+
+crate::sql_fn! {
+    PRUNE_REMOVED_MIGRATIONS = || {
+        let known = [
+            Value::from("m20260619_010000_globalize_derivation".to_string()),
+            Value::from("m20260619_020000_derivation_build_anchor".to_string()),
+        ];
+        prune_removed_migrations_sql(&known)
+    },
+        params = [
+            Text("m20260619_010000_globalize_derivation"),
+            Text("m20260619_020000_derivation_build_anchor"),
+        ];
+}
+
 async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
     let known: Vec<Value> = Migrator::migrations()
         .iter()
@@ -140,11 +164,7 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
     if known.is_empty() {
         return Ok(());
     }
-    let placeholders: Vec<String> = (1..=known.len()).map(|i| format!("${i}")).collect();
-    let sql = format!(
-        "DELETE FROM seaql_migrations WHERE version NOT IN ({}) RETURNING version",
-        placeholders.join(", ")
-    );
+    let sql = prune_removed_migrations_sql(&known);
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,

@@ -413,6 +413,11 @@ mod tests {
         assert_eq!(run(&worker).await, DbBackend::Postgres);
     }
 
+    crate::sql! {
+        TEST_TRANSACTIONAL_UPDATE = "UPDATE derivation_build SET status = 1",
+            params = [];
+    }
+
     #[tokio::test]
     async fn a_transactional_handle_runs_inside_the_transaction_and_detaches_to_the_pool() {
         let mock = MockDatabase::new(DbBackend::Postgres)
@@ -428,10 +433,7 @@ mod tests {
         assert!(scoped.detached().as_transaction().is_none());
 
         scoped
-            .execute_raw(Statement::from_string(
-                DbBackend::Postgres,
-                "UPDATE derivation_build SET status = 1",
-            ))
+            .execute_raw(TEST_TRANSACTIONAL_UPDATE.stmt())
             .await
             .expect("statement on the transaction");
         drop(scoped);

@@ -21,8 +21,8 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, EntityTrait,
-    QueryFilter, QuerySelect, Statement, TransactionTrait, Value,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, QueryFilter,
+    QuerySelect, TransactionTrait, Value,
 };
 use std::sync::LazyLock;
 
@@ -120,6 +120,11 @@ pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
     }))
 }
 
+crate::sql! {
+    PRODUCERS_OF_HASHES = "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
+        params = [CachedPathHashes(64)];
+}
+
 /// The derivations whose outputs carry any of `hashes`: the anchors a store
 /// path's arrival or removal can make fetchable or unfetchable.
 pub async fn producers_of_hashes<C: ConnectionTrait>(
@@ -131,11 +136,7 @@ pub async fn producers_of_hashes<C: ConnectionTrait>(
     }
 
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
-            [hashes.to_vec().into()],
-        ))
+        .query_all_raw(PRODUCERS_OF_HASHES.bind([hashes.to_vec().into()]))
         .await?;
 
     Ok(rows
@@ -143,6 +144,11 @@ pub async fn producers_of_hashes<C: ConnectionTrait>(
         .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
         .map(DerivationId::new)
         .collect())
+}
+
+crate::sql! {
+    DERIVATIONS_WITH_HASHES = "SELECT d.id FROM derivation d WHERE d.hash = ANY($1)",
+        params = [DerivationHashes(64)];
 }
 
 /// The derivations whose own `.drv` hash is any of `hashes`: the anchors whose
@@ -156,11 +162,7 @@ pub async fn derivations_with_hashes<C: ConnectionTrait>(
     }
 
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT d.id FROM derivation d WHERE d.hash = ANY($1)",
-            [hashes.to_vec().into()],
-        ))
+        .query_all_raw(DERIVATIONS_WITH_HASHES.bind([hashes.to_vec().into()]))
         .await?;
 
     Ok(rows
@@ -248,6 +250,20 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
 static ADOPT_EVAL: LazyLock<String> =
     LazyLock::new(|| adopt_sql(&named_builders("bj.evaluation = $1")));
 
+crate::sql_lazy! {
+    ADOPT_LIVE_QUERY = || ADOPT_LIVE.as_str(),
+        params = [],
+        tier = Walk,
+        flags = [Walk];
+}
+
+crate::sql_lazy! {
+    ADOPT_EVAL_QUERY = || ADOPT_EVAL.as_str(),
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
+}
+
 fn pending_orphans_sql(scope: &str) -> String {
     format!(
         "SELECT 1 FROM derivation_build db WHERE {scope}db.status IN ({pending}) \
@@ -258,6 +274,11 @@ fn pending_orphans_sql(scope: &str) -> String {
 
 static PENDING_ORPHANS_AMONG: LazyLock<String> =
     LazyLock::new(|| pending_orphans_sql("db.derivation = ANY($1::uuid[]) AND "));
+
+crate::sql_lazy! {
+    PENDING_ORPHANS_AMONG_QUERY = || PENDING_ORPHANS_AMONG.as_str(),
+        params = [DerivationIds(64)];
+}
 
 /// The frontier every naming hole has: a pending anchor nobody names, one edge
 /// below a builder a live evaluation names. Cheap to ask on every sweep; the walk
@@ -275,6 +296,11 @@ static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
     ))
 });
 
+crate::sql_lazy! {
+    PENDING_ORPHAN_FRONTIER_QUERY = || PENDING_ORPHAN_FRONTIER.as_str(),
+        params = [];
+}
+
 /// Whether any of `derivations` is in a builder status with no `build_job` left:
 /// what the per-task GC asks about the names it just cascaded away, before it
 /// pays for the walk.
@@ -288,11 +314,7 @@ pub async fn pending_orphans_among<C: ConnectionTrait>(
 
     let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
     Ok(db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            PENDING_ORPHANS_AMONG.as_str(),
-            [ids.into()],
-        ))
+        .query_one_raw(PENDING_ORPHANS_AMONG_QUERY.bind([ids.into()]))
         .await?
         .is_some())
 }
@@ -301,10 +323,7 @@ pub async fn pending_orphans_among<C: ConnectionTrait>(
 /// consistency sweep's guard on the walk.
 pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     Ok(db
-        .query_one_raw(Statement::from_string(
-            DatabaseBackend::Postgres,
-            PENDING_ORPHAN_FRONTIER.as_str().to_owned(),
-        ))
+        .query_one_raw(PENDING_ORPHAN_FRONTIER_QUERY.stmt())
         .await?
         .is_some())
 }
@@ -318,7 +337,7 @@ pub async fn adopt_pending_closures<C>(db: &C) -> Result<Adopted, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    adopt(db, ADOPT_LIVE.as_str(), []).await
+    adopt(db, &ADOPT_LIVE_QUERY, []).await
 }
 
 /// [`adopt_pending_closures`] for one evaluation, from its own names.
@@ -328,25 +347,19 @@ where
 {
     adopt(
         db,
-        ADOPT_EVAL.as_str(),
+        &ADOPT_EVAL_QUERY,
         [Value::Uuid(Some(evaluation.into_inner()))],
     )
     .await
 }
 
-async fn adopt<C, V>(db: &C, sql: &str, values: V) -> Result<Adopted, DbErr>
+async fn adopt<C, V>(db: &C, query: &crate::sql::Query, values: V) -> Result<Adopted, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
     V: IntoIterator<Item = Value>,
 {
     let walk = crate::graph_sql::begin_walk(db).await?;
-    let rows = walk
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
-            values,
-        ))
-        .await?;
+    let rows = walk.query_all_raw(query.bind(values)).await?;
     walk.commit().await?;
 
     let pairs = rows

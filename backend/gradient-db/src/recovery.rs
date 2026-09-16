@@ -8,9 +8,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::sea_query::{Expr, ExprTrait};
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, QueryFilter, Statement,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
 use gradient_types::*;
 
@@ -45,6 +43,22 @@ pub struct RecoveryReport {
     pub builds_aborted: u64,
     pub evals_aborted: u64,
     pub tasks_forced: u64,
+}
+
+fn requeue_mid_flight_sql() -> String {
+    format!(
+        "UPDATE derivation_build SET status = {queued}, \
+         updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE status = {building} RETURNING derivation",
+        queued = crate::status_sql::build(BuildStatus::Queued),
+        building = crate::status_sql::build(BuildStatus::Building),
+    )
+}
+
+crate::sql_fn! {
+    REQUEUE_MID_FLIGHT = requeue_mid_flight_sql,
+        params = [],
+        tier = Sweep;
 }
 
 pub async fn recover_interrupted_work<C: ConnectionTrait>(
@@ -82,17 +96,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     // `m20260908_000000` every derivation is unwalked. `RETURNING` names exactly the
     // rows this statement moved, so the settle cannot miss one that arrived late.
     let requeued = crate::promotion::returned_derivations(
-        conn.query_all_raw(Statement::from_string(
-            DatabaseBackend::Postgres,
-            format!(
-                "UPDATE derivation_build SET status = {queued}, \
-                 updated_at = (now() AT TIME ZONE 'UTC') \
-                 WHERE status = {building} RETURNING derivation",
-                queued = crate::status_sql::build(BuildStatus::Queued),
-                building = crate::status_sql::build(BuildStatus::Building),
-            ),
-        ))
-        .await?,
+        conn.query_all_raw(REQUEUE_MID_FLIGHT.stmt()).await?,
     );
     report.builds_requeued = requeued.len() as u64;
     report.builds_unpromoted = crate::readiness::unpromote_ungated(conn, &requeued)
@@ -177,12 +181,8 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
 /// Mirrors the explicit-abort path (`status::abort`): a global build-once anchor
 /// is only aborted when no surviving evaluation depends on it. Returns the
 /// derivations it aborted, which name every evaluation whose histogram moved.
-async fn abort_anchors_for_evals<C: ConnectionTrait>(
-    conn: &C,
-    eval_ids: &[EvaluationId],
-) -> Result<Vec<DerivationId>, DbErr> {
-    let ids: Vec<uuid::Uuid> = eval_ids.iter().map(|e| e.into_inner()).collect();
-    let sql = format!(
+fn abort_anchors_for_evals_sql() -> String {
+    format!(
         r#"
         UPDATE derivation_build db
         SET status = {aborted}, updated_at = (now() AT TIME ZONE 'UTC')
@@ -204,14 +204,24 @@ async fn abort_anchors_for_evals<C: ConnectionTrait>(
         completed = EvaluationStatus::Completed as i32,
         failed = EvaluationStatus::Failed as i32,
         eval_aborted = EvaluationStatus::Aborted as i32,
-    );
+    )
+}
 
+crate::sql_fn! {
+    // No Param kind names an `evaluation` id array; BuildIds stands in as the
+    // closest UUID-shaped kind the registry offers.
+    ABORT_ANCHORS_FOR_EVALS = abort_anchors_for_evals_sql,
+        params = [BuildIds(64)],
+        tier = Sweep;
+}
+
+async fn abort_anchors_for_evals<C: ConnectionTrait>(
+    conn: &C,
+    eval_ids: &[EvaluationId],
+) -> Result<Vec<DerivationId>, DbErr> {
+    let ids: Vec<uuid::Uuid> = eval_ids.iter().map(|e| e.into_inner()).collect();
     let rows = conn
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
-            [ids.into()],
-        ))
+        .query_all_raw(ABORT_ANCHORS_FOR_EVALS.bind([ids.into()]))
         .await?;
 
     Ok(crate::promotion::returned_derivations(rows))

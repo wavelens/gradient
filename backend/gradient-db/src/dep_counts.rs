@@ -23,8 +23,8 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::ids::{DerivationId, EntryPointId, EvaluationId};
 use gradient_types::*;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, EntityTrait, QueryFilter,
-    Statement, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, QueryFilter,
+    TransactionTrait,
 };
 use std::collections::HashMap;
 
@@ -66,6 +66,21 @@ fn needs_recompute(ep: &MEntryPoint, version: i64, now: NaiveDateTime) -> bool {
     ep.dep_counts_version != Some(version) && age >= DEP_COUNTS_REFRESH_SECS
 }
 
+crate::sql! {
+    BUMP_GRAPH_VERSION = "UPDATE evaluation e SET graph_version = e.graph_version + 1 \
+             FROM (SELECT id FROM evaluation WHERE id = ANY($1::uuid[]) \
+                   ORDER BY id FOR UPDATE) locked \
+             WHERE e.id = locked.id",
+        params = [BuildIds(64)];
+
+    BUMP_GRAPH_VERSION_FOR_DERIVATIONS = "UPDATE evaluation e SET graph_version = e.graph_version + 1 \
+             FROM (SELECT id FROM evaluation \
+                   WHERE id IN (SELECT evaluation FROM build_job WHERE derivation = ANY($1::uuid[])) \
+                   ORDER BY id FOR UPDATE) locked \
+             WHERE e.id = locked.id",
+        params = [DerivationIds(64)];
+}
+
 /// Advance the graph version of `evaluations`. The rows are locked in id order
 /// so two emits over overlapping evaluation sets cannot deadlock on them.
 pub async fn bump_graph_version<C: ConnectionTrait>(
@@ -78,14 +93,7 @@ pub async fn bump_graph_version<C: ConnectionTrait>(
 
     let ids: Vec<uuid::Uuid> = evaluations.iter().map(|e| e.into_inner()).collect();
     let res = db
-        .execute_raw(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "UPDATE evaluation e SET graph_version = e.graph_version + 1 \
-             FROM (SELECT id FROM evaluation WHERE id = ANY($1::uuid[]) \
-                   ORDER BY id FOR UPDATE) locked \
-             WHERE e.id = locked.id",
-            [ids.into()],
-        ))
+        .execute_raw(BUMP_GRAPH_VERSION.bind([ids.into()]))
         .await?;
 
     Ok(res.rows_affected())
@@ -103,15 +111,7 @@ pub async fn bump_graph_version_for_derivations<C: ConnectionTrait>(
 
     let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
     let res = db
-        .execute_raw(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "UPDATE evaluation e SET graph_version = e.graph_version + 1 \
-             FROM (SELECT id FROM evaluation \
-                   WHERE id IN (SELECT evaluation FROM build_job WHERE derivation = ANY($1::uuid[])) \
-                   ORDER BY id FOR UPDATE) locked \
-             WHERE e.id = locked.id",
-            [ids.into()],
-        ))
+        .execute_raw(BUMP_GRAPH_VERSION_FOR_DERIVATIONS.bind([ids.into()]))
         .await?;
 
     Ok(res.rows_affected())
@@ -158,6 +158,21 @@ where
     Ok(out)
 }
 
+crate::sql! {
+    DELETE_ENTRY_POINT_DEP_COUNTS = "DELETE FROM entry_point_dep_count WHERE entry_point = ANY($1::uuid[])",
+        params = [BuildIds(64)];
+
+    INSERT_ENTRY_POINT_DEP_COUNTS = "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
+             SELECT uuidv7(), r.entry_point, r.status, r.count \
+             FROM unnest($1::uuid[], $2::int[], $3::bigint[]) AS r(entry_point, status, count) \
+             ON CONFLICT (entry_point, status) DO UPDATE SET count = EXCLUDED.count",
+        params = [BuildIds(64), Int(2), Int(5)];
+
+    UPDATE_ENTRY_POINT_DEP_COUNTS_STAMP = "UPDATE entry_point SET dep_counts_version = $1, dep_counts_computed_at = $2 \
+         WHERE id = ANY($3::uuid[])",
+        params = [Int(2), Now, BuildIds(64)];
+}
+
 async fn store_entry_point_dep_counts<C>(
     db: &C,
     version: i64,
@@ -190,31 +205,23 @@ where
     let cnts: Vec<i64> = rows.iter().map(|r| r.2).collect();
 
     let txn = db.begin().await?;
-    txn.execute_raw(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        "DELETE FROM entry_point_dep_count WHERE entry_point = ANY($1::uuid[])",
-        [ids.clone().into()],
-    ))
-    .await?;
+    txn.execute_raw(DELETE_ENTRY_POINT_DEP_COUNTS.bind([ids.clone().into()]))
+        .await?;
 
     if !eps.is_empty() {
-        txn.execute_raw(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
-             SELECT uuidv7(), r.entry_point, r.status, r.count \
-             FROM unnest($1::uuid[], $2::int[], $3::bigint[]) AS r(entry_point, status, count) \
-             ON CONFLICT (entry_point, status) DO UPDATE SET count = EXCLUDED.count",
-            [eps.into(), statuses.into(), cnts.into()],
-        ))
+        txn.execute_raw(INSERT_ENTRY_POINT_DEP_COUNTS.bind([
+            eps.into(),
+            statuses.into(),
+            cnts.into(),
+        ]))
         .await?;
     }
 
-    txn.execute_raw(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        "UPDATE entry_point SET dep_counts_version = $1, dep_counts_computed_at = $2 \
-         WHERE id = ANY($3::uuid[])",
-        [version.into(), computed_at.into(), ids.into()],
-    ))
+    txn.execute_raw(UPDATE_ENTRY_POINT_DEP_COUNTS_STAMP.bind([
+        version.into(),
+        computed_at.into(),
+        ids.into(),
+    ]))
     .await?;
 
     txn.commit().await

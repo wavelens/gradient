@@ -22,8 +22,8 @@ use gradient_entity::evaluation_message::MessageLevel;
 use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait,
-    IntoActiveModel, QueryFilter, Statement, TransactionTrait, Value,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
+    QueryFilter, TransactionTrait, Value,
 };
 use tracing::{debug, error, warn};
 
@@ -31,10 +31,11 @@ use crate::messages::{IngestBatch, IngestReport, UpstreamHit};
 
 const BATCH_SIZE: usize = 1000;
 
-/// Insert or complete the record of every derivation the worker walked. The
-/// conflict update runs only for a row that is not yet walked, so RETURNING
-/// yields exactly the derivations this batch flipped.
-const WALKED_UPSERT: &str = r#"
+gradient_db::sql! {
+    /// Insert or complete the record of every derivation the worker walked. The
+    /// conflict update runs only for a row that is not yet walked, so RETURNING
+    /// yields exactly the derivations this batch flipped.
+    WALKED_UPSERT = r#"
 INSERT INTO derivation
     (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, created_at)
 SELECT d.id, d.hash, d.name, d.architecture, NULLIF(d.pname, ''), d.prefer_local_build,
@@ -50,38 +51,65 @@ ON CONFLICT (hash, name) DO UPDATE SET
     walked = true
 WHERE NOT derivation.walked
 RETURNING hash
-"#;
+"#,
+        params = [
+            DerivationIds(64), DerivationHashes(64), Text("hello"), Text("x86_64-linux"),
+            Text("hello-1.0"), Bool(false), Bool(false), Bool(true), Now,
+        ];
 
-/// A row for every dependency the batch names, so its edge can land now. A
-/// stub carries only what the path itself says; the walk fills the rest.
-const STUB_INSERT: &str = r#"
+    /// A row for every dependency the batch names, so its edge can land now. A
+    /// stub carries only what the path itself says; the walk fills the rest.
+    STUB_INSERT = r#"
 INSERT INTO derivation (id, hash, name, architecture, walked, created_at)
 SELECT d.id, d.hash, d.name, '', false, $4
 FROM unnest($1::uuid[], $2::text[], $3::text[]) AS d(id, hash, name)
 ON CONFLICT (hash, name) DO NOTHING
-"#;
+"#,
+        params = [DerivationIds(64), DerivationHashes(64), Text("hello"), Now];
 
-const RESOLVE_IDS: &str = "SELECT id, hash FROM derivation WHERE hash = ANY($1::text[])";
+    RESOLVE_IDS = "SELECT id, hash FROM derivation WHERE hash = ANY($1::text[])",
+        params = [DerivationHashes(64)];
 
-/// `RETURNING` names exactly the dependents whose edge set GREW, so the readiness
-/// seed runs for those and not for every derivation the batch mentions.
-const EDGE_INSERT: &str = r#"
+    /// `RETURNING` names exactly the dependents whose edge set GREW, so the readiness
+    /// seed runs for those and not for every derivation the batch mentions.
+    EDGE_INSERT = r#"
 INSERT INTO derivation_dependency (derivation, dependency)
 SELECT e.derivation, e.dependency FROM unnest($1::uuid[], $2::uuid[]) AS e(derivation, dependency)
 ON CONFLICT DO NOTHING
 RETURNING derivation
-"#;
+"#,
+        params = [DerivationIds(64), DerivationIds(64)];
 
-/// A stub's anchor exists before the record that carries the derivation's
-/// limits, so they land here; `0` stands in for an unset limit in the arrays.
-const ANCHOR_LIMITS_UPDATE: &str = r#"
+    /// A stub's anchor exists before the record that carries the derivation's
+    /// limits, so they land here; `0` stands in for an unset limit in the arrays.
+    ANCHOR_LIMITS_UPDATE = r#"
 UPDATE derivation_build AS db
 SET timeout_secs = NULLIF(l.timeout_secs, 0), max_silent_secs = NULLIF(l.max_silent_secs, 0)
 FROM unnest($1::uuid[], $2::bigint[], $3::bigint[]) AS l(derivation, timeout_secs, max_silent_secs)
 WHERE db.derivation = l.derivation
   AND (db.timeout_secs, db.max_silent_secs)
       IS DISTINCT FROM (NULLIF(l.timeout_secs, 0), NULLIF(l.max_silent_secs, 0))
-"#;
+"#,
+        params = [DerivationIds(64), Int(3600), Int(600)];
+}
+
+gradient_db::sql_fn! {
+    /// The exemplar behind [`flip_substitutable`]'s dynamic `NOT IN` fence: the
+    /// gate plans against the same generated fragment the call site runs.
+    FLIP_SUBSTITUTABLE = flip_substitutable_sql,
+        params = [DerivationIds(64)];
+}
+
+fn flip_substitutable_sql() -> String {
+    format!(
+        "UPDATE derivation_build SET substitutable = true, \
+         updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE derivation = ANY($1::uuid[]) AND NOT substitutable \
+           AND status NOT IN ({terminal_success}) \
+         RETURNING derivation",
+        terminal_success = gradient_db::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+    )
+}
 
 /// Every drv path the batch names, resolved twice: by path for the writes that
 /// key on what the worker reported, by hash for the readiness seed, whose input
@@ -142,21 +170,17 @@ impl BatchWriter<'_> {
 
         let rows = self
             .db()
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                WALKED_UPSERT,
-                [
-                    ids.into(),
-                    hashes.into(),
-                    names.into(),
-                    architectures.into(),
-                    pnames.into(),
-                    prefer_local.into(),
-                    fixed_output.into(),
-                    allow_substitutes.into(),
-                    Value::ChronoDateTime(Some(gradient_types::now())),
-                ],
-            ))
+            .query_all_raw(WALKED_UPSERT.bind([
+                ids.into(),
+                hashes.into(),
+                names.into(),
+                architectures.into(),
+                pnames.into(),
+                prefer_local.into(),
+                fixed_output.into(),
+                allow_substitutes.into(),
+                Value::ChronoDateTime(Some(gradient_types::now())),
+            ]))
             .await
             .context("upsert walked derivations")?;
 
@@ -203,16 +227,12 @@ impl BatchWriter<'_> {
         }
 
         self.db()
-            .execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                STUB_INSERT,
-                [
-                    ids.into(),
-                    hashes.into(),
-                    names.into(),
-                    Value::ChronoDateTime(Some(gradient_types::now())),
-                ],
-            ))
+            .execute_raw(STUB_INSERT.bind([
+                ids.into(),
+                hashes.into(),
+                names.into(),
+                Value::ChronoDateTime(Some(gradient_types::now())),
+            ]))
             .await
             .context("insert dependency stubs")?;
 
@@ -239,11 +259,7 @@ impl BatchWriter<'_> {
         for chunk in hashes.chunks(gradient_db::IN_CHUNK_SIZE) {
             let rows = self
                 .db()
-                .query_all_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    RESOLVE_IDS,
-                    [chunk.to_vec().into()],
-                ))
+                .query_all_raw(RESOLVE_IDS.bind([chunk.to_vec().into()]))
                 .await
                 .context("resolve derivation ids")?;
             for r in rows {
@@ -341,11 +357,7 @@ impl BatchWriter<'_> {
 
         let grew = self
             .db()
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                EDGE_INSERT,
-                [edge_from.into(), edge_to.into()],
-            ))
+            .query_all_raw(EDGE_INSERT.bind([edge_from.into(), edge_to.into()]))
             .await
             .context("insert dependency edges")?;
 
@@ -382,11 +394,7 @@ impl BatchWriter<'_> {
         }
 
         self.db()
-            .execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                ANCHOR_LIMITS_UPDATE,
-                [ids.into(), timeouts.into(), silents.into()],
-            ))
+            .execute_raw(ANCHOR_LIMITS_UPDATE.bind([ids.into(), timeouts.into(), silents.into()]))
             .await
             .context("set anchor limits")?;
 
@@ -561,19 +569,7 @@ impl BatchWriter<'_> {
         let ids: Vec<uuid::Uuid> = upstream.iter().map(|d| d.into_inner()).collect();
         let rows = self
             .db()
-            .query_all_raw(sea_orm::Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                format!(
-                    "UPDATE derivation_build SET substitutable = true, \
-                     updated_at = (now() AT TIME ZONE 'UTC') \
-                     WHERE derivation = ANY($1::uuid[]) AND NOT substitutable \
-                       AND status NOT IN ({terminal_success}) \
-                     RETURNING derivation",
-                    terminal_success =
-                        gradient_db::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
-                ),
-                [ids.into()],
-            ))
+            .query_all_raw(FLIP_SUBSTITUTABLE.bind([ids.into()]))
             .await
             .context("flag anchors substitutable from upstream")?;
 
@@ -1101,7 +1097,7 @@ mod tests {
     use super::*;
     use crate::test_ctx::ctx;
     use gradient_entity::evaluation::EvaluationStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement, Value};
     use std::collections::BTreeMap;
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";

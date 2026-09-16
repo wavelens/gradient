@@ -9,14 +9,70 @@ use chrono::Duration as ChronoDuration;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder, Statement,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    QueryOrder,
 };
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::DbContext;
 use gradient_types::*;
+
+crate::sql! {
+    ANCHORS_LOSING_AN_EVALUATION = "SELECT derivation FROM build_job WHERE evaluation = ANY($1::uuid[]) \
+             UNION SELECT derivation FROM entry_point WHERE evaluation = ANY($1::uuid[]) \
+             UNION SELECT e.dependency AS derivation FROM derivation_dependency e \
+             JOIN build_job bj ON bj.derivation = e.derivation \
+             WHERE bj.evaluation = ANY($1::uuid[])",
+        params = [BuildIds(64)],
+        tier = Sweep;
+
+    ORPHAN_DEPENDENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
+                 WHERE e.dependency = ANY($1)",
+        params = [DerivationIds(64)],
+        tier = Sweep;
+
+    UNWALK_ORPHAN_SURVIVORS = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
+        params = [DerivationIds(64)],
+        tier = Sweep;
+}
+
+/// The keep-set is the shared build-graph walk (`graph_sql`), reused verbatim by
+/// the candidate scan and the delete re-check so they can never diverge.
+fn gc_orphan_candidates_sql() -> String {
+    format!(
+        "{reachable}
+         SELECT d.id, d.hash FROM derivation d
+         WHERE d.created_at < $1
+           AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)",
+        reachable = crate::graph_sql::reachable_derivations_cte(),
+    )
+}
+
+crate::sql_fn! {
+    GC_ORPHAN_CANDIDATES = gc_orphan_candidates_sql,
+        params = [Now],
+        tier = Walk,
+        flags = [Walk];
+}
+
+fn gc_orphan_delete_sql() -> String {
+    format!(
+        "{reachable}
+         DELETE FROM derivation d
+         WHERE d.id = ANY($1)
+           AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)
+         RETURNING d.id",
+        reachable = crate::graph_sql::reachable_derivations_cte(),
+    )
+}
+
+crate::sql_fn! {
+    GC_ORPHAN_DELETE = gc_orphan_delete_sql,
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
 
 /// Deletes evaluations for `task_id`, retaining the most recent `keep`
 /// terminal evaluations (see [`evaluations_to_gc`]).
@@ -193,15 +249,7 @@ async fn anchors_losing_an_evaluation(
     let ids: Vec<Uuid> = evaluations.iter().map(|e| e.id.into_inner()).collect();
     let rows = ctx
         .worker_db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT derivation FROM build_job WHERE evaluation = ANY($1::uuid[]) \
-             UNION SELECT derivation FROM entry_point WHERE evaluation = ANY($1::uuid[]) \
-             UNION SELECT e.dependency AS derivation FROM derivation_dependency e \
-             JOIN build_job bj ON bj.derivation = e.derivation \
-             WHERE bj.evaluation = ANY($1::uuid[])",
-            [ids.into()],
-        ))
+        .query_all_raw(ANCHORS_LOSING_AN_EVALUATION.bind([ids.into()]))
         .await
         .context("GC: failed to collect the derivations of the evaluations to delete")?;
 
@@ -305,24 +353,11 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     let cutoff = gradient_types::now() - ChronoDuration::hours(grace_hours.max(0));
     let db = &ctx.worker_db;
 
-    // The keep-set is the shared build-graph walk (`graph_sql`), reused verbatim
-    // by the candidate scan and the delete re-check so they can never diverge.
-    let reachable = crate::graph_sql::reachable_derivations_cte();
-    let select_sql = format!(
-        "{reachable}
-         SELECT d.id, d.hash FROM derivation d
-         WHERE d.created_at < $1
-           AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)"
-    );
     let walk = crate::graph_sql::begin_walk(db)
         .await
         .context("GC: failed to open the keep-set walk")?;
     let rows = walk
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            &select_sql,
-            [sea_orm::Value::ChronoDateTime(Some(cutoff))],
-        ))
+        .query_all_raw(GC_ORPHAN_CANDIDATES.bind([sea_orm::Value::ChronoDateTime(Some(cutoff))]))
         .await
         .context("Failed to query orphan derivations")?;
     walk.commit()
@@ -395,13 +430,6 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         })
         .collect();
 
-    let delete_sql = format!(
-        "{reachable}
-         DELETE FROM derivation d
-         WHERE d.id = ANY($1)
-           AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)
-         RETURNING d.id"
-    );
     // Snapshot the edges INTO the candidates before the delete, never after: the
     // `dependency` FK is ON DELETE CASCADE, so the rows naming a reclaimed
     // derivation are gone the moment it is, and a dependent that survived it has
@@ -410,21 +438,16 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
         dependents.extend(
-            db.query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "SELECT e.derivation, e.dependency FROM derivation_dependency e \
-                 WHERE e.dependency = ANY($1)",
-                [ids.into()],
-            ))
-            .await
-            .context("GC: failed to query dependents of the candidates")?
-            .into_iter()
-            .filter_map(|r| {
-                Some((
-                    r.try_get::<Uuid>("", "derivation").ok()?,
-                    r.try_get::<Uuid>("", "dependency").ok()?,
-                ))
-            }),
+            db.query_all_raw(ORPHAN_DEPENDENTS.bind([ids.into()]))
+                .await
+                .context("GC: failed to query dependents of the candidates")?
+                .into_iter()
+                .filter_map(|r| {
+                    Some((
+                        r.try_get::<Uuid>("", "derivation").ok()?,
+                        r.try_get::<Uuid>("", "dependency").ok()?,
+                    ))
+                }),
         );
     }
 
@@ -436,11 +459,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         let outcome = async {
             let walk = crate::graph_sql::begin_walk(db).await?;
             let returned = walk
-                .query_all_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    &delete_sql,
-                    [ids.into()],
-                ))
+                .query_all_raw(GC_ORPHAN_DELETE.bind([ids.into()]))
                 .await?;
             walk.commit().await?;
             Ok::<Vec<sea_orm::QueryResult>, sea_orm::DbErr>(returned)
@@ -472,12 +491,8 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         let settled = async {
             use sea_orm::TransactionTrait;
             let txn = db.begin().await?;
-            txn.execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "UPDATE derivation SET walked = false WHERE id = ANY($1)",
-                [orphaned.into()],
-            ))
-            .await?;
+            txn.execute_raw(UNWALK_ORPHAN_SURVIVORS.bind([orphaned.into()]))
+                .await?;
             let changes = crate::readiness::unpromote_ungated(&txn, &survivors).await?;
             txn.commit().await?;
             Ok::<_, sea_orm::DbErr>(changes)

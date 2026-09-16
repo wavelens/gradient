@@ -69,18 +69,10 @@ pub fn record_nar_traffic(state: &ServerState, cache_id: CacheId, bytes: i64) {
     state.cache_traffic.record(cache_id, bucket, bytes);
 }
 
-/// Zero-filled time-series of a cache rollup metric. `count` and `sum` carry
-/// the two values the cache-stats UI needs (requests/bytes or packages/bytes).
-async fn cache_series<C: sea_orm::ConnectionTrait>(
-    db: &C,
-    cache_id: CacheId,
-    metric: &str,
-    granularity: RollupGranularity,
-    back_interval: &str,
-) -> Result<Vec<(NaiveDateTime, i64, i64)>, WebError> {
-    // generate_series keeps every bucket present (zero-filled) up to "now"; the
-    // values come from the new metric_rollup aggregates rather than ad-hoc scans.
-    let sql = format!(
+/// generate_series keeps every bucket present (zero-filled) up to "now"; the
+/// values come from the metric_rollup aggregates rather than ad-hoc scans.
+fn cache_series_sql(unit: &str, back: &str, gran: i16) -> String {
+    format!(
         r#"SELECT gs.period,
                   COALESCE(SUM(mr.count), 0)::bigint AS cnt,
                   COALESCE(SUM(mr.sum), 0)::bigint    AS total
@@ -96,9 +88,27 @@ async fn cache_series<C: sea_orm::ConnectionTrait>(
               AND (mr.scope->>'cache') = $2
            GROUP BY gs.period
            ORDER BY gs.period"#,
-        unit = granularity.trunc_unit(),
-        back = back_interval,
-        gran = i16::from(granularity),
+    )
+}
+
+gradient_db::sql_fn! {
+    CACHE_SERIES = || cache_series_sql("hour", "23 hours", 1),
+        params = [Text("cache.bytes_sent"), Text("11111111-1111-1111-1111-111111111111")];
+}
+
+/// Zero-filled time-series of a cache rollup metric. `count` and `sum` carry
+/// the two values the cache-stats UI needs (requests/bytes or packages/bytes).
+async fn cache_series<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    cache_id: CacheId,
+    metric: &str,
+    granularity: RollupGranularity,
+    back_interval: &str,
+) -> Result<Vec<(NaiveDateTime, i64, i64)>, WebError> {
+    let sql = cache_series_sql(
+        granularity.trunc_unit(),
+        back_interval,
+        i16::from(granularity),
     );
 
     let rows = db
@@ -165,6 +175,16 @@ async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
         .collect())
 }
 
+gradient_db::sql! {
+    CACHE_TOTALS = r#"SELECT COALESCE(SUM(cp.file_size), 0)::bigint AS total_bytes,
+                      COALESCE(SUM(cp.nar_size),  0)::bigint AS total_nar_bytes,
+                      COUNT(cps.id)::bigint                   AS total_packages
+               FROM cached_path_signature cps
+               JOIN cached_path cp ON cp.id = cps.cached_path
+               WHERE cps.cache = $1"#,
+        params = [CacheId];
+}
+
 pub async fn get_cache_stats(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -183,16 +203,7 @@ pub async fn get_cache_stats(
     // Total compressed bytes and package count for this cache.
     let total_row = state
         .web_db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"SELECT COALESCE(SUM(cp.file_size), 0)::bigint AS total_bytes,
-                      COALESCE(SUM(cp.nar_size),  0)::bigint AS total_nar_bytes,
-                      COUNT(cps.id)::bigint                   AS total_packages
-               FROM cached_path_signature cps
-               JOIN cached_path cp ON cp.id = cps.cached_path
-               WHERE cps.cache = $1"#,
-            [sea_orm::Value::Uuid(Some(cache.id.into_inner()))],
-        ))
+        .query_one_raw(CACHE_TOTALS.bind([sea_orm::Value::Uuid(Some(cache.id.into_inner()))]))
         .await
         .map_err(WebError::from)?;
 

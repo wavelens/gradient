@@ -127,13 +127,13 @@ impl HotNarCache {
         self.inner.is_some() && size <= self.small_nar_bytes && size <= self.capacity
     }
 
-    pub fn get(&self, hash: &str) -> Option<Bytes> {
+    /// A lookup that re-ranks the entry but leaves the counters alone, for a
+    /// re-probe behind an already-counted [`Self::get`]: one lookup is one hit or
+    /// one miss however many times the code has to ask.
+    fn peek(&self, hash: &str) -> Option<Bytes> {
         let inner = self.inner.as_ref()?;
         let mut inner = inner.lock();
-        let Some(entry) = inner.entries.get(hash) else {
-            self.misses.fetch_add(1, Ordering::Relaxed);
-            return None;
-        };
+        let entry = inner.entries.get(hash)?;
 
         let old = (entry.priority, entry.seq);
         let (hits, size) = (entry.hits + 1, entry.bytes.len() as u64);
@@ -144,9 +144,22 @@ impl HotNarCache {
         entry.priority = priority;
         let (bytes, seq) = (entry.bytes.clone(), entry.seq);
         inner.order.insert((priority, seq), hash.to_owned());
-        self.hits.fetch_add(1, Ordering::Relaxed);
 
         Some(bytes)
+    }
+
+    pub fn get(&self, hash: &str) -> Option<Bytes> {
+        self.inner.as_ref()?;
+        match self.peek(hash) {
+            Some(bytes) => {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+                Some(bytes)
+            }
+            None => {
+                self.misses.fetch_add(1, Ordering::Relaxed);
+                None
+            }
+        }
     }
 
     /// Admit `bytes` under `hash`, evicting the lowest-ranked entries until it
@@ -199,7 +212,7 @@ impl HotNarCache {
     where
         F: Future<Output = anyhow::Result<Bytes>> + Send + 'static,
     {
-        if let Some(bytes) = self.get(hash) {
+        if let Some(bytes) = self.peek(hash) {
             return Ok(bytes);
         }
 
@@ -332,7 +345,10 @@ mod tests {
             c.get("old");
         }
 
-        for i in 0..1500u32 {
+        // The floor rises to the VICTIM's priority, and with three residents the
+        // victim is two generations stale, so it climbs once per two evictions:
+        // ageing out an entry with n hits takes about 2n evictions, not n.
+        for i in 0..2500u32 {
             c.insert(&format!("churn{i}"), blob(10 * KIB, 2));
         }
 

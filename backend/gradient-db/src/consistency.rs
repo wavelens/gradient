@@ -26,7 +26,7 @@
 use crate::{DbContext, status_sql};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
+use sea_orm::{ConnectionTrait, DbErr, Statement};
 
 /// Counts of graph-invariant violations at one instant.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -76,10 +76,57 @@ impl ConsistencyReport {
     }
 }
 
-async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
-    let row = db
-        .query_one_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
-        .await?;
+crate::sql! {
+    NEGATIVE_REFERENCE_COUNTERS = "SELECT count(*) AS n FROM cached_path WHERE missing_references < 0",
+        params = [],
+        tier = Sweep;
+}
+
+fn unbacked_trusted_output_count_sql() -> String {
+    format!(
+        "SELECT count(*) AS n FROM ({}) u",
+        crate::cache_storage::unbacked_trusted_outputs_select()
+    )
+}
+
+crate::sql_fn! {
+    UNBACKED_TRUSTED_OUTPUT_COUNT = unbacked_trusted_output_count_sql,
+        params = [],
+        tier = Sweep;
+}
+
+fn wedged_building_evals_sql() -> String {
+    format!(
+        "SELECT count(*) AS n FROM evaluation ev \
+         WHERE ev.status = {building} \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM build_job bj \
+             JOIN derivation_build db ON db.derivation = bj.derivation \
+             WHERE bj.evaluation = ev.id AND db.status IN ({non_terminal}))",
+        building = status_sql::eval(EvaluationStatus::Building),
+        non_terminal = status_sql::build_in(&[
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+            BuildStatus::FailedTransient,
+        ]),
+    )
+}
+
+crate::sql_fn! {
+    WEDGED_BUILDING_EVALS = wedged_building_evals_sql,
+        params = [],
+        tier = Sweep;
+}
+
+crate::sql_fn! {
+    GATING_PATHS = crate::nar_closure::gating_paths,
+        params = [],
+        tier = Sweep;
+}
+
+async fn count<C: ConnectionTrait>(db: &C, stmt: Statement) -> Result<i64, DbErr> {
+    let row = db.query_one_raw(stmt).await?;
     Ok(row
         .and_then(|r| r.try_get::<i64>("", "n").ok())
         .unwrap_or(0))
@@ -96,23 +143,15 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
 /// construction. `gating_paths` reports the size of that bounded set.
 pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
     let db = &ctx.worker_db;
-    let unbacked = crate::cache_storage::unbacked_trusted_outputs_select();
 
     let gating = db
-        .query_all_raw(Statement::from_string(
-            DatabaseBackend::Postgres,
-            crate::nar_closure::gating_paths(),
-        ))
+        .query_all_raw(GATING_PATHS.stmt())
         .await?
         .into_iter()
         .map(|r| r.try_get::<String>("", "hash"))
         .collect::<Result<Vec<_>, _>>()?;
     let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
-    let negative_reference_counters = count(
-        db,
-        "SELECT count(*) AS n FROM cached_path WHERE missing_references < 0".to_owned(),
-    )
-    .await?;
+    let negative_reference_counters = count(db, NEGATIVE_REFERENCE_COUNTERS.stmt()).await?;
 
     let repaired = crate::readiness::repair_pending(db).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
@@ -136,28 +175,9 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         0
     };
 
-    let unbacked_trusted_outputs =
-        count(db, format!("SELECT count(*) AS n FROM ({unbacked}) u")).await?;
+    let unbacked_trusted_outputs = count(db, UNBACKED_TRUSTED_OUTPUT_COUNT.stmt()).await?;
 
-    let wedged_building_evals = count(
-        db,
-        format!(
-            "SELECT count(*) AS n FROM evaluation ev \
-             WHERE ev.status = {building} \
-               AND NOT EXISTS ( \
-                 SELECT 1 FROM build_job bj \
-                 JOIN derivation_build db ON db.derivation = bj.derivation \
-                 WHERE bj.evaluation = ev.id AND db.status IN ({non_terminal}))",
-            building = status_sql::eval(EvaluationStatus::Building),
-            non_terminal = status_sql::build_in(&[
-                BuildStatus::Created,
-                BuildStatus::Queued,
-                BuildStatus::Building,
-                BuildStatus::FailedTransient,
-            ]),
-        ),
-    )
-    .await?;
+    let wedged_building_evals = count(db, WEDGED_BUILDING_EVALS.stmt()).await?;
 
     Ok(ConsistencyReport {
         counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
@@ -175,7 +195,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{MockDatabase, MockExecResult, Value};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 
     fn exec(rows_affected: u64) -> MockExecResult {

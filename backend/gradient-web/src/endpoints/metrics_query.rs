@@ -121,6 +121,43 @@ pub struct MetricPoint {
     pub avg: f64,
 }
 
+fn metrics_query_sql(project_filter: Option<&str>, has_from: bool, has_to: bool) -> String {
+    let mut sql = String::from(
+        "SELECT bucket_start, sum(count)::bigint AS c, sum(sum) AS s, \
+                min(min) AS mn, max(max) AS mx \
+         FROM metric_rollup WHERE metric = $1 AND granularity = $2",
+    );
+
+    if let Some(list) = project_filter {
+        // DB-sourced UUID strings, safe to inline as a quoted IN list.
+        sql.push_str(&format!(" AND (scope->>'project') IN ({list})"));
+    }
+
+    let mut n = 2;
+    if has_from {
+        n += 1;
+        sql.push_str(&format!(" AND bucket_start >= ${n}"));
+    }
+
+    if has_to {
+        n += 1;
+        sql.push_str(&format!(" AND bucket_start <= ${n}"));
+    }
+
+    sql.push_str(" GROUP BY bucket_start ORDER BY bucket_start");
+    sql
+}
+
+// Representative instantiation for the plan gate: project filter plus both bounds.
+gradient_db::sql_fn! {
+    METRICS_QUERY = || metrics_query_sql(
+        Some("'11111111-1111-1111-1111-111111111111'"),
+        true,
+        true,
+    ),
+        params = [Text("builds.created"), Int(1), Now, Now];
+}
+
 pub async fn get_metrics_query(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -154,38 +191,28 @@ pub async fn get_metrics_query(
         }
     };
 
-    let mut sql = String::from(
-        "SELECT bucket_start, sum(count)::bigint AS c, sum(sum) AS s, \
-                min(min) AS mn, max(max) AS mx \
-         FROM metric_rollup WHERE metric = $1 AND granularity = $2",
-    );
+    let project_list = project_filter.as_ref().map(|projects| {
+        projects
+            .iter()
+            .map(|o| format!("'{o}'"))
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    let from = parse_ts(params.from.as_deref());
+    let to = parse_ts(params.to.as_deref());
+    let sql = metrics_query_sql(project_list.as_deref(), from.is_some(), to.is_some());
 
     let mut values: Vec<Value> = vec![
         Value::from(params.metric.clone()),
         Value::from(i16::from(gran)),
     ];
-    if let Some(projects) = &project_filter {
-        // DB-sourced UUID strings, safe to inline as a quoted IN list.
-        let list = projects
-            .iter()
-            .map(|o| format!("'{o}'"))
-            .collect::<Vec<_>>()
-            .join(",");
-
-        sql.push_str(&format!(" AND (scope->>'project') IN ({list})"));
-    }
-
-    if let Some(from) = parse_ts(params.from.as_deref()) {
+    if let Some(from) = from {
         values.push(Value::from(from));
-        sql.push_str(&format!(" AND bucket_start >= ${}", values.len()));
     }
 
-    if let Some(to) = parse_ts(params.to.as_deref()) {
+    if let Some(to) = to {
         values.push(Value::from(to));
-        sql.push_str(&format!(" AND bucket_start <= ${}", values.len()));
     }
-
-    sql.push_str(" GROUP BY bucket_start ORDER BY bucket_start");
 
     let rows = state
         .web_db

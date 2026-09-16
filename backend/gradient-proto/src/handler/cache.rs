@@ -63,6 +63,21 @@ async fn load_cached_path_rows(
         .await
 }
 
+gradient_db::sql! {
+    INSERT_PUSH_SIGNATURE_PLACEHOLDERS = r#"
+                INSERT INTO cached_path_signature (id, cached_path, cache, created_at)
+                SELECT uuidv7(), cp.id, c.cache_id, (now() AT TIME ZONE 'UTC')
+                FROM cached_path cp
+                CROSS JOIN unnest($2::uuid[]) AS c(cache_id)
+                WHERE cp.id = ANY($1::uuid[])
+                ON CONFLICT (cached_path, cache) DO NOTHING
+                "#,
+        params = [
+            Text("{11111111-1111-1111-1111-111111111111}"),
+            Text("{22222222-2222-2222-2222-222222222222}"),
+        ];
+}
+
 /// For Push mode: ensure a `cached_path_signature` row exists for each
 /// (cached_path, project cache) pair so that the signing job is triggered for
 /// paths that were already cached before this worker connected.
@@ -103,18 +118,10 @@ async fn ensure_push_signatures(
     for chunk in path_ids.chunks(SIGNATURE_PATH_BATCH) {
         let result = state
             .cache_db
-            .execute_raw(sea_orm::Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Postgres,
-                r#"
-                INSERT INTO cached_path_signature (id, cached_path, cache, created_at)
-                SELECT uuidv7(), cp.id, c.cache_id, (now() AT TIME ZONE 'UTC')
-                FROM cached_path cp
-                CROSS JOIN unnest($2::uuid[]) AS c(cache_id)
-                WHERE cp.id = ANY($1::uuid[])
-                ON CONFLICT (cached_path, cache) DO NOTHING
-                "#,
-                [chunk.to_vec().into(), cache_ids.clone().into()],
-            ))
+            .execute_raw(
+                INSERT_PUSH_SIGNATURE_PLACEHOLDERS
+                    .bind([chunk.to_vec().into(), cache_ids.clone().into()]),
+            )
             .await;
         if let Err(e) = result {
             warn!(

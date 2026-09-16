@@ -43,19 +43,28 @@ pub struct SeriesPoint {
     pub sum: f64,
 }
 
+fn infra_series_sql(window_hours: i64) -> String {
+    format!(
+        "SELECT bucket_start, sum(count)::bigint AS c, sum(sum) AS s \
+         FROM metric_rollup WHERE metric = $1 AND granularity = {gran} \
+           AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
+         GROUP BY bucket_start ORDER BY bucket_start",
+        gran = i16::from(RollupGranularity::Hour),
+    )
+}
+
+gradient_db::sql_fn! {
+    INFRA_SERIES = || infra_series_sql(24),
+        params = [Text("cache.bytes_sent")];
+}
+
 /// Hourly rollup of `metric`, summed across every scope (anonymized infra view).
 async fn infra_series(
     db: &impl ConnectionTrait,
     metric: &str,
     window_hours: i64,
 ) -> WebResult<Vec<SeriesPoint>> {
-    let sql = format!(
-        "SELECT bucket_start, sum(count)::bigint AS c, sum(sum) AS s \
-         FROM metric_rollup WHERE metric = $1 AND granularity = {gran} \
-           AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
-         GROUP BY bucket_start ORDER BY bucket_start",
-        gran = i16::from(RollupGranularity::Hour),
-    );
+    let sql = infra_series_sql(window_hours);
 
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
@@ -145,6 +154,24 @@ fn upstream_host(url: &str) -> String {
     }
 }
 
+fn board_upstreams_sql(window_hours: i64) -> String {
+    format!(
+        "SELECT mr.scope->>'upstream_url' AS upstream_url, mr.metric AS metric, \
+                mr.bucket_start AS bucket_start, mr.count AS c, mr.sum AS s \
+         FROM metric_rollup mr \
+         WHERE mr.metric IN ('upstream.latency_ms','upstream.narinfo_hits','upstream.narinfo_misses') \
+           AND mr.granularity = {gran} \
+           AND mr.bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
+         ORDER BY mr.bucket_start",
+        gran = i16::from(RollupGranularity::Hour),
+    )
+}
+
+gradient_db::sql_fn! {
+    BOARD_UPSTREAMS = || board_upstreams_sql(24),
+        params = [];
+}
+
 pub async fn get_board_upstreams(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -153,16 +180,7 @@ pub async fn get_board_upstreams(
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let window = window_clause(&params);
 
-    let sql = format!(
-        "SELECT mr.scope->>'upstream_url' AS upstream_url, mr.metric AS metric, \
-                mr.bucket_start AS bucket_start, mr.count AS c, mr.sum AS s \
-         FROM metric_rollup mr \
-         WHERE mr.metric IN ('upstream.latency_ms','upstream.narinfo_hits','upstream.narinfo_misses') \
-           AND mr.granularity = {gran} \
-           AND mr.bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window} hours' \
-         ORDER BY mr.bucket_start",
-        gran = i16::from(RollupGranularity::Hour),
-    );
+    let sql = board_upstreams_sql(window);
 
     let rows = state
         .web_db
@@ -307,6 +325,26 @@ pub struct BoardNetworkStats {
     pub http: Vec<HttpRouteStat>,
 }
 
+fn board_network_sql(project_filter: Option<&str>) -> String {
+    let mut sql = String::from(
+        "SELECT DISTINCT ON (worker_id) worker_id, network_speed_mbps, disk_speed_mbps \
+         FROM worker_sample \
+         WHERE at >= (now() AT TIME ZONE 'UTC') - interval '1 hour'",
+    );
+
+    if let Some(list) = project_filter {
+        sql.push_str(&format!(" AND project IN ({list})"));
+    }
+
+    sql.push_str(" ORDER BY worker_id, at DESC");
+    sql
+}
+
+gradient_db::sql_fn! {
+    BOARD_NETWORK = || board_network_sql(Some("'11111111-1111-1111-1111-111111111111'")),
+        params = [];
+}
+
 pub async fn get_board_network(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -316,25 +354,18 @@ pub async fn get_board_network(
     let window = window_clause(&params);
     let nar_egress = infra_series(&state.web_db, "cache.bytes_sent", window).await?;
 
-    let mut sql = String::from(
-        "SELECT DISTINCT ON (worker_id) worker_id, network_speed_mbps, disk_speed_mbps \
-         FROM worker_sample \
-         WHERE at >= (now() AT TIME ZONE 'UTC') - interval '1 hour'",
-    );
-
-    if let Some(list) = scope.project_in_list() {
-        if list.is_empty() {
-            return Ok(ok_json(BoardNetworkStats {
-                nar_egress,
-                workers: vec![],
-                http: vec![],
-            }));
-        }
-
-        sql.push_str(&format!(" AND project IN ({list})"));
+    let project_filter = scope.project_in_list();
+    if let Some(list) = &project_filter
+        && list.is_empty()
+    {
+        return Ok(ok_json(BoardNetworkStats {
+            nar_egress,
+            workers: vec![],
+            http: vec![],
+        }));
     }
 
-    sql.push_str(" ORDER BY worker_id, at DESC");
+    let sql = board_network_sql(project_filter.as_deref());
     let rows = state
         .web_db
         .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
@@ -371,13 +402,7 @@ pub struct BoardFleetPoint {
     pub build: i64,
 }
 
-pub async fn get_board_fleet(
-    State(state): State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Query(params): Query<WindowParams>,
-) -> WebResult<Json<BaseResponse<Vec<BoardFleetPoint>>>> {
-    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let window = window_clause(&params);
+fn board_fleet_sql(window_hours: i64, project_filter: Option<&str>) -> String {
     let mut sql = format!(
         "SELECT date_trunc('hour', at) AS bucket, \
                 count(DISTINCT worker_id) AS connected, \
@@ -386,19 +411,39 @@ pub async fn get_board_fleet(
                 count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'fetch')::boolean) AS ft, \
                 count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'build')::boolean) AS bd \
          FROM worker_sample \
-         WHERE at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'",
+         WHERE at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours'",
         draining = i16::from(gradient_entity::worker_sample::WorkerSampleState::Draining),
     );
 
-    if let Some(list) = scope.project_in_list() {
-        if list.is_empty() {
-            return Ok(ok_json(vec![]));
-        }
-
+    if let Some(list) = project_filter {
         sql.push_str(&format!(" AND project IN ({list})"));
     }
 
     sql.push_str(" GROUP BY bucket ORDER BY bucket");
+    sql
+}
+
+gradient_db::sql_fn! {
+    BOARD_FLEET = || board_fleet_sql(24, Some("'11111111-1111-1111-1111-111111111111'")),
+        params = [];
+}
+
+pub async fn get_board_fleet(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Query(params): Query<WindowParams>,
+) -> WebResult<Json<BaseResponse<Vec<BoardFleetPoint>>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let window = window_clause(&params);
+
+    let project_filter = scope.project_in_list();
+    if let Some(list) = &project_filter
+        && list.is_empty()
+    {
+        return Ok(ok_json(vec![]));
+    }
+
+    let sql = board_fleet_sql(window, project_filter.as_deref());
     let rows = state
         .web_db
         .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
@@ -438,16 +483,7 @@ pub struct DurationsHeatmap {
     pub bands: Vec<HeatmapBand>,
 }
 
-/// 2D build-duration distribution (duration band × hour) for the Durations page.
-/// Build times live on the most recent `build_attempt` after the split.
-/// Project-scoped.
-pub async fn get_board_durations_heatmap(
-    State(state): State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
-    Query(params): Query<WindowParams>,
-) -> WebResult<Json<BaseResponse<DurationsHeatmap>>> {
-    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let window = window_clause(&params);
+fn board_durations_heatmap_sql(window_hours: i64, project_filter: Option<&str>) -> String {
     let mut clauses = vec![
         format!(
             "b.status = {}",
@@ -455,21 +491,16 @@ pub async fn get_board_durations_heatmap(
         ),
         "ba.build_started_at IS NOT NULL".to_string(),
         "ba.build_finished_at IS NOT NULL".to_string(),
-        format!("ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"),
+        format!(
+            "ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours'"
+        ),
     ];
 
-    if let Some(list) = scope.project_in_list() {
-        if list.is_empty() {
-            return Ok(ok_json(DurationsHeatmap {
-                times: vec![],
-                bands: vec![],
-            }));
-        }
-
+    if let Some(list) = project_filter {
         clauses.push(format!("pr.project IN ({list})"));
     }
 
-    let sql = format!(
+    format!(
         "SELECT date_trunc('hour', ba.build_finished_at) AS t, \
                 width_bucket((extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000)::bigint, \
                              ARRAY[10000,30000,60000,180000,600000,1800000]::bigint[]) AS band, \
@@ -485,7 +516,39 @@ pub async fn get_board_durations_heatmap(
          ) ba ON true \
          WHERE {} GROUP BY t, band ORDER BY t",
         clauses.join(" AND ")
-    );
+    )
+}
+
+gradient_db::sql_fn! {
+    BOARD_DURATIONS_HEATMAP = || board_durations_heatmap_sql(
+        24,
+        Some("'11111111-1111-1111-1111-111111111111'"),
+    ),
+        params = [];
+}
+
+/// 2D build-duration distribution (duration band × hour) for the Durations page.
+/// Build times live on the most recent `build_attempt` after the split.
+/// Project-scoped.
+pub async fn get_board_durations_heatmap(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Query(params): Query<WindowParams>,
+) -> WebResult<Json<BaseResponse<DurationsHeatmap>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let window = window_clause(&params);
+
+    let project_filter = scope.project_in_list();
+    if let Some(list) = &project_filter
+        && list.is_empty()
+    {
+        return Ok(ok_json(DurationsHeatmap {
+            times: vec![],
+            bands: vec![],
+        }));
+    }
+
+    let sql = board_durations_heatmap_sql(window, project_filter.as_deref());
 
     let rows = state
         .web_db
@@ -606,6 +669,18 @@ impl From<gradient_storage::HotNarStats> for HotNarCacheHealth {
     }
 }
 
+fn latest_rollup_bucket_sql() -> String {
+    format!(
+        "SELECT max(bucket_start) AS m FROM metric_rollup WHERE granularity = {}",
+        i16::from(RollupGranularity::Minute)
+    )
+}
+
+gradient_db::sql_fn! {
+    LATEST_ROLLUP_BUCKET = latest_rollup_bucket_sql,
+        params = [];
+}
+
 pub async fn get_board_health(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -619,10 +694,7 @@ pub async fn get_board_health(
         .web_db
         .query_one_raw(Statement::from_string(
             DatabaseBackend::Postgres,
-            format!(
-                "SELECT max(bucket_start) AS m FROM metric_rollup WHERE granularity = {}",
-                i16::from(RollupGranularity::Minute)
-            ),
+            latest_rollup_bucket_sql(),
         ))
         .await?
         .and_then(|r| r.try_get("", "m").ok().flatten());

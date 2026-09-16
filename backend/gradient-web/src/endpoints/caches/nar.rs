@@ -139,6 +139,20 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     Ok(path_hash.to_string())
 }
 
+gradient_db::sql! {
+    TOUCH_CACHE_DERIVATION_FETCH = "UPDATE cache_derivation SET last_fetched_at = $1 \
+         WHERE cache = $2 AND derivation IN ( \
+             SELECT derivation FROM derivation_output WHERE hash = $3 AND is_cached = true \
+         )",
+        params = [Now, CacheId, CachedPathHash];
+
+    TOUCH_CACHED_PATH_SIGNATURE_FETCH = "UPDATE cached_path_signature \
+         SET last_fetched_at = $1, fetch_count = fetch_count + 1 \
+         WHERE cache = $2 \
+           AND cached_path = (SELECT id FROM cached_path WHERE hash = $3)",
+        params = [Now, CacheId, CachedPathHash];
+}
+
 /// Bookkeeping update spawned after every successful NAR fetch. Uses
 /// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic these
 /// fire-and-forget UPDATEs would otherwise contend with foreground HTTP
@@ -146,7 +160,7 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
 fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
-        use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+        use sea_orm::ConnectionTrait;
         let now = gradient_types::now();
         let now_val = sea_orm::Value::ChronoDateTimeUtc(Some(
             chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc),
@@ -156,26 +170,16 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
 
         let _ = s
             .worker_db
-            .execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "UPDATE cache_derivation SET last_fetched_at = $1 \
-                 WHERE cache = $2 AND derivation IN ( \
-                     SELECT derivation FROM derivation_output WHERE hash = $3 AND is_cached = true \
-                 )",
-                [now_val.clone(), cache_val.clone(), hash_val.clone()],
-            ))
+            .execute_raw(TOUCH_CACHE_DERIVATION_FETCH.bind([
+                now_val.clone(),
+                cache_val.clone(),
+                hash_val.clone(),
+            ]))
             .await;
 
         let _ = s
             .worker_db
-            .execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "UPDATE cached_path_signature \
-                 SET last_fetched_at = $1, fetch_count = fetch_count + 1 \
-                 WHERE cache = $2 \
-                   AND cached_path = (SELECT id FROM cached_path WHERE hash = $3)",
-                [now_val, cache_val, hash_val],
-            ))
+            .execute_raw(TOUCH_CACHED_PATH_SIGNATURE_FETCH.bind([now_val, cache_val, hash_val]))
             .await;
     });
 }
