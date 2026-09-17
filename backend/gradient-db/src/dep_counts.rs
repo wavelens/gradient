@@ -166,7 +166,7 @@ crate::sql! {
              SELECT uuidv7(), r.entry_point, r.status, r.count \
              FROM unnest($1::uuid[], $2::int[], $3::bigint[]) AS r(entry_point, status, count) \
              ON CONFLICT (entry_point, status) DO UPDATE SET count = EXCLUDED.count",
-        params = [EntryPointIds(64), Int(2), Int(5)];
+        params = [EntryPointIds(64), Ints(2, 64), Ints(5, 64)];
 
     UPDATE_ENTRY_POINT_DEP_COUNTS_STAMP = "UPDATE entry_point SET dep_counts_version = $1, dep_counts_computed_at = $2 \
          WHERE id = ANY($3::uuid[])",

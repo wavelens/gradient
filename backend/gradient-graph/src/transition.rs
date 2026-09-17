@@ -614,10 +614,10 @@ async fn substitute_misses(
 gradient_db::sql! {
     CLEAR_ANCHOR_SUBSTITUTION = "UPDATE derivation_build SET substitutable = false, status = $2, attempt = 0, \
          updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
-        params = [Text("018f4b6a-7c2e-7d31-9a44-6e8b2f105c3d"), Int(0)];
+        params = [AnchorId, Int(0)];
 
     CLEAR_OUTPUTS_UPSTREAM_RECORD = "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
-         file_size = NULL, nar_size = NULL, \"references\" = NULL, deriver = NULL \
+         file_size = NULL, nar_size = NULL, references_list = NULL, deriver = NULL \
          WHERE derivation = $1",
         params = [DerivationId];
 }
@@ -850,7 +850,7 @@ gradient_db::sql! {
     SET_CLOSURE_SIZES = "UPDATE derivation SET closure_size = v.size \
              FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::bigint[]) AS size) v \
              WHERE derivation.id = v.id",
-        params = [DerivationIds(64), Int(1200)];
+        params = [DerivationIds(64), Ints(1200, 64)];
 }
 
 /// Stamp `ready_at` the first time an anchor became dispatchable, and persist

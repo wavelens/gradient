@@ -14,7 +14,7 @@ macro_rules! sql {
     ($(
         $(#[$meta:meta])*
         $vis:vis $name:ident = $sql:expr,
-        params = [$($param:ident $(($arg:expr))?),* $(,)?]
+        params = [$($param:ident $(($($arg:expr),+))?),* $(,)?]
         $(, tier = $tier:ident)?
         $(, budget = $budget:expr)?
         $(, flags = [$($flag:ident),* $(,)?])?
@@ -26,7 +26,7 @@ macro_rules! sql {
             sql: $crate::sql::Sql::Static($sql),
             file: file!(),
             line: line!(),
-            params: &[$($crate::sql::Param::$param $(($arg))?),*],
+            params: &[$($crate::sql::Param::$param $(($($arg),+))?),*],
             tier: $crate::sql_tier!($($tier)?),
             budget: $crate::sql_budget!($($budget)? ; $($tier)?),
             flags: &[$($($crate::sql::Flag::$flag),*)?],
@@ -43,7 +43,7 @@ macro_rules! sql_fn {
     ($(
         $(#[$meta:meta])*
         $vis:vis $name:ident = $builder:expr,
-        params = [$($param:ident $(($arg:expr))?),* $(,)?]
+        params = [$($param:ident $(($($arg:expr),+))?),* $(,)?]
         $(, tier = $tier:ident)?
         $(, budget = $budget:expr)?
         $(, flags = [$($flag:ident),* $(,)?])?
@@ -55,7 +55,7 @@ macro_rules! sql_fn {
             sql: $crate::sql::Sql::Built($builder),
             file: file!(),
             line: line!(),
-            params: &[$($crate::sql::Param::$param $(($arg))?),*],
+            params: &[$($crate::sql::Param::$param $(($($arg),+))?),*],
             tier: $crate::sql_tier!($($tier)?),
             budget: $crate::sql_budget!($($budget)? ; $($tier)?),
             flags: &[$($($crate::sql::Flag::$flag),*)?],
@@ -72,7 +72,7 @@ macro_rules! sql_lazy {
     ($(
         $(#[$meta:meta])*
         $vis:vis $name:ident = $borrow:expr,
-        params = [$($param:ident $(($arg:expr))?),* $(,)?]
+        params = [$($param:ident $(($($arg:expr),+))?),* $(,)?]
         $(, tier = $tier:ident)?
         $(, budget = $budget:expr)?
         $(, flags = [$($flag:ident),* $(,)?])?
@@ -84,7 +84,7 @@ macro_rules! sql_lazy {
             sql: $crate::sql::Sql::Lazy($borrow),
             file: file!(),
             line: line!(),
-            params: &[$($crate::sql::Param::$param $(($arg))?),*],
+            params: &[$($crate::sql::Param::$param $(($($arg),+))?),*],
             tier: $crate::sql_tier!($($tier)?),
             budget: $crate::sql_budget!($($budget)? ; $($tier)?),
             flags: &[$($($crate::sql::Flag::$flag),*)?],

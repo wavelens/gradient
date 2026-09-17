@@ -53,8 +53,8 @@ WHERE NOT derivation.walked
 RETURNING hash
 "#,
         params = [
-            DerivationIds(64), DerivationHashes(64), Text("hello"), Text("x86_64-linux"),
-            Text("hello-1.0"), Bool(false), Bool(false), Bool(true), Now,
+            NewUuids(64), DerivationHashes(64), Texts("hello", 64), Texts("x86_64-linux", 64),
+            Texts("hello-1.0", 64), Bools(false, 64), Bools(false, 64), Bools(true, 64), Now,
         ];
 
     /// A row for every dependency the batch names, so its edge can land now. A
@@ -65,7 +65,7 @@ SELECT d.id, d.hash, d.name, '', false, $4
 FROM unnest($1::uuid[], $2::text[], $3::text[]) AS d(id, hash, name)
 ON CONFLICT (hash, name) DO NOTHING
 "#,
-        params = [DerivationIds(64), DerivationHashes(64), Text("hello"), Now];
+        params = [NewUuids(64), DerivationHashes(64), Texts("hello", 64), Now];
 
     RESOLVE_IDS = "SELECT id, hash FROM derivation WHERE hash = ANY($1::text[])",
         params = [DerivationHashes(64)];
@@ -90,7 +90,7 @@ WHERE db.derivation = l.derivation
   AND (db.timeout_secs, db.max_silent_secs)
       IS DISTINCT FROM (NULLIF(l.timeout_secs, 0), NULLIF(l.max_silent_secs, 0))
 "#,
-        params = [DerivationIds(64), Int(3600), Int(600)];
+        params = [DerivationIds(64), Ints(3600, 64), Ints(600, 64)];
 }
 
 gradient_db::sql_fn! {
