@@ -414,6 +414,17 @@ in {
       send_a() { printf '%s\\n' "$1" >&3; }
       send_b() { printf '%s\\n' "$1" >&4; }
 
+      # The arm is only a race once the retire owns a row. A fixture deleted out from
+      # under it leaves both sessions unblocked and the next wait times out blaming
+      # the recount, so name the real cause here.
+      retired() {
+        if [ "$(grep -c '^DELETE 1$' $D/a.out)" != "$1" ]; then
+          echo "LOCKRACE: the retire deleted no row, its fixture was gone before the arm ran"
+          cat $D/a.out
+          exit 1
+        fi
+      }
+
       rm -rf $D
       mkdir -p $D
       mkfifo $D/a.in
@@ -439,6 +450,7 @@ in {
       send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT']);"
       send_a "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV']::uuid[]) ORDER BY derivation FOR UPDATE;"
       wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction'" "the retire session never reached its held state"
+      retired 1
 
       send_b "SET application_name = 'lockrace_b';"
       send_b "BEGIN;"
@@ -484,6 +496,7 @@ in {
       send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']);"
       send_a "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV2']::uuid[]) ORDER BY derivation FOR UPDATE;"
       wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction'" "the retire session never held its second row"
+      retired 2
 
       send_b "BEGIN;"
       send_b "$(recount "$LR_DRV2")"
@@ -1509,9 +1522,12 @@ in {
               f"INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, "
               f"created_at) VALUES (uuidv7(), '{drv}', 'out', '{out_hash}', '{name}-out', "
               f"true, now() AT TIME ZONE 'UTC');\n"
+              # Unconfirmed on purpose: no NAR backs these rows, and the cache cleanup
+              # purges a CONFIRMED row whose object is gone, which took the second
+              # fixture out from under the phase 20 seconds after it was written.
               f"INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, "
-              f"missing_references, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
-              f"'sha256:lockrace', 1, 1, 'sha256:lockrace', 0, now() AT TIME ZONE 'UTC');"
+              f"missing_references, confirmed, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
+              f"'sha256:lockrace', 1, 1, 'sha256:lockrace', 0, false, now() AT TIME ZONE 'UTC');"
           )
           assert sql(
               f"SELECT db.fetchable::int::text || ' ' || (SELECT count(*)::text FROM cached_path "
