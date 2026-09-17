@@ -1167,6 +1167,27 @@ in {
               "    AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)));"
           ))
 
+      # The third counter (#666). Demand is reachability from the entry points
+      # through named builders, so the recompute is a walk and not a per-row
+      # subquery. A relay is reached and never stepped through, which is the whole
+      # reason a relayed subtree stops being built. Pending anchors only: they are
+      # the ones a gate reads the column on, and a terminal anchor keeps whatever it
+      # carried until the recompute that thaws it names it as a root.
+      def demand_drift():
+          return int(sql(
+              "WITH RECURSIVE demanded(derivation) AS ("
+              "  SELECT derivation FROM entry_point "
+              "  UNION "
+              "  SELECT e.dependency FROM demanded c "
+              "  JOIN derivation_dependency e ON e.derivation = c.derivation "
+              "  JOIN derivation_build p ON p.derivation = c.derivation "
+              "  JOIN derivation w ON w.id = p.derivation "
+              "  WHERE w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8) "
+              "    AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)) "
+              "SELECT count(*) FROM derivation_build db WHERE db.status IN (0, 1, 2, 8) "
+              "AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded));"
+          ))
+
       def poll(query, want, what, timeout=180):
           for _ in range(timeout):
               if sql(query) == want:
@@ -1706,8 +1727,23 @@ in {
       assert output_missing("busybox") == "0", (
           f"busybox's relayed output is missing closure members: {output_missing('busybox')}"
       )
+      # The point of #666: a relay needs none of its inputs, so none of them may be
+      # built. busybox's source FODs reach the network, which the VM does not have,
+      # so before the fix they were dispatched, failed permanently, and cascaded onto
+      # the anchor the moment a retire made it non-terminal again.
+      relayed_inputs_built = sql(
+          "SELECT count(*) FROM build_attempt a "
+          "JOIN derivation_build db ON db.id = a.derivation_build "
+          "JOIN derivation d ON d.id = db.derivation "
+          "WHERE d.name LIKE 'unzip60%' OR d.name LIKE 'CVE-2019-13232%' "
+          "   OR d.name LIKE 'patchutils%';"
+      )
+      assert relayed_inputs_built == "0", (
+          f"a relayed anchor's inputs were built anyway: {relayed_inputs_built} attempts"
+      )
       assert drift() == 0, "counters disagree with their recompute after the relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the relay"
+      assert demand_drift() == 0, "demand disagrees with its recompute after the relay"
 
       # A re-evaluation demands the same anchor, which is already whole, so the
       # gate holds and nothing is relayed again. 14k anchors on production were
@@ -1766,6 +1802,7 @@ in {
       )
       assert drift() == 0, "counters disagree with their recompute after the re-relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-relay"
+      assert demand_drift() == 0, "demand disagrees with its recompute after the re-relay"
 
       # ── Phase 10h: a pruned interior outlives the evaluation that walked it ─
       # A batch names what it walked plus the direct inputs of that, and a walk
