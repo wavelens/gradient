@@ -68,6 +68,7 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         shutdown: Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(16).0,
         reactor: Arc::new(NoReactor),
+        outbox_wake: Default::default(),
     };
 
     (ctx, worker_db)

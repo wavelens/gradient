@@ -181,6 +181,7 @@ pub fn make_ctx() -> crate::CiContext {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(NoReactor),
+        outbox_wake: Default::default(),
     };
     CiContext {
         db,
