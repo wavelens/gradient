@@ -1488,7 +1488,7 @@ mod tests {
         let on = DerivationId::now_v7();
         let off = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(1)])
+            .append_exec_results([exec(0), exec(1)])
             .append_query_results([vec![demand_row(on, true), demand_row(off, false)]])
             .into_connection();
 
@@ -1497,7 +1497,12 @@ mod tests {
         assert_eq!(moved.lost, vec![off]);
 
         let log = statements(db.into_transaction_log());
-        let sql = norm(&log[1]);
+        assert!(
+            log[0].contains("SET LOCAL work_mem")
+                && log[1].contains("ORDER BY derivation FOR UPDATE"),
+            "the walk its plan gate measures is raised and its roots locked: {log:?}"
+        );
+        let sql = norm(&log[2]);
         assert!(
             sql.contains("region(evaluation, derivation, builder) AS"),
             "{sql}"
