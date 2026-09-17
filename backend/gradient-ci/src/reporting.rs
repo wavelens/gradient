@@ -9,7 +9,73 @@
 
 use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
+use gradient_types::waiting_reason::WaitingReason;
+
+/// Snake-case tag of an evaluation kind, surfaced in action payloads so the
+/// effects consumer can restrict `OpenPr` to `input_update` runs.
+pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
+    match kind {
+        EvaluationKind::Normal => "normal",
+        EvaluationKind::InputUpdate => "input_update",
+        EvaluationKind::DrvRecovery => "drv_recovery",
+    }
+}
+
+/// The dispatch event an evaluation's status transition reports.
+pub fn evaluation_event_for_status(status: EvaluationStatus) -> &'static str {
+    match status {
+        EvaluationStatus::Queued => "evaluation.queued",
+        EvaluationStatus::Fetching
+        | EvaluationStatus::EvaluatingFlake
+        | EvaluationStatus::EvaluatingDerivation => "evaluation.started",
+        EvaluationStatus::Building => "evaluation.building",
+        EvaluationStatus::Waiting => "evaluation.waiting",
+        EvaluationStatus::Completed => "evaluation.completed",
+        EvaluationStatus::Failed => "evaluation.failed",
+        EvaluationStatus::Aborted => "evaluation.aborted",
+    }
+}
+
+/// The event a freshly INSERTed evaluation reports, with the description the
+/// forge check carries. Such a row never transitions through
+/// `update_evaluation_status`, so without this the commit shows no Gradient
+/// check at all until an eval worker picks it up.
+///
+/// `Queued` is a plain pending check; the three `Waiting` gates the trigger
+/// path can park on report pending (or action-required, for approval) with the
+/// reason spelled out. Anything else owes no first report.
+pub fn evaluation_created_event(
+    status: EvaluationStatus,
+    reason: Option<WaitingReason>,
+) -> Option<(&'static str, Option<&'static str>)> {
+    Some(match (status, reason) {
+        (EvaluationStatus::Queued, _) => ("evaluation.queued", None),
+        (EvaluationStatus::Waiting, Some(WaitingReason::Approval { .. })) => (
+            "evaluation.action_required",
+            Some("Awaiting maintainer approval for external contributor PR."),
+        ),
+        (EvaluationStatus::Waiting, Some(WaitingReason::NoCache)) => (
+            "evaluation.queued",
+            Some("Waiting for a writable cache subscription before this evaluation can run."),
+        ),
+        (EvaluationStatus::Waiting, Some(WaitingReason::CacheStorageFull)) => (
+            "evaluation.queued",
+            Some("Waiting for cache storage to free up before this evaluation can run."),
+        ),
+        (
+            EvaluationStatus::Waiting,
+            Some(WaitingReason::Workers {
+                connected_workers: 0,
+                ..
+            }),
+        ) => (
+            "evaluation.queued",
+            Some("Waiting for an eval-capable worker to be registered on the project."),
+        ),
+        _ => return None,
+    })
+}
 
 /// `"{project}/{task}"` when both are known, falling back to `"{task}"` when
 /// the project lookup turned up nothing. Used as the scope segment of

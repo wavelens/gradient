@@ -232,7 +232,9 @@ async fn finalize_aborted_logs(ctx: &DbContext, building_ids: &[DerivationBuildI
             let attempt_id = att.id;
             let log_ctx = ctx.detached();
             ctx.shutdown.spawn(async move {
-                finalize_build_log(&log_ctx, attempt_id).await;
+                if let Err(e) = finalize_build_log(&log_ctx, attempt_id).await {
+                    error!(error = %e, attempt = %attempt_id, "failed to finalize a build log");
+                }
             });
         }
     }

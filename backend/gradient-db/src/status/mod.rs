@@ -13,7 +13,7 @@ mod derivation_build_status;
 mod effects;
 mod eval_finalize;
 mod evaluation_status;
-mod logging;
+pub mod logging;
 
 pub use abort::{abort_eval_anchors, abort_evaluation};
 pub use derivation_build_status::{

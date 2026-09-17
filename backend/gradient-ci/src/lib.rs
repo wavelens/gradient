@@ -12,6 +12,7 @@ pub mod context;
 pub mod github_app_manifest;
 pub mod integration_lookup;
 pub mod manifest_state;
+pub mod reactions;
 pub mod reactor;
 pub mod reporting;
 pub mod trigger;

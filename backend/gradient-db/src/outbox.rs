@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use gradient_entity::outbox::OutboxKind;
+pub use gradient_entity::outbox::OutboxKind;
 use gradient_types::MEvaluation;
 use gradient_types::ids::OutboxId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
