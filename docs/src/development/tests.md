@@ -119,13 +119,21 @@ statements so a human reads the numbers the assertion cannot.
 declares a statement, its parameter kinds and its tier, and registers it;
 `backend/clippy.toml` forbids building a `Statement` any other way, so the list
 cannot fall behind. The e2e test's last phase amplifies its database to
-production scale and runs `gradient-sql-gate`, which draws real parameter values
-out of that data, explains each statement in a rolled-back transaction (an
+production scale - every key derived from the original row and the copy index, so
+the copies form one consistent graph and a lookup by evaluation stays as
+selective as it is in production - and runs `gradient-sql-gate`, which draws real
+parameter values out of that data, explains each statement in a rolled-back transaction (an
 `EXPLAIN ANALYZE` of an `INSERT` really does insert) and fails on a sequential
-scan of a large relation, a buffer or amplification budget overrun, a per-row
-rescan or a disk spill. Tier `Hot` is the default, `Walk` covers the recursive
-closure walks and also asserts the `OFFSET 0` fence survived, `Sweep` covers
-timer-driven work that is allowed to scan. Nothing is asserted on wall clock: the
+scan of a large relation that throws most of its read away, a buffer or
+amplification budget overrun, a per-row rescan or a disk spill. Tier `Hot` is the
+default, `Bulk` covers the statements whose cost follows a working set rather
+than a row (a dashboard summary, a metrics scrape, a batch keyed on an array of
+ids, the dispatcher ranking its queue), `Walk` covers the recursive closure walks
+and also asserts the `OFFSET 0` fence survived in the recursive term, `Sweep`
+covers timer-driven work that is allowed to scan. Three of the rules stand aside
+where they mean nothing: a plan that aggregates reads many rows to return one by
+design, a statement that returns nothing has no ratio, and a batch is measured
+against the values it was handed. Nothing is asserted on wall clock: the
 runner is shared and slow, so a millisecond budget would measure the runner. A
 statement whose relations are empty is reported unmeasured rather than passed,
 and the phase fails once more than 40 of them are, so the count is a ratchet

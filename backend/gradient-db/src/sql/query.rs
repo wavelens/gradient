@@ -32,6 +32,10 @@ pub enum Sql {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Tier {
     Hot,
+    /// A statement whose cost follows a working set rather than a row: a
+    /// dashboard summary, a metrics scrape, a paged listing, a batch update
+    /// over an array of ids, the dispatcher ranking its queue.
+    Bulk,
     Walk,
     Sweep,
 }
@@ -40,6 +44,7 @@ impl Tier {
     pub const fn budget(self) -> Budget {
         match self {
             Self::Hot => Budget::HOT,
+            Self::Bulk => Budget::BULK,
             Self::Walk => Budget::WALK,
             Self::Sweep => Budget::SWEEP,
         }

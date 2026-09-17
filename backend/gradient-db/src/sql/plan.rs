@@ -19,9 +19,29 @@ pub struct Measured {
     pub max_loops: u64,
     pub worst_filtered: (String, u64),
     pub spilled: bool,
-    pub seq_scans: Vec<String>,
+    pub seq_scans: Vec<Scan>,
     pub node_types: Vec<String>,
+    /// The node types of every recursive term, which is where an `OFFSET 0`
+    /// fence has to survive. Empty for a plan that recurses nowhere.
+    pub fenced_types: Vec<String>,
+    /// True when the plan's row count is decided by the operator at the top
+    /// rather than by the data - an aggregate, or a scalar computed from
+    /// subplans - which is what makes a ratio against it meaningless.
+    pub collapses: bool,
+    /// How many values the widest bound array carried. A statement handed a
+    /// batch does work per value in it, however few rows come back, so this is
+    /// what the amplification ratio divides by when it is the larger number.
+    pub inputs: u64,
     pub execution_ms: f64,
+}
+
+/// One sequential scan: what it read and what it threw away again. A scan that
+/// keeps what it read is the planner reading a table it needs in full.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Scan {
+    pub relation: String,
+    pub read: u64,
+    pub removed: u64,
 }
 
 #[derive(Debug)]
@@ -46,6 +66,7 @@ pub fn measure(body: &Value) -> Result<Measured, PlanError> {
     let mut measured = Measured {
         buffers: number(root, "Shared Hit Blocks") + number(root, "Shared Read Blocks"),
         rows_out: rows_out(root),
+        collapses: root.get("Node Type").and_then(Value::as_str) == Some("Result"),
         execution_ms: entry
             .get("Execution Time")
             .and_then(Value::as_f64)
@@ -54,6 +75,7 @@ pub fn measure(body: &Value) -> Result<Measured, PlanError> {
     };
 
     walk(root, &mut measured);
+    fenced(root, &mut measured);
     Ok(measured)
 }
 
@@ -80,16 +102,22 @@ fn rows_out(root: &Value) -> u64 {
 
 fn walk(node: &Value, measured: &mut Measured) {
     let loops = number(node, "Actual Loops").max(1);
-    measured.rows_scanned += number(node, "Actual Rows") * loops;
+    let rows = number(node, "Actual Rows") * loops;
+    measured.rows_scanned += rows;
     measured.max_loops = measured.max_loops.max(loops);
 
     if let Some(kind) = node.get("Node Type").and_then(Value::as_str) {
         measured.node_types.push(kind.to_string());
+        measured.collapses |= kind == "Aggregate";
 
         if kind == "Seq Scan"
             && let Some(relation) = node.get("Relation Name").and_then(Value::as_str)
         {
-            measured.seq_scans.push(relation.to_string());
+            measured.seq_scans.push(Scan {
+                relation: relation.to_string(),
+                read: rows + number(node, "Rows Removed by Filter") * loops,
+                removed: number(node, "Rows Removed by Filter") * loops,
+            });
         }
     }
 
@@ -112,6 +140,37 @@ fn walk(node: &Value, measured: &mut Measured) {
         for child in children {
             walk(child, measured);
         }
+    }
+}
+
+/// The recursive term of every `Recursive Union` is its second child: the first
+/// is the seed, which no fence applies to.
+fn fenced(node: &Value, measured: &mut Measured) {
+    let children = node.get("Plans").and_then(Value::as_array);
+
+    if node.get("Node Type").and_then(Value::as_str) == Some("Recursive Union")
+        && let Some(term) = children.and_then(|plans| plans.get(1))
+    {
+        collect_types(term, &mut measured.fenced_types);
+    }
+
+    for child in children.into_iter().flatten() {
+        fenced(child, measured);
+    }
+}
+
+fn collect_types(node: &Value, out: &mut Vec<String>) {
+    if let Some(kind) = node.get("Node Type").and_then(Value::as_str) {
+        out.push(kind.to_string());
+    }
+
+    for child in node
+        .get("Plans")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        collect_types(child, out);
     }
 }
 
@@ -146,10 +205,60 @@ mod tests {
     }
 
     #[test]
-    fn seq_scans_are_named() {
+    fn seq_scans_are_named_with_what_they_threw_away() {
         let m = measure(&fixture("seq_scan_hot")).expect("measurable");
-        assert_eq!(m.seq_scans, vec!["derivation_build".to_string()]);
+        assert_eq!(m.seq_scans.len(), 1);
+        assert_eq!(m.seq_scans[0].relation, "derivation_build");
+        assert_eq!(m.seq_scans[0].removed, 412_816);
+        assert_eq!(m.seq_scans[0].read, 412_817);
         assert_eq!(m.worst_filtered, ("derivation_build".to_string(), 412_816));
+    }
+
+    #[test]
+    fn a_recursive_term_is_the_second_child_of_its_union() {
+        let body = serde_json::json!([{
+            "Plan": {
+                "Node Type": "Recursive Union",
+                "Actual Rows": 3.0,
+                "Actual Loops": 1,
+                "Plans": [
+                    { "Node Type": "Merge Join", "Actual Rows": 1.0, "Actual Loops": 1 },
+                    { "Node Type": "Nested Loop", "Actual Rows": 2.0, "Actual Loops": 1 },
+                ],
+            }
+        }]);
+
+        let m = measure(&body).expect("measurable");
+        assert_eq!(m.fenced_types, vec!["Nested Loop".to_string()]);
+        assert!(
+            m.node_types.iter().any(|n| n == "Merge Join"),
+            "the seed is still measured"
+        );
+    }
+
+    #[test]
+    fn an_aggregate_collapses_what_it_read() {
+        let body = serde_json::json!([{
+            "Plan": {
+                "Node Type": "Aggregate",
+                "Actual Rows": 1.0,
+                "Actual Loops": 1,
+                "Plans": [{ "Node Type": "Seq Scan", "Actual Rows": 500.0, "Actual Loops": 1 }],
+            }
+        }]);
+
+        assert!(measure(&body).expect("measurable").collapses);
+    }
+
+    /// `SELECT EXISTS (...)` is one row by construction, however much its
+    /// subplan had to read to decide it.
+    #[test]
+    fn a_scalar_from_a_subplan_collapses_too() {
+        let body = serde_json::json!([{
+            "Plan": { "Node Type": "Result", "Actual Rows": 1.0, "Actual Loops": 1 }
+        }]);
+
+        assert!(measure(&body).expect("measurable").collapses);
     }
 
     #[test]
