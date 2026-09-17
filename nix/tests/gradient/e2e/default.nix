@@ -1664,43 +1664,36 @@ in {
 
       assert "file-upstream" in api_get(token, "caches/main/upstreams"), "the declared upstream was not provisioned"
 
-      def anchor_of(name):
-          """`<status> <substitutable> <relay attempts>` of the newest such anchor."""
-          return sql(newest_anchor(
-              name,
+      def anchor_of(drv):
+          """`<status> <substitutable> <relay attempts>` of `drv`'s anchor."""
+          return sql(anchor_column(
+              drv,
               "db.status::text || ' ' || db.substitutable::int::text || ' ' || "
               "(SELECT count(*) FROM build_attempt a "
               " WHERE a.derivation_build = db.id AND a.substitute)::text",
           ))
 
-      def newest_anchor(name, column):
-          """`column` of the newest anchor whose derivation name starts with `name`."""
-          return (
-              f"SELECT {column} FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
-              f"WHERE d.name LIKE '{name}%' ORDER BY d.created_at DESC LIMIT 1;"
-          )
+      def anchor_column(drv, column):
+          return f"SELECT {column} FROM derivation_build db WHERE db.derivation = '{drv}';"
 
-      def relay_attempts(name):
-          return newest_anchor(
-              name,
+      def relay_attempts(drv):
+          return anchor_column(
+              drv,
               "(SELECT count(*) FROM build_attempt a "
               " WHERE a.derivation_build = db.id AND a.substitute)::text",
           )
 
-      def output_missing(name):
+      def output_missing(drv):
           return sql(
               f"SELECT cp.missing_references::text FROM cached_path cp "
               f"JOIN derivation_output o ON o.hash = cp.hash "
-              f"JOIN derivation d ON d.id = o.derivation "
-              f"WHERE d.name LIKE '{name}%' AND o.name = 'out' "
-              f"ORDER BY d.created_at DESC LIMIT 1;"
+              f"WHERE o.derivation = '{drv}' AND o.name = 'out';"
           )
 
-      def output_hash(name):
+      def output_hash(drv):
           return sql(
-              f"SELECT o.hash FROM derivation_output o JOIN derivation d ON d.id = o.derivation "
-              f"WHERE d.name LIKE '{name}%' AND o.name = 'out' "
-              f"ORDER BY d.created_at DESC LIMIT 1;"
+              f"SELECT o.hash FROM derivation_output o "
+              f"WHERE o.derivation = '{drv}' AND o.name = 'out';"
           )
 
       def wait_for_new_eval(known, timeout=900):
@@ -1732,18 +1725,26 @@ in {
       server.succeed("chown git:git -R /var/lib/git/test")
       eval4_id = wait_for_new_eval({eval_id, eval2_id, eval3_id})
 
-      assert anchor_of("busywrap").startswith("3 0"), (
-          f"busywrap must be built here, not relayed: {anchor_of('busywrap')}"
+      # Both probes name their derivation exactly: `LIKE 'busybox%'` also matches
+      # the source tarball, a stub row written after the walked ones and so always
+      # the newest, which is the one thing here that must never be fetched.
+      busybox = sql("SELECT id FROM derivation WHERE name = '${pkgs.busybox.name}';")
+      busywrap = sql("SELECT id FROM derivation WHERE name = 'busywrap';")
+      assert busybox, "the evaluation walked no derivation named ${pkgs.busybox.name}"
+      assert busywrap, "the evaluation walked no derivation named busywrap"
+
+      assert anchor_of(busywrap).startswith("3 0"), (
+          f"busywrap must be built here, not relayed: {anchor_of(busywrap)}"
       )
-      assert anchor_of("busybox") == "3 1 1", (
-          f"busybox must be relayed exactly once off the upstream: {anchor_of('busybox')}"
+      assert anchor_of(busybox) == "3 1 1", (
+          f"busybox must be relayed exactly once off the upstream: {anchor_of(busybox)}"
       )
       # The whole of decision 3: the relay walked the upstream references and
       # pushed every member we lacked, so the output is whole and its dependents
       # can be built entirely out of our cache. Relaying the output alone leaves
       # this above zero.
-      assert output_missing("busybox") == "0", (
-          f"busybox's relayed output is missing closure members: {output_missing('busybox')}"
+      assert output_missing(busybox) == "0", (
+          f"busybox's relayed output is missing closure members: {output_missing(busybox)}"
       )
       # The point of #666: a relay needs none of its inputs, so none of them may be
       # built. busybox's source FODs reach the network, which the VM does not have,
@@ -1759,6 +1760,18 @@ in {
       assert relayed_inputs_built == "0", (
           f"a relayed anchor's inputs were built anyway: {relayed_inputs_built} attempts"
       )
+      sources, touched = sql(
+          f"SELECT count(*)::text || ' ' || count(*) FILTER ("
+          f"  WHERE db.status <> 0 OR EXISTS ("
+          f"    SELECT 1 FROM build_attempt a WHERE a.derivation_build = db.id))::text "
+          f"FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
+          f"JOIN derivation_dependency e ON e.dependency = d.id AND e.derivation = '{busybox}' "
+          f"WHERE d.name LIKE '%.tar%';"
+      ).split()
+      assert int(sources) >= 1 and touched == "0", (
+          f"busybox's source is named by the relay and wanted by nobody, so it must sit "
+          f"at Created with no attempt of its own: {sources} sources, {touched} touched"
+      )
       assert drift() == 0, "counters disagree with their recompute after the relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the relay"
       assert demand_drift() == 0, "demand disagrees with its recompute after the relay"
@@ -1769,8 +1782,8 @@ in {
       server.succeed(f"{GIT} -C /var/lib/git/test commit --allow-empty -m 'busywrap again'")
       server.succeed("chown git:git -R /var/lib/git/test")
       eval5_id = wait_for_new_eval({eval_id, eval2_id, eval3_id, eval4_id})
-      assert anchor_of("busybox") == "3 1 1", (
-          f"the second evaluation re-relayed a whole anchor: {anchor_of('busybox')}"
+      assert anchor_of(busybox) == "3 1 1", (
+          f"the second evaluation re-relayed a whole anchor: {anchor_of(busybox)}"
       )
 
       # Retire busybox's NAR. Its anchor loses fetchability and is reset to a
@@ -1778,7 +1791,7 @@ in {
       # busybox, so nothing demands it: it stays `Created` and is never
       # dispatched. This is the assertion the old undemanded-relay behaviour
       # cannot pass.
-      bb_hash = output_hash("busybox")
+      bb_hash = output_hash(busybox)
       assert bb_hash, "busybox has no cached output row to retire"
       server.succeed(f"rm -f {nar_object(bb_hash)}")
       server.succeed(
@@ -1787,21 +1800,21 @@ in {
       )
       poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bb_hash}';", "0",
            "the zombie purge kept busybox's row after its NAR was deleted")
-      poll(newest_anchor("busybox", "db.status::text"), "0",
+      poll(anchor_column(busybox, "db.status::text"), "0",
            "the retire left busybox terminal-success with nothing to serve")
 
       # Three dispatch ticks and a maintenance pass: the consistency sweep is the
       # other claimant for a `Created` anchor and its promote embeds the same
       # gate, so if demand were not part of that gate it would queue busybox here.
       server.sleep(45)
-      assert anchor_of("busybox") == "0 1 1", (
-          f"an undemanded relay was dispatched again: {anchor_of('busybox')}"
+      assert anchor_of(busybox) == "0 1 1", (
+          f"an undemanded relay was dispatched again: {anchor_of(busybox)}"
       )
 
       # Retire busywrap's own output. Its producer is reset, which makes it a
       # builder again, which demands busybox: the relay runs a second time and
       # both anchors come back.
-      bw_hash = output_hash("busywrap")
+      bw_hash = output_hash(busywrap)
       assert bw_hash, "busywrap has no cached output row to retire"
       server.succeed(f"rm -f {nar_object(bw_hash)}")
       server.succeed(
@@ -1810,13 +1823,13 @@ in {
       )
       poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}';", "0",
            "the zombie purge kept busywrap's row after its NAR was deleted")
-      poll(relay_attempts("busybox"), "2",
+      poll(relay_attempts(busybox), "2",
            "a demanded relay was not re-dispatched after its NAR was retired",
            timeout=600)
-      poll(newest_anchor("busywrap", "db.status::text"), "3",
+      poll(anchor_column(busywrap, "db.status::text"), "3",
            "busywrap was not rebuilt once its input was relayed again", timeout=600)
-      assert output_missing("busybox") == "0", (
-          f"the second relay left closure members behind: {output_missing('busybox')}"
+      assert output_missing(busybox) == "0", (
+          f"the second relay left closure members behind: {output_missing(busybox)}"
       )
       assert drift() == 0, "counters disagree with their recompute after the re-relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-relay"
