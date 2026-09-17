@@ -1510,6 +1510,23 @@ in {
       builds_after = int(sql("SELECT count(*) FROM dispatched_job WHERE kind = 1;"))
       print(f"builds dispatched around the re-evaluation: {builds_after - builds_before}")
 
+      # The unbacked-output heal bets ONE rebuild per anchor (#654). Two successful
+      # builds of one derivation is the most this run can legitimately want - its
+      # first, and the one phase 10c's retire demoted it into - so a third says the
+      # heal re-armed itself on an output the rebuild does not restore and the
+      # anchor is on the `demote -> promote -> rebuild` loop, one dispatch per
+      # reconcile pass. Outcomes 1 and 2 are `Built`/`Substituted`; relay attempts
+      # build nothing and are excluded, as they are in the heal's own predicate.
+      churn = sql(
+          "SELECT string_agg(d.name || ' built ' || x.builds::text || ' times', ', ') "
+          "FROM (SELECT ba.derivation_build, count(*) AS builds FROM build_attempt ba "
+          "      WHERE NOT ba.substitute AND ba.outcome IN (1, 2) "
+          "      GROUP BY ba.derivation_build HAVING count(*) > 2) x "
+          "JOIN derivation_build db ON db.id = x.derivation_build "
+          "JOIN derivation d ON d.id = db.derivation;"
+      )
+      assert churn == "", f"a build-once anchor was rebuilt past the one granted retry: {churn}"
+
       # ── Phase 10f: the ordered lock is what makes a recount correct ───────
       # Four defect classes on the counter stack were a counter written outside an
       # ordered lock, and none of them had a test that would fail. This pins ONE
