@@ -271,6 +271,9 @@ where
     match outcome {
         Ok(Ok(value)) => {
             tx.commit().await.context("commit")?;
+            // The transaction may have written outbox rows; the effects actor
+            // claims them now rather than on its next tick.
+            ctx.outbox_wake.notify_one();
             Ok(value)
         }
         Ok(Err(e)) => {

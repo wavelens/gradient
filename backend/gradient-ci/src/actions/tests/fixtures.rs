@@ -35,7 +35,7 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
 pub fn make_ctx() -> crate::CiContext {
     use crate::CiContext;
     use futures::future::BoxFuture;
-    use gradient_db::{DbContext, NoReactor, WebDb, WorkerDb};
+    use gradient_db::{DbContext, WebDb, WorkerDb};
     use gradient_notify::EmailSender;
     use gradient_storage::{LogStorage, NarStore, StorageCtx};
     use gradient_types::RuntimeConfig;
@@ -180,7 +180,6 @@ pub fn make_ctx() -> crate::CiContext {
         },
         shutdown: gradient_util::shutdown::Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(NoReactor),
         outbox_wake: Default::default(),
     };
     CiContext {

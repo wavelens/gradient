@@ -235,7 +235,13 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                     }
 
                     info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
-                    gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
+                    if let Err(e) =
+                        gradient_db::outbox::enqueue_evaluation_created(&state.worker_db, &eval)
+                            .await
+                    {
+                        tracing::error!(error = %e, "failed to enqueue an evaluation's first report");
+                    }
+                    state.outbox_wake.notify_one();
                 }
                 Ok(other) => {
                     debug!(task = %task.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");

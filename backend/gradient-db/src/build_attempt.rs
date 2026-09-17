@@ -12,7 +12,7 @@
 use chrono::NaiveDateTime;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome, Column, Entity, Model};
 use gradient_entity::ids::{
-    BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId, EvaluationId,
+    BuildAttemptId, BuildJobId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -162,6 +162,40 @@ pub async fn latest_attempts<C: ConnectionTrait>(
     .await?;
 
     Ok(rows.into_iter().map(|a| (a.derivation_build, a)).collect())
+}
+
+crate::sql! {
+    LATEST_ATTEMPTS_BY_DERIVATION = "SELECT DISTINCT ON (b.derivation) b.derivation AS derivation, \
+             a.id AS attempt FROM build_attempt a \
+             JOIN derivation_build b ON b.id = a.derivation_build \
+             WHERE b.derivation = ANY($1) ORDER BY b.derivation, a.created_at DESC",
+        params = [DerivationIds(64)],
+        tier = Sweep;
+}
+
+/// The log key of each derivation's latest attempt, in one statement. The
+/// transition emitter finalizes by derivation, because that is what a bulk
+/// sweep reports moving; an anchor that never ran is simply absent.
+pub async fn latest_attempts_by_derivation<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<std::collections::HashMap<DerivationId, BuildAttemptId>, DbErr> {
+    let rows = crate::fetch_in_chunks(derivations, |chunk| async move {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        db.query_all_raw(LATEST_ATTEMPTS_BY_DERIVATION.bind([ids.into()]))
+            .await
+    })
+    .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| {
+            Some((
+                DerivationId::new(r.try_get::<uuid::Uuid>("", "derivation").ok()?),
+                BuildAttemptId::new(r.try_get::<uuid::Uuid>("", "attempt").ok()?),
+            ))
+        })
+        .collect())
 }
 
 /// The log key to read/finalize for an anchor: its latest attempt's id. Returns

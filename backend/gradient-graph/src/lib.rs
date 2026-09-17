@@ -206,7 +206,7 @@ pub(crate) mod test_ctx {
     use std::sync::Arc;
 
     use clap::Parser as _;
-    use gradient_db::{DbContext, NoReactor, WebDb, WorkerDb};
+    use gradient_db::{DbContext, WebDb, WorkerDb};
     use gradient_storage::{FileLogStorage, NarStore, StorageCtx};
     use gradient_types::{Cli, RuntimeConfig};
     use gradient_util::shutdown::Shutdown;
@@ -239,7 +239,6 @@ pub(crate) mod test_ctx {
             },
             shutdown: Shutdown::new(),
             board_events: tokio::sync::broadcast::channel(16).0,
-            reactor: Arc::new(NoReactor),
             outbox_wake: Default::default(),
         };
         (ctx, worker_db)

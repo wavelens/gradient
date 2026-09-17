@@ -160,18 +160,20 @@ mod tests {
             ]])
             .append_query_results([vec![eval.clone()]])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                3
+            ])
             .append_query_results([vec![eval.clone()]])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         check_evaluation_done(&ctx, eval.id).await.unwrap();
-        // The settle spawns the reactor hook and the phase event, each holding a
-        // context clone: drop alone leaves the pool handle shared and the log
-        // unreadable.
+        // The settle still spawns work that holds a context clone: drop alone
+        // leaves the pool handle shared and the log unreadable.
         crate::test_ctx::settle(ctx).await;
 
         let log = crate::pool::statements(pool.into_transaction_log());

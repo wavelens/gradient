@@ -141,7 +141,6 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_forge::ForgeRegistry::with_builtin(),
             upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: Arc::new(gradient_db::NoReactor),
             outbox_wake: Default::default(),
             graph: gradient_core::Graph::stub(),
         });
@@ -224,7 +223,6 @@ fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
             board_events: tokio::sync::broadcast::channel(256).0,
             forge: gradient_forge::ForgeRegistry::with_builtin(),
             upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: Arc::new(gradient_db::NoReactor),
             outbox_wake: Default::default(),
             graph: gradient_core::Graph::stub(),
         });

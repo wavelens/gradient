@@ -102,7 +102,6 @@ fn make_state(
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        reactor: std::sync::Arc::new(gradient_db::NoReactor),
         outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
     })
@@ -391,8 +390,8 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
 /// (skips same-commit dedup) and no in-flight evaluation. Includes the
 /// `project_has_writable_cache` lookup that runs after the eval is created,
 /// the `project_has_eval_capable_worker_registration` lookup that follows it,
-/// the `touch_trigger_last_fired` update on the trigger row, and the
-/// `dispatch_evaluation_created` lookup of task actions.
+/// the `touch_trigger_last_fired` update on the trigger row, and the outbox row
+/// the new evaluation's first forge report is written as.
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]) // in-flight check
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
@@ -413,7 +412,10 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
             last_insert_id: 0,
             rows_affected: 1,
         }]) // touch_trigger_last_fired: UPDATE
-        .append_query_results([Vec::<gradient_entity::task_action::Model>::new()]) // dispatch_evaluation_created: task_action lookup
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }]) // enqueue_evaluation_created: INSERT INTO outbox
 }
 
 // ── Test 1: Generic forge - no matching trigger (Gitea) ───────────────────────

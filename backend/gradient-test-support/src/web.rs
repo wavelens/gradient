@@ -140,7 +140,6 @@ fn server_from_cli(db: DatabaseConnection, cli: gradient_types::Cli) -> TestServ
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_db::NoReactor),
         outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
