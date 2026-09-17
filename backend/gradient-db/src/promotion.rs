@@ -304,16 +304,17 @@ crate::sql_fn! {
 }
 
 /// SQL predicate: the `derivation_build` aliased `alias` has a recorded
-/// deterministic build failure - the builder ran and exited non-zero. Rebuilding
-/// the identical derivation reproduces it, so a fresh evaluation must not thaw it
-/// (else it loops: re-queue -> rebuild -> same non-zero exit -> re-queue). Only a
-/// changed drv (a new anchor) or a newly-substitutable output can recover it.
+/// deterministic build failure - the builder ran and exited non-zero, or it ran,
+/// reported success and never backed one of its outputs. Rebuilding the identical
+/// derivation reproduces either, so a fresh evaluation must not thaw it (else it
+/// loops: re-queue -> rebuild -> same outcome -> re-queue). Only a changed drv (a
+/// new anchor) or a newly-substitutable output can recover it.
 fn deterministic_build_failure(alias: &str) -> String {
     format!(
         "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = {alias}.id \
-         AND ba.outcome = {outcome} AND ba.reason = {reason})",
+         AND ba.outcome = {outcome} AND ba.reason IN ({reasons}))",
         outcome = status_sql::attempt_outcome(AttemptOutcome::Failed),
-        reason = status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
+        reasons = status_sql::attempt_reason_in(&AttemptFailureReason::DETERMINISTIC),
     )
 }
 
@@ -516,11 +517,13 @@ crate::sql_fn! {
 mod tests {
     use super::*;
 
-    /// The requeue thaw must skip a reproducible non-zero builder exit, or a
-    /// polling-triggered eval loops it forever (re-queue -> rebuild -> same exit).
-    /// No live DB in unit tests, so pin the predicate SQL shape and its integers.
+    /// The requeue thaw must skip a failure a rebuild reproduces, or a
+    /// polling-triggered eval loops it forever (re-queue -> rebuild -> same
+    /// outcome). Two qualify: the builder's non-zero exit, and a build that
+    /// completed without ever backing an output (#654). No live DB in unit tests,
+    /// so pin the predicate SQL shape and its integers.
     #[test]
-    fn deterministic_build_failure_predicate_matches_builder_nonzero() {
+    fn deterministic_build_failure_predicate_matches_every_reproducible_reason() {
         let sql = deterministic_build_failure("db")
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -529,15 +532,19 @@ mod tests {
             sql,
             format!(
                 "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = db.id \
-                 AND ba.outcome = {outcome} AND ba.reason = {reason})",
+                 AND ba.outcome = {outcome} AND ba.reason IN ({reasons}))",
                 outcome = status_sql::attempt_outcome(AttemptOutcome::Failed),
-                reason = status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
+                reasons = status_sql::attempt_reason_in(&AttemptFailureReason::DETERMINISTIC),
             ),
         );
         assert_eq!(status_sql::attempt_outcome(AttemptOutcome::Failed), 3);
         assert_eq!(
             status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
             5
+        );
+        assert_eq!(
+            status_sql::attempt_reason(AttemptFailureReason::OutputMissing),
+            9
         );
     }
 

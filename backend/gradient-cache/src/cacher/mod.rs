@@ -37,7 +37,7 @@ use gradient_graph::Demotion;
 use gradient_util::supervision::ChildSpec;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// One periodic pass: a name (logs and health), a tick interval, the budget
 /// past which a pass is cancelled, and the async fn to run.
@@ -151,6 +151,11 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     // and no backing NAR - so its dependents stop failing `InputsUnavailable` and
     // the next eval rebuilds it.
     match state.graph.demote(Demotion::UnbackedTrustedOutputs).await {
+        Ok(report) if report.failed > 0 => warn!(
+            reset = report.demoted,
+            failed = report.failed,
+            "Failed trusted producers whose granted rebuild never backed their output"
+        ),
         Ok(report) if report.demoted > 0 => info!(
             reset = report.demoted,
             "Demoted trusted producers with unfetchable outputs"

@@ -82,6 +82,21 @@ pub enum AttemptFailureReason {
     SilentTimeout = 7,
     #[sea_orm(num_value = 8)]
     InputsUnavailable = 8,
+    /// The build finished and the cache never got one of the derivation's
+    /// declared outputs. Recorded by the unbacked-output heal once the upload
+    /// grace has passed, on the very attempt that reported success: an attempt
+    /// answers "did this deliver the outputs", and at `JobCompleted` that answer
+    /// is optimistic - the trailing NAR commits are still in flight.
+    #[sea_orm(num_value = 9)]
+    OutputMissing = 9,
+}
+
+impl AttemptFailureReason {
+    /// Failures a rebuild of the identical derivation reproduces, so a fresh
+    /// evaluation must not thaw the anchor into one: the builder's own non-zero
+    /// exit, and a build that completes without backing an output. Only a changed
+    /// drv (a new anchor) or the artifact appearing recovers either.
+    pub const DETERMINISTIC: [Self; 2] = [Self::BuilderNonzero, Self::OutputMissing];
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

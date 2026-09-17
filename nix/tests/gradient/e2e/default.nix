@@ -1999,6 +1999,65 @@ in {
           "a path its own name still reaches left the cache with hello"
       assert drift() == 0, "counters disagree with their recompute after the GC and the eviction"
 
+      # ── Phase 10j: a build that never backed its output is failed (#654) ──
+      # The heal bets one rebuild per anchor and then has to answer for it. This
+      # plants the state the bet has already been lost in - a producer the fleet
+      # built, whose output no `cached_path` backs, whose build finished long
+      # before the upload grace so nothing is still in flight - and holds the heal
+      # to the verdict. The old sweep demoted it instead, every pass, and the
+      # fleet rebuilt an output that never came back.
+      banner("Phase 10j: an unhealable trusted producer is failed, not rebuilt again")
+      UH_DRV = "aaaaaaaa-0000-4000-8000-00000000fe03"
+      uh_drv_hash = "unhealabl".ljust(32, "0")
+      uh_out_hash = "unhealabo".ljust(32, "0")
+      sql(
+          f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
+          f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
+          f"('{UH_DRV}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{uh_drv_hash}', "
+          f"'unhealable', false, true, false, true);\n"
+          f"INSERT INTO derivation_build (id, derivation, status, substitutable, substituted, "
+          f"fetchable, unready_deps, attempt, created_at, updated_at) VALUES "
+          f"('{UH_DRV}', '{UH_DRV}', 3, false, false, false, 0, 0, "
+          f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');\n"
+          # No cached_path for this hash at all: the output the build never landed.
+          f"INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, "
+          f"created_at) VALUES (uuidv7(), '{UH_DRV}', 'out', '{uh_out_hash}', 'unhealable-out', "
+          f"false, now() AT TIME ZONE 'UTC');\n"
+          # Outcome 1 is `Built` and `substitute` false: a real build, finished 48 h
+          # ago, so it is past `narUploadGraceHours` and its NAR commits cannot
+          # still be in flight. `dispatched_job` carries no foreign key.
+          f"INSERT INTO build_attempt (id, build_job, derivation_build, dispatched_job, "
+          f"substitute, outcome, build_context, build_finished_at, created_at) VALUES "
+          f"(uuidv7(), NULL, '{UH_DRV}', uuidv7(), false, 1, '{{}}'::jsonb, "
+          f"now() AT TIME ZONE 'UTC' - interval '48 hours', now() AT TIME ZONE 'UTC');"
+      )
+
+      # The cache-maintenance loop runs the heal every `cacheMaintenanceIntervalSecs`.
+      poll(f"SELECT status FROM derivation_build WHERE derivation = '{UH_DRV}';", "4",
+           "the heal left a producer trusted against an output its own build never "
+           "landed, or demoted it into another rebuild", timeout=120)
+      verdict = sql(
+          f"SELECT ba.outcome::text || ' ' || ba.reason::text FROM build_attempt ba "
+          f"WHERE ba.derivation_build = '{UH_DRV}';"
+      )
+      assert verdict == "3 9", (
+          f"the failure must be recorded on the attempt that claimed success, as the "
+          f"deterministic `OutputMissing` a new evaluation does not thaw, has {verdict!r}"
+      )
+      assert uh_out_hash in sql(
+          f"SELECT ba.failure_message FROM build_attempt ba "
+          f"WHERE ba.derivation_build = '{UH_DRV}';"
+      ), "the failure must name the output the cache never got"
+      assert sql(f"SELECT count(*) FROM build_attempt WHERE derivation_build = '{UH_DRV}';") == "1", \
+          "the verdict dispatched a rebuild instead of answering for the one already spent"
+
+      sql(
+          f"DELETE FROM build_attempt WHERE derivation_build = '{UH_DRV}';\n"
+          f"DELETE FROM derivation_output WHERE derivation = '{UH_DRV}';\n"
+          f"DELETE FROM derivation_build WHERE derivation = '{UH_DRV}';\n"
+          f"DELETE FROM derivation WHERE id = '{UH_DRV}';"
+      )
+
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
       health = json.loads(api_get(token, "board/health"))["message"]

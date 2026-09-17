@@ -490,16 +490,34 @@ orphaned or partially-cached producer heals promptly - even while the evaluation
 that needs it is itself stuck `Building` - without manual intervention.
 
 The demote is a bet that a rebuild lands the artifact, and it is placed **once**.
-The sweep reads, per hash, whether the fleet has already finished a real build of
-its producer (a `build_attempt` with `substitute = false` and a successful
-outcome; a relay attempt never counts, and the demote clears `substitutable` so
-the retry it grants is a real build). A producer that has already built and whose
-output is still unbacked does not rebuild it, so it is reported at `warn` and left
-alone. Without that bound the heal has no memory and no verdict: it re-derives the
-same demote every pass and the anchor runs `demote -> promote -> rebuild ->
-demote` forever, one dispatch per pass, leaving a zombie `cached_path` behind each
-time (#654). Its dependents stay blocked either way - `fetchable` wants every
-output whole - so what the bound costs is nothing and what it saves is the fleet.
+The heal splits the invariant into two disjoint halves on whether the fleet has
+already finished a real build of the producer (a `build_attempt` with
+`substitute = false` and a successful outcome; a relay attempt never counts, and
+the demote clears `substitutable` so the retry it grants is a real build):
+
+- **not yet** - demote, as above. That is the one rebuild the anchor gets.
+- **already** - the rebuild came and went and the output is still unbacked, so
+  rebuilding does not restore it. The producer is marked `FailedPermanent` and the
+  attempt that reported success is rewritten
+  `Failed`/`OutputMissing` with a message naming the
+  output. Its dependents then cascade `DependencyFailed` instead of counting it
+  unready forever, and because `OutputMissing` is a *deterministic* failure a new
+  evaluation does not thaw it into a rebuild that reproduces it. The artifact
+  appearing is what recovers the anchor, through `reconcile_cached_anchors_for_eval`.
+
+Without that split the heal has no memory and no verdict: it re-derives the same
+demote every pass and the anchor runs `demote -> promote -> rebuild -> demote`
+forever, one dispatch per pass, leaving a zombie `cached_path` behind each time,
+while its dependents stay blocked regardless - `fetchable` wants every output whole
+(#654).
+
+The verdict waits out `narUploadGraceHours`, measured from the attempt's
+`build_finished_at`. `JobCompleted` rides the control writer lane and overtakes its
+own trailing `NarUploaded` commits, so an output is legitimately unbacked for a
+while after its build reports success; that setting is the bound this system
+already uses for exactly that window (the orphan-files GC and the uploader's
+absent-row demote both measure against it). Before it, the anchor is in neither
+half and the heal simply waits.
 
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to a later sweep: every pass that deletes `cached_path` rows
