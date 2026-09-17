@@ -848,7 +848,19 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
                 staged.wake();
             }
         }
-        Err(e) => warn!(store_path = %c.store_path, error = %e, "failed to mark NAR as stored"),
+        // The last step of the upload is the only one that was allowed to fail
+        // quietly, and it is the one that decides whether the cache has the path:
+        // the bytes are in storage and the index never learns it, so the anchor
+        // reaches terminal success against an output nothing serves. A full disk
+        // or a DB error here is the same class of transient server-side failure as
+        // the staged-read and integrity checks above, and it fails the build the
+        // same way rather than leaving the graph to discover the lie later.
+        Err(e) => {
+            let reason = format!("failed to record {} in the cache index: {e}", c.store_path);
+            error!(peer_id = %c.peer_id, job_id = %c.job_id, store_path = %c.store_path, %reason, "NAR commit failed");
+            fail_build_transient(&c.writer, &c.scheduler, &c.peer_id, &c.job_id, reason).await;
+            return;
+        }
     }
     if let Err(e) = record_nar_push_metric(&c.state, c.project_id, file_size_i64).await {
         debug!(error = %e, "failed to record cache metric for NarUploaded");
