@@ -34,6 +34,8 @@ pub struct ConsistencyReport {
     /// `fetchable` and `unready_deps` rows rewritten over the pending anchors
     /// and their direct dependencies.
     pub counter_drift: i64,
+    /// Anchors whose `demanded` disagreed with the walk from the entry points.
+    pub demand_drift: i64,
     /// Promotable anchors found unpromoted, queued by this pass.
     pub unpromoted_ready: i64,
     /// `build_job` rows this pass inserted for pending anchors a live evaluation
@@ -67,6 +69,7 @@ impl ConsistencyReport {
     /// measurements and are deliberately not summed.
     pub fn total(&self) -> i64 {
         self.counter_drift
+            + self.demand_drift
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
@@ -153,6 +156,10 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
     let negative_reference_counters = count(db, NEGATIVE_REFERENCE_COUNTERS.stmt()).await?;
 
+    // Before the readiness repair, so the queue settle that follows reads a
+    // corrected column rather than promoting against a stale demand.
+    let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
+
     let repaired = crate::readiness::repair_pending(db).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
     // the board at the status the earlier statement wrote.
@@ -181,6 +188,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
 
     Ok(ConsistencyReport {
         counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
+        demand_drift,
         unpromoted_ready: repaired.promoted.len() as i64,
         adopted,
         unbacked_trusted_outputs,
@@ -344,6 +352,7 @@ mod tests {
     fn total_sums_every_dimension() {
         let r = ConsistencyReport {
             counter_drift: 1,
+            demand_drift: 8,
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
@@ -353,7 +362,7 @@ mod tests {
             repair_scope: 2000,
             adopted: 2,
         };
-        assert_eq!(r.total(), 28);
+        assert_eq!(r.total(), 36);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }

@@ -412,6 +412,35 @@ pub fn pending_closure_cte(seed_select: &str) -> String {
     )
 }
 
+/// `WITH RECURSIVE demanded(derivation) AS (...)`: from `seed_select`, every anchor
+/// something still wants in our cache, walking dependencies out of named builders
+/// only.
+///
+/// Something wants an anchor's outputs when an entry point names it, or a dependent
+/// that will itself be built lists it as an input. That dependent is a builder by
+/// [`builder_predicate`] and demands its own inputs by the same rule, which is the
+/// recursion: a relay is reached and never stepped through, because it fetches
+/// finished bytes and needs nothing below it, and a terminal anchor stops the walk
+/// because what is below a finished build is served from its outputs. The one
+/// definition of demand; every recompute steps with it.
+pub fn demand_closure_cte(seed_select: &str) -> String {
+    format!(
+        "WITH RECURSIVE demanded(derivation) AS ({seed_select} UNION {})",
+        lateral_step(
+            "demanded",
+            "s.next",
+            &format!(
+                "SELECT e.dependency AS next FROM derivation_dependency e \
+                 JOIN derivation_build p ON p.derivation = c.derivation \
+                 JOIN derivation w ON w.id = p.derivation \
+                 WHERE e.derivation = c.derivation AND {builder} \
+                   AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)",
+                builder = builder_predicate("p", "w"),
+            ),
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -813,6 +842,35 @@ mod tests {
                  AND dep.status IN (0, 1, 2, 8) OFFSET 0) s"
             ),
             "{cte}"
+        );
+    }
+
+    /// Demand flows DOWN from the entry points through named builders, which is
+    /// the arm the one-hop `demanded_predicate` could not carry: `Created` counts
+    /// as a builder, so without the recursion the first undemanded builder
+    /// re-demands everything below it (#666). A relay is reached and never stepped
+    /// through, and that single fact is what stops a relayed subtree being built.
+    #[test]
+    fn the_demand_walk_steps_only_out_of_named_builders() {
+        let sql = norm(&demand_closure_cte("SELECT derivation FROM entry_point"));
+        assert!(
+            sql.starts_with(
+                "WITH RECURSIVE demanded(derivation) AS (SELECT derivation FROM entry_point UNION"
+            ),
+            "{sql}"
+        );
+        assert!(sql.contains(&norm(&builder_predicate("p", "w"))), "{sql}");
+        assert!(
+            sql.contains("SELECT e.dependency AS next FROM derivation_dependency e"),
+            "the step must project the dependency, not the dependent: {sql}"
+        );
+        assert!(
+            sql.contains("FROM build_job bj WHERE bj.derivation = p.derivation"),
+            "an unnamed builder demands nothing: {sql}"
+        );
+        assert!(
+            sql.contains("OFFSET 0"),
+            "the lateral fence must survive: {sql}"
         );
     }
 }

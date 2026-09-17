@@ -592,6 +592,43 @@ pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCh
         .collect())
 }
 
+/// One absolute recompute of `demanded` over `region`, from `seed`. Absolute rather
+/// than incremental for the reason [`seed_unready_deps`] is: an adjustment cannot
+/// express "this anchor keeps its demand through a different parent", and an anchor
+/// that keeps it re-demands everything below it, which the walk's downward step
+/// computes for free. It returns each row it changed WITH its new value, so one
+/// statement serves a gain and a loss and no caller has to know which it caused.
+pub(crate) fn demand_recompute_sql(region: &str, seed: &str) -> String {
+    format!(
+        "{cte} \
+         UPDATE derivation_build db \
+         SET demanded = (db.derivation IN (SELECT derivation FROM demanded)), \
+             updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE {region}db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
+         RETURNING db.derivation, db.demanded",
+        cte = crate::graph_sql::demand_closure_cte(seed),
+    )
+}
+
+/// Table-wide, seeded from every entry point: the backstop for a lost recompute and
+/// the backfill the migration deliberately does not carry.
+pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> =
+    LazyLock::new(|| demand_recompute_sql("", "SELECT derivation FROM entry_point"));
+
+crate::sql_lazy! {
+    RECOUNT_DEMANDED = || RECOUNT_DEMANDED_SQL.as_str(),
+        params = [],
+        tier = Sweep,
+        flags = [Walk];
+}
+
+/// Rewrite every anchor whose demand drifted. Returns how many disagreed, which is
+/// the sweep's `demand_drift`: a healthy fleet reports zero, and a number that keeps
+/// coming back names a mover that is not recomputing what it changed.
+pub async fn recount_demanded<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
+    Ok(db.query_all_raw(RECOUNT_DEMANDED.stmt()).await?.len() as u64)
+}
+
 /// Queue every `Created` candidate whose gates hold. The gate is embedded, so a
 /// candidate list is a bound and never a claim: passing a row that is not yet ready
 /// moves nothing.
@@ -1357,6 +1394,31 @@ mod tests {
             columns,
             ["fetchable", "fetchable", "unready_deps", "unready_deps"],
             "two chunks, both fetchable passes first: {log:?}"
+        );
+    }
+
+    /// The recompute is absolute and writes only the rows that disagree, so its
+    /// row count IS the drift and a healthy fleet writes nothing. It returns the
+    /// new value per row, because one statement serves both directions: what it
+    /// turned on is promoted and what it turned off is un-promoted.
+    #[test]
+    fn the_demand_recompute_writes_only_disagreeing_rows() {
+        let sql = norm(RECOUNT_DEMANDED_SQL.as_str());
+        assert!(
+            sql.contains("WITH RECURSIVE demanded(derivation) AS"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("SET demanded = (db.derivation IN (SELECT derivation FROM demanded))"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("db.demanded <> (db.derivation IN (SELECT derivation FROM demanded))"),
+            "rewriting agreeing rows reports drift that is not there: {sql}"
+        );
+        assert!(
+            sql.contains("RETURNING db.derivation, db.demanded"),
+            "the caller settles the queue from the new value: {sql}"
         );
     }
 }
