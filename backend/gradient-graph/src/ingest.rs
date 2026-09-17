@@ -694,10 +694,11 @@ impl BatchWriter<'_> {
         Ok(())
     }
 
-    /// Settle the two demands a batch moves without moving any anchor's status, so
-    /// the transition emitter cannot see them: a newly walked or newly grown builder
-    /// wants its direct inputs relayed, an entry point wants its own derivation, and
-    /// an anchor an upstream just claimed stops wanting anything.
+    /// Settle the demand a batch moves without moving any anchor's status, so the
+    /// transition emitter cannot see it: a newly walked or newly grown builder wants
+    /// its inputs, an entry point wants its own derivation, and an anchor an upstream
+    /// just claimed stops wanting anything below it. All three are the same event, an
+    /// anchor whose demand changed, so all three are one recompute.
     async fn move_batch_demand(
         &self,
         builders: &[DerivationId],
@@ -705,31 +706,31 @@ impl BatchWriter<'_> {
         entry_points: &[DerivationId],
     ) -> Result<()> {
         let db = self.db();
-        let mut wanted = gradient_db::direct_dependencies_of(db, builders)
-            .await
-            .context("load what this batch's builders demand")?;
-        wanted.extend_from_slice(entry_points);
-        wanted.sort_unstable();
-        wanted.dedup();
-
-        let released = gradient_db::direct_dependencies_of(db, newly_substitutable)
-            .await
-            .context("load what an upstream-claimed anchor stops demanding")?;
+        let mut roots = builders.to_vec();
+        roots.extend_from_slice(newly_substitutable);
+        roots.extend_from_slice(entry_points);
+        roots.sort_unstable();
+        roots.dedup();
 
         let mut changes = Vec::new();
-        for chunk in wanted.chunks(gradient_db::IN_CHUNK_SIZE) {
-            changes.extend(
-                gradient_db::promote(db, chunk)
-                    .await
-                    .context("promote what this batch demands")?,
-            );
-        }
-        for chunk in released.chunks(gradient_db::IN_CHUNK_SIZE) {
-            changes.extend(
-                gradient_db::unpromote_ungated(db, chunk)
-                    .await
-                    .context("release undemanded relays")?,
-            );
+        for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
+            let moved = gradient_db::recompute_demand(db, chunk)
+                .await
+                .context("recompute what this batch demands")?;
+            for gained in moved.gained.chunks(gradient_db::IN_CHUNK_SIZE) {
+                changes.extend(
+                    gradient_db::promote(db, gained)
+                        .await
+                        .context("promote what this batch demands")?,
+                );
+            }
+            for lost in moved.lost.chunks(gradient_db::IN_CHUNK_SIZE) {
+                changes.extend(
+                    gradient_db::unpromote_ungated(db, lost)
+                        .await
+                        .context("release undemanded relays")?,
+                );
+            }
         }
         gradient_db::emit_transition_effects(self.ctx, &changes).await;
 

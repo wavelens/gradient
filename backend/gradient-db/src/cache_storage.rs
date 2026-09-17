@@ -351,13 +351,15 @@ pub async fn demote_cached_output(
         .extend(crate::readiness::unpromote_ungated(&txn, &producers).await?);
     txn.commit().await?;
 
-    // Every producer is offered, not just the ones the clear moved: `promote`
-    // embeds the gate, so a candidate list is a bound and never a claim, and that
-    // is cheaper than a `RETURNING` round trip to narrow it.
-    let wanted = crate::readiness::direct_dependencies_of(db, &producers).await?;
+    // Clearing `substitutable` turns these producers back into builders, so demand
+    // reaches their whole pending closure again and not just one hop.
+    let moved = crate::readiness::recompute_demand(db, &producers).await?;
     retired
         .transitions
-        .extend(crate::readiness::promote(db, &wanted).await?);
+        .extend(crate::readiness::promote(db, &moved.gained).await?);
+    retired
+        .transitions
+        .extend(crate::readiness::unpromote_ungated(db, &moved.lost).await?);
     crate::status::emit_transition_effects(ctx, &retired.transitions).await;
 
     if let Err(e) = nar_storage.delete(hash).await {

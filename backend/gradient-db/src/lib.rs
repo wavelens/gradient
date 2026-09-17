@@ -108,8 +108,8 @@ pub use self::reachability::{
     pending_orphan_frontier, pending_orphans_among, producers_of_hashes,
 };
 pub use self::readiness::{
-    AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, direct_dependencies_of,
-    lock_anchors, lost_fetchability, promote, promote_closure, recompute_demand, recount_demanded,
+    AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,
+    lost_fetchability, promote, promote_closure, recompute_demand, recount_demanded,
     repair_pending, seed_unready_deps, unpromote_drv_owners, unpromote_ungated, unwalk_derivations,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};

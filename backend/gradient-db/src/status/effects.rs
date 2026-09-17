@@ -100,52 +100,51 @@ fn is_builder(status: BuildStatus) -> bool {
     BUILDER_STATUSES.contains(&status)
 }
 
-/// The anchors whose transition carried them INTO the builder statuses (their
-/// direct inputs gained demand) and those it carried OUT (their inputs lost it).
+/// Every anchor whose transition carried it across the builder statuses, in either
+/// direction: into them its inputs are wanted again, out of them they are not, and
+/// its own stored demand is stale either way.
 ///
 /// A substitutable anchor is a relay rather than a builder and demands nothing, but
-/// the flag is not on a [`TransitionChange`]; both statements below embed the gate,
-/// so naming one is a wasted row and never a wrong move.
-fn demand_moves(changes: &[TransitionChange]) -> (Vec<DerivationId>, Vec<DerivationId>) {
-    let mut gained = Vec::new();
-    let mut lost = Vec::new();
-    for c in changes {
-        match (is_builder(c.from), is_builder(c.to)) {
-            (false, true) => gained.push(c.derivation),
-            (true, false) => lost.push(c.derivation),
-            _ => {}
-        }
-    }
-
-    (gained, lost)
+/// the flag is not on a [`TransitionChange`]; the recompute reads it, so naming one
+/// is a wasted row and never a wrong move.
+fn demand_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
+    changes
+        .iter()
+        .filter(|c| is_builder(c.from) != is_builder(c.to))
+        .map(|c| c.derivation)
+        .collect()
 }
 
-/// Re-gate the direct inputs of every anchor that just became, or stopped being,
-/// something this fleet will build. Both statements embed
-/// [`crate::graph_sql::gates_predicate`], so the candidate list is a bound and
+/// Recompute demand below every anchor that just became, or stopped being, something
+/// this fleet will build, and settle the queue against what moved. The two statements
+/// embed [`crate::graph_sql::gates_predicate`], so the candidate list is a bound and
 /// never a claim.
+///
+/// An anchor already `Building` keeps building: [`crate::readiness::unpromote_ungated`]
+/// moves only `Queued` rows. The bytes a running build produces are cached and useful,
+/// while an abort throws the work away and complicates attempt attribution.
 async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Vec<TransitionChange> {
-    let (gained, lost) = demand_moves(changes);
     let db = &ctx.worker_db;
     let mut regated = Vec::new();
-    for (anchors, gained) in [(gained, true), (lost, false)] {
-        for chunk in anchors.chunks(crate::IN_CHUNK_SIZE) {
-            let moved = async {
-                let deps = crate::readiness::direct_dependencies_of(db, chunk).await?;
-                let mut changes = Vec::new();
-                for deps in deps.chunks(crate::IN_CHUNK_SIZE) {
-                    changes.extend(if gained {
-                        crate::readiness::promote(db, deps).await?
-                    } else {
-                        crate::readiness::unpromote_ungated(db, deps).await?
-                    });
-                }
-                Ok::<_, sea_orm::DbErr>(changes)
+    for chunk in demand_moves(changes).chunks(crate::IN_CHUNK_SIZE) {
+        let moved = match crate::readiness::recompute_demand(db, chunk).await {
+            Ok(moved) => moved,
+            Err(e) => {
+                error!(error = %e, "failed to recompute what an anchor demands");
+                continue;
             }
-            .await;
-            match moved {
+        };
+
+        for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
+            match crate::readiness::promote(db, gained).await {
                 Ok(changes) => regated.extend(changes),
-                Err(e) => error!(error = %e, gained, "failed to re-gate what an anchor demands"),
+                Err(e) => error!(error = %e, "failed to queue what an anchor demands"),
+            }
+        }
+        for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
+            match crate::readiness::unpromote_ungated(db, lost).await {
+                Ok(changes) => regated.extend(changes),
+                Err(e) => error!(error = %e, "failed to release undemanded anchors"),
             }
         }
     }
@@ -307,12 +306,14 @@ mod tests {
         assert_eq!(c.derivation, d);
     }
 
-    /// Demand is one hop and it follows the builder boundary, not "terminal": an
-    /// anchor thawed back into the queue makes its inputs wanted again, and one
-    /// that leaves for ANY non-builder status (a success and an abort alike) stops
-    /// wanting them.
+    /// Demand follows the builder boundary, not "terminal": an anchor thawed back
+    /// into the queue makes its inputs wanted again, and one that leaves for ANY
+    /// non-builder status (a success and an abort alike) stops wanting them. Which
+    /// way it crossed does not matter here, because the recompute is absolute over
+    /// the region either way and a thaw needs its own stale value rewritten just as
+    /// much as a finish does.
     #[test]
-    fn demand_moves_key_on_crossing_the_builder_boundary() {
+    fn demand_moves_are_every_crossing_of_the_builder_boundary() {
         let thawed = DerivationId::now_v7();
         let finished = DerivationId::now_v7();
         let aborted = DerivationId::now_v7();
@@ -323,15 +324,15 @@ mod tests {
             to,
         };
 
-        let (gained, lost) = demand_moves(&[
-            change(thawed, BuildStatus::FailedPermanent, BuildStatus::Created),
-            change(finished, BuildStatus::Building, BuildStatus::Completed),
-            change(aborted, BuildStatus::Queued, BuildStatus::Aborted),
-            change(promoted, BuildStatus::Created, BuildStatus::Queued),
-        ]);
-
-        assert_eq!(gained, vec![thawed]);
-        assert_eq!(lost, vec![finished, aborted]);
+        assert_eq!(
+            demand_moves(&[
+                change(thawed, BuildStatus::FailedPermanent, BuildStatus::Created),
+                change(finished, BuildStatus::Building, BuildStatus::Completed),
+                change(aborted, BuildStatus::Queued, BuildStatus::Aborted),
+                change(promoted, BuildStatus::Created, BuildStatus::Queued),
+            ]),
+            vec![thawed, finished, aborted],
+        );
     }
 
     /// The second announce round is only safe because nothing it moves can cross
@@ -344,23 +345,25 @@ mod tests {
             (BuildStatus::Created, BuildStatus::Queued),
             (BuildStatus::Queued, BuildStatus::Created),
         ] {
-            let (gained, lost) = demand_moves(&[TransitionChange {
+            let moved = demand_moves(&[TransitionChange {
                 derivation: d,
                 from,
                 to,
             }]);
-            assert!(gained.is_empty() && lost.is_empty(), "{from:?} to {to:?}");
+            assert!(moved.is_empty(), "{from:?} to {to:?}");
         }
     }
 
     /// A re-announce carries no move, so it must re-gate nothing.
     #[test]
     fn an_unchanged_announcement_moves_no_demand() {
-        let (gained, lost) = demand_moves(&[TransitionChange::unchanged(
-            DerivationId::now_v7(),
-            BuildStatus::Completed,
-        )]);
-        assert!(gained.is_empty() && lost.is_empty());
+        assert!(
+            demand_moves(&[TransitionChange::unchanged(
+                DerivationId::now_v7(),
+                BuildStatus::Completed,
+            )])
+            .is_empty()
+        );
     }
 
     /// An anchor promoted and then pulled back inside one transaction committed
@@ -414,6 +417,50 @@ mod tests {
         assert_eq!(
             (net[0].from, net[0].to),
             (BuildStatus::Created, BuildStatus::Building)
+        );
+    }
+
+    /// An anchor crossing the boundary recomputes its whole pending closure, not one
+    /// hop: the source FODs under a relayed anchor were built because a one-hop
+    /// re-gate never reached them (#666).
+    #[tokio::test]
+    async fn a_boundary_crossing_recomputes_the_closure_and_settles_the_queue() {
+        let crossed = DerivationId::now_v7();
+        let lost = DerivationId::now_v7();
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([vec![std::collections::BTreeMap::from([
+                (
+                    "derivation".to_owned(),
+                    sea_orm::Value::from(lost.into_inner()),
+                ),
+                ("demanded".to_owned(), sea_orm::Value::from(false)),
+            ])]])
+            .append_query_results([
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
+            ])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+
+        move_demand(
+            &ctx,
+            &[TransitionChange {
+                derivation: crossed,
+                from: BuildStatus::Created,
+                to: BuildStatus::Completed,
+            }],
+        )
+        .await;
+        drop(ctx);
+
+        let log = crate::pool::statements(pool.into_transaction_log()).join(" ");
+        assert!(log.contains("SET demanded ="), "{log}");
+        assert!(
+            !log.contains("SELECT DISTINCT e.dependency FROM derivation_dependency"),
+            "the one-hop re-gate must be gone: {log}"
         );
     }
 }
