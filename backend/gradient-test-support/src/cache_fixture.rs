@@ -152,6 +152,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -207,6 +208,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -267,6 +269,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });
@@ -386,6 +389,7 @@ fn make_state(
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -472,6 +476,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -543,6 +548,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });

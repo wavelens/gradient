@@ -27,6 +27,7 @@ pub mod eval_watchdog;
 pub mod gc;
 pub mod graph_sql;
 pub mod nar_closure;
+pub mod outbox;
 pub mod permissions;
 pub mod pool;
 pub mod project_cache;

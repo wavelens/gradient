@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use tokio::sync::{Semaphore, broadcast};
+use tokio::sync::{Notify, Semaphore, broadcast};
 use uuid::Uuid;
 
 use gradient_ci::CiContext;
@@ -85,6 +85,9 @@ pub struct AppState {
     /// into forge events and PR-comment reactions. Tests and worker-side flows
     /// use [`gradient_db::NoReactor`].
     pub reactor: Arc<dyn StatusReactor>,
+    /// Nudged after every committed write that owes an effect; the effects
+    /// actor waits on it so a delivery does not sit out the 30 s tick.
+    pub outbox_wake: Arc<Notify>,
     /// The graph actor's handle: every write to the dependency graph and the
     /// cache index goes through it.
     pub graph: Arc<Graph>,
@@ -120,6 +123,7 @@ impl AppState {
             shutdown: self.shutdown.clone(),
             board_events: self.board_events.clone(),
             reactor: self.reactor.clone(),
+            outbox_wake: self.outbox_wake.clone(),
         }
     }
 

@@ -240,6 +240,7 @@ pub(crate) mod test_ctx {
             shutdown: Shutdown::new(),
             board_events: tokio::sync::broadcast::channel(16).0,
             reactor: Arc::new(NoReactor),
+            outbox_wake: Default::default(),
         };
         (ctx, worker_db)
     }

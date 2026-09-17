@@ -802,6 +802,7 @@ mod tests {
             forge: gradient_forge::ForgeRegistry::with_builtin(),
             upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
             reactor: std::sync::Arc::new(gradient_db::NoReactor),
+            outbox_wake: Default::default(),
             graph: gradient_core::Graph::stub(),
         })
     }
