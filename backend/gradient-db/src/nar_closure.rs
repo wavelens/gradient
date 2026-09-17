@@ -547,7 +547,7 @@ crate::sql_fn! {
 /// `gradient_graph::nar`'s forward ripple marks its producer fetchable again through
 /// [`crate::readiness::became_fetchable`], which requires the terminal status this
 /// reset would have taken away. Resetting a referrer therefore restores nothing and
-/// rebuilds an artifact that was never missing. Measured on the cache VM test: 107
+/// rebuilds an artifact that was never missing. Measured on the e2e VM test: 107
 /// derivations re-queued and 139 dispatches inside 30 s from deleting ONE NAR.
 ///
 /// The asked-for hashes have to be in `gone`, not just the deleted ones. A hash with

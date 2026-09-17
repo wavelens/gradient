@@ -224,7 +224,7 @@ mod tests {
         }
     }
 
-    /// The kill that broke the `gradient-cache` run: 27 MiB reaped against a
+    /// The kill that broke the `gradient-e2e` run: 27 MiB reaped against a
     /// 44 MiB shortfall, which cannot lift the host back over the margin and so
     /// only guarantees the next tick reaps again.
     #[test]

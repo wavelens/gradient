@@ -6,7 +6,7 @@
 
 //! Every hand-written statement in the backend is declared with [`crate::sql!`],
 //! which registers it so the plan gate can explain it against a
-//! production-scale dataset in the cache VM test. Nothing else may build a raw
+//! production-scale dataset in the e2e VM test. Nothing else may build a raw
 //! `Statement`: `backend/clippy.toml` denies the sea-orm constructors.
 
 pub mod budget;

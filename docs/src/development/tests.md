@@ -14,7 +14,7 @@ the catalogue, and a per-test list goes stale and collides on every merge.
 | CLI | `cli/tests/*.rs`, `cli/connector/tests/*.rs` | the installed `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | components and services under vitest |
 | NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
-| SQL plan gate | `backend/src/sql_gate/`, run by the cache VM test | every registered statement's plan at production scale |
+| SQL plan gate | `backend/src/sql_gate/`, run by the e2e VM test | every registered statement's plan at production scale |
 
 A crate's own `tests/` directory is for anything that has to go through a public
 entry point (an HTTP route, a CLI invocation). Everything else belongs in a
@@ -32,9 +32,9 @@ nix flake check                         # every check below
 VM tests are discovered by directory: any folder added under
 `nix/tests/gradient/` becomes the check `gradient-<folder>` with no wiring.
 
-The cargo suites are checks (`tests`, `cli-tests`) rather than the check phase
-of the packages: `nix build .#gradient` produces the binary only. Doc tests run
-in `tests` after nextest, where the workspace is already compiled.
+The cargo suites are checks (`unittest`, `cli-unittest`) rather than the check
+phase of the packages: `nix build .#gradient` produces the binary only. Doc tests
+run in `unittest` after nextest, where the workspace is already compiled.
 They build under `[profile.test]`, so a test target compiles unoptimised and
 without the full DWARF that `separateDebugInfo` puts on the shipped binary,
 while `[profile.dev.package."*"]` keeps their dependencies optimised.
@@ -103,7 +103,7 @@ many times it asks.
 
 **A VM test can assert on the database's own accounting.** Nothing in the type
 system notices a lost `OFFSET 0` fence or a counter that is re-derived instead of
-moved, so the cache test asserts the plan shape (`EXPLAIN`: a nested loop, no merge
+moved, so the e2e test asserts the plan shape (`EXPLAIN`: a nested loop, no merge
 join) and bills the run through `pg_stat_statements` (`shared_preload_libraries` on
 the test's Postgres, statements filtered to the server's role). Keep the thresholds
 loose enough to be pathology detectors on a slow shared VM, and print the top
@@ -112,7 +112,7 @@ statements so a human reads the numbers the assertion cannot.
 **Every hand-written statement is registered and explained.** `gradient_db::sql!`
 declares a statement, its parameter kinds and its tier, and registers it;
 `backend/clippy.toml` forbids building a `Statement` any other way, so the list
-cannot fall behind. The cache test's last phase amplifies its database to
+cannot fall behind. The e2e test's last phase amplifies its database to
 production scale and runs `gradient-sql-gate`, which draws real parameter values
 out of that data, explains each statement in a rolled-back transaction (an
 `EXPLAIN ANALYZE` of an `INSERT` really does insert) and fails on a sequential
@@ -127,7 +127,7 @@ and the phase fails if the unmeasured count grows.
 **Two database sessions, held against each other, prove a lock is load-bearing.**
 Each `psql` helper is a fresh process, so a phase that replays statements in order
 shows only that nothing bad happened - it still passes once the discipline is
-deleted from the code. The cache test drives two FIFO-fed `psql` sessions from one
+deleted from the code. The e2e test drives two FIFO-fed `psql` sessions from one
 shell script, with a third connection polling `pg_stat_activity` for
 `wait_event_type = 'Lock'` as the handshake, and runs the same interleaving twice:
 once taking the ordered lock in its own statement, once without. Assert the
