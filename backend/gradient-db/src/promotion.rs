@@ -510,6 +510,9 @@ crate::sql_fn! {
     RECONCILE_CACHED_ANCHORS_FOR_EVAL = reconcile_cached_anchors_for_eval_sql,
         params = [EvaluationId],
         tier = Walk,
+        budget = crate::sql::Budget::walk().buffers(2_400_000)
+            .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, plus \
+                      one output-and-path anti-join per anchor the closure names"),
         flags = [Walk];
 }
 
