@@ -1189,6 +1189,18 @@ in {
               "AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded));"
           ))
 
+      # The sweep counts this and repairs nothing: a terminal-success producer whose
+      # output no artifact backs is never fetchable, so every dependent of it waits
+      # for an event that cannot come. Two of these wedged an evaluation for 900 s.
+      def unbacked():
+          return int(sql(
+              "SELECT count(DISTINCT o.hash) FROM derivation_output o "
+              "JOIN derivation_build db ON db.derivation = o.derivation "
+              "WHERE db.status IN (3, 7) AND o.external_url IS NULL "
+              "  AND NOT EXISTS (SELECT 1 FROM cached_path cp "
+              "                  WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL);"
+          ))
+
       def poll(query, want, what, timeout=180):
           for _ in range(timeout):
               if sql(query) == want:
@@ -1198,6 +1210,7 @@ in {
 
       assert drift() == 0, "counters disagree with their recompute before the retire"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute before the retire"
+      assert unbacked() == 0, "a producer this build settled has an output nothing backs"
       assert counter(store_hash) == 0, "hello's own output is not whole to start with"
 
       # glibc first, since hello links against it.
