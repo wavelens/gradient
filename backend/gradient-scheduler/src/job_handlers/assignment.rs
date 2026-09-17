@@ -223,7 +223,9 @@ fn transition_budget(heartbeat_timeout_secs: u64) -> Duration {
 /// stays `None`: the metrics average must not read "this dispatch missed nothing"
 /// off a job that never reported.
 fn window_count(job_context: &serde_json::Value, key: &str) -> Option<i32> {
-    job_context[key].as_i64().and_then(|n| i32::try_from(n).ok())
+    job_context[key]
+        .as_i64()
+        .and_then(|n| i32::try_from(n).ok())
 }
 
 /// The `dispatched_job` row, then for a build the open `build_attempt` and the
