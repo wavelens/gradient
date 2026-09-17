@@ -71,7 +71,7 @@ crate::sql! {
              FROM (SELECT id FROM evaluation WHERE id = ANY($1::uuid[]) \
                    ORDER BY id FOR UPDATE) locked \
              WHERE e.id = locked.id",
-        params = [BuildIds(64)];
+        params = [EvaluationIds(64)];
 
     BUMP_GRAPH_VERSION_FOR_DERIVATIONS = "UPDATE evaluation e SET graph_version = e.graph_version + 1 \
              FROM (SELECT id FROM evaluation \
@@ -160,17 +160,17 @@ where
 
 crate::sql! {
     DELETE_ENTRY_POINT_DEP_COUNTS = "DELETE FROM entry_point_dep_count WHERE entry_point = ANY($1::uuid[])",
-        params = [BuildIds(64)];
+        params = [EntryPointIds(64)];
 
     INSERT_ENTRY_POINT_DEP_COUNTS = "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
              SELECT uuidv7(), r.entry_point, r.status, r.count \
              FROM unnest($1::uuid[], $2::int[], $3::bigint[]) AS r(entry_point, status, count) \
              ON CONFLICT (entry_point, status) DO UPDATE SET count = EXCLUDED.count",
-        params = [BuildIds(64), Int(2), Int(5)];
+        params = [EntryPointIds(64), Int(2), Int(5)];
 
     UPDATE_ENTRY_POINT_DEP_COUNTS_STAMP = "UPDATE entry_point SET dep_counts_version = $1, dep_counts_computed_at = $2 \
          WHERE id = ANY($3::uuid[])",
-        params = [Int(2), Now, BuildIds(64)];
+        params = [Int(2), Now, EntryPointIds(64)];
 }
 
 async fn store_entry_point_dep_counts<C>(

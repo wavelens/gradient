@@ -61,17 +61,34 @@ pub fn render(rows: &[(&'static Query, Outcome)]) -> String {
                         violation.rule, violation.detail
                     ));
                 }
+
+                out.push_str(&statement(query));
             }
 
-            Outcome::Unmeasured(why) => out.push_str(&format!(
-                "WARN {:<24} {:<30} unmeasured: {why}\n",
-                query.location(),
-                query.name,
-            )),
+            Outcome::Unmeasured(why) => {
+                out.push_str(&format!(
+                    "WARN {:<24} {:<30} unmeasured: {why}\n",
+                    query.location(),
+                    query.name,
+                ));
+
+                out.push_str(&statement(query));
+            }
         }
     }
 
     out
+}
+
+/// The statement behind anything that is not a pass. A `file:line` names where
+/// it was declared, which is not what the planner was given: a `sql_fn!` builds
+/// its text at runtime and is not in that file at all.
+fn statement(query: &Query) -> String {
+    query
+        .text()
+        .lines()
+        .map(|line| format!("       {}\n", line.trim_end()))
+        .collect()
 }
 
 pub fn exit_code(rows: &[(&'static Query, Outcome)], max_unmeasured: usize) -> i32 {
@@ -118,12 +135,14 @@ mod tests {
         assert!(text.contains("readiness.rs:348"), "{text}");
         assert!(text.contains("SAMPLE"), "{text}");
         assert!(text.contains("buffers 48213 > 2000"), "{text}");
+        assert!(text.contains("SELECT 1"), "the statement itself: {text}");
     }
 
     #[test]
     fn unmeasured_says_why_and_does_not_fail() {
         let rows = vec![(&Q, Outcome::Unmeasured("debug_info has 0 rows".into()))];
         assert!(render(&rows).contains("debug_info has 0 rows"));
+        assert!(render(&rows).contains("SELECT 1"));
         assert_eq!(exit_code(&rows, 1), 0);
     }
 

@@ -22,21 +22,19 @@ use sea_orm::{
 use uuid::Uuid;
 
 crate::sql! {
-    // No Param kind names a `derivation_build`/`evaluation`/`entry_point` id array;
-    // BuildId(s) stands in as the closest UUID-shaped kind the registry offers.
     SUBSTITUTE_MISS_COUNTS = r#"SELECT ba.derivation_build AS anchor, bj.evaluation AS evaluation,
                           count(*) AS misses
                    FROM build_attempt ba
                    JOIN build_job bj ON bj.id = ba.build_job
                    WHERE ba.derivation_build = ANY($1) AND ba.reason = $2
                    GROUP BY ba.derivation_build, bj.evaluation"#,
-        params = [BuildIds(64), Int(0)];
+        params = [AnchorIds(64), Int(0)];
 
     LATEST_ATTEMPT_EVALUATION = "SELECT bj.evaluation FROM build_attempt ba \
              JOIN build_job bj ON bj.id = ba.build_job \
              WHERE ba.derivation_build = $1 \
              ORDER BY ba.created_at DESC LIMIT 1",
-        params = [BuildId];
+        params = [AnchorId];
 }
 
 /// Open a new attempt for an anchor (`derivation_build`), attributed to
