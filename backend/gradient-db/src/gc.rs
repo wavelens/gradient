@@ -851,7 +851,8 @@ mod tests {
                 ("evaluation".to_owned(), Value::from(live.into_inner())),
                 ("derivation".to_owned(), Value::from(orphan.into_inner())),
             ])]])
-            .append_query_results([empty.clone(), empty])
+            .append_exec_results([exec(0), exec(0)])
+            .append_query_results([empty.clone(), empty.clone(), empty])
             .append_exec_results([exec(1)])
             .into_connection();
 
@@ -862,7 +863,7 @@ mod tests {
         assert_eq!(adopted, 1);
         assert!(changes.is_empty());
         let log = crate::pool::statements(pool.into_transaction_log());
-        assert_eq!(log.len(), 6, "{log:?}");
+        assert_eq!(log.len(), 9, "{log:?}");
         assert!(
             log[0].contains(
                 "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
@@ -874,21 +875,27 @@ mod tests {
             "the walk runs under its own raise: {log:?}"
         );
         assert!(
-            log[3].contains("SET status = 0") && log[3].contains("db.derivation = ANY($1::uuid[])"),
+            log[3].contains("SET LOCAL work_mem")
+                && log[4].contains("ORDER BY derivation FOR UPDATE")
+                && log[5].contains("SET demanded ="),
+            "what lost a name and what gained one are recomputed together, locked and raised: {log:?}"
+        );
+        assert!(
+            log[6].contains("SET status = 0") && log[6].contains("db.derivation = ANY($1::uuid[])"),
             "the lost set is re-gated only after the names moved: {log:?}"
         );
         assert!(
-            log[4].contains("SET status = 1"),
+            log[7].contains("SET status = 1"),
             "what was adopted is queued where its gates hold: {log:?}"
         );
         assert!(
-            log[5].contains("graph_version = e.graph_version + 1"),
+            log[8].contains("graph_version = e.graph_version + 1"),
             "{log:?}"
         );
     }
 
-    /// Nothing pending lost its last name: no walk is paid for, and the lost set
-    /// is re-gated as before.
+    /// Nothing pending lost its last name: no adoption walk is paid for, and the
+    /// lost set is recomputed and re-gated as before.
     #[tokio::test]
     async fn a_deletion_that_orphans_nothing_pending_walks_nothing() {
         use sea_orm::{DatabaseBackend, MockDatabase, Value};
@@ -897,7 +904,8 @@ mod tests {
         let d = DerivationId::now_v7();
         let empty = Vec::<BTreeMap<String, Value>>::new();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([empty.clone(), empty])
+            .append_query_results([empty.clone(), empty.clone(), empty])
+            .append_exec_results([exec(0), exec(0)])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -907,9 +915,12 @@ mod tests {
         assert_eq!(adopted, 0);
         assert!(changes.is_empty());
         let log = crate::pool::statements(pool.into_transaction_log());
-        assert_eq!(log.len(), 2, "{log:?}");
+        assert_eq!(log.len(), 5, "{log:?}");
         assert!(
-            log[0].contains("LIMIT 1") && log[1].contains("SET status = 0"),
+            log[0].contains("LIMIT 1")
+                && !log.iter().any(|s| s.contains("INSERT INTO build_job"))
+                && log[3].contains("SET demanded =")
+                && log[4].contains("SET status = 0"),
             "{log:?}"
         );
     }

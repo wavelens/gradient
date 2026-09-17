@@ -1149,11 +1149,14 @@ mod tests {
         BTreeMap::from([("hash".to_owned(), Value::from(hash.to_owned()))])
     }
 
-    fn dep_row(dependency: DerivationId) -> BTreeMap<String, Value> {
-        BTreeMap::from([(
-            "dependency".to_owned(),
-            Value::from(dependency.into_inner()),
-        )])
+    fn demand_row(derivation: DerivationId, demanded: bool) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            (
+                "derivation".to_owned(),
+                Value::from(derivation.into_inner()),
+            ),
+            ("demanded".to_owned(), Value::from(demanded)),
+        ])
     }
 
     fn drv_row(derivation: DerivationId) -> BTreeMap<String, Value> {
@@ -1224,7 +1227,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![ok(1); 4])
+            .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1244,8 +1247,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            15,
-            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, demand: {log:?}"
+            17,
+            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, and the raised, locked demand recompute: {log:?}"
         );
         let walked = log
             .iter()
@@ -1312,8 +1315,9 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // stubs, lock, seed, the batch's own bump, the cross-evaluation bump
-            .append_exec_results(vec![ok(1); 5])
+            // stubs, lock, seed, the batch's own bump, the cross-evaluation bump,
+            // then the demand recompute's raise and lock
+            .append_exec_results(vec![ok(1); 7])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1394,7 +1398,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![transition_row(a.id, 1, 0)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![ok(1); 4])
+            .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1443,11 +1447,12 @@ mod tests {
         );
     }
 
-    /// A newly walked builder wants its direct inputs in our cache, and nothing
-    /// about that is a status transition the effects emitter could notice: the
-    /// anchors already exist, at the status they already had. So the batch asks for
-    /// them itself, after its counters have committed, and the promote it issues is
-    /// the ordinary gated one (the candidate list is a bound, never a claim).
+    /// A newly walked builder wants its whole pending closure in our cache, and
+    /// nothing about that is a status transition the effects emitter could notice:
+    /// the anchors already exist, at the status they already had. So the batch
+    /// recomputes demand below its own roots after its counters have committed, and
+    /// promotes what gained it with the ordinary gated statement (the candidate list
+    /// is a bound, never a claim).
     #[tokio::test]
     async fn a_batch_promotes_what_its_new_builders_demand() {
         let evaluation = EvaluationId::now_v7();
@@ -1463,10 +1468,10 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // what the batch's builders depend on, then the relay it queues
-            .append_query_results([vec![dep_row(b.id)]])
+            // what the recompute gave demand to, then the relay it queues
+            .append_query_results([vec![demand_row(b.id, true)]])
             .append_query_results([vec![drv_row(b.id)]])
-            .append_exec_results(vec![ok(1); 4])
+            .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -1483,10 +1488,10 @@ mod tests {
 
         drop(ctx);
         let log = gradient_db::pool::statements(pool.into_transaction_log());
-        let deps = log
+        let demand = log
             .iter()
-            .position(|s| s.contains("SELECT DISTINCT e.dependency FROM derivation_dependency"))
-            .expect("the batch loads what its builders demand");
+            .position(|s| s.contains("SET demanded ="))
+            .expect("the batch recomputes what it demands");
         let seed = log
             .iter()
             .position(|s| s.contains("SET unready_deps = (SELECT count(*)"))
@@ -1500,12 +1505,16 @@ mod tests {
             .expect("the demanded relay is promoted");
 
         assert!(
-            seed < deps && deps < promote,
+            seed < demand && demand < promote,
             "demand settles after the counters, and its promote reads the settled gate: {log:?}"
         );
         assert!(
-            log[promote].contains("db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
-            "the promote carries the demand arm of the gate: {log:?}"
+            log[demand].contains("demanded(derivation) AS"),
+            "the recompute is the closure walk, not one hop: {log:?}"
+        );
+        assert!(
+            log[promote].contains("AND db.demanded"),
+            "the promote reads the column the recompute just wrote: {log:?}"
         );
     }
 
@@ -1642,7 +1651,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![ok(1); 4])
+            .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 

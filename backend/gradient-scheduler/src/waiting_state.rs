@@ -201,8 +201,9 @@ pub async fn reconcile_waiting_state(
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
 /// every pending anchor yet none is dispatchable: typically the set is `Created`
 /// with some term of `graph_sql::gates_predicate` false (a non-zero
-/// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, or no
-/// `build_job`) and no in-flight build to drive a promotion, though a stalled
+/// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, no
+/// `build_job`, or an anchor nothing demands) and no in-flight build to drive a
+/// promotion, though a stalled
 /// substitute or a `FailedTransient` anchor reaches here too. Every gate the
 /// graph maintains moves on an event, and by definition no event is coming, so we
 /// self-heal here: [`attempt_graph_unstick`], gated by [`unstick_due`].

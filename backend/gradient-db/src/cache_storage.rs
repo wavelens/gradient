@@ -675,7 +675,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                6
+                7
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -693,10 +693,11 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            13,
+            15,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
              is_cached, producers of the union, producers of what is gone, owners, \
-             un-promote, and what the producers now demand: {log:?}"
+             un-promote, and the raised, locked recompute of what the producers now \
+             demand: {log:?}"
         );
         let paths = log
             .iter()
@@ -775,7 +776,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                5
+                7
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -786,10 +787,11 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            16,
+            18,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
              producers of the union, anchor lock, mark, ripple, producers of what is \
-             gone, reset, owners, un-promote, and what the producers now demand: {log:?}"
+             gone, reset, owners, un-promote, and the raised, locked recompute of what \
+             the producers now demand: {log:?}"
         );
         assert!(
             !log.iter()
