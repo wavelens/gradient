@@ -98,6 +98,14 @@ pub struct Model {
     pub instance_context: Option<Json>,
     pub candidates: Option<Json>,
     pub created_at: NaiveDateTime,
+    /// The three scores the instance-metrics windows average, lifted out of
+    /// `job_context` so the window index can carry them: averaging them out of
+    /// the jsonb made the pass read every row in the window from the heap.
+    /// `None` on rows written before the column existed, which `AVG` skips
+    /// exactly as it skipped an absent json key.
+    pub missing_nar_size: Option<i64>,
+    pub missing_count: Option<i32>,
+    pub dependency_count: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

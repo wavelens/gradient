@@ -61,6 +61,7 @@ mod m20260917_000001_derivation_build_demanded;
 mod m20260917_000002_outbox;
 mod m20260917_000003_open_work_indexes;
 mod m20260918_000000_gc_freshness_indexes;
+mod m20260918_000001_dispatch_window_columns;
 
 pub struct Migrator;
 
@@ -118,6 +119,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260917_000002_outbox::Migration),
             Box::new(m20260917_000003_open_work_indexes::Migration),
             Box::new(m20260918_000000_gc_freshness_indexes::Migration),
+            Box::new(m20260918_000001_dispatch_window_columns::Migration),
         ]
     }
 }

@@ -324,7 +324,7 @@ in {
           cannot starve dispatch.
         '';
         type = lib.types.ints.positive;
-        default = 16;
+        default = 32;
       };
 
       databaseCacheMinConnections = lib.mkOption {
