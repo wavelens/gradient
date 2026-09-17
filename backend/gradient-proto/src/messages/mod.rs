@@ -37,7 +37,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 /// v12: rkyv archives are unaligned and read in place; `QueryKnownDerivations`
 ///      carries a `query_id` that `KnownDerivations` echoes; bulk chunks are
 ///      512 KiB and a bulk write batch is byte-capped.
-pub const PROTO_VERSION: u16 = 12;
+/// v13: `CacheQuery` carries `nar_sizes` in Push mode; the server relays NARs at
+///      or under `smallNarBytes` and pulls small or unconfirmed ones over the stream.
+pub const PROTO_VERSION: u16 = 13;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

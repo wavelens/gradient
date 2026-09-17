@@ -26,7 +26,7 @@ use gradient_proto::messages::{BuildJob, FlakeJob, FlakeStep};
 use tokio::sync::watch;
 use tracing::instrument;
 
-use gradient_proto::messages::{JobPhase, QueryMode};
+use gradient_proto::messages::JobPhase;
 use gradient_types::CachedPathInfo;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
@@ -44,10 +44,7 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
     if all_paths.is_empty() {
         return vec![];
     }
-    match updater
-        .query_cache(all_paths.clone(), QueryMode::Push)
-        .await
-    {
+    match updater.query_push(all_paths.clone()).await {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(error = %e, "CacheQuery failed; will attempt direct push for all paths");

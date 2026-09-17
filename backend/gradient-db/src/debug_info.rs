@@ -18,30 +18,35 @@ use gradient_entity::ids::{CacheId, CachedPathId};
 use gradient_storage::NarStore;
 use gradient_storage::debug_info::scan_build_ids;
 use gradient_storage::nar_extract::nar_reader_from_stream;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, Statement, Value};
+use sea_orm::{ConnectionTrait, DbErr, EntityTrait, Value};
 use tracing::debug;
 
 /// Store-path name suffix of a nixpkgs `separateDebugInfo` output.
 const DEBUG_OUTPUT_SUFFIX: &str = "-debug";
 
-/// The `cached_path_signature` join is the access gate: its row proves the
-/// caller-authorised cache holds the path, the same rule the narinfo lookups use.
-const LOOKUP_SQL: &str = "SELECT cp.file_hash AS file_hash, d.member AS member \
+crate::sql! {
+    /// The `cached_path_signature` join is the access gate: its row proves the
+    /// caller-authorised cache holds the path, the same rule the narinfo lookups use.
+    LOOKUP_SQL = "SELECT cp.file_hash AS file_hash, d.member AS member \
      FROM debug_info d \
      JOIN cached_path cp ON cp.id = d.cached_path \
      JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = $1 \
      WHERE d.build_id = $2 AND cp.file_hash IS NOT NULL \
      ORDER BY d.created_at DESC \
-     LIMIT 1";
+     LIMIT 1",
+        params = [CacheId, Text("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")];
 
-/// Written out with the `-debug` pattern as a literal so the planner can match
-/// it against the partial index covering exactly this predicate. A bound
-/// parameter would not match, and the sweep would seq-scan `cached_path`.
-const PENDING_SQL: &str = "SELECT * FROM cached_path \
+    /// Written out with the `-debug` pattern as a literal so the planner can match
+    /// it against the partial index covering exactly this predicate. A bound
+    /// parameter would not match, and the sweep would seq-scan `cached_path`.
+    PENDING_SQL = "SELECT * FROM cached_path \
      WHERE NOT debug_info_indexed AND package LIKE '%-debug' \
        AND file_hash IS NOT NULL \
      ORDER BY created_at \
-     LIMIT $1";
+     LIMIT $1",
+        params = [Int(32)],
+        tier = Sweep;
+}
 
 /// A build id resolved inside one cache: which NAR holds it and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,11 +64,7 @@ pub async fn lookup_for_cache<C: ConnectionTrait>(
     build_id: &str,
 ) -> Result<Option<DebugInfoTarget>, DbErr> {
     let row = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            LOOKUP_SQL,
-            [Value::Uuid(Some(cache.into_inner())), build_id.into()],
-        ))
+        .query_one_raw(LOOKUP_SQL.bind([Value::Uuid(Some(cache.into_inner())), build_id.into()]))
         .await?;
 
     let Some(row) = row else {
@@ -88,11 +89,7 @@ pub async fn pending_debug_index<C: ConnectionTrait>(
     limit: u64,
 ) -> Result<Vec<MCachedPath>, DbErr> {
     ECachedPath::find()
-        .from_raw_sql(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            PENDING_SQL,
-            [(limit as i64).into()],
-        ))
+        .from_raw_sql(PENDING_SQL.bind([(limit as i64).into()]))
         .all(db)
         .await
 }
@@ -130,16 +127,28 @@ pub async fn index_cached_path<C: ConnectionTrait>(
     Ok(entries.len())
 }
 
+crate::sql! {
+    DEBUG_INFO_INDEXED_SELECT = "SELECT debug_info_indexed FROM cached_path WHERE id = $1",
+        params = [BuildId];
+
+    INSERT_DEBUG_INFO = "INSERT INTO debug_info (id, build_id, cached_path, member, created_at) \
+         SELECT uuidv7(), t.build_id, $1, t.member, $2 \
+         FROM unnest($3::text[], $4::text[]) AS t(build_id, member) \
+         ON CONFLICT (build_id, cached_path) DO NOTHING",
+        params = [BuildId, Now, CachedPathHashes(8), CachedPathHashes(8)];
+
+    MARK_DEBUG_INFO_INDEXED = "UPDATE cached_path SET debug_info_indexed = true WHERE id = $1",
+        params = [BuildId];
+}
+
 /// Re-read rather than trusted from the caller: a re-push of unchanged bytes
 /// reaches the inline indexer with the marker already set, and decompressing a
 /// whole debug output to rediscover the same members is pure waste.
 async fn needs_index<C: ConnectionTrait>(db: &C, cached_path: CachedPathId) -> Result<bool, DbErr> {
     let row = db
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT debug_info_indexed FROM cached_path WHERE id = $1",
-            [Value::Uuid(Some(cached_path.into_inner()))],
-        ))
+        .query_one_raw(
+            DEBUG_INFO_INDEXED_SELECT.bind([Value::Uuid(Some(cached_path.into_inner()))]),
+        )
         .await?;
 
     match row {
@@ -154,31 +163,20 @@ async fn insert_entries<C: ConnectionTrait>(
     build_ids: Vec<String>,
     members: Vec<String>,
 ) -> Result<(), DbErr> {
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "INSERT INTO debug_info (id, build_id, cached_path, member, created_at) \
-         SELECT uuidv7(), t.build_id, $1, t.member, $2 \
-         FROM unnest($3::text[], $4::text[]) AS t(build_id, member) \
-         ON CONFLICT (build_id, cached_path) DO NOTHING",
-        [
-            Value::Uuid(Some(cached_path.into_inner())),
-            gradient_types::now().into(),
-            build_ids.into(),
-            members.into(),
-        ],
-    ))
+    db.execute_raw(INSERT_DEBUG_INFO.bind([
+        Value::Uuid(Some(cached_path.into_inner())),
+        gradient_types::now().into(),
+        build_ids.into(),
+        members.into(),
+    ]))
     .await?;
 
     Ok(())
 }
 
 async fn mark_indexed<C: ConnectionTrait>(db: &C, cached_path: CachedPathId) -> Result<(), DbErr> {
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "UPDATE cached_path SET debug_info_indexed = true WHERE id = $1",
-        [Value::Uuid(Some(cached_path.into_inner()))],
-    ))
-    .await?;
+    db.execute_raw(MARK_DEBUG_INFO_INDEXED.bind([Value::Uuid(Some(cached_path.into_inner()))]))
+        .await?;
 
     Ok(())
 }
@@ -200,7 +198,11 @@ mod tests {
     /// `cached_path` seq scan.
     #[test]
     fn the_backfill_predicate_matches_its_partial_index() {
-        let sql = PENDING_SQL.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = PENDING_SQL
+            .text()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
             sql.contains("WHERE NOT debug_info_indexed AND package LIKE '%-debug'"),
             "predicate must match the partial index verbatim: {sql}"
@@ -216,7 +218,11 @@ mod tests {
     /// from another's URL.
     #[test]
     fn the_lookup_is_gated_on_this_cache_holding_the_path() {
-        let sql = LOOKUP_SQL.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = LOOKUP_SQL
+            .text()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
             sql.contains("JOIN cached_path_signature s ON s.cached_path = cp.id AND s.cache = $1"),
             "the cache gate must stay a join, not a filter that can be dropped: {sql}"

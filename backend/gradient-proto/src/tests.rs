@@ -175,6 +175,7 @@ fn cache_query_normal_roundtrip() {
         query_id: "query-1".into(),
         paths: vec!["/nix/store/aaaa-hello".into()],
         mode: QueryMode::Normal,
+        nar_sizes: vec![],
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -188,6 +189,7 @@ fn cache_query_push_roundtrip() {
         query_id: "query-2".into(),
         paths: vec!["/nix/store/aaaa-foo".into(), "/nix/store/bbbb-bar".into()],
         mode: QueryMode::Push,
+        nar_sizes: vec![4096, u64::MAX],
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -201,10 +203,16 @@ fn cache_query_pull_roundtrip() {
         query_id: "query-3".into(),
         paths: vec!["/nix/store/cccc-baz".into()],
         mode: QueryMode::Pull,
+        nar_sizes: vec![],
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
     assert_eq!(decoded, original);
+}
+
+#[test]
+fn the_handshake_speaks_version_thirteen() {
+    assert_eq!(PROTO_VERSION, 13);
 }
 
 #[test]

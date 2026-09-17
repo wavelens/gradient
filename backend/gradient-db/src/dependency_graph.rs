@@ -18,10 +18,7 @@
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte};
 use anyhow::{Context, Result};
-use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, FromQueryResult, Statement,
-    TransactionTrait,
-};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, FromQueryResult, TransactionTrait};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_types::*;
@@ -37,6 +34,32 @@ struct EdgeRow {
     dependency: uuid::Uuid,
 }
 
+fn collect_transitive_dependents_sql() -> String {
+    format!(
+        "{} SELECT derivation FROM dependents",
+        dependency_closure_cte(
+            "dependents",
+            "SELECT $1::uuid",
+            ClosureDirection::Dependents,
+        )
+    )
+}
+
+crate::sql_fn! {
+    COLLECT_TRANSITIVE_DEPENDENTS = collect_transitive_dependents_sql,
+        params = [DerivationId],
+        tier = Walk,
+        flags = [Walk];
+}
+
+crate::sql! {
+    EVAL_DEPENDENCY_EDGES = "WITH d AS MATERIALIZED (SELECT derivation FROM build_job WHERE evaluation = $1) \
+         SELECT d.derivation, s.dependency FROM d, LATERAL (\
+           SELECT e.dependency FROM derivation_dependency e \
+           WHERE e.derivation = d.derivation OFFSET 0) s",
+        params = [EvaluationId];
+}
+
 /// Returns the set of all transitive dependents of `start`, **including** `start`
 /// itself, as one recursive statement over the reverse `derivation_dependency`
 /// edges.
@@ -49,22 +72,12 @@ pub async fn collect_transitive_dependents<C>(
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let sql = format!(
-        "{} SELECT derivation FROM dependents",
-        dependency_closure_cte(
-            "dependents",
-            "SELECT $1::uuid",
-            ClosureDirection::Dependents,
-        )
-    );
     let walk = crate::graph_sql::begin_walk(db)
         .await
         .context("open the reverse-edge walk")?;
-    let rows = DerivationRow::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        sql,
-        [start.into_inner().into()],
-    ))
+    let rows = DerivationRow::find_by_statement(
+        COLLECT_TRANSITIVE_DEPENDENTS.bind([start.into_inner().into()]),
+    )
     .all(&walk)
     .await
     .context("walk derivation_dependency reverse edges")?;
@@ -88,16 +101,10 @@ pub async fn eval_dependency_edges<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
 ) -> Result<Vec<(DerivationId, DerivationId)>, DbErr> {
-    let rows = EdgeRow::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "WITH d AS MATERIALIZED (SELECT derivation FROM build_job WHERE evaluation = $1) \
-         SELECT d.derivation, s.dependency FROM d, LATERAL (\
-           SELECT e.dependency FROM derivation_dependency e \
-           WHERE e.derivation = d.derivation OFFSET 0) s",
-        [evaluation.into_inner().into()],
-    ))
-    .all(db)
-    .await?;
+    let rows =
+        EdgeRow::find_by_statement(EVAL_DEPENDENCY_EDGES.bind([evaluation.into_inner().into()]))
+            .all(db)
+            .await?;
 
     Ok(rows
         .into_iter()

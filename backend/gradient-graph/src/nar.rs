@@ -19,7 +19,7 @@ use sea_orm::{
 };
 use tracing::{debug, trace, warn};
 
-use crate::messages::{NarCommit, NarCommitted, SignTargets};
+use crate::messages::{NarCommit, NarCommitted, NarConfirm, SignTargets};
 
 /// Record a stored NAR: the row, its reference index, the counter seeded from it,
 /// the wholeness flip that counter makes, and the anchor side of that flip.
@@ -193,11 +193,15 @@ async fn upsert_cached_path(
             // Different bytes under the same store path: the recorded build-id
             // members no longer describe the NAR, so re-open it to the indexer.
             let rescan_debug_info = row.file_hash.as_deref() != Some(file_hash.as_str());
+            let was_confirmed = row.confirmed;
             let mut active = row.into_active_model();
             active.file_size = Set(Some(c.file_size));
             active.file_hash = Set(Some(file_hash));
             if rescan_debug_info {
                 active.debug_info_indexed = Set(false);
+                active.confirmed = Set(c.confirmed);
+            } else if c.confirmed && !was_confirmed {
+                active.confirmed = Set(true);
             }
 
             active.nar_size = Set(Some(c.nar_size));
@@ -229,6 +233,7 @@ async fn upsert_cached_path(
                 deriver: c.deriver.clone(),
                 ca: c.ca.clone(),
                 created_at: now(),
+                confirmed: c.confirmed,
                 ..Default::default()
             }
             .into_active_model();
@@ -241,6 +246,43 @@ async fn upsert_cached_path(
             })
         }
     }
+}
+
+/// Mark a relayed path's object as stored. Answers `false` when the row's bytes
+/// moved on since the upload began.
+pub(crate) async fn confirm(ctx: &DbContext, c: &NarConfirm) -> anyhow::Result<bool> {
+    let updated = ECachedPath::update_many()
+        .col_expr(CCachedPath::Confirmed, Expr::value(true))
+        .filter(CCachedPath::Hash.eq(c.hash.as_str()))
+        .filter(CCachedPath::FileHash.eq(normalize_nar_hash(&c.file_hash)))
+        .filter(CCachedPath::Confirmed.eq(false))
+        .exec(&ctx.worker_db)
+        .await
+        .context("confirm cached path")?
+        .rows_affected;
+
+    Ok(updated == 1)
+}
+
+gradient_db::sql! {
+    SYNC_REFERENCE_INDEX = r#"
+        WITH reported(reference, ord) AS (
+            SELECT DISTINCT ON (t.tok) t.tok, t.ord
+            FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
+            WHERE t.tok <> ''
+            ORDER BY t.tok, t.ord
+        ), dropped AS (
+            DELETE FROM cached_path_reference r
+            WHERE r.referrer = $1
+              AND NOT EXISTS (SELECT 1 FROM reported n WHERE n.reference = r.reference)
+        )
+        INSERT INTO cached_path_reference (referrer, reference, reference_hash, position)
+        SELECT $1, n.reference, split_part(n.reference, '-', 1), n.ord FROM reported n
+        ON CONFLICT (referrer, reference) DO UPDATE
+        SET position = EXCLUDED.position
+        WHERE cached_path_reference.position IS DISTINCT FROM EXCLUDED.position
+        "#,
+        params = [CachedPathHash, CachedPathHashes(64)];
 }
 
 /// Record a path's hash-name references in the normalized `cached_path_reference`
@@ -268,28 +310,8 @@ async fn sync_reference_index(
     hash: &str,
     references: &[String],
 ) -> Result<(), sea_orm::DbErr> {
-    db.execute_raw(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        r#"
-        WITH reported(reference, ord) AS (
-            SELECT DISTINCT ON (t.tok) t.tok, t.ord
-            FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
-            WHERE t.tok <> ''
-            ORDER BY t.tok, t.ord
-        ), dropped AS (
-            DELETE FROM cached_path_reference r
-            WHERE r.referrer = $1
-              AND NOT EXISTS (SELECT 1 FROM reported n WHERE n.reference = r.reference)
-        )
-        INSERT INTO cached_path_reference (referrer, reference, reference_hash, position)
-        SELECT $1, n.reference, split_part(n.reference, '-', 1), n.ord FROM reported n
-        ON CONFLICT (referrer, reference) DO UPDATE
-        SET position = EXCLUDED.position
-        WHERE cached_path_reference.position IS DISTINCT FROM EXCLUDED.position
-        "#,
-        [hash.into(), references.to_vec().into()],
-    ))
-    .await?;
+    db.execute_raw(SYNC_REFERENCE_INDEX.bind([hash.into(), references.to_vec().into()]))
+        .await?;
 
     Ok(())
 }
@@ -355,7 +377,8 @@ mod tests {
     use crate::test_ctx::ctx;
     use gradient_types::ids::ProjectId;
     use sea_orm::{
-        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, TransactionTrait, Value,
+        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement,
+        TransactionTrait, Value,
     };
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -405,6 +428,7 @@ mod tests {
             deriver: None,
             ca: None,
             targets: SignTargets::None,
+            confirmed: true,
         }
     }
 
@@ -422,6 +446,48 @@ mod tests {
 
     fn statements(db: WorkerDb) -> Vec<String> {
         gradient_db::pool::statements(db.into_transaction_log())
+    }
+
+    /// The statements as sea-orm built them. The shared helper formats each with
+    /// `{:?}`, which escapes the quotes sea-orm puts around every identifier, so
+    /// an assertion on a generated statement reads the raw `sql` instead.
+    fn raw_statements(db: WorkerDb) -> Vec<Statement> {
+        db.into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements().to_vec())
+            .filter(|s| !matches!(s.sql.trim().to_uppercase().as_str(), "BEGIN" | "COMMIT"))
+            .collect()
+    }
+
+    /// The value a generated statement binds to `column`, through the placeholder
+    /// the SET clause or the insert's column list gives it. Searching the value
+    /// list for the bare `Bool(Some(false))` would match the `debug_info_indexed`
+    /// these same statements write, and pass while `confirmed` went the other way.
+    fn bound(stmt: &Statement, column: &str) -> Value {
+        let quoted = format!("\"{column}\"");
+        let position = match stmt.sql.split_once(&format!("{quoted} = $")) {
+            Some((_, rest)) => rest
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse::<usize>()
+                .expect("a placeholder number"),
+            None => {
+                let columns = stmt
+                    .sql
+                    .split_once('(')
+                    .and_then(|(_, rest)| rest.split_once(')'))
+                    .expect("an insert column list")
+                    .0;
+                columns
+                    .split(", ")
+                    .position(|c| c == quoted)
+                    .unwrap_or_else(|| panic!("{column} is not written: {}", stmt.sql))
+                    + 1
+            }
+        };
+
+        stmt.values.as_ref().expect("the statement binds values").0[position - 1].clone()
     }
 
     /// `commit` runs in the graph actor's transaction and rejects a pooled handle,
@@ -450,6 +516,15 @@ mod tests {
         drop(ctx);
 
         statements(pool)
+    }
+
+    /// [`commit_and_log`] over the raw statements.
+    async fn commit_and_raw_log(db: DatabaseConnection, c: &NarCommit) -> Vec<Statement> {
+        let (ctx, pool) = ctx(db).await;
+        commit_in_transaction(&ctx, c).await.expect("commit");
+        drop(ctx);
+
+        raw_statements(pool)
     }
 
     /// An existing whole row re-pushed with `references`, seeded back to whole so
@@ -838,5 +913,109 @@ mod tests {
         let committed = commit_in_transaction(&ctx, &commit_for(SP)).await.unwrap();
         assert!(committed.created);
         assert_eq!(committed.outputs_marked, 2);
+    }
+
+    /// A relayed NAR on S3 is committed before its object exists, so the row
+    /// must say so.
+    #[tokio::test]
+    async fn a_relayed_commit_on_s3_inserts_the_row_unconfirmed() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(false)])
+            .append_exec_results([exec(0), exec(0), exec(0)])
+            .into_connection();
+
+        let log = commit_and_raw_log(
+            db,
+            &NarCommit {
+                confirmed: false,
+                ..commit_for(SP)
+            },
+        )
+        .await;
+
+        let insert = log
+            .iter()
+            .find(|s| s.sql.starts_with("INSERT INTO \"cached_path\""))
+            .expect("the insert");
+        assert_eq!(
+            bound(insert, "confirmed"),
+            Value::Bool(Some(false)),
+            "{insert:?}"
+        );
+    }
+
+    /// New bytes under an old hash on S3 are unconfirmed again until uploaded.
+    #[tokio::test]
+    async fn a_recommit_with_new_bytes_takes_the_commits_confirmed_flag() {
+        let existing = MCachedPath {
+            confirmed: true,
+            file_hash: Some("sha256:old".to_owned()),
+            ..returned_cached_path(HASH)
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![existing.clone()], vec![existing]])
+            .append_query_results([seed_reply(true)])
+            .append_exec_results([exec(0), exec(1), exec(1)])
+            .into_connection();
+
+        let log = commit_and_raw_log(
+            db,
+            &NarCommit {
+                confirmed: false,
+                ..commit_for(SP)
+            },
+        )
+        .await;
+
+        let update = log
+            .iter()
+            .find(|s| s.sql.starts_with("UPDATE \"cached_path\""))
+            .expect("the update");
+        assert_eq!(
+            bound(update, "confirmed"),
+            Value::Bool(Some(false)),
+            "{update:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn confirm_updates_only_the_row_whose_bytes_are_still_the_uploaded_ones() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0)])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let confirmed = confirm(
+            &ctx,
+            &NarConfirm {
+                hash: HASH.to_owned(),
+                file_hash: "sha256:abc".to_owned(),
+            },
+        )
+        .await
+        .expect("confirm");
+        drop(ctx);
+
+        assert!(!confirmed, "no row matched the uploaded file hash");
+        let log = raw_statements(pool);
+        let update = log.first().expect("one statement");
+        assert!(
+            update
+                .sql
+                .starts_with("UPDATE \"cached_path\" SET \"confirmed\" = "),
+            "{update:?}"
+        );
+        assert_eq!(
+            bound(update, "confirmed"),
+            Value::Bool(Some(true)),
+            "{update:?}"
+        );
+        assert!(update.sql.contains("\"file_hash\" = "), "{update:?}");
+        assert!(
+            format!("{:?}", update.values).contains("Bool(Some(false))"),
+            "only an unconfirmed row matches: {update:?}"
+        );
     }
 }

@@ -27,8 +27,16 @@ fn empty_mock() -> DatabaseConnection {
 /// directly so they can supply their own mock query results.
 pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
-    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
+    let config = RuntimeConfig::from_cli(&cli).expect("valid test config");
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    test_state_with_storage(db, nar_storage)
+}
+
+/// Like `test_state` but with a caller-supplied `NarStore`, for tests that need
+/// staging or the hot cache wired up.
+pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) -> Arc<ServerState> {
+    let cli = test_cli();
+    let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     Arc::new(ServerState {
         web_db: WebDb::new(empty_mock()),
         cache_db: CacheDb::new(empty_mock()),

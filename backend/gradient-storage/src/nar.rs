@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::{HotNarCache, StagedNars};
 use anyhow::{Context, Result};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use gradient_types::constants::BULK_CHUNK_SIZE;
@@ -46,6 +47,38 @@ impl Default for S3Timeouts {
 /// one takes the whole connection's commit path down with it.
 const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// Hands object_store the workspace's HTTP client instead of letting it build its
+/// own. reqwest's platform verifier refuses to construct a client where the
+/// system CA store is empty - every nix build sandbox, and any host without a CA
+/// bundle - while our roots fold webpki's in; this was the last client in the
+/// workspace not going through `gradient_util::http`. Bypassing object_store's
+/// builder bypasses its own rules too, so they are restated here: no content
+/// encoding, because compression rewrites the `Content-Length` object sizes are
+/// read from.
+#[derive(Debug)]
+struct SharedHttpConnector {
+    read_timeout: std::time::Duration,
+    allow_http: bool,
+}
+
+impl object_store::client::HttpConnector for SharedHttpConnector {
+    fn connect(&self, _: &ClientOptions) -> object_store::Result<object_store::client::HttpClient> {
+        let client = gradient_util::http::untimed_client_builder()
+            .read_timeout(self.read_timeout)
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .https_only(!self.allow_http)
+            .build()
+            .map_err(|e| object_store::Error::Generic {
+                store: "S3",
+                source: Box::new(e),
+            })?;
+
+        Ok(object_store::client::HttpClient::new(client))
+    }
+}
+
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
 ///
 /// All NARs are stored pre-compressed (`.nar.zst`). The key path within the store is
@@ -60,6 +93,10 @@ pub struct NarStore {
     /// S3 store - held separately to enable presigned URL generation via the
     /// [`object_store::signer::Signer`] trait.  `None` for local-disk stores.
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
+    /// Relayed NARs awaiting the background upload; `None` on a store built
+    /// without staging, whose relay commit writes through synchronously.
+    staged: Option<Arc<StagedNars>>,
+    hot: Arc<HotNarCache>,
 }
 
 /// Slowest write we are willing to wait out. Sets how [`single_write_budget`]
@@ -121,6 +158,8 @@ impl NarStore {
             prefix: String::new(),
             local_base: Some(base_path.to_string()),
             s3_signer: None,
+            staged: None,
+            hot: Arc::new(HotNarCache::disabled()),
         })
     }
 
@@ -158,16 +197,10 @@ impl NarStore {
             .with_bucket_name(bucket)
             .with_region(region)
             .with_retry(retry_config)
-            .with_client_options(
-                ClientOptions::new()
-                    .with_user_agent(
-                        gradient_util::http::user_agent()
-                            .parse()
-                            .expect("static UA is valid"),
-                    )
-                    .with_timeout_disabled()
-                    .with_read_timeout(timeouts.read_timeout),
-            );
+            .with_http_connector(SharedHttpConnector {
+                read_timeout: timeouts.read_timeout,
+                allow_http: endpoint.is_some(),
+            });
 
         if let Some(ep) = endpoint {
             builder = builder
@@ -190,6 +223,8 @@ impl NarStore {
             prefix: crate::layout::normalize_prefix(prefix),
             local_base: None,
             s3_signer: Some(store),
+            staged: None,
+            hot: Arc::new(HotNarCache::disabled()),
         })
     }
 
@@ -516,6 +551,29 @@ impl NarStore {
         self.local_base.as_deref()
     }
 
+    /// Whether this store can mint presigned URLs (S3); a local store cannot.
+    pub fn presigner_available(&self) -> bool {
+        self.s3_signer.is_some()
+    }
+
+    pub fn with_staging(mut self, staged: StagedNars) -> Self {
+        self.staged = Some(Arc::new(staged));
+        self
+    }
+
+    pub fn with_hot_cache(mut self, hot: HotNarCache) -> Self {
+        self.hot = Arc::new(hot);
+        self
+    }
+
+    pub fn staged(&self) -> Option<&Arc<StagedNars>> {
+        self.staged.as_ref()
+    }
+
+    pub fn hot(&self) -> &HotNarCache {
+        &self.hot
+    }
+
     /// Generate a presigned GET URL valid for `expires_in` for the NAR
     /// identified by `hash`.
     ///
@@ -750,6 +808,85 @@ impl std::fmt::Debug for NarStore {
     }
 }
 
+/// Where a served NAR's bytes come from: RAM, or a stream over the staged file
+/// or the object store.
+pub enum NarSource {
+    /// The whole object; the caller slices by offset.
+    Hot(Bytes),
+    Stream {
+        size: u64,
+        stream: BoxStream<'static, Result<Bytes>>,
+    },
+}
+
+impl NarSource {
+    pub fn size(&self) -> u64 {
+        match self {
+            NarSource::Hot(bytes) => bytes.len() as u64,
+            NarSource::Stream { size, .. } => *size,
+        }
+    }
+}
+
+async fn collect(mut stream: BoxStream<'static, Result<Bytes>>, size: u64) -> Result<Bytes> {
+    let mut buf = BytesMut::with_capacity(usize::try_from(size).unwrap_or(0));
+    while let Some(chunk) = stream.next().await {
+        buf.extend_from_slice(&chunk?);
+    }
+
+    Ok(buf.freeze())
+}
+
+impl NarStore {
+    /// Resolve `hash` through the tiers: the hot cache, then a staged file, then
+    /// the object store. A source at offset 0 whose size the cache admits is
+    /// read once through the single-flight loader and answered from RAM.
+    pub async fn open(&self, hash: &str, offset: u64) -> Result<Option<NarSource>> {
+        if let Some(bytes) = self.hot.get(hash) {
+            return Ok(Some(NarSource::Hot(bytes)));
+        }
+
+        if let Some(staged) = &self.staged
+            && let Some((size, mut file)) = staged.open(hash).await?
+        {
+            if offset == 0 && self.hot.admits(size) {
+                let path = staged.path(hash);
+                let bytes = self
+                    .hot
+                    .get_or_load(hash, async move {
+                        tokio::fs::read(path)
+                            .await
+                            .map(Bytes::from)
+                            .context("read staged NAR")
+                    })
+                    .await?;
+
+                return Ok(Some(NarSource::Hot(bytes)));
+            }
+
+            file.seek(SeekFrom::Start(offset))
+                .await
+                .context("seek staged NAR")?;
+            let stream = tokio_util::io::ReaderStream::with_capacity(file, BULK_CHUNK_SIZE)
+                .map(|chunk| chunk.context("read staged NAR chunk"))
+                .boxed();
+
+            return Ok(Some(NarSource::Stream { size, stream }));
+        }
+
+        let Some((size, stream)) = self.get_stream_from(hash, offset).await? else {
+            return Ok(None);
+        };
+
+        if offset == 0 && self.hot.admits(size) {
+            let bytes = self.hot.get_or_load(hash, collect(stream, size)).await?;
+            return Ok(Some(NarSource::Hot(bytes)));
+        }
+
+        Ok(Some(NarSource::Stream { size, stream }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -760,6 +897,113 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let store = NarStore::local(dir.path().to_str().unwrap()).expect("local store");
         (dir, store)
+    }
+
+    fn tiered_store(threshold: u64) -> (TempDir, NarStore) {
+        let dir = TempDir::new().expect("tempdir");
+        let store = NarStore::local(dir.path().to_str().unwrap())
+            .expect("local store")
+            .with_staging(StagedNars::new(dir.path().join("nar-staged")).expect("staging"))
+            .with_hot_cache(HotNarCache::new(4 * 1024 * 1024, threshold));
+        (dir, store)
+    }
+
+    async fn collect_source(source: NarSource) -> Vec<u8> {
+        match source {
+            NarSource::Hot(bytes) => bytes.to_vec(),
+            NarSource::Stream { mut stream, .. } => {
+                let mut out = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    out.extend_from_slice(&chunk.expect("chunk"));
+                }
+
+                out
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn open_answers_a_small_object_from_ram_on_the_second_call() {
+        let (_d, store) = tiered_store(64 * 1024);
+        let payload = vec![7u8; 1000];
+        store.put("small", payload.clone()).await.expect("put");
+
+        let first = store
+            .open("small", 0)
+            .await
+            .expect("open")
+            .expect("present");
+        assert!(matches!(first, NarSource::Hot(_)), "read through into RAM");
+        assert_eq!(collect_source(first).await, payload);
+        let stats = store.hot().stats();
+        assert_eq!((stats.entries, stats.hits, stats.misses), (1, 0, 1));
+
+        let second = store
+            .open("small", 0)
+            .await
+            .expect("open")
+            .expect("present");
+        assert!(matches!(second, NarSource::Hot(_)));
+        assert_eq!(store.hot().stats().hits, 1);
+    }
+
+    #[tokio::test]
+    async fn open_streams_a_large_object_and_never_caches_it() {
+        let (_d, store) = tiered_store(64 * 1024);
+        let payload: Vec<u8> = (0..128 * 1024).map(|i| i as u8).collect();
+        store.put("large", payload.clone()).await.expect("put");
+
+        let source = store
+            .open("large", 0)
+            .await
+            .expect("open")
+            .expect("present");
+        assert!(matches!(source, NarSource::Stream { size, .. } if size == payload.len() as u64));
+        assert_eq!(collect_source(source).await, payload);
+        assert_eq!(store.hot().stats().entries, 0);
+    }
+
+    #[tokio::test]
+    async fn open_prefers_a_staged_file_over_the_object_store() {
+        let (dir, store) = tiered_store(64 * 1024);
+        let claim = dir.path().join("claim");
+        tokio::fs::write(&claim, b"staged bytes")
+            .await
+            .expect("write");
+        store
+            .staged()
+            .expect("staging")
+            .adopt("stagedhash", &claim)
+            .await
+            .expect("adopt");
+
+        let source = store
+            .open("stagedhash", 0)
+            .await
+            .expect("open")
+            .expect("present");
+        assert_eq!(collect_source(source).await, b"staged bytes");
+    }
+
+    #[tokio::test]
+    async fn open_at_an_offset_streams_the_tail_of_a_large_object() {
+        let (_d, store) = tiered_store(64 * 1024);
+        let payload: Vec<u8> = (0..128 * 1024).map(|i| i as u8).collect();
+        store.put("large", payload.clone()).await.expect("put");
+
+        let source = store
+            .open("large", 100)
+            .await
+            .expect("open")
+            .expect("present");
+        assert_eq!(source.size(), payload.len() as u64);
+        assert_eq!(collect_source(source).await, payload[100..]);
+    }
+
+    #[tokio::test]
+    async fn open_is_none_for_an_unknown_hash() {
+        let (_d, store) = tiered_store(64 * 1024);
+        assert!(store.open("nothing", 0).await.expect("open").is_none());
     }
 
     #[tokio::test]

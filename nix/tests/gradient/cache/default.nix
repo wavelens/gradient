@@ -63,10 +63,11 @@
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-cache";
-    # Phases 10e to 10h add three more evaluations of the repository, a
-    # two-session lock handshake and three retire-and-recover cycles to what was
-    # already a full build-and-cache run.
-    globalTimeout = 3600;
+    # Phases 10e to 10h add five more evaluations of the repository, a two-session
+    # lock handshake and four retire-and-recover cycles to what was already a full
+    # build-and-cache run, and 10g only began relaying for real once it stopped
+    # failing in its first seconds.
+    globalTimeout = 5400;
 
     defaults = {
       networking.firewall.enable = false;
@@ -223,7 +224,10 @@ in {
                   upstreams = [{
                     type = "external";
                     display_name = "file-upstream";
-                    url = "http://gradient.local/upstream";
+                    # `server`, not `gradient.local`: the RELAY runs on a builder,
+                    # and only the server node maps the gradient.local name. An
+                    # upstream a worker cannot resolve is not an upstream.
+                    url = "http://server/upstream";
                     public_key = "file-upstream-1:CF7rch65Q3JWRsHM8viCggLfNh5Cqw7TNervR0fbs5E=";
                   }];
                 };
@@ -410,6 +414,17 @@ in {
       send_a() { printf '%s\\n' "$1" >&3; }
       send_b() { printf '%s\\n' "$1" >&4; }
 
+      # The arm is only a race once the retire owns a row. A fixture deleted out from
+      # under it leaves both sessions unblocked and the next wait times out blaming
+      # the recount, so name the real cause here.
+      retired() {
+        if [ "$(grep -c '^DELETE 1$' $D/a.out)" != "$1" ]; then
+          echo "LOCKRACE: the retire deleted no row, its fixture was gone before the arm ran"
+          cat $D/a.out
+          exit 1
+        fi
+      }
+
       rm -rf $D
       mkdir -p $D
       mkfifo $D/a.in
@@ -435,6 +450,7 @@ in {
       send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT']);"
       send_a "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV']::uuid[]) ORDER BY derivation FOR UPDATE;"
       wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction'" "the retire session never reached its held state"
+      retired 1
 
       send_b "SET application_name = 'lockrace_b';"
       send_b "BEGIN;"
@@ -480,6 +496,7 @@ in {
       send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']);"
       send_a "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV2']::uuid[]) ORDER BY derivation FOR UPDATE;"
       wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction'" "the retire session never held its second row"
+      retired 2
 
       send_b "BEGIN;"
       send_b "$(recount "$LR_DRV2")"
@@ -811,15 +828,8 @@ in {
           ))
           assert disagree == 0, f"the fenced {direction} walk disagrees on {disagree} nodes"
 
-          # A lateral correlation can only be executed as a nested loop, so the
-          # fence holding is exactly "no merge join survived in the plan".
-          plan = sql(
-              f"EXPLAIN WITH RECURSIVE fenced(derivation) AS ({seed} UNION "
-              f"  SELECT s.next FROM fenced c, LATERAL ({fenced_step} OFFSET 0) s) "
-              f"SELECT count(*) FROM fenced;"
-          )
-          assert "Nested Loop" in plan, f"the {direction} walk lost its nested loop:\n{plan}"
-          assert "Merge Join" not in plan, f"the {direction} walk merge-joins again:\n{plan}"
+          # The plan shape of this walk (a nested loop, never a merge join) is
+          # asserted for every registered walk by the SQL plan gate in phase 13.
 
       # The table is gone; the task page fills the histogram cache for the
       # page it reads and stamps every entry point with the graph version.
@@ -1430,10 +1440,33 @@ in {
               f"in 600 s, has (status fetchable) = ({producer}) with {unbacked} of its "
               f"outputs missing a cached_path row"
           )
-      assert int(sql(
-          f"SELECT db.unready_deps FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
-          f"WHERE d.hash = '{drv_hash}';"
-      )) == 0, "hello's counter must return to zero"
+      # The ripple decrements the dependents inside the same transaction that
+      # flips the producer, so this is settled the moment the poll above sees it.
+      # The short window is for a SECOND dependency still being re-pushed, and is
+      # deliberately far inside the 300 s sweep: a ripple this missed must fail
+      # here rather than be repaired into a pass.
+      hello_unready = (
+          f"SELECT db.unready_deps FROM derivation_build db "
+          f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';"
+      )
+      for _ in range(12):
+          if sql(hello_unready) == "0":
+              break
+          server.sleep(5)
+      else:
+          raise Exception(
+              f"hello's counter must return to zero, is {sql(hello_unready)} with these "
+              f"unfetchable inputs: " + sql(
+                  f"SELECT string_agg(d.name || ' status=' || dep.status::text "
+                  f"  || ' fetchable=' || dep.fetchable::int::text "
+                  f"  || ' unready=' || dep.unready_deps::text, ', ') "
+                  f"FROM derivation_dependency e "
+                  f"JOIN derivation_build dep ON dep.derivation = e.dependency "
+                  f"JOIN derivation d ON d.id = e.dependency "
+                  f"WHERE e.derivation = (SELECT id FROM derivation WHERE hash = '{drv_hash}') "
+                  f"  AND NOT dep.fetchable;"
+              )
+          )
       unsettled = int(sql(
           f"SELECT count(*) FROM build_job bj "
           f"JOIN derivation_build db ON db.derivation = bj.derivation "
@@ -1489,9 +1522,12 @@ in {
               f"INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, "
               f"created_at) VALUES (uuidv7(), '{drv}', 'out', '{out_hash}', '{name}-out', "
               f"true, now() AT TIME ZONE 'UTC');\n"
+              # Unconfirmed on purpose: no NAR backs these rows, and the cache cleanup
+              # purges a CONFIRMED row whose object is gone, which took the second
+              # fixture out from under the phase 20 seconds after it was written.
               f"INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, "
-              f"missing_references, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
-              f"'sha256:lockrace', 1, 1, 'sha256:lockrace', 0, now() AT TIME ZONE 'UTC');"
+              f"missing_references, confirmed, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
+              f"'sha256:lockrace', 1, 1, 'sha256:lockrace', 0, false, now() AT TIME ZONE 'UTC');"
           )
           assert sql(
               f"SELECT db.fetchable::int::text || ' ' || (SELECT count(*)::text FROM cached_path "
@@ -1575,6 +1611,10 @@ in {
       )
       server.succeed("chown -R nginx:nginx /srv/upstream && systemctl reload nginx")
       server.succeed(f"{CURL} -sf http://gradient.local/upstream/nix-cache-info > /dev/null")
+      # The relay downloads the upstream NAR from the BUILDER, so the upstream has
+      # to answer there too. Asserted here because the alternative symptom is the
+      # phase timing out 900 s later on an evaluation that never finishes.
+      builder.succeed(f"{CURL} -sf http://server/upstream/nix-cache-info > /dev/null")
 
       assert "file-upstream" in api_get(token, "caches/main/upstreams"), "the declared upstream was not provisioned"
 
@@ -1843,7 +1883,8 @@ in {
       print(names)
       for want in ["graph", "build-dispatch", "eval-dispatch", "trigger-dispatch",
                    "cache-maintenance", "sign-sweep", "debug-index",
-                   "eval-cache-sweep", "retention", "rollup", "outbound-connect"]:
+                   "eval-cache-sweep", "retention", "rollup", "outbound-connect",
+                   "nar-uploader"]:
           assert want in names, f"{want} missing from supervised loops: {names}"
       bad = [l for l in health["supervised"] if l["restarts"] or l["pass_timeouts"]]
       assert not bad, f"restarted or stalled loops: {bad}"
@@ -1885,6 +1926,20 @@ in {
       assert builder.succeed(
           "systemctl show -p Result --value gradient-worker.service"
       ).strip() == "success"
+
+      # ── Phase 13: every registered statement plans sanely (#651) ──────────
+      # The gate amplifies this database to production scale, so it runs last and
+      # the server is stopped first: nothing else should ever see those rows. It
+      # explains each statement in a transaction it rolls back, which is what
+      # makes a registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
+      banner("Phase 13: the SQL plan gate")
+      server.succeed("systemctl stop gradient-server.service")
+
+      print(server.succeed(
+          "${pkgs.gradient.sqlGate}/bin/gradient-sql-gate "
+          "--database-url postgresql://postgres@127.0.0.1/gradient "
+          "--max-unmeasured 0 2>&1"
+      ))
 
       banner("Cache test PASSED")
       '';

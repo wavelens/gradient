@@ -12,8 +12,16 @@
 
 use crate::error::WebError;
 use gradient_types::MUser;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, Value};
+use sea_orm::{ConnectionTrait, Value};
 use uuid::Uuid;
+
+gradient_db::sql! {
+    PUBLIC_PROJECTS = "SELECT id FROM project WHERE public = true",
+        params = [];
+
+    PROJECTS_FOR_USER = "SELECT project AS id FROM project_user WHERE \"user\" = $1",
+        params = [UserId];
+}
 
 pub enum MetricsScope {
     All,
@@ -30,22 +38,12 @@ impl MetricsScope {
         }
 
         let mut projects: Vec<String> = Vec::new();
-        for row in db
-            .query_all_raw(Statement::from_string(
-                DatabaseBackend::Postgres,
-                "SELECT id FROM project WHERE public = true".to_owned(),
-            ))
-            .await?
-        {
+        for row in db.query_all_raw(PUBLIC_PROJECTS.stmt()).await? {
             projects.push(row.try_get::<Uuid>("", "id")?.to_string());
         }
         if let Some(u) = user {
             for row in db
-                .query_all_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    "SELECT project AS id FROM project_user WHERE \"user\" = $1",
-                    [Value::from(Uuid::from(u.id))],
-                ))
+                .query_all_raw(PROJECTS_FOR_USER.bind([Value::from(Uuid::from(u.id))]))
                 .await?
             {
                 projects.push(row.try_get::<Uuid>("", "id")?.to_string());

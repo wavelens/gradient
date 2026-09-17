@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use gradient_types::ids::TaskId;
-use sea_orm::{ConnectionTrait, DbBackend, FromQueryResult, Statement};
+use sea_orm::{ConnectionTrait, FromQueryResult};
 use tracing::error;
 
 /// In-memory scheduler counts the loop already holds; merged into the snapshot.
@@ -74,18 +74,8 @@ struct DispatchRow {
     dep_24h: Option<f64>,
 }
 
-/// Compute a fresh windowed snapshot from `derivation_metric` + `dispatched_job`.
-/// Each query degrades independently - errors are logged and that query's windows read absent; counts always survive.
-pub async fn compute_instance_context(
-    db: &impl ConnectionTrait,
-    counts: InstanceCounts,
-    now: chrono::NaiveDateTime,
-) -> gradient_score::InstanceContext {
-    let c5m = now - chrono::Duration::minutes(5);
-    let c1h = now - chrono::Duration::hours(1);
-    let c24h = now - chrono::Duration::hours(24);
-
-    let metric_sql = r#"
+gradient_db::sql! {
+    INSTANCE_METRIC_WINDOWS = r#"
         SELECT
           (AVG(peak_ram_mb)    FILTER (WHERE created_at >= $1))::float8 AS peak_ram_5m,
           (AVG(peak_ram_mb)    FILTER (WHERE created_at >= $2))::float8 AS peak_ram_1h,
@@ -116,24 +106,19 @@ pub async fn compute_instance_context(
           COALESCE(COUNT(*) FILTER (WHERE created_at >= $3), 0)::float8 AS completed_24h
         FROM derivation_metric
         WHERE created_at >= $3
-    "#;
+    "#,
+        params = [Now, Now, Now];
+}
 
-    let metric = match MetricRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        metric_sql,
-        [c5m.into(), c1h.into(), c24h.into()],
-    ))
-    .one(db)
-    .await
-    {
-        Ok(row) => row.unwrap_or_default(),
-        Err(e) => {
-            error!(error = %e, "instance metrics: derivation_metric query failed");
-            MetricRow::default()
-        }
-    };
+gradient_db::sql_fn! {
+    /// The exemplar behind the dispatch-window query's `kind` fence: the gate
+    /// plans against the same generated fragment the call site runs.
+    INSTANCE_DISPATCH_WINDOWS = dispatch_windows_sql,
+        params = [Now, Now, Now];
+}
 
-    let dispatch_sql = format!(
+fn dispatch_windows_sql() -> String {
+    format!(
         r#"
         SELECT
           (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $1))::float8 AS wait_5m,
@@ -152,13 +137,40 @@ pub async fn compute_instance_context(
         WHERE kind = {kind} AND ready_at IS NOT NULL AND dispatched_at >= $3
     "#,
         kind = i16::from(gradient_entity::dispatched_job::DispatchedJobKind::Build)
-    );
+    )
+}
 
-    let dispatch = match DispatchRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        dispatch_sql,
-        [c5m.into(), c1h.into(), c24h.into()],
-    ))
+/// Compute a fresh windowed snapshot from `derivation_metric` + `dispatched_job`.
+/// Each query degrades independently - errors are logged and that query's windows read absent; counts always survive.
+pub async fn compute_instance_context(
+    db: &impl ConnectionTrait,
+    counts: InstanceCounts,
+    now: chrono::NaiveDateTime,
+) -> gradient_score::InstanceContext {
+    let c5m = now - chrono::Duration::minutes(5);
+    let c1h = now - chrono::Duration::hours(1);
+    let c24h = now - chrono::Duration::hours(24);
+
+    let metric = match MetricRow::find_by_statement(INSTANCE_METRIC_WINDOWS.bind([
+        c5m.into(),
+        c1h.into(),
+        c24h.into(),
+    ]))
+    .one(db)
+    .await
+    {
+        Ok(row) => row.unwrap_or_default(),
+        Err(e) => {
+            error!(error = %e, "instance metrics: derivation_metric query failed");
+            MetricRow::default()
+        }
+    };
+
+    let dispatch = match DispatchRow::find_by_statement(INSTANCE_DISPATCH_WINDOWS.bind([
+        c5m.into(),
+        c1h.into(),
+        c24h.into(),
+    ]))
     .one(db)
     .await
     {
@@ -205,14 +217,8 @@ struct EvalHistoryRow {
     samples: i64,
 }
 
-/// Per-task p95 of evaluation peak RSS over the last 24h, fed into
-/// `ResourceFitRule` so heavy evals route to big-RAM workers.
-pub async fn compute_eval_history(
-    db: &impl ConnectionTrait,
-    now: chrono::NaiveDateTime,
-) -> HashMap<TaskId, gradient_score::HistoryPrediction> {
-    let since = now - chrono::Duration::hours(24);
-    let sql = r#"
+gradient_db::sql! {
+    EVAL_HISTORY_P95_RAM = r#"
         SELECT e.task AS task,
                COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY m.peak_rss_mb), 0)::float8 AS p95_ram,
                COUNT(*)::bigint AS samples
@@ -220,15 +226,21 @@ pub async fn compute_eval_history(
         JOIN evaluation e ON e.id = m.evaluation
         WHERE m.created_at >= $1 AND e.task IS NOT NULL
         GROUP BY e.task
-    "#;
+    "#,
+        params = [Now];
+}
 
-    let rows = match EvalHistoryRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        sql,
-        [since.into()],
-    ))
-    .all(db)
-    .await
+/// Per-task p95 of evaluation peak RSS over the last 24h, fed into
+/// `ResourceFitRule` so heavy evals route to big-RAM workers.
+pub async fn compute_eval_history(
+    db: &impl ConnectionTrait,
+    now: chrono::NaiveDateTime,
+) -> HashMap<TaskId, gradient_score::HistoryPrediction> {
+    let since = now - chrono::Duration::hours(24);
+
+    let rows = match EvalHistoryRow::find_by_statement(EVAL_HISTORY_P95_RAM.bind([since.into()]))
+        .all(db)
+        .await
     {
         Ok(r) => r,
         Err(e) => {

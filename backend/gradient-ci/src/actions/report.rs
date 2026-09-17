@@ -18,6 +18,18 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
 use tracing::warn;
 
+gradient_db::sql! {
+    PERSIST_EVALUATION_CHECK_ID = r#"UPDATE evaluation
+               SET check_run_ids = jsonb_set(
+                   COALESCE(check_run_ids, '{}'::jsonb),
+                   ARRAY[$2::text],
+                   to_jsonb($3::bigint),
+                   true
+               )
+               WHERE id = $1"#,
+        params = [EvaluationId, Text("Evaluation"), Int(123456)];
+}
+
 /// Atomically upsert `check_run_id` into `evaluation.check_run_ids` under
 /// `context`. Uses Postgres `jsonb_set` so concurrent persists for
 /// different context keys (e.g. Approval + Evaluation + per-Build) cannot
@@ -30,27 +42,16 @@ pub(super) async fn persist_evaluation_check_id(
     context: &str,
     check_run_id: i64,
 ) {
-    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+    use sea_orm::ConnectionTrait;
 
     let result = ctx
         .db
         .worker_db
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"UPDATE evaluation
-               SET check_run_ids = jsonb_set(
-                   COALESCE(check_run_ids, '{}'::jsonb),
-                   ARRAY[$2::text],
-                   to_jsonb($3::bigint),
-                   true
-               )
-               WHERE id = $1"#,
-            [
-                sea_orm::Value::Uuid(Some(evaluation_id.into_inner())),
-                sea_orm::Value::String(Some(context.to_string())),
-                sea_orm::Value::BigInt(Some(check_run_id)),
-            ],
-        ))
+        .execute_raw(PERSIST_EVALUATION_CHECK_ID.bind([
+            sea_orm::Value::Uuid(Some(evaluation_id.into_inner())),
+            sea_orm::Value::String(Some(context.to_string())),
+            sea_orm::Value::BigInt(Some(check_run_id)),
+        ]))
         .await;
     if let Err(e) = result {
         warn!(error = %e, %evaluation_id, "persisting evaluation check_run_ids");

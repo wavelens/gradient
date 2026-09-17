@@ -32,15 +32,16 @@ use tracing::{debug, warn};
 /// invocation; remaining rows are picked up by the next scheduled pass.
 const SIGN_SWEEP_BATCH: u64 = 1000;
 
-/// Re-create `cached_path_signature` rows for paths that hold none at all.
-///
-/// A NAR whose owning job could not be resolved at commit time was written to
-/// `cached_path` with no cache claim, and the signing pass below cannot repair
-/// that: it only fills rows that already exist. Such a path is cached according
-/// to every gate flag yet 404s from the narinfo endpoint forever. Bounded the
-/// same way as the signing pass, and driven off the "no rows at all" anti-join
-/// so a healthy instance pays one indexed probe.
-const RECONCILE_ORPHAN_CLAIMS: &str = r#"
+gradient_db::sql! {
+    /// Re-create `cached_path_signature` rows for paths that hold none at all.
+    ///
+    /// A NAR whose owning job could not be resolved at commit time was written to
+    /// `cached_path` with no cache claim, and the signing pass below cannot repair
+    /// that: it only fills rows that already exist. Such a path is cached according
+    /// to every gate flag yet 404s from the narinfo endpoint forever. Bounded the
+    /// same way as the signing pass, and driven off the "no rows at all" anti-join
+    /// so a healthy instance pays one indexed probe.
+    RECONCILE_ORPHAN_CLAIMS = r#"
 WITH orphan AS (
     SELECT cp.id
     FROM cached_path cp
@@ -62,16 +63,17 @@ INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_
 SELECT uuidv7(), claim.cached_path, claim.cache, 0, (now() AT TIME ZONE 'UTC')
 FROM claim
 ON CONFLICT (cached_path, cache) DO NOTHING
-"#;
+"#,
+        params = [Int(1000)],
+        tier = Sweep;
+}
 
 async fn reconcile_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()> {
     let res = state
         .worker_db
-        .execute_raw(sea_orm::Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            RECONCILE_ORPHAN_CLAIMS,
-            [sea_orm::Value::BigInt(Some(SIGN_SWEEP_BATCH as i64))],
-        ))
+        .execute_raw(
+            RECONCILE_ORPHAN_CLAIMS.bind([sea_orm::Value::BigInt(Some(SIGN_SWEEP_BATCH as i64))]),
+        )
         .await?;
     if res.rows_affected() > 0 {
         tracing::info!(
@@ -277,56 +279,11 @@ fn full_backfill_due() -> bool {
     }
 }
 
-/// For every derivation built by a project subscribed to `cache_id`
-/// whose outputs are all cached and whose dependency closure is already
-/// recorded, insert a `cache_derivation` row (project scoping mirrors
-/// `gradient_db::derivation_ids_for_project`: task -> evaluation -> build_job).
-/// Idempotent. `full = false` restricts the walk to `seed` and its dependents,
-/// layer by layer to a fixpoint; `full = true` is the unseeded hourly backfill.
-async fn record_newly_completed_derivations(
-    state: &ServerState,
-    cache_id: CacheId,
-    seed: &[uuid::Uuid],
-    full: bool,
-) -> anyhow::Result<()> {
-    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-
-    const INSERT_LAYER: &str = r#"
-        INSERT INTO cache_derivation (id, cache, derivation, cached_at)
-        SELECT uuidv7(), $1, d.id, $2
-        FROM derivation d
-        WHERE d.id = ANY($3)
-          AND d.id IN (
-            SELECT bj.derivation
-            FROM build_job bj
-            JOIN evaluation ev ON ev.id = bj.evaluation
-            JOIN task p ON p.id = ev.task
-            JOIN project_cache oc ON oc.project = p.project
-            WHERE oc.cache = $1)
-          AND NOT EXISTS (
-            SELECT 1 FROM derivation_output o
-            WHERE o.derivation = d.id AND o.is_cached = false)
-          AND NOT EXISTS (
-            SELECT 1 FROM derivation_dependency e
-            WHERE e.derivation = d.id
-              AND NOT EXISTS (
-                SELECT 1 FROM cache_derivation cd
-                WHERE cd.cache = $1 AND cd.derivation = e.dependency))
-          AND NOT EXISTS (
-            SELECT 1 FROM cache_derivation cd2
-            WHERE cd2.cache = $1 AND cd2.derivation = d.id)
-        RETURNING derivation
-    "#;
-
-    if full {
-        // Set-based shape: materialise the already-recorded set once and hash
-        // anti-join against it, instead of a correlated probe per candidate
-        // per dependency (which scanned for minutes on a large graph).
-        let inserted = state
-            .worker_db
-            .execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                r#"
+gradient_db::sql! {
+    /// The unseeded hourly backfill: materialises the already-recorded set once
+    /// and hash anti-joins against it, instead of a correlated probe per
+    /// candidate per dependency (which scanned for minutes on a large graph).
+    FULL_BACKFILL_CACHE_DERIVATION = r#"
         WITH have AS MATERIALIZED (
             SELECT derivation FROM cache_derivation WHERE cache = $1
         ),
@@ -351,8 +308,68 @@ async fn record_newly_completed_derivations(
             LEFT JOIN have h ON h.derivation = e.dependency
             WHERE e.derivation = c.derivation AND h.derivation IS NULL)
                 "#,
-                [cache_id.into_inner().into(), gradient_types::now().into()],
-            ))
+        params = [CacheId, Now];
+
+    /// The frontier-walk's next layer: dependents of the derivations the
+    /// previous layer just inserted.
+    FRONTIER_DEPENDENTS = "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
+        params = [DerivationIds(64)];
+}
+
+/// For every derivation built by a project subscribed to `cache_id`
+/// whose outputs are all cached and whose dependency closure is already
+/// recorded, insert a `cache_derivation` row (project scoping mirrors
+/// `gradient_db::derivation_ids_for_project`: task -> evaluation -> build_job).
+/// Idempotent. `full = false` restricts the walk to `seed` and its dependents,
+/// layer by layer to a fixpoint; `full = true` is the unseeded hourly backfill.
+async fn record_newly_completed_derivations(
+    state: &ServerState,
+    cache_id: CacheId,
+    seed: &[uuid::Uuid],
+    full: bool,
+) -> anyhow::Result<()> {
+    use sea_orm::ConnectionTrait;
+
+    gradient_db::sql! {
+        INSERT_LAYER = r#"
+        INSERT INTO cache_derivation (id, cache, derivation, cached_at)
+        SELECT uuidv7(), $1, d.id, $2
+        FROM derivation d
+        WHERE d.id = ANY($3)
+          AND d.id IN (
+            SELECT bj.derivation
+            FROM build_job bj
+            JOIN evaluation ev ON ev.id = bj.evaluation
+            JOIN task p ON p.id = ev.task
+            JOIN project_cache oc ON oc.project = p.project
+            WHERE oc.cache = $1)
+          AND NOT EXISTS (
+            SELECT 1 FROM derivation_output o
+            WHERE o.derivation = d.id AND o.is_cached = false)
+          AND NOT EXISTS (
+            SELECT 1 FROM derivation_dependency e
+            WHERE e.derivation = d.id
+              AND NOT EXISTS (
+                SELECT 1 FROM cache_derivation cd
+                WHERE cd.cache = $1 AND cd.derivation = e.dependency))
+          AND NOT EXISTS (
+            SELECT 1 FROM cache_derivation cd2
+            WHERE cd2.cache = $1 AND cd2.derivation = d.id)
+        RETURNING derivation
+    "#,
+            params = [CacheId, Now, DerivationIds(64)];
+    }
+
+    if full {
+        // Set-based shape: materialise the already-recorded set once and hash
+        // anti-join against it, instead of a correlated probe per candidate
+        // per dependency (which scanned for minutes on a large graph).
+        let inserted = state
+            .worker_db
+            .execute_raw(
+                FULL_BACKFILL_CACHE_DERIVATION
+                    .bind([cache_id.into_inner().into(), gradient_types::now().into()]),
+            )
             .await?
             .rows_affected();
         if inserted > 0 {
@@ -366,15 +383,11 @@ async fn record_newly_completed_derivations(
     while !frontier.is_empty() {
         let rows = state
             .worker_db
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                INSERT_LAYER,
-                [
-                    cache_id.into_inner().into(),
-                    gradient_types::now().into(),
-                    frontier.into(),
-                ],
-            ))
+            .query_all_raw(INSERT_LAYER.bind([
+                cache_id.into_inner().into(),
+                gradient_types::now().into(),
+                frontier.into(),
+            ]))
             .await?;
         if rows.is_empty() {
             break;
@@ -386,11 +399,7 @@ async fn record_newly_completed_derivations(
         inserted_total += inserted.len();
         frontier = state
             .worker_db
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
-                [inserted.into()],
-            ))
+            .query_all_raw(FRONTIER_DEPENDENTS.bind([inserted.into()]))
             .await?
             .iter()
             .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
@@ -403,6 +412,25 @@ async fn record_newly_completed_derivations(
     Ok(())
 }
 
+gradient_db::sql! {
+    /// The reserved per-project `build-request` task backing `gradient build`
+    /// is always signable regardless of its `sign_cache` flag - its outputs
+    /// must be substitutable by the submitting client. Keyed on the reserved
+    /// name (BUILD_REQUEST_TASK_NAME), not `managed`, which also marks
+    /// nix-state-declared tasks that may legitimately set sign_cache=false.
+    PRODUCING_TASK_FLAGS = r#"
+            SELECT do_.hash AS hash,
+                   (p.sign_cache OR p.name = 'build-request') AS sign_cache
+            FROM derivation_output do_
+            JOIN derivation d   ON d.id = do_.derivation
+            JOIN build_job b    ON b.derivation = d.id
+            JOIN evaluation e   ON e.id = b.evaluation
+            JOIN task p      ON p.id = e.task
+            WHERE do_.hash = ANY($1)
+        "#,
+        params = [CachedPathHashes(64)];
+}
+
 /// Loads, for every cached_path in `cached_paths`, the `sign_cache` flag of
 /// every task that produced a matching `derivation_output`. Cached_paths
 /// whose hash matches no `derivation_output` (e.g. `.drv` files) are absent
@@ -411,7 +439,7 @@ async fn load_producing_task_flags(
     state: &Arc<ServerState>,
     cached_paths: &HashMap<CachedPathId, MCachedPath>,
 ) -> anyhow::Result<HashMap<CachedPathId, Vec<bool>>> {
-    use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
+    use sea_orm::FromQueryResult;
 
     let mut out: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
     if cached_paths.is_empty() {
@@ -430,28 +458,9 @@ async fn load_producing_task_flags(
         sign_cache: bool,
     }
 
-    let backend = state.worker_db.get_database_backend();
-    let stmt = Statement::from_sql_and_values(
-        backend,
-        // The reserved per-project `build-request` task backing `gradient build`
-        // is always signable regardless of its `sign_cache` flag - its outputs
-        // must be substitutable by the submitting client. Keyed on the reserved
-        // name (BUILD_REQUEST_TASK_NAME), not `managed`, which also marks
-        // nix-state-declared tasks that may legitimately set sign_cache=false.
-        r#"
-            SELECT do_.hash AS hash,
-                   (p.sign_cache OR p.name = 'build-request') AS sign_cache
-            FROM derivation_output do_
-            JOIN derivation d   ON d.id = do_.derivation
-            JOIN build_job b    ON b.derivation = d.id
-            JOIN evaluation e   ON e.id = b.evaluation
-            JOIN task p      ON p.id = e.task
-            WHERE do_.hash = ANY($1)
-        "#,
-        [hashes.into()],
-    );
-
-    let rows = Row::find_by_statement(stmt).all(&state.worker_db).await?;
+    let rows = Row::find_by_statement(PRODUCING_TASK_FLAGS.bind([hashes.into()]))
+        .all(&state.worker_db)
+        .await?;
 
     for r in rows {
         if let Some(&id) = cp_by_hash.get(r.hash.as_str()) {
@@ -471,16 +480,11 @@ mod orphan_claim_tests {
     /// the only thing that gives such a path a claim back.
     #[test]
     fn the_reconcile_targets_paths_with_no_claim_at_all() {
+        let sql = RECONCILE_ORPHAN_CLAIMS.text();
+        assert!(sql.contains("NOT EXISTS"), "{sql}");
+        assert!(sql.contains("INSERT INTO cached_path_signature"), "{sql}");
         assert!(
-            RECONCILE_ORPHAN_CLAIMS.contains("NOT EXISTS"),
-            "{RECONCILE_ORPHAN_CLAIMS}"
-        );
-        assert!(
-            RECONCILE_ORPHAN_CLAIMS.contains("INSERT INTO cached_path_signature"),
-            "{RECONCILE_ORPHAN_CLAIMS}"
-        );
-        assert!(
-            RECONCILE_ORPHAN_CLAIMS.contains("ON CONFLICT (cached_path, cache) DO NOTHING"),
+            sql.contains("ON CONFLICT (cached_path, cache) DO NOTHING"),
             "a re-created claim must never collide with a live one"
         );
     }
@@ -489,12 +493,10 @@ mod orphan_claim_tests {
     /// before, and the pass runs on a timer.
     #[test]
     fn the_reconcile_is_bounded_and_respects_the_sign_cache_opt_out() {
+        let sql = RECONCILE_ORPHAN_CLAIMS.text();
+        assert!(sql.contains("LIMIT $1"), "{sql}");
         assert!(
-            RECONCILE_ORPHAN_CLAIMS.contains("LIMIT $1"),
-            "{RECONCILE_ORPHAN_CLAIMS}"
-        );
-        assert!(
-            RECONCILE_ORPHAN_CLAIMS.contains("t.sign_cache"),
+            sql.contains("t.sign_cache"),
             "a task that opted out of signing must not be handed a claim"
         );
     }

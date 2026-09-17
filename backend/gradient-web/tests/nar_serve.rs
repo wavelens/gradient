@@ -77,6 +77,7 @@ fn cached_path_row() -> gradient_entity::cached_path::Model {
         nar_size: Some(67890),
         nar_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
         created_at: test_date(),
+        confirmed: true,
         ..Default::default()
     }
 }
@@ -169,5 +170,86 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
             data.as_slice(),
             "served body must be byte-identical to the stored blob",
         );
+    });
+}
+
+#[test]
+fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
+    run(async {
+        let cli = test_cli();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![cache_row()]])
+            .append_query_results([vec![cached_path_row()]])
+            .append_query_results([vec![cache_row()]])
+            .append_query_results([vec![cached_path_row()]])
+            .into_connection();
+
+        let nar_storage = NarStore::local(&cli.storage.base_path)
+            .expect("create test NarStore")
+            .with_hot_cache(gradient_storage::HotNarCache::new(
+                4 * 1024 * 1024,
+                1024 * 1024,
+            ));
+        let data = blob();
+        nar_storage
+            .put(STORE_HASH, data.clone())
+            .await
+            .expect("seed NAR blob");
+        let hot = nar_storage.clone();
+
+        let state = Arc::new(ServerState {
+            web_db: WebDb::new(db),
+            cache_db: gradient_db::CacheDb::new(
+                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            ),
+            worker_db: WorkerDb::new(
+                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            ),
+            config: Arc::new(gradient_types::RuntimeConfig::from_cli(&cli).expect("valid config")),
+            log_storage: Arc::new(NoopLogStorage),
+            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+            nar_storage,
+            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            http: gradient_util::http::build_client().expect("http client"),
+            shutdown: gradient_util::shutdown::Shutdown::new(),
+            last_used_stamps: gradient_core::last_used_stamps(),
+            cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
+            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
+            started_at: chrono::Utc::now(),
+            pending_project_memberships: Arc::new(std::collections::HashMap::new()),
+            oidc_group_roles: Arc::new(std::collections::HashMap::new()),
+            scim_group_roles: Arc::new(Default::default()),
+            board_events: tokio::sync::broadcast::channel(256).0,
+            forge: gradient_forge::ForgeRegistry::with_builtin(),
+            upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
+            reactor: Arc::new(gradient_db::NoReactor),
+            graph: gradient_core::Graph::stub(),
+        });
+
+        let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let router = gradient_web::create_router(state)
+            .expect("router")
+            .layer(MockConnectInfo(peer));
+        let server = TestServer::new(router);
+        let url = format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst");
+
+        let first = server.get(&url).await;
+        first.assert_status_ok();
+        assert_eq!(first.as_bytes().as_ref(), data.as_slice());
+        assert_eq!(
+            hot.hot().stats().entries,
+            1,
+            "the first read filled the cache"
+        );
+
+        let second = server.get(&url).await;
+        second.assert_status_ok();
+        assert_eq!(
+            second.header("content-length").to_str().unwrap(),
+            data.len().to_string()
+        );
+        assert_eq!(second.as_bytes().as_ref(), data.as_slice());
+        assert_eq!(hot.hot().stats().hits, 1, "the second read was a hit");
     });
 }

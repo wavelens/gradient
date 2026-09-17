@@ -38,6 +38,9 @@ let
       (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "nix") unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "sql") unfilteredRoot)
+      # The plan gate's unit tests read these EXPLAIN fixtures at run time, so
+      # they have to survive the cargo-source filter that drops every non-source.
+      (lib.fileset.fileFilter (file: file.hasExt "json") ../../backend/gradient-db/tests)
     ];
   };
 
@@ -94,6 +97,16 @@ craneLib.buildPackage (commonArgs // {
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
     inherit cargoArtifacts;
     cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+  });
+
+  # The SQL plan gate the cache VM test runs. Behind `required-features`, so a
+  # default build never compiles it and it never lands in this package.
+  passthru.sqlGate = craneLib.buildPackage (commonArgs // {
+    inherit cargoArtifacts;
+    pname = "gradient-sql-gate";
+    version = "1.3.0";
+    cargoExtraArgs = "--features sql-gate --bin gradient-sql-gate";
+    doCheck = false;
   });
 
   nativeCheckInputs = [ git ];

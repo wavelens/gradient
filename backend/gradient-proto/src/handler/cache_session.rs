@@ -218,6 +218,7 @@ mod tests {
             query_id: "query".into(),
             paths: vec![],
             mode,
+            nar_sizes: vec![],
         }
     }
 

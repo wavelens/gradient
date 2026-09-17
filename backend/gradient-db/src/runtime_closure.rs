@@ -13,8 +13,8 @@
 //! outputs are cached.
 
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, EntityTrait,
-    FromQueryResult, QueryFilter, Statement, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, FromQueryResult,
+    QueryFilter, TransactionTrait,
 };
 use std::collections::HashMap;
 
@@ -64,6 +64,11 @@ pub async fn output_hashes_for_drvs<C: ConnectionTrait>(
     .collect())
 }
 
+crate::sql! {
+    REFERENCE_EDGES = "SELECT referrer, reference_hash FROM cached_path_reference WHERE referrer = ANY($1)",
+        params = [CachedPathHashes(64)];
+}
+
 /// Runtime reference edges of `referrers`: `(referrer hash, referenced hash)`
 /// pairs from `cached_path_reference`. The reverse index makes this an index
 /// scan instead of parsing a text blob.
@@ -75,18 +80,19 @@ pub async fn reference_edges<C: ConnectionTrait>(
         return Ok(vec![]);
     }
     Ok(crate::fetch_in_chunks(referrers, |chunk| async move {
-        ReferenceEdge::find_by_statement(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT referrer, reference_hash FROM cached_path_reference WHERE referrer = ANY($1)",
-            [chunk.into()],
-        ))
-        .all(db)
-        .await
+        ReferenceEdge::find_by_statement(REFERENCE_EDGES.bind([chunk.into()]))
+            .all(db)
+            .await
     })
     .await?
     .into_iter()
     .map(|e| (e.referrer, e.reference_hash))
     .collect())
+}
+
+crate::sql! {
+    REFERENCES_FOR_HASH = "SELECT reference FROM cached_path_reference WHERE referrer = $1 ORDER BY position",
+        params = [CachedPathHash];
 }
 
 /// Runtime references of `hash` as `hash-name` tokens in their stored order
@@ -97,17 +103,19 @@ pub async fn references_for_hash<C: ConnectionTrait>(
     hash: &str,
 ) -> Result<Vec<String>, DbErr> {
     Ok(
-        ReferenceToken::find_by_statement(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT reference FROM cached_path_reference WHERE referrer = $1 ORDER BY position",
-            [hash.into()],
-        ))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|r| r.reference)
-        .collect(),
+        ReferenceToken::find_by_statement(REFERENCES_FOR_HASH.bind([hash.into()]))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|r| r.reference)
+            .collect(),
     )
+}
+
+crate::sql! {
+    REFERENCES_FOR_HASHES = "SELECT referrer, reference FROM cached_path_reference \
+         WHERE referrer = ANY($1) ORDER BY referrer, position",
+        params = [CachedPathHashes(64)];
 }
 
 /// [`references_for_hash`] for many referrers at once, grouped by referrer and
@@ -126,14 +134,9 @@ pub async fn references_for_hashes<C: ConnectionTrait>(
     }
 
     let rows = crate::fetch_in_chunks(hashes, |chunk| async move {
-        ReferrerToken::find_by_statement(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT referrer, reference FROM cached_path_reference \
-             WHERE referrer = ANY($1) ORDER BY referrer, position",
-            [chunk.into()],
-        ))
-        .all(db)
-        .await
+        ReferrerToken::find_by_statement(REFERENCES_FOR_HASHES.bind([chunk.into()]))
+            .all(db)
+            .await
     })
     .await?;
 
@@ -143,6 +146,20 @@ pub async fn references_for_hashes<C: ConnectionTrait>(
     }
 
     Ok(out)
+}
+
+fn runtime_closure_reachable_sql() -> String {
+    format!(
+        "{} SELECT cp.* FROM cached_path cp JOIN refs r ON cp.hash = r.hash",
+        crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
+    )
+}
+
+crate::sql_fn! {
+    RUNTIME_CLOSURE_REACHABLE = runtime_closure_reachable_sql,
+        params = [CachedPathHashes(64)],
+        tier = Walk,
+        flags = [Walk];
 }
 
 /// Reference closure of `seed_hashes` as one recursive statement; returns every
@@ -159,17 +176,9 @@ where
         return Ok(HashMap::new());
     }
 
-    let sql = format!(
-        "{} SELECT cp.* FROM cached_path cp JOIN refs r ON cp.hash = r.hash",
-        crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
-    );
     let walk = crate::graph_sql::begin_walk(db).await?;
     let reached: HashMap<String, gradient_entity::cached_path::Model> = ECachedPath::find()
-        .from_raw_sql(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
-            [seed_hashes.to_vec().into()],
-        ))
+        .from_raw_sql(RUNTIME_CLOSURE_REACHABLE.bind([seed_hashes.to_vec().into()]))
         .all(&walk)
         .await?
         .into_iter()
@@ -178,6 +187,23 @@ where
     walk.commit().await?;
 
     Ok(reached)
+}
+
+fn runtime_closure_cached_paths_sql() -> String {
+    format!(
+        "{} SELECT '/nix/store/' || cp.hash || '-' || cp.package AS reference \
+         FROM cached_path cp JOIN refs r ON cp.hash = r.hash \
+         WHERE cp.file_hash IS NOT NULL AND cp.hash <> ALL($1::text[]) \
+         LIMIT $2",
+        crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
+    )
+}
+
+crate::sql_fn! {
+    RUNTIME_CLOSURE_CACHED_PATHS = runtime_closure_cached_paths_sql,
+        params = [CachedPathHashes(64), Int(100)],
+        tier = Walk,
+        flags = [Walk];
 }
 
 /// Store paths in the reference closure of `seed_hashes` that this cache can
@@ -200,19 +226,10 @@ where
         return Ok(vec![]);
     }
 
-    let sql = format!(
-        "{} SELECT '/nix/store/' || cp.hash || '-' || cp.package AS reference \
-         FROM cached_path cp JOIN refs r ON cp.hash = r.hash \
-         WHERE cp.file_hash IS NOT NULL AND cp.hash <> ALL($1::text[]) \
-         LIMIT $2",
-        crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
-    );
     let walk = crate::graph_sql::begin_walk(db).await?;
-    let reached = ReferenceToken::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        sql,
-        [seed_hashes.to_vec().into(), (limit as i64).into()],
-    ))
+    let reached = ReferenceToken::find_by_statement(
+        RUNTIME_CLOSURE_CACHED_PATHS.bind([seed_hashes.to_vec().into(), (limit as i64).into()]),
+    )
     .all(&walk)
     .await?;
     walk.commit().await?;

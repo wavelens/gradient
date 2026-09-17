@@ -11,7 +11,7 @@ use gradient_entity::cache_upstream::{
 use gradient_entity::project_cache::{
     CacheSubscriptionMode, Column as CProjectCache, Entity as EProjectCache,
 };
-use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 use gradient_types::ids::{CacheId, CacheUpstreamId, ProjectId};
 
@@ -138,12 +138,8 @@ pub async fn gradient_proto_upstreams_for_project<C: ConnectionTrait>(
         .collect())
 }
 
-pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
-    db: &C,
-    project_id: ProjectId,
-    window_minutes: i64,
-) -> Result<Vec<UpstreamEndpoint>> {
-    let sql = format!(
+fn upstream_endpoints_sql(window_minutes: i64) -> String {
+    format!(
         "SELECT cu.id AS id, cu.url AS url, \
                 SUM(um.latency_ms_sum) / NULLIF(SUM(um.request_count), 0) AS avg_latency_ms, \
                 SUM(um.narinfo_hits)::float8 \
@@ -156,12 +152,24 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
                AND cu.mode <> 2 AND cu.url IS NOT NULL \
          GROUP BY cu.id, cu.url",
         window_minutes = window_minutes
-    );
+    )
+}
 
+crate::sql_fn! {
+    UPSTREAM_ENDPOINTS_FOR_PROJECT = || upstream_endpoints_sql(60),
+        params = [ProjectId];
+}
+
+pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
+    db: &C,
+    project_id: ProjectId,
+    window_minutes: i64,
+) -> Result<Vec<UpstreamEndpoint>> {
+    // window_minutes is baked into the text rather than bound, so the exemplar
+    // above is what the gate plans.
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            sql,
+        .query_all_raw(UPSTREAM_ENDPOINTS_FOR_PROJECT.bind_built(
+            upstream_endpoints_sql(window_minutes),
             [project_id.into_inner().into()],
         ))
         .await?;
@@ -183,6 +191,18 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
     Ok(endpoints)
 }
 
+crate::sql! {
+    UPSERT_UPSTREAM_METRIC = "INSERT INTO upstream_metric \
+                 (id, upstream_url, bucket_time, latency_ms_sum, request_count, narinfo_hits, narinfo_misses) \
+             VALUES (uuidv7(), $1, $2, $3, $4, $5, $6) \
+             ON CONFLICT (upstream_url, bucket_time) DO UPDATE SET \
+                 latency_ms_sum = upstream_metric.latency_ms_sum + EXCLUDED.latency_ms_sum, \
+                 request_count  = upstream_metric.request_count  + EXCLUDED.request_count, \
+                 narinfo_hits   = upstream_metric.narinfo_hits   + EXCLUDED.narinfo_hits, \
+                 narinfo_misses = upstream_metric.narinfo_misses + EXCLUDED.narinfo_misses",
+        params = [Text("https://cache.example/"), Now, Int(120), Int(4), Int(3), Int(1)];
+}
+
 pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
     db: &C,
     bucket: chrono::NaiveDateTime,
@@ -193,25 +213,14 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
             continue;
         }
 
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "INSERT INTO upstream_metric \
-                 (id, upstream_url, bucket_time, latency_ms_sum, request_count, narinfo_hits, narinfo_misses) \
-             VALUES (uuidv7(), $1, $2, $3, $4, $5, $6) \
-             ON CONFLICT (upstream_url, bucket_time) DO UPDATE SET \
-                 latency_ms_sum = upstream_metric.latency_ms_sum + EXCLUDED.latency_ms_sum, \
-                 request_count  = upstream_metric.request_count  + EXCLUDED.request_count, \
-                 narinfo_hits   = upstream_metric.narinfo_hits   + EXCLUDED.narinfo_hits, \
-                 narinfo_misses = upstream_metric.narinfo_misses + EXCLUDED.narinfo_misses",
-            [
-                url.clone().into(),
-                bucket.into(),
-                a.latency_ms_sum.into(),
-                (a.request_count as i32).into(),
-                (a.narinfo_hits as i32).into(),
-                (a.narinfo_misses as i32).into(),
-            ],
-        ))
+        db.execute_raw(UPSERT_UPSTREAM_METRIC.bind([
+            url.clone().into(),
+            bucket.into(),
+            a.latency_ms_sum.into(),
+            (a.request_count as i32).into(),
+            (a.narinfo_hits as i32).into(),
+            (a.narinfo_misses as i32).into(),
+        ]))
         .await?;
     }
 
@@ -220,18 +229,29 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
 
 /// Distinct upstream URLs reachable by any of `project_ids` (their subscribed
 /// caches' HTTP upstreams). Scopes the by-URL board metrics to the caller.
+fn upstream_urls_for_projects_sql(project_list: &str) -> String {
+    format!(
+        "SELECT DISTINCT cu.url AS url FROM cache_upstream cu \
+         JOIN project_cache oc ON oc.cache = cu.cache \
+         WHERE oc.project IN ({project_list}) AND cu.url IS NOT NULL"
+    )
+}
+
+crate::sql_fn! {
+    UPSTREAM_URLS_FOR_PROJECTS = || {
+        upstream_urls_for_projects_sql("'11111111-1111-1111-1111-111111111111'")
+    },
+        params = [];
+}
+
 pub async fn upstream_urls_for_projects<C: ConnectionTrait>(
     db: &C,
     project_list: &str,
 ) -> Result<std::collections::HashSet<String>> {
-    let sql = format!(
-        "SELECT DISTINCT cu.url AS url FROM cache_upstream cu \
-         JOIN project_cache oc ON oc.cache = cu.cache \
-         WHERE oc.project IN ({project_list}) AND cu.url IS NOT NULL"
-    );
-
     Ok(db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(
+            UPSTREAM_URLS_FOR_PROJECTS.bind_built(upstream_urls_for_projects_sql(project_list), []),
+        )
         .await?
         .into_iter()
         .filter_map(|r| r.try_get::<String>("", "url").ok())

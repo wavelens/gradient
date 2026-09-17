@@ -27,7 +27,7 @@ use prometheus::{
     Encoder, Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
     Opts, Registry, TextEncoder,
 };
-use sea_orm::{DatabaseBackend, FromQueryResult, Iterable, Statement};
+use sea_orm::{FromQueryResult, Iterable};
 use subtle::ConstantTimeEq;
 
 use crate::error::{WebError, WebResult};
@@ -424,18 +424,9 @@ fn register_labelled_gauge(registry: &Registry, name: &str, help: &str, values: 
     registry.register(Box::new(gv)).expect("register");
 }
 
-/// Collect metrics by querying the DB and scheduler in-memory state.
-///
-/// Errors propagate as `WebError`; the handler converts those into 500.
-/// We intentionally never serve a partial response - Prometheus would
-/// treat a 200 with missing series as authoritative and corrupt counters.
-pub(crate) async fn collect(
-    state: &Arc<ServerState>,
-    scheduler: &Scheduler,
-) -> WebResult<Observations> {
-    // Single CTE-style query returning typed rows for every counter we need.
-    // Status sets and label names come from the enums (decoded in Rust below),
-    // so a new or renumbered variant can never silently vanish from a series.
+// Status sets and label names come from the enums (decoded in Rust below), so a
+// new or renumbered variant can never silently vanish from a series.
+fn observations_sql() -> String {
     let build_terminal: Vec<BuildStatus> = BuildStatus::iter()
         .filter(|s| {
             s.is_terminal_success() || s.is_terminal_failure() || *s == BuildStatus::Aborted
@@ -444,7 +435,7 @@ pub(crate) async fn collect(
     let build_live: Vec<BuildStatus> = BuildStatus::iter()
         .filter(|s| !build_terminal.contains(s))
         .collect();
-    let sql = format!(
+    format!(
         r#"
         SELECT 'build_total'::text AS kind, status::int AS status, COUNT(*)::bigint AS value
         FROM derivation_build
@@ -503,13 +494,28 @@ pub(crate) async fn collect(
         build_live = gradient_db::status_sql::build_in(&build_live),
         eval_terminal = gradient_db::status_sql::eval_in(&EvaluationStatus::TERMINAL),
         eval_active = gradient_db::status_sql::eval_in(&EvaluationStatus::ACTIVE),
-    );
+    )
+}
 
-    let rows: Vec<CountRow> =
-        CountRow::find_by_statement(Statement::from_string(DatabaseBackend::Postgres, sql))
-            .all(&state.web_db)
-            .await
-            .map_err(WebError::from)?;
+gradient_db::sql_fn! {
+    OBSERVATIONS = observations_sql,
+        params = [];
+}
+
+/// Collect metrics by querying the DB and scheduler in-memory state.
+///
+/// Errors propagate as `WebError`; the handler converts those into 500.
+/// We intentionally never serve a partial response - Prometheus would
+/// treat a 200 with missing series as authoritative and corrupt counters.
+pub(crate) async fn collect(
+    state: &Arc<ServerState>,
+    scheduler: &Scheduler,
+) -> WebResult<Observations> {
+    // Single CTE-style query returning typed rows for every counter we need.
+    let rows: Vec<CountRow> = CountRow::find_by_statement(OBSERVATIONS.stmt())
+        .all(&state.web_db)
+        .await
+        .map_err(WebError::from)?;
 
     let mut obs = Observations {
         version: env!("CARGO_PKG_VERSION").to_string(),

@@ -21,7 +21,7 @@
 use gradient_entity::dispatched_job::{DispatchedJobKind, DispatchedJobOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::EvaluationId;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
+use sea_orm::{ConnectionTrait, DbErr};
 
 use crate::status_sql;
 
@@ -40,11 +40,8 @@ pub struct LostCompletion {
 /// refreshes, so an evaluation that is merely slow to be promoted ages out of
 /// the result the moment it moves. It must stay above the graph actor's RPC
 /// timeout, or a transition still legitimately in flight looks lost.
-pub async fn lost_eval_completions<C: ConnectionTrait>(
-    db: &C,
-    grace_secs: i64,
-) -> Result<Vec<LostCompletion>, DbErr> {
-    let sql = format!(
+fn lost_eval_completions_sql(grace_secs: i64) -> String {
+    format!(
         "SELECT ev.id AS evaluation, dj.outcome AS outcome \
          FROM evaluation ev \
          JOIN LATERAL ( \
@@ -58,10 +55,23 @@ pub async fn lost_eval_completions<C: ConnectionTrait>(
            AND ev.updated_at < (now() AT TIME ZONE 'UTC') - make_interval(secs => {grace_secs})",
         eval_kind = i16::from(DispatchedJobKind::Eval),
         evaluating = status_sql::eval_in(&EvaluationStatus::EVALUATING),
-    );
+    )
+}
 
+crate::sql_fn! {
+    LOST_EVAL_COMPLETIONS = || lost_eval_completions_sql(900),
+        params = [],
+        tier = Sweep;
+}
+
+pub async fn lost_eval_completions<C: ConnectionTrait>(
+    db: &C,
+    grace_secs: i64,
+) -> Result<Vec<LostCompletion>, DbErr> {
+    // grace_secs is baked into the text rather than bound, so the exemplar
+    // above is what the gate plans.
     let rows = db
-        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(LOST_EVAL_COMPLETIONS.bind_built(lost_eval_completions_sql(grace_secs), []))
         .await?;
 
     Ok(rows

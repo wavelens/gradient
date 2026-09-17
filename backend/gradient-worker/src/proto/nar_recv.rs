@@ -300,7 +300,7 @@ impl Stager {
             Resume::Fresh => 0,
         };
         let writer = store
-            .open_writer(disk_key, &spec.token, resume_from)
+            .open_writer(disk_key, &spec.token, resume_from, 0)
             .await?;
         debug!(job_id = %spec.key.0, store_path = %spec.key.1, resume_from, "staging pulled NAR to disk");
         Ok(Sink::Disk {

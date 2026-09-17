@@ -102,9 +102,7 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
-use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
-};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 use std::collections::HashSet;
 
 /// The row `{alias}` is stored and every reference resolves to a whole row.
@@ -145,6 +143,11 @@ fn seed_statement() -> String {
     )
 }
 
+crate::sql_fn! {
+    SEED_STATEMENT_QUERY = seed_statement,
+        params = [CachedPathHash];
+}
+
 /// Serialising pass ahead of every delete, guarded or not: it is the retire's half
 /// of the module doc's one hash-ordered acquisition, and `FOR UPDATE` conflicts
 /// with the RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds
@@ -152,6 +155,11 @@ fn seed_statement() -> String {
 /// opens its snapshot after it (see the module doc on READ COMMITTED). It reads
 /// nothing and decides nothing; see [`retire_paths`].
 const LOCK: &str = "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
+
+crate::sql! {
+    LOCK_QUERY = LOCK,
+        params = [CachedPathHashes(64)];
+}
 
 /// The rows a commit's seed can count from: the references it reports (tokens,
 /// so the hash is their prefix), the references currently indexed for it, and its
@@ -164,6 +172,11 @@ const LOCK_REFERENCES: &str = "\
                    UNION \
                    SELECT $2::text) \
     ORDER BY hash FOR SHARE";
+
+crate::sql! {
+    LOCK_REFERENCES_QUERY = LOCK_REFERENCES,
+        params = [CachedPathHashes(64), CachedPathHash];
+}
 
 /// Lock every row a commit's counter will be counted from, before the commit
 /// decides anything.
@@ -200,12 +213,8 @@ pub async fn lock_reference_endpoints<'txn>(
     hash: &str,
     references: &[String],
 ) -> Result<ReferenceLock<'txn>, DbErr> {
-    txn.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        LOCK_REFERENCES,
-        [references.to_vec().into(), hash.into()],
-    ))
-    .await?;
+    txn.execute_raw(LOCK_REFERENCES_QUERY.bind([references.to_vec().into(), hash.into()]))
+        .await?;
 
     Ok(ReferenceLock {
         txn,
@@ -238,6 +247,11 @@ const FORWARD: &str = r#"
     RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS whole
 "#;
 
+crate::sql! {
+    FORWARD_QUERY = FORWARD,
+        params = [CachedPathHashes(64)];
+}
+
 const REVERSE: &str = r#"
     UPDATE cached_path cp
     SET missing_references = cp.missing_references + c.n
@@ -248,6 +262,11 @@ const REVERSE: &str = r#"
     RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = c.n) AS was_whole
 "#;
 
+crate::sql! {
+    REVERSE_QUERY = REVERSE,
+        params = [CachedPathHashes(64)];
+}
+
 fn delete_statement(guard: Option<&str>) -> String {
     let guard = guard.map(|g| format!(" AND ({g})")).unwrap_or_default();
     format!(
@@ -255,6 +274,18 @@ fn delete_statement(guard: Option<&str>) -> String {
          RETURNING cp.hash, {whole} AS was_whole",
         whole = whole_predicate("cp"),
     )
+}
+
+crate::sql_fn! {
+    DELETE_STATEMENT = || delete_statement(None),
+        params = [CachedPathHashes(64)];
+
+    // The guarded shape TTL eviction actually runs; see
+    // `gradient-cache`'s `UNSIGNED_GUARD`.
+    DELETE_STATEMENT_GUARDED = || delete_statement(Some(
+        "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)"
+    )),
+        params = [CachedPathHashes(64)];
 }
 
 /// Recount the row the lock names from its references and report whether the
@@ -272,11 +303,7 @@ fn delete_statement(guard: Option<&str>) -> String {
 pub async fn seed_references(lock: &ReferenceLock<'_>) -> Result<bool, DbErr> {
     let Some(row) = lock
         .txn
-        .query_one_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            seed_statement(),
-            [lock.hash.as_str().into()],
-        ))
+        .query_one_raw(SEED_STATEMENT_QUERY.bind([lock.hash.as_str().into()]))
         .await?
     else {
         return Ok(false);
@@ -297,7 +324,7 @@ pub async fn ripple_whole<C: ConnectionTrait>(
     db: &C,
     became_whole: Vec<String>,
 ) -> Result<Vec<String>, DbErr> {
-    ripple(db, FORWARD, "whole", became_whole).await
+    ripple(db, &FORWARD_QUERY, "whole", became_whole).await
 }
 
 /// The reverse: increment the referrers of the frontier and continue from
@@ -311,25 +338,19 @@ pub async fn ripple_unwhole<C: ConnectionTrait>(
     db: &C,
     stopped_being_whole: Vec<String>,
 ) -> Result<Vec<String>, DbErr> {
-    ripple(db, REVERSE, "was_whole", stopped_being_whole).await
+    ripple(db, &REVERSE_QUERY, "was_whole", stopped_being_whole).await
 }
 
 async fn ripple<C: ConnectionTrait>(
     db: &C,
-    statement: &str,
+    query: &crate::sql::Query,
     flag: &str,
     seeds: Vec<String>,
 ) -> Result<Vec<String>, DbErr> {
     let mut all = seeds.clone();
     let mut frontier = seeds;
     while !frontier.is_empty() {
-        let rows = db
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                statement,
-                [frontier.into()],
-            ))
-            .await?;
+        let rows = db.query_all_raw(query.bind([frontier.into()])).await?;
 
         let mut next = Vec::new();
         for row in rows {
@@ -424,6 +445,11 @@ pub async fn retire_paths_where(
     retire(txn, hashes, Some(guard)).await
 }
 
+crate::sql! {
+    SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
+        params = [CachedPathHashes(64)];
+}
+
 async fn retire(
     db: &DatabaseTransaction,
     hashes: &[String],
@@ -433,19 +459,19 @@ async fn retire(
         return Ok(Retired::default());
     }
 
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        LOCK,
-        [hashes.to_vec().into()],
-    ))
-    .await?;
+    db.execute_raw(LOCK_QUERY.bind([hashes.to_vec().into()]))
+        .await?;
+
+    // `guard` is a caller-supplied fragment, so the two exemplars above stand
+    // for the two shapes production runs.
+    let exemplar = if guard.is_some() {
+        &DELETE_STATEMENT_GUARDED
+    } else {
+        &DELETE_STATEMENT
+    };
 
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            delete_statement(guard),
-            [hashes.to_vec().into()],
-        ))
+        .query_all_raw(exemplar.bind_built(delete_statement(guard), [hashes.to_vec().into()]))
         .await?;
 
     let mut deleted = Vec::with_capacity(rows.len());
@@ -465,12 +491,8 @@ async fn retire(
     gated.extend(unwhole.iter().filter(|h| !seen.contains(*h)).cloned());
 
     if !deleted.is_empty() {
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
-            [deleted.clone().into()],
-        ))
-        .await?;
+        db.execute_raw(SET_OUTPUTS_UNCACHED.bind([deleted.clone().into()]))
+            .await?;
     }
 
     // `gone` is what has no artifact any more: the rows this call deleted, plus the
@@ -490,6 +512,25 @@ async fn retire(
         unwhole,
         transitions,
     })
+}
+
+fn reset_uncached_producers_sql() -> String {
+    format!(
+        "UPDATE derivation_build db \
+         SET status = {created}, substituted = false, attempt = 0, \
+             updated_at = (now() AT TIME ZONE 'UTC') \
+         FROM derivation_build old \
+         WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) \
+           AND db.status IN ({terminal_success}) AND NOT db.fetchable \
+         RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
+        created = crate::status_sql::build(BuildStatus::Created),
+        terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+    )
+}
+
+crate::sql_fn! {
+    RESET_UNCACHED_PRODUCERS = reset_uncached_producers_sql,
+        params = [DerivationIds(64)];
 }
 
 /// The readiness half of a retire. `scope` is every hash the caller ASKED to retire
@@ -544,22 +585,8 @@ async fn retire_anchors(
     let rebuildable = crate::reachability::producers_of_hashes(txn, gone).await?;
     if !rebuildable.is_empty() {
         let reset = crate::promotion::returned_transitions(
-            txn.query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                format!(
-                    "UPDATE derivation_build db \
-                     SET status = {created}, substituted = false, attempt = 0, \
-                         updated_at = (now() AT TIME ZONE 'UTC') \
-                     FROM derivation_build old \
-                     WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) \
-                       AND db.status IN ({terminal_success}) AND NOT db.fetchable \
-                     RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
-                    created = crate::status_sql::build(BuildStatus::Created),
-                    terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
-                ),
-                [crate::readiness::ids(&rebuildable)],
-            ))
-            .await?,
+            txn.query_all_raw(RESET_UNCACHED_PRODUCERS.bind([crate::readiness::ids(&rebuildable)]))
+                .await?,
         );
         if !reset.is_empty() {
             let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
@@ -583,6 +610,11 @@ fn repair_statement() -> String {
          WHERE cp.hash = x.hash AND cp.missing_references = x.old AND x.old <> x.n",
         count = unwhole_reference_count("c"),
     )
+}
+
+crate::sql_fn! {
+    REPAIR_STATEMENT_QUERY = repair_statement,
+        params = [CachedPathHashes(64)];
 }
 
 /// Recompute the counter for `hashes` from their references and write the rows
@@ -643,12 +675,8 @@ pub async fn lock_paths<'txn>(
     txn: &'txn DatabaseTransaction,
     hashes: &[String],
 ) -> Result<PathLock<'txn>, DbErr> {
-    txn.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        LOCK,
-        [hashes.to_vec().into()],
-    ))
-    .await?;
+    txn.execute_raw(LOCK_QUERY.bind([hashes.to_vec().into()]))
+        .await?;
 
     Ok(PathLock {
         txn,
@@ -660,11 +688,7 @@ pub async fn lock_paths<'txn>(
 async fn recount(lock: &PathLock<'_>) -> Result<u64, DbErr> {
     Ok(lock
         .txn
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            repair_statement(),
-            [lock.hashes.clone().into()],
-        ))
+        .execute_raw(REPAIR_STATEMENT_QUERY.bind([lock.hashes.clone().into()]))
         .await?
         .rows_affected())
 }

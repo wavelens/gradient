@@ -72,6 +72,7 @@ const PHASE_LABELS: Record<string, string> = {
   drv_closure_push: 'Drv-closure push',
   prefetch: 'Prefetch',
   substitute_relay: 'Substitute relay',
+  substitute_fetch: 'Substitute fetch',
   build: 'Build',
   compress: 'Compress',
   nar_push: 'NAR push',

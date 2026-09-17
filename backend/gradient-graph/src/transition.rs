@@ -609,6 +609,17 @@ async fn substitute_misses(
         .unwrap_or(0)
 }
 
+gradient_db::sql! {
+    CLEAR_ANCHOR_SUBSTITUTION = "UPDATE derivation_build SET substitutable = false, status = $2, attempt = 0, \
+         updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
+        params = [Text("018f4b6a-7c2e-7d31-9a44-6e8b2f105c3d"), Int(0)];
+
+    CLEAR_OUTPUTS_UPSTREAM_RECORD = "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
+         file_size = NULL, nar_size = NULL, \"references\" = NULL, deriver = NULL \
+         WHERE derivation = $1",
+        params = [DerivationId];
+}
+
 /// The anchor stops being a relay: it forgets the upstream its outputs were
 /// recorded on and goes back to `Created`, where the ordinary build gates apply.
 ///
@@ -626,26 +637,15 @@ async fn exhaust_substitution(
     misses: i64,
 ) -> Result<()> {
     let db = &ctx.worker_db;
-    db.execute_raw(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "UPDATE derivation_build SET substitutable = false, status = $2, attempt = 0, \
-         updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
-        [
-            anchor.id.into_inner().into(),
-            i32::from(BuildStatus::Created).into(),
-        ],
-    ))
+    db.execute_raw(CLEAR_ANCHOR_SUBSTITUTION.bind([
+        anchor.id.into_inner().into(),
+        i32::from(BuildStatus::Created).into(),
+    ]))
     .await
     .context("clear the anchor's substitution")?;
-    db.execute_raw(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
-         file_size = NULL, nar_size = NULL, \"references\" = NULL, deriver = NULL \
-         WHERE derivation = $1",
-        [anchor.derivation.into_inner().into()],
-    ))
-    .await
-    .context("clear the outputs' upstream record")?;
+    db.execute_raw(CLEAR_OUTPUTS_UPSTREAM_RECORD.bind([anchor.derivation.into_inner().into()]))
+        .await
+        .context("clear the outputs' upstream record")?;
 
     let mut changes = vec![gradient_db::TransitionChange {
         derivation: anchor.derivation,
@@ -841,6 +841,13 @@ async fn find_or_create_build_job(
     }
 }
 
+gradient_db::sql! {
+    SET_CLOSURE_SIZES = "UPDATE derivation SET closure_size = v.size \
+             FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::bigint[]) AS size) v \
+             WHERE derivation.id = v.id",
+        params = [DerivationIds(64), Int(1200)];
+}
+
 /// Stamp `ready_at` the first time an anchor became dispatchable, and persist
 /// the closure sizes the dispatch pass computed on the way.
 async fn ready(
@@ -867,14 +874,8 @@ async fn ready(
             .map(|(derivation, size)| (uuid::Uuid::from(*derivation), *size))
             .unzip();
 
-        db.execute_raw(sea_orm::Statement::from_sql_and_values(
-            sea_orm::DatabaseBackend::Postgres,
-            "UPDATE derivation SET closure_size = v.size \
-             FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::bigint[]) AS size) v \
-             WHERE derivation.id = v.id",
-            [ids.into(), sizes.into()],
-        ))
-        .await
+        db.execute_raw(SET_CLOSURE_SIZES.bind([ids.into(), sizes.into()]))
+            .await
     })
     .await?;
 

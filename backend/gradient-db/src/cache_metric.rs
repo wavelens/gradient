@@ -23,7 +23,7 @@ use chrono::{NaiveDateTime, Timelike};
 use gradient_entity::ids::CacheId;
 use gradient_util::supervision::ChildSpec;
 use gradient_util::sync::Mutex;
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+use sea_orm::{ConnectionTrait, Statement};
 use tracing::warn;
 use uuid::Uuid;
 
@@ -127,25 +127,26 @@ pub fn flush_on_shutdown(ctx: DbContext, traffic: Arc<CacheTraffic>) {
     });
 }
 
-/// Add one instance's sums into the `(cache, bucket_time)` row. Additive, so
-/// neither a concurrent instance's flush nor a later interval of this one's
-/// loses what the row already holds.
-fn add_traffic_stmt(cache: CacheId, bucket: NaiveDateTime, traffic: Traffic) -> Statement {
-    Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count)
+crate::sql! {
+    ADD_TRAFFIC = r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count)
            VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (cache, bucket_time)
            DO UPDATE SET bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent,
                          nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
-        [
-            sea_orm::Value::Uuid(Some(Uuid::now_v7())),
-            sea_orm::Value::Uuid(Some(cache.into_inner())),
-            sea_orm::Value::ChronoDateTime(Some(bucket)),
-            sea_orm::Value::BigInt(Some(traffic.bytes)),
-            sea_orm::Value::BigInt(Some(traffic.nars)),
-        ],
-    )
+        params = [Text("00000000-0000-0000-0000-000000000000"), CacheId, Now, Int(4096), Int(1)];
+}
+
+/// Add one instance's sums into the `(cache, bucket_time)` row. Additive, so
+/// neither a concurrent instance's flush nor a later interval of this one's
+/// loses what the row already holds.
+fn add_traffic_stmt(cache: CacheId, bucket: NaiveDateTime, traffic: Traffic) -> Statement {
+    ADD_TRAFFIC.bind([
+        sea_orm::Value::Uuid(Some(Uuid::now_v7())),
+        sea_orm::Value::Uuid(Some(cache.into_inner())),
+        sea_orm::Value::ChronoDateTime(Some(bucket)),
+        sea_orm::Value::BigInt(Some(traffic.bytes)),
+        sea_orm::Value::BigInt(Some(traffic.nars)),
+    ])
 }
 
 #[cfg(test)]

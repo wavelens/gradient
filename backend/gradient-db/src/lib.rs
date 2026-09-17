@@ -40,6 +40,7 @@ pub mod recovery;
 pub mod retention;
 pub mod rollup;
 pub mod runtime_closure;
+pub mod sql;
 pub mod state_machine;
 pub mod status;
 pub mod status_reactor;
@@ -52,9 +53,11 @@ pub(crate) mod test_ctx;
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
-    MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes, demote_cached_output,
-    demote_output_only_cached_deps, demote_referrers_of, demote_unbacked_trusted_outputs,
-    diagnose_missing_input, instance_used_bytes, project_caches_all_full, project_writable_caches,
+    MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, UnconfirmedPath, cache_used_bytes,
+    demote_cached_output, demote_output_only_cached_deps, demote_referrers_of,
+    demote_unbacked_trusted_outputs, diagnose_missing_input, instance_used_bytes,
+    project_caches_all_full, project_writable_caches, unconfirmed_cached_path_count,
+    unconfirmed_cached_paths,
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_project,
@@ -99,7 +102,7 @@ pub use self::promotion::{
     substitute_created_anchors,
 };
 pub use self::reachability::{
-    Adopted, adopt_pending_closure, adopt_pending_closures, anchor_status,
+    Adopted, adopt_pending_closure, adopt_pending_closures, anchor_dispatch_state, anchor_status,
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
     derivations_with_hashes, eval_anchor_statuses, evals_referencing_derivation,
     pending_orphan_frontier, pending_orphans_among, producers_of_hashes,

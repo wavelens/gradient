@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
+use bytes::{Bytes, BytesMut};
 use harmonia_utils_hash::{Algorithm, Context as HashContext, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -46,6 +47,8 @@ pub struct StagedFile {
     pub path: PathBuf,
     pub len: u64,
     pub sha256: [u8; 32],
+    /// The whole stream when it stayed under the retention bound, for the hot cache.
+    pub bytes: Option<Bytes>,
 }
 
 /// An open append handle on one `.partial`, owned by the task draining a single
@@ -61,6 +64,8 @@ pub struct PartialWriter {
     /// so a resume's full-file read lands on whoever writes the stream rather
     /// than on the caller that opened it.
     pending_prefix: u64,
+    retained: Option<BytesMut>,
+    retain_up_to: u64,
 }
 
 impl PartialWriter {
@@ -88,6 +93,14 @@ impl PartialWriter {
             .await
             .context("write partial chunk")?;
         self.hasher.update(data);
+        if let Some(buf) = self.retained.as_mut() {
+            if self.len + data.len() as u64 > self.retain_up_to {
+                self.retained = None;
+            } else {
+                buf.extend_from_slice(data);
+            }
+        }
+
         self.len += data.len() as u64;
         Ok(())
     }
@@ -102,6 +115,7 @@ impl PartialWriter {
             path: self.path,
             len: self.len,
             sha256: *digest.digest_bytes(),
+            bytes: self.retained.map(BytesMut::freeze),
         })
     }
 
@@ -215,6 +229,7 @@ impl PartialStore {
         key: &str,
         token: &str,
         resume_from: u64,
+        retain_up_to: u64,
     ) -> Result<PartialWriter> {
         self.ensure_parent(key).await?;
         let path = self.partial_path(key);
@@ -250,6 +265,8 @@ impl PartialStore {
             len: resume_from,
             hasher: HashContext::new(Algorithm::SHA256),
             pending_prefix: resume_from,
+            retained: (resume_from == 0 && retain_up_to > 0).then(BytesMut::new),
+            retain_up_to,
         })
     }
 
@@ -549,7 +566,7 @@ mod tests {
     #[tokio::test]
     async fn writer_hashes_what_it_writes_and_finish_reports_it() {
         let (_d, s) = store(3600);
-        let mut w = s.open_writer("peer/job/hash", "tok", 0).await.unwrap();
+        let mut w = s.open_writer("peer/job/hash", "tok", 0, 0).await.unwrap();
         w.append(0, b"hello ").await.unwrap();
         w.append(6, b"world").await.unwrap();
         let staged = w.finish().await.unwrap();
@@ -564,12 +581,12 @@ mod tests {
     #[tokio::test]
     async fn resuming_rehashes_the_existing_prefix() {
         let (_d, s) = store(3600);
-        let mut w = s.open_writer("k", "tok", 0).await.unwrap();
+        let mut w = s.open_writer("k", "tok", 0, 0).await.unwrap();
         w.append(0, b"hello ").await.unwrap();
         drop(w);
         let received = s.received_len("k", "tok").await.unwrap();
         assert_eq!(received, 6);
-        let mut w = s.open_writer("k", "tok", received).await.unwrap();
+        let mut w = s.open_writer("k", "tok", received, 0).await.unwrap();
         w.append(6, b"world").await.unwrap();
         let staged = w.finish().await.unwrap();
         assert_eq!(
@@ -584,13 +601,13 @@ mod tests {
     #[tokio::test]
     async fn a_resume_with_no_new_bytes_still_reports_the_prefix_hash() {
         let (_d, s) = store(3600);
-        let mut w = s.open_writer("k", "tok", 0).await.unwrap();
+        let mut w = s.open_writer("k", "tok", 0, 0).await.unwrap();
         w.append(0, b"hello world").await.unwrap();
         w.finish().await.unwrap();
 
         let received = s.received_len("k", "tok").await.unwrap();
         let staged = s
-            .open_writer("k", "tok", received)
+            .open_writer("k", "tok", received, 0)
             .await
             .unwrap()
             .finish()
@@ -606,9 +623,48 @@ mod tests {
     #[tokio::test]
     async fn a_gap_is_rejected() {
         let (_d, s) = store(3600);
-        let mut w = s.open_writer("k", "tok", 0).await.unwrap();
+        let mut w = s.open_writer("k", "tok", 0, 0).await.unwrap();
         w.append(0, b"abc").await.unwrap();
         assert!(w.append(5, b"x").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_stream_under_the_bound_is_retained_and_one_over_it_is_dropped() {
+        let (_d, s) = store(3600);
+
+        let mut w = s.open_writer("small", "tok", 0, 8).await.unwrap();
+        w.append(0, b"abcd").await.unwrap();
+        w.append(4, b"efgh").await.unwrap();
+        let file = w.finish().await.unwrap();
+        assert_eq!(file.bytes.as_deref(), Some(&b"abcdefgh"[..]));
+
+        let mut w = s.open_writer("big", "tok", 0, 8).await.unwrap();
+        w.append(0, b"abcd").await.unwrap();
+        w.append(4, b"efghi").await.unwrap();
+        let file = w.finish().await.unwrap();
+        assert!(
+            file.bytes.is_none(),
+            "a stream past the bound drops its buffer"
+        );
+        assert_eq!(file.len, 9);
+    }
+
+    #[tokio::test]
+    async fn a_resumed_stream_never_retains() {
+        let (_d, s) = store(3600);
+        let mut w = s.open_writer("k", "tok", 0, 64).await.unwrap();
+        w.append(0, b"abcd").await.unwrap();
+        drop(w);
+
+        let received = s.received_len("k", "tok").await.unwrap();
+        let mut w = s.open_writer("k", "tok", received, 64).await.unwrap();
+        w.append(received, b"ef").await.unwrap();
+        let file = w.finish().await.unwrap();
+        assert!(
+            file.bytes.is_none(),
+            "a resume cannot know the prefix bytes cheaply"
+        );
+        assert_eq!(file.len, 6);
     }
 
     #[tokio::test]

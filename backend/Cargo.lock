@@ -2225,6 +2225,7 @@ dependencies = [
  "gradient-types",
  "gradient-util",
  "mockall",
+ "ractor",
  "ring",
  "sea-orm",
  "serde",
@@ -2363,6 +2364,7 @@ dependencies = [
  "gradient-storage",
  "gradient-types",
  "gradient-util",
+ "inventory",
  "sea-orm",
  "sea-orm-migration",
  "serde_json",
@@ -2630,17 +2632,27 @@ dependencies = [
 name = "gradient-server"
 version = "1.3.0"
 dependencies = [
+ "anyhow",
  "clap",
  "gradient-cache",
+ "gradient-ci",
  "gradient-core",
+ "gradient-db",
+ "gradient-graph",
+ "gradient-proto",
+ "gradient-report",
+ "gradient-scheduler",
  "gradient-state",
  "gradient-types",
  "gradient-util",
  "gradient-web",
+ "sea-orm",
  "sentry",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

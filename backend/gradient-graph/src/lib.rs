@@ -152,6 +152,22 @@ impl Graph {
         self.call(|reply| GraphMsg::CommitNar(commit, reply)).await
     }
 
+    /// Mark a relayed path's object as stored. `false` means the row's bytes
+    /// moved on since the upload began, so the caller keeps the newer staged file.
+    pub async fn confirm_nar(&self, hash: &str, file_hash: &str) -> anyhow::Result<bool> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(true);
+        }
+
+        let confirm = NarConfirm {
+            hash: hash.to_owned(),
+            file_hash: file_hash.to_owned(),
+        };
+        self.call(|reply| GraphMsg::ConfirmNar(confirm, reply))
+            .await
+    }
+
     pub async fn transition(&self, transition: Transition) -> anyhow::Result<TransitionReport> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -179,6 +195,11 @@ impl Graph {
         self.call(|reply| GraphMsg::Demote(demotion, reply)).await
     }
 }
+
+/// Pulls this crate into a binary that otherwise references nothing from it, so
+/// the statements it declares with `gradient_db::sql!` reach the plan gate's
+/// registry. A linker drops an rlib nothing mentions, registry entries included.
+pub const fn link() {}
 
 #[cfg(test)]
 pub(crate) mod test_ctx {

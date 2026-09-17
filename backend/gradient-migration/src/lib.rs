@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "migrations are not gated: they are not independently executable"
+)]
+
 pub use sea_orm_migration::prelude::*;
 
 mod m20241101_000000_baseline;
@@ -50,6 +55,7 @@ mod m20260909_000000_build_attempt_indexes;
 mod m20260911_000000_edge_bloat_and_dead_indexes;
 mod m20260911_000001_drop_derivation_closure;
 mod m20260915_000000_demand;
+mod m20260915_000001_cached_path_confirmed;
 
 pub struct Migrator;
 
@@ -101,6 +107,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260911_000000_edge_bloat_and_dead_indexes::Migration),
             Box::new(m20260911_000001_drop_derivation_closure::Migration),
             Box::new(m20260915_000000_demand::Migration),
+            Box::new(m20260915_000001_cached_path_confirmed::Migration),
         ]
     }
 }

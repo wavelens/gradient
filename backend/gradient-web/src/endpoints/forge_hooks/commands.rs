@@ -22,7 +22,7 @@ use gradient_scheduler::Scheduler;
 use gradient_types::triggers::TriggerType;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
-use sea_orm::{DbBackend, FromQueryResult, Statement, Value};
+use sea_orm::{FromQueryResult, Value};
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -597,22 +597,22 @@ pub(super) fn github_installation_id_from_comment_body(body: &[u8]) -> Option<i6
         .map(|i| i.id)
 }
 
+gradient_db::sql! {
+    ACTIVE_TASK_IDS_FOR_INTEGRATION = "SELECT DISTINCT task FROM task_trigger \
+         WHERE active = true \
+           AND trigger_type = $1 \
+           AND (config->>'integration_id')::uuid = $2",
+        params = [Int(2), Text("00000000-0000-0000-0000-000000000001")];
+}
+
 pub(super) async fn active_task_ids_for_integration(
     state: &Arc<ServerState>,
     integration_id: IntegrationId,
 ) -> Result<Vec<TaskId>, sea_orm::DbErr> {
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        "SELECT DISTINCT task FROM task_trigger \
-         WHERE active = true \
-           AND trigger_type = $1 \
-           AND (config->>'integration_id')::uuid = $2"
-            .to_string(),
-        [
-            Value::SmallInt(Some(i16::from(TriggerType::ReporterPullRequest))),
-            Value::Uuid(Some(integration_id.into_inner())),
-        ],
-    );
+    let stmt = ACTIVE_TASK_IDS_FOR_INTEGRATION.bind([
+        Value::SmallInt(Some(i16::from(TriggerType::ReporterPullRequest))),
+        Value::Uuid(Some(integration_id.into_inner())),
+    ]);
 
     #[derive(sea_orm::FromQueryResult)]
     struct TaskRow {

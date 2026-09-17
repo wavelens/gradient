@@ -133,6 +133,7 @@ impl Actor for SessionActor {
             &peer_id,
             partial_ttl,
             max_partial_bytes,
+            state.config.storage.small_nar_bytes,
             state.shutdown.clone(),
         )
         .unwrap_or_else(|e| {
@@ -142,6 +143,7 @@ impl Actor for SessionActor {
                 &peer_id,
                 partial_ttl,
                 max_partial_bytes,
+                state.config.storage.small_nar_bytes,
                 state.shutdown.clone(),
             )
             .expect("temp partial dir must be creatable")

@@ -17,7 +17,7 @@ use gradient_scheduler::Scheduler;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, DbBackend, EntityTrait, Statement, Value};
+use sea_orm::{ActiveModelTrait, EntityTrait, Value};
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -470,6 +470,23 @@ async fn touch_trigger_last_fired(state: &Arc<ServerState>, trig: &ept::Model) {
     }
 }
 
+fn active_triggers_sql(trigger_type: TriggerType) -> String {
+    format!(
+        "SELECT pt.* FROM task_trigger pt \
+         JOIN task p ON pt.task = p.id \
+         JOIN integration i ON i.project = p.project \
+         WHERE pt.active = true \
+           AND pt.trigger_type = {} \
+           AND i.id = $1",
+        i16::from(trigger_type),
+    )
+}
+
+gradient_db::sql_fn! {
+    ACTIVE_TRIGGERS_FOR_INTEGRATION = || active_triggers_sql(TriggerType::ReporterPullRequest),
+        params = [Text("00000000-0000-0000-0000-000000000001")];
+}
+
 async fn load_active_triggers_for_integration(
     state: &Arc<ServerState>,
     integration_id: IntegrationId,
@@ -478,17 +495,8 @@ async fn load_active_triggers_for_integration(
     // Match by project (each project has one inbound integration per forge_type), not by
     // config integration_id: the GitHub App seed migration rewrites integration
     // rows, so a pre-migration trigger's stale UUID would stop matching.
-    let stmt = Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        format!(
-            "SELECT pt.* FROM task_trigger pt \
-             JOIN task p ON pt.task = p.id \
-             JOIN integration i ON i.project = p.project \
-             WHERE pt.active = true \
-               AND pt.trigger_type = {} \
-               AND i.id = $1",
-            i16::from(trigger_type),
-        ),
+    let stmt = ACTIVE_TRIGGERS_FOR_INTEGRATION.bind_built(
+        active_triggers_sql(trigger_type),
         [Value::Uuid(Some(integration_id.into_inner()))],
     );
     ETaskTrigger::find()

@@ -157,10 +157,7 @@ use crate::status::TransitionChange;
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_types::{DerivationId, EvaluationId};
-use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
-    Value,
-};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait, Value};
 use std::sync::LazyLock;
 
 /// The value `unready_deps` holds for anchor `{alias}`: its direct dependencies whose
@@ -195,6 +192,11 @@ static SEED_UNREADY: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+crate::sql_lazy! {
+    SEED_UNREADY_QUERY = || SEED_UNREADY.as_str(),
+        params = [DerivationIds(64)];
+}
+
 static MARK_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE derivation_build db SET fetchable = true \
@@ -203,6 +205,11 @@ static MARK_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
         pred = fetchable_predicate("db"),
     )
 });
+
+crate::sql_lazy! {
+    MARK_FETCHABLE_QUERY = || MARK_FETCHABLE.as_str(),
+        params = [DerivationIds(64)];
+}
 
 static MARK_UNFETCHABLE: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -213,14 +220,22 @@ static MARK_UNFETCHABLE: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-const RIPPLE_DOWN: &str = r#"
+crate::sql_lazy! {
+    MARK_UNFETCHABLE_QUERY = || MARK_UNFETCHABLE.as_str(),
+        params = [DerivationIds(64)];
+}
+
+crate::sql! {
+    RIPPLE_DOWN = r#"
     UPDATE derivation_build d
     SET unready_deps = d.unready_deps - c.n
     FROM (SELECT e.derivation, count(*) AS n FROM derivation_dependency e
           WHERE e.dependency = ANY($1::uuid[]) GROUP BY e.derivation) c
     WHERE d.derivation = c.derivation
     RETURNING d.derivation, d.unready_deps = 0 AS ready
-"#;
+"#,
+        params = [DerivationIds(64)];
+}
 
 static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -239,6 +254,11 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+crate::sql_lazy! {
+    RIPPLE_UP_QUERY = || RIPPLE_UP.as_str(),
+        params = [DerivationIds(64)];
+}
+
 fn promote_sql(scope: &str) -> String {
     format!(
         "UPDATE derivation_build db \
@@ -255,6 +275,11 @@ fn promote_sql(scope: &str) -> String {
 static PROMOTE: LazyLock<String> =
     LazyLock::new(|| promote_sql("db.derivation = ANY($1::uuid[]) AND "));
 
+crate::sql_lazy! {
+    PROMOTE_QUERY = || PROMOTE.as_str(),
+        params = [DerivationIds(64)];
+}
+
 /// `Created` to `Queued` table-wide. The leading conjunct is implied by the gate (a
 /// relay takes the `substitutable` arm, a build the `unready_deps = 0` one) and is
 /// written out anyway: it is the predicate of `idx-derivation_build-promotable`, and
@@ -263,6 +288,11 @@ static PROMOTE: LazyLock<String> =
 static PROMOTE_ANY: LazyLock<String> =
     LazyLock::new(|| promote_sql("(db.unready_deps = 0 OR db.substitutable) AND "));
 
+crate::sql_lazy! {
+    PROMOTE_ANY_QUERY = || PROMOTE_ANY.as_str(),
+        params = [];
+}
+
 static PROMOTE_CLOSURE: LazyLock<String> = LazyLock::new(|| {
     format!(
         "{cte} {promote}",
@@ -270,6 +300,13 @@ static PROMOTE_CLOSURE: LazyLock<String> = LazyLock::new(|| {
         promote = promote_sql("db.derivation IN (SELECT derivation FROM closure) AND "),
     )
 });
+
+crate::sql_lazy! {
+    PROMOTE_CLOSURE_QUERY = || PROMOTE_CLOSURE.as_str(),
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
+}
 
 fn unpromote_sql(reason: &str) -> String {
     format!(
@@ -297,6 +334,11 @@ static UNPROMOTE_DRV_OWNERS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+crate::sql_lazy! {
+    UNPROMOTE_DRV_OWNERS_QUERY = || UNPROMOTE_DRV_OWNERS.as_str(),
+        params = [DerivationHashes(64)];
+}
+
 /// The queue's own backstop: every `Queued` anchor whose gates no longer hold.
 ///
 /// Table-wide with no index-friendly bound - it scans the `Queued` rows and evaluates
@@ -305,10 +347,21 @@ static UNPROMOTE_DRV_OWNERS: LazyLock<String> = LazyLock::new(|| {
 /// count belongs in whatever the sweep reports.
 static UNPROMOTE_UNGATED: LazyLock<String> = LazyLock::new(|| unpromote_ungated_sql(""));
 
+crate::sql_lazy! {
+    UNPROMOTE_UNGATED_QUERY = || UNPROMOTE_UNGATED.as_str(),
+        params = [],
+        tier = Sweep;
+}
+
 /// [`UNPROMOTE_UNGATED`] bounded to a candidate list, for an event that just
 /// invalidated a known set of gates.
 static UNPROMOTE_UNGATED_IN: LazyLock<String> =
     LazyLock::new(|| unpromote_ungated_sql("db.derivation = ANY($1::uuid[]) AND "));
+
+crate::sql_lazy! {
+    UNPROMOTE_UNGATED_IN_QUERY = || UNPROMOTE_UNGATED_IN.as_str(),
+        params = [DerivationIds(64)];
+}
 
 /// The pending anchors and their direct dependencies: every row whose `fetchable` a
 /// gate can read this pass, one edge deep. [`pending_scope`] materialises it, so the
@@ -325,6 +378,12 @@ fn repair_scope() -> String {
     )
 }
 
+crate::sql_fn! {
+    REPAIR_SCOPE_QUERY = repair_scope,
+        params = [],
+        tier = Sweep;
+}
+
 static RECOUNT_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE derivation_build db SET fetchable = x.f \
@@ -334,6 +393,11 @@ static RECOUNT_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
         pred = fetchable_predicate("p"),
     )
 });
+
+crate::sql_lazy! {
+    RECOUNT_FETCHABLE_QUERY = || RECOUNT_FETCHABLE.as_str(),
+        params = [DerivationIds(64)];
+}
 
 static RECOUNT_UNREADY: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -345,9 +409,17 @@ static RECOUNT_UNREADY: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-const LOCK_ANCHORS: &str = "SELECT 1 FROM derivation_build \
-                            WHERE derivation = ANY($1::uuid[]) \
-                            ORDER BY derivation FOR UPDATE";
+crate::sql_lazy! {
+    RECOUNT_UNREADY_QUERY = || RECOUNT_UNREADY.as_str(),
+        params = [DerivationIds(64)];
+}
+
+crate::sql! {
+    LOCK_ANCHORS = "SELECT 1 FROM derivation_build \
+                    WHERE derivation = ANY($1::uuid[]) \
+                    ORDER BY derivation FOR UPDATE",
+        params = [DerivationIds(64)];
+}
 
 /// Proof that a batch of anchors is held `FOR UPDATE`, `derivation`-ordered, on `txn`.
 /// Only [`lock_anchors`] constructs one, and [`seed_unready_deps`],
@@ -379,12 +451,8 @@ pub async fn lock_anchors<'txn>(
     derivations: &[DerivationId],
 ) -> Result<AnchorLock<'txn>, DbErr> {
     if !derivations.is_empty() {
-        txn.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            LOCK_ANCHORS,
-            [ids(derivations)],
-        ))
-        .await?;
+        txn.execute_raw(LOCK_ANCHORS.bind([ids(derivations)]))
+            .await?;
     }
 
     Ok(AnchorLock {
@@ -423,11 +491,7 @@ pub async fn seed_unready_deps(lock: &AnchorLock<'_>) -> Result<u64, DbErr> {
 
     Ok(lock
         .txn
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            SEED_UNREADY.as_str(),
-            [ids(&lock.derivations)],
-        ))
+        .execute_raw(SEED_UNREADY_QUERY.bind([ids(&lock.derivations)]))
         .await?
         .rows_affected())
 }
@@ -437,19 +501,15 @@ async fn mark(lock: &AnchorLock<'_>, to: bool) -> Result<Vec<DerivationId>, DbEr
         return Ok(Vec::new());
     }
 
-    let statement = if to {
-        MARK_FETCHABLE.as_str()
+    let query = if to {
+        &MARK_FETCHABLE_QUERY
     } else {
-        MARK_UNFETCHABLE.as_str()
+        &MARK_UNFETCHABLE_QUERY
     };
 
     Ok(returned_derivations(
         lock.txn
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                statement,
-                [ids(&lock.derivations)],
-            ))
+            .query_all_raw(query.bind([ids(&lock.derivations)]))
             .await?,
     ))
 }
@@ -469,11 +529,7 @@ pub async fn became_fetchable(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCha
 
     let rows = lock
         .txn
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            RIPPLE_DOWN,
-            [ids(&flipped)],
-        ))
+        .query_all_raw(RIPPLE_DOWN.bind([ids(&flipped)]))
         .await?;
 
     let mut ready = Vec::new();
@@ -527,11 +583,7 @@ pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCh
 
     let rows = lock
         .txn
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            RIPPLE_UP.as_str(),
-            [ids(&flipped)],
-        ))
+        .query_all_raw(RIPPLE_UP_QUERY.bind([ids(&flipped)]))
         .await?;
 
     Ok(returned_transitions(rows)
@@ -552,11 +604,7 @@ pub async fn promote<C: ConnectionTrait>(
     }
 
     let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            PROMOTE.as_str(),
-            [ids(candidates)],
-        ))
+        .query_all_raw(PROMOTE_QUERY.bind([ids(candidates)]))
         .await?;
 
     Ok(transitions_from(
@@ -579,11 +627,7 @@ where
 {
     let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            PROMOTE_CLOSURE.as_str(),
-            [Value::Uuid(Some(evaluation.into_inner()))],
-        ))
+        .query_all_raw(PROMOTE_CLOSURE_QUERY.bind([Value::Uuid(Some(evaluation.into_inner()))]))
         .await?;
     walk.commit().await?;
 
@@ -608,16 +652,15 @@ pub async fn unpromote_drv_owners<C: ConnectionTrait>(
     }
 
     Ok(returned_transitions(
-        db.query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            UNPROMOTE_DRV_OWNERS.as_str(),
-            [drv_hashes.to_vec().into()],
-        ))
-        .await?,
+        db.query_all_raw(UNPROMOTE_DRV_OWNERS_QUERY.bind([drv_hashes.to_vec().into()]))
+            .await?,
     ))
 }
 
-const DIRECT_DEPENDENCIES: &str = "SELECT DISTINCT e.dependency FROM derivation_dependency e WHERE e.derivation = ANY($1::uuid[])";
+crate::sql! {
+    DIRECT_DEPENDENCIES = "SELECT DISTINCT e.dependency FROM derivation_dependency e WHERE e.derivation = ANY($1::uuid[])",
+        params = [DerivationIds(64)];
+}
 
 /// The direct inputs of `derivations`, one statement and one hop. What every event
 /// that creates, thaws, finishes or drops a builder hands to [`promote`] or
@@ -639,11 +682,7 @@ pub async fn direct_dependencies_of<C: ConnectionTrait>(
     }
 
     Ok(db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            DIRECT_DEPENDENCIES,
-            [ids(derivations)],
-        ))
+        .query_all_raw(DIRECT_DEPENDENCIES.bind([ids(derivations)]))
         .await?
         .iter()
         .filter_map(|r| r.try_get::<uuid::Uuid>("", "dependency").ok())
@@ -664,13 +703,14 @@ pub async fn unpromote_ungated<C: ConnectionTrait>(
     }
 
     Ok(returned_transitions(
-        db.query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            UNPROMOTE_UNGATED_IN.as_str(),
-            [ids(candidates)],
-        ))
-        .await?,
+        db.query_all_raw(UNPROMOTE_UNGATED_IN_QUERY.bind([ids(candidates)]))
+            .await?,
     ))
+}
+
+crate::sql! {
+    UNWALK_DERIVATIONS = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
+        params = [DerivationIds(64)];
 }
 
 /// Drop the record of `derivations` and close the gates that read `walked`, so the
@@ -691,12 +731,8 @@ pub async fn unwalk_derivations(
     }
 
     let txn = ctx.worker_db.begin().await?;
-    txn.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "UPDATE derivation SET walked = false WHERE id = ANY($1)",
-        [ids(derivations)],
-    ))
-    .await?;
+    txn.execute_raw(UNWALK_DERIVATIONS.bind([ids(derivations)]))
+        .await?;
     let _anchors = lock_anchors(&txn, derivations).await?;
     let changes = unpromote_ungated(&txn, derivations).await?;
     txn.commit().await?;
@@ -722,41 +758,34 @@ pub struct Repaired {
 /// comes from one snapshot instead of a subquery each statement re-evaluates against
 /// its own.
 async fn pending_scope<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationId>, DbErr> {
-    db.query_all_raw(Statement::from_string(
-        DatabaseBackend::Postgres,
-        repair_scope(),
-    ))
-    .await?
-    .into_iter()
-    .map(|r| {
-        r.try_get::<uuid::Uuid>("", "derivation")
-            .map(DerivationId::new)
-    })
-    .collect()
+    db.query_all_raw(REPAIR_SCOPE_QUERY.stmt())
+        .await?
+        .into_iter()
+        .map(|r| {
+            r.try_get::<uuid::Uuid>("", "derivation")
+                .map(DerivationId::new)
+        })
+        .collect()
 }
 
 /// Recompute `fetchable` for the locked chunk and write the rows that disagree.
 async fn recount_fetchable(lock: &AnchorLock<'_>) -> Result<u64, DbErr> {
-    recount(lock, RECOUNT_FETCHABLE.as_str()).await
+    recount(lock, &RECOUNT_FETCHABLE_QUERY).await
 }
 
 /// Recompute `unready_deps` for the locked chunk and write the rows that disagree.
 async fn recount_unready(lock: &AnchorLock<'_>) -> Result<u64, DbErr> {
-    recount(lock, RECOUNT_UNREADY.as_str()).await
+    recount(lock, &RECOUNT_UNREADY_QUERY).await
 }
 
-async fn recount(lock: &AnchorLock<'_>, statement: &str) -> Result<u64, DbErr> {
+async fn recount(lock: &AnchorLock<'_>, query: &crate::sql::Query) -> Result<u64, DbErr> {
     if lock.derivations.is_empty() {
         return Ok(0);
     }
 
     Ok(lock
         .txn
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            statement,
-            [ids(&lock.derivations)],
-        ))
+        .execute_raw(query.bind([ids(&lock.derivations)]))
         .await?
         .rows_affected())
 }
@@ -804,21 +833,9 @@ where
         txn.commit().await?;
     }
 
-    let unpromoted = returned_transitions(
-        db.query_all_raw(Statement::from_string(
-            DatabaseBackend::Postgres,
-            UNPROMOTE_UNGATED.as_str().to_owned(),
-        ))
-        .await?,
-    );
+    let unpromoted = returned_transitions(db.query_all_raw(UNPROMOTE_UNGATED_QUERY.stmt()).await?);
     let promoted = transitions_from(
-        returned_derivations(
-            db.query_all_raw(Statement::from_string(
-                DatabaseBackend::Postgres,
-                PROMOTE_ANY.as_str().to_owned(),
-            ))
-            .await?,
-        ),
+        returned_derivations(db.query_all_raw(PROMOTE_ANY_QUERY.stmt()).await?),
         BuildStatus::Created,
         BuildStatus::Queued,
     );
