@@ -393,11 +393,11 @@ pub fn live_cached_paths_cte() -> String {
 /// the same way, because what is below a finished build is served from its
 /// outputs and what is below a failed one is the requeue's to thaw first. This is
 /// what names a pruned subtree for the evaluations that build against it.
-pub fn pending_closure_cte(seed_select: &str) -> String {
+pub fn pending_closure_cte(name: &str, seed_select: &str) -> String {
     format!(
-        "WITH RECURSIVE pending(evaluation, derivation, builder) AS ({seed_select} UNION {})",
+        "WITH RECURSIVE {name}(evaluation, derivation, builder) AS ({seed_select} UNION {})",
         lateral_step(
-            "pending",
+            name,
             "c.evaluation, s.next, s.builder",
             &format!(
                 "SELECT e.dependency AS next, ({builder}) AS builder \
@@ -422,8 +422,16 @@ pub fn pending_closure_cte(seed_select: &str) -> String {
 /// recursion: a relay is reached and never stepped through, because it fetches
 /// finished bytes and needs nothing below it, and a terminal anchor stops the walk
 /// because what is below a finished build is served from its outputs. The one
-/// definition of demand; every recompute steps with it.
-pub fn demand_closure_cte(seed_select: &str) -> String {
+/// definition of demand; every recompute steps with it. `bound` is an extra predicate
+/// over the edge alias `e`, applied inside the probe so a region-scoped recompute
+/// prunes at the index lookup instead of walking the live graph and discarding it.
+pub fn demand_closure_cte(seed_select: &str, bound: &str) -> String {
+    let restrict = if bound.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {bound}")
+    };
+
     format!(
         "WITH RECURSIVE demanded(derivation) AS ({seed_select} UNION {})",
         lateral_step(
@@ -434,7 +442,8 @@ pub fn demand_closure_cte(seed_select: &str) -> String {
                  JOIN derivation_build p ON p.derivation = c.derivation \
                  JOIN derivation w ON w.id = p.derivation \
                  WHERE e.derivation = c.derivation AND {builder} \
-                   AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)",
+                   AND EXISTS (SELECT 1 FROM build_job bj \
+                               WHERE bj.derivation = p.derivation){restrict}",
                 builder = builder_predicate("p", "w"),
             ),
         ),
@@ -738,7 +747,10 @@ mod tests {
                 ClosureDirection::Dependents,
             )),
             norm(&reference_closure_cte("refs", "SELECT $1::text")),
-            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true")),
+            norm(&pending_closure_cte(
+                "pending",
+                "SELECT $1::uuid, $2::uuid, true",
+            )),
         ] {
             assert!(
                 cte.contains("LATERAL ("),
@@ -810,8 +822,11 @@ mod tests {
         );
         assert!(norm(&demanded_predicate("db")).contains(&builder));
         assert!(
-            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"))
-                .contains(&norm(&builder_predicate("dep", "w")))
+            norm(&pending_closure_cte(
+                "pending",
+                "SELECT $1::uuid, $2::uuid, true"
+            ))
+            .contains(&norm(&builder_predicate("dep", "w")))
         );
     }
 
@@ -820,7 +835,10 @@ mod tests {
     /// or a terminal anchor is reached and never expanded.
     #[test]
     fn the_pending_closure_walks_dependencies_through_builders_only() {
-        let cte = norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"));
+        let cte = norm(&pending_closure_cte(
+            "pending",
+            "SELECT $1::uuid, $2::uuid, true",
+        ));
         assert!(
             cte.starts_with(
                 "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
@@ -852,7 +870,10 @@ mod tests {
     /// through, and that single fact is what stops a relayed subtree being built.
     #[test]
     fn the_demand_walk_steps_only_out_of_named_builders() {
-        let sql = norm(&demand_closure_cte("SELECT derivation FROM entry_point"));
+        let sql = norm(&demand_closure_cte(
+            "SELECT derivation FROM entry_point",
+            "",
+        ));
         assert!(
             sql.starts_with(
                 "WITH RECURSIVE demanded(derivation) AS (SELECT derivation FROM entry_point UNION"

@@ -246,7 +246,7 @@ fn adopt_sql(seed_select: &str) -> String {
          FROM pending p JOIN derivation_build db ON db.derivation = p.derivation \
          ON CONFLICT (evaluation, derivation) DO NOTHING \
          RETURNING evaluation, derivation",
-        cte = pending_closure_cte(seed_select),
+        cte = pending_closure_cte("pending", seed_select),
     )
 }
 

@@ -598,7 +598,7 @@ pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCh
 /// that keeps it re-demands everything below it, which the walk's downward step
 /// computes for free. It returns each row it changed WITH its new value, so one
 /// statement serves a gain and a loss and no caller has to know which it caused.
-pub(crate) fn demand_recompute_sql(region: &str, seed: &str) -> String {
+pub(crate) fn demand_recompute_sql(region: &str, seed: &str, bound: &str) -> String {
     format!(
         "{cte} \
          UPDATE derivation_build db \
@@ -606,14 +606,27 @@ pub(crate) fn demand_recompute_sql(region: &str, seed: &str) -> String {
              updated_at = (now() AT TIME ZONE 'UTC') \
          WHERE {region}db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
          RETURNING db.derivation, db.demanded",
-        cte = crate::graph_sql::demand_closure_cte(seed),
+        cte = crate::graph_sql::demand_closure_cte(seed, bound),
     )
 }
 
 /// Table-wide, seeded from every entry point: the backstop for a lost recompute and
 /// the backfill the migration deliberately does not carry.
-pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> =
-    LazyLock::new(|| demand_recompute_sql("", "SELECT derivation FROM entry_point"));
+///
+/// Only anchors in a builder status are rewritten, because they are the only ones a
+/// gate reads the column on. A terminal anchor keeps whatever it carried when it was
+/// pending, and the recompute that thaws it names it as a root, so the value it reads
+/// on the way back into the queue is computed and never inherited.
+pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> = LazyLock::new(|| {
+    demand_recompute_sql(
+        &format!(
+            "db.status IN ({pending}) AND ",
+            pending = status_sql::build_in(&crate::graph_sql::BUILDER_STATUSES),
+        ),
+        "SELECT derivation FROM entry_point",
+        "",
+    )
+});
 
 crate::sql_lazy! {
     RECOUNT_DEMANDED = || RECOUNT_DEMANDED_SQL.as_str(),
@@ -627,6 +640,95 @@ crate::sql_lazy! {
 /// coming back names a mover that is not recomputing what it changed.
 pub async fn recount_demanded<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
     Ok(db.query_all_raw(RECOUNT_DEMANDED.stmt()).await?.len() as u64)
+}
+
+/// What a bounded recompute moved: the anchors that gained demand, for [`promote`],
+/// and the ones that lost it, for [`unpromote_ungated`].
+#[derive(Debug, Default)]
+pub struct DemandMoved {
+    pub gained: Vec<DerivationId>,
+    pub lost: Vec<DerivationId>,
+}
+
+static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
+    // The roots enter the region as builders so the walk steps out of them once even
+    // where they have just stopped being one; everything below is stepped through
+    // only while it is.
+    let region = crate::graph_sql::pending_closure_cte(
+        "region",
+        "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
+    );
+    let seed = format!(
+        "SELECT r.derivation FROM region r \
+         WHERE EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) \
+            OR EXISTS (SELECT 1 FROM derivation_dependency e \
+                       JOIN derivation_build p ON p.derivation = e.derivation \
+                       JOIN derivation w ON w.id = p.derivation \
+                       WHERE e.dependency = r.derivation AND p.demanded \
+                         AND p.derivation NOT IN (SELECT derivation FROM region) \
+                         AND ({builder}) \
+                         AND EXISTS (SELECT 1 FROM build_job bj \
+                                     WHERE bj.derivation = p.derivation))",
+        builder = crate::graph_sql::builder_predicate("p", "w"),
+    );
+    let body = demand_recompute_sql(
+        "db.derivation IN (SELECT derivation FROM region) AND ",
+        &seed,
+        "e.dependency IN (SELECT derivation FROM region)",
+    );
+
+    format!(
+        "{region}, {rest}",
+        rest = body.trim_start_matches("WITH RECURSIVE "),
+    )
+});
+
+crate::sql_lazy! {
+    RECOMPUTE_DEMAND = || RECOMPUTE_DEMAND_SQL.as_str(),
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
+
+/// Recompute demand over `roots` and the pending closure below them, after an event
+/// that changed whether they carry it.
+///
+/// The region includes the roots: a thaw makes an anchor a builder again and its own
+/// stored value is as stale as its subtree's. Runs under [`lock_anchors`] on the
+/// roots; two recomputes over overlapping regions can still interleave, and the
+/// sweep's table-wide recount is the backstop that notices.
+pub async fn recompute_demand<C>(db: &C, roots: &[DerivationId]) -> Result<DemandMoved, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if roots.is_empty() {
+        return Ok(DemandMoved::default());
+    }
+
+    let txn = db.begin().await?;
+    let _lock = lock_anchors(&txn, roots).await?;
+    let rows = txn
+        .query_all_raw(RECOMPUTE_DEMAND.bind([ids(roots)]))
+        .await?;
+    txn.commit().await?;
+
+    let mut moved = DemandMoved::default();
+    for row in &rows {
+        let (Ok(derivation), Ok(demanded)) = (
+            row.try_get::<uuid::Uuid>("", "derivation"),
+            row.try_get::<bool>("", "demanded"),
+        ) else {
+            continue;
+        };
+
+        if demanded {
+            moved.gained.push(DerivationId::new(derivation));
+        } else {
+            moved.lost.push(DerivationId::new(derivation));
+        }
+    }
+
+    Ok(moved)
 }
 
 /// Queue every `Created` candidate whose gates hold. The gate is embedded, so a
@@ -899,6 +1001,13 @@ mod tests {
 
     fn drv(id: DerivationId) -> BTreeMap<String, Value> {
         BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
+    }
+
+    fn demand_row(id: DerivationId, demanded: bool) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("derivation".to_owned(), Value::from(id.into_inner())),
+            ("demanded".to_owned(), Value::from(demanded)),
+        ])
     }
 
     fn ripple_row(id: DerivationId, ready: bool) -> BTreeMap<String, Value> {
@@ -1419,6 +1528,46 @@ mod tests {
         assert!(
             sql.contains("RETURNING db.derivation, db.demanded"),
             "the caller settles the queue from the new value: {sql}"
+        );
+    }
+
+    /// One statement, both directions, over a region that INCLUDES the roots. A
+    /// thawed anchor's own demand is as stale as anything below it - its value was
+    /// last written when it was terminal - so a recompute that only walked downward
+    /// would relay busybox again the moment a retire reset it (#666). The seed comes
+    /// from outside the region, because a member kept by an outside builder
+    /// re-demands its own subtree.
+    #[tokio::test]
+    async fn the_bounded_recompute_covers_its_roots_and_seeds_from_outside() {
+        let root = DerivationId::now_v7();
+        let on = DerivationId::now_v7();
+        let off = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(1)])
+            .append_query_results([vec![demand_row(on, true), demand_row(off, false)]])
+            .into_connection();
+
+        let moved = recompute_demand(&db, &[root]).await.unwrap();
+        assert_eq!(moved.gained, vec![on]);
+        assert_eq!(moved.lost, vec![off]);
+
+        let log = statements(db.into_transaction_log());
+        let sql = norm(&log[1]);
+        assert!(
+            sql.contains("region(evaluation, derivation, builder) AS"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("db.derivation IN (SELECT derivation FROM region)"),
+            "the write must be bounded to the region: {sql}"
+        );
+        assert!(
+            sql.contains("p.derivation NOT IN (SELECT derivation FROM region)"),
+            "the seed must come from demanders OUTSIDE the region: {sql}"
+        );
+        assert!(
+            sql.contains("RETURNING db.derivation, db.demanded"),
+            "{sql}"
         );
     }
 }
