@@ -11,23 +11,14 @@
 
 use async_trait::async_trait;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
+use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::EntityTrait;
 use tracing::{error, warn};
 
-/// Snake-case tag of an evaluation kind, surfaced in action payloads so the
-/// dispatcher can restrict `OpenPr` to `input_update` runs.
-fn eval_kind_str(kind: EvaluationKind) -> &'static str {
-    match kind {
-        EvaluationKind::Normal => "normal",
-        EvaluationKind::InputUpdate => "input_update",
-        EvaluationKind::DrvRecovery => "drv_recovery",
-    }
-}
-
-use crate::actions::{dispatch_build_event, dispatch_evaluation_event, reporter_for_task};
+use crate::actions::{dispatch_build_event, dispatch_evaluation_event};
 use crate::context::CiContext;
-use crate::{ReactionKind, ReactionTarget};
+use crate::reactions::react_to_source_comment_on_terminal;
+use crate::reporting::{eval_kind_str, evaluation_event_for_status};
 use gradient_db::{DbContext, StatusReactor};
 use gradient_forge::ForgeRegistry;
 use gradient_notify::EmailSender;
@@ -118,17 +109,7 @@ impl StatusReactor for CiStatusReactor {
         evaluation: MEvaluation,
         status: EvaluationStatus,
     ) {
-        let event = match status {
-            EvaluationStatus::Queued => "evaluation.queued",
-            EvaluationStatus::Fetching
-            | EvaluationStatus::EvaluatingFlake
-            | EvaluationStatus::EvaluatingDerivation => "evaluation.started",
-            EvaluationStatus::Building => "evaluation.building",
-            EvaluationStatus::Waiting => "evaluation.waiting",
-            EvaluationStatus::Completed => "evaluation.completed",
-            EvaluationStatus::Failed => "evaluation.failed",
-            EvaluationStatus::Aborted => "evaluation.aborted",
-        };
+        let event = evaluation_event_for_status(status);
 
         let task_id = match evaluation.task {
             Some(id) => id,
@@ -149,59 +130,4 @@ impl StatusReactor for CiStatusReactor {
 
         react_to_source_comment_on_terminal(&ctx, task_id, &evaluation, status).await;
     }
-}
-
-/// Post a thumbs-up/-down reaction on the `/gradient` PR comment that triggered
-/// this evaluation, once it reaches a terminal status. Best-effort.
-async fn react_to_source_comment_on_terminal(
-    ctx: &CiContext,
-    task_id: TaskId,
-    evaluation: &MEvaluation,
-    status: EvaluationStatus,
-) {
-    let kind = match status {
-        EvaluationStatus::Completed => ReactionKind::ThumbsUp,
-        EvaluationStatus::Failed | EvaluationStatus::Aborted => ReactionKind::ThumbsDown,
-        _ => return,
-    };
-    let Some(raw) = evaluation.source_comment.as_ref() else {
-        return;
-    };
-    // PR-triggered evals stamp `source_comment` with just `{pr_number, pr_author}`
-    // (no `comment_id`) so the UI can show "PR #42"; there's no comment to react
-    // to, so skip silently rather than warning about a "malformed" payload.
-    if raw.get("comment_id").is_none() {
-        return;
-    }
-    let Some(target) = parse_source_comment(raw) else {
-        warn!(
-            evaluation_id = %evaluation.id,
-            "evaluation.source_comment present but malformed; skipping reaction"
-        );
-        return;
-    };
-    let reporter = match reporter_for_task(ctx, task_id).await {
-        Ok(Some(r)) => r,
-        Ok(None) => return,
-        Err(e) => {
-            warn!(error = %e, %task_id, "resolving reporter for terminal-status reaction");
-            return;
-        }
-    };
-    if let Err(e) = reporter.add_reaction(&target, kind).await {
-        warn!(error = %e, %task_id, ?kind, "/gradient terminal reaction post failed");
-    }
-}
-
-fn parse_source_comment(value: &serde_json::Value) -> Option<ReactionTarget> {
-    let owner = value.get("owner")?.as_str()?.to_string();
-    let repo = value.get("repo")?.as_str()?.to_string();
-    let pr_number = value.get("pr_number")?.as_u64()?;
-    let comment_id = value.get("comment_id")?.as_i64()?;
-    Some(ReactionTarget {
-        owner,
-        repo,
-        pr_number,
-        comment_id,
-    })
 }

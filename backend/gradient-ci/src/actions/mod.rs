@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Task Actions dispatch and execution. This module fans build/evaluation
-//! events out to the configured actions ([`dispatch_event`]); the execution and
-//! per-config executors live in [`executor`] and [`send`].
+//! Task Actions dispatch and execution. [`matching_actions`] decides which of a
+//! task's actions an event reaches; the execution and per-config executors live
+//! in [`executor`] and [`send`].
 
 mod crypto;
 mod executor;
@@ -48,6 +48,42 @@ fn truncate(mut s: String, max: usize) -> String {
         }
     }
     s
+}
+
+/// The active actions of `task_id`, in insertion order.
+pub async fn active_actions_for_task(
+    ctx: &CiContext,
+    task_id: TaskId,
+) -> Result<Vec<gradient_types::MTaskAction>, sea_orm::DbErr> {
+    ETaskAction::find()
+        .filter(CTaskAction::Task.eq(task_id))
+        .filter(CTaskAction::Active.eq(true))
+        .all(&ctx.db.worker_db)
+        .await
+}
+
+/// The actions that react to `event`, with the two payload rules: `OpenPr` only
+/// on input-update evaluations, forge reports never on them.
+///
+/// `OpenPr` fires on a normal gate event (build/eval completed) but must only
+/// act on `input_update` evaluations, never regular CI runs. A
+/// `forge_status_report` posts a CI status against a real commit/PR, and an
+/// `input_update` eval is an internal bump whose own commit is blank until its
+/// PR is pushed, so it is skipped there: the PR's own CI run reports normally.
+pub fn matching_actions(
+    actions: Vec<gradient_types::MTaskAction>,
+    event: &str,
+    payload: &JsonValue,
+) -> Vec<gradient_types::MTaskAction> {
+    let is_input_update =
+        payload.get("evaluation_kind").and_then(|v| v.as_str()) == Some("input_update");
+
+    actions
+        .into_iter()
+        .filter(|a| matches_event(a, event))
+        .filter(|a| a.action_type != ActionType::OpenPr || is_input_update)
+        .filter(|a| a.action_type != ActionType::ForgeStatusReport || !is_input_update)
+        .collect()
 }
 
 pub async fn dispatch_evaluation_event(

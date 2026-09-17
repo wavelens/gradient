@@ -1,0 +1,34 @@
+[package]
+name        = "gradient-effects"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
+
+[lib]
+name = "gradient_effects"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-core   = { workspace = true }
+gradient-ci     = { workspace = true }
+gradient-db     = { workspace = true }
+gradient-entity = { workspace = true }
+gradient-types  = { workspace = true }
+gradient-util   = { workspace = true }
+
+anyhow     = { workspace = true }
+ractor     = { workspace = true }
+sea-orm    = { workspace = true }
+serde_json = { workspace = true }
+tokio      = { workspace = true, features = ["macros", "sync", "time"] }
+tracing    = { workspace = true }
+uuid       = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "test-util"] }

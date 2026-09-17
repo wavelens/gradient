@@ -7,6 +7,7 @@
 mod fixtures;
 
 use super::matchers::{forge_status_for_event, matches_event};
+use super::matching_actions;
 use super::payload::{forge_status_payload, render_default_body, render_subject};
 use super::report::build_ci_report_from_payload;
 use super::truncate;
@@ -231,4 +232,50 @@ fn build_ci_report_errors_on_invalid_build_id() {
             .unwrap_err();
         assert!(err.to_string().contains("invalid build_id"), "error: {err}");
     });
+}
+
+/// An input-update evaluation is an internal bump: its `OpenPr` acts, and the
+/// forge report it would post against a still-blank commit does not.
+#[test]
+fn an_input_update_reaches_open_pr_and_never_the_forge_report() {
+    let actions = vec![
+        action_with(ActionType::OpenPr, vec!["evaluation.completed"]),
+        action_with(ActionType::ForgeStatusReport, vec![]),
+        action_with(ActionType::SendMail, vec!["evaluation.completed"]),
+    ];
+    let payload = json!({"evaluation_kind": "input_update"});
+
+    let matched = matching_actions(actions, "evaluation.completed", &payload);
+
+    assert_eq!(
+        matched.iter().map(|a| a.action_type).collect::<Vec<_>>(),
+        vec![ActionType::OpenPr, ActionType::SendMail],
+    );
+}
+
+/// A regular CI run is the mirror image: the forge check is posted and the
+/// `OpenPr` that would raise a pull request against it is not.
+#[test]
+fn a_normal_run_reaches_the_forge_report_and_never_open_pr() {
+    let actions = vec![
+        action_with(ActionType::OpenPr, vec!["evaluation.completed"]),
+        action_with(ActionType::ForgeStatusReport, vec![]),
+    ];
+    let payload = json!({"evaluation_kind": "normal"});
+
+    let matched = matching_actions(actions, "evaluation.completed", &payload);
+
+    assert_eq!(
+        matched.iter().map(|a| a.action_type).collect::<Vec<_>>(),
+        vec![ActionType::ForgeStatusReport],
+    );
+}
+
+/// An action whose stored events do not name the event never matches, whatever
+/// the payload says.
+#[test]
+fn an_action_that_does_not_subscribe_is_not_matched() {
+    let actions = vec![action_with(ActionType::SendMail, vec!["build.failed"])];
+
+    assert!(matching_actions(actions, "build.completed", &json!({})).is_empty());
 }

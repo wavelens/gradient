@@ -5,13 +5,22 @@
  */
 
 use crate::DbContext;
+use anyhow::{Context, Result};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{error, warn};
 
 /// Compress a finalized build log into zstd chunks, persist the chunk index,
-/// and drop the inline copy. Best-effort: failures are logged, never propagated.
-pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::BuildAttemptId) {
+/// and drop the inline copy.
+///
+/// Fallible on purpose: this runs as an outbox delivery, so a storage or index
+/// failure is retried with the inline copy still in place rather than losing the
+/// log. Dropping the inline copy afterwards is the one best-effort step, because
+/// the index it duplicates is already written.
+pub async fn finalize_build_log(
+    ctx: &DbContext,
+    log_id: gradient_entity::ids::BuildAttemptId,
+) -> Result<()> {
     let log_text = ctx
         .storage
         .log_storage
@@ -19,29 +28,26 @@ pub async fn finalize_build_log(ctx: &DbContext, log_id: gradient_entity::ids::B
         .await
         .unwrap_or_default();
     if log_text.is_empty() {
-        return;
+        return Ok(());
     }
-    let descs = match gradient_storage::log_chunk::compress_and_store_chunks(
+    let descs = gradient_storage::log_chunk::compress_and_store_chunks(
         ctx.storage.log_storage.as_ref(),
         log_id,
         &log_text,
         ctx.config.storage.log_chunk_bytes,
     )
     .await
-    {
-        Ok(d) => d,
-        Err(e) => {
-            error!(error = %e, build_id = %log_id, "Failed to chunk build log");
-            return;
-        }
-    };
-    if let Err(e) = replace_log_chunk_index(&ctx.worker_db, log_id, &descs).await {
-        error!(error = %e, build_id = %log_id, "Failed to write log chunk index");
-        return;
-    }
+    .with_context(|| format!("chunking the build log of attempt {log_id}"))?;
+
+    replace_log_chunk_index(&ctx.worker_db, log_id, &descs)
+        .await
+        .with_context(|| format!("writing the log chunk index of attempt {log_id}"))?;
+
     if let Err(e) = ctx.storage.log_storage.delete_inline_log(log_id).await {
         warn!(error = %e, build_id = %log_id, "Failed to drop inline log after chunking");
     }
+
+    Ok(())
 }
 
 /// Replace the `build_log_chunk` rows for `log_id` with `descs` (idempotent).
