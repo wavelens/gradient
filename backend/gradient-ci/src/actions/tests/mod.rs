@@ -65,25 +65,30 @@ fn matches_event_send_mail_filters_by_stored_events() {
     assert!(!matches_event(&a, "build.failed"));
 }
 
+/// An `OpenPr` action fires on the events its `verify_gate` names, so its config
+/// is what decides whether it matches; the stored `events` list is ignored.
+fn open_pr(gate: gradient_types::VerifyGate) -> gradient_types::MTaskAction {
+    use gradient_types::{ActionConfig, IntegrationId};
+
+    let mut a = action_with(ActionType::OpenPr, vec![]);
+    a.config = serde_json::to_value(ActionConfig::OpenPr {
+        integration_id: IntegrationId::now_v7(),
+        generator: Default::default(),
+        granularity: Default::default(),
+        verify_gate: gate,
+        branch_pattern: "gradient/flake-lock-update".into(),
+        title_template: None,
+        body_template: None,
+        update_existing: true,
+    })
+    .unwrap();
+
+    a
+}
+
 #[test]
 fn matches_event_open_pr_fires_only_on_gate_event() {
-    use gradient_types::{ActionConfig, IntegrationId, VerifyGate};
-
-    let open_pr = |gate: VerifyGate| {
-        let mut a = action_with(ActionType::OpenPr, vec![]);
-        a.config = serde_json::to_value(ActionConfig::OpenPr {
-            integration_id: IntegrationId::now_v7(),
-            generator: Default::default(),
-            granularity: Default::default(),
-            verify_gate: gate,
-            branch_pattern: "gradient/flake-lock-update".into(),
-            title_template: None,
-            body_template: None,
-            update_existing: true,
-        })
-        .unwrap();
-        a
-    };
+    use gradient_types::VerifyGate;
 
     // The gate keys off the eval's own terminal transition, not a per-build
     // event: a candidate whose closure is already built/substitutable fires no
@@ -239,7 +244,7 @@ fn build_ci_report_errors_on_invalid_build_id() {
 #[test]
 fn an_input_update_reaches_open_pr_and_never_the_forge_report() {
     let actions = vec![
-        action_with(ActionType::OpenPr, vec!["evaluation.completed"]),
+        open_pr(gradient_types::VerifyGate::Build),
         action_with(ActionType::ForgeStatusReport, vec![]),
         action_with(ActionType::SendMail, vec!["evaluation.completed"]),
     ];
@@ -258,7 +263,7 @@ fn an_input_update_reaches_open_pr_and_never_the_forge_report() {
 #[test]
 fn a_normal_run_reaches_the_forge_report_and_never_open_pr() {
     let actions = vec![
-        action_with(ActionType::OpenPr, vec!["evaluation.completed"]),
+        open_pr(gradient_types::VerifyGate::Build),
         action_with(ActionType::ForgeStatusReport, vec![]),
     ];
     let payload = json!({"evaluation_kind": "normal"});
