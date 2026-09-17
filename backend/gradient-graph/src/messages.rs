@@ -204,6 +204,9 @@ pub enum Demotion {
 pub struct DemoteReport {
     pub producers: Vec<DerivationId>,
     pub demoted: u64,
+    /// Producers the maintenance sweep failed: the rebuild it granted them came
+    /// and went without backing their output.
+    pub failed: u64,
     pub cached_path: Option<MCachedPath>,
     pub others_remain: bool,
 }

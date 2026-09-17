@@ -43,9 +43,10 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
         }
         Demotion::CacheClaim { cache, hash } => cache_claim(ctx, cache, &hash).await,
         Demotion::UnbackedTrustedOutputs => {
-            let demoted = gradient_db::demote_unbacked_trusted_outputs(ctx).await?;
+            let sweep = gradient_db::demote_unbacked_trusted_outputs(ctx).await?;
             Ok(DemoteReport {
-                demoted,
+                demoted: sweep.demoted,
+                failed: sweep.failed,
                 ..Default::default()
             })
         }

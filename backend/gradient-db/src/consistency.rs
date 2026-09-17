@@ -334,7 +334,7 @@ mod tests {
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[14].contains("AS rebuilt") && log[15].contains("FROM evaluation ev"),
+            log[14].contains("SELECT DISTINCT o.hash") && log[15].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
         );
         assert_eq!(log.len(), 16, "{log:?}");
@@ -360,7 +360,7 @@ mod tests {
             "probe, walk, queue what was named, bump: {log:?}"
         );
         assert!(
-            log[18].contains("AS rebuilt") && log[19].contains("FROM evaluation ev"),
+            log[18].contains("SELECT DISTINCT o.hash") && log[19].contains("FROM evaluation ev"),
             "the read-only alarms still come last: {log:?}"
         );
     }

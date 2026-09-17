@@ -44,6 +44,9 @@ impl ReconcileScope {
 pub struct ReconcileReport {
     pub thawed: u64,
     pub demoted_producers: u64,
+    /// Producers failed because the rebuild they were granted never backed their
+    /// output.
+    pub failed_unhealable: u64,
     pub cached_reconciled: usize,
     pub adopted: usize,
     pub dependency_failed: Vec<TransitionChange>,
@@ -54,6 +57,7 @@ impl ReconcileReport {
     pub fn is_noop(&self) -> bool {
         self.thawed == 0
             && self.demoted_producers == 0
+            && self.failed_unhealable == 0
             && self.cached_reconciled == 0
             && self.adopted == 0
             && self.dependency_failed.is_empty()
@@ -82,7 +86,10 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
 
     if let ReconcileScope::Unstick(_) = scope {
         match crate::cache_storage::demote_unbacked_trusted_outputs(ctx).await {
-            Ok(n) => report.demoted_producers = n,
+            Ok(sweep) => {
+                report.demoted_producers = sweep.demoted;
+                report.failed_unhealable = sweep.failed;
+            }
             Err(e) => error!(error = %e, "reconcile: demote_unbacked_trusted_outputs failed"),
         }
     }
@@ -148,6 +155,7 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
             ?scope,
             thawed = report.thawed,
             demoted = report.demoted_producers,
+            failed_unhealable = report.failed_unhealable,
             cached_reconciled = report.cached_reconciled,
             adopted = report.adopted,
             dependency_failed = report.dependency_failed.len(),
