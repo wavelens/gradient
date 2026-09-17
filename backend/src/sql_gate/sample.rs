@@ -32,18 +32,28 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
         Param::DerivationHashes(_) => {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM derivation LIMIT $1) s"
         }
+        Param::CachedPathId => "SELECT id AS v FROM cached_path LIMIT 1",
         Param::CachedPathHash => "SELECT hash AS v FROM cached_path LIMIT 1",
         Param::CachedPathHashes(_) => {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM cached_path LIMIT $1) s"
         }
-        Param::BuildId => "SELECT id AS v FROM build LIMIT 1",
-        Param::BuildIds(_) => "SELECT array_agg(id) AS v FROM (SELECT id FROM build LIMIT $1) s",
+        Param::AnchorId => "SELECT id AS v FROM derivation_build LIMIT 1",
+        Param::AnchorIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation_build LIMIT $1) s"
+        }
         Param::EvaluationId => "SELECT id AS v FROM evaluation LIMIT 1",
+        Param::EvaluationIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM evaluation LIMIT $1) s"
+        }
         Param::EntryPointId => "SELECT id AS v FROM entry_point LIMIT 1",
+        Param::EntryPointIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM entry_point LIMIT $1) s"
+        }
         Param::ProjectId => "SELECT id AS v FROM project LIMIT 1",
         Param::OrganizationId => "SELECT id AS v FROM organization LIMIT 1",
         Param::UserId => r#"SELECT id AS v FROM "user" LIMIT 1"#,
         Param::CacheId => "SELECT id AS v FROM cache LIMIT 1",
+        Param::TaskId => "SELECT id AS v FROM task LIMIT 1",
         Param::Text(_) | Param::Int(_) | Param::Bool(_) | Param::Now => return None,
     })
 }
@@ -58,14 +68,19 @@ enum Shape {
 fn shape(param: &Param) -> Option<Shape> {
     Some(match param {
         Param::DerivationId
-        | Param::BuildId
+        | Param::CachedPathId
+        | Param::AnchorId
         | Param::EvaluationId
         | Param::EntryPointId
         | Param::ProjectId
         | Param::OrganizationId
         | Param::UserId
-        | Param::CacheId => Shape::Uuid,
-        Param::DerivationIds(n) | Param::BuildIds(n) => Shape::Uuids(*n),
+        | Param::CacheId
+        | Param::TaskId => Shape::Uuid,
+        Param::DerivationIds(n)
+        | Param::AnchorIds(n)
+        | Param::EvaluationIds(n)
+        | Param::EntryPointIds(n) => Shape::Uuids(*n),
         Param::DerivationHash | Param::CachedPathHash => Shape::Text,
         Param::DerivationHashes(n) | Param::CachedPathHashes(n) => Shape::Texts(*n),
         Param::Text(_) | Param::Int(_) | Param::Bool(_) | Param::Now => return None,
@@ -154,16 +169,20 @@ mod tests {
             Param::DerivationIds(4),
             Param::DerivationHash,
             Param::DerivationHashes(4),
+            Param::CachedPathId,
             Param::CachedPathHash,
             Param::CachedPathHashes(4),
-            Param::BuildId,
-            Param::BuildIds(4),
+            Param::AnchorId,
+            Param::AnchorIds(4),
             Param::EvaluationId,
+            Param::EvaluationIds(4),
             Param::EntryPointId,
+            Param::EntryPointIds(4),
             Param::ProjectId,
             Param::OrganizationId,
             Param::UserId,
             Param::CacheId,
+            Param::TaskId,
         ] {
             assert!(draw_sql(&param).is_some(), "{param:?} has no sampler");
         }

@@ -208,10 +208,8 @@ fn abort_anchors_for_evals_sql() -> String {
 }
 
 crate::sql_fn! {
-    // No Param kind names an `evaluation` id array; BuildIds stands in as the
-    // closest UUID-shaped kind the registry offers.
     ABORT_ANCHORS_FOR_EVALS = abort_anchors_for_evals_sql,
-        params = [BuildIds(64)],
+        params = [EvaluationIds(64)],
         tier = Sweep;
 }
 

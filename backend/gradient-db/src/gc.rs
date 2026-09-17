@@ -24,7 +24,7 @@ crate::sql! {
              UNION SELECT e.dependency AS derivation FROM derivation_dependency e \
              JOIN build_job bj ON bj.derivation = e.derivation \
              WHERE bj.evaluation = ANY($1::uuid[])",
-        params = [BuildIds(64)],
+        params = [EvaluationIds(64)],
         tier = Sweep;
 
     ORPHAN_DEPENDENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
