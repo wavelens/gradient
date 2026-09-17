@@ -386,6 +386,8 @@ mod tests {
 
     const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    /// A referrer of [`HASH`], for the ripple level a whole commit drives.
+    const DEP_HASH: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     fn cache_id() -> CacheId {
         CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
@@ -435,6 +437,15 @@ mod tests {
     /// The seed's reply: whether the path is whole after the recount.
     fn seed_reply(whole: bool) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([("whole".to_owned(), Value::from(whole))])]
+    }
+
+    /// A ripple level reads its referrers before it moves them, so a level that
+    /// runs takes two query results rather than one.
+    fn referrer_counts(referrer: &str, n: i32) -> Vec<BTreeMap<String, Value>> {
+        vec![BTreeMap::from([
+            ("referrer".to_owned(), Value::from(referrer.to_owned())),
+            ("n".to_owned(), Value::from(n)),
+        ])]
     }
 
     fn exec(rows_affected: u64) -> MockExecResult {
@@ -632,6 +643,7 @@ mod tests {
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([seed_reply(true)])
+            .append_query_results([referrer_counts(DEP_HASH, 1)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -673,6 +685,7 @@ mod tests {
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([seed_reply(true)])
+            .append_query_results([referrer_counts(DEP_HASH, 1)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])

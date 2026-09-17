@@ -188,6 +188,10 @@ The set operator stays `UNION`. It is what deduplicates the frontier on each ite
 
 Both edge tables carry a covering index in the direction they are probed, so the walk is index-only rather than one heap fetch per row: `(derivation, dependency)` and `(dependency, derivation)` on `derivation_dependency`, `(referrer, reference_hash)` on `cached_path_reference`. The counter ripple probes that table the other way round, from a reference to its referrers, which is what the `reference_hash` index is for. Neither table has a surrogate key; the natural pair is the primary key.
 
+A ripple level is two statements, not one: it reads its referrers and their edge counts `ORDER BY referrer`, then moves the counters through `unnest` of that bound set. Deriving the set inside the update instead left the planner with no small driver, and at production scale it answered the join with a sequential scan of the whole of `cached_path` — which both cost far more than the lookup and took the update's row locks in physical rather than hash order, deadlocking a NAR commit against a concurrent maintenance retire roughly every six minutes. Driving the update from the ordered array is what keeps the ripples inside the hash-ordered lock discipline the rest of `nar_closure` obeys.
+
+The GC's freshness seed reads `build_job` and `entry_point` by `created_at`, both indexed `INCLUDE (derivation)`: the cutoff is the moment the candidate scan ran, so the seed normally matches almost nothing and must not read the table to discover that.
+
 ### SQL/PGQ
 
 PostgreSQL 19 implements SQL/PGQ (ISO SQL:2023 part 16), which layers a property-graph view over ordinary tables and queries it with `GRAPH_TABLE`. Gradient does not use it, and adopting it is not currently possible: the first implementation matches fixed-length patterns only, with no quantified path patterns and no transitive closure, and every walk here is unbounded depth.

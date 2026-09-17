@@ -60,6 +60,7 @@ mod m20260916_000000_path_retention;
 mod m20260917_000001_derivation_build_demanded;
 mod m20260917_000002_outbox;
 mod m20260917_000003_open_work_indexes;
+mod m20260918_000000_gc_freshness_indexes;
 
 pub struct Migrator;
 
@@ -116,6 +117,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260917_000001_derivation_build_demanded::Migration),
             Box::new(m20260917_000002_outbox::Migration),
             Box::new(m20260917_000003_open_work_indexes::Migration),
+            Box::new(m20260918_000000_gc_freshness_indexes::Migration),
         ]
     }
 }
