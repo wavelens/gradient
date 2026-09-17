@@ -26,49 +26,76 @@ use sea_orm::{
 };
 use std::sync::LazyLock;
 
-/// The two columns eval-done reads off an anchor. By name, not by position: a
-/// scripted mock row is a map and hands a positional read its columns in
-/// alphabetical order.
-#[derive(sea_orm::FromQueryResult)]
-struct AnchorState {
-    status: i32,
-    demanded: bool,
+/// Whether an evaluation still names an anchor it is waiting for.
+///
+/// One `EXISTS` rather than the anchor set: the effects emitter asks this on
+/// every terminal transition, an evaluation the size of a nixpkgs eval names
+/// thousands of anchors, and the answer is almost always "yes" off the first
+/// blocking row it reaches. Reading the set instead moved tens of millions of
+/// rows a minute into the process to compute one bool.
+static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT EXISTS (SELECT 1 FROM build_job bj \
+         JOIN derivation_build db ON db.id = bj.derivation_build \
+         WHERE bj.evaluation = $1 AND {blocks}) AS blocked",
+        blocks = crate::graph_sql::blocks_evaluation_predicate("db"),
+    )
+});
+
+crate::sql_lazy! {
+    EVAL_BLOCKED = || EVAL_BLOCKED_SQL.as_str(),
+        params = [EvaluationId];
 }
 
-/// Status and demand of every anchor an evaluation names (one per `build_job`).
-/// Used for graph-derived eval-done, which reads both: see
-/// [`crate::graph_sql::blocks_evaluation`].
-pub async fn eval_anchor_states<C: ConnectionTrait>(
+/// Whether any anchor the evaluation names failed terminally: what decides
+/// `Failed` over `Completed` once [`eval_blocked`] says nothing is left.
+static EVAL_ANY_ANCHOR_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT EXISTS (SELECT 1 FROM build_job bj \
+         JOIN derivation_build db ON db.id = bj.derivation_build \
+         WHERE bj.evaluation = $1 AND db.status IN ({failed})) AS failed",
+        failed = crate::status_sql::build_in(&[
+            BuildStatus::FailedPermanent,
+            BuildStatus::FailedTimeout,
+            BuildStatus::DependencyFailed,
+        ]),
+    )
+});
+
+crate::sql_lazy! {
+    EVAL_ANY_ANCHOR_FAILED = || EVAL_ANY_ANCHOR_FAILED_SQL.as_str(),
+        params = [EvaluationId];
+}
+
+/// See [`EVAL_BLOCKED_SQL`]. An evaluation naming no anchor at all is not blocked.
+pub async fn eval_blocked<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<Vec<(BuildStatus, bool)>, DbErr> {
-    let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
-        .select_only()
-        .column(CBuildJob::DerivationBuild)
-        .filter(CBuildJob::Evaluation.eq(evaluation))
-        .into_tuple::<DerivationBuildId>()
-        .all(db)
-        .await?;
-    if anchor_ids.is_empty() {
-        return Ok(vec![]);
-    }
+) -> Result<bool, DbErr> {
+    flag(db, &EVAL_BLOCKED, evaluation, "blocked").await
+}
 
-    let raw = crate::fetch_in_chunks(&anchor_ids, |chunk| async move {
-        EDerivationBuild::find()
-            .select_only()
-            .column(CDerivationBuild::Status)
-            .column(CDerivationBuild::Demanded)
-            .filter(CDerivationBuild::Id.is_in(chunk))
-            .into_model::<AnchorState>()
-            .all(db)
-            .await
-    })
-    .await?;
+/// See [`EVAL_ANY_ANCHOR_FAILED_SQL`].
+pub async fn eval_any_anchor_failed<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<bool, DbErr> {
+    flag(db, &EVAL_ANY_ANCHOR_FAILED, evaluation, "failed").await
+}
 
-    Ok(raw
-        .into_iter()
-        .filter_map(|a| Some((BuildStatus::try_from(a.status).ok()?, a.demanded)))
-        .collect())
+/// A one-row, one-column `EXISTS` read. A missing row is an error and not `false`:
+/// an eval-done decision that silently read "nothing blocks" would settle an
+/// evaluation whose builds are still running.
+async fn flag<C: ConnectionTrait>(
+    db: &C,
+    query: &crate::sql::Query,
+    evaluation: EvaluationId,
+    column: &str,
+) -> Result<bool, DbErr> {
+    db.query_one_raw(query.bind([Value::Uuid(Some(evaluation.into_inner()))]))
+        .await?
+        .ok_or_else(|| DbErr::Custom(format!("{} returned no row", query.name)))?
+        .try_get::<bool>("", column)
 }
 
 /// The anchor's current status, for the dispatcher's last look before a
@@ -111,6 +138,30 @@ pub async fn evals_referencing_derivation<C: ConnectionTrait>(
         .into_tuple::<EvaluationId>()
         .all(db)
         .await
+}
+
+/// Bulk variant of [`evals_referencing_derivation`]: one chunked `IN` per batch
+/// instead of a round-trip per derivation. The finalize fan-out asks for a whole
+/// batch of derivations at once and only ever wants the union.
+pub async fn evals_referencing_derivations<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<EvaluationId>, DbErr> {
+    let mut all = crate::fetch_in_chunks(derivations, |chunk| async move {
+        EBuildJob::find()
+            .select_only()
+            .column(CBuildJob::Evaluation)
+            .distinct()
+            .filter(CBuildJob::Derivation.is_in(chunk))
+            .into_tuple::<EvaluationId>()
+            .all(db)
+            .await
+    })
+    .await?;
+    all.sort_unstable();
+    all.dedup();
+
+    Ok(all)
 }
 
 /// All `build_job` rows for `derivation`, across every evaluation that needs it.

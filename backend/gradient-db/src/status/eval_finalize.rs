@@ -11,11 +11,9 @@
 
 use super::evaluation_status::update_evaluation_status;
 use crate::DbContext;
-use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
-use std::collections::HashSet;
 use tracing::info;
 
 /// Settle `evaluation_id` if the build graph says it is done: no anchor it names
@@ -27,12 +25,11 @@ pub async fn check_evaluation_done(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
 ) -> Result<(), DbErr> {
-    let anchors = crate::reachability::eval_anchor_states(&ctx.worker_db, evaluation_id).await?;
-
-    let any_active = anchors
-        .iter()
-        .any(|&(status, demanded)| crate::graph_sql::blocks_evaluation(status, demanded));
-    if any_active {
+    // The blocking question first, and as an EXISTS: it is asked on every terminal
+    // transition and the answer is almost always "yes" off the first blocking
+    // anchor, so neither the anchor set nor the evaluation row is worth reading
+    // until it comes back false.
+    if crate::reachability::eval_blocked(&ctx.worker_db, evaluation_id).await? {
         return Ok(());
     }
 
@@ -47,14 +44,8 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    let any_failed = anchors.iter().any(|(s, _)| {
-        matches!(
-            s,
-            BuildStatus::FailedPermanent
-                | BuildStatus::FailedTimeout
-                | BuildStatus::DependencyFailed
-        )
-    });
+    let any_failed =
+        crate::reachability::eval_any_anchor_failed(&ctx.worker_db, evaluation_id).await?;
 
     let eval_error_messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
@@ -99,19 +90,18 @@ fn in_build_phase(eval: &MEvaluation) -> bool {
 }
 
 /// Finalize every evaluation referencing any of `derivations`, deduplicated.
+///
+/// The referencing set is resolved for the whole batch in one read rather than one
+/// per derivation: a demand loss names as many derivations as the recompute moved,
+/// and the union is all this wants.
 pub async fn finalize_evals_for_derivations(
     ctx: &DbContext,
     derivations: &[DerivationId],
 ) -> Result<(), DbErr> {
-    let mut seen = HashSet::new();
-    for &derivation in derivations {
-        for evaluation_id in
-            crate::reachability::evals_referencing_derivation(&ctx.worker_db, derivation).await?
-        {
-            if seen.insert(evaluation_id) {
-                check_evaluation_done(ctx, evaluation_id).await?;
-            }
-        }
+    let evaluations =
+        crate::reachability::evals_referencing_derivations(&ctx.worker_db, derivations).await?;
+    for evaluation_id in evaluations {
+        check_evaluation_done(ctx, evaluation_id).await?;
     }
 
     Ok(())
@@ -123,17 +113,11 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 
-    fn anchor(status: BuildStatus, demanded: bool) -> BTreeMap<String, Value> {
-        BTreeMap::from([
-            ("status".to_owned(), Value::Int(Some(status as i32))),
-            ("demanded".to_owned(), Value::Bool(Some(demanded))),
-        ])
-    }
-
-    fn named() -> Vec<BTreeMap<String, Value>> {
+    /// The reply to either `EXISTS` read: one row, one boolean column.
+    fn flag(column: &str, value: bool) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([(
-            "derivation_build".to_owned(),
-            Value::from(DerivationBuildId::now_v7().into_inner()),
+            column.to_owned(),
+            Value::Bool(Some(value)),
         )])]
     }
 
@@ -145,20 +129,15 @@ mod tests {
         }
     }
 
-    /// The anchors an evaluation named but nothing demands are never built: no
-    /// gate queues them and no event is coming, so an evaluation that waits for
-    /// one waits forever (#666). They are settled work, and the evaluation that
-    /// named them is done.
+    /// Nothing blocking left settles the evaluation, and the failure question is
+    /// asked only then - it decides `Failed` over `Completed` and nothing else.
     #[tokio::test]
-    async fn an_anchor_nothing_demands_does_not_hold_its_evaluation_open() {
+    async fn an_evaluation_nothing_blocks_settles() {
         let eval = building();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([named()])
-            .append_query_results([vec![
-                anchor(BuildStatus::Completed, true),
-                anchor(BuildStatus::Created, false),
-            ]])
+            .append_query_results([flag("blocked", false)])
             .append_query_results([vec![eval.clone()]])
+            .append_query_results([flag("failed", false)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![
                 MockExecResult {
@@ -179,18 +158,18 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
             log.iter().any(|s| s.contains(r#"UPDATE \"evaluation\""#)),
-            "the evaluation settles on what is demanded of it: {log:?}"
+            "the evaluation settles once nothing blocks it: {log:?}"
         );
     }
 
-    /// The same anchor with something still demanding it is work in flight, and
-    /// the evaluation is not read at all until nothing blocks it.
+    /// An anchor still blocking stops the pass at the one read. The emitter asks
+    /// this on every terminal transition, so the blocked answer must cost a single
+    /// `EXISTS` and must not read the anchor set or the evaluation row.
     #[tokio::test]
-    async fn a_demanded_anchor_holds_its_evaluation_open() {
+    async fn a_blocked_evaluation_costs_one_read() {
         let eval = building();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([named()])
-            .append_query_results([vec![anchor(BuildStatus::Created, true)]])
+            .append_query_results([flag("blocked", true)])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -198,10 +177,21 @@ mod tests {
         drop(ctx);
 
         let log = crate::pool::statements(pool.into_transaction_log());
-        assert_eq!(
-            log.len(),
-            2,
-            "it reads the anchors it named and stops there: {log:?}"
-        );
+        assert_eq!(log.len(), 1, "one EXISTS and nothing else: {log:?}");
+        assert!(log[0].contains("SELECT EXISTS"), "{log:?}");
+    }
+
+    /// A reply with no row is an error, not "nothing blocks": settling an
+    /// evaluation whose builds are still running is the dead zone this whole
+    /// module exists to close.
+    #[tokio::test]
+    async fn a_missing_reply_does_not_read_as_settled() {
+        let eval = building();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+
+        let (ctx, _pool) = crate::test_ctx::ctx(db).await;
+        assert!(check_evaluation_done(&ctx, eval.id).await.is_err());
     }
 }

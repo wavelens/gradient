@@ -314,17 +314,13 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
     if !finished.is_empty() {
         match crate::build_attempt::latest_attempts_by_derivation(db, &finished).await {
             Ok(attempts) => {
-                for attempt in attempts.values() {
-                    if let Err(e) = crate::outbox::enqueue(
-                        db,
-                        OutboxKind::LogFinalize,
-                        attempt.to_string(),
-                        serde_json::json!({ "attempt": attempt }),
-                    )
-                    .await
-                    {
-                        error!(error = %e, %attempt, "failed to enqueue a log finalization");
-                    }
+                let rows = attempts
+                    .values()
+                    .map(|a| (a.to_string(), serde_json::json!({ "attempt": a })))
+                    .collect();
+                if let Err(e) = crate::outbox::enqueue_many(db, OutboxKind::LogFinalize, rows).await
+                {
+                    error!(error = %e, "failed to enqueue the log finalizations");
                 }
             }
             Err(e) => error!(error = %e, "failed to look up the attempts of finished builds"),
