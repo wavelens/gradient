@@ -36,6 +36,16 @@ crate::sql! {
          ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING",
         params = [NewUuid, Int(3), Text("outbox-gate-probe"), Text("{}")];
 
+    /// [`OUTBOX_ENQUEUE`] for a whole batch. A bulk transition finishes as many
+    /// builds as the sweep moved and owes each one a row; one round trip per row
+    /// put the transition emitter's cost on the number of builds that finished
+    /// together rather than on the work itself.
+    OUTBOX_ENQUEUE_MANY = "INSERT INTO outbox (id, kind, key, payload, created_at, next_attempt_at) \
+         SELECT r.id, $2::smallint, r.key, r.payload::jsonb, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC') \
+         FROM unnest($1::uuid[], $3::text[], $4::text[]) AS r(id, key, payload) \
+         ON CONFLICT (kind, key) WHERE delivered_at IS NULL AND failed_at IS NULL DO NOTHING",
+        params = [NewUuids(64), Int(3), Texts("outbox-gate-probe", 64), Texts("{}", 64)];
+
     /// The lease and the selection are one statement, so a row is never read by
     /// one claimer and leased by another.
     OUTBOX_CLAIM_DUE = "UPDATE outbox o SET next_attempt_at = (now() AT TIME ZONE 'UTC') + make_interval(secs => $2::int) \
@@ -99,6 +109,40 @@ pub async fn enqueue<C: ConnectionTrait>(
         Value::SmallInt(Some(i16::from(kind))),
         Value::String(Some(key)),
         Value::String(Some(payload.to_string())),
+    ]))
+    .await?;
+
+    Ok(())
+}
+
+/// [`enqueue`] for a batch of one kind, in one statement. Keys are sorted so two
+/// concurrent batches over an overlapping set take the same lock order, the way
+/// every other batched write here does.
+pub async fn enqueue_many<C: ConnectionTrait>(
+    db: &C,
+    kind: OutboxKind,
+    rows: Vec<(String, serde_json::Value)>,
+) -> Result<(), DbErr> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let mut rows = rows;
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    rows.dedup_by(|a, b| a.0 == b.0);
+
+    let ids: Vec<uuid::Uuid> = rows
+        .iter()
+        .map(|_| OutboxId::now_v7().into_inner())
+        .collect();
+    let keys: Vec<String> = rows.iter().map(|(key, _)| key.clone()).collect();
+    let payloads: Vec<String> = rows.iter().map(|(_, p)| p.to_string()).collect();
+
+    db.execute_raw(OUTBOX_ENQUEUE_MANY.bind([
+        ids.into(),
+        Value::SmallInt(Some(i16::from(kind))),
+        keys.into(),
+        payloads.into(),
     ]))
     .await?;
 
