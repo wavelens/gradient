@@ -21,10 +21,10 @@ use tracing::{info, warn};
 
 use crate::ingest;
 use crate::messages::{
-    DemoteReport, Demotion, IngestBatch, IngestReport, NarCommit, NarCommitted, NarConfirm,
-    RequeueScope, Transition, TransitionReport,
+    DemoteReport, Demotion, GcReport, GcRequest, IngestBatch, IngestReport, NarCommit,
+    NarCommitted, NarConfirm, RequeueScope, Transition, TransitionReport,
 };
-use crate::{demote, known, nar, requeue, transition};
+use crate::{demote, gc, known, nar, requeue, transition};
 
 /// How long a caller waits for the actor to exist after a restart.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -51,6 +51,7 @@ pub enum GraphMsg {
     Transition(Transition, Reply<TransitionReport>),
     Requeue(RequeueScope, Reply<u64>),
     Demote(Demotion, Reply<DemoteReport>),
+    Gc(GcRequest, Reply<GcReport>),
     Flush,
 }
 
@@ -114,7 +115,7 @@ impl Actor for GraphActor {
                 st.queued_rows += batch.derivations.len();
                 st.queued.push((batch, reply));
                 if st.queued_rows >= INGEST_ROW_BUDGET {
-                    flush(st).await;
+                    flush(&myself, st).await;
                 } else if !st.flush_pending {
                     st.flush_pending = true;
                     let _ = myself.send_message(GraphMsg::Flush);
@@ -122,10 +123,10 @@ impl Actor for GraphActor {
             }
             GraphMsg::Flush => {
                 st.flush_pending = false;
-                flush(st).await;
+                flush(&myself, st).await;
             }
             GraphMsg::KnownDerivations { drv_hashes, reply } => {
-                flush(st).await;
+                flush(&myself, st).await;
                 let result = known::prunable(&st.ctx.worker_db, drv_hashes)
                     .await
                     .map_err(Into::into);
@@ -133,7 +134,7 @@ impl Actor for GraphActor {
                 let _ = reply.send(result);
             }
             GraphMsg::CommitNar(commit, reply) => {
-                flush(st).await;
+                flush(&myself, st).await;
                 let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
                     nar::commit(scoped, &commit).await
                 })
@@ -146,7 +147,7 @@ impl Actor for GraphActor {
                 let _ = reply.send(result);
             }
             GraphMsg::ConfirmNar(confirm, reply) => {
-                flush(st).await;
+                flush(&myself, st).await;
                 let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
                     nar::confirm(scoped, &confirm).await
                 })
@@ -155,7 +156,7 @@ impl Actor for GraphActor {
                 let _ = reply.send(result);
             }
             GraphMsg::Transition(t, reply) => {
-                flush(st).await;
+                flush(&myself, st).await;
                 let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
                     transition::apply(scoped, t).await
                 })
@@ -164,7 +165,7 @@ impl Actor for GraphActor {
                 let _ = reply.send(result);
             }
             GraphMsg::Requeue(scope, reply) => {
-                flush(st).await;
+                flush(&myself, st).await;
                 let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
                     requeue::apply(scoped, scope).await
                 })
@@ -173,9 +174,18 @@ impl Actor for GraphActor {
                 let _ = reply.send(result);
             }
             GraphMsg::Demote(demotion, reply) => {
-                flush(st).await;
+                flush(&myself, st).await;
                 let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
                     demote::apply(scoped, demotion).await
+                })
+                .await;
+                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                let _ = reply.send(result);
+            }
+            GraphMsg::Gc(request, reply) => {
+                flush(&myself, st).await;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+                    gc::apply(scoped, request).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -191,7 +201,7 @@ impl Actor for GraphActor {
 /// to all of them and run the post-commit effects of the ones that landed. A
 /// batch that fails is lost (the wire has no ack the worker could retry on),
 /// so its evaluation is failed rather than left with a hole in its graph.
-async fn flush(st: &mut GraphState) {
+async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     if st.queued.is_empty() {
         return;
     }
@@ -216,7 +226,7 @@ async fn flush(st: &mut GraphState) {
             for ((batch, reply), outcome) in batches.into_iter().zip(replies).zip(outcomes) {
                 match outcome {
                     Ok(report) => {
-                        ingest::after_commit(&st.ctx, &batch, &report).await;
+                        ingest::after_commit(&st.ctx, myself, &batch, &report).await;
                         let _ = reply.send(Ok(report));
                     }
                     Err(e) => {

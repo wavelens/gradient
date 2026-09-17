@@ -11,6 +11,7 @@ pub mod actor;
 pub mod messages;
 
 mod demote;
+mod gc;
 mod ingest;
 mod known;
 mod nar;
@@ -193,6 +194,16 @@ impl Graph {
             return Ok(DemoteReport::default());
         }
         self.call(|reply| GraphMsg::Demote(demotion, reply)).await
+    }
+
+    /// Apply one bounded maintenance delete. The sweep scans on the pool and
+    /// reclaims the objects of what comes back, never of what it asked about.
+    pub async fn gc(&self, request: GcRequest) -> anyhow::Result<GcReport> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(GcReport::default());
+        }
+        self.call(|reply| GraphMsg::Gc(request, reply)).await
     }
 }
 

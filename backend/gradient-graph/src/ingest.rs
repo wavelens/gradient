@@ -1045,7 +1045,12 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
 
 /// What a landed batch triggers outside its transaction: forge checks for the
 /// entry points, the per-task evaluation GC, and the live-channel ping.
-pub(crate) async fn after_commit(ctx: &DbContext, batch: &IngestBatch, report: &IngestReport) {
+pub(crate) async fn after_commit(
+    ctx: &DbContext,
+    actor: &ractor::ActorRef<crate::actor::GraphMsg>,
+    batch: &IngestBatch,
+    report: &IngestReport,
+) {
     if report.skipped {
         return;
     }
@@ -1056,8 +1061,10 @@ pub(crate) async fn after_commit(ctx: &DbContext, batch: &IngestBatch, report: &
         if let Ok(Some(task)) = ETask::find_by_id(task_id).one(&ctx.worker_db).await {
             let gc_ctx = ctx.detached();
             let keep = task.keep_evaluations as usize;
+            let actor = actor.clone();
             ctx.shutdown.spawn(async move {
-                if let Err(e) = gradient_db::gc_task_evaluations(&gc_ctx, task_id, keep).await {
+                if let Err(e) = crate::gc::gc_task_evaluations(&gc_ctx, actor, task_id, keep).await
+                {
                     error!(error = %e, %task_id, "GC: per-task evaluation GC failed");
                 }
             });
