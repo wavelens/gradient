@@ -6,7 +6,7 @@
 
 //! The one graph reconciler: the heals for state no event can reach, run at an
 //! evaluation's stream completion (`Eval`) and when a building evaluation is
-//! graph-stuck (`Unstick`). No scope runs on a tick and nothing here is a
+//! graph-stuck (`Unstick`). Both scopes now run the same steps. No scope runs on a tick and nothing here is a
 //! fixpoint; every counter is moved by the event that changes it, and
 //! [`crate::readiness::repair_pending`] is the backstop for a move that was lost.
 //!
@@ -27,7 +27,10 @@ pub enum ReconcileScope {
     /// dependents of a deterministic failure, name the pending anchors it reaches
     /// for the evaluation, promote the closure.
     Eval(EvaluationId),
-    /// A wedged evaluation: the `Eval` steps plus the unbacked-output demote.
+    /// A wedged evaluation. The same steps: what used to set this scope apart was
+    /// an unbacked-output demote, and the state it repaired is now prevented at the
+    /// source rather than swept for. The scope stays as the provenance a pass is
+    /// logged with - why it ran, which is not recoverable from what it did.
     Unstick(EvaluationId),
 }
 
@@ -43,10 +46,6 @@ impl ReconcileScope {
 #[derive(Debug, Default)]
 pub struct ReconcileReport {
     pub thawed: u64,
-    pub demoted_producers: u64,
-    /// Producers failed because the rebuild they were granted never backed their
-    /// output.
-    pub failed_unhealable: u64,
     pub cached_reconciled: usize,
     pub adopted: usize,
     pub dependency_failed: Vec<TransitionChange>,
@@ -56,8 +55,6 @@ pub struct ReconcileReport {
 impl ReconcileReport {
     pub fn is_noop(&self) -> bool {
         self.thawed == 0
-            && self.demoted_producers == 0
-            && self.failed_unhealable == 0
             && self.cached_reconciled == 0
             && self.adopted == 0
             && self.dependency_failed.is_empty()
@@ -81,16 +78,6 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
         Err(e) => {
             error!(error = %e, %evaluation, "reconcile: requeue_failed_closure_for_eval failed")
-        }
-    }
-
-    if let ReconcileScope::Unstick(_) = scope {
-        match crate::cache_storage::demote_unbacked_trusted_outputs(ctx).await {
-            Ok(sweep) => {
-                report.demoted_producers = sweep.demoted;
-                report.failed_unhealable = sweep.failed;
-            }
-            Err(e) => error!(error = %e, "reconcile: demote_unbacked_trusted_outputs failed"),
         }
     }
 
@@ -154,8 +141,6 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         debug!(
             ?scope,
             thawed = report.thawed,
-            demoted = report.demoted_producers,
-            failed_unhealable = report.failed_unhealable,
             cached_reconciled = report.cached_reconciled,
             adopted = report.adopted,
             dependency_failed = report.dependency_failed.len(),

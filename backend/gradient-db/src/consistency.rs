@@ -41,7 +41,10 @@ pub struct ConsistencyReport {
     /// `build_job` rows this pass inserted for pending anchors a live evaluation
     /// reaches and nobody named. A repair, like the drift counts.
     pub adopted: i64,
-    /// Outputs of terminal-success producers with no backing artifact.
+    /// Outputs of terminal-success producers with no backing artifact. Nothing
+    /// repairs this any more: every way it was known to arise is closed where it
+    /// happens (see [`crate::cache_storage::unbacked_trusted_outputs_select`]), so
+    /// a non-zero count is a bug in one of those, not a queue of work.
     pub unbacked_trusted_outputs: i64,
     /// `Building` evaluations with zero non-terminal anchors left.
     pub wedged_building_evals: i64,

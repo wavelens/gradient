@@ -33,11 +33,10 @@ pub use self::sign_sweep::sign_missing_signatures;
 
 use futures::future::BoxFuture;
 use gradient_core::ServerState;
-use gradient_graph::Demotion;
 use gradient_util::supervision::ChildSpec;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// One periodic pass: a name (logs and health), a tick interval, the budget
 /// past which a pass is cancelled, and the async fn to run.
@@ -143,25 +142,6 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
         Ok(n) if n > 0 => info!(evicted = n, "Stale cached-path eviction completed"),
         Ok(_) => {}
         Err(e) => error!(error = ?e, "Stale cached-path eviction failed"),
-    }
-    // The GC passes above retire the `cached_path` rows they drop, so the counters
-    // and the anchor side move in the deleting transaction, for every hash they ask
-    // about and not only the ones that moved. This stays the backstop for an anchor
-    // NO retire is invoked for - trusted, with an output nothing ever asked to drop
-    // and no backing NAR - so its dependents stop failing `InputsUnavailable` and
-    // the next eval rebuilds it.
-    match state.graph.demote(Demotion::UnbackedTrustedOutputs).await {
-        Ok(report) if report.failed > 0 => warn!(
-            reset = report.demoted,
-            failed = report.failed,
-            "Failed trusted producers whose granted rebuild never backed their output"
-        ),
-        Ok(report) if report.demoted > 0 => info!(
-            reset = report.demoted,
-            "Demoted trusted producers with unfetchable outputs"
-        ),
-        Ok(_) => {}
-        Err(e) => error!(error = ?e, "Cache-trust reconcile failed"),
     }
     if let Err(e) =
         gradient_ci::unpark_storage_full_all(&state.worker_db, state.config.storage.max_storage_gb)
