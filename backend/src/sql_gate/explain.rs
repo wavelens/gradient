@@ -79,16 +79,18 @@ async fn run_one(
         }
     }
 
-    align_array_widths(&mut values);
+    let inputs = align_array_widths(&mut values);
 
     let txn = db.begin().await?;
     let measured = measure_in(&txn, query, &sql, values).await;
     txn.rollback().await?;
 
-    let measured = match measured {
+    let mut measured = match measured {
         Ok(plan) => measure(&plan).map_err(|err| anyhow::anyhow!("{err}"))?,
         Err(err) => return Ok(Outcome::Unmeasured(format!("explain failed: {err}"))),
     };
+
+    measured.inputs = inputs as u64;
 
     let violations = check(&measured, &query.budget, relation_rows);
     Ok(if violations.is_empty() {
@@ -127,10 +129,11 @@ async fn measure_in(
 /// `unnest($1, $2, ...)` pads the shorter arrays with NULL and a NOT NULL column
 /// then rejects the row, so every array a statement binds is cut to the shortest
 /// one drawn: a table with fewer rows than the declared width decides the width
-/// for all of them, literal arrays included.
-fn align_array_widths(values: &mut [Value]) {
+/// for all of them, literal arrays included. The width is also what the
+/// statement was asked to do work for.
+fn align_array_widths(values: &mut [Value]) -> usize {
     let Some(width) = values.iter().filter_map(array_len).min() else {
-        return;
+        return 0;
     };
 
     for value in values {
@@ -138,6 +141,8 @@ fn align_array_widths(values: &mut [Value]) {
             items.truncate(width);
         }
     }
+
+    width
 }
 
 fn array_len(value: &Value) -> Option<usize> {
