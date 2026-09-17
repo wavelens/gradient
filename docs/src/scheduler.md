@@ -115,6 +115,17 @@ with its new value, so the caller queues what gained demand and releases what lo
 it. An anchor already `Building` is left to finish: the bytes it produces are
 cached and useful, while an abort throws the work away.
 
+What nothing demands is never promoted and never built, so it is settled work and
+not pending work. Both readers of "is this evaluation still waiting" -
+`check_evaluation_done` and the scheduler's pending set - ask
+`graph_sql::blocks_evaluation`, which counts a pending anchor only while something
+demands it, and always counts one that is `Queued` or `Building`, because the
+dispatcher hands out work on the status alone. An evaluation that counted the rest
+would wait forever, because the event it waits for is the one that is never
+coming. A demand loss settles work without moving any status, so the emitter asks
+the evaluations that name what lost it whether they are done; no anchor of theirs
+need have transitioned at all.
+
 Every transition that carries an anchor into or out of the builder statuses
 (`Created`, `Queued`, `Building`, `FailedTransient`) recomputes from it, and the
 transition-effects emitter is where that happens - the same one place the graph
@@ -921,7 +932,9 @@ cannot make progress, auto-unparking once the blocker clears:
   (issue #381).
 - **Build phase** - a `Building` eval parks with a `workers` reason listing the
   unmet `(architecture, required_features)` combinations when no connected
-  worker can satisfy any pending build.
+  worker can satisfy any pending build. Pending means what still blocks the
+  evaluation, so an anchor nothing demands is not in the set, and an evaluation
+  with nothing left in it is finalized here rather than parked.
 - **Graph stuck** - the pool *can* build every pending anchor (so the `workers`
   reason would carry an empty `unmet` set) yet none is dispatchable: nothing in
   the pending set passes the dispatch gate and no in-flight build is left to fire

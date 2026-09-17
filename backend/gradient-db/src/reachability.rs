@@ -26,12 +26,22 @@ use sea_orm::{
 };
 use std::sync::LazyLock;
 
-/// Build status of every anchor an evaluation needs (one per `build_job`).
-/// Used for graph-derived eval-done.
-pub async fn eval_anchor_statuses<C: ConnectionTrait>(
+/// The two columns eval-done reads off an anchor. By name, not by position: a
+/// scripted mock row is a map and hands a positional read its columns in
+/// alphabetical order.
+#[derive(sea_orm::FromQueryResult)]
+struct AnchorState {
+    status: i32,
+    demanded: bool,
+}
+
+/// Status and demand of every anchor an evaluation names (one per `build_job`).
+/// Used for graph-derived eval-done, which reads both: see
+/// [`crate::graph_sql::blocks_evaluation`].
+pub async fn eval_anchor_states<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<Vec<BuildStatus>, DbErr> {
+) -> Result<Vec<(BuildStatus, bool)>, DbErr> {
     let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
         .select_only()
         .column(CBuildJob::DerivationBuild)
@@ -47,8 +57,9 @@ pub async fn eval_anchor_statuses<C: ConnectionTrait>(
         EDerivationBuild::find()
             .select_only()
             .column(CDerivationBuild::Status)
+            .column(CDerivationBuild::Demanded)
             .filter(CDerivationBuild::Id.is_in(chunk))
-            .into_tuple::<i32>()
+            .into_model::<AnchorState>()
             .all(db)
             .await
     })
@@ -56,7 +67,7 @@ pub async fn eval_anchor_statuses<C: ConnectionTrait>(
 
     Ok(raw
         .into_iter()
-        .filter_map(|s| BuildStatus::try_from(s).ok())
+        .filter_map(|a| Some((BuildStatus::try_from(a.status).ok()?, a.demanded)))
         .collect())
 }
 
