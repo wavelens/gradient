@@ -16,21 +16,6 @@
     skipDirectories = false;
   };
 
-  # Phase 10g relays busybox off the upstream and must never BUILD it, but the
-  # graph walks its whole build closure and dispatches each derivation, and those
-  # reach for the network (nixpkgs patches busybox's unzip applet with the
-  # madler/unzip CVE patches). A dispatch that slips through must build offline,
-  # or it fails permanently and poisons busybox with DependencyFailed on the next
-  # retire. This is hello's treatment applied to busybox: the closure of its
-  # `.drv`, which carries every input but none of busybox's own outputs - those
-  # stay upstream-only, which is what `anchor_of("busybox") == "3 1 1"` proves
-  # arrived by relay.
-  busyboxStore = import ../../../scripts/store.nix {
-    inherit pkgs;
-    package = pkgs.busybox;
-    skipDirectories = false;
-  };
-
   builderNode = workerId: { config, pkgs, lib, ... }: {
     imports = [ ../../../modules/gradient-worker.nix ];
 
@@ -39,7 +24,7 @@
     # every derivation the worker walks is already substituted.  Without
     # this the worker would try to fetch tarballs from the internet -
     # which the test VM cannot reach - and every build would fail.
-    virtualisation.additionalPaths = [ testStore busyboxStore ];
+    virtualisation.additionalPaths = [ testStore ];
 
     nix.settings = {
       trusted-users = [
@@ -80,8 +65,8 @@ in {
     name = "gradient-cache";
     # Phases 10e to 10h add five more evaluations of the repository, a two-session
     # lock handshake and four retire-and-recover cycles to what was already a full
-    # build-and-cache run. 3600 s aborted mid-10g once that phase stopped failing
-    # in its first seconds and began relaying for real.
+    # build-and-cache run, and 10g only began relaying for real once it stopped
+    # failing in its first seconds.
     globalTimeout = 5400;
 
     defaults = {
