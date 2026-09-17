@@ -82,15 +82,25 @@ fn ci_reports(status: BuildStatus) -> bool {
 /// That second round cannot need a third. It only ever moves rows between
 /// `Created` and `Queued`, both of which are in [`BUILDER_STATUSES`], so no row it
 /// touches crosses the boundary [`demand_moves`] keys on.
+///
+/// Losing demand settles work without moving a status, and `announce`'s finalize
+/// runs before the recompute that takes it away, so the evaluations naming what
+/// lost it are asked again here. Nothing else would ask: no anchor of theirs need
+/// have transitioned at all (#666).
 pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChange]) {
     if changes.is_empty() {
         return;
     }
 
     announce(ctx, changes).await;
-    let regated = move_demand(ctx, changes).await;
+    let (regated, undemanded) = move_demand(ctx, changes).await;
     if !regated.is_empty() {
         announce(ctx, &regated).await;
+    }
+    if !undemanded.is_empty()
+        && let Err(e) = super::eval_finalize::finalize_evals_for_derivations(ctx, &undemanded).await
+    {
+        error!(error = %e, "eval finalize after a demand loss failed");
     }
 }
 
@@ -123,9 +133,13 @@ fn demand_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
 /// An anchor already `Building` keeps building: [`crate::readiness::unpromote_ungated`]
 /// moves only `Queued` rows. The bytes a running build produces are cached and useful,
 /// while an abort throws the work away and complicates attempt attribution.
-async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Vec<TransitionChange> {
+async fn move_demand(
+    ctx: &DbContext,
+    changes: &[TransitionChange],
+) -> (Vec<TransitionChange>, Vec<DerivationId>) {
     let db = &ctx.worker_db;
     let mut regated = Vec::new();
+    let mut undemanded = Vec::new();
     for chunk in demand_moves(changes).chunks(crate::IN_CHUNK_SIZE) {
         let moved = match crate::readiness::recompute_demand(db, chunk).await {
             Ok(moved) => moved,
@@ -147,9 +161,10 @@ async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Vec<Trans
                 Err(e) => error!(error = %e, "failed to release undemanded anchors"),
             }
         }
+        undemanded.extend(moved.lost);
     }
 
-    regated
+    (regated, undemanded)
 }
 
 /// The graph version that invalidates the per-entry-point histogram cache, board
@@ -451,7 +466,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
 
-        move_demand(
+        let (_, undemanded) = move_demand(
             &ctx,
             &[TransitionChange {
                 derivation: crossed,
@@ -461,6 +476,12 @@ mod tests {
         )
         .await;
         drop(ctx);
+
+        assert_eq!(
+            undemanded,
+            vec![lost],
+            "what lost its demand is reported, so the evaluations waiting on it can settle"
+        );
 
         let log = crate::pool::statements(pool.into_transaction_log()).join(" ");
         assert!(log.contains("SET LOCAL work_mem"), "{log}");

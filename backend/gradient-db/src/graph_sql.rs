@@ -216,6 +216,20 @@ pub const BUILDER_STATUSES: [BuildStatus; 4] = [
     BuildStatus::FailedTransient,
 ];
 
+/// Anchor `status`/`demanded` is work its evaluation is still waiting for: what
+/// nothing demands is never promoted, so an evaluation that counts it as pending
+/// waits forever (#666). Every terminal status is settled by definition, and an
+/// anchor the dispatcher can still pick up - or already has - is work in flight
+/// whatever demand says now: dispatch reads the status rather than the gate, and
+/// a running build is deliberately left to finish.
+pub fn blocks_evaluation(status: BuildStatus, demanded: bool) -> bool {
+    if !BUILDER_STATUSES.contains(&status) {
+        return false;
+    }
+
+    demanded || matches!(status, BuildStatus::Queued | BuildStatus::Building)
+}
+
 /// Anchor `{anchor}` (its `derivation` row aliased `{walked}`) is a builder:
 /// recorded, not a relay, and in a status an evaluation will still have built.
 /// The one definition of what demands its inputs and of what the adoption walk
@@ -468,6 +482,37 @@ mod tests {
             )),
             "{cte}"
         );
+    }
+
+    /// An anchor nothing demands is never promoted, so an evaluation that waits
+    /// for it never finishes: it is settled work, not pending work. `Queued` and
+    /// `Building` are the exception in the other direction - the dispatcher reads
+    /// the status, so both can still produce a build after the demand is gone.
+    #[test]
+    fn only_demanded_or_in_flight_work_blocks_an_evaluation() {
+        use BuildStatus::*;
+
+        for status in BUILDER_STATUSES {
+            assert!(
+                blocks_evaluation(status, true),
+                "{status:?} is pending work something wants"
+            );
+        }
+        for status in [Queued, Building] {
+            assert!(
+                blocks_evaluation(status, false),
+                "{status:?} is handed out on its status alone, demand or not"
+            );
+        }
+        for status in [Created, FailedTransient] {
+            assert!(
+                !blocks_evaluation(status, false),
+                "{status:?} with nothing demanding it is work that never happens"
+            );
+        }
+        for status in [Completed, Substituted, FailedPermanent, DependencyFailed] {
+            assert!(!blocks_evaluation(status, true), "{status:?} is settled");
+        }
     }
 
     /// The raise has to be `SET LOCAL` and it has to happen inside the walk's own

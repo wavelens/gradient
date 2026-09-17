@@ -668,11 +668,12 @@ in {
           # logging and names nothing.
           anchors = sql(
               f"SELECT db.status::text || ' fetchable=' || db.fetchable::int::text"
+              f"  || ' demanded=' || db.demanded::int::text"
               f"  || ' unready_deps=' || db.unready_deps || ' count=' || count(*)::text"
               f" FROM derivation_build db"
               f" JOIN build_job bj ON bj.derivation_build = db.id"
               f" WHERE bj.evaluation = '{eval_id}'"
-              f" GROUP BY db.status, db.fetchable, db.unready_deps ORDER BY 1;"
+              f" GROUP BY db.status, db.fetchable, db.demanded, db.unready_deps ORDER BY 1;"
           )
           j = server.succeed(
               "journalctl -u gradient-server --no-pager --since='-900s' -n 4000"
