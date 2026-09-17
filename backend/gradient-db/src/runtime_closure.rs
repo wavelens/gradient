@@ -148,9 +148,13 @@ pub async fn references_for_hashes<C: ConnectionTrait>(
     Ok(out)
 }
 
+/// The path lookup is fenced like the walk above it: joining the closure to
+/// `cached_path` plainly gives the planner no size for the closure, and it
+/// answers with a hash join over every path in the cache.
 fn runtime_closure_reachable_sql() -> String {
     format!(
-        "{} SELECT cp.* FROM cached_path cp JOIN refs r ON cp.hash = r.hash",
+        "{} SELECT s.* FROM refs r, \
+         LATERAL (SELECT cp.* FROM cached_path cp WHERE cp.hash = r.hash OFFSET 0) s",
         crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
     )
 }

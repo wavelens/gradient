@@ -55,10 +55,14 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
+/// The edge lookup is fenced like the walk above it: joining the closure to the
+/// edge table plainly gives the planner no size for the closure, and it answers
+/// with a hash join over every edge in the database.
 fn transitive_closure_edges_sql() -> String {
     format!(
-        "{} SELECT e.derivation, e.dependency FROM derivation_dependency e \
-         JOIN closure c ON e.derivation = c.derivation",
+        "{} SELECT s.derivation, s.dependency FROM closure c, \
+         LATERAL (SELECT e.derivation, e.dependency FROM derivation_dependency e \
+                  WHERE e.derivation = c.derivation OFFSET 0) s",
         roots_closure_cte()
     )
 }
