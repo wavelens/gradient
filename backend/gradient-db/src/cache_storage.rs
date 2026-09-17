@@ -10,6 +10,7 @@
 //! global sum. Backend-agnostic (works for local FS and S3).
 
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
 use gradient_entity::project_cache::CacheSubscriptionMode;
@@ -471,10 +472,21 @@ pub async fn demote_output_only_cached_deps(
 /// straight from an upstream (not from our cache). The completion path records each
 /// output's `cached_path` before flipping the anchor terminal (#303/#399), so a
 /// genuinely-complete anchor is never selected mid-completion.
+///
+/// `rebuilt` is what bounds the heal (#654). A demote is a bet that a rebuild
+/// lands the artifact, and the bet is only good while nothing has collected on it:
+/// once the fleet has finished a real build of the anchor and the output is STILL
+/// unbacked, the rebuild provably does not restore it, and demoting again just
+/// re-queues the same build on the next pass - the `demote -> promote -> rebuild ->
+/// demote` loop, one dispatch per reconcile pass, forever. A relay attempt
+/// (`substitute`) is not that evidence: it moves upstream bytes into the cache and
+/// says nothing about what building the derivation lands, and the demote clears
+/// `substitutable` so the granted retry is a real build. The flag is `bool_and`
+/// over the producers of one hash because the demote resets all of them together.
 pub(crate) fn unbacked_trusted_outputs_select() -> String {
     format!(
         r#"
-    SELECT DISTINCT o.hash
+    SELECT o.hash, bool_and({built}) AS rebuilt
     FROM derivation_output o
     JOIN derivation_build db ON db.derivation = o.derivation
     WHERE db.status IN ({terminal_success})
@@ -482,14 +494,36 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
       AND NOT EXISTS (
           SELECT 1 FROM cached_path cp
           WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL)
+    GROUP BY o.hash
 "#,
+        built = already_built("db"),
         terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+    )
+}
+
+/// SQL predicate: the fleet has finished a real build of the anchor aliased
+/// `{alias}` - the builder ran, or its daemon found the outputs already valid.
+/// Relay attempts are excluded: a relay never builds anything.
+fn already_built(alias: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = {alias}.id \
+         AND NOT ba.substitute AND ba.outcome IN ({success}))",
+        success = crate::status_sql::attempt_outcome_in(&AttemptOutcome::SUCCESS),
     )
 }
 
 crate::sql_fn! {
     UNBACKED_TRUSTED_OUTPUTS = unbacked_trusted_outputs_select,
-        params = [];
+        params = [],
+        tier = Sweep;
+}
+
+/// An unbacked output of a trusted producer, and whether a rebuild has already
+/// been spent on it.
+#[derive(sea_orm::FromQueryResult)]
+struct UnbackedOutput {
+    hash: String,
+    rebuilt: bool,
 }
 
 pub async fn demote_unbacked_trusted_outputs(
@@ -497,18 +531,28 @@ pub async fn demote_unbacked_trusted_outputs(
 ) -> Result<u64, sea_orm::DbErr> {
     use sea_orm::FromQueryResult;
 
-    #[derive(sea_orm::FromQueryResult)]
-    struct OutputHash {
-        hash: String,
-    }
-
-    let hashes = OutputHash::find_by_statement(UNBACKED_TRUSTED_OUTPUTS.stmt())
+    let outputs = UnbackedOutput::find_by_statement(UNBACKED_TRUSTED_OUTPUTS.stmt())
         .all(&ctx.worker_db)
         .await?;
 
     let mut reset = 0u64;
-    for h in hashes {
-        reset += demote_cached_output(ctx, &h.hash).await?.len() as u64;
+    let mut spent: Vec<String> = Vec::new();
+    for output in outputs {
+        if output.rebuilt {
+            spent.push(output.hash);
+            continue;
+        }
+
+        reset += demote_cached_output(ctx, &output.hash).await?.len() as u64;
+    }
+
+    if let Some(first) = spent.first() {
+        warn!(
+            count = spent.len(),
+            hash = %first,
+            "unbacked outputs whose producer the fleet already built: not demoted again, \
+             a rebuild does not restore them and their dependents stay blocked"
+        );
     }
 
     Ok(reset)
@@ -887,6 +931,84 @@ mod tests {
         assert!(
             sql.contains("NOT EXISTS") && sql.contains("cp.file_hash IS NOT NULL"),
             "must require a missing backing NAR: {sql}"
+        );
+    }
+
+    /// The heal grants ONE rebuild and then stops (#654). A producer the fleet has
+    /// already built is reported, never demoted again: the rebuild already ran and
+    /// did not back the output, so demoting it once more only re-queues the same
+    /// build forever (demote -> promote -> rebuild -> demote, one dispatch a pass).
+    /// A relay attempt is not that evidence - it moves upstream bytes and never
+    /// proves what a build lands - so the flag reads real builds only.
+    #[test]
+    fn unbacked_trusted_select_reports_whether_the_fleet_already_built_it() {
+        let sql = unbacked_trusted_outputs_select()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let success = crate::status_sql::attempt_outcome_in(&AttemptOutcome::SUCCESS);
+        assert!(
+            sql.contains("FROM build_attempt ba WHERE ba.derivation_build = db.id"),
+            "the flag must read the anchor's own attempts: {sql}"
+        );
+        assert!(
+            sql.contains("NOT ba.substitute"),
+            "a relay attempt is not proof a build was tried: {sql}"
+        );
+        assert!(
+            sql.contains(&format!("ba.outcome IN ({success})")),
+            "only a finished, successful attempt counts: {sql}"
+        );
+        assert!(
+            sql.contains("AS rebuilt") && sql.contains("GROUP BY o.hash"),
+            "the flag is per hash, over every producer of it: {sql}"
+        );
+    }
+
+    /// The loop #654 reported, in one pass: the sweep hands the hash whose producer
+    /// has never been built to the demote and passes over the one whose producer the
+    /// fleet already built. Appending exactly one further query result is the
+    /// assertion - a second demote would fail on the missing mock result, which is
+    /// what the old sweep did on every reconcile pass forever.
+    #[tokio::test]
+    async fn the_sweep_spends_one_rebuild_on_an_unbacked_output_and_no_more() {
+        use sea_orm::{DatabaseBackend, MockDatabase, Value};
+        use std::collections::BTreeMap;
+
+        let fresh = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
+        let spent = "cn1sgl0pn88d9dkc10jp0i1a77iadh8x";
+        let (tmp, _file) = present_nar(fresh);
+
+        let unbacked = |hash: &str, rebuilt: bool| {
+            BTreeMap::from([
+                ("hash".to_owned(), Value::from(hash.to_owned())),
+                ("rebuilt".to_owned(), Value::from(rebuilt)),
+            ])
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![unbacked(fresh, false), unbacked(spent, true)]])
+            // The fresh hash reaches the demote, which finds no producer and, its
+            // object being present, preserves it and returns before any write.
+            .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
+
+        let reset = demote_unbacked_trusted_outputs(&ctx).await.unwrap();
+
+        assert_eq!(
+            reset, 0,
+            "a producerless preserved input resets no producer"
+        );
+        drop(ctx);
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            2,
+            "the sweep and one demote; the already-built hash must not open a second: {log:?}"
+        );
+        assert!(
+            log[1].contains(fresh) && !log[1].contains(spent),
+            "the demote must be handed the hash no rebuild has been spent on: {log:?}"
         );
     }
 

@@ -41,6 +41,13 @@ pub enum AttemptOutcome {
     Aborted = 4,
 }
 
+impl AttemptOutcome {
+    /// An attempt that ended with the derivation's outputs realised: the builder
+    /// ran, or the daemon found them already valid. Pinned here next to the
+    /// numbers so a renumbering moves the set with them.
+    pub const SUCCESS: [Self; 2] = [Self::Built, Self::Substituted];
+}
+
 #[repr(i32)]
 #[derive(
     Debug,

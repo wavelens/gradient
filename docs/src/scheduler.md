@@ -478,6 +478,18 @@ cache loop (after the GC passes) and inside the reconciler's `Unstick` scope, so
 orphaned or partially-cached producer heals promptly - even while the evaluation
 that needs it is itself stuck `Building` - without manual intervention.
 
+The demote is a bet that a rebuild lands the artifact, and it is placed **once**.
+The sweep reads, per hash, whether the fleet has already finished a real build of
+its producer (a `build_attempt` with `substitute = false` and a successful
+outcome; a relay attempt never counts, and the demote clears `substitutable` so
+the retry it grants is a real build). A producer that has already built and whose
+output is still unbacked does not rebuild it, so it is reported at `warn` and left
+alone. Without that bound the heal has no memory and no verdict: it re-derives the
+same demote every pass and the anchor runs `demote -> promote -> rebuild ->
+demote` forever, one dispatch per pass, leaving a zombie `cached_path` behind each
+time (#654). Its dependents stay blocked either way - `fetchable` wants every
+output whole - so what the bound costs is nothing and what it saves is the fleet.
+
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to a later sweep: every pass that deletes `cached_path` rows
 (orphan-derivation GC, zombie purge, stale-path eviction, path invalidation) goes through
