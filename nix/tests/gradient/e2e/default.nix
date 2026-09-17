@@ -1831,12 +1831,11 @@ in {
       # driving evaluation and eval-done all read `build_job` (#663). The fix
       # hands the names over: a live evaluation adopts the pending anchors it
       # reaches through its own builders, from the GC's own pass, the graph-stuck
-      # heal and the consistency sweep. The evaluation GC only deletes past
-      # `keep_evaluations`, which this task never reaches, so this phase makes the state by hand - the
+      # heal and the consistency sweep. This phase makes the state by hand - the
       # interior's names are dropped, its outputs are retired for real so the
-      # chain is pending, task2's evaluation is put back into Building over it -
-      # and asserts the outcome end to end: adopted, queued, attributed to task2's
-      # evaluation, rebuilt, and that evaluation completes with everything whole.
+      # chain is pending, task2's current evaluation is put back into Building over
+      # it - and asserts the outcome end to end: adopted, queued, attributed to
+      # that evaluation, rebuilt, and it completes with everything whole.
       banner("Phase 10h: a pruned interior is adopted, attributed and rebuilt (#663)")
 
       hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
@@ -1900,18 +1899,30 @@ in {
           "an interior with no name was queued before anything adopted it"
       )
 
-      # task2's evaluation is the one still building against the subtree.
+      # task2's CURRENT evaluation is the one still building against the subtree.
+      # Not `eval2_id`: every push in the phases above re-evaluates both tasks and
+      # `keep_evaluations` is 1, so task2's first evaluation and its names are long
+      # deleted by here - which is the very state this phase is about.
+      task2_eval = sql(
+          "SELECT e.id FROM evaluation e JOIN task t ON t.id = e.task "
+          "WHERE t.name = 'task2' ORDER BY e.created_at DESC LIMIT 1;"
+      )
+      assert task2_eval, "task2 has no evaluation left to build against the subtree"
       sql(f"UPDATE evaluation SET status = 3, "
           f"building_started_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC') "
-          f"WHERE id = '{eval2_id}';")
+          f"WHERE id = '{task2_eval}';")
+      assert sql(
+          f"SELECT count(*) FROM build_job bj WHERE bj.evaluation = '{task2_eval}' "
+          f"AND bj.derivation = '{hello_drv}';"
+      ) == "1", "task2's evaluation does not name the builder the adoption walks out of"
 
-      poll(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval2_id}' AND derivation IN ('{d1}', '{d2}');",
+      poll(f"SELECT count(*) FROM build_job WHERE evaluation = '{task2_eval}' AND derivation IN ('{d1}', '{d2}');",
            "2", "task2's evaluation did not adopt the interior it never walked", timeout=420)
       status2 = ""
       for _ in range(60):
           status2 = server.succeed(
               f'{CURL} -sf -H "Authorization: Bearer {token}" '
-              f'{API}/evals/{eval2_id} | {JQ} -rj ".message.status"'
+              f'{API}/evals/{task2_eval} | {JQ} -rj ".message.status"'
           ).strip()
           if status2 == "Completed":
               break
@@ -1931,7 +1942,7 @@ in {
           ) == "1", f"{h} did not come back whole"
       attributed = int(sql(
           f"SELECT count(DISTINCT bj.derivation) FROM build_attempt a JOIN build_job bj ON bj.id = a.build_job "
-          f"WHERE bj.evaluation = '{eval2_id}' AND bj.derivation IN ('{d1}', '{d2}');"
+          f"WHERE bj.evaluation = '{task2_eval}' AND bj.derivation IN ('{d1}', '{d2}');"
       ))
       assert attributed == 2, f"the interior's rebuilds were attributed to {attributed} of the 2 adopted names"
       assert drift() == 0, "counters disagree with their recompute after the adopted rebuild"
