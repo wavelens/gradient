@@ -169,7 +169,10 @@ mod tests {
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
         check_evaluation_done(&ctx, eval.id).await.unwrap();
-        drop(ctx);
+        // The settle spawns the reactor hook and the phase event, each holding a
+        // context clone: drop alone leaves the pool handle shared and the log
+        // unreadable.
+        crate::test_ctx::settle(ctx).await;
 
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
