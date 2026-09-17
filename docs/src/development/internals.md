@@ -192,6 +192,8 @@ A ripple level is two statements, not one: it reads its referrers and their edge
 
 The GC's freshness seed reads `build_job` and `entry_point` by `created_at`, both indexed `INCLUDE (derivation)`: the cutoff is the moment the candidate scan ran, so the seed normally matches almost nothing and must not read the table to discover that.
 
+The instance-metrics pass averages nine values over the last 24 hours of dispatches every 30 seconds. Three of them — `missing_nar_size`, `missing_count`, `dependency_count` — are columns on `dispatched_job` rather than reads out of `job_context`, and `idx-dispatched_job-build-window` carries them alongside `ready_at` so the aggregate is an index-only scan of the window. Averaging them out of the jsonb instead was measured in production at 1.94M buffers and 1.6 s against 449k rows, of which the scan itself was only 183k buffers. The columns are written from the same view that writes the jsonb and are deliberately not backfilled: `AVG` skips nulls exactly as it skipped an absent json key, and no window is longer than a day.
+
 ### SQL/PGQ
 
 PostgreSQL 19 implements SQL/PGQ (ISO SQL:2023 part 16), which layers a property-graph view over ordinary tables and queries it with `GRAPH_TABLE`. Gradient does not use it, and adopting it is not currently possible: the first implementation matches fixed-length patterns only, with no quantified path patterns and no transitive closure, and every walk here is unbounded depth.
