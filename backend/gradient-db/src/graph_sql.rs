@@ -228,6 +228,19 @@ pub fn builder_predicate(anchor: &str, walked: &str) -> String {
     )
 }
 
+/// The anchor on derivation `{derivation}` still needs its inputs: nothing relays
+/// it. A failure walk stops at one that does, because a substitutable anchor takes
+/// finished bytes off an upstream - an input that can never build neither dooms it
+/// nor reaches anything above it. Same rule as [`gates_predicate`]'s relay arm,
+/// which lets a relay through with its `unready_deps` unread, and as the refusal in
+/// `graph::policy` to mark a failing relay `Permanent`.
+pub fn unrelayed_predicate(derivation: &str) -> String {
+    format!(
+        "NOT EXISTS (SELECT 1 FROM derivation_build rb \
+         WHERE rb.derivation = {derivation} AND rb.substitutable)"
+    )
+}
+
 /// Dependents can get the outputs of anchor `{alias}` from OUR cache: it reached
 /// terminal success and every output is whole here. An upstream copy does not
 /// count (#593): a dependent of an unrelayed substitutable anchor waits for the
