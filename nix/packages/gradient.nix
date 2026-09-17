@@ -119,7 +119,7 @@ craneLib.buildPackage (commonArgs // {
   # everything that only needs the binary.
   doCheck = false;
 
-  # The SQL plan gate the cache VM test runs comes out of this same cargo
+  # The SQL plan gate the e2e VM test runs comes out of this same cargo
   # invocation instead of a second one over the whole workspace: no code sits
   # behind `cfg(feature = "sql-gate")`, the feature only flips optional
   # dependencies of the root crate, and `required-features` keeps the bin out

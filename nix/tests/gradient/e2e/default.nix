@@ -62,7 +62,7 @@
   };
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
-    name = "gradient-cache";
+    name = "gradient-e2e";
     # Phases 10e to 10h add five more evaluations of the repository, a two-session
     # lock handshake and four retire-and-recover cycles to what was already a full
     # build-and-cache run, and 10g only began relaying for real once it stopped

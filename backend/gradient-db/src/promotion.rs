@@ -596,7 +596,7 @@ mod tests {
 
     /// A failure must not cross a relay. A substitutable anchor takes finished
     /// bytes off an upstream, so an input that can never build neither dooms it
-    /// nor reaches anything above it; measured in the cache VM's phase 10g, where
+    /// nor reaches anything above it; measured in the e2e VM's phase 10g, where
     /// busybox's unbuildable source FODs cascaded `DependencyFailed` onto the
     /// relayed anchor itself (#666). Every upward walk that carries a failure
     /// fences on the same predicate, so the cascade, its sweep and the thaw's
