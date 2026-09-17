@@ -1760,17 +1760,23 @@ in {
       assert relayed_inputs_built == "0", (
           f"a relayed anchor's inputs were built anyway: {relayed_inputs_built} attempts"
       )
-      sources, touched = sql(
+      # The source is the input the relay exists to avoid, and the row `LIKE
+      # 'busybox%'` used to resolve to. Its STATUS is not the invariant: the relay
+      # mirrors busybox's whole closure, `separateDebugInfo` puts the source inside
+      # it, and the next evaluation to name a path we now hold moves that anchor to
+      # `Substituted` without dispatching anything. Never dispatched is the invariant.
+      sources, dispatched, statuses = sql(
           f"SELECT count(*)::text || ' ' || count(*) FILTER ("
-          f"  WHERE db.status <> 0 OR EXISTS ("
+          f"  WHERE db.status IN (1, 2) OR EXISTS ("
           f"    SELECT 1 FROM build_attempt a WHERE a.derivation_build = db.id))::text "
+          f"|| ' ' || coalesce(string_agg(DISTINCT db.status::text, ','), '-') "
           f"FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
           f"JOIN derivation_dependency e ON e.dependency = d.id AND e.derivation = '{busybox}' "
           f"WHERE d.name LIKE '%.tar%';"
       ).split()
-      assert int(sources) >= 1 and touched == "0", (
-          f"busybox's source is named by the relay and wanted by nobody, so it must sit "
-          f"at Created with no attempt of its own: {sources} sources, {touched} touched"
+      assert int(sources) >= 1 and dispatched == "0", (
+          f"busybox's source is wanted by nobody, so nothing may queue or build it: "
+          f"{sources} sources, {dispatched} dispatched, status {statuses}"
       )
       assert drift() == 0, "counters disagree with their recompute after the relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the relay"
