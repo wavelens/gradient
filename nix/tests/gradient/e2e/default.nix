@@ -2076,10 +2076,13 @@ in {
 
       # ── Phase 13: every registered statement plans sanely (#651) ──────────
       # The gate amplifies this database to production scale, so it runs last and
-      # the server is stopped first: nothing else should ever see those rows. It
-      # explains each statement in a transaction it rolls back, which is what
-      # makes a registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
+      # the fleet is stopped first: nothing else should ever see those rows, and a
+      # worker left running only reconnects at a server that is gone. It explains
+      # each statement in a transaction it rolls back, which is what makes a
+      # registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
       banner("Phase 13: the SQL plan gate")
+      builder.succeed("systemctl stop gradient-worker.service")
+      builder2.succeed("systemctl stop gradient-worker.service")
       server.succeed("systemctl stop gradient-server.service")
 
       print(server.succeed(
