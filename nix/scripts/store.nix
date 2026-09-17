@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ pkgs, skipDirectories ? true, package ? pkgs.hello, ... }: let
-  testPkgs = package;
+{ pkgs, skipDirectories ? true, ... }: let
+  testPkgs = pkgs.hello;
   closureInfo = pkgs.stdenvNoCC.mkDerivation {
     name = "closure-info";
 
