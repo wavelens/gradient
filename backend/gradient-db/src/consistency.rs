@@ -170,9 +170,29 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     // each repair it on their own path, and this is the backstop for a lost move.
     let adopted = if crate::reachability::pending_orphan_frontier(db).await? {
         let adopted = crate::reachability::adopt_pending_closures(db).await?;
-        let mut queued = Vec::new();
+        // Naming is half of what demand means, as it is on every other adoption
+        // path: a name makes the anchor a demander of its own inputs, and without
+        // this the closure below what was just named waits for the NEXT sweep's
+        // recount to be queueable at all.
+        let mut moved = crate::readiness::DemandMoved::default();
         for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+            let chunk_moved = crate::readiness::recompute_demand(db, chunk).await?;
+            moved.gained.extend(chunk_moved.gained);
+            moved.lost.extend(chunk_moved.lost);
+        }
+
+        let mut queued = Vec::new();
+        let promotable: Vec<_> = adopted
+            .derivations()
+            .iter()
+            .chain(moved.gained.iter())
+            .copied()
+            .collect();
+        for chunk in promotable.chunks(crate::IN_CHUNK_SIZE) {
             queued.extend(crate::readiness::promote(db, chunk).await?);
+        }
+        for chunk in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
+            queued.extend(crate::readiness::unpromote_ungated(db, chunk).await?);
         }
 
         crate::bump_graph_version(db, &adopted.evaluations()).await?;
@@ -253,7 +273,8 @@ mod tests {
                 ("evaluation".to_owned(), Value::from(uuid::Uuid::now_v7())),
                 ("derivation".to_owned(), Value::from(uuid::Uuid::now_v7())),
             ])]])
-            .append_query_results([empty.clone()])
+            .append_exec_results([exec(0), exec(0)])
+            .append_query_results([empty.clone(), empty.clone()])
             .append_exec_results([exec(1)])
         } else {
             db.append_query_results([empty.clone()])
@@ -341,8 +362,9 @@ mod tests {
     }
 
     /// A pending anchor nobody names below a live evaluation's builder is the one
-    /// hole no counter repair can close: the sweep walks, names, queues what it
-    /// named, and reports the rows as a repair.
+    /// hole no counter repair can close: the sweep walks, names, recomputes the
+    /// demand the new name carries, queues what it named, and reports the rows as
+    /// a repair.
     #[tokio::test]
     async fn the_sweep_adopts_when_a_live_evaluation_reaches_an_unnamed_pending_anchor() {
         let (ctx, pool) = crate::test_ctx::ctx(scripted(true)).await;
@@ -354,13 +376,22 @@ mod tests {
         assert!(
             log[13].contains("LIMIT 1")
                 && log[14].contains("SET LOCAL work_mem")
-                && log[15].contains("INSERT INTO build_job")
-                && log[16].contains("SET status = 1")
-                && log[17].contains("graph_version = e.graph_version + 1"),
-            "probe, walk, queue what was named, bump: {log:?}"
+                && log[15].contains("INSERT INTO build_job"),
+            "the probe guards the walk that names: {log:?}"
         );
         assert!(
-            log[18].contains("SELECT DISTINCT o.hash") && log[19].contains("FROM evaluation ev"),
+            log[16].contains("SET LOCAL work_mem")
+                && log[17].contains("ORDER BY derivation FOR UPDATE")
+                && log[18].contains("SET demanded ="),
+            "a name gives the closure below it demand, in this pass and not the next: {log:?}"
+        );
+        assert!(
+            log[19].contains("SET status = 1")
+                && log[20].contains("graph_version = e.graph_version + 1"),
+            "then queue what was named and bump: {log:?}"
+        );
+        assert!(
+            log[21].contains("SELECT DISTINCT o.hash") && log[22].contains("FROM evaluation ev"),
             "the read-only alarms still come last: {log:?}"
         );
     }
