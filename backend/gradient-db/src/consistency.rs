@@ -213,12 +213,21 @@ mod tests {
         }
     }
 
-    /// The sweep's statement script: the gating select, the NAR repair, the
-    /// readiness repair, the queue settle, the naming probe (and the walk it
-    /// guards when `hole` is set), then the two read-only alarms.
+    /// The sweep's statement script: the gating select, the NAR repair, the demand
+    /// recount under its walk raise, the readiness repair, the queue settle, the
+    /// naming probe (and the walk it guards when `hole` is set), then the two
+    /// read-only alarms.
     fn scripted(hole: bool) -> sea_orm::DatabaseConnection {
         let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
         let empty = Vec::<BTreeMap<String, Value>>::new();
+        let drifted: Vec<BTreeMap<String, Value>> = (0..4)
+            .map(|_| {
+                BTreeMap::from([
+                    ("derivation".to_owned(), Value::from(uuid::Uuid::now_v7())),
+                    ("demanded".to_owned(), Value::from(true)),
+                ])
+            })
+            .collect();
         let mut db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![BTreeMap::from([(
                 "hash".to_owned(),
@@ -226,6 +235,8 @@ mod tests {
             )])]])
             .append_exec_results([exec(0), exec(2)])
             .append_query_results([n()])
+            .append_exec_results([exec(0)])
+            .append_query_results([drifted])
             .append_query_results([vec![BTreeMap::from([(
                 "derivation".to_owned(),
                 Value::from(uuid::Uuid::now_v7()),
@@ -275,6 +286,10 @@ mod tests {
             report.repair_scope, 1,
             "the readiness repair's scope is measured too"
         );
+        assert_eq!(
+            report.demand_drift, 4,
+            "every anchor the recount rewrote is reported"
+        );
         assert_eq!(report.adopted, 0);
 
         let log = crate::pool::statements(pool.into_transaction_log());
@@ -293,32 +308,36 @@ mod tests {
             "a counter below zero is unrecoverable, so it must be counted: {log:?}"
         );
         assert!(
-            log[4].contains("SELECT q.derivation FROM derivation_build q"),
-            "the readiness repair materialises its scope: {log:?}"
+            log[4].contains("SET LOCAL work_mem") && log[5].contains("SET demanded ="),
+            "the table-wide demand walk runs under its own raise: {log:?}"
         );
         assert!(
-            log[5].contains("FOR UPDATE") && log[6].contains("SET fetchable"),
+            log[6].contains("SELECT q.derivation FROM derivation_build q"),
+            "the demand recount precedes the readiness repair, so the settle below it reads a corrected column: {log:?}"
+        );
+        assert!(
+            log[7].contains("FOR UPDATE") && log[8].contains("SET fetchable"),
             "the fetchable recount runs under its own ordered lock: {log:?}"
         );
         assert!(
-            log[7].contains("FOR UPDATE") && log[8].contains("SET unready_deps"),
+            log[9].contains("FOR UPDATE") && log[10].contains("SET unready_deps"),
             "and the counter recount after it, in a second locked pass: {log:?}"
         );
         assert!(
-            log[9].contains("SET status = 0") && log[10].contains("SET status = 1"),
+            log[11].contains("SET status = 0") && log[12].contains("SET status = 1"),
             "the queue is settled against the repaired counters: {log:?}"
         );
         assert!(
-            log[11].contains(
+            log[13].contains(
                 "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
             ),
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[12].contains("SELECT DISTINCT o.hash") && log[13].contains("FROM evaluation ev"),
+            log[14].contains("SELECT DISTINCT o.hash") && log[15].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
         );
-        assert_eq!(log.len(), 14, "{log:?}");
+        assert_eq!(log.len(), 16, "{log:?}");
     }
 
     /// A pending anchor nobody names below a live evaluation's builder is the one
@@ -333,15 +352,15 @@ mod tests {
         assert_eq!(report.adopted, 1);
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log[11].contains("LIMIT 1")
-                && log[12].contains("SET LOCAL work_mem")
-                && log[13].contains("INSERT INTO build_job")
-                && log[14].contains("SET status = 1")
-                && log[15].contains("graph_version = e.graph_version + 1"),
+            log[13].contains("LIMIT 1")
+                && log[14].contains("SET LOCAL work_mem")
+                && log[15].contains("INSERT INTO build_job")
+                && log[16].contains("SET status = 1")
+                && log[17].contains("graph_version = e.graph_version + 1"),
             "probe, walk, queue what was named, bump: {log:?}"
         );
         assert!(
-            log[16].contains("SELECT DISTINCT o.hash") && log[17].contains("FROM evaluation ev"),
+            log[18].contains("SELECT DISTINCT o.hash") && log[19].contains("FROM evaluation ev"),
             "the read-only alarms still come last: {log:?}"
         );
     }

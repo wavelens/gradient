@@ -633,22 +633,20 @@ mod tests {
         }
     }
 
-    /// The gate has two arms: a relay needs demand and nothing else, a build needs
-    /// ready inputs and an importable `.drv`.
+    /// The gate has two arms and demand sits outside both: a relay needs nothing
+    /// more, a build needs ready inputs and an importable `.drv`.
     #[test]
     fn gates_split_on_substitutable() {
         let g = norm(&gates_predicate("db"));
         assert!(
-            g.contains("(db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
-            "{g}"
+            g.contains(
+                "AND db.demanded AND (db.substitutable OR (db.unready_deps = 0 AND EXISTS ("
+            ),
+            "demand is common to both arms, the split is on substitutable alone: {g}"
         );
         assert!(
-            g.contains("OR (NOT db.substitutable AND db.unready_deps = 0 AND EXISTS ("),
-            "{g}"
-        );
-        assert!(
-            g.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
-            "{g}"
+            g.contains("JOIN cached_path cp ON cp.hash = d.hash WHERE d.id = db.derivation"),
+            "the build arm reads the anchor's own .drv: {g}"
         );
     }
 

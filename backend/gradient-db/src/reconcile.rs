@@ -199,6 +199,9 @@ mod tests {
                 ("evaluation".to_owned(), Value::from(eval.into_inner())),
                 ("derivation".to_owned(), Value::from(d.into_inner())),
             ])]])
+            // the adoption recomputes demand below what it named, raised and locked
+            .append_exec_results([exec(0), exec(0)])
+            .append_query_results([empty.clone()])
             // the adopting evaluation's graph version
             .append_exec_results([exec(1)])
             // the closure promote opens a walk and finds nothing ready yet
@@ -229,9 +232,13 @@ mod tests {
             log[adopt].contains("WHERE bj.evaluation = $1"),
             "scoped to the healed evaluation: {log:?}"
         );
+        let demand = log
+            .iter()
+            .position(|s| s.contains("SET demanded ="))
+            .expect("the adoption recomputes what it named");
         assert!(
-            adopt < bump && bump < promote,
-            "adopt, bump, then promote: {log:?}"
+            adopt < demand && demand < bump && bump < promote,
+            "adopt, recompute what a name gave demand to, bump, then promote: {log:?}"
         );
         assert!(
             log[..adopt]

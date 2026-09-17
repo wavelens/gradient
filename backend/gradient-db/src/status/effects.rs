@@ -428,10 +428,16 @@ mod tests {
         let crossed = DerivationId::now_v7();
         let lost = DerivationId::now_v7();
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
+            .append_exec_results([
+                sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                },
+                sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+            ])
             .append_query_results([vec![std::collections::BTreeMap::from([
                 (
                     "derivation".to_owned(),
@@ -457,6 +463,7 @@ mod tests {
         drop(ctx);
 
         let log = crate::pool::statements(pool.into_transaction_log()).join(" ");
+        assert!(log.contains("SET LOCAL work_mem"), "{log}");
         assert!(log.contains("SET demanded ="), "{log}");
         assert!(
             !log.contains("SELECT DISTINCT e.dependency FROM derivation_dependency"),

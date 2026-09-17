@@ -638,8 +638,15 @@ crate::sql_lazy! {
 /// Rewrite every anchor whose demand drifted. Returns how many disagreed, which is
 /// the sweep's `demand_drift`: a healthy fleet reports zero, and a number that keeps
 /// coming back names a mover that is not recomputing what it changed.
-pub async fn recount_demanded<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
-    Ok(db.query_all_raw(RECOUNT_DEMANDED.stmt()).await?.len() as u64)
+pub async fn recount_demanded<C>(db: &C) -> Result<u64, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk.query_all_raw(RECOUNT_DEMANDED.stmt()).await?;
+    walk.commit().await?;
+
+    Ok(rows.len() as u64)
 }
 
 /// What a bounded recompute moved: the anchors that gained demand, for [`promote`],
@@ -705,7 +712,7 @@ where
         return Ok(DemandMoved::default());
     }
 
-    let txn = db.begin().await?;
+    let txn = crate::graph_sql::begin_walk(db).await?;
     let _lock = lock_anchors(&txn, roots).await?;
     let rows = txn
         .query_all_raw(RECOMPUTE_DEMAND.bind([ids(roots)]))
@@ -1303,8 +1310,8 @@ mod tests {
             "{log:?}"
         );
         assert!(
-            log[0].contains("db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
-            "the embedded gate carries the demand arm: {log:?}"
+            log[0].contains("AND db.demanded"),
+            "the embedded gate reads the demand column: {log:?}"
         );
     }
 
