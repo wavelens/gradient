@@ -7189,6 +7189,12 @@ paths:
                           unconfirmed_nars:
                             type: integer
                             description: cached_path rows whose object the background uploader still owes to storage.
+                          outbox_pending:
+                            type: integer
+                            description: Effect rows still owed to the outside world (forge reports, action deliveries, log finalization).
+                          outbox_failed:
+                            type: integer
+                            description: Effect rows that gave up after their last retry and stay as dead letters until the retention pass.
                           hot_nar_cache:
                             type: object
                             description: The in-memory small-NAR cache.

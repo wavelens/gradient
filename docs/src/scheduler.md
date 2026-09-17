@@ -243,12 +243,16 @@ The consequences of moving an anchor are equally centralized. Bulk sweeps
 return the typed `(derivation, from, to)` transitions they made, and both
 mutation models - the state-machine-guarded single-row path
 (`update_derivation_build_status`) and the bulk SQL sweeps - feed them through
-one `emit_transition_effects`: the evaluation graph version, board events, the
-per-entry-point CI check, cache-changed notifications, and evaluation
-finalization (`check_evaluation_done` fires for every terminal transition, from
-any path). It is structurally impossible to move an anchor without its
-consequences firing, which closes the historical "bulk sweep bypassed the
-reactive hook" dead-zone class.
+one `emit_transition_effects`: the evaluation graph version, board events,
+cache-changed notifications, evaluation finalization (`check_evaluation_done`
+fires for every terminal transition, from any path), and the `outbox` rows the
+move owes the outside world - one `build_status` row per entry-point
+`build_job` of a status the forges report, one `log_finalize` row per anchor
+that actually finished. Those rows are written in the transaction that moved the
+anchor and delivered later by the `effects` actor; the in-process status reactor
+that used to spawn a forge call per transition no longer exists. It is
+structurally impossible to move an anchor without its consequences firing, which
+closes the historical "bulk sweep bypassed the reactive hook" dead-zone class.
 
 `evaluation.graph_version` is the invalidation key of the task page's
 per-entry-point histogram. The emitter bumps it once per emit for every

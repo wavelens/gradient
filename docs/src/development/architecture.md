@@ -28,6 +28,8 @@ root
 │   debug-index, eval-cache-sweep        cache sweeps
 ├── nar-uploader                         actor: streams staged NARs to S3,
 │                                        reconciles unconfirmed rows
+├── effects                              actor: claims outbox rows;
+│                                        effects-workers factory beneath it
 ├── retention, rollup, otlp-snapshot     metrics pipeline
 └── outbound-connect                     dials workers with a registered URL
 ```
@@ -58,9 +60,13 @@ written in one transaction with a savepoint each, and a worker's
 known-derivations query is answered only after the batches queued before it, so
 it never prunes a subtree whose edges are still unwritten. Reads that need no
 ordering (`CacheQuery`, board and API queries) stay on the pools. Effects that
-leave the process (forge reports, notifications) are still spawned after the
-write; #597 moves them into an outbox. Startup recovery, the maintenance
-deletions (`Gc`, #597) and the debug indexer's flag stay outside the actor.
+leave the process are rows in `outbox`, written in the transaction that changed
+state and delivered by the `effects` actor: events expand into one delivery per
+matching task action, deliveries run on a factory of eight workers, fail with
+backoff and dead-letter after six attempts. Maintenance deletes are `Gc`
+requests: the sweep scans on the pool, the actor applies each chunk in one short
+transaction after re-checking what became live since the scan. Startup recovery
+and the debug indexer's flag stay outside the actor.
 
 A relayed NAR on the S3 backend is committed before its object exists: the row
 carries `confirmed = false` and the file waits in `nar-staged/`. The
@@ -113,6 +119,7 @@ db             every query and the graph reconciler, over the pools
 entity         SeaORM entities, one module per table
 migration      SeaORM migrator
 graph          the graph actor: every write to the graph and the cache index
+effects        the effects actor: delivers the outbox rows a state change wrote
 scheduler      worker pool, job tracker, dispatch loops
 proto          worker protocol: sessions, NAR transfer, dispatch
 web            Axum HTTP API and the binary cache endpoints

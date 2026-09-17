@@ -88,11 +88,14 @@ impl<S: OutboxStore, D: Dispatch> Actor for EffectsActor<S, D> {
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         myself.send_after(args.tick, || EffectsMsg::Tick);
+        // What the last process owed is owed the moment this one starts, so the
+        // first pass is now rather than one tick from now.
+        let _ = myself.send_message(EffectsMsg::Pass);
 
         Ok(EffectsState {
             args,
             in_flight: HashSet::new(),
-            pass_scheduled: false,
+            pass_scheduled: true,
         })
     }
 
@@ -316,8 +319,9 @@ mod tests {
         actor.stop_and_wait(None, None).await.unwrap();
     }
 
-    /// Every writer in a burst notifies, and the burst costs one pass: the
-    /// scheduled pass sits behind the wakes already queued, so they fold into it.
+    /// Every writer in a burst notifies, and the burst costs ONE pass beyond the
+    /// one every start pays: the scheduled pass sits behind the wakes already
+    /// queued, so they fold into it.
     #[tokio::test]
     async fn a_burst_of_wakes_runs_exactly_one_pass() {
         let store = Store::with([]);
@@ -329,7 +333,11 @@ mod tests {
         }
         settle().await;
 
-        assert_eq!(*store.claims.lock(), vec![2], "ten wakes, one claim");
+        assert_eq!(
+            *store.claims.lock(),
+            vec![2, 2],
+            "the boot pass, then one claim for the whole burst"
+        );
 
         actor.stop_and_wait(None, None).await.unwrap();
     }

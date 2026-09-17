@@ -45,6 +45,8 @@ const MIB = 1024 ** 2;
         <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | date: 'short') : '-' }}</span></div>
         <div class="cell"><span class="label">Cache size</span><span>{{ (h.cache_bytes / (1024*1024*1024)) | number: '1.2-2' }} GiB</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
+        <div class="cell"><span class="label">Effects pending</span><span>{{ h.outbox_pending }}</span></div>
+        <div class="cell"><span class="label">Effects dead-lettered</span><span [class.bad]="h.outbox_failed > 0">{{ h.outbox_failed }}</span></div>
       </div>
 
       <h2>Supervision</h2>

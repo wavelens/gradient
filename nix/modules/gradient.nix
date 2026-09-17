@@ -637,7 +637,7 @@ in {
         };
 
         dispatchRetentionDays = lib.mkOption {
-          description = "Days to retain dispatched_job forensic rows. 0 = keep forever.";
+          description = "Days to retain dispatched_job forensic rows and settled outbox rows. 0 = keep forever.";
           type = lib.types.ints.unsigned;
           default = 30;
         };
