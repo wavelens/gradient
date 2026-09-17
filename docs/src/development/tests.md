@@ -122,7 +122,8 @@ closure walks and also asserts the `OFFSET 0` fence survived, `Sweep` covers
 timer-driven work that is allowed to scan. Nothing is asserted on wall clock: the
 runner is shared and slow, so a millisecond budget would measure the runner. A
 statement whose relations are empty is reported unmeasured rather than passed,
-and the phase fails if the unmeasured count grows.
+and the phase fails once more than 40 of them are, so the count is a ratchet
+rather than a demand that the VM's fixture exercise every table.
 
 **Two database sessions, held against each other, prove a lock is load-bearing.**
 Each `psql` helper is a fresh process, so a phase that replays statements in order
