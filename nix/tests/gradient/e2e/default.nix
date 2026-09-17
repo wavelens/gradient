@@ -210,6 +210,19 @@ in {
                       config = { interval_secs = 10; };
                     }
                   ];
+                  # Phase 14's probe. It lives in state because provisioning runs
+                  # on every boot and deletes actions state does not declare, so
+                  # an API-created one would not survive that phase's restart; it
+                  # subscribes to an event this VM never raises, so the only thing
+                  # that ever reaches the hook is the row the phase writes.
+                  actions = [
+                    {
+                      name = "restart-probe";
+                      type = "send_web_request";
+                      events = [ "evaluation.approval_granted" ];
+                      config = { url = "http://hook.local:8099/hook"; };
+                    }
+                  ];
                 };
 
                 task2 = {
@@ -2101,13 +2114,8 @@ in {
       # it survives the process that owed it. The row is inserted while the server
       # is down, which no in-process spawn could have carried across.
       banner("Phase 14: the outbox survives a restart (#597)")
-      action_id = server.succeed(
-          f'{CURL} -sf -X POST -H "Authorization: Bearer {token}" -H "Content-Type: application/json" '
-          f"""-d '{{"name":"restart-probe","events":["evaluation.completed"],"""
-          f""""config":{{"type":"send_web_request","url":"http://hook.local:8099/hook"}}}}' """
-          f'{API}/tasks/project/task/actions | {JQ} -r .message.action.id'
-      ).strip()
-      assert len(action_id) == 36, f"the action was not created: {action_id}"
+      action_id = sql("SELECT id FROM task_action WHERE name = 'restart-probe';")
+      assert len(action_id) == 36, f"the state-declared probe action is missing: {action_id}"
 
       server.succeed("cat > /root/hook.py <<'PY'\n"
                      "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
@@ -2124,7 +2132,7 @@ in {
       sql(
           "INSERT INTO outbox (id, kind, key, payload, created_at, next_attempt_at) VALUES ("
           "gen_random_uuid(), 3, 'restart-probe', "
-          f"""'{{"action": "{action_id}", "event": "evaluation.completed", "payload": {{"probe": "restart"}}}}'::jsonb, """
+          f"""'{{"action": "{action_id}", "event": "evaluation.approval_granted", "payload": {{"probe": "restart"}}}}'::jsonb, """
           "now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
       )
       server.succeed("systemctl start gradient-server.service")
