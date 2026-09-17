@@ -133,7 +133,7 @@ crate::sql! {
            ON CONFLICT (cache, bucket_time)
            DO UPDATE SET bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent,
                          nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
-        params = [Text("00000000-0000-0000-0000-000000000000"), CacheId, Now, Int(4096), Int(1)];
+        params = [NewUuid, CacheId, Now, Int(4096), Int(1)];
 }
 
 /// Add one instance's sums into the `(cache, bucket_time)` row. Additive, so

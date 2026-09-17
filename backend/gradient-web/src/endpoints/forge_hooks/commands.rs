@@ -602,7 +602,7 @@ gradient_db::sql! {
          WHERE active = true \
            AND trigger_type = $1 \
            AND (config->>'integration_id')::uuid = $2",
-        params = [Int(2), Text("00000000-0000-0000-0000-000000000001")];
+        params = [Int(2), IntegrationId];
 }
 
 pub(super) async fn active_task_ids_for_integration(

@@ -99,8 +99,8 @@ WHERE oa.name NOT LIKE 'amp-%' AND ob.name NOT LIKE 'amp-%' \
 ON CONFLICT DO NOTHING";
 
 const EDGE_REFERENCE: &str = "\
-INSERT INTO cached_path_reference (id, referrer, reference, reference_hash, position) \
-SELECT uuidv7(), ca.hash, ca.hash || '-' || r.position::text, cb.hash, r.position \
+INSERT INTO cached_path_reference (referrer, reference, reference_hash, position) \
+SELECT ca.hash, ca.hash || '-' || r.position::text, cb.hash, r.position \
 FROM cached_path_reference r \
 JOIN cached_path oa ON oa.hash = r.referrer \
 JOIN cached_path ob ON ob.hash = r.reference_hash \

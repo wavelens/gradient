@@ -45,7 +45,7 @@ pub fn measure(body: &Value) -> Result<Measured, PlanError> {
 
     let mut measured = Measured {
         buffers: number(root, "Shared Hit Blocks") + number(root, "Shared Read Blocks"),
-        rows_out: number(root, "Actual Rows"),
+        rows_out: rows_out(root),
         execution_ms: entry
             .get("Execution Time")
             .and_then(Value::as_f64)
@@ -55,6 +55,27 @@ pub fn measure(body: &Value) -> Result<Measured, PlanError> {
 
     walk(root, &mut measured);
     Ok(measured)
+}
+
+/// What the statement produced. A write without `RETURNING` reports no rows at
+/// the root, so the amplification ratio would read every one of them as "scanned
+/// N for 0" and fail on its own shape; what such a statement produced is what it
+/// modified, which is what its child fed into the `ModifyTable`.
+fn rows_out(root: &Value) -> u64 {
+    let rows = number(root, "Actual Rows");
+    if rows > 0 || root.get("Node Type").and_then(Value::as_str) != Some("ModifyTable") {
+        return rows;
+    }
+
+    root.get("Plans")
+        .and_then(Value::as_array)
+        .map(|children| {
+            children
+                .iter()
+                .map(|child| number(child, "Actual Rows") * number(child, "Actual Loops").max(1))
+                .sum()
+        })
+        .unwrap_or_default()
 }
 
 fn walk(node: &Value, measured: &mut Measured) {
@@ -147,6 +168,33 @@ mod tests {
                 .expect("measurable")
                 .spilled
         );
+    }
+
+    #[test]
+    fn a_write_returns_what_it_modified() {
+        let body = serde_json::json!([{
+            "Plan": {
+                "Node Type": "ModifyTable",
+                "Operation": "Update",
+                "Actual Rows": 0.0,
+                "Actual Loops": 1,
+                "Shared Hit Blocks": 42,
+                "Plans": [{ "Node Type": "Index Scan", "Actual Rows": 8.0, "Actual Loops": 1 }],
+            }
+        }]);
+
+        let m = measure(&body).expect("measurable");
+        assert_eq!(m.rows_out, 8, "an UPDATE without RETURNING reports no rows");
+        assert_eq!(m.rows_scanned, 8);
+    }
+
+    #[test]
+    fn a_read_that_returns_nothing_still_returns_nothing() {
+        let body = serde_json::json!([{
+            "Plan": { "Node Type": "Seq Scan", "Actual Rows": 0.0, "Actual Loops": 1 }
+        }]);
+
+        assert_eq!(measure(&body).expect("measurable").rows_out, 0);
     }
 
     #[test]
