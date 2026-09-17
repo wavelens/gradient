@@ -36,7 +36,7 @@ use gradient_core::ServerState;
 use gradient_util::supervision::ChildSpec;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 /// One periodic pass: a name (logs and health), a tick interval, the budget
 /// past which a pass is cancelled, and the async fn to run.
@@ -115,6 +115,44 @@ pub fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
         .collect()
 }
 
+/// The orphan-derivation pass: scan the whole keep-set once on the pool, then
+/// hand the actor bounded chunks to apply. The log files of what it actually
+/// deleted are reclaimed here, because they live outside the database.
+async fn run_derivation_gc(state: &Arc<ServerState>) -> anyhow::Result<usize> {
+    let (candidates, scanned_at) = gradient_db::orphan_derivation_candidates(
+        &state.worker_db,
+        state.config.storage.keep_orphan_derivations_hours,
+    )
+    .await?;
+
+    let mut deleted = 0usize;
+    for chunk in candidates.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let report = match state
+            .graph
+            .gc(gradient_graph::GcRequest::Derivations {
+                candidates: chunk.to_vec(),
+                scanned_at,
+            })
+            .await
+        {
+            Ok(report) => report,
+            Err(e) => {
+                warn!(error = %e, "GC: orphan derivation delete chunk failed; skipping");
+                continue;
+            }
+        };
+
+        deleted += report.deleted_derivations.len();
+        for attempt in report.attempt_logs {
+            if let Err(e) = state.log_storage.delete(attempt).await {
+                warn!(error = %e, %attempt, "GC: failed to remove orphan build log");
+            }
+        }
+    }
+
+    Ok(deleted)
+}
+
 /// The 9 order-sensitive cache-maintenance steps, run sequentially every
 /// `cache_maintenance_interval_secs`. No per-output work here - the worker
 /// uploads+signs; this is GC and self-heal reconciliation only.
@@ -128,15 +166,9 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     } else {
         info!("Evaluation GC completed successfully");
     }
-    if let Err(e) = gradient_db::gc_orphan_derivations(
-        &state.db(),
-        state.config.storage.keep_orphan_derivations_hours,
-    )
-    .await
-    {
-        error!(error = ?e, "Derivation GC failed");
-    } else {
-        info!("Derivation GC completed successfully");
+    match run_derivation_gc(&state).await {
+        Ok(deleted) => info!(deleted, "Derivation GC completed successfully"),
+        Err(e) => error!(error = ?e, "Derivation GC failed"),
     }
     match evict_stale_cached_paths(Arc::clone(&state)).await {
         Ok(n) if n > 0 => info!(evicted = n, "Stale cached-path eviction completed"),
