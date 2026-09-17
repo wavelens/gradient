@@ -829,7 +829,7 @@ in {
         };
 
         cacheTtlHours = lib.mkOption {
-          description = "TTL in hours for cached NAR files that have not been fetched recently. 0 disables TTL-based GC";
+          description = "Hours a cached path outside the live closure (the NAR closure of every retained evaluation's outputs and .drv files) is kept after its last fetch, or its commit if never fetched. 0 keeps nothing beyond narUploadGraceHours, which always applies.";
           type = lib.types.ints.unsigned;
           default = 336;
         };
@@ -861,13 +861,13 @@ in {
         smallNarBytes = lib.mkOption {
           description = "A NAR at or under this many bytes is relayed through the server on upload, pulled through it on download and admitted to the hot RAM cache; larger NARs keep their presigned S3 URLs.";
           type = lib.types.ints.unsigned;
-          default = 1048576;
+          default = 1024 * 1024;
         };
 
         hotNarCacheBytes = lib.mkOption {
           description = "Capacity in bytes of the in-memory NAR cache, ranked by hits per byte. 0 disables it.";
           type = lib.types.ints.unsigned;
-          default = 536870912;
+          default = 512 * 1024 * 1024;
         };
 
         narUploadConcurrency = lib.mkOption {

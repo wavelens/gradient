@@ -484,7 +484,7 @@ fn active_triggers_sql(trigger_type: TriggerType) -> String {
 
 gradient_db::sql_fn! {
     ACTIVE_TRIGGERS_FOR_INTEGRATION = || active_triggers_sql(TriggerType::ReporterPullRequest),
-        params = [Text("00000000-0000-0000-0000-000000000001")];
+        params = [IntegrationId];
 }
 
 async fn load_active_triggers_for_integration(

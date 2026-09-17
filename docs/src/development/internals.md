@@ -243,9 +243,9 @@ sweep via `Shutdown::spawn`. The sweep runs three passes - NAR, blob,
 log - each bidirectionally reconciling its storage backend against the
 DB:
 
-1. **NAR pass** reuses `cleanup_orphaned_cache_files`: removes
-   `cache_storage` files with no live DB reference and `cached_path`
-   rows whose NAR is gone.
+1. **NAR pass** reuses `cleanup_orphaned_cache_files`: removes NAR objects
+   with no `cached_path` row and rows whose object is gone; eviction of
+   live-but-stale paths is the maintenance pass's job, not the deep GC's.
 2. **Blob pass** lists `build-request-blobs/...` from `nar_storage` and
    `build_request_blob` rows. Orphans on either side are removed.
 3. **Log pass** lists `BuildId`s from `log_storage`. Orphan logs (no

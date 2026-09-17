@@ -16,8 +16,8 @@
 //! Re-evaluating the gates per dispatch candidate is the per-row work #591 removed.
 
 use crate::graph_sql::{
-    ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte,
-    dependency_closure_cte_body, eval_closure_cte, eval_closure_cte_body,
+    ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte_body,
+    eval_closure_cte, eval_closure_cte_body, unrelayed_predicate,
 };
 use crate::status::TransitionChange;
 use crate::status_sql;
@@ -115,10 +115,14 @@ crate::sql_fn! {
 }
 
 fn cascade_dependency_failed_sql() -> String {
-    let cte = dependency_closure_cte(
-        "dependents",
-        "SELECT $1::uuid",
-        ClosureDirection::Dependents,
+    let cte = format!(
+        "WITH RECURSIVE {}",
+        bounded_dependency_closure_cte_body(
+            "dependents",
+            "SELECT $1::uuid",
+            ClosureDirection::Dependents,
+            &unrelayed_predicate("e.derivation"),
+        )
     );
     format!(
         r#"
@@ -223,7 +227,10 @@ fn dependency_failed_reconcile_sql() -> String {
                    AND derivation IN (SELECT derivation FROM closure)"
             ),
             ClosureDirection::Dependents,
-            "e.derivation IN (SELECT derivation FROM closure)",
+            &format!(
+                "e.derivation IN (SELECT derivation FROM closure) AND {}",
+                unrelayed_predicate("e.derivation"),
+            ),
         ),
     );
 
@@ -359,7 +366,10 @@ fn requeue_ctes(closure_seed: &str) -> String {
                  WHERE dbf.derivation IN (SELECT derivation FROM closure) AND {deterministic}"
             ),
             ClosureDirection::Dependents,
-            "e.derivation IN (SELECT derivation FROM closure)",
+            &format!(
+                "e.derivation IN (SELECT derivation FROM closure) AND {}",
+                unrelayed_predicate("e.derivation"),
+            ),
         ),
     )
 }
@@ -581,6 +591,31 @@ mod tests {
                 )),
                 "still thaws the requeueable states for transient causes: {sql}"
             );
+        }
+    }
+
+    /// A failure must not cross a relay. A substitutable anchor takes finished
+    /// bytes off an upstream, so an input that can never build neither dooms it
+    /// nor reaches anything above it; measured in the e2e VM's phase 10g, where
+    /// busybox's unbuildable source FODs cascaded `DependencyFailed` onto the
+    /// relayed anchor itself (#666). Every upward walk that carries a failure
+    /// fences on the same predicate, so the cascade, its sweep and the thaw's
+    /// blocked set can never disagree about who a failure reaches.
+    #[test]
+    fn a_failure_walk_never_enters_a_relay() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let fence = norm(unrelayed_predicate("e.derivation"));
+        assert!(
+            fence.contains("rb.substitutable"),
+            "the fence must read the relay flag: {fence}"
+        );
+        for sql in [
+            norm(cascade_dependency_failed_sql()),
+            norm(dependency_failed_reconcile_sql()),
+            norm(requeue_failed_anchors_sql()),
+            norm(requeue_failed_closure_for_eval_sql()),
+        ] {
+            assert!(sql.contains(&fence), "upward walk crosses a relay: {sql}");
         }
     }
 

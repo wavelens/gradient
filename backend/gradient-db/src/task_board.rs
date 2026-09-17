@@ -26,13 +26,11 @@ struct EvalStatusCountRow {
 }
 
 crate::sql! {
-    // No Param kind names an `evaluation` id array; BuildIds stands in as the
-    // closest UUID-shaped kind the registry offers.
     BUILD_STATUS_COUNTS_BY_EVALUATION = "SELECT bj.evaluation AS evaluation, db.status AS status, COUNT(*) AS cnt \
          FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build \
          WHERE bj.evaluation = ANY($1) \
          GROUP BY bj.evaluation, db.status",
-        params = [BuildIds(64)];
+        params = [EvaluationIds(64)];
 }
 
 /// `(evaluation, build.status) -> count`, one grouped query per chunk of ids.
@@ -72,7 +70,7 @@ crate::sql! {
     EVALUATION_MESSAGE_COUNTS = "SELECT evaluation, level, COUNT(*) AS cnt \
          FROM evaluation_message WHERE evaluation = ANY($1) \
          GROUP BY evaluation, level",
-        params = [BuildIds(64)];
+        params = [EvaluationIds(64)];
 }
 
 /// `(evaluation, message.level) -> count`.
@@ -128,10 +126,8 @@ fn task_queue_summary_sql() -> String {
 }
 
 crate::sql_fn! {
-    // No Param kind names a `task` id; BuildId stands in as the closest
-    // UUID-shaped kind the registry offers.
     TASK_QUEUE_SUMMARY = task_queue_summary_sql,
-        params = [BuildId];
+        params = [TaskId];
 }
 
 /// Live `building` / `queued` build counts across the task's non-finished
@@ -205,11 +201,9 @@ const DEP_COUNTS_SQL: &str = "WITH RECURSIVE seeds(ep, root_drv) AS (SELECT * FR
     GROUP BY c.ep, b.status";
 
 crate::sql! {
-    // No Param kind names an `entry_point` id array; BuildIds stands in as the
-    // closest UUID-shaped kind the registry offers.
     DEP_COUNTS_SQL_QUERY = DEP_COUNTS_SQL,
         params = [
-            BuildIds(64),
+            EntryPointIds(64),
             DerivationIds(64),
             EvaluationId,
         ],

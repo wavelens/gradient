@@ -55,9 +55,8 @@ pub use self::cache_reach::*;
 pub use self::cache_storage::{
     MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, UnconfirmedPath, cache_used_bytes,
     demote_cached_output, demote_output_only_cached_deps, demote_referrers_of,
-    demote_unbacked_trusted_outputs, diagnose_missing_input, instance_used_bytes,
-    project_caches_all_full, project_writable_caches, unconfirmed_cached_path_count,
-    unconfirmed_cached_paths,
+    diagnose_missing_input, instance_used_bytes, project_caches_all_full, project_writable_caches,
+    unconfirmed_cached_path_count, unconfirmed_cached_paths,
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_project,
@@ -104,13 +103,13 @@ pub use self::promotion::{
 pub use self::reachability::{
     Adopted, adopt_pending_closure, adopt_pending_closures, anchor_dispatch_state, anchor_status,
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
-    derivations_with_hashes, eval_anchor_statuses, evals_referencing_derivation,
+    derivations_with_hashes, eval_anchor_states, evals_referencing_derivation,
     pending_orphan_frontier, pending_orphans_among, producers_of_hashes,
 };
 pub use self::readiness::{
-    AnchorLock, Repaired, advance_fetchable, became_fetchable, direct_dependencies_of,
-    lock_anchors, lost_fetchability, promote, promote_closure, repair_pending, seed_unready_deps,
-    unpromote_drv_owners, unpromote_ungated, unwalk_derivations,
+    AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,
+    lost_fetchability, promote, promote_closure, recompute_demand, recount_demanded,
+    repair_pending, seed_unready_deps, unpromote_drv_owners, unpromote_ungated, unwalk_derivations,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;

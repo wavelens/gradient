@@ -18,6 +18,19 @@ use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 
 use crate::{DbContext, NoReactor, WebDb, WorkerDb};
 
+/// Drain the detached work a context spawned, then drop it, so the `WorkerDb` the
+/// builder returned is the last handle on the pool - which is what
+/// `WorkerDb::into_transaction_log` requires. `drop(ctx)` alone is not enough for
+/// any path that reaches `status::update_evaluation_status`: its success branch
+/// spawns the reactor hook and the phase-event record onto `ctx.shutdown`, each
+/// holding a `DbContext` clone that outlives the drop.
+pub(crate) async fn settle(ctx: DbContext) {
+    ctx.shutdown
+        .cancel_and_drain(std::time::Duration::from_secs(5))
+        .await;
+    drop(ctx);
+}
+
 /// A context over `db`, plus the pool handle its transaction log is read from.
 /// Drop the context before draining that log: `WorkerDb::into_transaction_log`
 /// requires the handle it is called on to be the last one alive.

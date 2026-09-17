@@ -129,16 +129,16 @@ pub async fn index_cached_path<C: ConnectionTrait>(
 
 crate::sql! {
     DEBUG_INFO_INDEXED_SELECT = "SELECT debug_info_indexed FROM cached_path WHERE id = $1",
-        params = [BuildId];
+        params = [CachedPathId];
 
     INSERT_DEBUG_INFO = "INSERT INTO debug_info (id, build_id, cached_path, member, created_at) \
          SELECT uuidv7(), t.build_id, $1, t.member, $2 \
          FROM unnest($3::text[], $4::text[]) AS t(build_id, member) \
          ON CONFLICT (build_id, cached_path) DO NOTHING",
-        params = [BuildId, Now, CachedPathHashes(8), CachedPathHashes(8)];
+        params = [CachedPathId, Now, CachedPathHashes(8), CachedPathHashes(8)];
 
     MARK_DEBUG_INFO_INDEXED = "UPDATE cached_path SET debug_info_indexed = true WHERE id = $1",
-        params = [BuildId];
+        params = [CachedPathId];
 }
 
 /// Re-read rather than trusted from the caller: a re-push of unchanged bytes

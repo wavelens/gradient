@@ -7,7 +7,7 @@
 //! NAR transfer: inbound push staging, outbound serving, and the
 //! `DispatchContext` handlers that commit an upload once it is complete.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -28,6 +28,103 @@ use crate::session::frame::Frame;
 use super::dispatch::DispatchContext;
 use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::socket::{BULK_CHUNK_SIZE, ProtoWriter, send_server_msg};
+
+// ── In-flight commits, per job ────────────────────────────────────────────────
+
+/// The commits a job still owes the index.
+///
+/// Committing a NAR reads the whole staged file and writes it to `nar_storage`
+/// (an S3 upload on object-store backends), so it runs detached: inline it froze
+/// the session read loop and every concurrent transfer on the connection stalled.
+/// That detachment is what lets `JobCompleted` - which rides the control writer
+/// lane, drained first - overtake its own job's commits. The anchor then reaches
+/// terminal success while the index has not yet been told the bytes exist, and a
+/// commit that fails afterwards cannot correct it: [`BuildStateMachine`] refuses
+/// to leave a terminal status, so the failure is dropped and the graph is left
+/// trusting an output nothing serves. That is the state the unbacked-output heal
+/// spends rebuilds on (#654).
+///
+/// So a job's completion waits here for its own commits. `settle` reports whether
+/// they all landed; when one did not, the commit path has already failed the build
+/// and the completion must not overwrite that verdict.
+///
+/// [`BuildStateMachine`]: gradient_db::state_machine::BuildStateMachine
+#[derive(Default)]
+pub(super) struct CommitTracker {
+    state: gradient_util::sync::Mutex<TrackerState>,
+    idle: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct TrackerState {
+    in_flight: HashMap<String, usize>,
+    failed: HashSet<String>,
+}
+
+impl CommitTracker {
+    /// Register one commit for `job_id`. The guard releases it on every exit of
+    /// the spawned task, an early return and a panic included.
+    fn start(self: &Arc<Self>, job_id: &str) -> CommitGuard {
+        *self
+            .state
+            .lock()
+            .in_flight
+            .entry(job_id.to_owned())
+            .or_insert(0) += 1;
+
+        CommitGuard {
+            tracker: Arc::clone(self),
+            job_id: job_id.to_owned(),
+        }
+    }
+
+    /// Wait until `job_id` owes no commit, and report whether they all landed.
+    /// Forgets the job, so a second call after a completion reads a clean slate.
+    pub(super) async fn settle(&self, job_id: &str) -> bool {
+        loop {
+            // Registered before the count is read: a guard that drops in between
+            // would otherwise notify nobody and this would wait for a commit that
+            // has already finished.
+            let idle = self.idle.notified();
+            tokio::pin!(idle);
+            idle.as_mut().enable();
+
+            {
+                let mut state = self.state.lock();
+                if state.in_flight.get(job_id).copied().unwrap_or(0) == 0 {
+                    state.in_flight.remove(job_id);
+                    return !state.failed.remove(job_id);
+                }
+            }
+
+            idle.await;
+        }
+    }
+}
+
+/// One in-flight commit. Dropping it releases the job's claim; `fail` records
+/// that this commit did not land before it is dropped.
+pub(super) struct CommitGuard {
+    tracker: Arc<CommitTracker>,
+    job_id: String,
+}
+
+impl CommitGuard {
+    fn fail(&self) {
+        self.tracker.state.lock().failed.insert(self.job_id.clone());
+    }
+}
+
+impl Drop for CommitGuard {
+    fn drop(&mut self) {
+        let mut state = self.tracker.state.lock();
+        if let Some(n) = state.in_flight.get_mut(&self.job_id) {
+            *n = n.saturating_sub(1);
+        }
+        drop(state);
+        self.tracker.idle.notify_waiters();
+    }
+}
 
 // ── Per-session inbound NAR receive store (issue #109, resumable #225) ────────
 
@@ -184,6 +281,7 @@ pub(super) struct NarReceiveStore {
     /// whose TTL this is.
     idle_timeout: Duration,
     poisoned: BTreeMap<String, Poison>,
+    commits: Arc<CommitTracker>,
 }
 
 /// In-memory key isolating a path's staging state per job, so two jobs pushing
@@ -213,6 +311,7 @@ impl NarReceiveStore {
             idle_timeout: ttl,
             active: HashMap::new(),
             poisoned: BTreeMap::new(),
+            commits: Arc::new(CommitTracker::default()),
         })
     }
 
@@ -256,6 +355,12 @@ impl NarReceiveStore {
     /// the life of the session. They are marked rather than closed because
     /// `JobCompleted` overtakes the job's own trailing bulk frames:
     /// [`ENDED_STREAM_GRACE`] gives those time to land.
+    /// The commits this session's jobs still owe the index. Cloned out so a
+    /// completion can wait for its own job off the read loop.
+    pub(super) fn commits(&self) -> Arc<CommitTracker> {
+        Arc::clone(&self.commits)
+    }
+
     pub(super) async fn forget_job(&mut self, job_id: &str) {
         let prefix = format!("{job_id}\u{1f}");
         let now = Instant::now();
@@ -707,6 +812,9 @@ impl<'a> DispatchContext<'a> {
         // ("WebSocket send stalled on final NarPush"). Detach the staged
         // stream synchronously, then commit on a bounded spawned task.
         let staged = nar.take_staged(&job_id, &store_path).await;
+        // Claimed before the spawn, so a `JobCompleted` that reaches the read loop
+        // between here and the task's first poll already sees the commit owed.
+        let guard = nar.commits().start(&job_id);
         let writer = self.writer.clone();
         let state = Arc::clone(self.state);
         let scheduler = Arc::clone(self.scheduler);
@@ -731,6 +839,7 @@ impl<'a> DispatchContext<'a> {
                 deriver,
                 ca,
                 staged,
+                guard,
             })
             .await;
         });
@@ -763,6 +872,8 @@ struct CommitUploadedNar {
     deriver: Option<String>,
     ca: Option<String>,
     staged: Option<StagedNar>,
+    /// Released when this task ends, however it ends.
+    guard: CommitGuard,
 }
 
 /// What a relayed commit left behind for the index and the hot cache.
@@ -796,7 +907,7 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
             .await
             {
                 Some(relayed) => relayed,
-                None => return,
+                None => return c.guard.fail(),
             }
         }
         None => {
@@ -813,7 +924,7 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
             )
             .await
             {
-                return;
+                return c.guard.fail();
             }
 
             Relayed {
@@ -848,7 +959,19 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
                 staged.wake();
             }
         }
-        Err(e) => warn!(store_path = %c.store_path, error = %e, "failed to mark NAR as stored"),
+        // The last step of the upload is the only one that was allowed to fail
+        // quietly, and it is the one that decides whether the cache has the path:
+        // the bytes are in storage and the index never learns it, so the anchor
+        // reaches terminal success against an output nothing serves. A full disk
+        // or a DB error here is the same class of transient server-side failure as
+        // the staged-read and integrity checks above, and it fails the build the
+        // same way rather than leaving the graph to discover the lie later.
+        Err(e) => {
+            let reason = format!("failed to record {} in the cache index: {e}", c.store_path);
+            error!(peer_id = %c.peer_id, job_id = %c.job_id, store_path = %c.store_path, %reason, "NAR commit failed");
+            fail_build_transient(&c.writer, &c.scheduler, &c.peer_id, &c.job_id, reason).await;
+            return c.guard.fail();
+        }
     }
     if let Err(e) = record_nar_push_metric(&c.state, c.project_id, file_size_i64).await {
         debug!(error = %e, "failed to record cache metric for NarUploaded");
@@ -1349,6 +1472,71 @@ async fn awaiting_upload(state: &Arc<ServerState>, hash: &str) -> bool {
     {
         Ok(Some(row)) => !row.confirmed && row.created_at > gradient_types::now() - grace,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod commit_tracker_tests {
+    use super::CommitTracker;
+    use gradient_util::shutdown::Shutdown;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// A completion must not pass a commit that is still running. The claim is
+    /// taken on the read loop before the commit task is spawned, so there is no
+    /// window in which `settle` can see zero for a commit that is owed.
+    #[tokio::test]
+    async fn settle_waits_for_a_commit_that_is_still_in_flight() {
+        let tracker = Arc::new(CommitTracker::default());
+        let guard = tracker.start("build:1");
+
+        let waiter = {
+            let tracker = Arc::clone(&tracker);
+            Shutdown::new().spawn(async move { tracker.settle("build:1").await })
+        };
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !waiter.is_finished(),
+            "the completion passed an owed commit"
+        );
+
+        drop(guard);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), waiter)
+                .await
+                .expect("the completion never woke")
+                .expect("waiter panicked"),
+            "a commit that landed settles clean"
+        );
+    }
+
+    /// A commit that failed has already failed the build, so the completion is
+    /// dropped: replaying it would mark terminal-success over that verdict, and
+    /// the build state machine would then refuse every correction.
+    #[tokio::test]
+    async fn settle_reports_a_commit_that_did_not_land() {
+        let tracker = Arc::new(CommitTracker::default());
+        let guard = tracker.start("build:1");
+        guard.fail();
+        drop(guard);
+
+        assert!(!tracker.settle("build:1").await);
+        assert!(
+            tracker.settle("build:1").await,
+            "the verdict is consumed with the job, so a later job id reads clean"
+        );
+    }
+
+    /// A job that pushed nothing completes without waiting for anything.
+    #[tokio::test]
+    async fn settle_is_immediate_when_no_commit_is_owed() {
+        let tracker = Arc::new(CommitTracker::default());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), tracker.settle("build:1"))
+                .await
+                .expect("settle blocked on a job that owes nothing")
+        );
     }
 }
 

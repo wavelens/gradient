@@ -6,7 +6,7 @@
 
 //! The one graph reconciler: the heals for state no event can reach, run at an
 //! evaluation's stream completion (`Eval`) and when a building evaluation is
-//! graph-stuck (`Unstick`). No scope runs on a tick and nothing here is a
+//! graph-stuck (`Unstick`). Both scopes now run the same steps. No scope runs on a tick and nothing here is a
 //! fixpoint; every counter is moved by the event that changes it, and
 //! [`crate::readiness::repair_pending`] is the backstop for a move that was lost.
 //!
@@ -27,7 +27,10 @@ pub enum ReconcileScope {
     /// dependents of a deterministic failure, name the pending anchors it reaches
     /// for the evaluation, promote the closure.
     Eval(EvaluationId),
-    /// A wedged evaluation: the `Eval` steps plus the unbacked-output demote.
+    /// A wedged evaluation. The same steps: what used to set this scope apart was
+    /// an unbacked-output demote, and the state it repaired is now prevented at the
+    /// source rather than swept for. The scope stays as the provenance a pass is
+    /// logged with - why it ran, which is not recoverable from what it did.
     Unstick(EvaluationId),
 }
 
@@ -43,7 +46,6 @@ impl ReconcileScope {
 #[derive(Debug, Default)]
 pub struct ReconcileReport {
     pub thawed: u64,
-    pub demoted_producers: u64,
     pub cached_reconciled: usize,
     pub adopted: usize,
     pub dependency_failed: Vec<TransitionChange>,
@@ -53,7 +55,6 @@ pub struct ReconcileReport {
 impl ReconcileReport {
     pub fn is_noop(&self) -> bool {
         self.thawed == 0
-            && self.demoted_producers == 0
             && self.cached_reconciled == 0
             && self.adopted == 0
             && self.dependency_failed.is_empty()
@@ -77,13 +78,6 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
         Err(e) => {
             error!(error = %e, %evaluation, "reconcile: requeue_failed_closure_for_eval failed")
-        }
-    }
-
-    if let ReconcileScope::Unstick(_) = scope {
-        match crate::cache_storage::demote_unbacked_trusted_outputs(ctx).await {
-            Ok(n) => report.demoted_producers = n,
-            Err(e) => error!(error = %e, "reconcile: demote_unbacked_trusted_outputs failed"),
         }
     }
 
@@ -121,6 +115,13 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     match crate::reachability::adopt_pending_closure(db, evaluation).await {
         Ok(adopted) => {
             report.adopted = adopted.pairs.len();
+            // Naming is half of what demand means, so an adoption creates it the way
+            // a thaw does.
+            for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+                if let Err(e) = crate::readiness::recompute_demand(db, chunk).await {
+                    error!(error = %e, %evaluation, "reconcile: demand recompute after adoption failed");
+                }
+            }
             if let Err(e) = crate::bump_graph_version(db, &adopted.evaluations()).await {
                 error!(error = %e, %evaluation, "reconcile: graph version bump after adoption failed");
             }
@@ -140,7 +141,6 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         debug!(
             ?scope,
             thawed = report.thawed,
-            demoted = report.demoted_producers,
             cached_reconciled = report.cached_reconciled,
             adopted = report.adopted,
             dependency_failed = report.dependency_failed.len(),
@@ -192,6 +192,9 @@ mod tests {
                 ("evaluation".to_owned(), Value::from(eval.into_inner())),
                 ("derivation".to_owned(), Value::from(d.into_inner())),
             ])]])
+            // the adoption recomputes demand below what it named, raised and locked
+            .append_exec_results([exec(0), exec(0)])
+            .append_query_results([empty.clone()])
             // the adopting evaluation's graph version
             .append_exec_results([exec(1)])
             // the closure promote opens a walk and finds nothing ready yet
@@ -222,9 +225,13 @@ mod tests {
             log[adopt].contains("WHERE bj.evaluation = $1"),
             "scoped to the healed evaluation: {log:?}"
         );
+        let demand = log
+            .iter()
+            .position(|s| s.contains("SET demanded ="))
+            .expect("the adoption recomputes what it named");
         assert!(
-            adopt < bump && bump < promote,
-            "adopt, bump, then promote: {log:?}"
+            adopt < demand && demand < bump && bump < promote,
+            "adopt, recompute what a name gave demand to, bump, then promote: {log:?}"
         );
         assert!(
             log[..adopt]

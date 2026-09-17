@@ -20,6 +20,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use gradient_db::sql::{Flag, Query, check, measure, registry};
+use sea_orm::sqlx::{AssertSqlSafe, Row, raw_sql};
 use sea_orm::{
     ConnectionTrait, DatabaseBackend, DatabaseConnection, DatabaseTransaction, Statement,
     TransactionTrait, Value,
@@ -59,13 +60,7 @@ async fn run_one(
 ) -> Result<Outcome> {
     let sql = query.text();
 
-    let generic = match plan(
-        db,
-        &format!("EXPLAIN (GENERIC_PLAN, FORMAT JSON) {sql}"),
-        [],
-    )
-    .await
-    {
+    let generic = match plan(db, format!("EXPLAIN (GENERIC_PLAN, FORMAT JSON) {sql}")).await {
         Ok(plan) => plan,
         Err(err) => return Ok(Outcome::Unmeasured(format!("generic plan failed: {err}"))),
     };
@@ -83,6 +78,8 @@ async fn run_one(
             None => return Ok(Outcome::Unmeasured(format!("no {param:?} to draw"))),
         }
     }
+
+    align_array_widths(&mut values);
 
     let txn = db.begin().await?;
     let measured = measure_in(&txn, query, &sql, values).await;
@@ -127,17 +124,40 @@ async fn measure_in(
         .map_err(Into::into)
 }
 
-async fn plan<I>(db: &DatabaseConnection, sql: &str, values: I) -> Result<serde_json::Value>
-where
-    I: IntoIterator<Item = Value>,
-{
-    let stmt = Statement::from_sql_and_values(DatabaseBackend::Postgres, sql, values);
+/// `unnest($1, $2, ...)` pads the shorter arrays with NULL and a NOT NULL column
+/// then rejects the row, so every array a statement binds is cut to the shortest
+/// one drawn: a table with fewer rows than the declared width decides the width
+/// for all of them, literal arrays included.
+fn align_array_widths(values: &mut [Value]) {
+    let Some(width) = values.iter().filter_map(array_len).min() else {
+        return;
+    };
 
-    db.query_one_raw(stmt)
-        .await?
-        .context("EXPLAIN returned no row")?
-        .try_get::<serde_json::Value>("", "QUERY PLAN")
-        .map_err(Into::into)
+    for value in values {
+        if let Value::Array(_, Some(items)) = value {
+            items.truncate(width);
+        }
+    }
+}
+
+fn array_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Array(_, Some(items)) => Some(items.len()),
+        _ => None,
+    }
+}
+
+/// `GENERIC_PLAN` asks for a plan with the parameters left UNBOUND, which the
+/// extended protocol cannot express: sea-orm prepares every statement, so the
+/// bind that follows supplies none of the `$n` the EXPLAIN declares and
+/// Postgres refuses the message. The simple protocol sends the text as it
+/// stands, and is the only way to ask for this plan at all.
+async fn plan(db: &DatabaseConnection, sql: String) -> Result<serde_json::Value> {
+    let mut conn = db.get_postgres_connection_pool().acquire().await?;
+    let row = raw_sql(AssertSqlSafe(sql)).fetch_one(&mut *conn).await?;
+
+    row.try_get::<serde_json::Value, _>(0)
+        .context("EXPLAIN returned no plan")
 }
 
 fn relations(plan: &serde_json::Value) -> Vec<String> {

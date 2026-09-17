@@ -134,8 +134,8 @@
 //! anchors themselves. The other three inputs each need their own call. A finished walk
 //! setting `walked` is [`promote_closure`]; a `build_job` appearing, a `.drv` becoming
 //! whole and demand arriving are [`promote`]; a `.drv` ceasing to be whole is
-//! [`unpromote_drv_owners`]; demand going away is [`unpromote_ungated`] over
-//! [`direct_dependencies_of`] the builder that lost it. `substitutable` being cleared on a `Queued` anchor is the
+//! [`unpromote_drv_owners`]; demand going away is [`unpromote_ungated`] over what
+//! [`recompute_demand`] reports lost. `substitutable` being cleared on a `Queued` anchor is the
 //! one with no entry point here, because it both unfetches the anchor and fails the
 //! anchor's own gate: the caller that clears it owes that anchor a re-check of its own
 //! gate, and until it does, [`repair_pending`]'s un-promote pass settles it one sweep
@@ -592,6 +592,152 @@ pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCh
         .collect())
 }
 
+/// One absolute recompute of `demanded` over `region`, from `seed`. Absolute rather
+/// than incremental for the reason [`seed_unready_deps`] is: an adjustment cannot
+/// express "this anchor keeps its demand through a different parent", and an anchor
+/// that keeps it re-demands everything below it, which the walk's downward step
+/// computes for free. It returns each row it changed WITH its new value, so one
+/// statement serves a gain and a loss and no caller has to know which it caused.
+pub(crate) fn demand_recompute_sql(region: &str, seed: &str, bound: &str) -> String {
+    format!(
+        "{cte} \
+         UPDATE derivation_build db \
+         SET demanded = (db.derivation IN (SELECT derivation FROM demanded)), \
+             updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE {region}db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
+         RETURNING db.derivation, db.demanded",
+        cte = crate::graph_sql::demand_closure_cte(seed, bound),
+    )
+}
+
+/// Table-wide, seeded from every entry point: the backstop for a lost recompute and
+/// the backfill the migration deliberately does not carry.
+///
+/// Only anchors in a builder status are rewritten, because they are the only ones a
+/// gate reads the column on. A terminal anchor keeps whatever it carried when it was
+/// pending, and the recompute that thaws it names it as a root, so the value it reads
+/// on the way back into the queue is computed and never inherited.
+pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> = LazyLock::new(|| {
+    demand_recompute_sql(
+        &format!(
+            "db.status IN ({pending}) AND ",
+            pending = status_sql::build_in(&crate::graph_sql::BUILDER_STATUSES),
+        ),
+        "SELECT derivation FROM entry_point",
+        "",
+    )
+});
+
+crate::sql_lazy! {
+    RECOUNT_DEMANDED = || RECOUNT_DEMANDED_SQL.as_str(),
+        params = [],
+        tier = Sweep,
+        flags = [Walk];
+}
+
+/// Rewrite every anchor whose demand drifted. Returns how many disagreed, which is
+/// the sweep's `demand_drift`: a healthy fleet reports zero, and a number that keeps
+/// coming back names a mover that is not recomputing what it changed.
+pub async fn recount_demanded<C>(db: &C) -> Result<u64, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk.query_all_raw(RECOUNT_DEMANDED.stmt()).await?;
+    walk.commit().await?;
+
+    Ok(rows.len() as u64)
+}
+
+/// What a bounded recompute moved: the anchors that gained demand, for [`promote`],
+/// and the ones that lost it, for [`unpromote_ungated`].
+#[derive(Debug, Default)]
+pub struct DemandMoved {
+    pub gained: Vec<DerivationId>,
+    pub lost: Vec<DerivationId>,
+}
+
+static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
+    // The roots enter the region as builders so the walk steps out of them once even
+    // where they have just stopped being one; everything below is stepped through
+    // only while it is.
+    let region = crate::graph_sql::pending_closure_cte(
+        "region",
+        "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
+    );
+    let seed = format!(
+        "SELECT r.derivation FROM region r \
+         WHERE EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) \
+            OR EXISTS (SELECT 1 FROM derivation_dependency e \
+                       JOIN derivation_build p ON p.derivation = e.derivation \
+                       JOIN derivation w ON w.id = p.derivation \
+                       WHERE e.dependency = r.derivation AND p.demanded \
+                         AND p.derivation NOT IN (SELECT derivation FROM region) \
+                         AND ({builder}) \
+                         AND EXISTS (SELECT 1 FROM build_job bj \
+                                     WHERE bj.derivation = p.derivation))",
+        builder = crate::graph_sql::builder_predicate("p", "w"),
+    );
+    let body = demand_recompute_sql(
+        "db.derivation IN (SELECT derivation FROM region) AND ",
+        &seed,
+        "e.dependency IN (SELECT derivation FROM region)",
+    );
+
+    format!(
+        "{region}, {rest}",
+        rest = body.trim_start_matches("WITH RECURSIVE "),
+    )
+});
+
+crate::sql_lazy! {
+    RECOMPUTE_DEMAND = || RECOMPUTE_DEMAND_SQL.as_str(),
+        params = [DerivationIds(64)],
+        tier = Walk,
+        flags = [Walk];
+}
+
+/// Recompute demand over `roots` and the pending closure below them, after an event
+/// that changed whether they carry it.
+///
+/// The region includes the roots: a thaw makes an anchor a builder again and its own
+/// stored value is as stale as its subtree's. Runs under [`lock_anchors`] on the
+/// roots; two recomputes over overlapping regions can still interleave, and the
+/// sweep's table-wide recount is the backstop that notices.
+pub async fn recompute_demand<C>(db: &C, roots: &[DerivationId]) -> Result<DemandMoved, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    if roots.is_empty() {
+        return Ok(DemandMoved::default());
+    }
+
+    let txn = crate::graph_sql::begin_walk(db).await?;
+    let _lock = lock_anchors(&txn, roots).await?;
+    let rows = txn
+        .query_all_raw(RECOMPUTE_DEMAND.bind([ids(roots)]))
+        .await?;
+    txn.commit().await?;
+
+    let mut moved = DemandMoved::default();
+    for row in &rows {
+        let (Ok(derivation), Ok(demanded)) = (
+            row.try_get::<uuid::Uuid>("", "derivation"),
+            row.try_get::<bool>("", "demanded"),
+        ) else {
+            continue;
+        };
+
+        if demanded {
+            moved.gained.push(DerivationId::new(derivation));
+        } else {
+            moved.lost.push(DerivationId::new(derivation));
+        }
+    }
+
+    Ok(moved)
+}
+
 /// Queue every `Created` candidate whose gates hold. The gate is embedded, so a
 /// candidate list is a bound and never a claim: passing a row that is not yet ready
 /// moves nothing.
@@ -655,39 +801,6 @@ pub async fn unpromote_drv_owners<C: ConnectionTrait>(
         db.query_all_raw(UNPROMOTE_DRV_OWNERS_QUERY.bind([drv_hashes.to_vec().into()]))
             .await?,
     ))
-}
-
-crate::sql! {
-    DIRECT_DEPENDENCIES = "SELECT DISTINCT e.dependency FROM derivation_dependency e WHERE e.derivation = ANY($1::uuid[])",
-        params = [DerivationIds(64)];
-}
-
-/// The direct inputs of `derivations`, one statement and one hop. What every event
-/// that creates, thaws, finishes or drops a builder hands to [`promote`] or
-/// [`unpromote_ungated`], because that builder is exactly the demand its inputs gained
-/// or lost.
-///
-/// A STATUS move across [`crate::graph_sql::BUILDER_STATUSES`] is handled once, in
-/// [`crate::status::emit_transition_effects`], so no mover has to remember it. The
-/// three events that change what an anchor IS rather than where it is - writing
-/// `substitutable` - are the exception, because they turn a relay into a builder (or
-/// back) at an unchanged status: `ingest`'s upstream flip, `demote_cached_output`'s
-/// clear, and the graph actor's exhausted substitution each call this themselves.
-pub async fn direct_dependencies_of<C: ConnectionTrait>(
-    db: &C,
-    derivations: &[DerivationId],
-) -> Result<Vec<DerivationId>, DbErr> {
-    if derivations.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    Ok(db
-        .query_all_raw(DIRECT_DEPENDENCIES.bind([ids(derivations)]))
-        .await?
-        .iter()
-        .filter_map(|r| r.try_get::<uuid::Uuid>("", "dependency").ok())
-        .map(DerivationId::new)
-        .collect())
 }
 
 /// Pull back every `Queued` candidate whose gates no longer hold. The gate is
@@ -864,6 +977,13 @@ mod tests {
         BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
     }
 
+    fn demand_row(id: DerivationId, demanded: bool) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("derivation".to_owned(), Value::from(id.into_inner())),
+            ("demanded".to_owned(), Value::from(demanded)),
+        ])
+    }
+
     fn ripple_row(id: DerivationId, ready: bool) -> BTreeMap<String, Value> {
         BTreeMap::from([
             ("derivation".to_owned(), Value::from(id.into_inner())),
@@ -960,7 +1080,6 @@ mod tests {
         assert!(promote(&db, &[]).await.unwrap().is_empty());
         assert!(unpromote_drv_owners(&db, &[]).await.unwrap().is_empty());
         assert!(unpromote_ungated(&db, &[]).await.unwrap().is_empty());
-        assert!(direct_dependencies_of(&db, &[]).await.unwrap().is_empty());
         assert!(statements(db.into_transaction_log()).is_empty());
     }
 
@@ -1164,34 +1283,6 @@ mod tests {
         );
     }
 
-    /// Demand is read one hop at a time, so every event that creates or drops a
-    /// builder needs that builder's direct inputs and nothing deeper. One statement,
-    /// no walk.
-    #[tokio::test]
-    async fn direct_dependencies_of_is_one_distinct_select_and_never_a_walk() {
-        let d = DerivationId::now_v7();
-        let dep = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![BTreeMap::from([(
-                "dependency".to_owned(),
-                Value::from(dep.into_inner()),
-            )])]])
-            .into_connection();
-
-        assert_eq!(direct_dependencies_of(&db, &[d]).await.unwrap(), vec![dep]);
-
-        let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 1, "{log:?}");
-        assert!(
-            log[0].contains(
-                "SELECT DISTINCT e.dependency FROM derivation_dependency e \
-                 WHERE e.derivation = ANY($1::uuid[])"
-            ),
-            "{log:?}"
-        );
-        assert!(!log[0].contains("WITH RECURSIVE"), "{log:?}");
-    }
-
     /// The generic un-promote is what every demand loss runs, so it must move
     /// `Queued` rows only and report the move as the transition the emitter fans out.
     #[tokio::test]
@@ -1219,8 +1310,8 @@ mod tests {
             "{log:?}"
         );
         assert!(
-            log[0].contains("db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
-            "the embedded gate carries the demand arm: {log:?}"
+            log[0].contains("AND db.demanded"),
+            "the embedded gate reads the demand column: {log:?}"
         );
     }
 
@@ -1357,6 +1448,76 @@ mod tests {
             columns,
             ["fetchable", "fetchable", "unready_deps", "unready_deps"],
             "two chunks, both fetchable passes first: {log:?}"
+        );
+    }
+
+    /// The recompute is absolute and writes only the rows that disagree, so its
+    /// row count IS the drift and a healthy fleet writes nothing. It returns the
+    /// new value per row, because one statement serves both directions: what it
+    /// turned on is promoted and what it turned off is un-promoted.
+    #[test]
+    fn the_demand_recompute_writes_only_disagreeing_rows() {
+        let sql = norm(RECOUNT_DEMANDED_SQL.as_str());
+        assert!(
+            sql.contains("WITH RECURSIVE demanded(derivation) AS"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("SET demanded = (db.derivation IN (SELECT derivation FROM demanded))"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("db.demanded <> (db.derivation IN (SELECT derivation FROM demanded))"),
+            "rewriting agreeing rows reports drift that is not there: {sql}"
+        );
+        assert!(
+            sql.contains("RETURNING db.derivation, db.demanded"),
+            "the caller settles the queue from the new value: {sql}"
+        );
+    }
+
+    /// One statement, both directions, over a region that INCLUDES the roots. A
+    /// thawed anchor's own demand is as stale as anything below it - its value was
+    /// last written when it was terminal - so a recompute that only walked downward
+    /// would relay busybox again the moment a retire reset it (#666). The seed comes
+    /// from outside the region, because a member kept by an outside builder
+    /// re-demands its own subtree.
+    #[tokio::test]
+    async fn the_bounded_recompute_covers_its_roots_and_seeds_from_outside() {
+        let root = DerivationId::now_v7();
+        let on = DerivationId::now_v7();
+        let off = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0), exec(1)])
+            .append_query_results([vec![demand_row(on, true), demand_row(off, false)]])
+            .into_connection();
+
+        let moved = recompute_demand(&db, &[root]).await.unwrap();
+        assert_eq!(moved.gained, vec![on]);
+        assert_eq!(moved.lost, vec![off]);
+
+        let log = statements(db.into_transaction_log());
+        assert!(
+            log[0].contains("SET LOCAL work_mem")
+                && log[1].contains("ORDER BY derivation FOR UPDATE"),
+            "the walk its plan gate measures is raised and its roots locked: {log:?}"
+        );
+        let sql = norm(&log[2]);
+        assert!(
+            sql.contains("region(evaluation, derivation, builder) AS"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("db.derivation IN (SELECT derivation FROM region)"),
+            "the write must be bounded to the region: {sql}"
+        );
+        assert!(
+            sql.contains("p.derivation NOT IN (SELECT derivation FROM region)"),
+            "the seed must come from demanders OUTSIDE the region: {sql}"
+        );
+        assert!(
+            sql.contains("RETURNING db.derivation, db.demanded"),
+            "{sql}"
         );
     }
 }

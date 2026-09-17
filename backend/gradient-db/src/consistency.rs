@@ -34,12 +34,17 @@ pub struct ConsistencyReport {
     /// `fetchable` and `unready_deps` rows rewritten over the pending anchors
     /// and their direct dependencies.
     pub counter_drift: i64,
+    /// Anchors whose `demanded` disagreed with the walk from the entry points.
+    pub demand_drift: i64,
     /// Promotable anchors found unpromoted, queued by this pass.
     pub unpromoted_ready: i64,
     /// `build_job` rows this pass inserted for pending anchors a live evaluation
     /// reaches and nobody named. A repair, like the drift counts.
     pub adopted: i64,
-    /// Outputs of terminal-success producers with no backing artifact.
+    /// Outputs of terminal-success producers with no backing artifact. Nothing
+    /// repairs this any more: every way it was known to arise is closed where it
+    /// happens (see [`crate::cache_storage::unbacked_trusted_outputs_select`]), so
+    /// a non-zero count is a bug in one of those, not a queue of work.
     pub unbacked_trusted_outputs: i64,
     /// `Building` evaluations with zero non-terminal anchors left.
     pub wedged_building_evals: i64,
@@ -67,6 +72,7 @@ impl ConsistencyReport {
     /// measurements and are deliberately not summed.
     pub fn total(&self) -> i64 {
         self.counter_drift
+            + self.demand_drift
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
@@ -153,6 +159,10 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
     let negative_reference_counters = count(db, NEGATIVE_REFERENCE_COUNTERS.stmt()).await?;
 
+    // Before the readiness repair, so the queue settle that follows reads a
+    // corrected column rather than promoting against a stale demand.
+    let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
+
     let repaired = crate::readiness::repair_pending(db).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
     // the board at the status the earlier statement wrote.
@@ -163,9 +173,29 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     // each repair it on their own path, and this is the backstop for a lost move.
     let adopted = if crate::reachability::pending_orphan_frontier(db).await? {
         let adopted = crate::reachability::adopt_pending_closures(db).await?;
-        let mut queued = Vec::new();
+        // Naming is half of what demand means, as it is on every other adoption
+        // path: a name makes the anchor a demander of its own inputs, and without
+        // this the closure below what was just named waits for the NEXT sweep's
+        // recount to be queueable at all.
+        let mut moved = crate::readiness::DemandMoved::default();
         for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+            let chunk_moved = crate::readiness::recompute_demand(db, chunk).await?;
+            moved.gained.extend(chunk_moved.gained);
+            moved.lost.extend(chunk_moved.lost);
+        }
+
+        let mut queued = Vec::new();
+        let promotable: Vec<_> = adopted
+            .derivations()
+            .iter()
+            .chain(moved.gained.iter())
+            .copied()
+            .collect();
+        for chunk in promotable.chunks(crate::IN_CHUNK_SIZE) {
             queued.extend(crate::readiness::promote(db, chunk).await?);
+        }
+        for chunk in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
+            queued.extend(crate::readiness::unpromote_ungated(db, chunk).await?);
         }
 
         crate::bump_graph_version(db, &adopted.evaluations()).await?;
@@ -181,6 +211,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
 
     Ok(ConsistencyReport {
         counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
+        demand_drift,
         unpromoted_ready: repaired.promoted.len() as i64,
         adopted,
         unbacked_trusted_outputs,
@@ -205,12 +236,21 @@ mod tests {
         }
     }
 
-    /// The sweep's statement script: the gating select, the NAR repair, the
-    /// readiness repair, the queue settle, the naming probe (and the walk it
-    /// guards when `hole` is set), then the two read-only alarms.
+    /// The sweep's statement script: the gating select, the NAR repair, the demand
+    /// recount under its walk raise, the readiness repair, the queue settle, the
+    /// naming probe (and the walk it guards when `hole` is set), then the two
+    /// read-only alarms.
     fn scripted(hole: bool) -> sea_orm::DatabaseConnection {
         let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
         let empty = Vec::<BTreeMap<String, Value>>::new();
+        let drifted: Vec<BTreeMap<String, Value>> = (0..4)
+            .map(|_| {
+                BTreeMap::from([
+                    ("derivation".to_owned(), Value::from(uuid::Uuid::now_v7())),
+                    ("demanded".to_owned(), Value::from(true)),
+                ])
+            })
+            .collect();
         let mut db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![BTreeMap::from([(
                 "hash".to_owned(),
@@ -218,6 +258,8 @@ mod tests {
             )])]])
             .append_exec_results([exec(0), exec(2)])
             .append_query_results([n()])
+            .append_exec_results([exec(0)])
+            .append_query_results([drifted])
             .append_query_results([vec![BTreeMap::from([(
                 "derivation".to_owned(),
                 Value::from(uuid::Uuid::now_v7()),
@@ -234,7 +276,8 @@ mod tests {
                 ("evaluation".to_owned(), Value::from(uuid::Uuid::now_v7())),
                 ("derivation".to_owned(), Value::from(uuid::Uuid::now_v7())),
             ])]])
-            .append_query_results([empty.clone()])
+            .append_exec_results([exec(0), exec(0)])
+            .append_query_results([empty.clone(), empty.clone()])
             .append_exec_results([exec(1)])
         } else {
             db.append_query_results([empty.clone()])
@@ -267,6 +310,10 @@ mod tests {
             report.repair_scope, 1,
             "the readiness repair's scope is measured too"
         );
+        assert_eq!(
+            report.demand_drift, 4,
+            "every anchor the recount rewrote is reported"
+        );
         assert_eq!(report.adopted, 0);
 
         let log = crate::pool::statements(pool.into_transaction_log());
@@ -285,37 +332,42 @@ mod tests {
             "a counter below zero is unrecoverable, so it must be counted: {log:?}"
         );
         assert!(
-            log[4].contains("SELECT q.derivation FROM derivation_build q"),
-            "the readiness repair materialises its scope: {log:?}"
+            log[4].contains("SET LOCAL work_mem") && log[5].contains("SET demanded ="),
+            "the table-wide demand walk runs under its own raise: {log:?}"
         );
         assert!(
-            log[5].contains("FOR UPDATE") && log[6].contains("SET fetchable"),
+            log[6].contains("SELECT q.derivation FROM derivation_build q"),
+            "the demand recount precedes the readiness repair, so the settle below it reads a corrected column: {log:?}"
+        );
+        assert!(
+            log[7].contains("FOR UPDATE") && log[8].contains("SET fetchable"),
             "the fetchable recount runs under its own ordered lock: {log:?}"
         );
         assert!(
-            log[7].contains("FOR UPDATE") && log[8].contains("SET unready_deps"),
+            log[9].contains("FOR UPDATE") && log[10].contains("SET unready_deps"),
             "and the counter recount after it, in a second locked pass: {log:?}"
         );
         assert!(
-            log[9].contains("SET status = 0") && log[10].contains("SET status = 1"),
+            log[11].contains("SET status = 0") && log[12].contains("SET status = 1"),
             "the queue is settled against the repaired counters: {log:?}"
         );
         assert!(
-            log[11].contains(
+            log[13].contains(
                 "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
             ),
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[12].contains("SELECT DISTINCT o.hash") && log[13].contains("FROM evaluation ev"),
+            log[14].contains("SELECT DISTINCT o.hash") && log[15].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
         );
-        assert_eq!(log.len(), 14, "{log:?}");
+        assert_eq!(log.len(), 16, "{log:?}");
     }
 
     /// A pending anchor nobody names below a live evaluation's builder is the one
-    /// hole no counter repair can close: the sweep walks, names, queues what it
-    /// named, and reports the rows as a repair.
+    /// hole no counter repair can close: the sweep walks, names, recomputes the
+    /// demand the new name carries, queues what it named, and reports the rows as
+    /// a repair.
     #[tokio::test]
     async fn the_sweep_adopts_when_a_live_evaluation_reaches_an_unnamed_pending_anchor() {
         let (ctx, pool) = crate::test_ctx::ctx(scripted(true)).await;
@@ -325,15 +377,24 @@ mod tests {
         assert_eq!(report.adopted, 1);
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log[11].contains("LIMIT 1")
-                && log[12].contains("SET LOCAL work_mem")
-                && log[13].contains("INSERT INTO build_job")
-                && log[14].contains("SET status = 1")
-                && log[15].contains("graph_version = e.graph_version + 1"),
-            "probe, walk, queue what was named, bump: {log:?}"
+            log[13].contains("LIMIT 1")
+                && log[14].contains("SET LOCAL work_mem")
+                && log[15].contains("INSERT INTO build_job"),
+            "the probe guards the walk that names: {log:?}"
         );
         assert!(
-            log[16].contains("SELECT DISTINCT o.hash") && log[17].contains("FROM evaluation ev"),
+            log[16].contains("SET LOCAL work_mem")
+                && log[17].contains("ORDER BY derivation FOR UPDATE")
+                && log[18].contains("SET demanded ="),
+            "a name gives the closure below it demand, in this pass and not the next: {log:?}"
+        );
+        assert!(
+            log[19].contains("SET status = 1")
+                && log[20].contains("graph_version = e.graph_version + 1"),
+            "then queue what was named and bump: {log:?}"
+        );
+        assert!(
+            log[21].contains("SELECT DISTINCT o.hash") && log[22].contains("FROM evaluation ev"),
             "the read-only alarms still come last: {log:?}"
         );
     }
@@ -344,6 +405,7 @@ mod tests {
     fn total_sums_every_dimension() {
         let r = ConsistencyReport {
             counter_drift: 1,
+            demand_drift: 8,
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
@@ -353,7 +415,7 @@ mod tests {
             repair_scope: 2000,
             adopted: 2,
         };
-        assert_eq!(r.total(), 28);
+        assert_eq!(r.total(), 36);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }

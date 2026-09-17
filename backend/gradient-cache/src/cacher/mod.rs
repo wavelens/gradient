@@ -26,14 +26,13 @@ pub use self::eval_cache_sweep::evict_eval_cache;
 
 pub use self::cleanup::{
     CleanupReport, cleanup_expired_upload_sessions, cleanup_old_evaluations,
-    cleanup_orphaned_cache_files, cleanup_stale_build_request_blobs, cleanup_stale_cached_nars,
+    cleanup_orphaned_cache_files, cleanup_stale_build_request_blobs, evict_stale_cached_paths,
 };
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::sign_sweep::sign_missing_signatures;
 
 use futures::future::BoxFuture;
 use gradient_core::ServerState;
-use gradient_graph::Demotion;
 use gradient_util::supervision::ChildSpec;
 use std::sync::Arc;
 use std::time::Duration;
@@ -139,24 +138,10 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     } else {
         info!("Derivation GC completed successfully");
     }
-    if state.config.storage.nar_ttl_hours > 0
-        && let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await
-    {
-        error!(error = ?e, "NAR TTL GC failed");
-    }
-    // The GC passes above retire the `cached_path` rows they drop, so the counters
-    // and the anchor side move in the deleting transaction, for every hash they ask
-    // about and not only the ones that moved. This stays the backstop for an anchor
-    // NO retire is invoked for - trusted, with an output nothing ever asked to drop
-    // and no backing NAR - so its dependents stop failing `InputsUnavailable` and
-    // the next eval rebuilds it.
-    match state.graph.demote(Demotion::UnbackedTrustedOutputs).await {
-        Ok(report) if report.demoted > 0 => info!(
-            reset = report.demoted,
-            "Demoted trusted producers with unfetchable outputs"
-        ),
+    match evict_stale_cached_paths(Arc::clone(&state)).await {
+        Ok(n) if n > 0 => info!(evicted = n, "Stale cached-path eviction completed"),
         Ok(_) => {}
-        Err(e) => error!(error = ?e, "Cache-trust reconcile failed"),
+        Err(e) => error!(error = ?e, "Stale cached-path eviction failed"),
     }
     if let Err(e) =
         gradient_ci::unpark_storage_full_all(&state.worker_db, state.config.storage.max_storage_gb)

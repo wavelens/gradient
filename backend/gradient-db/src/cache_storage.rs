@@ -351,13 +351,15 @@ pub async fn demote_cached_output(
         .extend(crate::readiness::unpromote_ungated(&txn, &producers).await?);
     txn.commit().await?;
 
-    // Every producer is offered, not just the ones the clear moved: `promote`
-    // embeds the gate, so a candidate list is a bound and never a claim, and that
-    // is cheaper than a `RETURNING` round trip to narrow it.
-    let wanted = crate::readiness::direct_dependencies_of(db, &producers).await?;
+    // Clearing `substitutable` turns these producers back into builders, so demand
+    // reaches their whole pending closure again and not just one hop.
+    let moved = crate::readiness::recompute_demand(db, &producers).await?;
     retired
         .transitions
-        .extend(crate::readiness::promote(db, &wanted).await?);
+        .extend(crate::readiness::promote(db, &moved.gained).await?);
+    retired
+        .transitions
+        .extend(crate::readiness::unpromote_ungated(db, &moved.lost).await?);
     crate::status::emit_transition_effects(ctx, &retired.transitions).await;
 
     if let Err(e) = nar_storage.delete(hash).await {
@@ -444,31 +446,31 @@ pub async fn demote_output_only_cached_deps(
     Ok(producers)
 }
 
-/// Enforce the row-vs-object invariant: **every** output of a terminal-success
-/// producer (`Completed`/`Substituted`) must have a backing artifact - present in
-/// our cache (`cached_path` with a NAR) or on a configured upstream
-/// (`external_url`). Three ways the invariant breaks, all the same dead zone: the
-/// cache GC deletes a `cached_path` row when its NAR object is gone (zombie purge,
-/// TTL eviction); an old global cache hit marks an anchor `Completed` + `is_cached`
-/// without ever building it; or a partial cache-hit / substitution marks an anchor
-/// `Completed` with an output that was never cached at all (`is_cached = false`, no
-/// build attempt - observed on multi-output CUDA derivations whose `out` was never
-/// pushed). Such an anchor's dependents are blocked at promotion (its
-/// `fetchable` is - correctly - false, so it counts toward their `unready_deps`),
-/// so they never dispatch, so no build
-/// ever reports the path missing and the reactive `reconcile_missing_inputs` heal
-/// never fires: a permanent dead zone. Demote each unbacked output - reset its
-/// producer to `Created`, drop the stale flags, and raise the reference counters
-/// of its referrers - so the next build rebuilds it. Returns the producers reset.
+/// The row-vs-object invariant, as a query: **every** output of a terminal-success
+/// producer (`Completed`/`Substituted`) must have a backing artifact, present in our
+/// cache (`cached_path` with a NAR) or on a configured upstream (`external_url`).
+/// An anchor that breaks it is a dead end - its `fetchable` is, correctly, false, so
+/// it counts toward its dependents' `unready_deps` forever, and being
+/// terminal-*success* no requeue path ever reaches it.
 ///
-/// Keyed on the **ground truth** (a backing `cached_path` NAR), NOT the derived
-/// `is_cached` flag: that flag is `false` for exactly the never-cached-output dead
-/// zone above, so an `is_cached`-gated predicate would skip the anchors this sweep
-/// exists to rescue. Nor the readiness flags, which are - correctly - already
-/// closed for every dead-zone anchor. `external_url IS NULL` excludes outputs fetched
-/// straight from an upstream (not from our cache). The completion path records each
-/// output's `cached_path` before flipping the anchor terminal (#303/#399), so a
-/// genuinely-complete anchor is never selected mid-completion.
+/// This is measured, not repaired. It used to feed a sweep that demoted such a
+/// producer back to `Created` so the next build would rebuild it, which is where
+/// #654 came from: the sweep re-derived the same demote every reconcile pass, the
+/// fleet rebuilt an output that never came back, and nothing noticed the rebuild had
+/// changed nothing. Every way the invariant was known to break is now closed where
+/// it happens: a NAR whose commit fails fails its build, a completion is not
+/// recorded until that job's commits have settled, an eval marks an anchor
+/// substituted only when EVERY output is already whole here, and every pass that
+/// deletes a `cached_path` row resets the producers it unbacked in the deleting
+/// transaction (`nar_closure::retire_paths`). So a non-zero count is a bug in one of
+/// those, and the consistency report is where it surfaces
+/// ([`crate::consistency::ConsistencyReport::unbacked_trusted_outputs`]) - a repair
+/// that rebuilds on its own would only hide it again, and one that failed the
+/// producer instead would take a real subtree down on a false positive.
+///
+/// Keyed on the **ground truth** (a backing `cached_path` NAR), not the derived
+/// `is_cached` flag, which is `false` for an anchor that was marked done with an
+/// output that was never cached at all - exactly the case worth seeing.
 pub(crate) fn unbacked_trusted_outputs_select() -> String {
     format!(
         r#"
@@ -483,33 +485,6 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
 "#,
         terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
     )
-}
-
-crate::sql_fn! {
-    UNBACKED_TRUSTED_OUTPUTS = unbacked_trusted_outputs_select,
-        params = [];
-}
-
-pub async fn demote_unbacked_trusted_outputs(
-    ctx: &crate::DbContext,
-) -> Result<u64, sea_orm::DbErr> {
-    use sea_orm::FromQueryResult;
-
-    #[derive(sea_orm::FromQueryResult)]
-    struct OutputHash {
-        hash: String,
-    }
-
-    let hashes = OutputHash::find_by_statement(UNBACKED_TRUSTED_OUTPUTS.stmt())
-        .all(&ctx.worker_db)
-        .await?;
-
-    let mut reset = 0u64;
-    for h in hashes {
-        reset += demote_cached_output(ctx, &h.hash).await?.len() as u64;
-    }
-
-    Ok(reset)
 }
 
 crate::sql! {
@@ -673,7 +648,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                6
+                7
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -691,10 +666,11 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            13,
+            15,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
              is_cached, producers of the union, producers of what is gone, owners, \
-             un-promote, and what the producers now demand: {log:?}"
+             un-promote, and the raised, locked recompute of what the producers now \
+             demand: {log:?}"
         );
         let paths = log
             .iter()
@@ -773,7 +749,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                5
+                7
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -784,10 +760,11 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            16,
+            18,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
              producers of the union, anchor lock, mark, ripple, producers of what is \
-             gone, reset, owners, un-promote, and what the producers now demand: {log:?}"
+             gone, reset, owners, un-promote, and the raised, locked recompute of what \
+             the producers now demand: {log:?}"
         );
         assert!(
             !log.iter()
@@ -855,12 +832,11 @@ mod tests {
         );
     }
 
-    /// The reconciler enforces the row-vs-object invariant on terminal-success
-    /// anchors: any output with no backing NAR is demoted. It must key on the
-    /// **ground truth** (a missing `cached_path` NAR), NOT the derived
-    /// `is_cached` flag - that flag is `false` for the never-cached-output
-    /// dead zone this sweep must rescue - and must skip upstream-fetchable outputs
-    /// (`external_url`).
+    /// The consistency report measures the row-vs-object invariant on
+    /// terminal-success anchors. It must key on the **ground truth** (a missing
+    /// `cached_path` NAR), NOT the derived `is_cached` flag - that flag is `false`
+    /// for exactly the never-cached-output case worth seeing - and must skip
+    /// upstream-fetchable outputs (`external_url`), which are served without us.
     #[test]
     fn unbacked_trusted_select_matches_the_gate() {
         let sql = unbacked_trusted_outputs_select()

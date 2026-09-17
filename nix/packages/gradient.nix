@@ -59,6 +59,10 @@ let
     inherit src cargoVendorDir;
     strictDeps = true;
 
+    # A sandbox starts with no incremental cache to reuse, so the bookkeeping
+    # is pure overhead and it fattens the target dir crane packs between layers.
+    CARGO_INCREMENTAL = "0";
+
     nativeBuildInputs = [
       installShellFiles
       pkg-config
@@ -86,6 +90,22 @@ let
     src = depsSrc;
     inherit dummyrs;
   });
+
+  # The suite builds under `[profile.test]`, so it cannot share the release
+  # layer. `[profile.dev.package."*"]` keeps the dependencies optimised, which
+  # is what stops an unoptimised argon2 from outlasting the compile it saves.
+  testArtifacts = craneLib.buildDepsOnly (commonArgs // {
+    src = depsSrc;
+    pname = "gradient-server-test";
+    inherit dummyrs;
+    CARGO_PROFILE = "test";
+
+    # crane leads with `cargo check --all-targets` to cache check artifacts.
+    # Only clippy reads those and clippy reads the release layer, so here that
+    # pass is six minutes for nothing. The check phase's `cargo test --no-run`
+    # still brings in the dev-dependencies.
+    buildPhaseCargoCommand = "cargoWithProfile build --locked";
+  });
 in
 craneLib.buildPackage (commonArgs // {
   inherit cargoArtifacts;
@@ -93,26 +113,49 @@ craneLib.buildPackage (commonArgs // {
   version = "1.3.0";
   separateDebugInfo = true;
 
+  # `separateDebugInfo` exports `NIX_RUSTFLAGS=-g -C strip=none` for the whole
+  # derivation. Keep that on the shipped binary and off the ~105 test targets:
+  # the suite is its own check, so it neither carries full DWARF nor blocks
+  # everything that only needs the binary.
+  doCheck = false;
+
+  # The SQL plan gate the e2e VM test runs comes out of this same cargo
+  # invocation instead of a second one over the whole workspace: no code sits
+  # behind `cfg(feature = "sql-gate")`, the feature only flips optional
+  # dependencies of the root crate, and `required-features` keeps the bin out
+  # of a default build. The `gate` output keeps it out of the server's closure.
+  outputs = [ "out" "gate" ];
+  cargoExtraArgs = "--locked --features sql-gate";
+
+  postInstall = ''
+    mkdir -p $gate/bin
+    mv $out/bin/gradient-sql-gate $gate/bin/
+  '';
+
   # Reuses cargoArtifacts so clippy only recompiles workspace crates.
   passthru.clippy = craneLib.cargoClippy (commonArgs // {
     inherit cargoArtifacts;
     cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
   });
 
-  # The SQL plan gate the cache VM test runs. Behind `required-features`, so a
-  # default build never compiles it and it never lands in this package.
-  passthru.sqlGate = craneLib.buildPackage (commonArgs // {
-    inherit cargoArtifacts;
-    pname = "gradient-sql-gate";
+  passthru.tests = craneLib.cargoNextest (commonArgs // {
+    cargoArtifacts = testArtifacts;
     version = "1.3.0";
-    cargoExtraArgs = "--features sql-gate --bin gradient-sql-gate";
-    doCheck = false;
-  });
+    CARGO_PROFILE = "test";
+    cargoExtraArgs = "--locked";
 
-  nativeCheckInputs = [ git ];
-  preCheck = ''
-    ln -s ${testStore} ./test-store
-  '';
+    nativeCheckInputs = [ git ];
+    preCheck = ''
+      ln -s ${testStore} ./test-store
+    '';
+
+    # nextest runs no doc tests. Here the workspace is already compiled and
+    # they cost 24 s; a derivation of their own spent six minutes rebuilding
+    # it to run the two that exist.
+    postCheck = ''
+      cargoWithProfile test --doc --locked
+    '';
+  });
 
   meta = {
     description = "Nix Continuous Integration System Backend";

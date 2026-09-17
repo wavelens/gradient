@@ -400,8 +400,10 @@ async fn build_completed(
     let derivation_id = anchor.derivation;
     let was_external_cached = anchor.substitutable;
 
-    // The output NARs are pushed by the time `JobCompleted` arrives, so the
-    // anchor may now become dispatch-ready.
+    // The output NARs are in the index by the time this runs: the completion
+    // rides the same writer lane as the `NarUploaded` frames it follows, and the
+    // session holds it until their commits have settled. So the anchor may now
+    // become dispatch-ready.
     let terminal = policy::terminal_success_status(anchor.substituted);
     if let Err(e) = succeed_latest_attempt(
         &ctx.worker_db,
@@ -612,10 +614,10 @@ async fn substitute_misses(
 gradient_db::sql! {
     CLEAR_ANCHOR_SUBSTITUTION = "UPDATE derivation_build SET substitutable = false, status = $2, attempt = 0, \
          updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
-        params = [Text("018f4b6a-7c2e-7d31-9a44-6e8b2f105c3d"), Int(0)];
+        params = [AnchorId, Int(0)];
 
     CLEAR_OUTPUTS_UPSTREAM_RECORD = "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
-         file_size = NULL, nar_size = NULL, \"references\" = NULL, deriver = NULL \
+         file_size = NULL, nar_size = NULL, references_list = NULL, deriver = NULL \
          WHERE derivation = $1",
         params = [DerivationId];
 }
@@ -652,9 +654,12 @@ async fn exhaust_substitution(
         from: anchor.status,
         to: BuildStatus::Created,
     }];
-    let mut candidates = gradient_db::direct_dependencies_of(db, &[anchor.derivation]).await?;
+    // The anchor is a builder again, so demand reaches its whole pending closure.
+    let moved = gradient_db::recompute_demand(db, &[anchor.derivation]).await?;
+    let mut candidates = moved.gained;
     candidates.push(anchor.derivation);
     changes.extend(gradient_db::promote(db, &candidates).await?);
+    changes.extend(gradient_db::unpromote_ungated(db, &moved.lost).await?);
     emit_transition_effects(ctx, &changes).await;
 
     if let Ok(Some(drv)) = EDerivation::find_by_id(anchor.derivation).one(db).await {
@@ -845,7 +850,7 @@ gradient_db::sql! {
     SET_CLOSURE_SIZES = "UPDATE derivation SET closure_size = v.size \
              FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::bigint[]) AS size) v \
              WHERE derivation.id = v.id",
-        params = [DerivationIds(64), Int(1200)];
+        params = [DerivationIds(64), Ints(1200, 64)];
 }
 
 /// Stamp `ready_at` the first time an anchor became dispatchable, and persist

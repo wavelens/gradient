@@ -62,7 +62,7 @@
   };
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
-    name = "gradient-cache";
+    name = "gradient-e2e";
     # Phases 10e to 10h add five more evaluations of the repository, a two-session
     # lock handshake and four retire-and-recover cycles to what was already a full
     # build-and-cache run, and 10g only began relaying for real once it stopped
@@ -172,7 +172,14 @@ in {
             proto.public = true;
             jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
-            settings.logLevel.default = "debug";
+            settings = {
+              logLevel.default = "debug";
+              # Phase 10i waits out a cache-maintenance pass, and the hourly
+              # default would outlast the test. Every step of that pass is a
+              # no-op at this scale except the one the phase drives.
+              cacheMaintenanceIntervalSecs = 20;
+              cacheTtlHours = 1;
+            };
             state = {
               users = {
                 admin = {
@@ -661,11 +668,12 @@ in {
           # logging and names nothing.
           anchors = sql(
               f"SELECT db.status::text || ' fetchable=' || db.fetchable::int::text"
+              f"  || ' demanded=' || db.demanded::int::text"
               f"  || ' unready_deps=' || db.unready_deps || ' count=' || count(*)::text"
               f" FROM derivation_build db"
               f" JOIN build_job bj ON bj.derivation_build = db.id"
               f" WHERE bj.evaluation = '{eval_id}'"
-              f" GROUP BY db.status, db.fetchable, db.unready_deps ORDER BY 1;"
+              f" GROUP BY db.status, db.fetchable, db.demanded, db.unready_deps ORDER BY 1;"
           )
           j = server.succeed(
               "journalctl -u gradient-server --no-pager --since='-900s' -n 4000"
@@ -1160,6 +1168,39 @@ in {
               "    AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)));"
           ))
 
+      # The third counter (#666). Demand is reachability from the entry points
+      # through named builders, so the recompute is a walk and not a per-row
+      # subquery. A relay is reached and never stepped through, which is the whole
+      # reason a relayed subtree stops being built. Pending anchors only: they are
+      # the ones a gate reads the column on, and a terminal anchor keeps whatever it
+      # carried until the recompute that thaws it names it as a root.
+      def demand_drift():
+          return int(sql(
+              "WITH RECURSIVE demanded(derivation) AS ("
+              "  SELECT derivation FROM entry_point "
+              "  UNION "
+              "  SELECT e.dependency FROM demanded c "
+              "  JOIN derivation_dependency e ON e.derivation = c.derivation "
+              "  JOIN derivation_build p ON p.derivation = c.derivation "
+              "  JOIN derivation w ON w.id = p.derivation "
+              "  WHERE w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8) "
+              "    AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)) "
+              "SELECT count(*) FROM derivation_build db WHERE db.status IN (0, 1, 2, 8) "
+              "AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded));"
+          ))
+
+      # The sweep counts this and repairs nothing: a terminal-success producer whose
+      # output no artifact backs is never fetchable, so every dependent of it waits
+      # for an event that cannot come. Two of these wedged an evaluation for 900 s.
+      def unbacked():
+          return int(sql(
+              "SELECT count(DISTINCT o.hash) FROM derivation_output o "
+              "JOIN derivation_build db ON db.derivation = o.derivation "
+              "WHERE db.status IN (3, 7) AND o.external_url IS NULL "
+              "  AND NOT EXISTS (SELECT 1 FROM cached_path cp "
+              "                  WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL);"
+          ))
+
       def poll(query, want, what, timeout=180):
           for _ in range(timeout):
               if sql(query) == want:
@@ -1169,6 +1210,7 @@ in {
 
       assert drift() == 0, "counters disagree with their recompute before the retire"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute before the retire"
+      assert unbacked() == 0, "a producer this build settled has an output nothing backs"
       assert counter(store_hash) == 0, "hello's own output is not whole to start with"
 
       # glibc first, since hello links against it.
@@ -1482,6 +1524,23 @@ in {
       builds_after = int(sql("SELECT count(*) FROM dispatched_job WHERE kind = 1;"))
       print(f"builds dispatched around the re-evaluation: {builds_after - builds_before}")
 
+      # A build-once anchor builds once (#654). Two successful builds of one
+      # derivation is the most this run can legitimately want - its first, and the
+      # one phase 10c's retire demoted it into - so a third means something re-armed
+      # a build the graph had already got, which is how the unbacked-output loop
+      # showed up: one dispatch per reconcile pass, rebuilding an output that never
+      # came back. Outcomes 1 and 2 are `Built`/`Substituted`; a relay builds
+      # nothing and is excluded.
+      churn = sql(
+          "SELECT string_agg(d.name || ' built ' || x.builds::text || ' times', ', ') "
+          "FROM (SELECT ba.derivation_build, count(*) AS builds FROM build_attempt ba "
+          "      WHERE NOT ba.substitute AND ba.outcome IN (1, 2) "
+          "      GROUP BY ba.derivation_build HAVING count(*) > 2) x "
+          "JOIN derivation_build db ON db.id = x.derivation_build "
+          "JOIN derivation d ON d.id = db.derivation;"
+      )
+      assert churn == "", f"a build-once anchor was rebuilt past the one granted retry: {churn}"
+
       # ── Phase 10f: the ordered lock is what makes a recount correct ───────
       # Four defect classes on the counter stack were a counter written outside an
       # ordered lock, and none of them had a test that would fail. This pins ONE
@@ -1618,43 +1677,36 @@ in {
 
       assert "file-upstream" in api_get(token, "caches/main/upstreams"), "the declared upstream was not provisioned"
 
-      def anchor_of(name):
-          """`<status> <substitutable> <relay attempts>` of the newest such anchor."""
-          return sql(newest_anchor(
-              name,
+      def anchor_of(drv):
+          """`<status> <substitutable> <relay attempts>` of `drv`'s anchor."""
+          return sql(anchor_column(
+              drv,
               "db.status::text || ' ' || db.substitutable::int::text || ' ' || "
               "(SELECT count(*) FROM build_attempt a "
               " WHERE a.derivation_build = db.id AND a.substitute)::text",
           ))
 
-      def newest_anchor(name, column):
-          """`column` of the newest anchor whose derivation name starts with `name`."""
-          return (
-              f"SELECT {column} FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
-              f"WHERE d.name LIKE '{name}%' ORDER BY d.created_at DESC LIMIT 1;"
-          )
+      def anchor_column(drv, column):
+          return f"SELECT {column} FROM derivation_build db WHERE db.derivation = '{drv}';"
 
-      def relay_attempts(name):
-          return newest_anchor(
-              name,
+      def relay_attempts(drv):
+          return anchor_column(
+              drv,
               "(SELECT count(*) FROM build_attempt a "
               " WHERE a.derivation_build = db.id AND a.substitute)::text",
           )
 
-      def output_missing(name):
+      def output_missing(drv):
           return sql(
               f"SELECT cp.missing_references::text FROM cached_path cp "
               f"JOIN derivation_output o ON o.hash = cp.hash "
-              f"JOIN derivation d ON d.id = o.derivation "
-              f"WHERE d.name LIKE '{name}%' AND o.name = 'out' "
-              f"ORDER BY d.created_at DESC LIMIT 1;"
+              f"WHERE o.derivation = '{drv}' AND o.name = 'out';"
           )
 
-      def output_hash(name):
+      def output_hash(drv):
           return sql(
-              f"SELECT o.hash FROM derivation_output o JOIN derivation d ON d.id = o.derivation "
-              f"WHERE d.name LIKE '{name}%' AND o.name = 'out' "
-              f"ORDER BY d.created_at DESC LIMIT 1;"
+              f"SELECT o.hash FROM derivation_output o "
+              f"WHERE o.derivation = '{drv}' AND o.name = 'out';"
           )
 
       def wait_for_new_eval(known, timeout=900):
@@ -1686,21 +1738,62 @@ in {
       server.succeed("chown git:git -R /var/lib/git/test")
       eval4_id = wait_for_new_eval({eval_id, eval2_id, eval3_id})
 
-      assert anchor_of("busywrap").startswith("3 0"), (
-          f"busywrap must be built here, not relayed: {anchor_of('busywrap')}"
+      # Both probes name their derivation exactly: `LIKE 'busybox%'` also matches
+      # the source tarball, a stub row written after the walked ones and so always
+      # the newest, which is the one thing here that must never be fetched.
+      busybox = sql("SELECT id FROM derivation WHERE name = '${pkgs.busybox.name}';")
+      busywrap = sql("SELECT id FROM derivation WHERE name = 'busywrap';")
+      assert busybox, "the evaluation walked no derivation named ${pkgs.busybox.name}"
+      assert busywrap, "the evaluation walked no derivation named busywrap"
+
+      assert anchor_of(busywrap).startswith("3 0"), (
+          f"busywrap must be built here, not relayed: {anchor_of(busywrap)}"
       )
-      assert anchor_of("busybox") == "3 1 1", (
-          f"busybox must be relayed exactly once off the upstream: {anchor_of('busybox')}"
+      assert anchor_of(busybox) == "3 1 1", (
+          f"busybox must be relayed exactly once off the upstream: {anchor_of(busybox)}"
       )
       # The whole of decision 3: the relay walked the upstream references and
       # pushed every member we lacked, so the output is whole and its dependents
       # can be built entirely out of our cache. Relaying the output alone leaves
       # this above zero.
-      assert output_missing("busybox") == "0", (
-          f"busybox's relayed output is missing closure members: {output_missing('busybox')}"
+      assert output_missing(busybox) == "0", (
+          f"busybox's relayed output is missing closure members: {output_missing(busybox)}"
+      )
+      # The point of #666: a relay needs none of its inputs, so none of them may be
+      # built. busybox's source FODs reach the network, which the VM does not have,
+      # so before the fix they were dispatched, failed permanently, and cascaded onto
+      # the anchor the moment a retire made it non-terminal again.
+      relayed_inputs_built = sql(
+          "SELECT count(*) FROM build_attempt a "
+          "JOIN derivation_build db ON db.id = a.derivation_build "
+          "JOIN derivation d ON d.id = db.derivation "
+          "WHERE d.name LIKE 'unzip60%' OR d.name LIKE 'CVE-2019-13232%' "
+          "   OR d.name LIKE 'patchutils%';"
+      )
+      assert relayed_inputs_built == "0", (
+          f"a relayed anchor's inputs were built anyway: {relayed_inputs_built} attempts"
+      )
+      # The source is the input the relay exists to avoid, and the row `LIKE
+      # 'busybox%'` used to resolve to. Its STATUS is not the invariant: the relay
+      # mirrors busybox's whole closure, `separateDebugInfo` puts the source inside
+      # it, and the next evaluation to name a path we now hold moves that anchor to
+      # `Substituted` without dispatching anything. Never dispatched is the invariant.
+      sources, dispatched, statuses = sql(
+          f"SELECT count(*)::text || ' ' || count(*) FILTER ("
+          f"  WHERE db.status IN (1, 2) OR EXISTS ("
+          f"    SELECT 1 FROM build_attempt a WHERE a.derivation_build = db.id))::text "
+          f"|| ' ' || coalesce(string_agg(DISTINCT db.status::text, ','), '-') "
+          f"FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
+          f"JOIN derivation_dependency e ON e.dependency = d.id AND e.derivation = '{busybox}' "
+          f"WHERE d.name LIKE '%.tar%';"
+      ).split()
+      assert int(sources) >= 1 and dispatched == "0", (
+          f"busybox's source is wanted by nobody, so nothing may queue or build it: "
+          f"{sources} sources, {dispatched} dispatched, status {statuses}"
       )
       assert drift() == 0, "counters disagree with their recompute after the relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the relay"
+      assert demand_drift() == 0, "demand disagrees with its recompute after the relay"
 
       # A re-evaluation demands the same anchor, which is already whole, so the
       # gate holds and nothing is relayed again. 14k anchors on production were
@@ -1708,8 +1801,8 @@ in {
       server.succeed(f"{GIT} -C /var/lib/git/test commit --allow-empty -m 'busywrap again'")
       server.succeed("chown git:git -R /var/lib/git/test")
       eval5_id = wait_for_new_eval({eval_id, eval2_id, eval3_id, eval4_id})
-      assert anchor_of("busybox") == "3 1 1", (
-          f"the second evaluation re-relayed a whole anchor: {anchor_of('busybox')}"
+      assert anchor_of(busybox) == "3 1 1", (
+          f"the second evaluation re-relayed a whole anchor: {anchor_of(busybox)}"
       )
 
       # Retire busybox's NAR. Its anchor loses fetchability and is reset to a
@@ -1717,7 +1810,7 @@ in {
       # busybox, so nothing demands it: it stays `Created` and is never
       # dispatched. This is the assertion the old undemanded-relay behaviour
       # cannot pass.
-      bb_hash = output_hash("busybox")
+      bb_hash = output_hash(busybox)
       assert bb_hash, "busybox has no cached output row to retire"
       server.succeed(f"rm -f {nar_object(bb_hash)}")
       server.succeed(
@@ -1726,21 +1819,21 @@ in {
       )
       poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bb_hash}';", "0",
            "the zombie purge kept busybox's row after its NAR was deleted")
-      poll(newest_anchor("busybox", "db.status::text"), "0",
+      poll(anchor_column(busybox, "db.status::text"), "0",
            "the retire left busybox terminal-success with nothing to serve")
 
       # Three dispatch ticks and a maintenance pass: the consistency sweep is the
       # other claimant for a `Created` anchor and its promote embeds the same
       # gate, so if demand were not part of that gate it would queue busybox here.
       server.sleep(45)
-      assert anchor_of("busybox") == "0 1 1", (
-          f"an undemanded relay was dispatched again: {anchor_of('busybox')}"
+      assert anchor_of(busybox) == "0 1 1", (
+          f"an undemanded relay was dispatched again: {anchor_of(busybox)}"
       )
 
       # Retire busywrap's own output. Its producer is reset, which makes it a
       # builder again, which demands busybox: the relay runs a second time and
       # both anchors come back.
-      bw_hash = output_hash("busywrap")
+      bw_hash = output_hash(busywrap)
       assert bw_hash, "busywrap has no cached output row to retire"
       server.succeed(f"rm -f {nar_object(bw_hash)}")
       server.succeed(
@@ -1749,16 +1842,17 @@ in {
       )
       poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}';", "0",
            "the zombie purge kept busywrap's row after its NAR was deleted")
-      poll(relay_attempts("busybox"), "2",
+      poll(relay_attempts(busybox), "2",
            "a demanded relay was not re-dispatched after its NAR was retired",
            timeout=600)
-      poll(newest_anchor("busywrap", "db.status::text"), "3",
+      poll(anchor_column(busywrap, "db.status::text"), "3",
            "busywrap was not rebuilt once its input was relayed again", timeout=600)
-      assert output_missing("busybox") == "0", (
-          f"the second relay left closure members behind: {output_missing('busybox')}"
+      assert output_missing(busybox) == "0", (
+          f"the second relay left closure members behind: {output_missing(busybox)}"
       )
       assert drift() == 0, "counters disagree with their recompute after the re-relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-relay"
+      assert demand_drift() == 0, "demand disagrees with its recompute after the re-relay"
 
       # ── Phase 10h: a pruned interior outlives the evaluation that walked it ─
       # A batch names what it walked plus the direct inputs of that, and a walk
@@ -1769,12 +1863,11 @@ in {
       # driving evaluation and eval-done all read `build_job` (#663). The fix
       # hands the names over: a live evaluation adopts the pending anchors it
       # reaches through its own builders, from the GC's own pass, the graph-stuck
-      # heal and the consistency sweep. The maintenance pass that runs the
-      # evaluation GC is hourly here, so this phase makes the state by hand - the
+      # heal and the consistency sweep. This phase makes the state by hand - the
       # interior's names are dropped, its outputs are retired for real so the
-      # chain is pending, task2's evaluation is put back into Building over it -
-      # and asserts the outcome end to end: adopted, queued, attributed to task2's
-      # evaluation, rebuilt, and that evaluation completes with everything whole.
+      # chain is pending, task2's current evaluation is put back into Building over
+      # it - and asserts the outcome end to end: adopted, queued, attributed to
+      # that evaluation, rebuilt, and it completes with everything whole.
       banner("Phase 10h: a pruned interior is adopted, attributed and rebuilt (#663)")
 
       hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
@@ -1838,18 +1931,30 @@ in {
           "an interior with no name was queued before anything adopted it"
       )
 
-      # task2's evaluation is the one still building against the subtree.
+      # task2's CURRENT evaluation is the one still building against the subtree.
+      # Not `eval2_id`: every push in the phases above re-evaluates both tasks and
+      # `keep_evaluations` is 1, so task2's first evaluation and its names are long
+      # deleted by here - which is the very state this phase is about.
+      task2_eval = sql(
+          "SELECT e.id FROM evaluation e JOIN task t ON t.id = e.task "
+          "WHERE t.name = 'task2' ORDER BY e.created_at DESC LIMIT 1;"
+      )
+      assert task2_eval, "task2 has no evaluation left to build against the subtree"
       sql(f"UPDATE evaluation SET status = 3, "
           f"building_started_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC') "
-          f"WHERE id = '{eval2_id}';")
+          f"WHERE id = '{task2_eval}';")
+      assert sql(
+          f"SELECT count(*) FROM build_job bj WHERE bj.evaluation = '{task2_eval}' "
+          f"AND bj.derivation = '{hello_drv}';"
+      ) == "1", "task2's evaluation does not name the builder the adoption walks out of"
 
-      poll(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval2_id}' AND derivation IN ('{d1}', '{d2}');",
+      poll(f"SELECT count(*) FROM build_job WHERE evaluation = '{task2_eval}' AND derivation IN ('{d1}', '{d2}');",
            "2", "task2's evaluation did not adopt the interior it never walked", timeout=420)
       status2 = ""
       for _ in range(60):
           status2 = server.succeed(
               f'{CURL} -sf -H "Authorization: Bearer {token}" '
-              f'{API}/evals/{eval2_id} | {JQ} -rj ".message.status"'
+              f'{API}/evals/{task2_eval} | {JQ} -rj ".message.status"'
           ).strip()
           if status2 == "Completed":
               break
@@ -1869,12 +1974,73 @@ in {
           ) == "1", f"{h} did not come back whole"
       attributed = int(sql(
           f"SELECT count(DISTINCT bj.derivation) FROM build_attempt a JOIN build_job bj ON bj.id = a.build_job "
-          f"WHERE bj.evaluation = '{eval2_id}' AND bj.derivation IN ('{d1}', '{d2}');"
+          f"WHERE bj.evaluation = '{task2_eval}' AND bj.derivation IN ('{d1}', '{d2}');"
       ))
       assert attributed == 2, f"the interior's rebuilds were attributed to {attributed} of the 2 adopted names"
       assert drift() == 0, "counters disagree with their recompute after the adopted rebuild"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the adopted rebuild"
       print(server.succeed("journalctl -u gradient-server --no-pager | grep -i 'adopt' | tail -n 5"))
+
+      # ── Phase 10i: retention follows the live closure (#594) ──────────────
+      # One keep-set decides what stays in the cache: the NAR reference closure
+      # of the outputs and `.drv` files of every derivation a retained
+      # evaluation reaches. Phase 9's probe is a store path no derivation
+      # produced and no evaluation names, so it has been outside that set since
+      # the moment it was uploaded and only its fetch recency keeps it; hello is
+      # inside it until nothing names hello any more.
+      banner("Phase 10i: live-closure retention (#594)")
+
+      probe_object = nar_object(f"{upload_hash}-probe")
+      assert sql(f"SELECT count(*) FROM cached_path WHERE hash = '{upload_hash}';") == "1", \
+          "phase 9's probe left the cache before this phase could evict it"
+      server.succeed(f"test -e {probe_object}")
+
+      def age(hashes, hours):
+          """Backdate the commit and the last fetch of `hashes` by `hours`."""
+          listed = "', '".join(hashes)
+          sql(f"UPDATE cached_path SET created_at = created_at - interval '{hours} hours' "
+              f"WHERE hash IN ('{listed}');")
+          sql(f"UPDATE cached_path_signature SET last_fetched_at = last_fetched_at - interval '{hours} hours' "
+              f"WHERE cached_path IN (SELECT id FROM cached_path WHERE hash IN ('{listed}'));")
+
+      # 26 hours, not 2: the bound is the fetch TTL floored at the upload grace
+      # (`cacheTtlHours = 1`, `narUploadGraceHours = 24`), so a closure member is
+      # never reclaimed between its own commit and its referrer's.
+      age([upload_hash], 26)
+      poll(f"SELECT count(*) FROM cached_path WHERE hash = '{upload_hash}';", "0",
+           "the eviction kept a path no retained evaluation reaches", timeout=240)
+      server.fail(f"test -e {probe_object}")
+      assert sql(
+          f"SELECT count(*) FROM cached_path WHERE hash IN ('{store_hash}', '{dep_hash}');"
+      ) == "2", "the eviction took a path the live closure still reaches"
+      assert drift() == 0, "counters disagree with their recompute after the eviction"
+
+      # `build_job` and `entry_point` are what seed the reachable walk, so hello
+      # leaves the live set when its names go; the pollers would write them back,
+      # so the triggers go first. Its derivation row then ages past the orphan
+      # grace, and the eviction pass owns the NARs the derivation GC used to.
+      sql("DELETE FROM task_trigger;")
+      hello_drv = sql(f"SELECT id FROM derivation WHERE hash = '{drv_hash}';")
+      assert hello_drv, "hello's derivation row is gone before this phase deleted anything"
+      hello_paths = [h for h in (store_hash, drv_hash)
+                     if sql(f"SELECT count(*) FROM cached_path WHERE hash = '{h}';") == "1"]
+      assert store_hash in hello_paths, "hello's output is not cached; the eviction would prove nothing"
+
+      sql(f"DELETE FROM build_job WHERE derivation = '{hello_drv}';")
+      sql(f"DELETE FROM entry_point WHERE derivation = '{hello_drv}';")
+      sql(f"UPDATE derivation SET created_at = created_at - interval '48 hours' WHERE id = '{hello_drv}';")
+      age(hello_paths, 26)
+
+      poll(f"SELECT count(*) FROM derivation WHERE id = '{hello_drv}';", "0",
+           "the orphan GC kept a derivation nothing reaches", timeout=240)
+      listed = "', '".join(hello_paths)
+      poll(f"SELECT count(*) FROM cached_path WHERE hash IN ('{listed}');", "0",
+           "hello's paths outlived the only derivation that reached them", timeout=240)
+      for h in hello_paths:
+          server.fail(f"test -e {nar_object(h + '-hello')}")
+      assert sql(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';") == "1", \
+          "a path its own name still reaches left the cache with hello"
+      assert drift() == 0, "counters disagree with their recompute after the GC and the eviction"
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
@@ -1929,19 +2095,22 @@ in {
 
       # ── Phase 13: every registered statement plans sanely (#651) ──────────
       # The gate amplifies this database to production scale, so it runs last and
-      # the server is stopped first: nothing else should ever see those rows. It
-      # explains each statement in a transaction it rolls back, which is what
-      # makes a registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
+      # the fleet is stopped first: nothing else should ever see those rows, and a
+      # worker left running only reconnects at a server that is gone. It explains
+      # each statement in a transaction it rolls back, which is what makes a
+      # registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
       banner("Phase 13: the SQL plan gate")
+      builder.succeed("systemctl stop gradient-worker.service")
+      builder2.succeed("systemctl stop gradient-worker.service")
       server.succeed("systemctl stop gradient-server.service")
 
       print(server.succeed(
-          "${pkgs.gradient.sqlGate}/bin/gradient-sql-gate "
+          "${pkgs.gradient.gate}/bin/gradient-sql-gate "
           "--database-url postgresql://postgres@127.0.0.1/gradient "
-          "--max-unmeasured 0 2>&1"
+          "--max-unmeasured 40 2>&1"
       ))
 
-      banner("Cache test PASSED")
+      banner("E2E test PASSED")
       '';
   });
 }

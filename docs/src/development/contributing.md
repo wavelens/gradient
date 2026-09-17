@@ -50,12 +50,18 @@ evaluations and builds run end-to-end against `pnpm run serve`.
 NixOS VM tests:
 
 ```sh
-nix build .#checks.x86_64-linux.gradient-api       -L
-nix build .#checks.x86_64-linux.gradient-state     -L
-nix build .#checks.x86_64-linux.gradient-cache     -L
-nix build .#checks.x86_64-linux.gradient-building  -L
-nix build .#checks.x86_64-linux.gradient-oidc      -L
-nix build .#checks.x86_64-linux.gradient-remote    -L
+nix build .#checks.x86_64-linux.gradient-api          -L
+nix build .#checks.x86_64-linux.gradient-deploy       -L
+nix build .#checks.x86_64-linux.gradient-e2e          -L
+nix build .#checks.x86_64-linux.gradient-eval         -L
+nix build .#checks.x86_64-linux.gradient-local-worker -L
+```
+
+The cargo suites are checks of their own, not part of `nix build .#gradient`:
+
+```sh
+nix build .#checks.x86_64-linux.unittest     -L   # cargo nextest plus the doc tests
+nix build .#checks.x86_64-linux.cli-unittest -L
 ```
 
 ## Workflow

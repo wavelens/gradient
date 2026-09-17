@@ -143,8 +143,11 @@ pub async fn reconcile_waiting_state(
                 _ => match build_phase_decision(state, eval.id, worker_caps, reason.as_ref())
                     .await?
                 {
-                    Some(pair) => Some(pair),
-                    None => Some(decide_eval_recovery(
+                    BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                    // Finalized rather than parked: unparking it to a status it
+                    // already left is the one thing left to get wrong.
+                    BuildPhase::Settled => continue,
+                    BuildPhase::Unnamed => Some(decide_eval_recovery(
                         EvalCapability::Eval,
                         eval_capable_workers,
                         fetch_capable_workers,
@@ -162,7 +165,10 @@ pub async fn reconcile_waiting_state(
                 connected_workers,
             ),
             EvaluationStatus::Building => {
-                build_phase_decision(state, eval.id, worker_caps, reason.as_ref()).await?
+                match build_phase_decision(state, eval.id, worker_caps, reason.as_ref()).await? {
+                    BuildPhase::Pending(a) => Some((a.target, a.reason)),
+                    BuildPhase::Settled | BuildPhase::Unnamed => None,
+                }
             }
             _ => None,
         };
@@ -201,8 +207,9 @@ pub async fn reconcile_waiting_state(
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
 /// every pending anchor yet none is dispatchable: typically the set is `Created`
 /// with some term of `graph_sql::gates_predicate` false (a non-zero
-/// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, or no
-/// `build_job`) and no in-flight build to drive a promotion, though a stalled
+/// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, no
+/// `build_job`, or an anchor nothing demands) and no in-flight build to drive a
+/// promotion, though a stalled
 /// substitute or a `FailedTransient` anchor reaches here too. Every gate the
 /// graph maintains moves on an event, and by definition no event is coming, so we
 /// self-heal here: [`attempt_graph_unstick`], gated by [`unstick_due`].
@@ -211,9 +218,16 @@ async fn build_phase_decision(
     evaluation_id: EvaluationId,
     worker_caps: &[(Vec<String>, Vec<String>)],
     current: Option<&WaitingReason>,
-) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
-    let Some(a) = assess_buildability(state, evaluation_id, worker_caps).await? else {
-        return Ok(None);
+) -> Result<BuildPhase> {
+    let a = match assess_buildability(state, evaluation_id, worker_caps).await? {
+        BuildPhase::Pending(a) => a,
+        // Nothing it named is work any more. No park and no recovery says
+        // anything true about a finished evaluation, so settle it here.
+        BuildPhase::Settled => {
+            finalize_settled(state, evaluation_id).await;
+            return Ok(BuildPhase::Settled);
+        }
+        BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
     };
 
     if let (EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. })) =
@@ -221,18 +235,26 @@ async fn build_phase_decision(
         && unmet.is_empty()
     {
         if !unstick_due(current, a.pending) {
-            return Ok(Some((
-                EvaluationStatus::Waiting,
-                Some(WaitingReason::graph_stuck(a.pending)),
-            )));
+            return Ok(BuildPhase::Pending(Assessment {
+                target: EvaluationStatus::Waiting,
+                reason: Some(WaitingReason::graph_stuck(a.pending)),
+                pending: a.pending,
+            }));
         }
 
-        return Ok(Some(
-            attempt_graph_unstick(state, evaluation_id, worker_caps).await?,
-        ));
+        return attempt_graph_unstick(state, evaluation_id, worker_caps).await;
     }
 
-    Ok(Some((a.target, a.reason)))
+    Ok(BuildPhase::Pending(a))
+}
+
+/// An evaluation the graph finished: everything it named is settled, so the
+/// finalizer decides its terminal status. Idempotent and a no-op on anything
+/// that is not in its build phase.
+async fn finalize_settled(state: &Arc<ServerState>, evaluation_id: EvaluationId) {
+    if let Err(e) = gradient_db::check_evaluation_done(&state.db(), evaluation_id).await {
+        error!(error = %e, %evaluation_id, "failed to finalize a settled evaluation");
+    }
 }
 
 /// The graph-stuck heal runs when an evaluation first parks, or when its pending
@@ -244,7 +266,7 @@ pub(crate) fn unstick_due(current: Option<&WaitingReason>, pending: u32) -> bool
     !matches!(current, Some(WaitingReason::GraphStuck { pending_anchors }) if *pending_anchors == pending)
 }
 
-/// One evaluation's build-phase verdict, with the size of the pending set it
+/// One evaluation's build-phase verdict, with the size of the blocking set it
 /// was read from: every caller needs both, and re-reading the set costs a
 /// second query per evaluation per pass.
 struct Assessment {
@@ -253,16 +275,29 @@ struct Assessment {
     pending: u32,
 }
 
-/// Decide `Building` vs `Waiting` for an eval's current pending anchors.
-/// Returns `None` when nothing is pending (nothing to decide).
+/// What an evaluation's own anchors decide about its build phase.
+enum BuildPhase {
+    /// It named no anchor: its state is the pre-build reconciler's to decide.
+    Unnamed,
+    /// It named anchors and none of them blocks it any more: the graph says it
+    /// is finished, whatever the pool looks like.
+    Settled,
+    Pending(Assessment),
+}
+
+/// Decide `Building` vs `Waiting` for an eval's current blocking anchors.
 async fn assess_buildability(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     worker_caps: &[(Vec<String>, Vec<String>)],
-) -> Result<Option<Assessment>> {
-    let pending = eval_pending_anchors(state, evaluation_id).await?;
+) -> Result<BuildPhase> {
+    let (named, pending) = eval_blocking_anchors(state, evaluation_id).await?;
     if pending.is_empty() {
-        return Ok(None);
+        return Ok(if named {
+            BuildPhase::Settled
+        } else {
+            BuildPhase::Unnamed
+        });
     }
 
     let checker = BuildabilityChecker::load(state, &pending).await?;
@@ -277,7 +312,7 @@ async fn assess_buildability(
         None
     };
 
-    Ok(Some(Assessment {
+    Ok(BuildPhase::Pending(Assessment {
         target,
         reason,
         pending: pending.len() as u32,
@@ -292,7 +327,7 @@ async fn attempt_graph_unstick(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     worker_caps: &[(Vec<String>, Vec<String>)],
-) -> Result<(EvaluationStatus, Option<WaitingReason>)> {
+) -> Result<BuildPhase> {
     info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing");
 
     // The healing pipeline in Unstick scope: terminal-failed thaw, unbacked-output
@@ -309,17 +344,22 @@ async fn attempt_graph_unstick(
     }
 
     let blocked = match assess_buildability(state, evaluation_id, worker_caps).await? {
-        Some(a) if a.target == EvaluationStatus::Building => {
-            return Ok((EvaluationStatus::Building, a.reason));
+        BuildPhase::Pending(a) if a.target == EvaluationStatus::Building => {
+            return Ok(BuildPhase::Pending(a));
         }
-        Some(a) => a.pending,
-        None => 0,
+        BuildPhase::Pending(a) => a.pending,
+        BuildPhase::Settled => {
+            finalize_settled(state, evaluation_id).await;
+            return Ok(BuildPhase::Settled);
+        }
+        BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
     };
 
-    Ok((
-        EvaluationStatus::Waiting,
-        Some(WaitingReason::graph_stuck(blocked)),
-    ))
+    Ok(BuildPhase::Pending(Assessment {
+        target: EvaluationStatus::Waiting,
+        reason: Some(WaitingReason::graph_stuck(blocked)),
+        pending: blocked,
+    }))
 }
 
 /// The graph-stuck heal's backstop, on the consistency sweep's cadence.
@@ -479,6 +519,7 @@ fn unproducible_drv_block_sql() -> String {
             JOIN derivation_build db ON db.id = bj.derivation_build
             WHERE bj.evaluation = $1
               AND db.status IN ({created}, {queued})
+              AND db.demanded
               AND {walked}
               AND NOT db.substitutable
               AND NOT {drv_whole}
@@ -491,12 +532,16 @@ fn unproducible_drv_block_sql() -> String {
     )
 }
 
-/// The non-terminal `derivation_build` anchors an evaluation still needs:
-/// the anchors of its `build_job`s in Created/Queued/Building/FailedTransient.
-async fn eval_pending_anchors(
+/// The anchors of `evaluation_id` that still block it, and whether it named any
+/// anchor at all. An anchor nothing demands is named but settled: no gate will
+/// ever queue it and no event is coming, so counting it parks the evaluation on
+/// work that never happens (#666). The two answers are one read, and the caller
+/// needs both: "named none" is a pre-build park to recover, "named some, none
+/// blocking" is an evaluation the graph has already finished.
+async fn eval_blocking_anchors(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
-) -> Result<Vec<MDerivationBuild>> {
+) -> Result<(bool, Vec<MDerivationBuild>)> {
     use sea_orm::QuerySelect;
     let db = &state.worker_db;
     let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
@@ -508,10 +553,10 @@ async fn eval_pending_anchors(
         .await
         .context("fetch eval build_job anchors")?;
     if anchor_ids.is_empty() {
-        return Ok(vec![]);
+        return Ok((false, vec![]));
     }
 
-    gradient_db::fetch_in_chunks(&anchor_ids, |chunk| async move {
+    let pending = gradient_db::fetch_in_chunks(&anchor_ids, |chunk| async move {
         EDerivationBuild::find()
             .filter(CDerivationBuild::Id.is_in(chunk))
             .filter(CDerivationBuild::Status.is_in(vec![
@@ -524,7 +569,15 @@ async fn eval_pending_anchors(
             .await
     })
     .await
-    .context("fetch pending anchors")
+    .context("fetch pending anchors")?;
+
+    Ok((
+        true,
+        pending
+            .into_iter()
+            .filter(|a| gradient_db::graph_sql::blocks_evaluation(a.status, a.demanded))
+            .collect(),
+    ))
 }
 
 /// The capability a pre-build evaluation needs to make progress: `Fetching`
@@ -633,10 +686,12 @@ mod tests {
     use super::*;
 
     /// The zone-B detection must fire only on an anchor blocked *solely* by its
-    /// own unimportable `.drv`: pending, walked, deps satisfied, not
-    /// substitutable, and neither `.drv` signal true. Mis-shaping it would either
-    /// re-eval healthy evals or miss the lost-`.drv` stall (no live DB in unit
-    /// tests, so pin the SQL shape).
+    /// own unimportable `.drv`: pending, demanded, walked, deps satisfied, not
+    /// substitutable, and neither `.drv` signal true. An anchor nothing demands
+    /// is not blocked on anything - it is never built - and re-evaluating a whole
+    /// commit over one would be the most expensive way to be wrong. Mis-shaping
+    /// it would either re-eval healthy evals or miss the lost-`.drv` stall (no
+    /// live DB in unit tests, so pin the SQL shape).
     #[test]
     fn unproducible_drv_block_sql_shape() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -649,7 +704,7 @@ mod tests {
             )),
             "only pending anchors: {sql}"
         );
-        for frag in ["w.walked", "NOT db.substitutable"] {
+        for frag in ["db.demanded", "w.walked", "NOT db.substitutable"] {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(

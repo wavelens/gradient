@@ -38,7 +38,7 @@ pub async fn nar(
         super::helpers::fetch_nar_stream(&state, &path_hash).await?;
 
     super::super::stats::record_nar_traffic(&state, ctx.cache.id, size as i64);
-    spawn_cache_derivation_fetch_update(Arc::clone(&state), ctx.cache.id, effective_hash);
+    spawn_fetch_stamp(Arc::clone(&state), ctx.cache.id, effective_hash);
 
     Response::builder()
         .header(
@@ -140,12 +140,6 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
 }
 
 gradient_db::sql! {
-    TOUCH_CACHE_DERIVATION_FETCH = "UPDATE cache_derivation SET last_fetched_at = $1 \
-         WHERE cache = $2 AND derivation IN ( \
-             SELECT derivation FROM derivation_output WHERE hash = $3 AND is_cached = true \
-         )",
-        params = [Now, CacheId, CachedPathHash];
-
     TOUCH_CACHED_PATH_SIGNATURE_FETCH = "UPDATE cached_path_signature \
          SET last_fetched_at = $1, fetch_count = fetch_count + 1 \
          WHERE cache = $2 \
@@ -153,11 +147,12 @@ gradient_db::sql! {
         params = [Now, CacheId, CachedPathHash];
 }
 
-/// Bookkeeping update spawned after every successful NAR fetch. Uses
-/// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic these
-/// fire-and-forget UPDATEs would otherwise contend with foreground HTTP
+/// Fetch recency, stamped after every successful NAR fetch: it is what the
+/// eviction pass measures a path outside the live closure against. Uses
+/// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic this
+/// fire-and-forget UPDATE would otherwise contend with foreground HTTP
 /// requests on the web pool.
-fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
+fn spawn_fetch_stamp(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
     let s = Arc::clone(&state);
     state.shutdown.spawn(async move {
         use sea_orm::ConnectionTrait;
@@ -167,15 +162,6 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
         ));
         let cache_val = sea_orm::Value::Uuid(Some(cache_id.into_inner()));
         let hash_val = sea_orm::Value::String(Some(hash.clone()));
-
-        let _ = s
-            .worker_db
-            .execute_raw(TOUCH_CACHE_DERIVATION_FETCH.bind([
-                now_val.clone(),
-                cache_val.clone(),
-                hash_val.clone(),
-            ]))
-            .await;
 
         let _ = s
             .worker_db

@@ -207,15 +207,28 @@ pub fn walked_predicate(alias: &str) -> String {
 }
 
 /// The statuses of an anchor that will still be built, and so still needs its
-/// inputs. Closed under both promotion moves (`Created` to `Queued` and back),
-/// which is what lets [`demanded_predicate`] read a *dependent's* status without
-/// reopening the double-move hazard [`gates_predicate`] documents.
+/// inputs. Closed under both promotion moves (`Created` to `Queued` and back), so a
+/// promotion can never change whether a dependent demands what it walks over.
 pub const BUILDER_STATUSES: [BuildStatus; 4] = [
     BuildStatus::Created,
     BuildStatus::Queued,
     BuildStatus::Building,
     BuildStatus::FailedTransient,
 ];
+
+/// Anchor `status`/`demanded` is work its evaluation is still waiting for: what
+/// nothing demands is never promoted, so an evaluation that counts it as pending
+/// waits forever (#666). Every terminal status is settled by definition, and an
+/// anchor the dispatcher can still pick up - or already has - is work in flight
+/// whatever demand says now: dispatch reads the status rather than the gate, and
+/// a running build is deliberately left to finish.
+pub fn blocks_evaluation(status: BuildStatus, demanded: bool) -> bool {
+    if !BUILDER_STATUSES.contains(&status) {
+        return false;
+    }
+
+    demanded || matches!(status, BuildStatus::Queued | BuildStatus::Building)
+}
 
 /// Anchor `{anchor}` (its `derivation` row aliased `{walked}`) is a builder:
 /// recorded, not a relay, and in a status an evaluation will still have built.
@@ -225,6 +238,19 @@ pub fn builder_predicate(anchor: &str, walked: &str) -> String {
     format!(
         "{walked}.walked AND NOT {anchor}.substitutable AND {anchor}.status IN ({pending})",
         pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+    )
+}
+
+/// The anchor on derivation `{derivation}` still needs its inputs: nothing relays
+/// it. A failure walk stops at one that does, because a substitutable anchor takes
+/// finished bytes off an upstream - an input that can never build neither dooms it
+/// nor reaches anything above it. Same rule as [`gates_predicate`]'s relay arm,
+/// which lets a relay through with its `unready_deps` unread, and as the refusal in
+/// `graph::policy` to mark a failing relay `Permanent`.
+pub fn unrelayed_predicate(derivation: &str) -> String {
+    format!(
+        "NOT EXISTS (SELECT 1 FROM derivation_build rb \
+         WHERE rb.derivation = {derivation} AND rb.substitutable)"
     )
 }
 
@@ -256,48 +282,33 @@ pub fn fetchable_predicate(alias: &str) -> String {
     )
 }
 
-/// Something still wants anchor `{alias}`'s outputs in our cache: an entry point
-/// names it, or a direct dependent that will itself be built lists it as an input.
-///
-/// One hop over `derivation_dependency` and never a walk. A dependent that will be
-/// built is a builder, and demands its own inputs by this same rule, so the
-/// "top-down propagation" the issue asks for is what evaluating this per row
-/// already gives - with nothing to backfill, ripple or repair.
-pub fn demanded_predicate(alias: &str) -> String {
-    format!(
-        r#"(EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = {alias}.derivation)
-    OR EXISTS (
-        SELECT 1 FROM derivation_dependency e
-        JOIN derivation_build p ON p.derivation = e.derivation
-        JOIN derivation w ON w.id = p.derivation
-        WHERE e.dependency = {alias}.derivation
-          AND {builder}
-          AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)))"#,
-        builder = builder_predicate("p", "w"),
-    )
-}
-
 /// The gates a `Created` anchor must pass to be queued, minus its own status term:
-/// walked and wanted by some evaluation, then one arm per kind of work. A relay
-/// needs demand and nothing else - it fetches finished bytes, so neither its
-/// inputs nor its `.drv` matter. A build needs every input fetchable from our
-/// cache and its own `.drv` importable.
+/// walked, named by some evaluation, still demanded, then one arm per kind of work.
+/// A relay needs nothing more - it fetches finished bytes, so neither its inputs nor
+/// its `.drv` matter. A build needs every input fetchable from our cache and its own
+/// `.drv` importable.
 ///
-/// It must stay free of any reference to `{alias}`'s OWN `status`, which is why
-/// that term lives in [`promotable_predicate`] instead. `m20260908_000002` and
-/// `m20260909_000001` run a demote and a promote in sequence in one transaction
-/// and they cannot interfere only because this never reads the column the demote
-/// writes; the same holds for `readiness::repair_pending`. The demand arm reads a
-/// DEPENDENT's status, which is safe for a different reason: both moves stay
-/// inside [`BUILDER_STATUSES`], so neither can change what the other's gate sees.
+/// Demand is a column, not a walk: [`crate::readiness::recompute_demand`] rewrites it
+/// on the events that change it and the consistency sweep recomputes it absolutely.
+/// Reading it here is what makes it transitive, which the one-hop `EXISTS` this
+/// replaced could not be - a `Created` dependent counts as a builder, so the first
+/// undemanded one re-demanded everything below it and a relayed anchor's whole input
+/// closure was built (#666). It also takes a correlated three-table subquery off
+/// every promote, un-promote and sweep row.
+///
+/// It must stay free of any reference to `{alias}`'s OWN `status`, which is why that
+/// term lives in [`promotable_predicate`] instead. `m20260908_000002` and
+/// `m20260909_000001` run a demote and a promote in sequence in one transaction and
+/// they cannot interfere only because this never reads the column the demote writes;
+/// the same holds for `readiness::repair_pending`.
 pub fn gates_predicate(alias: &str) -> String {
     format!(
         r#"({walked}
     AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = {alias}.derivation)
-    AND (({alias}.substitutable AND {demanded})
-         OR (NOT {alias}.substitutable AND {alias}.unready_deps = 0 AND {drv_whole})))"#,
+    AND {alias}.demanded
+    AND ({alias}.substitutable
+         OR ({alias}.unready_deps = 0 AND {drv_whole})))"#,
         walked = walked_predicate(alias),
-        demanded = demanded_predicate(alias),
         drv_whole = drv_whole_predicate(alias),
     )
 }
@@ -341,10 +352,34 @@ pub fn eval_closure_cte_body() -> String {
 /// its own: `build_job` rows are pruned with old evals while dependency edges
 /// and anchors persist.
 pub fn reachable_derivations_cte() -> String {
-    dependency_closure_cte(
+    format!("WITH RECURSIVE {}", reachable_derivations_cte_body())
+}
+
+/// The reachable-roots CTE body (no `WITH RECURSIVE` prefix), for statements
+/// that bind it alongside a second closure under one `WITH RECURSIVE`.
+pub fn reachable_derivations_cte_body() -> String {
+    dependency_closure_cte_body(
         "reachable",
         "SELECT derivation FROM entry_point UNION SELECT derivation FROM build_job",
         ClosureDirection::Dependencies,
+    )
+}
+
+/// Every cached path a retained evaluation can reach: the outputs and `.drv`
+/// NARs of the reachable derivations, closed over their references. Input
+/// sources are references of the `.drv` NAR, so the walk from `derivation.hash`
+/// covers them. This is the cache's keep-set; everything outside it is the
+/// eviction pass's to reclaim once past the fetch TTL.
+pub fn live_cached_paths_cte() -> String {
+    format!(
+        "WITH RECURSIVE {reachable}, \
+         roots(hash) AS (\
+         SELECT o.hash FROM derivation_output o JOIN reachable r ON r.derivation = o.derivation \
+         UNION \
+         SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id), \
+         {live}",
+        reachable = reachable_derivations_cte_body(),
+        live = reference_closure_cte_body("live", "SELECT hash FROM roots"),
     )
 }
 
@@ -356,11 +391,11 @@ pub fn reachable_derivations_cte() -> String {
 /// the same way, because what is below a finished build is served from its
 /// outputs and what is below a failed one is the requeue's to thaw first. This is
 /// what names a pruned subtree for the evaluations that build against it.
-pub fn pending_closure_cte(seed_select: &str) -> String {
+pub fn pending_closure_cte(name: &str, seed_select: &str) -> String {
     format!(
-        "WITH RECURSIVE pending(evaluation, derivation, builder) AS ({seed_select} UNION {})",
+        "WITH RECURSIVE {name}(evaluation, derivation, builder) AS ({seed_select} UNION {})",
         lateral_step(
-            "pending",
+            name,
             "c.evaluation, s.next, s.builder",
             &format!(
                 "SELECT e.dependency AS next, ({builder}) AS builder \
@@ -375,12 +410,109 @@ pub fn pending_closure_cte(seed_select: &str) -> String {
     )
 }
 
+/// `WITH RECURSIVE demanded(derivation) AS (...)`: from `seed_select`, every anchor
+/// something still wants in our cache, walking dependencies out of named builders
+/// only.
+///
+/// Something wants an anchor's outputs when an entry point names it, or a dependent
+/// that will itself be built lists it as an input. That dependent is a builder by
+/// [`builder_predicate`] and demands its own inputs by the same rule, which is the
+/// recursion: a relay is reached and never stepped through, because it fetches
+/// finished bytes and needs nothing below it, and a terminal anchor stops the walk
+/// because what is below a finished build is served from its outputs. The one
+/// definition of demand; every recompute steps with it. `bound` is an extra predicate
+/// over the edge alias `e`, applied inside the probe so a region-scoped recompute
+/// prunes at the index lookup instead of walking the live graph and discarding it.
+pub fn demand_closure_cte(seed_select: &str, bound: &str) -> String {
+    let restrict = if bound.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {bound}")
+    };
+
+    format!(
+        "WITH RECURSIVE demanded(derivation) AS ({seed_select} UNION {})",
+        lateral_step(
+            "demanded",
+            "s.next",
+            &format!(
+                "SELECT e.dependency AS next FROM derivation_dependency e \
+                 JOIN derivation_build p ON p.derivation = c.derivation \
+                 JOIN derivation w ON w.id = p.derivation \
+                 WHERE e.derivation = c.derivation AND {builder} \
+                   AND EXISTS (SELECT 1 FROM build_job bj \
+                               WHERE bj.derivation = p.derivation){restrict}",
+                builder = builder_predicate("p", "w"),
+            ),
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// The live set starts at the outputs and `.drv` hashes of every reachable
+    /// derivation and closes over `cached_path_reference` with the fenced step.
+    #[test]
+    fn live_cached_paths_close_reachable_outputs_and_drvs_over_references() {
+        let cte = norm(&live_cached_paths_cte());
+
+        assert!(
+            cte.starts_with("WITH RECURSIVE reachable(derivation) AS ("),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(concat!(
+                "roots(hash) AS (SELECT o.hash FROM derivation_output o ",
+                "JOIN reachable r ON r.derivation = o.derivation UNION ",
+                "SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id)",
+            )),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(concat!(
+                "live(hash) AS (SELECT hash FROM roots UNION SELECT s.next FROM live c, ",
+                "LATERAL (SELECT r.reference_hash AS next FROM cached_path_reference r ",
+                "WHERE r.referrer = c.hash OFFSET 0) s)",
+            )),
+            "{cte}"
+        );
+    }
+
+    /// An anchor nothing demands is never promoted, so an evaluation that waits
+    /// for it never finishes: it is settled work, not pending work. `Queued` and
+    /// `Building` are the exception in the other direction - the dispatcher reads
+    /// the status, so both can still produce a build after the demand is gone.
+    #[test]
+    fn only_demanded_or_in_flight_work_blocks_an_evaluation() {
+        use BuildStatus::*;
+
+        for status in BUILDER_STATUSES {
+            assert!(
+                blocks_evaluation(status, true),
+                "{status:?} is pending work something wants"
+            );
+        }
+        for status in [Queued, Building] {
+            assert!(
+                blocks_evaluation(status, false),
+                "{status:?} is handed out on its status alone, demand or not"
+            );
+        }
+        for status in [Created, FailedTransient] {
+            assert!(
+                !blocks_evaluation(status, false),
+                "{status:?} with nothing demanding it is work that never happens"
+            );
+        }
+        for status in [Completed, Substituted, FailedPermanent, DependencyFailed] {
+            assert!(!blocks_evaluation(status, true), "{status:?} is settled");
+        }
     }
 
     /// The raise has to be `SET LOCAL` and it has to happen inside the walk's own
@@ -509,27 +641,27 @@ mod tests {
         );
     }
 
-    /// Demand is one hop: an entry point, or a walked, non-substitutable, pending
-    /// builder with a `build_job` that lists this anchor as a direct input. Never
-    /// a walk - a dependent that will be built demands its own inputs by the same
-    /// rule, so the propagation is the per-row evaluation.
+    /// Both arms are demand-gated now. A build used to be promoted the moment its
+    /// own inputs were fetchable, with nothing asking whether anything still wanted
+    /// its output, which is why a relayed anchor's whole input closure was built
+    /// (#666). The term is a column read, so the one-hop EXISTS that used to leave
+    /// every promote and un-promote is gone, and #591's gate work with it.
     #[test]
-    fn demanded_is_entry_points_or_a_pending_builder_one_hop_away() {
-        let p = norm(&demanded_predicate("db"));
+    fn both_gate_arms_are_demand_gated_and_read_the_column() {
+        let sql = norm(&gates_predicate("db"));
+        assert!(sql.contains("db.demanded"), "{sql}");
         assert!(
-            p.contains("FROM entry_point ep WHERE ep.derivation = db.derivation"),
-            "{p}"
-        );
-        assert!(p.contains("WHERE e.dependency = db.derivation"), "{p}");
-        assert!(
-            p.contains("AND w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"),
-            "{p}"
+            !sql.contains("FROM derivation_dependency"),
+            "the gate must not walk edges per row: {sql}"
         );
         assert!(
-            p.contains("FROM build_job bj WHERE bj.derivation = p.derivation"),
-            "{p}"
+            sql.contains("db.unready_deps = 0"),
+            "the build arm keeps its readiness terms: {sql}"
         );
-        assert!(!p.contains("WITH RECURSIVE"), "demand is one hop: {p}");
+        assert!(
+            sql.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
+            "an unnamed anchor is still not promotable: {sql}"
+        );
     }
 
     /// The demand arm reads a DEPENDENT's status, which is only safe while both
@@ -546,22 +678,20 @@ mod tests {
         }
     }
 
-    /// The gate has two arms: a relay needs demand and nothing else, a build needs
-    /// ready inputs and an importable `.drv`.
+    /// The gate has two arms and demand sits outside both: a relay needs nothing
+    /// more, a build needs ready inputs and an importable `.drv`.
     #[test]
     fn gates_split_on_substitutable() {
         let g = norm(&gates_predicate("db"));
         assert!(
-            g.contains("(db.substitutable AND (EXISTS (SELECT 1 FROM entry_point"),
-            "{g}"
+            g.contains(
+                "AND db.demanded AND (db.substitutable OR (db.unready_deps = 0 AND EXISTS ("
+            ),
+            "demand is common to both arms, the split is on substitutable alone: {g}"
         );
         assert!(
-            g.contains("OR (NOT db.substitutable AND db.unready_deps = 0 AND EXISTS ("),
-            "{g}"
-        );
-        assert!(
-            g.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
-            "{g}"
+            g.contains("JOIN cached_path cp ON cp.hash = d.hash WHERE d.id = db.derivation"),
+            "the build arm reads the anchor's own .drv: {g}"
         );
     }
 
@@ -644,7 +774,10 @@ mod tests {
                 ClosureDirection::Dependents,
             )),
             norm(&reference_closure_cte("refs", "SELECT $1::text")),
-            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true")),
+            norm(&pending_closure_cte(
+                "pending",
+                "SELECT $1::uuid, $2::uuid, true",
+            )),
         ] {
             assert!(
                 cte.contains("LATERAL ("),
@@ -714,10 +847,12 @@ mod tests {
             builder,
             "w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"
         );
-        assert!(norm(&demanded_predicate("db")).contains(&builder));
         assert!(
-            norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"))
-                .contains(&norm(&builder_predicate("dep", "w")))
+            norm(&pending_closure_cte(
+                "pending",
+                "SELECT $1::uuid, $2::uuid, true"
+            ))
+            .contains(&norm(&builder_predicate("dep", "w")))
         );
     }
 
@@ -726,7 +861,10 @@ mod tests {
     /// or a terminal anchor is reached and never expanded.
     #[test]
     fn the_pending_closure_walks_dependencies_through_builders_only() {
-        let cte = norm(&pending_closure_cte("SELECT $1::uuid, $2::uuid, true"));
+        let cte = norm(&pending_closure_cte(
+            "pending",
+            "SELECT $1::uuid, $2::uuid, true",
+        ));
         assert!(
             cte.starts_with(
                 "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
@@ -748,6 +886,38 @@ mod tests {
                  AND dep.status IN (0, 1, 2, 8) OFFSET 0) s"
             ),
             "{cte}"
+        );
+    }
+
+    /// Demand flows DOWN from the entry points through named builders, which is
+    /// the arm the one-hop predicate it replaced could not carry: `Created` counts
+    /// as a builder, so without the recursion the first undemanded builder
+    /// re-demands everything below it (#666). A relay is reached and never stepped
+    /// through, and that single fact is what stops a relayed subtree being built.
+    #[test]
+    fn the_demand_walk_steps_only_out_of_named_builders() {
+        let sql = norm(&demand_closure_cte(
+            "SELECT derivation FROM entry_point",
+            "",
+        ));
+        assert!(
+            sql.starts_with(
+                "WITH RECURSIVE demanded(derivation) AS (SELECT derivation FROM entry_point UNION"
+            ),
+            "{sql}"
+        );
+        assert!(sql.contains(&norm(&builder_predicate("p", "w"))), "{sql}");
+        assert!(
+            sql.contains("SELECT e.dependency AS next FROM derivation_dependency e"),
+            "the step must project the dependency, not the dependent: {sql}"
+        );
+        assert!(
+            sql.contains("FROM build_job bj WHERE bj.derivation = p.derivation"),
+            "an unnamed builder demands nothing: {sql}"
+        );
+        assert!(
+            sql.contains("OFFSET 0"),
+            "the lateral fence must survive: {sql}"
         );
     }
 }

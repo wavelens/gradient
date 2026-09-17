@@ -19,7 +19,7 @@ use tracing::warn;
 gradient_db::sql! {
     TOUCH_ACTION_LAST_FIRED = "UPDATE task_action SET last_fired_at = $1, updated_at = $1 \
              WHERE id IN (SELECT id FROM task_action WHERE id = $2 FOR UPDATE SKIP LOCKED)",
-        params = [Now, Text("11111111-1111-1111-1111-111111111111")];
+        params = [Now, TaskActionId];
 }
 
 pub async fn execute_action(

@@ -188,6 +188,13 @@ wiremock  = { version = "0.6", default-features = false }
 [profile.test]
 debug = "line-tables-only"
 
+# Test targets compile unoptimised, their dependencies must not: an unoptimised
+# argon2 or blake3 costs the run far more than opt-level 0 saves on the compile.
+# The layer is built once per dependency set and cached, the test targets are
+# what gets rebuilt on every change.
+[profile.dev.package."*"]
+opt-level = 2
+
 [patch.crates-io]
 harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git" }
 harmonia-protocol              = { git = "https://github.com/nix-community/harmonia.git" }
@@ -218,7 +225,7 @@ name = "gradient-server"
 path = "src/main.rs"
 
 # The SQL plan gate. `required-features` keeps it out of a default build, so it
-# is compiled only by the nix passthru the cache VM test runs and never ships.
+# is compiled only by the nix passthru the e2e VM test runs and never ships.
 [[bin]]
 name = "gradient-sql-gate"
 path = "src/sql_gate/main.rs"

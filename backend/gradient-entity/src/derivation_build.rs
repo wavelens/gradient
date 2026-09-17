@@ -33,6 +33,11 @@ pub struct Model {
     pub fetchable: bool,
     /// Direct dependencies that are not fetchable. Zero is the readiness gate.
     pub unready_deps: i32,
+    /// Something still wants this anchor's outputs in our cache: an entry point
+    /// names it, or a demanded, named builder depends on it. Recomputed by
+    /// `readiness::recompute_demand` on the events that change it; every arm of
+    /// the promotion gate reads it.
+    pub demanded: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,
     pub max_silent_secs: Option<i64>,

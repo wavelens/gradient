@@ -32,19 +32,38 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
         Param::DerivationHashes(_) => {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM derivation LIMIT $1) s"
         }
+        Param::CachedPathId => "SELECT id AS v FROM cached_path LIMIT 1",
         Param::CachedPathHash => "SELECT hash AS v FROM cached_path LIMIT 1",
         Param::CachedPathHashes(_) => {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM cached_path LIMIT $1) s"
         }
-        Param::BuildId => "SELECT id AS v FROM build LIMIT 1",
-        Param::BuildIds(_) => "SELECT array_agg(id) AS v FROM (SELECT id FROM build LIMIT $1) s",
+        Param::AnchorId => "SELECT id AS v FROM derivation_build LIMIT 1",
+        Param::AnchorIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation_build LIMIT $1) s"
+        }
         Param::EvaluationId => "SELECT id AS v FROM evaluation LIMIT 1",
+        Param::EvaluationIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM evaluation LIMIT $1) s"
+        }
         Param::EntryPointId => "SELECT id AS v FROM entry_point LIMIT 1",
+        Param::EntryPointIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM entry_point LIMIT $1) s"
+        }
         Param::ProjectId => "SELECT id AS v FROM project LIMIT 1",
-        Param::OrganizationId => "SELECT id AS v FROM organization LIMIT 1",
         Param::UserId => r#"SELECT id AS v FROM "user" LIMIT 1"#,
         Param::CacheId => "SELECT id AS v FROM cache LIMIT 1",
-        Param::Text(_) | Param::Int(_) | Param::Bool(_) | Param::Now => return None,
+        Param::TaskId => "SELECT id AS v FROM task LIMIT 1",
+        Param::TaskActionId => "SELECT id AS v FROM task_action LIMIT 1",
+        Param::IntegrationId => "SELECT id AS v FROM integration LIMIT 1",
+        Param::NewUuid
+        | Param::NewUuids(_)
+        | Param::Text(_)
+        | Param::Int(_)
+        | Param::Bool(_)
+        | Param::Texts(..)
+        | Param::Ints(..)
+        | Param::Bools(..)
+        | Param::Now => return None,
     })
 }
 
@@ -58,17 +77,31 @@ enum Shape {
 fn shape(param: &Param) -> Option<Shape> {
     Some(match param {
         Param::DerivationId
-        | Param::BuildId
+        | Param::CachedPathId
+        | Param::AnchorId
         | Param::EvaluationId
         | Param::EntryPointId
         | Param::ProjectId
-        | Param::OrganizationId
         | Param::UserId
-        | Param::CacheId => Shape::Uuid,
-        Param::DerivationIds(n) | Param::BuildIds(n) => Shape::Uuids(*n),
+        | Param::CacheId
+        | Param::TaskId
+        | Param::TaskActionId
+        | Param::IntegrationId => Shape::Uuid,
+        Param::DerivationIds(n)
+        | Param::AnchorIds(n)
+        | Param::EvaluationIds(n)
+        | Param::EntryPointIds(n) => Shape::Uuids(*n),
         Param::DerivationHash | Param::CachedPathHash => Shape::Text,
         Param::DerivationHashes(n) | Param::CachedPathHashes(n) => Shape::Texts(*n),
-        Param::Text(_) | Param::Int(_) | Param::Bool(_) | Param::Now => return None,
+        Param::NewUuid
+        | Param::NewUuids(_)
+        | Param::Text(_)
+        | Param::Int(_)
+        | Param::Bool(_)
+        | Param::Texts(..)
+        | Param::Ints(..)
+        | Param::Bools(..)
+        | Param::Now => return None,
     })
 }
 
@@ -134,6 +167,13 @@ fn literal(param: &Param) -> Option<Value> {
         Param::Text(text) => Value::from(*text),
         Param::Int(n) => Value::from(*n),
         Param::Bool(b) => Value::from(*b),
+        Param::NewUuid => Value::from(Uuid::now_v7()),
+        Param::NewUuids(width) => {
+            Value::from((0..*width).map(|_| Uuid::now_v7()).collect::<Vec<Uuid>>())
+        }
+        Param::Texts(text, width) => Value::from(vec![(*text).to_string(); *width]),
+        Param::Ints(n, width) => Value::from(vec![*n; *width]),
+        Param::Bools(b, width) => Value::from(vec![*b; *width]),
         Param::Now => Value::from(sea_orm::prelude::DateTimeUtc::from(
             std::time::SystemTime::now(),
         )),
@@ -154,16 +194,21 @@ mod tests {
             Param::DerivationIds(4),
             Param::DerivationHash,
             Param::DerivationHashes(4),
+            Param::CachedPathId,
             Param::CachedPathHash,
             Param::CachedPathHashes(4),
-            Param::BuildId,
-            Param::BuildIds(4),
+            Param::AnchorId,
+            Param::AnchorIds(4),
             Param::EvaluationId,
+            Param::EvaluationIds(4),
             Param::EntryPointId,
+            Param::EntryPointIds(4),
             Param::ProjectId,
-            Param::OrganizationId,
             Param::UserId,
             Param::CacheId,
+            Param::TaskId,
+            Param::TaskActionId,
+            Param::IntegrationId,
         ] {
             assert!(draw_sql(&param).is_some(), "{param:?} has no sampler");
         }
@@ -175,6 +220,11 @@ mod tests {
             Param::Text("x"),
             Param::Int(1),
             Param::Bool(true),
+            Param::NewUuid,
+            Param::NewUuids(4),
+            Param::Texts("x", 4),
+            Param::Ints(1, 4),
+            Param::Bools(true, 4),
             Param::Now,
         ] {
             assert!(draw_sql(&param).is_none(), "{param:?} must not query");
