@@ -10,11 +10,10 @@
 //! global sum. Backend-agnostic (works for local FS and S3).
 
 use gradient_entity::build::BuildStatus;
-use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
 use gradient_entity::project_cache::CacheSubscriptionMode;
-use gradient_types::ids::{CacheId, DerivationBuildId, DerivationId, ProjectId};
+use gradient_types::ids::{CacheId, DerivationId, ProjectId};
 use sea_orm::sea_query::{Alias, Expr};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -447,36 +446,31 @@ pub async fn demote_output_only_cached_deps(
     Ok(producers)
 }
 
-/// Enforce the row-vs-object invariant: **every** output of a terminal-success
-/// producer (`Completed`/`Substituted`) must have a backing artifact - present in
-/// our cache (`cached_path` with a NAR) or on a configured upstream
-/// (`external_url`). Three ways the invariant breaks, all the same dead zone: the
-/// cache GC deletes a `cached_path` row when its NAR object is gone (zombie purge,
-/// stale-path eviction); an old global cache hit marks an anchor `Completed` + `is_cached`
-/// without ever building it; or a partial cache-hit / substitution marks an anchor
-/// `Completed` with an output that was never cached at all (`is_cached = false`, no
-/// build attempt - observed on multi-output CUDA derivations whose `out` was never
-/// pushed). Such an anchor's dependents are blocked at promotion (its
-/// `fetchable` is - correctly - false, so it counts toward their `unready_deps`),
-/// so they never dispatch, so no build
-/// ever reports the path missing and the reactive `reconcile_missing_inputs` heal
-/// never fires: a permanent dead zone. Demote each unbacked output - reset its
-/// producer to `Created`, drop the stale flags, and raise the reference counters
-/// of its referrers - so the next build rebuilds it. Returns the producers reset.
+/// The row-vs-object invariant, as a query: **every** output of a terminal-success
+/// producer (`Completed`/`Substituted`) must have a backing artifact, present in our
+/// cache (`cached_path` with a NAR) or on a configured upstream (`external_url`).
+/// An anchor that breaks it is a dead end - its `fetchable` is, correctly, false, so
+/// it counts toward its dependents' `unready_deps` forever, and being
+/// terminal-*success* no requeue path ever reaches it.
 ///
-/// Keyed on the **ground truth** (a backing `cached_path` NAR), NOT the derived
-/// `is_cached` flag: that flag is `false` for exactly the never-cached-output dead
-/// zone above, so an `is_cached`-gated predicate would skip the anchors this sweep
-/// exists to rescue. Nor the readiness flags, which are - correctly - already
-/// closed for every dead-zone anchor. `external_url IS NULL` excludes outputs fetched
-/// straight from an upstream (not from our cache). The completion path records each
-/// output's `cached_path` before flipping the anchor terminal (#303/#399), so a
-/// genuinely-complete anchor is never selected mid-completion.
+/// This is measured, not repaired. It used to feed a sweep that demoted such a
+/// producer back to `Created` so the next build would rebuild it, which is where
+/// #654 came from: the sweep re-derived the same demote every reconcile pass, the
+/// fleet rebuilt an output that never came back, and nothing noticed the rebuild had
+/// changed nothing. Every way the invariant was known to break is now closed where
+/// it happens: a NAR whose commit fails fails its build, a completion is not
+/// recorded until that job's commits have settled, an eval marks an anchor
+/// substituted only when EVERY output is already whole here, and every pass that
+/// deletes a `cached_path` row resets the producers it unbacked in the deleting
+/// transaction (`nar_closure::retire_paths`). So a non-zero count is a bug in one of
+/// those, and the consistency report is where it surfaces
+/// ([`crate::consistency::ConsistencyReport::unbacked_trusted_outputs`]) - a repair
+/// that rebuilds on its own would only hide it again, and one that failed the
+/// producer instead would take a real subtree down on a false positive.
 ///
-/// This is the invariant itself, which is what the consistency report counts. The
-/// heal acts on two disjoint halves of it: [`demotable_unbacked_outputs_select`]
-/// (a rebuild is still worth trying) and [`fail_unhealable_anchors_sql`] (it is
-/// not, and the producer is failed).
+/// Keyed on the **ground truth** (a backing `cached_path` NAR), not the derived
+/// `is_cached` flag, which is `false` for an anchor that was marked done with an
+/// output that was never cached at all - exactly the case worth seeing.
 pub(crate) fn unbacked_trusted_outputs_select() -> String {
     format!(
         r#"
@@ -491,191 +485,6 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
 "#,
         terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
     )
-}
-
-/// The invariant minus the anchors a rebuild has already been spent on (#654).
-///
-/// A demote is a bet that a rebuild lands the artifact, and it is placed once. Once
-/// the fleet has finished a real build of the producer and the output is STILL
-/// unbacked, the rebuild provably does not restore it, and demoting again only
-/// re-queues the same build on the next pass - the `demote -> promote -> rebuild ->
-/// demote` loop, one dispatch per reconcile pass, forever. A relay attempt is not
-/// that evidence: it moves upstream bytes into the cache and says nothing about
-/// what building the derivation lands, and the demote clears `substitutable` so the
-/// retry it grants is a real build.
-fn demotable_unbacked_outputs_select() -> String {
-    format!(
-        "{invariant}      AND NOT {built}\n",
-        invariant = unbacked_trusted_outputs_select(),
-        built = already_built("db", ""),
-    )
-}
-
-/// SQL predicate: the fleet has finished a real build of the anchor aliased
-/// `{alias}` - the builder ran, or its daemon found the outputs already valid.
-/// Relay attempts are excluded: a relay never builds anything. `bound` is an extra
-/// term on the attempt, for a caller that needs the build to have settled.
-fn already_built(alias: &str, bound: &str) -> String {
-    format!(
-        "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = {alias}.id \
-         AND NOT ba.substitute AND ba.outcome IN ({success}){bound})",
-        success = crate::status_sql::attempt_outcome_in(&AttemptOutcome::SUCCESS),
-    )
-}
-
-/// The other half: fail the producer whose rebuild is spent and whose output never
-/// came. The anchor is terminal-*success* against an artifact nothing has, so no
-/// requeue path reaches it and `fetchable` can never hold - its dependents count it
-/// unready forever. Leaving it is the dead zone this whole heal exists to close,
-/// and demoting it again is the loop, so the third answer is the true one: the
-/// build is a failure, recorded as one.
-///
-/// `$1` is the upload-grace cutoff. `JobCompleted` rides the control lane and
-/// overtakes its own trailing `NarUploaded` commits, so an output is legitimately
-/// unbacked for a while after its build reports success; `nar_upload_grace_hours`
-/// is the bound this system already uses for exactly that window (the orphan-files
-/// GC and the uploader's absent-row demote both measure against it). Only a build
-/// that finished before it has run out of excuses.
-fn fail_unhealable_anchors_sql() -> String {
-    let unbacked = unbacked_output_of("db");
-    format!(
-        "UPDATE derivation_build db \
-         SET status = {failed}, updated_at = (now() AT TIME ZONE 'UTC') \
-         FROM derivation_build old \
-         WHERE old.id = db.id \
-           AND db.status IN ({terminal_success}) \
-           AND {built} \
-           AND EXISTS ({unbacked}) \
-         RETURNING db.derivation, db.id AS anchor, old.status AS from_status, \
-                   db.status AS to_status, ({unbacked} ORDER BY o.hash LIMIT 1) AS missing",
-        failed = crate::status_sql::build(BuildStatus::FailedPermanent),
-        terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
-        built = already_built("db", " AND ba.build_finished_at < $1"),
-    )
-}
-
-/// An output of the anchor aliased `{alias}` that neither our cache nor an upstream
-/// has. Written once and used twice: as the UPDATE's predicate, and to name the
-/// output in the failure the operator reads.
-fn unbacked_output_of(alias: &str) -> String {
-    format!(
-        "SELECT o.hash FROM derivation_output o \
-         WHERE o.derivation = {alias}.derivation AND o.external_url IS NULL \
-           AND NOT EXISTS (SELECT 1 FROM cached_path cp \
-                           WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL)"
-    )
-}
-
-crate::sql_fn! {
-    UNBACKED_TRUSTED_OUTPUTS = unbacked_trusted_outputs_select,
-        params = [],
-        tier = Sweep;
-
-    DEMOTABLE_UNBACKED_OUTPUTS = demotable_unbacked_outputs_select,
-        params = [],
-        tier = Sweep;
-
-    FAIL_UNHEALABLE_ANCHORS = fail_unhealable_anchors_sql,
-        params = [Now],
-        tier = Sweep;
-}
-
-/// What one pass of the unbacked-output heal did.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct UnbackedSweep {
-    /// Producers reset to `Created`, so the rebuild they are owed can restore
-    /// their output.
-    pub demoted: u64,
-    /// Producers failed `FailedPermanent`: their rebuild is spent and the output
-    /// never came.
-    pub failed: u64,
-}
-
-pub async fn demote_unbacked_trusted_outputs(
-    ctx: &crate::DbContext,
-) -> Result<UnbackedSweep, sea_orm::DbErr> {
-    use sea_orm::FromQueryResult;
-
-    #[derive(sea_orm::FromQueryResult)]
-    struct OutputHash {
-        hash: String,
-    }
-
-    let db = &ctx.worker_db;
-    let mut report = UnbackedSweep::default();
-
-    for output in OutputHash::find_by_statement(DEMOTABLE_UNBACKED_OUTPUTS.stmt())
-        .all(db)
-        .await?
-    {
-        report.demoted += demote_cached_output(ctx, &output.hash).await?.len() as u64;
-    }
-
-    report.failed = fail_unhealable_anchors(ctx).await?;
-
-    Ok(report)
-}
-
-/// Fail every producer whose granted rebuild came and went without backing its
-/// output, and record why on the attempt that reported success - the answer an
-/// attempt gives is "did this deliver the outputs", and at `JobCompleted` that
-/// answer is optimistic. [`AttemptFailureReason::OutputMissing`] is deterministic,
-/// so the next evaluation does not thaw the anchor into a rebuild that reproduces
-/// it; the artifact appearing is what recovers it, through
-/// `reconcile_cached_anchors_for_eval`.
-/// The status and the reason share one transaction: a `FailedPermanent` anchor
-/// whose attempt still reads `Built` is one the next evaluation thaws straight back
-/// into the rebuild this verdict exists to stop.
-async fn fail_unhealable_anchors(ctx: &crate::DbContext) -> Result<u64, sea_orm::DbErr> {
-    use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome as Outcome};
-    use sea_orm::TransactionTrait;
-
-    let cutoff = gradient_types::now()
-        - chrono::Duration::hours(ctx.config.storage.nar_upload_grace_hours.max(0));
-
-    let txn = ctx.worker_db.begin().await?;
-    let rows = txn
-        .query_all_raw(FAIL_UNHEALABLE_ANCHORS.bind([sea_orm::Value::ChronoDateTime(Some(cutoff))]))
-        .await?;
-
-    let failed: Vec<(DerivationBuildId, String)> = rows
-        .iter()
-        .filter_map(|r| {
-            Some((
-                DerivationBuildId::new(r.try_get::<uuid::Uuid>("", "anchor").ok()?),
-                r.try_get::<String>("", "missing").ok()?,
-            ))
-        })
-        .collect();
-
-    for (anchor, missing) in &failed {
-        warn!(
-            %anchor, %missing,
-            "the build completed and the cache never got this output; failing the producer \
-             instead of rebuilding it again"
-        );
-        crate::build_attempt::fail_latest_attempt(
-            &txn,
-            *anchor,
-            Outcome::Failed,
-            Some(AttemptFailureReason::OutputMissing),
-            Some(format!(
-                "the build completed but output {missing} never reached the cache; \
-                 a rebuild reproduces this, so the producer is failed rather than re-queued"
-            )),
-        )
-        .await?;
-    }
-    txn.commit().await?;
-
-    if failed.is_empty() {
-        return Ok(0);
-    }
-
-    let changes = crate::promotion::returned_transitions(rows);
-    crate::status::emit_transition_effects(ctx, &changes).await;
-
-    Ok(failed.len() as u64)
 }
 
 crate::sql! {
@@ -1023,12 +832,11 @@ mod tests {
         );
     }
 
-    /// The reconciler enforces the row-vs-object invariant on terminal-success
-    /// anchors: any output with no backing NAR is demoted. It must key on the
-    /// **ground truth** (a missing `cached_path` NAR), NOT the derived
-    /// `is_cached` flag - that flag is `false` for the never-cached-output
-    /// dead zone this sweep must rescue - and must skip upstream-fetchable outputs
-    /// (`external_url`).
+    /// The consistency report measures the row-vs-object invariant on
+    /// terminal-success anchors. It must key on the **ground truth** (a missing
+    /// `cached_path` NAR), NOT the derived `is_cached` flag - that flag is `false`
+    /// for exactly the never-cached-output case worth seeing - and must skip
+    /// upstream-fetchable outputs (`external_url`), which are served without us.
     #[test]
     fn unbacked_trusted_select_matches_the_gate() {
         let sql = unbacked_trusted_outputs_select()
@@ -1051,185 +859,6 @@ mod tests {
         assert!(
             sql.contains("NOT EXISTS") && sql.contains("cp.file_hash IS NOT NULL"),
             "must require a missing backing NAR: {sql}"
-        );
-    }
-
-    /// The heal grants ONE rebuild and then stops (#654): the demote arm is the
-    /// invariant minus the anchors a real build has already been spent on. A relay
-    /// attempt is not that evidence - it moves upstream bytes and never proves what
-    /// a build lands - so the term reads real builds only.
-    #[test]
-    fn the_demote_arm_skips_an_anchor_the_fleet_has_already_built() {
-        let norm = |sql: String| sql.split_whitespace().collect::<Vec<_>>().join(" ");
-        let sql = norm(demotable_unbacked_outputs_select());
-        let success = crate::status_sql::attempt_outcome_in(&AttemptOutcome::SUCCESS);
-        assert!(
-            sql.starts_with(&norm(unbacked_trusted_outputs_select())),
-            "the demote arm must be the invariant itself, narrowed: {sql}"
-        );
-        assert!(
-            sql.contains(
-                "AND NOT EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = db.id"
-            ),
-            "narrowed by the anchor's own attempts: {sql}"
-        );
-        assert!(
-            sql.contains("NOT ba.substitute")
-                && sql.contains(&format!("ba.outcome IN ({success})")),
-            "a relay attempt is not proof a build was tried: {sql}"
-        );
-    }
-
-    /// The other arm: a producer whose granted rebuild came and went without
-    /// backing its output is failed, not demoted again. `FailedPermanent` is what
-    /// stops it - the anchor was terminal-*success*, which no requeue path reaches,
-    /// so its dependents counted it unready forever with nothing ever dispatched to
-    /// report the output missing.
-    #[test]
-    fn the_verdict_arm_fails_a_producer_whose_settled_build_left_an_output_unbacked() {
-        let sql = fail_unhealable_anchors_sql()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            sql.contains(&format!(
-                "SET status = {}",
-                crate::status_sql::build(BuildStatus::FailedPermanent)
-            )),
-            "the verdict is a terminal failure: {sql}"
-        );
-        assert!(
-            sql.contains(&format!(
-                "db.status IN ({})",
-                crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS)
-            )),
-            "only an anchor the graph still trusts can be failed by this: {sql}"
-        );
-        assert!(
-            sql.contains("ba.build_finished_at < $1"),
-            "a build whose NAR commits may still be in flight is left alone: {sql}"
-        );
-        assert!(
-            sql.contains("o.external_url IS NULL") && sql.contains("cp.file_hash IS NOT NULL"),
-            "the output must be in neither our cache nor an upstream: {sql}"
-        );
-        assert!(
-            sql.contains("AS missing"),
-            "the failure names the output the build never backed: {sql}"
-        );
-    }
-
-    /// The loop #654 reported, in one pass: the demote arm's hash reaches the
-    /// demote, and the verdict arm runs once after it. Appending exactly these
-    /// results is the assertion - a second demote would fail on a missing mock,
-    /// which is what the old sweep did on every reconcile pass forever.
-    #[tokio::test]
-    async fn the_sweep_demotes_what_it_can_heal_and_then_asks_for_the_rest() {
-        use sea_orm::{DatabaseBackend, MockDatabase, Value};
-        use std::collections::BTreeMap;
-
-        let fresh = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
-        let (tmp, _file) = present_nar(fresh);
-
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![BTreeMap::from([(
-                "hash".to_owned(),
-                Value::from(fresh.to_owned()),
-            )])]])
-            // The hash reaches the demote, which finds no producer and, its object
-            // being present, preserves it and returns before any write.
-            .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
-            // The verdict arm finds nothing to fail.
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .into_connection();
-        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
-
-        let sweep = demote_unbacked_trusted_outputs(&ctx).await.unwrap();
-
-        assert_eq!(sweep, UnbackedSweep::default());
-        drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
-        assert_eq!(
-            log.len(),
-            3,
-            "the demote arm, one demote, the verdict: {log:?}"
-        );
-        assert!(
-            log[1].contains(fresh),
-            "the demote is handed the hash: {log:?}"
-        );
-        assert!(
-            log[2].contains("SET status ="),
-            "the verdict runs even when the demote arm moved nothing: {log:?}"
-        );
-    }
-
-    /// The verdict records WHY on the attempt that reported success, and that
-    /// reason is deterministic, so the next evaluation does not thaw the anchor
-    /// into a rebuild that reproduces it. Without the attempt the UI shows a failed
-    /// build with no cause, and the thaw re-queues it once per evaluation forever.
-    #[tokio::test]
-    async fn the_verdict_records_the_reason_on_the_attempt_that_claimed_success() {
-        use gradient_entity::build_attempt::{AttemptFailureReason, Model as MAttempt};
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
-        use std::collections::BTreeMap;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let anchor = DerivationBuildId::now_v7();
-        let derivation = DerivationId::now_v7();
-        let missing = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
-
-        let failed = BTreeMap::from([
-            (
-                "derivation".to_owned(),
-                Value::from(derivation.into_inner()),
-            ),
-            ("anchor".to_owned(), Value::from(anchor.into_inner())),
-            ("from_status".to_owned(), Value::from(3i32)),
-            ("to_status".to_owned(), Value::from(4i32)),
-            ("missing".to_owned(), Value::from(missing.to_owned())),
-        ]);
-        let attempt = MAttempt {
-            derivation_build: anchor,
-            outcome: AttemptOutcome::Built,
-            ..Default::default()
-        };
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // nothing left to demote, one anchor to fail, its latest attempt
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([vec![failed]])
-            .append_query_results([vec![attempt.clone()], vec![attempt]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
-
-        let sweep = demote_unbacked_trusted_outputs(&ctx).await.unwrap();
-
-        assert_eq!(sweep.failed, 1, "the anchor is failed");
-        drop(ctx);
-        let log = crate::pool::statements(pool.into_transaction_log());
-        // The log renders each statement with `Debug`, so its quoted identifiers
-        // are escaped; the values are what this asserts on anyway.
-        let rewrite = log
-            .iter()
-            .find(|s| s.contains("SET") && s.contains("outcome") && s.contains(missing))
-            .unwrap_or_else(|| panic!("the attempt must be rewritten: {log:?}"));
-        assert!(
-            rewrite.contains(&format!(
-                "Int(Some({}))",
-                crate::status_sql::attempt_reason(AttemptFailureReason::OutputMissing)
-            )),
-            "with the deterministic reason the thaw reads: {rewrite}"
-        );
-        assert!(
-            rewrite.contains(&format!(
-                "Int(Some({}))",
-                crate::status_sql::attempt_outcome(AttemptOutcome::Failed)
-            )),
-            "and the outcome that pairs with it: {rewrite}"
         );
     }
 

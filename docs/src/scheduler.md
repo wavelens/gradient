@@ -469,68 +469,49 @@ forever.
 
 The cache can break the invariant from the other direction: an artifact that goes
 without the retire that would have moved the anchor - a row deleted by hand, an
-output a partial completion never backed at all - leaves the producer at
-`Completed`/`Substituted` with nothing to serve. The gate
-then trusts it, dependents fail `InputsUnavailable` permanently, and - being
-terminal-*success*, not terminal-failed - it is never re-queued, so it never
-rebuilds. `demote_unbacked_trusted_outputs` restores the row-vs-object invariant:
-it finds every terminal-success producer (`status IN (3, 7)`) with **any** output
-that is neither in our cache (a `cached_path` with a NAR) nor on an upstream
-(`external_url`) and demotes it back to `Created`. It keys on the **ground truth**
-(a missing backing NAR), **not** the derived `is_cached` flag: `is_cached` is
-`false` whenever an anchor was marked `Completed` with an output that was *never* cached -
-a partial cache-hit or substitution that set the anchor done without backing every
-output (observed on multi-output CUDA derivations whose `out` was never pushed, no
-build attempt). An `is_cached`-gated predicate skipped that case, stranding the
-producer and its whole dependent subtree. The completion path records each output's
-`cached_path` before flipping the anchor terminal (#303/#399), so a
-genuinely-complete anchor is never demoted mid-completion. It runs hourly in the
-cache loop (after the GC passes) and inside the reconciler's `Unstick` scope, so an
-orphaned or partially-cached producer heals promptly - even while the evaluation
-that needs it is itself stuck `Building` - without manual intervention.
+output a completion never backed at all - leaves the producer at
+`Completed`/`Substituted` with nothing to serve. The gate then trusts it, dependents
+count it unready forever, and - being terminal-*success*, not terminal-failed - it is
+never re-queued, so it never rebuilds.
 
-A build is not marked terminal-success until the NARs it pushed are in the index.
-The worker sends `JobCompleted` after its last upload, but that message used to
-ride the control writer lane, which is drained ahead of bulk, so it overtook its
-own `NarUploaded` frames; and the commits themselves run detached from the session
-read loop, because committing one inline froze every other transfer on the
-connection. The anchor therefore reached `Completed` before the index had been
-told the bytes existed, and a commit that failed afterwards could not correct it -
-the build state machine refuses to leave a terminal status, so the failure was
-dropped and the graph was left trusting an output nothing serves. A completion now
-rides the bulk lane, in FIFO behind its job's own frames, and the session holds it
-until that job's commits have settled; a commit that fails fails the build, and the
-completion behind it is dropped rather than overwriting that verdict.
+That state is now prevented rather than swept for, at each of the four places it
+could arise:
 
-The demote is a bet that a rebuild lands the artifact, and it is placed **once**.
-The heal splits the invariant into two disjoint halves on whether the fleet has
-already finished a real build of the producer (a `build_attempt` with
-`substitute = false` and a successful outcome; a relay attempt never counts, and
-the demote clears `substitutable` so the retry it grants is a real build):
+- **A NAR whose commit fails fails its build.** Recording the `cached_path` row was
+  the one step of an upload allowed to fail quietly, so a full disk or a database
+  error left the bytes in storage, the index without them, and the build reported
+  done. It now fails the build transiently, like every other step of the same
+  commit.
+- **A build is not completed until the NARs it pushed are in the index.** The worker
+  sends `JobCompleted` after its last upload, but that message used to ride the
+  control writer lane, drained ahead of bulk, so it overtook its own `NarUploaded`
+  frames; and the commits themselves run detached from the session read loop,
+  because committing one inline froze every other transfer on the connection. The
+  anchor therefore reached `Completed` before the index had been told the bytes
+  existed, and a commit failing afterwards could not correct it - the build state
+  machine refuses to leave a terminal status, so the failure was dropped. A
+  completion now rides the bulk lane, in FIFO behind its job's own frames, and the
+  session holds it until that job's commits have settled; a commit that failed has
+  already failed the build, and the completion behind it is dropped rather than
+  overwriting that verdict.
+- **An eval marks an anchor substituted only when every output is already whole
+  here.** The partial cache-hit that set an anchor done with one output never
+  cached (observed on multi-output CUDA derivations whose `out` was never pushed)
+  cannot be expressed: substitutability is `all()` over the derivation's outputs,
+  against `cached_path.is_whole()`.
+- **Every pass that deletes a `cached_path` row resets the producers it unbacked**,
+  in the deleting transaction - see `nar_closure::retire_paths` below.
 
-- **not yet** - demote, as above. That is the one rebuild the anchor gets.
-- **already** - the rebuild came and went and the output is still unbacked, so
-  rebuilding does not restore it. The producer is marked `FailedPermanent` and the
-  attempt that reported success is rewritten
-  `Failed`/`OutputMissing` with a message naming the
-  output. Its dependents then cascade `DependencyFailed` instead of counting it
-  unready forever, and because `OutputMissing` is a *deterministic* failure a new
-  evaluation does not thaw it into a rebuild that reproduces it. The artifact
-  appearing is what recovers the anchor, through `reconcile_cached_anchors_for_eval`.
-
-Without that split the heal has no memory and no verdict: it re-derives the same
-demote every pass and the anchor runs `demote -> promote -> rebuild -> demote`
-forever, one dispatch per pass, leaving a zombie `cached_path` behind each time,
-while its dependents stay blocked regardless - `fetchable` wants every output whole
-(#654).
-
-The verdict waits out `narUploadGraceHours`, measured from the attempt's
-`build_finished_at`. `JobCompleted` rides the control writer lane and overtakes its
-own trailing `NarUploaded` commits, so an output is legitimately unbacked for a
-while after its build reports success; that setting is the bound this system
-already uses for exactly that window (the orphan-files GC and the uploader's
-absent-row demote both measure against it). Before it, the anchor is in neither
-half and the heal simply waits.
+So the state has no remaining source, and the consistency report **measures** it
+(`unbacked_trusted_outputs`) rather than repairing it. What used to be there was a
+sweep that demoted such a producer back to `Created` so the next build would rebuild
+it. It had no memory and no verdict: it re-derived the same demote every reconcile
+pass, the fleet rebuilt an output that never came back, and nothing noticed the
+rebuild had changed nothing - `demote -> promote -> rebuild -> demote`, one dispatch
+a pass, a zombie `cached_path` each time (#654). A repair that rebuilds on its own
+would only hide a bug in one of the four above; one that failed the producer instead
+would take a real subtree down on a false positive. A non-zero count is a bug
+report, and it is read as one.
 
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to a later sweep: every pass that deletes `cached_path` rows
@@ -971,12 +952,11 @@ cannot make progress, auto-unparking once the blocker clears:
   the pending set passes the dispatch gate and no in-flight build is left to fire
   a promotion. What blocks it is not recorded on the reason; `pending_anchors` is
   the blocked count. The reconciler
-  detects it and self-heals in six steps: `requeue_failed_closure_for_eval`
+  detects it and self-heals in five steps: `requeue_failed_closure_for_eval`
   thaws any terminal-failed anchor in the eval's full dependency closure (a
   transitive dep a prior eval left failed and this eval pruned has no `build_job`
   here, so `requeue_failed_anchors` never reaches it and it blocks its dependents
-  with no dispatch to fail); `demote_unbacked_trusted_outputs` resets a producer
-  the graph trusts against an artifact nothing serves; `reconcile_cached_anchors_for_eval`
+  with no dispatch to fail); `reconcile_cached_anchors_for_eval`
   marks every anchor in the closure whose outputs are all in our cache `Completed`
   (build-graph state desyncs from the durable cache state - a derivation whose
   artifacts exist sits `Created` after a requeue/cascade/demote and blocks its

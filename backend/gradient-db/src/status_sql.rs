@@ -38,20 +38,6 @@ pub fn build_in(set: &[BuildStatus]) -> String {
         .join(", ")
 }
 
-pub fn attempt_outcome_in(set: &[AttemptOutcome]) -> String {
-    set.iter()
-        .map(|o| i32::from(*o).to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-pub fn attempt_reason_in(set: &[AttemptFailureReason]) -> String {
-    set.iter()
-        .map(|r| i32::from(*r).to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 pub fn eval_in(set: &[EvaluationStatus]) -> String {
     set.iter()
         .map(|s| i32::from(*s).to_string())
@@ -73,11 +59,6 @@ mod tests {
         assert_eq!(build_in(&BuildStatus::REQUEUEABLE), "4, 5, 6, 9");
         assert_eq!(eval_in(&EvaluationStatus::TERMINAL), "5, 6, 7");
         assert_eq!(attempt_outcome(AttemptOutcome::Failed), 3);
-        assert_eq!(attempt_outcome_in(&AttemptOutcome::SUCCESS), "1, 2");
-        assert_eq!(
-            attempt_reason_in(&AttemptFailureReason::DETERMINISTIC),
-            "5, 9"
-        );
         assert_eq!(attempt_reason(AttemptFailureReason::BuilderNonzero), 5);
     }
 }

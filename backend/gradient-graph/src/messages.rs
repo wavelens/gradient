@@ -196,17 +196,11 @@ pub enum Demotion {
     Path { hash: String },
     /// One cache drops its claim; the path is demoted when it was the last.
     CacheClaim { cache: CacheId, hash: String },
-    /// Maintenance: producers trusted by the dispatch gate whose output is gone.
-    UnbackedTrustedOutputs,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct DemoteReport {
     pub producers: Vec<DerivationId>,
-    pub demoted: u64,
-    /// Producers the maintenance sweep failed: the rebuild it granted them came
-    /// and went without backing their output.
-    pub failed: u64,
     pub cached_path: Option<MCachedPath>,
     pub others_remain: bool,
 }
