@@ -111,9 +111,13 @@ fn nars_select_sql(
 }
 
 // Representative instantiation for the plan gate: every optional filter engaged.
+// The package filter is a substring match, which no index answers, so the scan
+// of the cache is the plan and not a missing index.
 gradient_db::sql_fn! {
     NARS_LIST_COUNT = || nars_count_sql("cps.cache = $1 AND cp.hash LIKE $2 AND cp.package LIKE $3"),
-        params = [CacheId, Text("abc%"), Text("%hello%")];
+        params = [CacheId, Text("abc%"), Text("%hello%")],
+        tier = Bulk,
+        budget = gradient_db::sql::Budget::bulk().seq_scan_allowed();
 
     NARS_LIST_SELECT = || nars_select_sql(
         "cps.cache = $1 AND cp.hash LIKE $2 AND cp.package LIKE $3",
@@ -122,7 +126,9 @@ gradient_db::sql_fn! {
         4,
         5,
     ),
-        params = [CacheId, Text("abc%"), Text("%hello%"), Int(50), Int(0)];
+        params = [CacheId, Text("abc%"), Text("%hello%"), Int(50), Int(0)],
+        tier = Bulk,
+        budget = gradient_db::sql::Budget::bulk().seq_scan_allowed();
 }
 
 pub async fn list(
@@ -259,7 +265,8 @@ gradient_db::sql! {
          FROM cached_path_signature cps \
          JOIN cached_path cp ON cp.id = cps.cached_path \
          WHERE cps.cache = $1",
-        params = [CacheId];
+        params = [CacheId],
+        tier = Bulk;
 }
 
 pub async fn stats(

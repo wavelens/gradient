@@ -29,7 +29,7 @@ fn gc_orphan_candidates_sql() -> String {
 crate::sql_fn! {
     GC_ORPHAN_CANDIDATES = gc_orphan_candidates_sql,
         params = [Now],
-        tier = Walk,
+        tier = Sweep,
         flags = [Walk];
 }
 
@@ -50,7 +50,9 @@ fn stale_cached_paths_sql() -> String {
 crate::sql_fn! {
     STALE_CACHED_PATHS = stale_cached_paths_sql,
         params = [Int(336)],
-        tier = Walk,
+        tier = Sweep,
+        budget = crate::sql::Budget::sweep().buffers(1_500_000)
+            .because("the collector walks every live path before it can name a dead one"),
         flags = [Walk];
 }
 

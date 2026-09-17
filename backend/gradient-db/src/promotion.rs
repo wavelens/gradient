@@ -300,7 +300,8 @@ fn find_ready_anchors_sql() -> String {
 
 crate::sql_fn! {
     FIND_READY_ANCHORS = find_ready_anchors_sql,
-        params = [];
+        params = [],
+        tier = Bulk;
 }
 
 /// SQL predicate: the `derivation_build` aliased `alias` has a recorded

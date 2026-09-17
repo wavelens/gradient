@@ -824,7 +824,8 @@ fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String 
 
 gradient_db::sql_fn! {
     EXPENSIVE_JOBS = || expensive_jobs_sql(30, Some("'11111111-1111-1111-1111-111111111111'")),
-        params = [];
+        params = [],
+        tier = Bulk;
 }
 
 pub async fn get_expensive_jobs(
@@ -1075,7 +1076,11 @@ fn top_projects_by_buildtime_sql(window_days: i64) -> String {
 
 gradient_db::sql_fn! {
     TOP_PROJECTS_BY_BUILDTIME = || top_projects_by_buildtime_sql(30),
-        params = [];
+        params = [],
+        tier = Bulk,
+        budget = gradient_db::sql::Budget::bulk().buffers(300_000).because(
+            "one attempt lookup per job in the window; only a rollup would cut it",
+        );
 }
 
 /// Top projects by cumulative build time in a window (superuser-only),
@@ -1160,7 +1165,8 @@ gradient_db::sql_fn! {
         30,
         " AND pr.project IN ('11111111-1111-1111-1111-111111111111')",
     ),
-        params = [];
+        params = [],
+        tier = Bulk;
 }
 
 /// Top derivations by a captured per-build resource (peak RAM, CPU time, total
