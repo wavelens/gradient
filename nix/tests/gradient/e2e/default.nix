@@ -2091,7 +2091,7 @@ in {
           "--max-unmeasured 0 2>&1"
       ))
 
-      banner("Cache test PASSED")
+      banner("E2E test PASSED")
       '';
   });
 }
