@@ -189,6 +189,11 @@ catches exactly those: it walks `derivation_dependency` upward from every
 terminal-failed anchor in the evaluation's closure and marks each reachable
 non-terminal anchor `DependencyFailed` in one statement.
 
+Neither walk enters a substitutable anchor. A relay takes finished bytes off an
+upstream, so an input that can never build neither dooms it nor reaches anything
+above it, and the requeue's blocked set stops at the same boundary so the thaw and
+the cascade cannot disagree about who a failure reaches.
+
 #### The graph reconciler and transition effects
 
 Two heals exist for state no event can reach, and both run inside the graph
