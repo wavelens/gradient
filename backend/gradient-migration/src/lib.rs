@@ -57,6 +57,7 @@ mod m20260911_000001_drop_derivation_closure;
 mod m20260915_000000_demand;
 mod m20260915_000001_cached_path_confirmed;
 mod m20260916_000000_path_retention;
+mod m20260917_000001_derivation_build_demanded;
 
 pub struct Migrator;
 
@@ -110,6 +111,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260915_000000_demand::Migration),
             Box::new(m20260915_000001_cached_path_confirmed::Migration),
             Box::new(m20260916_000000_path_retention::Migration),
+            Box::new(m20260917_000001_derivation_build_demanded::Migration),
         ]
     }
 }

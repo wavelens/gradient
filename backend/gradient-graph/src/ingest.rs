@@ -461,6 +461,10 @@ impl BatchWriter<'_> {
                     status,
                     substitutable: upstream.contains(&drv_id),
                     substituted: status == BuildStatus::Substituted,
+                    // `..Default::default()` sends every column, so the database
+                    // default never reaches a new row: this batch's recompute is
+                    // what turns demand on for the anchors something reaches.
+                    demanded: false,
                     timeout_secs,
                     max_silent_secs,
                     created_at: now,
