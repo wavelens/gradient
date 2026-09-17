@@ -88,33 +88,46 @@ own dependencies, so nothing recurses over `derivation_dependency`; the only
 recursion left is the reference ripple on the NAR side.
 
 An anchor is promoted `Created` to `Queued` when its derivation is walked, some
-evaluation wants it (a `build_job`), and then one arm per kind of work: a build
-needs `unready_deps = 0` and its own `.drv` whole in the cache, a relay needs
-demand. Those terms are `graph_sql::gates_predicate`, generated once. The events
-that can open one promote the anchors they touched: a batch that walked it, a
-dependency becoming fetchable, its `.drv` NAR arriving, an upstream hit, a thaw
-at stream completion.
+evaluation wants it (a `build_job`), and something still demands it, and then one
+arm per kind of work: a build needs `unready_deps = 0` and its own `.drv` whole in
+the cache, a relay needs nothing more. Those terms are
+`graph_sql::gates_predicate`, generated once. The events that can open one promote
+the anchors they touched: a batch that walked it, a dependency becoming fetchable,
+its `.drv` NAR arriving, an upstream hit, a thaw at stream completion.
 
-Demand is what keeps the fleet from relaying half of nixpkgs on every
-evaluation. A substitutable anchor is queued while something wants its outputs in
-our cache: an entry point of a retained evaluation names it, or a direct
-dependent that will itself be built (walked, not substitutable, pending, with a
-`build_job`) lists it as an input. That is one hop over `derivation_dependency`,
-evaluated inside the promotion statement, so there is no counter to keep and
-nothing to propagate: a dependent that will be built demands its own inputs by
-the same rule. An undemanded substitutable anchor stays `Created`, recorded as
-available upstream and costing nothing.
+Demand is what keeps the fleet from relaying half of nixpkgs, and from building the
+input closure of everything it relays. An anchor is demanded when an entry point of
+a retained evaluation names it, or a dependent that will itself be built (walked,
+not substitutable, pending, with a `build_job`) lists it as an input and is itself
+demanded. That last clause is a fixpoint, so demand is a column,
+`derivation_build.demanded`, and not a subquery: it flows DOWN from the entry
+points while readiness flows UP from the leaves, and a per-row predicate that looks
+one hop cannot carry the downward direction. It used to look one hop, which is why
+a relayed anchor's whole source closure was still built.
 
-Because demand is a property of the anchors around it, every transition that
-carries an anchor into or out of the builder statuses (`Created`, `Queued`,
-`Building`, `FailedTransient`) re-gates that anchor's direct inputs, and the
+`readiness::recompute_demand` rewrites the column absolutely over the anchors an
+event changed and the pending closure below them. The walk steps out of named
+builders only: a relay is reached and never stepped through, because it fetches
+finished bytes and needs nothing below it. The region includes the anchors it was
+given, because a thaw makes one a builder again and its own stored value is as
+stale as its subtree's. One statement serves both directions and returns each row
+with its new value, so the caller queues what gained demand and releases what lost
+it. An anchor already `Building` is left to finish: the bytes it produces are
+cached and useful, while an abort throws the work away.
+
+Every transition that carries an anchor into or out of the builder statuses
+(`Created`, `Queued`, `Building`, `FailedTransient`) recomputes from it, and the
 transition-effects emitter is where that happens - the same one place the graph
 version bump and the board events fan out from, so a new mover cannot forget it.
-Both moves it makes stay inside those four statuses, so one round of re-gating is
-the whole fixpoint. The two events that move demand without moving any status do
-it explicitly: ingest (a newly walked builder, a new entry point, an anchor an
-upstream just claimed) and the per-task evaluation GC (an anchor whose last
-`build_job` went away).
+The events that change what an anchor IS at an unchanged status call it
+themselves: ingest (a newly walked builder, a new entry point, an anchor an
+upstream just claimed), `demote_cached_output`, an exhausted substitution, the
+per-task evaluation GC (an anchor whose last `build_job` went away) and the
+reconciler's adoption, because naming is half of what demand means.
+`readiness::recount_demanded` in the consistency sweep recomputes every pending
+anchor from the entry points and reports what disagreed as `demand_drift`: the
+backstop for a lost recompute, and the backfill the migration deliberately does not
+carry.
 
 The dispatcher does not re-derive the gates - it reads the status - so `Queued`
 carries the claim that they held. That rests on one rule, which every writer of

@@ -207,9 +207,8 @@ pub fn walked_predicate(alias: &str) -> String {
 }
 
 /// The statuses of an anchor that will still be built, and so still needs its
-/// inputs. Closed under both promotion moves (`Created` to `Queued` and back),
-/// which is what lets [`demanded_predicate`] read a *dependent's* status without
-/// reopening the double-move hazard [`gates_predicate`] documents.
+/// inputs. Closed under both promotion moves (`Created` to `Queued` and back), so a
+/// promotion can never change whether a dependent demands what it walks over.
 pub const BUILDER_STATUSES: [BuildStatus; 4] = [
     BuildStatus::Created,
     BuildStatus::Queued,
@@ -269,48 +268,33 @@ pub fn fetchable_predicate(alias: &str) -> String {
     )
 }
 
-/// Something still wants anchor `{alias}`'s outputs in our cache: an entry point
-/// names it, or a direct dependent that will itself be built lists it as an input.
-///
-/// One hop over `derivation_dependency` and never a walk. A dependent that will be
-/// built is a builder, and demands its own inputs by this same rule, so the
-/// "top-down propagation" the issue asks for is what evaluating this per row
-/// already gives - with nothing to backfill, ripple or repair.
-pub fn demanded_predicate(alias: &str) -> String {
-    format!(
-        r#"(EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = {alias}.derivation)
-    OR EXISTS (
-        SELECT 1 FROM derivation_dependency e
-        JOIN derivation_build p ON p.derivation = e.derivation
-        JOIN derivation w ON w.id = p.derivation
-        WHERE e.dependency = {alias}.derivation
-          AND {builder}
-          AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)))"#,
-        builder = builder_predicate("p", "w"),
-    )
-}
-
 /// The gates a `Created` anchor must pass to be queued, minus its own status term:
-/// walked and wanted by some evaluation, then one arm per kind of work. A relay
-/// needs demand and nothing else - it fetches finished bytes, so neither its
-/// inputs nor its `.drv` matter. A build needs every input fetchable from our
-/// cache and its own `.drv` importable.
+/// walked, named by some evaluation, still demanded, then one arm per kind of work.
+/// A relay needs nothing more - it fetches finished bytes, so neither its inputs nor
+/// its `.drv` matter. A build needs every input fetchable from our cache and its own
+/// `.drv` importable.
 ///
-/// It must stay free of any reference to `{alias}`'s OWN `status`, which is why
-/// that term lives in [`promotable_predicate`] instead. `m20260908_000002` and
-/// `m20260909_000001` run a demote and a promote in sequence in one transaction
-/// and they cannot interfere only because this never reads the column the demote
-/// writes; the same holds for `readiness::repair_pending`. The demand arm reads a
-/// DEPENDENT's status, which is safe for a different reason: both moves stay
-/// inside [`BUILDER_STATUSES`], so neither can change what the other's gate sees.
+/// Demand is a column, not a walk: [`crate::readiness::recompute_demand`] rewrites it
+/// on the events that change it and the consistency sweep recomputes it absolutely.
+/// Reading it here is what makes it transitive, which the one-hop `EXISTS` this
+/// replaced could not be - a `Created` dependent counts as a builder, so the first
+/// undemanded one re-demanded everything below it and a relayed anchor's whole input
+/// closure was built (#666). It also takes a correlated three-table subquery off
+/// every promote, un-promote and sweep row.
+///
+/// It must stay free of any reference to `{alias}`'s OWN `status`, which is why that
+/// term lives in [`promotable_predicate`] instead. `m20260908_000002` and
+/// `m20260909_000001` run a demote and a promote in sequence in one transaction and
+/// they cannot interfere only because this never reads the column the demote writes;
+/// the same holds for `readiness::repair_pending`.
 pub fn gates_predicate(alias: &str) -> String {
     format!(
         r#"({walked}
     AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = {alias}.derivation)
-    AND (({alias}.substitutable AND {demanded})
-         OR (NOT {alias}.substitutable AND {alias}.unready_deps = 0 AND {drv_whole})))"#,
+    AND {alias}.demanded
+    AND ({alias}.substitutable
+         OR ({alias}.unready_deps = 0 AND {drv_whole})))"#,
         walked = walked_predicate(alias),
-        demanded = demanded_predicate(alias),
         drv_whole = drv_whole_predicate(alias),
     )
 }
@@ -612,27 +596,27 @@ mod tests {
         );
     }
 
-    /// Demand is one hop: an entry point, or a walked, non-substitutable, pending
-    /// builder with a `build_job` that lists this anchor as a direct input. Never
-    /// a walk - a dependent that will be built demands its own inputs by the same
-    /// rule, so the propagation is the per-row evaluation.
+    /// Both arms are demand-gated now. A build used to be promoted the moment its
+    /// own inputs were fetchable, with nothing asking whether anything still wanted
+    /// its output, which is why a relayed anchor's whole input closure was built
+    /// (#666). The term is a column read, so the one-hop EXISTS that used to leave
+    /// every promote and un-promote is gone, and #591's gate work with it.
     #[test]
-    fn demanded_is_entry_points_or_a_pending_builder_one_hop_away() {
-        let p = norm(&demanded_predicate("db"));
+    fn both_gate_arms_are_demand_gated_and_read_the_column() {
+        let sql = norm(&gates_predicate("db"));
+        assert!(sql.contains("db.demanded"), "{sql}");
         assert!(
-            p.contains("FROM entry_point ep WHERE ep.derivation = db.derivation"),
-            "{p}"
-        );
-        assert!(p.contains("WHERE e.dependency = db.derivation"), "{p}");
-        assert!(
-            p.contains("AND w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"),
-            "{p}"
+            !sql.contains("FROM derivation_dependency"),
+            "the gate must not walk edges per row: {sql}"
         );
         assert!(
-            p.contains("FROM build_job bj WHERE bj.derivation = p.derivation"),
-            "{p}"
+            sql.contains("db.unready_deps = 0"),
+            "the build arm keeps its readiness terms: {sql}"
         );
-        assert!(!p.contains("WITH RECURSIVE"), "demand is one hop: {p}");
+        assert!(
+            sql.contains("FROM build_job bj WHERE bj.derivation = db.derivation"),
+            "an unnamed anchor is still not promotable: {sql}"
+        );
     }
 
     /// The demand arm reads a DEPENDENT's status, which is only safe while both
@@ -820,7 +804,6 @@ mod tests {
             builder,
             "w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"
         );
-        assert!(norm(&demanded_predicate("db")).contains(&builder));
         assert!(
             norm(&pending_closure_cte(
                 "pending",
@@ -864,7 +847,7 @@ mod tests {
     }
 
     /// Demand flows DOWN from the entry points through named builders, which is
-    /// the arm the one-hop `demanded_predicate` could not carry: `Created` counts
+    /// the arm the one-hop predicate it replaced could not carry: `Created` counts
     /// as a builder, so without the recursion the first undemanded builder
     /// re-demands everything below it (#666). A relay is reached and never stepped
     /// through, and that single fact is what stops a relayed subtree being built.
