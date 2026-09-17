@@ -36,6 +36,8 @@ const HEALTH: BoardHealth = {
     { name: 'retention', restarts: 0, pass_errors: 0, pass_timeouts: 0, last_ok_seconds_ago: null, last_error: null },
   ],
   proto_sessions: 2,
+  outbox_pending: 0,
+  outbox_failed: 0,
 };
 
 const TASK: AdminTask = {

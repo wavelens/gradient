@@ -634,6 +634,11 @@ pub struct BoardHealth {
     pub supervised: Vec<SupervisedLoop>,
     pub proto_sessions: usize,
     pub unconfirmed_nars: u64,
+    /// Outbox rows still owed, and rows that gave up after their last attempt.
+    /// A rising `outbox_failed` is a forge or a mail host that is down, not a
+    /// backlog: those rows are dead letters until an operator acts.
+    pub outbox_pending: i64,
+    pub outbox_failed: i64,
     pub hot_nar_cache: HotNarCacheHealth,
 }
 
@@ -686,6 +691,8 @@ pub async fn get_board_health(
         .and_then(|r| r.try_get("", "m").ok().flatten());
 
     let rollup_lag_seconds = latest.map(|t| (now() - t).num_milliseconds() as f64 / 1000.0);
+    let (outbox_pending, outbox_failed) =
+        gradient_db::outbox::pending_counts(&state.web_db).await?;
 
     Ok(ok_json(BoardHealth {
         version: obs.version,
@@ -705,6 +712,8 @@ pub async fn get_board_health(
         supervised: loops_view(scheduler.loop_health(), std::time::Instant::now()),
         proto_sessions: limiter.in_use(),
         unconfirmed_nars: gradient_db::unconfirmed_cached_path_count(&state.web_db).await?,
+        outbox_pending,
+        outbox_failed,
         hot_nar_cache: state.nar_storage.hot().stats().into(),
     }))
 }

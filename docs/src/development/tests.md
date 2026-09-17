@@ -89,6 +89,12 @@ lift one algorithm out of its I/O (`RelayIo` under the worker's closure relay),
 the fake stays in that module's own `tests`: it is a fixture for one walk, not a
 double anything else will reuse.
 
+**An actor with side effects is tested behind small traits.** `gradient-effects`
+takes its queue and its deliverer as `OutboxStore` and `Dispatch`, so the one
+thing the actor owns - never more than the worker count in flight, one pass per
+burst of wakes - is asserted against in-memory fakes with no database, no
+factory and no clock.
+
 **Closure and scheduling work uses `StoreFixture`.** It carries a real
 derivation graph, so dependency ordering, readiness and cache-presence logic get
 tested against genuine `.drv` shapes instead of a hand-built three-node tree.
