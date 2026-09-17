@@ -132,6 +132,27 @@ pub async fn enqueue_evaluation_created<C: ConnectionTrait>(
     .await
 }
 
+/// An evaluation event that is not a status transition, such as the approval
+/// gate clearing. The consumer reports `event` verbatim instead of deriving one.
+pub async fn enqueue_evaluation_event<C: ConnectionTrait>(
+    db: &C,
+    evaluation: gradient_types::EvaluationId,
+    task: gradient_types::TaskId,
+    event: &str,
+) -> Result<(), DbErr> {
+    enqueue(
+        db,
+        OutboxKind::EvaluationStatus,
+        format!("{evaluation}:{event}"),
+        serde_json::json!({
+            "evaluation": evaluation,
+            "task": task,
+            "event": event,
+        }),
+    )
+    .await
+}
+
 pub async fn claim_due<C: ConnectionTrait>(db: &C, limit: usize) -> Result<Vec<OutboxRow>, DbErr> {
     if limit == 0 {
         return Ok(Vec::new());

@@ -5,7 +5,7 @@
  */
 
 use super::evaluation_status::update_evaluation_status;
-use super::logging::{PhaseSubjectKind, finalize_build_log, record_phase_events};
+use super::logging::{PhaseSubjectKind, record_phase_events};
 use crate::state_machine::EvalStateMachine;
 use crate::{DbContext, fetch_in_chunks, for_each_chunk};
 use gradient_entity::build::BuildStatus;
@@ -160,8 +160,6 @@ pub async fn abort_eval_anchors(
     )
     .await;
 
-    finalize_aborted_logs(ctx, &building_ids).await;
-
     let _ = ctx
         .board_events
         .send(gradient_types::BoardEvent::EvaluationProgress {
@@ -217,29 +215,6 @@ async fn shared_anchor_ids(
         .collect())
 }
 
-/// Compress the log of each executing anchor that was aborted. Spawned so log
-/// I/O never blocks the abort; Created/Queued anchors never produced a log.
-async fn finalize_aborted_logs(ctx: &DbContext, building_ids: &[DerivationBuildId]) {
-    if building_ids.is_empty() {
-        return;
-    }
-
-    let attempts = crate::build_attempt::latest_attempts(&ctx.worker_db, building_ids)
-        .await
-        .unwrap_or_default();
-    for &anchor_id in building_ids {
-        if let Some(att) = attempts.get(&anchor_id) {
-            let attempt_id = att.id;
-            let log_ctx = ctx.detached();
-            ctx.shutdown.spawn(async move {
-                if let Err(e) = finalize_build_log(&log_ctx, attempt_id).await {
-                    error!(error = %e, attempt = %attempt_id, "failed to finalize a build log");
-                }
-            });
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,8 +264,8 @@ mod tests {
     /// evaluation's anchors, which of them are still active, the `build_job`
     /// rows other evaluations hold on those anchors, and those evaluations.
     /// Everything past the abort write (the graph version, board events, phase
-    /// events, log finalize) is answered empty: the decision is made by then and
-    /// each of those paths is a no-op on empty input.
+    /// events, the attempts whose logs the abort owes) is answered empty: the
+    /// decision is made by then and each of those paths is a no-op on empty input.
     fn scripted_db(
         anchors: Vec<BTreeMap<String, Value>>,
         active: Vec<MDerivationBuild>,
@@ -302,7 +277,7 @@ mod tests {
             .append_query_results([active])
             .append_query_results([other_jobs])
             .append_query_results([other_evals])
-            .append_query_results(vec![Vec::<MBuildJob>::new(); 6])
+            .append_query_results(vec![Vec::<MBuildJob>::new(); 8])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,

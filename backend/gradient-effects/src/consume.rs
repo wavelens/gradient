@@ -112,8 +112,6 @@ async fn expand_build_status(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
 async fn expand_evaluation_status(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
     let db = ctx.db();
     let evaluation_id = EvaluationId::new(uuid_field(row, "evaluation")?);
-    let status = EvaluationStatus::try_from(i32_field(row, "status")?)
-        .map_err(|_| anyhow!("outbox evaluation status out of range"))?;
     let Some(evaluation) = EEvaluation::find_by_id(evaluation_id)
         .one(&db.worker_db)
         .await
@@ -125,6 +123,21 @@ async fn expand_evaluation_status(ctx: &EffectsCtx, row: &OutboxRow) -> Result<(
         return Ok(());
     };
 
+    // An event named outright is one no status maps to (the approval gate
+    // clearing), so it is reported as written and settles no reaction.
+    if let Some(event) = row.payload.get("event").and_then(JsonValue::as_str) {
+        let payload = serde_json::json!({
+            "evaluation_id": evaluation_id,
+            "task_id": task,
+            "status": event,
+            "evaluation_kind": eval_kind_str(evaluation.kind),
+        });
+
+        return fan_out(ctx, task, event, &payload, &row.key).await;
+    }
+
+    let status = EvaluationStatus::try_from(i32_field(row, "status")?)
+        .map_err(|_| anyhow!("outbox evaluation status out of range"))?;
     let created = row
         .payload
         .get("created")

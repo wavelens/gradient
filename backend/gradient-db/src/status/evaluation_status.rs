@@ -8,6 +8,7 @@ use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::outbox::OutboxKind;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, warn};
@@ -107,28 +108,31 @@ pub async fn update_evaluation_status(
             status: i32::from(event_status) as i16,
         });
 
-    let action_ctx = ctx.detached();
-    let action_eval = updated_eval.clone();
-    ctx.shutdown.spawn(async move {
-        action_ctx
-            .reactor
-            .on_eval_terminal(&action_ctx, action_eval, event_status)
-            .await;
-    });
+    if let Err(e) = crate::outbox::enqueue(
+        &ctx.worker_db,
+        OutboxKind::EvaluationStatus,
+        format!("{}:{}", updated_eval.id, i32::from(event_status)),
+        serde_json::json!({
+            "evaluation": updated_eval.id,
+            "task": updated_eval.task,
+            "status": i32::from(event_status),
+        }),
+    )
+    .await
+    {
+        error!(error = %e, evaluation_id = %updated_eval.id, "failed to enqueue an evaluation status report");
+    }
+    ctx.outbox_wake.notify_one();
 
-    let pe_ctx = ctx.detached();
-    let pe_id = updated_eval.id.into_inner();
-    ctx.shutdown.spawn(async move {
-        record_phase_event(
-            &pe_ctx.worker_db,
-            PhaseSubjectKind::Evaluation,
-            pe_id,
-            i32::from(event_status) as i16,
-            None,
-            now,
-        )
-        .await;
-    });
+    record_phase_event(
+        &ctx.worker_db,
+        PhaseSubjectKind::Evaluation,
+        updated_eval.id.into_inner(),
+        i32::from(event_status) as i16,
+        None,
+        now,
+    )
+    .await;
 
     updated_eval
 }

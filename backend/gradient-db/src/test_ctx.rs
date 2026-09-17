@@ -16,14 +16,13 @@ use gradient_types::{Cli, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 
-use crate::{DbContext, NoReactor, WebDb, WorkerDb};
+use crate::{DbContext, WebDb, WorkerDb};
 
 /// Drain the detached work a context spawned, then drop it, so the `WorkerDb` the
 /// builder returned is the last handle on the pool - which is what
 /// `WorkerDb::into_transaction_log` requires. `drop(ctx)` alone is not enough for
-/// any path that reaches `status::update_evaluation_status`: its success branch
-/// spawns the reactor hook and the phase-event record onto `ctx.shutdown`, each
-/// holding a `DbContext` clone that outlives the drop.
+/// any path that still spawns onto `ctx.shutdown`: each spawned task holds a
+/// `DbContext` clone that outlives the drop.
 pub(crate) async fn settle(ctx: DbContext) {
     ctx.shutdown
         .cancel_and_drain(std::time::Duration::from_secs(5))
@@ -67,7 +66,6 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         },
         shutdown: Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(16).0,
-        reactor: Arc::new(NoReactor),
         outbox_wake: Default::default(),
     };
 

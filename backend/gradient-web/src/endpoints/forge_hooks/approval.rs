@@ -121,20 +121,20 @@ pub(super) async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &M
     let Some(task_id) = eval.task else {
         return;
     };
-    let payload = serde_json::json!({
-        "evaluation_id": eval.id,
-        "task_id": task_id,
-        "status": "evaluation.approval_granted",
-    });
-    gradient_ci::actions::dispatch_evaluation_event(
-        &state.ci(),
+    if let Err(e) = gradient_db::outbox::enqueue_evaluation_event(
+        &state.worker_db,
+        eval.id,
         task_id,
         "evaluation.approval_granted",
-        payload,
     )
-    .await;
-
-    gradient_ci::actions::dispatch_evaluation_created(&state.ci(), eval).await;
+    .await
+    {
+        tracing::error!(error = %e, evaluation_id = %eval.id, "failed to enqueue the approval-granted report");
+    }
+    if let Err(e) = gradient_db::outbox::enqueue_evaluation_created(&state.worker_db, eval).await {
+        tracing::error!(error = %e, evaluation_id = %eval.id, "failed to re-enqueue the evaluation check");
+    }
+    state.outbox_wake.notify_one();
 }
 
 gradient_db::sql! {
