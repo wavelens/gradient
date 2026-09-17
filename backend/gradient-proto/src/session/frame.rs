@@ -184,6 +184,15 @@ impl WireMessage for ClientMessage {
                 | ClientMessage::EvalCacheChunk { .. }
                 | ClientMessage::EvalCachePushDone { .. }
                 | ClientMessage::LogChunk { .. }
+                // The end of the job's own NAR stream set, and ordered behind it
+                // for the same reason `EvalCachePushDone` is ordered behind its
+                // chunks: on the control lane a completion overtakes the
+                // `NarUploaded` frames the worker enqueued before it, and the
+                // server marks the build terminal-success against outputs whose
+                // bytes it has not been told about yet (#654). The cost is that a
+                // completion now waits out the session's bulk backlog - the
+                // worker's own uploads, which it was waiting for anyway.
+                | ClientMessage::JobCompleted { .. }
         )
     }
 
@@ -933,6 +942,44 @@ mod tests {
                 message: "boom".into(),
             }
             .is_bulk()
+        );
+    }
+
+    /// A completion must NOT overtake the uploads it is a completion of. On the
+    /// control lane it did, and the server marked the build terminal-success
+    /// before it had been told the output bytes existed - the state the
+    /// unbacked-output heal then spent rebuilds on (#654). It rides bulk, in
+    /// FIFO behind its own job's `NarUploaded` frames, like `EvalCachePushDone`
+    /// rides behind its chunks.
+    #[test]
+    fn a_job_completion_stays_behind_the_nars_it_completes() {
+        let completed = ClientMessage::JobCompleted {
+            job_id: "build:1".into(),
+            dispatch: "dispatch-1".into(),
+            spans: Vec::new(),
+        };
+        assert!(completed.is_bulk(), "a completion rides its job's own lane");
+        assert!(
+            ClientMessage::NarUploaded {
+                job_id: "build:1".into(),
+                store_path: "/nix/store/aaa-foo".into(),
+                file_hash: "sha256:x".into(),
+                file_size: 1,
+                nar_size: 1,
+                nar_hash: "sha256:y".into(),
+                references: Vec::new(),
+                deriver: None,
+                ca: None,
+            }
+            .is_bulk(),
+            "the frames it must stay behind ride it too"
+        );
+        assert!(
+            !ClientMessage::RequestJob {
+                kind: gradient_types::proto::JobKind::Build,
+            }
+            .is_bulk(),
+            "the rest of the control plane is untouched"
         );
     }
 

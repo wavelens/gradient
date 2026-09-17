@@ -489,6 +489,19 @@ cache loop (after the GC passes) and inside the reconciler's `Unstick` scope, so
 orphaned or partially-cached producer heals promptly - even while the evaluation
 that needs it is itself stuck `Building` - without manual intervention.
 
+A build is not marked terminal-success until the NARs it pushed are in the index.
+The worker sends `JobCompleted` after its last upload, but that message used to
+ride the control writer lane, which is drained ahead of bulk, so it overtook its
+own `NarUploaded` frames; and the commits themselves run detached from the session
+read loop, because committing one inline froze every other transfer on the
+connection. The anchor therefore reached `Completed` before the index had been
+told the bytes existed, and a commit that failed afterwards could not correct it -
+the build state machine refuses to leave a terminal status, so the failure was
+dropped and the graph was left trusting an output nothing serves. A completion now
+rides the bulk lane, in FIFO behind its job's own frames, and the session holds it
+until that job's commits have settled; a commit that fails fails the build, and the
+completion behind it is dropped rather than overwriting that verdict.
+
 The demote is a bet that a rebuild lands the artifact, and it is placed **once**.
 The heal splits the invariant into two disjoint halves on whether the fleet has
 already finished a real build of the producer (a `build_attempt` with

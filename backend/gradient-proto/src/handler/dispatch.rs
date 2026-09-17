@@ -33,7 +33,7 @@ use super::eval_cache::{
     EvalCacheReceiveStore, handle_eval_cache_chunk, handle_eval_cache_pull, handle_eval_cache_push,
     handle_eval_cache_push_done,
 };
-use super::nar_transfer::{NarReceiveStore, serve_nar_request};
+use super::nar_transfer::{CommitTracker, NarReceiveStore, serve_nar_request};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, push_pending_candidates, send_credentials_for_job,
     send_error, send_server_msg,
@@ -230,9 +230,11 @@ impl<'a> DispatchContext<'a> {
                 dispatch,
                 spans,
             } => {
+                let commits = nar.commits();
                 nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
-                    self.on_job_completed(job_id, dispatch, spans).await;
+                    self.on_job_completed(job_id, dispatch, spans, commits)
+                        .await;
                 }
                 true
             }
@@ -796,24 +798,46 @@ impl<'a> DispatchContext<'a> {
 
     // ── Job terminal states ───────────────────────────────────────────────────
 
+    /// A job is completed only once the NARs it pushed are in the index.
+    ///
+    /// The worker sends `JobCompleted` after its last push, but the commits run
+    /// detached from this read loop and the control lane is drained first, so the
+    /// completion arrives ahead of them. Marking the build terminal there is what
+    /// makes terminal success mean "the worker said so" instead of "the cache has
+    /// the outputs": a commit that then fails cannot move the anchor back, because
+    /// the build state machine refuses to leave a terminal status, and the graph
+    /// is left trusting an output nothing serves (#654).
+    ///
+    /// So the completion waits for [`CommitTracker::settle`] first - off the loop,
+    /// because waiting on it here would stall every other transfer on the
+    /// connection, which is why the commits were detached in the first place. Only
+    /// the session's own bookkeeping stays inline. A commit that failed has already
+    /// failed the build; the completion is dropped rather than overwriting that.
     async fn on_job_completed(
         &mut self,
         job_id: String,
         dispatch: DispatchedJobId,
         spans: Vec<JobPhaseSpan>,
+        commits: Arc<CommitTracker>,
     ) {
-        info!(peer_id = %self.peer_id, %job_id, phases = spans.len(), "job completed");
         self.active.remove(&job_id);
-        self.scheduler
-            .record_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans);
-        if let Err(e) = self
-            .scheduler
-            .handle_job_completed(self.peer_id, &job_id)
-            .await
-        {
-            error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_completed failed");
-        }
-        push_pending_candidates(self.writer, self.scheduler, self.peer_id).await;
+
+        let writer = self.writer.clone();
+        let scheduler = Arc::clone(self.scheduler);
+        let peer_id = self.peer_id.to_owned();
+        self.state.shutdown.spawn(async move {
+            if !commits.settle(&job_id).await {
+                warn!(%peer_id, %job_id, "a NAR this job pushed never reached the index; the build was failed, not completed");
+                return;
+            }
+
+            info!(%peer_id, %job_id, phases = spans.len(), "job completed");
+            scheduler.record_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans);
+            if let Err(e) = scheduler.handle_job_completed(&peer_id, &job_id).await {
+                error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
+            }
+            push_pending_candidates(&writer, &scheduler, &peer_id).await;
+        });
     }
 
     async fn on_job_failed(

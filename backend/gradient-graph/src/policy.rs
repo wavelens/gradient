@@ -87,11 +87,13 @@ pub(crate) fn decide_failure_outcome(
 
 /// Terminal success status for a build whose job completed. `Substituted` when
 /// the daemon found the outputs already valid and ran no build (recorded on
-/// `build.substituted`), else `Completed`. Decided at `JobCompleted`, after the
-/// worker has pushed the output NARs, so a build never reaches a dispatch-ready
-/// terminal state while its bytes are still absent from the cache - the #399
-/// regression where a dependent dispatched into that window and failed
-/// `InputsUnavailable`.
+/// `build.substituted`), else `Completed`. Decided at `JobCompleted`, once the
+/// output NARs the worker pushed are committed to the index, so a build never
+/// reaches a dispatch-ready terminal state while its bytes are still absent from
+/// the cache - the #399 regression where a dependent dispatched into that window
+/// and failed `InputsUnavailable`. The worker having sent them is not that
+/// guarantee and never was: the completion used to overtake its own frames on the
+/// control lane and the commits ran detached behind it (#654).
 pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatus {
     if outputs_already_valid {
         BuildStatus::Substituted

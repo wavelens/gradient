@@ -400,8 +400,10 @@ async fn build_completed(
     let derivation_id = anchor.derivation;
     let was_external_cached = anchor.substitutable;
 
-    // The output NARs are pushed by the time `JobCompleted` arrives, so the
-    // anchor may now become dispatch-ready.
+    // The output NARs are in the index by the time this runs: the completion
+    // rides the same writer lane as the `NarUploaded` frames it follows, and the
+    // session holds it until their commits have settled. So the anchor may now
+    // become dispatch-ready.
     let terminal = policy::terminal_success_status(anchor.substituted);
     if let Err(e) = succeed_latest_attempt(
         &ctx.worker_db,
