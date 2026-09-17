@@ -566,9 +566,6 @@ where
 }
 
 /// Emit a tracing summary after [`drain_build_logs_with_timeout`] completes.
-///
-/// Warns if the daemon emitted no messages at all, or if it emitted messages
-/// but none were forwardable text (suggesting daemon verbosity is too low).
 fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
     info!(
         drv = %drv_path,
@@ -580,20 +577,7 @@ fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
     );
 
     if stats.total_msgs == 0 {
-        warn!(
-            drv = %drv_path,
-            "daemon emitted zero LogMessages during build - daemon verbosity may be too low \
-             (set `verbose-builds = true` and `log-lines = 0` in nix.conf, or check \
-             the worker user's permissions to read daemon output)"
-        );
-    } else if stats.forwarded_lines == 0 {
-        warn!(
-            drv = %drv_path,
-            daemon_messages = stats.total_msgs,
-            "daemon emitted LogMessages but none had forwardable text content \
-             (only structured progress / activity events) - set `verbose-builds = true` \
-             on the worker's nix-daemon to enable BuildLogLine results"
-        );
+        warn!(drv = %drv_path, "daemon emitted zero LogMessages during build");
     }
 }
 
