@@ -57,7 +57,8 @@ crate::sql! {
          SELECT d.derivation, s.dependency FROM d, LATERAL (\
            SELECT e.dependency FROM derivation_dependency e \
            WHERE e.derivation = d.derivation OFFSET 0) s",
-        params = [EvaluationId];
+        params = [EvaluationId],
+        tier = Walk;
 }
 
 /// Returns the set of all transitive dependents of `start`, **including** `start`

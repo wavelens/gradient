@@ -30,7 +30,8 @@ crate::sql! {
          FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build \
          WHERE bj.evaluation = ANY($1) \
          GROUP BY bj.evaluation, db.status",
-        params = [EvaluationIds(64)];
+        params = [EvaluationIds(64)],
+        tier = Bulk;
 }
 
 /// `(evaluation, build.status) -> count`, one grouped query per chunk of ids.
@@ -127,7 +128,8 @@ fn task_queue_summary_sql() -> String {
 
 crate::sql_fn! {
     TASK_QUEUE_SUMMARY = task_queue_summary_sql,
-        params = [TaskId];
+        params = [TaskId],
+        tier = Bulk;
 }
 
 /// Live `building` / `queued` build counts across the task's non-finished
@@ -207,7 +209,7 @@ crate::sql! {
             DerivationIds(64),
             EvaluationId,
         ],
-        tier = Walk,
+        tier = Bulk,
         flags = [Walk];
 }
 

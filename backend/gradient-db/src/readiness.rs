@@ -194,7 +194,8 @@ static SEED_UNREADY: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     SEED_UNREADY_QUERY = || SEED_UNREADY.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 static MARK_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
@@ -234,7 +235,8 @@ crate::sql! {
     WHERE d.derivation = c.derivation
     RETURNING d.derivation, d.unready_deps = 0 AS ready
 "#,
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
@@ -256,7 +258,8 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     RIPPLE_UP_QUERY = || RIPPLE_UP.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 fn promote_sql(scope: &str) -> String {
@@ -411,7 +414,8 @@ static RECOUNT_UNREADY: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     RECOUNT_UNREADY_QUERY = || RECOUNT_UNREADY.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 crate::sql! {

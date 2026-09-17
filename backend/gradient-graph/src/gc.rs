@@ -83,7 +83,7 @@ gradient_db::sql_fn! {
 
     GC_STALE_AFTER_SCAN = stale_after_scan_sql,
         params = [CachedPathHashes(64), Now],
-        tier = Walk,
+        tier = Sweep,
         flags = [Walk];
 }
 

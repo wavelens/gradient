@@ -305,8 +305,9 @@ crate::sql_lazy! {
 }
 
 /// The frontier every naming hole has: a pending anchor nobody names, one edge
-/// below a builder a live evaluation names. Cheap to ask on every sweep; the walk
-/// runs only when the answer is yes.
+/// below a builder a live evaluation names. Asked on every sweep, and the walk
+/// runs only when the answer is yes; a settled server has no frontier, so the
+/// answer costs a pass over the anchors that are still open.
 static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
     pending_orphans_sql(&format!(
         "EXISTS (SELECT 1 FROM derivation_dependency e \
@@ -322,7 +323,8 @@ static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     PENDING_ORPHAN_FRONTIER_QUERY = || PENDING_ORPHAN_FRONTIER.as_str(),
-        params = [];
+        params = [],
+        tier = Sweep;
 }
 
 /// Whether any of `derivations` is in a builder status with no `build_job` left:
