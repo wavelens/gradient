@@ -267,11 +267,29 @@ async fn purge_zombie_cached_paths(
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
 
-    let zombies: Vec<String> = rows
-        .into_iter()
-        .filter(|row| !on_disk.contains(&row.hash))
-        .map(|row| row.hash)
-        .collect();
+    // The listing was taken before these rows were read, so a NAR committed in
+    // between is absent from it and present in storage. Dropping such a row leaves
+    // its producer `Completed` with an output nothing backs, which is fetchable
+    // for nobody: one pass did that to two anchors and wedged 550 dependents of
+    // theirs for the rest of the run. The listing is the prefilter; storage
+    // decides, and a probe that errors preserves.
+    let mut zombies = Vec::new();
+    for row in rows {
+        if on_disk.contains(&row.hash) {
+            continue;
+        }
+
+        match state.nar_storage.exists(&row.hash).await {
+            Ok(false) => zombies.push(row.hash),
+            Ok(true) => {
+                debug!(hash = %row.hash, "zombie purge: the object landed after the listing")
+            }
+            Err(e) => {
+                warn!(hash = %row.hash, error = %e, "zombie purge: could not probe the object")
+            }
+        }
+    }
+
     if zombies.is_empty() {
         return Ok(0);
     }
@@ -508,6 +526,38 @@ mod tests {
             nar_file_exists(tmp.path(), orphan),
             "freshly written orphan NAR must be spared within the grace window"
         );
+    }
+
+    /// The listing the purge compares against is older than the rows it reads, so
+    /// a NAR committed in between is missing from it and present in storage. The
+    /// row must survive: dropping it leaves its producer `Completed` against an
+    /// output nothing backs, and every dependent waits on it forever.
+    #[tokio::test]
+    async fn a_path_committed_after_the_listing_survives() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fresh = "cccc33333333333333333333333333cccc";
+        write_nar_file(tmp.path(), fresh);
+
+        let row = gradient_entity::cached_path::Model {
+            id: CachedPathId::now_v7(),
+            hash: fresh.into(),
+            package: "fresh".into(),
+            file_hash: Some("sha256:beef".into()),
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row]])
+            .into_connection();
+
+        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let state = test_server_state(nar_storage, db, |_| {});
+
+        let purged = purge_zombie_cached_paths(&state, &HashSet::new())
+            .await
+            .unwrap();
+
+        assert_eq!(purged, 0, "storage decides, not the stale listing");
+        assert!(nar_file_exists(tmp.path(), fresh));
     }
 
     /// `cached_path` rows whose NAR is gone from storage are zombies left
