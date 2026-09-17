@@ -258,8 +258,32 @@ async fn settle_after_delete(
         crate::reachability::Adopted::default()
     };
 
+    // Naming is half of what demand means, so a deletion can take it away and an
+    // adoption can give it back: recompute below both before the queue is settled.
+    let mut undemanded = Vec::new();
+    let mut demanded = Vec::new();
+    for chunk in lost
+        .iter()
+        .chain(adopted.derivations().iter())
+        .copied()
+        .collect::<Vec<_>>()
+        .chunks(crate::IN_CHUNK_SIZE)
+    {
+        let moved = crate::readiness::recompute_demand(db, chunk)
+            .await
+            .context("GC: failed to recompute demand after deleting evaluations")?;
+        undemanded.extend(moved.lost);
+        demanded.extend(moved.gained);
+    }
+
     let mut changes = Vec::new();
-    for chunk in lost.chunks(crate::IN_CHUNK_SIZE) {
+    for chunk in lost
+        .iter()
+        .chain(undemanded.iter())
+        .copied()
+        .collect::<Vec<_>>()
+        .chunks(crate::IN_CHUNK_SIZE)
+    {
         changes.extend(
             crate::readiness::unpromote_ungated(db, chunk)
                 .await
@@ -267,7 +291,14 @@ async fn settle_after_delete(
         );
     }
 
-    for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+    for chunk in adopted
+        .derivations()
+        .iter()
+        .chain(demanded.iter())
+        .copied()
+        .collect::<Vec<_>>()
+        .chunks(crate::IN_CHUNK_SIZE)
+    {
         changes.extend(
             crate::readiness::promote(db, chunk)
                 .await

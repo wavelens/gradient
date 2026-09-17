@@ -121,6 +121,13 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     match crate::reachability::adopt_pending_closure(db, evaluation).await {
         Ok(adopted) => {
             report.adopted = adopted.pairs.len();
+            // Naming is half of what demand means, so an adoption creates it the way
+            // a thaw does.
+            for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+                if let Err(e) = crate::readiness::recompute_demand(db, chunk).await {
+                    error!(error = %e, %evaluation, "reconcile: demand recompute after adoption failed");
+                }
+            }
             if let Err(e) = crate::bump_graph_version(db, &adopted.evaluations()).await {
                 error!(error = %e, %evaluation, "reconcile: graph version bump after adoption failed");
             }

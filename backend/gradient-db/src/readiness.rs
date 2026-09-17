@@ -134,8 +134,8 @@
 //! anchors themselves. The other three inputs each need their own call. A finished walk
 //! setting `walked` is [`promote_closure`]; a `build_job` appearing, a `.drv` becoming
 //! whole and demand arriving are [`promote`]; a `.drv` ceasing to be whole is
-//! [`unpromote_drv_owners`]; demand going away is [`unpromote_ungated`] over
-//! [`direct_dependencies_of`] the builder that lost it. `substitutable` being cleared on a `Queued` anchor is the
+//! [`unpromote_drv_owners`]; demand going away is [`unpromote_ungated`] over what
+//! [`recompute_demand`] reports lost. `substitutable` being cleared on a `Queued` anchor is the
 //! one with no entry point here, because it both unfetches the anchor and fails the
 //! anchor's own gate: the caller that clears it owes that anchor a re-check of its own
 //! gate, and until it does, [`repair_pending`]'s un-promote pass settles it one sweep
@@ -796,39 +796,6 @@ pub async fn unpromote_drv_owners<C: ConnectionTrait>(
     ))
 }
 
-crate::sql! {
-    DIRECT_DEPENDENCIES = "SELECT DISTINCT e.dependency FROM derivation_dependency e WHERE e.derivation = ANY($1::uuid[])",
-        params = [DerivationIds(64)];
-}
-
-/// The direct inputs of `derivations`, one statement and one hop. What every event
-/// that creates, thaws, finishes or drops a builder hands to [`promote`] or
-/// [`unpromote_ungated`], because that builder is exactly the demand its inputs gained
-/// or lost.
-///
-/// A STATUS move across [`crate::graph_sql::BUILDER_STATUSES`] is handled once, in
-/// [`crate::status::emit_transition_effects`], so no mover has to remember it. The
-/// three events that change what an anchor IS rather than where it is - writing
-/// `substitutable` - are the exception, because they turn a relay into a builder (or
-/// back) at an unchanged status: `ingest`'s upstream flip, `demote_cached_output`'s
-/// clear, and the graph actor's exhausted substitution each call this themselves.
-pub async fn direct_dependencies_of<C: ConnectionTrait>(
-    db: &C,
-    derivations: &[DerivationId],
-) -> Result<Vec<DerivationId>, DbErr> {
-    if derivations.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    Ok(db
-        .query_all_raw(DIRECT_DEPENDENCIES.bind([ids(derivations)]))
-        .await?
-        .iter()
-        .filter_map(|r| r.try_get::<uuid::Uuid>("", "dependency").ok())
-        .map(DerivationId::new)
-        .collect())
-}
-
 /// Pull back every `Queued` candidate whose gates no longer hold. The gate is
 /// embedded, so the candidate list is a bound and never a claim: an anchor a
 /// concurrent evaluation re-walked between the event and this call keeps its place
@@ -1106,7 +1073,6 @@ mod tests {
         assert!(promote(&db, &[]).await.unwrap().is_empty());
         assert!(unpromote_drv_owners(&db, &[]).await.unwrap().is_empty());
         assert!(unpromote_ungated(&db, &[]).await.unwrap().is_empty());
-        assert!(direct_dependencies_of(&db, &[]).await.unwrap().is_empty());
         assert!(statements(db.into_transaction_log()).is_empty());
     }
 
@@ -1308,34 +1274,6 @@ mod tests {
             sql.contains("RETURNING db.derivation, old.status AS from_status"),
             "{sql}"
         );
-    }
-
-    /// Demand is read one hop at a time, so every event that creates or drops a
-    /// builder needs that builder's direct inputs and nothing deeper. One statement,
-    /// no walk.
-    #[tokio::test]
-    async fn direct_dependencies_of_is_one_distinct_select_and_never_a_walk() {
-        let d = DerivationId::now_v7();
-        let dep = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![BTreeMap::from([(
-                "dependency".to_owned(),
-                Value::from(dep.into_inner()),
-            )])]])
-            .into_connection();
-
-        assert_eq!(direct_dependencies_of(&db, &[d]).await.unwrap(), vec![dep]);
-
-        let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 1, "{log:?}");
-        assert!(
-            log[0].contains(
-                "SELECT DISTINCT e.dependency FROM derivation_dependency e \
-                 WHERE e.derivation = ANY($1::uuid[])"
-            ),
-            "{log:?}"
-        );
-        assert!(!log[0].contains("WITH RECURSIVE"), "{log:?}");
     }
 
     /// The generic un-promote is what every demand loss runs, so it must move
