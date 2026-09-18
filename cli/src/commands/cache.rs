@@ -11,7 +11,7 @@ use crate::input::{client_from_config, handle_input};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use connector::caches::MakeCacheRequest;
+use connector::caches::{MakeCacheRequest, PatchCacheRequest};
 use std::fs;
 
 #[derive(Subcommand, Debug)]
@@ -39,9 +39,9 @@ pub enum Commands {
         description: Option<String>,
         #[arg(short, long)]
         priority: Option<i32>,
-        /// Max cache storage in GB. 0 = unlimited (default); otherwise at least 1.
-        #[arg(short = 'm', long, default_value_t = 0)]
-        max_storage_gb: i32,
+        /// Max cache storage in GB. 0 = unlimited; otherwise at least 1.
+        #[arg(short = 'm', long)]
+        max_storage_gb: Option<i32>,
     },
     Delete {
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
@@ -151,11 +151,29 @@ pub async fn handle(cmd: Commands, out: Output) {
             priority,
             max_storage_gb,
         } => {
+            let client = client_from_config(out);
+            let current = match client.caches().get(&name).await {
+                Ok(c) => c,
+                Err(e) => out.err(to_exit_kind(&e), e),
+            };
+
             let input_fields = [
-                ("Display Name", display_name),
-                ("Description", description),
-                ("Priority", priority.map(|p| p.to_string())),
-                ("Max Storage (GB)", Some(max_storage_gb.to_string())),
+                (
+                    "Display Name",
+                    Some(display_name.unwrap_or(current.display_name)),
+                ),
+                (
+                    "Description",
+                    Some(description.unwrap_or(current.description)),
+                ),
+                (
+                    "Priority",
+                    Some(priority.unwrap_or(current.priority).to_string()),
+                ),
+                (
+                    "Max Storage (GB)",
+                    Some(max_storage_gb.unwrap_or(current.max_storage_gb).to_string()),
+                ),
             ]
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
@@ -167,18 +185,22 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Ok(p) => p,
                 Err(_) => out.err(ExitKind::Usage, "Priority must be an integer."),
             };
-            let max_storage_gb = parse_max_storage_gb(&input.get("Max Storage (GB)"), out);
 
-            let client = client_from_config(out);
             match client
                 .caches()
-                .create(MakeCacheRequest {
-                    name,
-                    display_name: input.get("Display Name"),
-                    description: input.get("Description"),
-                    priority,
-                    max_storage_gb,
-                })
+                .update(
+                    &name,
+                    PatchCacheRequest {
+                        display_name: Some(input.get("Display Name")),
+                        description: Some(input.get("Description")),
+                        priority: Some(priority),
+                        max_storage_gb: Some(parse_max_storage_gb(
+                            &input.get("Max Storage (GB)"),
+                            out,
+                        )),
+                        ..Default::default()
+                    },
+                )
                 .await
             {
                 Ok(_) => {
