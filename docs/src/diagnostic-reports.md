@@ -92,7 +92,6 @@ for it - a distinction the whole diagnosis of an unwhole closure rests on.
 | `derivation`, `derivation_build`, `derivation_output` | the evaluation's derivations **and their direct dependencies** |
 | `derivation_dependency` | the evaluation's own edges with their `kind`, both ends exported |
 | `cached_path` | those derivations' output hashes **and every path they reference** |
-| `cached_path_reference` | those output hashes as referrers, every referenced path exported |
 | `build_job` | the evaluation's jobs **and every job an exported attempt was made under** |
 
 One hop is the whole requirement, not an arbitrary cut. `unready_deps` counts one
@@ -100,7 +99,7 @@ per build edge and reads a dependency's own anchor, outputs and cached paths; a
 dependency's *own* dependencies are already summarised in its stored
 `unready_deps`. `missing_runtime_deps` is the same count over the runtime edges
 (`derivation_dependency.kind IN (1, 2)`), and the same holds for
-`missing_references` over `cached_path_reference`. So the file is a boundary, not a closure, and a
+`missing_runtime_deps` over the runtime edges. So the file is a boundary, not a closure, and a
 dependency row in it is evidence about this evaluation's work rather than work of
 its own - it has no `build_job` row, which is how `why-stuck` tells the two apart.
 
@@ -167,22 +166,26 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
 
 The raw signature is never exported, only whether one exists.
 
-`cached_path` carries `missing_references`, the number of the path's references
-that are absent, unbacked or themselves not whole. A path is *whole* - what the
-dispatch gate reads - when `file_hash IS NOT NULL AND
-missing_references = 0`, so a non-zero counter is a path no dispatch will trust,
-and a negative one is a ripple that was lost:
+Wholeness is an anchor fact, not a path one. `derivation_build` carries
+`missing_runtime_deps`, the number of the anchor's runtime edges leading to
+something that is not whole itself; an anchor is *whole* - what `fetchable`, and so
+every dispatch gate, reads - when every output has a NAR here and that counter is
+zero. A non-zero counter is an anchor no dispatch will trust, and a negative one is
+a ripple that was lost:
 
 ```sh
 sqlite3 gradient-report-01a05a38-2026-09-01.db \
-  'SELECT package, missing_references FROM cached_path
-    WHERE missing_references <> 0 ORDER BY missing_references DESC'
+  'SELECT d.name, b.missing_runtime_deps
+     FROM derivation_build b JOIN derivation d ON d.id = b.derivation
+    WHERE b.missing_runtime_deps <> 0
+    ORDER BY b.missing_runtime_deps DESC'
 ```
 
-A negative counter is also counted table-wide by the running server, as
-`negative_reference_counters` on the graph-consistency sweep's warning line, next
-to `nar_counter_drift` (rows that sweep repaired, which is bounded to the paths
-pending anchors gate on) and `gating` (how many paths that was).
+`cached_path.references` is the narinfo `References:` line the wholeness walk was
+built from, so the same closure is readable per path when a counter has to be
+checked by hand. The running server recounts the column table-wide on every
+consistency sweep and reports what disagreed as `runtime_drift` on its warning
+line.
 
 An evaluation still in `EvaluatingFlake` or `EvaluatingDerivation` whose newest
 eval job carries a `finished_at` is one whose terminal report never landed. The

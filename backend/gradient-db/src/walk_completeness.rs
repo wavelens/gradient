@@ -6,7 +6,7 @@
 
 //! `derivation.unwalked_inputs`: how many direct inputs of a walked derivation have a
 //! subtree that is not recorded. The walk prunes on `walked AND unwalked_inputs = 0`,
-//! so the bit it trusts is maintained here the way `missing_references` is: seeded
+//! so the bit it trusts is maintained here the way `missing_runtime_deps` is: seeded
 //! when a record lands, rippled up as inputs complete, rippled back when a record is
 //! dropped, recounted by the sweep. Every pass locks the rows it will write in id
 //! order and touches `derivation` only, which is the first class in the lock order.

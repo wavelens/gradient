@@ -26,7 +26,7 @@ sharing is implicit in the global derivation graph.
 #### The graph actor
 
 Every write to the anchors, edges, outputs, input sources, build jobs,
-attempts and the cache index (`cached_path`, `cached_path_reference`) is a
+attempts and the cache index (`cached_path`) is a
 message to one actor, `graph`, under the root of the supervision tree. One
 message is one transaction:
 
@@ -301,9 +301,10 @@ per-evaluation sweeps and the GC keep-set.
 
 A consistency sweep (`graph_consistency_report`, interval
 `GRADIENT_GRAPH_CONSISTENCY_INTERVAL`, default 300s) is the only backstop for the
-counters, because both of them are moved rather than derived and nothing else
-would ever notice a lost move. It repairs `cached_path.missing_references` over
-the paths the pending anchors gate on, then recomputes `fetchable` and
+counters, because every one of them is moved rather than derived and nothing else
+would ever notice a lost move. It recounts `derivation.unwalked_inputs`,
+`derivation_build.missing_runtime_deps` and `demanded` table-wide, in the order the
+next one reads the last, then recomputes `fetchable` and
 `unready_deps` over the pending anchors and their direct dependencies, writes
 what differs, settles the queue against the gates in both directions, names for
 the live evaluations the pending anchors they reach through builders that nobody
@@ -423,11 +424,12 @@ without this gate a build dispatched mid-push fails terminal `InputsUnavailable`
 on a missing `.drv` (its own or a dependency's), the dominant failure of large
 NixOS system-closure derivations.
 
-That gate is one integer on the `.drv`'s own `cached_path` row, not a mirror of it
-on the anchor. A `.drv` is an ordinary store path whose references are exactly its
-input `.drv`s and its `inputSrcs`, so `missing_references = 0` on a backed `.drv`
-row already means the whole importable closure is there, input sources included -
-which is why nothing gates on `derivation_input_source` any more. A build-graph
+That gate is the presence of the `.drv`'s own `cached_path` row, not a mirror of
+its closure on the anchor. A `.drv` closure is trusted: the evaluation pushes it
+before it reports the derivation, and the one `.drv` state a fresh evaluation
+repairs is an absent NAR - which is why nothing gates on
+`derivation_input_source` any more, and why the gate and the "unproducible `.drv`"
+block are exact negations of each other. A build-graph
 mirror of the same fact could only diverge from the NAR ground truth when eval
 pruning leaves a dependency unwalked, and would then dead-zone a build whose
 `.drv` closure is in fact fully cached. A substitutable anchor substitutes its
@@ -542,10 +544,10 @@ report, and it is read as one.
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to a later sweep: every pass that deletes `cached_path` rows
 (orphan-derivation GC, zombie purge, stale-path eviction, path invalidation) goes through
-`nar_closure::retire_paths`, which in the **same transaction** raises the
-`missing_references` counter of every referrer that trusted the deleted rows and
-moves the anchor side of every hash it deleted, every hash that stopped being
-whole, and every hash the caller asked it to retire: those producers lose
+`runtime_readiness::retire_outputs`, which in the **same transaction** raises the
+`missing_runtime_deps` counter of every anchor that trusted the deleted rows and
+moves the readiness side of the producers of what it deleted and of everything
+that stopped being whole with them: those anchors lose
 `fetchable` and their dependents' `unready_deps` rises, and the owner of a `.drv`
 that is gone leaves the queue. One statement in that pass is deliberately narrower.
 A terminal-success producer becomes a fresh build intent (recounted before it
@@ -799,17 +801,17 @@ both scans off the full anchor table: the dispatch queue matches `status = Queue
 in `updated_at` order, and the table-wide promote matches
 `status = Created AND (unready_deps = 0 OR substitutable)`.
 
-The NAR side of that invariant is a counter, not a flag.
-`cached_path.missing_references` is the number of a path's references (self
-excluded) whose row is absent, unbacked or itself not whole; a backed row with
-`missing_references = 0` is *whole*, and `gradient_db::nar_closure::whole_predicate`
-is the one definition every gate reads. The graph actor seeds the counter when it
-commits a NAR, from the references the worker reported, and when that flips the path
-to whole it decrements every referrer, then every referrer of the referrers that
-just reached zero, one statement per level. Deleting a row (`retire_paths`: the
-orphan GC, the zombie purge, the stale-path eviction, every demote) runs the same ripple in
-reverse from the rows that were whole, and moves the anchor side of what those rows
-backed in the same transaction. Every ripple is driven by a **transition**, never by a
+The cache side of that invariant is a counter, not a flag.
+`derivation_build.missing_runtime_deps` is the number of an anchor's runtime edges
+whose dependency is not whole; an anchor whose every output has a NAR here and
+whose counter reads zero is *whole*, and `graph_sql::anchor_whole_predicate` is
+the one definition every gate reads. The graph actor seeds the counter when it
+commits a NAR, over the runtime edges that NAR's references named, and when that
+flips the anchor to whole it decrements every runtime dependent, then every
+dependent of the ones that just reached zero, one statement per level. Deleting a
+row (`retire_outputs`: the orphan GC, the zombie purge, the stale-path eviction,
+every demote) runs the same ripple in reverse from the anchors that were whole,
+and moves the readiness side in the same transaction. Every ripple is driven by a **transition**, never by a
 state: rippling from a row that did not just flip moves its referrers past zero, and
 a negative counter never satisfies `= 0` again.
 
@@ -877,13 +879,12 @@ object and rebuilds the producer with consistent metadata. Verify-on-read makes
 the cache self-correcting regardless of how a desync arose. The same premise
 governs a path's **reference set**: an input-addressed path rebuilt
 non-deterministically keeps its hash while its closure moves, so the commit
-rewrites `cached_path_reference` to exactly the set the worker reported instead
-of adding to it: one statement that prunes the edges the report no longer carries
-and re-positions the survivors, since dropping one reference shifts every later
-one and `position` is what the narinfo `References:` line and the signature
-fingerprint are reconstructed from. An edge an add-only write left behind would
-stay counted in `missing_references` forever, and the consistency sweep's repair
-recomputes from that same table, so it could never disagree with the stale row.
+rewrites `cached_path.references` to exactly the ordered line the worker reported
+instead of appending to it, which is what the narinfo `References:` line and the
+signature fingerprint are reconstructed from verbatim. The runtime EDGES the line
+names are add-only on the graph, because an edge is a fact about the derivation
+rather than about one build of it; a stale one only holds its anchor unwhole until
+the sweep's recount reads the same relation and agrees.
 
 An **orphan producer** is the third case: the missing leaf has a producing
 derivation, but that producer has no `build_job` (it was pruned out of the build

@@ -19,8 +19,9 @@ use rusqlite::Connection;
 /// did, sitting on 10 against an exporter writing 11. `report-inspector`'s
 /// derivation reads both constants and fails evaluation when they disagree.
 ///
-/// 14 adds derivation_dependency.kind and derivation_build.missing_runtime_deps.
-pub const SCHEMA_VERSION: i64 = 14;
+/// 15 drops cached_path_reference and cached_path.missing_references for
+/// cached_path.references and the graph's own runtime edges.
+pub const SCHEMA_VERSION: i64 = 15;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {

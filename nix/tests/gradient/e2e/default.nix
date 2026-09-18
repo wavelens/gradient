@@ -460,7 +460,7 @@ in {
       exec 4> $D/b.in
 
       recount() {
-        printf '%s\\n' "UPDATE derivation_build db SET fetchable = x.f FROM (SELECT p.derivation, p.fetchable AS old, (p.substitutable OR (p.status IN (3, 7) AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = p.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = p.derivation AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)))) AS f FROM derivation_build p WHERE p.derivation = ANY(ARRAY['$1']::uuid[])) x WHERE db.derivation = x.derivation AND db.fetchable = x.old AND x.old <> x.f;"
+        printf '%s\\n' "UPDATE derivation_build db SET fetchable = x.f FROM (SELECT p.derivation, p.fetchable AS old, (p.substitutable OR (p.status IN (3, 7) AND p.missing_runtime_deps = 0 AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = p.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = p.derivation AND cp.file_hash IS NULL))) AS f FROM derivation_build p WHERE p.derivation = ANY(ARRAY['$1']::uuid[])) x WHERE db.derivation = x.derivation AND db.fetchable = x.old AND x.old <> x.f;"
       }
 
       # The retire's shape: its opening hash-ordered lock pass, the delete, then the
@@ -820,17 +820,21 @@ in {
           "WHERE indexname = 'idx-derivation_dependency-reverse-pair';"
       ))
       assert have_reverse_index == 1, "the reverse walk lost its covering index"
-      have_referrer_index = int(sql(
+      have_runtime_index = int(sql(
           "SELECT count(*) FROM pg_indexes "
-          "WHERE indexname = 'idx-cached_path_reference-referrer-hash';"
+          "WHERE indexname = 'idx-derivation_dependency-runtime';"
       ))
-      assert have_referrer_index == 1, "the reference walk lost its covering index"
+      assert have_runtime_index == 1, "the runtime walk lost its covering index"
       leftover_keys = int(sql(
           "SELECT count(*) FROM information_schema.columns "
-          "WHERE column_name = 'id' AND table_name IN "
-          "('derivation_dependency', 'cached_path_reference');"
+          "WHERE column_name = 'id' AND table_name = 'derivation_dependency';"
       ))
       assert leftover_keys == 0, f"{leftover_keys} junction tables kept a surrogate key"
+      retired_index = int(sql(
+          "SELECT count(*) FROM information_schema.tables "
+          "WHERE table_name = 'cached_path_reference';"
+      ))
+      assert retired_index == 0, "the path-level reference index outlived its migration"
 
       # The fenced walk and the plain join must select the same node set. This is
       # the only place the rewrite is checked against a real graph.
@@ -1130,38 +1134,25 @@ in {
 
       # ── Phase 10c: the reference counter moves with the cache (#592) ──────
       # Retire one of hello's runtime references: the zombie purge deletes the
-      # row and ripples the loss up to every referrer, a re-upload seeds it
-      # whole again and ripples that back. `missing_references` is moved, never
-      # re-derived, so the recompute has to agree at every step.
-      banner("Phase 10c: missing_references moves on retire and re-upload")
+      # row and ripples the loss up to every anchor that trusted it, a re-upload
+      # seeds it whole again and ripples that back. `missing_runtime_deps` is
+      # moved, never re-derived, so the recompute has to agree at every step.
+      banner("Phase 10c: missing_runtime_deps moves on retire and re-upload")
 
-      retired_flag = int(sql(
+      retired_columns = int(sql(
           "SELECT count(*) FROM information_schema.columns "
-          "WHERE table_name = 'cached_path' AND column_name = 'closure_complete';"
+          "WHERE table_name = 'cached_path' "
+          "  AND column_name IN ('closure_complete', 'missing_references');"
       ))
-      assert retired_flag == 0, "cached_path still carries the retired closure_complete flag"
+      assert retired_columns == 0, "cached_path still carries a retired wholeness column"
 
       # Phase 10d bills this cycle, so open the accounting before it runs. The
       # library counts from server start; the extension only exposes the view.
       sql("CREATE EXTENSION IF NOT EXISTS pg_stat_statements;")
-      COUNTER_WRITES = "s.query ILIKE '%update cached_path%missing_references%'"
+      COUNTER_WRITES = "s.query ILIKE '%update derivation_build%missing_runtime_deps%'"
       counter_rows_before = int(sql(
           f"SELECT coalesce(sum(s.rows), 0) FROM pg_stat_statements s WHERE {COUNTER_WRITES};"
       ))
-
-      def counter(path_hash):
-          return int(sql(
-              f"SELECT missing_references FROM cached_path WHERE hash = '{path_hash}';"
-          ))
-
-      def drift():
-          return int(sql(
-              "SELECT count(*) FROM cached_path cp WHERE cp.missing_references <> ("
-              "  SELECT count(*) FROM cached_path_reference r "
-              "  LEFT JOIN cached_path dep ON dep.hash = r.reference_hash "
-              "  WHERE r.referrer = cp.hash AND r.reference_hash <> cp.hash "
-              "    AND NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0));"
-          ))
 
       # The anchor side of the same idea (#591): both readiness columns are moved
       # by the event that changes them, so a recompute has to agree with every row.
@@ -1254,11 +1245,10 @@ in {
               server.sleep(1)
           raise Exception(f"{what} (still {sql(query)!r}, want {want!r})")
 
-      assert drift() == 0, "counters disagree with their recompute before the retire"
-      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute before the retire"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute before the retire"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute before the retire"
       assert unbacked() == 0, "a producer this build settled has an output nothing backs"
-      assert counter(store_hash) == 0, "hello's own output is not whole to start with"
+      assert anchor_whole(drv_hash)[0] == "0", "hello's anchor is not whole to start with"
 
       # glibc first, since hello links against it.
       refs = sql(
@@ -1335,10 +1325,7 @@ in {
       if bystanders:
           print(f"the purge also took {len(bystanders)} rows that were already zombies: {bystanders}")
 
-      missing = counter(store_hash)
-      assert missing >= 1, f"hello's output should miss the retired path, has {missing}"
-      assert drift() == 0, "counters disagree with their recompute after the retire"
-      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute after the retire"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the retire"
       # The retire moves the anchor side in its own transaction: the producer of a
       # path it deleted stops being fetchable, and a terminal-success producer with
       # nothing left to serve is reset to a fresh build intent. Only the terminal
@@ -1389,10 +1376,7 @@ in {
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the retire"
 
       print(server.succeed(f"{CLI} cache upload main {dep_path}"))
-      poll(f"SELECT missing_references FROM cached_path WHERE hash = '{store_hash}';", "0",
-           "the re-upload did not ripple hello's output back to whole")
-      assert drift() == 0, "counters disagree with their recompute after the re-upload"
-      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute after the re-upload"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the re-upload"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-upload"
       poll(f"SELECT missing_runtime_deps FROM derivation_build db "
            f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';", "0",
@@ -1422,7 +1406,7 @@ in {
       poll("SELECT count(*) FROM dispatched_job WHERE finished_at IS NULL "
            "AND dispatched_at > (now() AT TIME ZONE 'UTC') - interval '10 minutes';",
            "0", "a re-dispatched build is still running", timeout=300)
-      assert drift() == 0, "counters disagree with their recompute after the self-heal"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the self-heal"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the self-heal"
 
       # ── Phase 10d: the database-time bill (#592, #629) ────────────────────
@@ -1454,10 +1438,10 @@ in {
       counter_rows = int(sql(
           f"SELECT coalesce(sum(s.rows), 0) FROM pg_stat_statements s WHERE {COUNTER_WRITES};"
       )) - counter_rows_before
-      cached_paths = int(sql("SELECT count(*) FROM cached_path;"))
-      assert 0 < counter_rows <= cached_paths, (
+      anchors = int(sql("SELECT count(*) FROM derivation_build;"))
+      assert 0 < counter_rows <= anchors, (
           f"one retire and one re-upload wrote {counter_rows} counter rows over a "
-          f"{cached_paths}-row cache; a moved counter touches referrers, a derived one the table"
+          f"{anchors}-anchor graph; a moved counter touches dependents, a derived one the table"
       )
 
       # Loose on purpose: these are pathology detectors on a slow shared VM, not
@@ -1470,7 +1454,7 @@ in {
           f"SELECT round(coalesce(100 * sum(s.total_exec_time) FILTER (WHERE {COUNTER_WRITES}) "
           f"/ nullif(sum(s.total_exec_time), 0), 0)::numeric, 2) {server_statements};"
       ))
-      print(f"server database time: {total_ms} ms, reference counter writes: {counter_share}%")
+      print(f"server database time: {total_ms} ms, wholeness counter writes: {counter_share}%")
       assert total_ms < 300000, f"the run burned {total_ms} ms of database time"
       assert counter_share < 50, f"maintaining the counter is {counter_share}% of database time"
 
@@ -1577,7 +1561,7 @@ in {
           f"WHERE bj.evaluation = '{eval3_id}' AND (db.status NOT IN (3, 7) OR NOT db.fetchable);"
       ))
       assert unsettled == 0, f"{unsettled} anchors of the completed re-evaluation are not settled and fetchable"
-      assert drift() == 0, "counters disagree with their recompute after the re-evaluation"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the re-evaluation"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-evaluation"
 
       # Printed, not asserted: a whole cache needs no build, but the sweep above can
@@ -1647,8 +1631,8 @@ in {
               # purges a CONFIRMED row whose object is gone, which took the second
               # fixture out from under the phase 20 seconds after it was written.
               f"INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, "
-              f"missing_references, confirmed, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
-              f"'sha256:lockrace', 1, 1, 'sha256:lockrace', 0, false, now() AT TIME ZONE 'UTC');"
+              f"confirmed, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
+              f"'sha256:lockrace', 1, 1, 'sha256:lockrace', false, now() AT TIME ZONE 'UTC');"
           )
           assert sql(
               f"SELECT db.fetchable::int::text || ' ' || (SELECT count(*)::text FROM cached_path "
@@ -1686,7 +1670,7 @@ in {
       # out before the drift checks, which would otherwise count the defect we asked for.
       lockrace_cleanup(LR_DRV, lr_out_hash)
       lockrace_cleanup(LR_DRV2, lr_out2_hash)
-      race_drift = drift()
+      race_drift = runtime_drift()
       race_anchor_drift = anchor_drift()
 
       assert rows_left == 0, "a retire session did not commit its delete"
@@ -1702,7 +1686,7 @@ in {
       )
       assert race_drift == 0 and race_anchor_drift == 0, (
           f"counters disagree with their recompute after the lock race "
-          f"(nar {race_drift}, anchor {race_anchor_drift})"
+          f"(wholeness {race_drift}, readiness {race_anchor_drift})"
       )
 
       # ── Phase 10g: a relay happens when, and only when, something wants it ─
@@ -1850,7 +1834,7 @@ in {
           f"busybox's source is wanted by nobody, so nothing may queue or build it: "
           f"{sources} sources, {dispatched} dispatched, status {statuses}"
       )
-      assert drift() == 0, "counters disagree with their recompute after the relay"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the relay"
       assert demand_drift() == 0, "demand disagrees with its recompute after the relay"
 
@@ -1909,7 +1893,7 @@ in {
       assert output_missing(busybox) == "0", (
           f"the second relay left closure members behind: {output_missing(busybox)}"
       )
-      assert drift() == 0, "counters disagree with their recompute after the re-relay"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the re-relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-relay"
       assert demand_drift() == 0, "demand disagrees with its recompute after the re-relay"
 
@@ -1981,8 +1965,7 @@ in {
                f"the zombie purge kept {h}'s row after its NAR was deleted")
       poll(f"SELECT count(*) FROM derivation_build WHERE derivation IN ({chain}) AND status = 0;", "3",
            "the retire did not reset every producer of the chain")
-      assert drift() == 0, "counters disagree with their recompute after the retire"
-      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute after the retire"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the retire"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the retire"
 
       # The dead zone, stated: nothing queues an unnamed anchor, however ready.
@@ -2041,7 +2024,7 @@ in {
           f"WHERE bj.evaluation = '{task2_eval}' AND bj.derivation IN ('{d1}', '{d2}');"
       ))
       assert attributed == 2, f"the interior's rebuilds were attributed to {attributed} of the 2 adopted names"
-      assert drift() == 0, "counters disagree with their recompute after the adopted rebuild"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the adopted rebuild"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the adopted rebuild"
       print(server.succeed("journalctl -u gradient-server --no-pager | grep -i 'adopt' | tail -n 5"))
 
@@ -2077,7 +2060,7 @@ in {
       assert sql(
           f"SELECT count(*) FROM cached_path WHERE hash IN ('{store_hash}', '{dep_hash}');"
       ) == "2", "the eviction took a path the live closure still reaches"
-      assert drift() == 0, "counters disagree with their recompute after the eviction"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the eviction"
 
       # `build_job` and `entry_point` are what seed the reachable walk, so hello
       # leaves the live set when its names go; the pollers would write them back,
@@ -2104,7 +2087,7 @@ in {
           server.fail(f"test -e {nar_object(h + '-hello')}")
       assert sql(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';") == "1", \
           "a path its own name still reaches left the cache with hello"
-      assert drift() == 0, "counters disagree with their recompute after the GC and the eviction"
+      assert runtime_drift() == 0, "wholeness disagrees with its recompute after the GC and the eviction"
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")

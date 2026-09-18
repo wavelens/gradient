@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 
 # Must track SCHEMA_VERSION in backend/gradient-report/src/schema.rs.
-SUPPORTED_SCHEMA = 14
+SUPPORTED_SCHEMA = 15
 
 
 class UnsupportedSchema(Exception):

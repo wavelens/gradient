@@ -126,7 +126,7 @@ Per-derivation `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild` 
 
 Gradient's working set is the build graph, and it is index-bound rather than
 table-bound. On the reference deployment a 17 GB database carries 8.5 GB of
-indexes, of which `cached_path_reference` alone holds 3.2 GB, so a stock 128 MB
+indexes, of which `derivation_dependency` alone holds several GB, so a stock 128 MB
 `shared_buffers` cannot keep even the hot index set resident and every recursive
 graph walk re-reads it from the page cache.
 
@@ -159,7 +159,7 @@ same six values there by hand.
 enough for one server, not for two.
 
 Two things Gradient handles itself, so they do not belong in the host config. The
-two edge tables (`cached_path_reference`, `derivation_dependency`) carry per-table
+edge table (`derivation_dependency`) carries per-table
 autovacuum overrides set by migration: all three scale factors go to 0.02, because
 these tables are append-heavy and read through index-only scans, and what keeps
 those scans index-only is a fresh visibility map rather than a low dead-tuple
@@ -233,7 +233,7 @@ The Job Board records build/eval phase timings, dispatch decisions (with scoring
 | `otlpPushIntervalSecs` / `GRADIENT_OTLP_PUSH_INTERVAL` | 30 | OTLP push interval. |
 | `dispatchRecordCandidates` / `GRADIENT_DISPATCH_RECORD_CANDIDATES` | false | Persist runner-up scoring candidates per dispatch. |
 | `instanceMetricsIntervalSecs` / `GRADIENT_INSTANCE_METRICS_INTERVAL` | 30 | InstanceContext window recomputation interval. |
-| `graphConsistencyIntervalSecs` / `GRADIENT_GRAPH_CONSISTENCY_INTERVAL` | 300 | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it repairs `cached_path.missing_references` over the paths pending anchors gate on, recounts `fetchable` and `unready_deps` over the pending anchors and their direct dependencies, settles the queue against them, names for the live evaluations the pending anchors they reach that no evaluation names any more, and re-heals graph-stuck evaluations. 0 disables all of that. |
+| `graphConsistencyIntervalSecs` / `GRADIENT_GRAPH_CONSISTENCY_INTERVAL` | 300 | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it recounts `derivation.unwalked_inputs`, `derivation_build.missing_runtime_deps` and `demanded` table-wide, recounts `fetchable` and `unready_deps` over the pending anchors and their direct dependencies, settles the queue against them, names for the live evaluations the pending anchors they reach that no evaluation names any more, and re-heals graph-stuck evaluations. 0 disables all of that. |
 
 ## OIDC
 

@@ -263,11 +263,11 @@ crate::sql! {
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
 /// retires the `cached_path` row itself
-/// ([`crate::nar_closure::retire_paths`]: the row goes, its
+/// ([`crate::runtime_readiness::retire_outputs`]: the row goes, its
 /// `cached_path_signature` rows cascade, the `derivation_output` FK is
-/// `ON DELETE SET NULL`, and every referrer's reference counter, gate flag and
-/// anchor moves back), and removes the NAR object from storage so the row and the
-/// object stay in step. The derivation
+/// `ON DELETE SET NULL`, and every anchor that trusted it loses wholeness,
+/// `fetchable` and its queue place), and removes the NAR object from storage so the
+/// row and the object stay in step. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
 /// producing derivations for logging. A producerless input (`.drv`/source) is
 /// only purged when its NAR is genuinely gone: a still-present one is preserved
@@ -337,7 +337,7 @@ pub async fn demote_cached_output(
     // anchor's `substitutable` so the retire's `fetchable` mark sees the truth. The
     // next eval re-marks it substitutable if it is genuinely still on an upstream.
     let txn = db.begin().await?;
-    let _paths = crate::nar_closure::lock_paths(&txn, &[hash.to_owned()]).await?;
+    crate::runtime_readiness::lock_cached_paths(&txn, &[hash.to_owned()]).await?;
     let _anchors = crate::readiness::lock_anchors(&txn, &producers).await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
@@ -377,8 +377,8 @@ pub async fn demote_cached_output(
 /// the `.drv`-importable term of [`crate::graph_sql::gates_predicate`], a permanent
 /// dead zone, since a genuinely missing input `.drv`/source is re-supplied only by
 /// a full re-eval. The transitive completeness invariant is handled by the reverse
-/// ripple inside [`crate::nar_closure::retire_paths`], which raises the referrers'
-/// counters and leaves their healthy NARs in place. Returns the producers reset to
+/// ripple inside [`crate::runtime_readiness::retire_outputs`], which raises the
+/// referrers' counters and leaves their healthy NARs in place. Returns the producers reset to
 /// `Created`.
 pub async fn demote_referrers_of(
     ctx: &crate::DbContext,
@@ -462,7 +462,7 @@ pub async fn demote_output_only_cached_deps(
 /// recorded until that job's commits have settled, an eval marks an anchor
 /// substituted only when EVERY output is already whole here, and every pass that
 /// deletes a `cached_path` row resets the producers it unbacked in the deleting
-/// transaction (`nar_closure::retire_paths`). So a non-zero count is a bug in one of
+/// transaction (`runtime_readiness::retire_outputs`). So a non-zero count is a bug in one of
 /// those, and the consistency report is where it surfaces
 /// ([`crate::consistency::ConsistencyReport::unbacked_trusted_outputs`]) - a repair
 /// that rebuilds on its own would only hide it again, and one that failed the
@@ -488,10 +488,11 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
 }
 
 crate::sql! {
-    OUTPUT_REFERRERS_SELECT = "SELECT DISTINCT r.referrer \
-     FROM cached_path_reference r \
-     WHERE r.reference_hash = $1 \
-       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)",
+    OUTPUT_REFERRERS_SELECT = "SELECT DISTINCT o.hash AS referrer \
+     FROM derivation_dependency e \
+     JOIN derivation_output o ON o.derivation = e.derivation \
+     WHERE e.kind IN (1, 2) \
+       AND e.dependency IN (SELECT p.derivation FROM derivation_output p WHERE p.hash = $1)",
         params = [CachedPathHash];
 }
 
@@ -898,12 +899,12 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert!(
-            sql.contains("FROM cached_path_reference r") && sql.contains("r.reference_hash = $1"),
-            "must resolve referrers of the missing hash: {sql}"
+            sql.contains("FROM derivation_dependency e") && sql.contains("e.kind IN (1, 2)"),
+            "must resolve the runtime referrers of the missing hash: {sql}"
         );
         assert!(
-            sql.contains("EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)"),
-            "must require the referrer to be a producing output, excluding .drv/source: {sql}"
+            sql.contains("JOIN derivation_output o ON o.derivation = e.derivation"),
+            "must project a producing output, which excludes every .drv and source: {sql}"
         );
     }
 
