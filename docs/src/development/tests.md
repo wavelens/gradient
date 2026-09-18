@@ -82,7 +82,10 @@ entry's statement list with a synthetic `BEGIN`/`COMMIT` (and `SAVEPOINT` for a
 nested one). Formatting entries lets a `contains` straddle two statements, and
 counting them shifts every index by one. `gradient_db::pool::statements(log)`
 flattens the log to one string per statement with the transaction control
-removed; use it instead of mapping `into_transaction_log()` by hand.
+removed; use it instead of mapping `into_transaction_log()` by hand. Those
+strings are `Debug`, which escapes every `"` sea-orm writes around an
+identifier, so an assertion that reads a quoted column or one bound value takes
+`raw_statements(log)` instead and matches `s.sql` / `s.values`.
 
 **A spawned task races the result buffer.** The buffer is ordered and shared, so
 a handler that spawns database work pops results out from under the request path.
