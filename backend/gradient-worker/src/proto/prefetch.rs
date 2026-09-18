@@ -389,13 +389,16 @@ impl<'a> InputPrefetcher<'a> {
     /// Stage 3 - ask the server which missing paths it can serve, then split
     /// them into two buckets: presigned-URL downloads and `NarRequest` transfers.
     ///
-    /// Any path the server reports as `Uncached` is a **hard failure**: the
-    /// path is known to be absent from the worker's local store (checked in
-    /// Stage 2) and builds run with `use_substitutes = false`, so the daemon
-    /// will not be able to fetch it from any upstream. Continuing would
-    /// eventually surface as a confusing `path '…' is not valid` error deep
-    /// inside `add_to_store_nar` when a dependent path is imported. Failing
-    /// here keeps the blame at the right layer.
+    /// Any path the reply does not answer with something serveable is a **hard
+    /// failure**, whether it comes back uncached or not at all: the path is known
+    /// to be absent from the worker's local store (checked in Stage 2) and builds
+    /// run with `use_substitutes = false`, so the daemon will not be able to fetch
+    /// it from any upstream. Continuing would eventually surface as a confusing
+    /// `path '…' is not valid` error deep inside `add_to_store_nar` when a
+    /// dependent path is imported. Failing here keeps the blame at the right layer.
+    ///
+    /// This query never leaves our cache (`external: false`). A path an upstream
+    /// has but we do not is a Substitute's job to put here, not a build's to fetch.
     async fn query_and_split(
         &mut self,
         missing: Vec<String>,
@@ -416,7 +419,7 @@ impl<'a> InputPrefetcher<'a> {
             by_url,
             by_request,
             uncached,
-        } = classify_cached_entries(cached_entries);
+        } = classify_cached_entries(&missing, cached_entries);
 
         if !uncached.is_empty() {
             error!(
@@ -424,7 +427,7 @@ impl<'a> InputPrefetcher<'a> {
                 drv = %self.drv_path,
                 missing = uncached.len(),
                 sample = ?uncached.iter().take(5).collect::<Vec<_>>(),
-                "prefetch: server cannot serve required inputs (not in gradient cache)"
+                "prefetch: our cache cannot serve required inputs"
             );
             return Err(anyhow::Error::new(MissingInputs(uncached)));
         }
@@ -847,7 +850,7 @@ struct Classified {
 /// Split a `CacheQuery Pull` response into URL-downloadable, WS-requestable,
 /// and uncached buckets. Pure helper, kept out of [`InputPrefetcher`] so the
 /// classification is unit-testable without a live WebSocket.
-fn classify_cached_entries(entries: Vec<CachedPath>) -> Classified {
+fn classify_cached_entries(asked: &[String], entries: Vec<CachedPath>) -> Classified {
     let mut out = Classified::default();
     for cp in entries {
         match cp.as_info() {
@@ -863,6 +866,24 @@ fn classify_cached_entries(entries: Vec<CachedPath>) -> Classified {
             }
         }
     }
+
+    // The reply is authoritative over what we asked: a path it omits is one our
+    // cache cannot serve, the same answer as one it returns uncached. The server
+    // drops a malformed path before it reads a row, so an omission is real.
+    let answered: HashSet<&str> = out
+        .by_url
+        .iter()
+        .chain(out.by_request.iter())
+        .map(|cp| cp.path.as_str())
+        .chain(out.uncached.iter().map(String::as_str))
+        .collect();
+    let omitted: Vec<String> = asked
+        .iter()
+        .filter(|p| !answered.contains(p.as_str()))
+        .cloned()
+        .collect();
+    out.uncached.extend(omitted);
+
     out
 }
 
@@ -904,10 +925,17 @@ mod tests {
 
     #[test]
     fn classify_splits_cached_by_url_presence() {
-        let out = classify_cached_entries(vec![
-            cached("/nix/store/aaaa-by-url", Some("https://s3.example/x")),
-            cached("/nix/store/bbbb-by-ws", None),
-        ]);
+        let asked = vec![
+            "/nix/store/aaaa-by-url".to_owned(),
+            "/nix/store/bbbb-by-ws".to_owned(),
+        ];
+        let out = classify_cached_entries(
+            &asked,
+            vec![
+                cached("/nix/store/aaaa-by-url", Some("https://s3.example/x")),
+                cached("/nix/store/bbbb-by-ws", None),
+            ],
+        );
         assert_eq!(out.by_url.len(), 1);
         assert_eq!(out.by_request.len(), 1);
         assert!(out.uncached.is_empty());
@@ -920,11 +948,19 @@ mod tests {
         // This is the regression the Stage-3 hard-fail guards against: if the
         // server reports a required input as uncached, we must surface it so
         // we don't silently hand the build a broken closure.
-        let out = classify_cached_entries(vec![
-            cached("/nix/store/aaaa-ok", None),
-            uncached("/nix/store/xxxx-missing-upstream"),
-            uncached("/nix/store/yyyy-also-missing"),
-        ]);
+        let asked = vec![
+            "/nix/store/aaaa-ok".to_owned(),
+            "/nix/store/xxxx-missing-upstream".to_owned(),
+            "/nix/store/yyyy-also-missing".to_owned(),
+        ];
+        let out = classify_cached_entries(
+            &asked,
+            vec![
+                cached("/nix/store/aaaa-ok", None),
+                uncached("/nix/store/xxxx-missing-upstream"),
+                uncached("/nix/store/yyyy-also-missing"),
+            ],
+        );
         assert_eq!(out.by_request.len(), 1);
         assert!(out.by_url.is_empty());
         assert_eq!(
@@ -938,10 +974,38 @@ mod tests {
 
     #[test]
     fn classify_empty_input_is_empty_output() {
-        let out = classify_cached_entries(vec![]);
+        let out = classify_cached_entries(&[], vec![]);
         assert!(out.by_url.is_empty());
         assert!(out.by_request.is_empty());
         assert!(out.uncached.is_empty());
+    }
+
+    /// The reply is authoritative: a path it never answers about is one our cache
+    /// cannot serve, exactly like one it returns uncached. Reading only the entries
+    /// that came back let an omission pass as satisfied, and the build then failed
+    /// inside the daemon's importer instead of here.
+    #[test]
+    fn a_path_the_reply_omits_is_uncached() {
+        let asked = vec![
+            "/nix/store/aaaa-served".to_owned(),
+            "/nix/store/bbbb-omitted".to_owned(),
+        ];
+
+        let out = classify_cached_entries(&asked, vec![cached("/nix/store/aaaa-served", None)]);
+
+        assert_eq!(out.by_request.len(), 1);
+        assert_eq!(out.uncached, vec!["/nix/store/bbbb-omitted".to_owned()]);
+    }
+
+    /// An omitted path is reported once, not twice, when the reply also returns it
+    /// uncached.
+    #[test]
+    fn an_uncached_entry_is_not_also_counted_as_omitted() {
+        let asked = vec!["/nix/store/xxxx-missing".to_owned()];
+
+        let out = classify_cached_entries(&asked, vec![uncached("/nix/store/xxxx-missing")]);
+
+        assert_eq!(out.uncached, vec!["/nix/store/xxxx-missing".to_owned()]);
     }
 
     #[test]

@@ -706,69 +706,37 @@ async fn query(
         }
     }
 
-    if matches!(mode, QueryMode::Push) {
+    // Everything below leaves our cache, and the answer is complete without it: the
+    // caller reads any path this reply does not serve as one we do not have.
+    if !may_consult_upstreams(mode, external) {
         return Ok(result);
     }
 
-    if may_consult_upstreams(mode, external) {
-        let locally_cached_hashes: std::collections::HashSet<&str> =
-            cached_map.keys().map(|s| s.as_str()).collect();
-        let uncached_pairs: Vec<(String, String)> = hash_path_pairs
-            .iter()
-            .filter(|(hash, _)| !locally_cached_hashes.contains(hash))
-            .map(|(h, p)| (h.to_string(), p.to_string()))
-            .collect();
+    let locally_cached_hashes: std::collections::HashSet<&str> =
+        cached_map.keys().map(|s| s.as_str()).collect();
+    let uncached_pairs: Vec<(String, String)> = hash_path_pairs
+        .iter()
+        .filter(|(hash, _)| !locally_cached_hashes.contains(hash))
+        .map(|(h, p)| (h.to_string(), p.to_string()))
+        .collect();
 
-        // Serve upstream availability resolved once at eval time
-        // (`derivation_output.external_url` + narinfo metadata): the worker downloads
-        // directly from the persisted URL, so the narinfo lookup is not re-run here.
-        let resolved = extend_with_persisted_upstream(state, &uncached_pairs, &mut result).await;
-        let uncached_pairs: Vec<(String, String)> = uncached_pairs
-            .into_iter()
-            .filter(|(h, _)| !resolved.contains(h))
-            .collect();
+    // Serve upstream availability resolved once at eval time
+    // (`derivation_output.external_url` + narinfo metadata): the worker downloads
+    // directly from the persisted URL, so the narinfo lookup is not re-run here.
+    let resolved = extend_with_persisted_upstream(state, &uncached_pairs, &mut result).await;
+    let uncached_pairs: Vec<(String, String)> = uncached_pairs
+        .into_iter()
+        .filter(|(h, _)| !resolved.contains(h))
+        .collect();
 
-        if !uncached_pairs.is_empty()
-            && let Some(oid) = project_id
-        {
-            extend_with_upstream_results(state, oid, uncached_pairs.clone(), &mut result).await;
-            extend_with_gradient_proto_results(state, oid, &uncached_pairs, &mut result).await;
-        }
-    }
-
-    if matches!(mode, QueryMode::Pull) {
-        let returned: std::collections::HashSet<String> =
-            result.iter().map(|cp| cp.path.clone()).collect();
-        let missing: Vec<gradient_types::proto::CachedPath> = hash_path_pairs
-            .iter()
-            .filter(|(_, p)| !returned.contains(*p))
-            .map(|(_, p)| build_uncached_pull_entry(p))
-            .collect();
-        result.extend(missing);
+    if !uncached_pairs.is_empty()
+        && let Some(oid) = project_id
+    {
+        extend_with_upstream_results(state, oid, uncached_pairs.clone(), &mut result).await;
+        extend_with_gradient_proto_results(state, oid, &uncached_pairs, &mut result).await;
     }
 
     Ok(result)
-}
-
-/// Pull-mode response for a path the server cannot serve (neither in the
-/// local cache nor in any configured upstream). Carries `cached: false` and
-/// no metadata so the worker's prefetch hard-fail can distinguish "server has
-/// nothing for this path" from "this path was never queried".
-fn build_uncached_pull_entry(path: &str) -> gradient_types::proto::CachedPath {
-    use gradient_types::proto::CachedPath;
-    CachedPath {
-        path: path.to_string(),
-        cached: false,
-        file_size: None,
-        nar_size: None,
-        url: None,
-        nar_hash: None,
-        file_hash: None,
-        references: None,
-        signatures: None,
-        deriver: None,
-        ca: None,
-    }
 }
 
 /// Return the subset of `hashes` that have a `cached_path_signature` row for
@@ -908,16 +876,6 @@ pub(super) async fn query_for_cache(
                 .await,
             );
         }
-    }
-
-    if matches!(mode, QueryMode::Pull) {
-        let returned: HashSet<String> = result.iter().map(|cp| cp.path.clone()).collect();
-        let missing: Vec<gradient_types::proto::CachedPath> = hash_path_pairs
-            .iter()
-            .filter(|(_, p)| !returned.contains(*p))
-            .map(|(_, p)| build_uncached_pull_entry(p))
-            .collect();
-        result.extend(missing);
     }
 
     result
@@ -1200,45 +1158,25 @@ mod tests {
         );
     }
 
+    /// A Pull answers from our rows alone and returns only what it can serve. The
+    /// caller reads every path it asked about and did not get back as one we do not
+    /// have, so an entry that carries nothing has nothing to say.
     #[tokio::test]
-    async fn cache_query_pull_uncached_returns_entries_with_cached_false() {
-        // Pull mode must surface every queried path, even ones the server cannot
-        // serve. Without an explicit `cached: false` entry the worker has no way
-        // to distinguish "server omitted this path" from "this path was never
-        // queried", so its closure-walk hard-fail is bypassed and the build
-        // proceeds to import a dependent path with an unsatisfiable reference,
-        // surfacing as a confusing `daemon add_to_store_nar … path '…' is not
-        // valid` error instead of the intended `not available in the gradient
-        // cache` message.
+    async fn cache_query_pull_returns_only_what_it_can_serve() {
         let state = make_state();
         let paths = vec![
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
+
         let result = query(&state, None, &paths, &[], QueryMode::Pull, false)
             .await
             .unwrap();
-        assert_eq!(result.len(), 2, "Pull must return all queried paths");
-        for cp in &result {
-            assert!(!cp.cached, "uncached path: {}", cp.path);
-            assert!(cp.url.is_none(), "Pull-uncached carries no URL");
-            assert!(cp.nar_hash.is_none(), "Pull-uncached carries no nar_hash");
-            assert!(
-                cp.references.is_none(),
-                "Pull-uncached carries no references"
-            );
-            assert!(
-                cp.signatures.is_none(),
-                "Pull-uncached carries no signatures"
-            );
-            assert!(cp.deriver.is_none(), "Pull-uncached carries no deriver");
-            assert!(cp.ca.is_none(), "Pull-uncached carries no ca");
-            assert!(cp.file_size.is_none(), "Pull-uncached carries no file_size");
-            assert!(cp.nar_size.is_none(), "Pull-uncached carries no nar_size");
-        }
-        let returned: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
-        assert!(returned.contains(&paths[0].as_str()));
-        assert!(returned.contains(&paths[1].as_str()));
+
+        assert!(
+            result.is_empty(),
+            "an unserveable path is an omission, not an empty entry: {result:?}"
+        );
     }
 
     #[tokio::test]
