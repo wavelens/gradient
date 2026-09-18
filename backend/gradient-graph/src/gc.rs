@@ -60,18 +60,19 @@ fn delete_derivations_sql() -> String {
 fn stale_after_scan_sql() -> String {
     format!(
         "WITH RECURSIVE {fresh}, \
-         roots(hash) AS ( \
-             SELECT o.hash FROM derivation_output o JOIN fresh f ON f.derivation = o.derivation \
-             UNION SELECT d.hash FROM derivation d JOIN fresh f ON f.derivation = d.id \
-             UNION SELECT hash FROM derivation WHERE created_at >= $2 \
-             UNION SELECT hash FROM derivation_output WHERE created_at >= $2 \
-             UNION SELECT r.reference_hash FROM cached_path_reference r \
-                   JOIN cached_path cp ON cp.hash = r.referrer WHERE cp.created_at >= $2), \
-         {live} \
+         roots(derivation) AS ( \
+             SELECT derivation FROM fresh \
+             UNION SELECT id FROM derivation WHERE created_at >= $2 \
+             UNION SELECT derivation FROM derivation_output WHERE created_at >= $2), \
+         {runtime}, {live} \
          SELECT u.h AS hash FROM unnest($1::text[]) AS u(h) \
          WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = u.h)",
         fresh = fresh_cte(),
-        live = gradient_db::graph_sql::reference_closure_cte_body("live", "SELECT hash FROM roots"),
+        runtime = gradient_db::graph_sql::runtime_closure_cte_body(
+            "runtime",
+            "SELECT derivation FROM roots",
+        ),
+        live = gradient_db::graph_sql::kept_hashes_cte_body("roots", "runtime"),
     )
 }
 
@@ -493,18 +494,16 @@ mod tests {
         assert!(report.retired.is_empty());
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         let sql = norm(&log[0]);
+        assert!(sql.contains("e.kind IN (1, 2)"), "{sql}");
         assert!(
-            sql.contains(
-                "SELECT r.reference_hash FROM cached_path_reference r JOIN cached_path cp ON cp.hash = r.referrer WHERE cp.created_at >= $2"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("UNION SELECT hash FROM derivation WHERE created_at >= $2")
-                && sql.contains("UNION SELECT hash FROM derivation_output WHERE created_at >= $2"),
+            sql.contains("UNION SELECT id FROM derivation WHERE created_at >= $2")
+                && sql.contains(
+                    "UNION SELECT derivation FROM derivation_output WHERE created_at >= $2"
+                ),
             "{sql}"
         );
         assert!(sql.contains("live(hash) AS ("), "{sql}");
+        assert!(!sql.contains("cached_path_reference"), "{sql}");
     }
 
     /// Nothing is asked of the database for an empty chunk.

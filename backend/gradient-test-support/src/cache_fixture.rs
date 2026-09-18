@@ -120,7 +120,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         .append_query_results([vec![drv_output_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
-        // references_for_hash (cached_path_reference): this fixture has none.
+        // references_for_hash (cached_path.references): this fixture has none.
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
 
@@ -621,7 +621,7 @@ pub async fn public_cache_with_one_nar() -> Arc<ServerState> {
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row_fixture()]])
         .append_query_results([vec![cached_path_sig_row_fixture()]])
-        // references_for_hash (cached_path_reference): this fixture has none.
+        // references_for_hash (cached_path.references): this fixture has none.
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
     make_state(db, Arc::new(NoopLogStorage))

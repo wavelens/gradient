@@ -140,7 +140,7 @@ async fn narinfo_served_from_db_inner() {
     //   1. EDerivationOutput::find (by hash)   → drv_output_row
     //   2. ECachedPath::find (by hash)         → cached_path_row
     //   3. ECachedPathSignature::find          → cached_path_sig_row
-    //   4. references_for_hash (cached_path_reference) → no references
+    //   4. references_for_hash (cached_path.references) -> no references
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
