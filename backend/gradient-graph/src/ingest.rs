@@ -865,10 +865,19 @@ impl BatchWriter<'_> {
             }
         };
 
+        let mut learned: Vec<(DerivationId, Vec<String>)> = Vec::new();
         for o in outputs.iter().filter(|o| !o.is_cached_anywhere()) {
             let Some(hit) = hits.get(&o.hash) else {
                 continue;
             };
+
+            if let Some(references) = hit.references.as_deref() {
+                let tokens: Vec<String> =
+                    references.split_whitespace().map(str::to_owned).collect();
+                if !tokens.is_empty() {
+                    learned.push((o.derivation, tokens));
+                }
+            }
 
             let mut am = o.clone().into_active_model();
             am.external_url = Set(hit.url.clone());
@@ -889,6 +898,27 @@ impl BatchWriter<'_> {
                 error!(hash = %o.hash, error = %e, "failed to persist upstream availability");
             }
         }
+
+        // A narinfo is the other place runtime references are learned, so the
+        // edges they name are written from the hit that carried them.
+        for (derivation, tokens) in &learned {
+            if let Err(e) = self.write_runtime_edges(*derivation, tokens).await {
+                error!(%derivation, error = %e, "failed to write the runtime edges an upstream hit named");
+            }
+        }
+    }
+
+    /// The runtime edges from `derivation` to the producers of `tokens`.
+    async fn write_runtime_edges(
+        &self,
+        derivation: DerivationId,
+        tokens: &[String],
+    ) -> Result<(), sea_orm::DbErr> {
+        let db = &self.ctx.worker_db;
+        let producers = gradient_db::producers_of_tokens(db, tokens).await?;
+        gradient_db::insert_runtime_edges(db, derivation, &producers).await?;
+
+        Ok(())
     }
 
     /// Record per-derivation system-feature requirements in the DB.
@@ -1354,6 +1384,68 @@ mod tests {
         assert!(
             log[edge].contains("RETURNING derivation"),
             "the seed set is the edges that actually landed: {log:?}"
+        );
+    }
+
+    /// A narinfo names the references of a path we do not have yet, so the hit is
+    /// the second place a runtime edge is learned: every reference with a producer
+    /// becomes one from the output's own derivation.
+    #[tokio::test]
+    async fn an_upstream_hit_writes_the_runtime_edges_its_narinfo_names() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let out = MDerivationOutput {
+            id: gradient_types::ids::DerivationOutputId::now_v7(),
+            derivation: a.id,
+            hash: "cccccccccccccccccccccccccccccccc".to_owned(),
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
+            .append_query_results([vec![out.clone()]])
+            .append_query_results([vec![out]])
+            .append_query_results([vec![drv_row(b.id)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 7])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                upstream_hits: HashMap::from([(
+                    "cccccccccccccccccccccccccccccccc".to_owned(),
+                    UpstreamHit {
+                        references: Some("dddddddddddddddddddddddddddddddd-dep".to_owned()),
+                        ..Default::default()
+                    },
+                )]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        assert!(
+            log.iter()
+                .any(|s| s
+                    .contains("INSERT INTO derivation_dependency (derivation, dependency, kind)")),
+            "{log:?}"
         );
     }
 
