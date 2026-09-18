@@ -110,10 +110,13 @@ event changed and the pending closure below them. The walk steps out of named
 builders only: a relay is reached and never stepped through, because it fetches
 finished bytes and needs nothing below it. The region includes the anchors it was
 given, because a thaw makes one a builder again and its own stored value is as
-stale as its subtree's. One statement serves both directions and returns each row
-with its new value, so the caller queues what gained demand and releases what lost
-it. An anchor already `Building` is left to finish: the bytes it produces are
-cached and useful, while an abort throws the work away.
+stale as its subtree's. The walk answers and a second statement in the same
+transaction writes what it answered, as a bound array rather than as a subquery the
+write names: a recursive CTE carries no row estimate the planner believes, so a
+region of a few dozen anchors loses to a sequential scan of the whole table. The
+write returns each row with its new value, so the caller queues what gained demand
+and releases what lost it. An anchor already `Building` is left to finish: the bytes
+it produces are cached and useful, while an abort throws the work away.
 
 What nothing demands is never promoted and never built, so it is settled work and
 not pending work. Both readers of "is this evaluation still waiting" -
