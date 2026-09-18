@@ -45,7 +45,7 @@ pub async fn handle_build(
     }
 
     let project = project
-        .or_else(|| set_get_value(ConfigKey::SelectedProject, None, true))
+        .or_else(|| get_value(ConfigKey::SelectedProject, true))
         .unwrap_or_else(|| {
             if !quiet {
                 out.progress(

@@ -8,6 +8,11 @@
 //! over a pipe: anything the command prints outside a frame corrupts the
 //! session for every MCP client.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{Value, json};

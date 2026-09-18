@@ -165,7 +165,7 @@ and `XDG_CONFIG_HOME` pointed at a `TempDir` holding a seeded `config.toml`, and
 `wiremock` stands in for the server. That covers argument parsing, config
 resolution and exit codes in one pass, which is where CLI bugs actually live.
 
-**`unwrap` needs a reason.** The workspace denies `clippy::unwrap_used`. Test
+**`unwrap` needs a reason.** Both workspaces deny `clippy::unwrap_used`. Test
 scaffolding opts out per file with an explicit reason:
 
 ```rust

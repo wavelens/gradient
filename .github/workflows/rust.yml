@@ -8,11 +8,13 @@ on:
     branches: [ main ]
     paths:
       - "backend/**"
+      - "cli/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
   pull_request:
     paths:
       - "backend/**"
+      - "cli/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust.yml"
 
@@ -21,11 +23,15 @@ permissions:
 
 jobs:
   lint:
-    name: "fmt + deny"
+    name: "fmt + deny (${{ matrix.workspace }})"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [ backend, cli ]
     defaults:
       run:
-        working-directory: backend
+        working-directory: ${{ matrix.workspace }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,5 +52,5 @@ jobs:
       - name: "cargo-deny (licenses, bans, sources)"
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          manifest-path: backend/Cargo.toml
+          manifest-path: ${{ matrix.workspace }}/Cargo.toml
           command: check bans licenses sources

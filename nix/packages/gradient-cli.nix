@@ -111,6 +111,12 @@ craneLib.buildPackage (commonArgs // {
   # as its own check instead of inside the package.
   doCheck = false;
 
+  # Reuses cargoArtifacts so clippy only recompiles the workspace crates.
+  passthru.clippy = craneLib.cargoClippy (commonArgs // {
+    inherit cargoArtifacts;
+    cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+  });
+
   passthru.tests = craneLib.cargoNextest (commonArgs // {
     inherit cargoArtifacts;
     version = "1.3.0";

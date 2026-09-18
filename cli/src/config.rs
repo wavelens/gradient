@@ -104,77 +104,58 @@ pub fn save_config(config: &HashMap<ConfigKey, Option<String>>) {
         .expect("Failed to write configuration file");
 }
 
-pub fn set_get_value_from_string(
-    key: String,
+/// The `gradient config <key> [value]` entry point: resolves the key by name,
+/// then either stores `value` or reads the current one back.
+pub fn set_or_get_by_name(
+    key: &str,
     value: Option<String>,
     quiet: bool,
 ) -> Result<Option<String>, String> {
-    let config_keys = ConfigKey::iter().collect::<Vec<_>>();
-
-    for config_key in config_keys.clone() {
-        if key.to_lowercase() == format!("{}", config_key).to_lowercase() {
-            return Ok(set_get_value(config_key, value.clone(), quiet));
+    let Some(config_key) = ConfigKey::iter().find(|k| k.to_string() == key.to_lowercase()) else {
+        if !quiet {
+            println!("Valid keys are:");
+            for config_key in ConfigKey::iter() {
+                println!("{}", config_key);
+            }
         }
-    }
 
-    if !quiet {
-        println!("Invalid key: {}", key);
-        println!("Valid keys are:");
-        for config_key in config_keys {
-            println!("{}", config_key);
+        return Err(format!("Invalid key: {}", key));
+    };
+
+    Ok(match value {
+        Some(value) => {
+            set_value(config_key, value.clone(), quiet);
+            Some(value)
         }
-    }
-
-    Err("Invalid key".to_string())
+        None => get_value(config_key, quiet),
+    })
 }
 
-pub fn set_get_value(key: ConfigKey, value: Option<String>, quiet: bool) -> Option<String> {
-    if let Some(value) = value.clone() {
-        let mut config = load_config();
-        config.remove(&key);
-        config.insert(key.clone(), Some(value.clone()));
-        save_config(&config);
+pub fn set_value(key: ConfigKey, value: String, quiet: bool) {
+    let mut config = load_config();
+    config.insert(key.clone(), Some(value.clone()));
+    save_config(&config);
 
-        if !quiet {
-            println!("{} set to \"{}\"", key, value);
-        }
+    if !quiet {
+        println!("{} set to \"{}\"", key, value);
+    }
+}
 
-        Some(value)
-    } else {
-        let config = load_config();
-        let found_values = config
-            .iter()
-            .map(
-                |(config_key, value): (&ConfigKey, &Option<String>)| -> Option<String> {
-                    if &key == config_key {
-                        if value.is_some() && !value.clone().unwrap().is_empty() {
-                            let value = value.clone().unwrap();
-                            if !quiet {
-                                println!("{}", value);
-                            };
+pub fn get_value(key: ConfigKey, quiet: bool) -> Option<String> {
+    let value = load_config()
+        .get(&key)
+        .cloned()
+        .flatten()
+        .filter(|value| !value.is_empty());
 
-                            return Some(value.clone());
-                        } else {
-                            if !quiet {
-                                println!("[unset]");
-                            };
-
-                            return None;
-                        }
-                    }
-
-                    None
-                },
-            )
-            .filter(|value| value.is_some())
-            .collect::<Vec<_>>();
-
-        if let Some(value) = found_values.first() {
-            value.clone()
-        } else {
-            None
+    if !quiet {
+        match &value {
+            Some(value) => println!("{}", value),
+            None => println!("[unset]"),
         }
     }
+
+    value
 }
 
 #[cfg(test)]

@@ -7,10 +7,9 @@
 use crate::commands::completion;
 use crate::config::*;
 use crate::input::{client_from_config, handle_input};
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{Color, ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
-use colored::*;
 use connector::tasks::{MakeTaskRequest, PatchTaskRequest};
 
 #[derive(Subcommand, Debug)]
@@ -53,22 +52,21 @@ pub enum Commands {
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { task } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Project is required for command."),
             };
 
-            set_get_value(
+            set_value(
                 ConfigKey::SelectedTask,
-                Some(format!("{}/{}", project, task)),
+                format!("{}/{}", project, task),
                 true,
-            )
-            .unwrap();
+            );
             out.human("Task selected in current Project.");
         }
 
         Commands::Show => {
-            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -123,14 +121,14 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             out.human("===== Building =====");
             for build in &builds.builds {
-                let colored_name = match build.status.as_str() {
-                    "Completed" => build.name.green(),
-                    "Building" | "Running" => build.name.yellow(),
-                    "Queued" | "Pending" => build.name.white(),
-                    "Failed" | "Error" => build.name.red(),
-                    _ => build.name.normal(),
+                let color = match build.status.as_str() {
+                    "Completed" => Color::Green,
+                    "Building" | "Running" => Color::Yellow,
+                    "Queued" | "Pending" => Color::White,
+                    "Failed" | "Error" => Color::Red,
+                    _ => Color::Plain,
                 };
-                out.human(format!("{}", colored_name));
+                out.human(out.paint(&build.name, color));
             }
             out.human("");
 
@@ -141,7 +139,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Log => {
-            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -167,7 +165,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             repository,
             wildcard,
         } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 _ => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -183,8 +181,8 @@ pub async fn handle(cmd: Commands, out: Output) {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-            let input = handle_input(input_fields, true);
-            let name = input.get("Name").unwrap().clone();
+            let input = handle_input(input_fields, true, out);
+            let name = input.get("Name");
 
             let client = client_from_config(out);
             match client
@@ -193,21 +191,20 @@ pub async fn handle(cmd: Commands, out: Output) {
                     &project,
                     MakeTaskRequest {
                         name: name.clone(),
-                        display_name: input.get("Display Name").unwrap().clone(),
-                        description: input.get("Description").unwrap().clone(),
-                        repository: input.get("Repository").unwrap().clone(),
-                        wildcard: input.get("Wildcard").unwrap().clone(),
+                        display_name: input.get("Display Name"),
+                        description: input.get("Description"),
+                        repository: input.get("Repository"),
+                        wildcard: input.get("Wildcard"),
                     },
                 )
                 .await
             {
                 Ok(_) => {
-                    set_get_value(
+                    set_value(
                         ConfigKey::SelectedTask,
-                        Some(format!("{}/{}", project, name)),
+                        format!("{}/{}", project, name),
                         true,
-                    )
-                    .unwrap();
+                    );
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Task created.");
                 }
@@ -216,7 +213,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::List => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 _ => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -244,7 +241,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             repository,
             wildcard,
         } => {
-            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -275,7 +272,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-            let input = handle_input(input_fields, false);
+            let input = handle_input(input_fields, false, out);
 
             match client
                 .tasks()
@@ -283,11 +280,11 @@ pub async fn handle(cmd: Commands, out: Output) {
                     &project,
                     &task,
                     PatchTaskRequest {
-                        name: input.get("Name").cloned(),
-                        display_name: input.get("Display Name").cloned(),
-                        description: input.get("Description").cloned(),
-                        repository: input.get("Repository").cloned(),
-                        wildcard: input.get("Wildcard").cloned(),
+                        name: Some(input.get("Name")),
+                        display_name: Some(input.get("Display Name")),
+                        description: Some(input.get("Description")),
+                        repository: Some(input.get("Repository")),
+                        wildcard: Some(input.get("Wildcard")),
                     },
                 )
                 .await
@@ -301,7 +298,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Delete => {
-            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -320,7 +317,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Evaluate => {
-            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match get_value(ConfigKey::SelectedTask, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
