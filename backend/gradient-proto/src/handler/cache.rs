@@ -267,6 +267,22 @@ pub(crate) fn push_transport(nar_size: u64, small_nar_bytes: u64, presigner: boo
     }
 }
 
+/// Whether a query may leave our cache. Only a caller that said `external` ever
+/// does: a build's inputs are here or the build fails, and putting them here is a
+/// Substitute's job, so a Pull without the flag is answered from our rows alone.
+pub(crate) fn may_consult_upstreams(
+    mode: gradient_types::proto::QueryMode,
+    external: bool,
+) -> bool {
+    external && !matches!(mode, gradient_types::proto::QueryMode::Push)
+}
+
+/// An external query names exactly one path: the probe is per path and the caller
+/// is asking about one output.
+pub(crate) fn external_arity_ok(external: bool, paths: usize) -> bool {
+    !external || paths == 1
+}
+
 /// Download transport for a cached path: relay unless the store can presign,
 /// the object is confirmed there, and it is over the threshold.
 pub(crate) fn pull_transport(
@@ -605,6 +621,12 @@ async fn query(
         )));
     }
 
+    if !external_arity_ok(external, paths.len()) {
+        return Err(DbErr::Custom(
+            "an external CacheQuery names exactly one path".to_owned(),
+        ));
+    }
+
     let hash_path_pairs: Vec<(&str, &str)> = paths
         .iter()
         .filter_map(|p| {
@@ -671,7 +693,7 @@ async fn query(
                     path,
                     file_size,
                     nar_size,
-                    mode.clone(),
+                    mode,
                     expire,
                     rows_by_hash.get(hash).copied(),
                     &meta,
@@ -688,7 +710,7 @@ async fn query(
         return Ok(result);
     }
 
-    if external {
+    if may_consult_upstreams(mode, external) {
         let locally_cached_hashes: std::collections::HashSet<&str> =
             cached_map.keys().map(|s| s.as_str()).collect();
         let uncached_pairs: Vec<(String, String)> = hash_path_pairs
@@ -878,7 +900,7 @@ pub(super) async fn query_for_cache(
                     path,
                     file_size,
                     nar_size,
-                    mode.clone(),
+                    mode,
                     expire,
                     rows_by_hash.get(hash).copied(),
                     &meta,
@@ -1076,6 +1098,41 @@ mod tests {
                 .is_err(),
             "DB error must propagate as Err, not a confident uncached result"
         );
+    }
+
+    #[test]
+    fn only_an_external_pull_or_normal_query_leaves_our_cache() {
+        assert!(may_consult_upstreams(QueryMode::Pull, true));
+        assert!(may_consult_upstreams(QueryMode::Normal, true));
+        assert!(!may_consult_upstreams(QueryMode::Push, true));
+        assert!(!may_consult_upstreams(QueryMode::Pull, false));
+        assert!(!may_consult_upstreams(QueryMode::Normal, false));
+    }
+
+    #[test]
+    fn an_external_query_names_exactly_one_path() {
+        assert!(external_arity_ok(false, 0) && external_arity_ok(false, 200));
+        assert!(external_arity_ok(true, 1));
+        assert!(!external_arity_ok(true, 0) && !external_arity_ok(true, 2));
+    }
+
+    /// The handler, not only the predicate: two external paths are refused before
+    /// any row is read, so a `CacheError` reaches the worker and it retries as
+    /// transient instead of reading the paths as absent.
+    #[tokio::test]
+    async fn the_handler_refuses_a_two_path_external_query() {
+        let state = make_state();
+        let err = handle_cache_query(
+            &state,
+            None,
+            &["/nix/store/a-a".to_owned(), "/nix/store/b-b".to_owned()],
+            &[],
+            QueryMode::Pull,
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("exactly one path"), "{err}");
     }
 
     #[tokio::test]

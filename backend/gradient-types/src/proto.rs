@@ -283,7 +283,7 @@ pub enum EvalCachePushMode {
 ///
 /// Controls what the server returns in [`CacheStatus`] beyond the basic
 /// cached/uncached flag.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum QueryMode {
     /// Return only paths that are already in the cache (`cached: true`).

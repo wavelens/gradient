@@ -666,6 +666,7 @@ CachedPath {
 - `Push` + `cached: false` - `path`, `cached`, and `url` (presigned S3 PUT when the store can presign and the NAR is over `smallNarBytes`; otherwise `None` and the worker relays over `NarPush`). No other metadata. No upstream lookup in Push mode.
 - A Push query whose `nar_sizes` length differs from `paths` is answered with `CacheError`.
 - Without `external: true` no mode reaches an upstream at all; `Pull` then answers from our rows alone and still reports every path it cannot serve as `cached: false`.
+- `external: true` - one path; the reply may carry an upstream `url`, `nar_hash`, `references`, `deriver` and `ca` when no row of ours serves it. A query that names any other number of paths is answered with `CacheError`.
 
 **"Cached" requires fully-stored bytes.** A `cached_path` row only counts as `cached: true` when its `file_hash IS NOT NULL` (`is_fully_cached()`). Placeholder rows for in-flight or aborted uploads are excluded from `CacheStatus` so the worker never receives "yes, fetch via `NarRequest`" for a path the server can't actually serve.
 

@@ -659,15 +659,7 @@ async fn cache_query_with_timeout(
         .collect();
     let answers: Vec<Vec<CachedPath>> = futures::stream::iter(chunks)
         .map(|(chunk, sizes)| {
-            cache_query_chunk(
-                job_id,
-                writer,
-                cache_waiters,
-                chunk,
-                sizes,
-                mode.clone(),
-                external,
-            )
+            cache_query_chunk(job_id, writer, cache_waiters, chunk, sizes, mode, external)
         })
         .buffered(CACHE_QUERY_WINDOW)
         .try_collect()
