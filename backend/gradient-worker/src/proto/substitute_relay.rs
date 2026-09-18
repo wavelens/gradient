@@ -15,10 +15,7 @@ use gradient_types::proto::JobPhase;
 use sha2::{Digest as _, Sha256};
 use tracing::debug;
 
-use crate::proto::compression::{
-    Compression, LEVEL6_WINDOW_BYTES, decompress, parse_nar_hash_to_bytes, resolve_compression,
-    zstd_window_size,
-};
+use crate::proto::compression::{decompress, parse_nar_hash_to_bytes, resolve_compression};
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{
     CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream, download_one_presigned,
@@ -211,35 +208,10 @@ async fn relay_one_path(
         })
         .collect();
 
-    // Pure relay: the upstream NAR is already zstd with a window at our level-6
-    // threshold and carries the file/nar metadata, so store the bytes verbatim -
-    // no decompress, no recompress, no rehash.
-    let verbatim = (kind == Compression::Zstd
-        && zstd_window_size(&compressed).is_some_and(|w| w >= LEVEL6_WINDOW_BYTES))
-    .then(|| {
-        Some((
-            meta.file_hash.clone()?,
-            meta.nar_hash.clone()?,
-            meta.nar_size?,
-        ))
-    })
-    .flatten();
-
-    let (bytes, cmeta) = if let Some((file_hash, nar_hash, nar_size)) = verbatim {
-        let file_size = compressed.len() as u64;
-        (
-            compressed,
-            crate::proto::nar::CompressedNarMeta {
-                file_hash,
-                file_size,
-                nar_hash,
-                nar_size,
-            },
-        )
-    } else {
-        // Weaker/absent upstream compression: decompress (verifying against the
-        // upstream nar_hash) and recompress at our level-6 threshold. Multi-MB CPU
-        // work, so it runs on the blocking pool.
+    // Decompress (verifying against the upstream nar_hash) and hand the raw NAR
+    // to the one push, which compresses at our level. Multi-MB CPU work, so it
+    // runs on the blocking pool.
+    let raw = {
         let mut compress = updater.phase(JobPhase::Compress);
         compress.record(1, compressed.len() as u64);
         let claimed = meta.nar_hash.clone();
@@ -256,8 +228,7 @@ async fn relay_one_path(
                         .context(format!("upstream NAR hash mismatch for {p}")));
                 }
             }
-            crate::proto::nar::compress_nar(&raw)
-                .with_context(|| format!("recompress relay NAR for {p}"))
+            anyhow::Ok(raw)
         })
         .await
         .context("relay decompress task panicked")??
@@ -266,13 +237,12 @@ async fn relay_one_path(
     // Transport: S3-backed caches expose a presigned PUT URL; local-disk caches
     // return none and accept the bytes via direct NarPush frames.
     let mut push = updater.phase(JobPhase::NarPush);
-    push.record(1, bytes.len() as u64);
+    push.record(1, raw.len() as u64);
     crate::proto::nar::upload_nar(
         &updater.job_id,
         path,
-        crate::proto::nar::NarSource::Compressed {
-            bytes: &bytes,
-            meta: cmeta,
+        crate::proto::nar::NarSource::Raw {
+            nar: raw,
             references: references.clone(),
             deriver: meta.deriver.clone(),
             ca: upstream.ca.clone(),

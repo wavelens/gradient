@@ -40,11 +40,15 @@ pub use eval::WorkerEvaluator;
 
 /// Query the server for which fetched input paths are already cached, falling
 /// back to "treat everything as uncached" when the query fails.
-async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -> Vec<CachedPath> {
+async fn query_fetched_paths(
+    updater: &mut JobUpdater,
+    all_paths: Vec<String>,
+    sizes: Vec<Option<u64>>,
+) -> Vec<CachedPath> {
     if all_paths.is_empty() {
         return vec![];
     }
-    match updater.query_push(all_paths.clone()).await {
+    match updater.query_push(all_paths.clone(), sizes).await {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(error = %e, "CacheQuery failed; will attempt direct push for all paths");
@@ -126,8 +130,21 @@ pub(crate) async fn push_drv_closure(
 
     let paths: Vec<String> = closure.into_iter().collect();
     guard.record(paths.len() as u32, 0);
-    let cache_entries = query_fetched_paths(updater, paths).await;
-    upload_all(updater, &cache_entries, Some(store), None).await
+    let sizes = vec![None; paths.len()];
+    let cache_entries = query_fetched_paths(updater, paths, sizes).await;
+    upload_all(updater, pair_with_store(cache_entries, store), None).await
+}
+
+/// Every entry paired with the local store it is packed from: the shape
+/// [`upload_all`] takes, for the callers that push paths they already hold.
+fn pair_with_store<'a>(
+    entries: Vec<CachedPath>,
+    store: &'a LocalNixStore,
+) -> Vec<(CachedPath, nar::NarSource<'a>)> {
+    entries
+        .into_iter()
+        .map(|cp| (cp, nar::NarSource::Path { store: Some(store) }))
+        .collect()
 }
 
 /// The `inputSrcs` declared by each `.drv`, read by parsing the file directly
@@ -177,12 +194,12 @@ pub(crate) const UPLOAD_CONCURRENCY: usize = 4;
 /// Already-cached paths are skipped. Errors are returned so the caller decides
 /// whether they are fatal.
 ///
-/// `store` is `None` only where there is no local daemon to ask for references
-/// (eval-internal pushes, tests); see [`nar::NarSource::Path`].
+/// The `source` says where the bytes come from: a path of the local store, or a
+/// raw NAR already in memory.
 pub(crate) async fn upload_one_nar(
     updater: &JobUpdater,
     cp: &CachedPath,
-    store: Option<&LocalNixStore>,
+    source: nar::NarSource<'_>,
 ) -> Result<()> {
     match cp.as_info() {
         CachedPathInfo::Cached { .. } => {
@@ -193,7 +210,7 @@ pub(crate) async fn upload_one_nar(
             nar::upload_nar(
                 &updater.job_id,
                 path,
-                nar::NarSource::Path { store },
+                source,
                 nar::NarSink::from_upload_url(upload_url, &updater.nar_recv),
                 &updater.writer,
             )
@@ -207,14 +224,13 @@ pub(crate) async fn upload_one_nar(
 /// server-side `AbortJob` stops the remaining uploads.
 pub(crate) async fn upload_all(
     updater: &JobUpdater,
-    entries: &[CachedPath],
-    store: Option<&LocalNixStore>,
+    uploads: Vec<(CachedPath, nar::NarSource<'_>)>,
     abort: Option<&watch::Receiver<bool>>,
 ) -> Result<()> {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
-    let uploads = entries.iter().filter(|cp| !cp.cached).count();
-    if uploads == 0 {
+    let pending = uploads.iter().filter(|(cp, _)| !cp.cached).count();
+    if pending == 0 {
         return Ok(());
     }
 
@@ -222,14 +238,16 @@ pub(crate) async fn upload_all(
     // span to the innermost open one, so per-path spans would chart as nested
     // and count their durations twice.
     let mut guard = updater.phase(JobPhase::NarPush);
-    guard.record(uploads as u32, 0);
+    guard.record(pending as u32, 0);
 
-    let mut queued = entries.iter();
+    let mut queued = uploads.into_iter();
     let mut running = FuturesUnordered::new();
     loop {
         while running.len() < UPLOAD_CONCURRENCY {
-            let Some(cp) = queued.next() else { break };
-            running.push(upload_unless_aborted(updater, cp, store, abort));
+            let Some((cp, source)) = queued.next() else {
+                break;
+            };
+            running.push(upload_unless_aborted(updater, cp, source, abort));
         }
 
         match running.next().await {
@@ -241,15 +259,15 @@ pub(crate) async fn upload_all(
 
 async fn upload_unless_aborted(
     updater: &JobUpdater,
-    cp: &CachedPath,
-    store: Option<&LocalNixStore>,
+    cp: CachedPath,
+    source: nar::NarSource<'_>,
     abort: Option<&watch::Receiver<bool>>,
 ) -> Result<()> {
     if let Some(abort) = abort {
         check_abort(abort)?;
     }
 
-    let result = upload_one_nar(updater, cp, store).await;
+    let result = upload_one_nar(updater, &cp, source).await;
     if result.is_err()
         && let Some(abort) = abort
     {
@@ -361,12 +379,14 @@ impl JobExecutor {
                     )
                     .await?;
 
+                    let sizes = vec![None; outcome.archived_paths.len()];
                     let cache_entries =
-                        query_fetched_paths(updater, outcome.archived_paths.clone()).await;
+                        query_fetched_paths(updater, outcome.archived_paths.clone(), sizes).await;
                     {
                         let mut push = updater.phase(JobPhase::PushInputs);
                         push.record(cache_entries.len() as u32, 0);
-                        upload_all(updater, &cache_entries, Some(&self.store), None).await?;
+                        upload_all(updater, pair_with_store(cache_entries, &self.store), None)
+                            .await?;
                     }
 
                     updater
@@ -426,7 +446,7 @@ impl JobExecutor {
         _credentials: &CredentialStore,
         mut abort: watch::Receiver<bool>,
     ) -> Result<()> {
-        let mut all_output_paths: Vec<String> = Vec::new();
+        let mut outputs: Vec<compress::OutputNar<'_>> = Vec::new();
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();
         for (index, build_task) in job.builds.iter().enumerate() {
             check_abort(&abort)?;
@@ -443,13 +463,13 @@ impl JobExecutor {
                 // Relay the outputs and their runtime closure from upstream;
                 // nothing enters the local store.
                 let _relay = updater.phase(JobPhase::SubstituteRelay);
-                let outputs = crate::proto::substitute_relay::relay_external_cached_outputs(
+                let relayed = crate::proto::substitute_relay::relay_external_cached_outputs(
                     build_task, updater,
                 )
                 .await
                 .map_err(|e| failure::classify_substitute_failure(&build_task.build_id, e))?;
 
-                let reported: Vec<gradient_proto::messages::BuildOutput> = outputs
+                let reported: Vec<gradient_proto::messages::BuildOutput> = relayed
                     .iter()
                     .map(|(name, path)| gradient_proto::messages::BuildOutput {
                         name: name.clone(),
@@ -475,8 +495,8 @@ impl JobExecutor {
             // Pin the .drv as an indirect GC root before prefetching its
             // inputs. Nix's reachability walks .drv references
             // (input_drvs + input_sources), so one root covers the entire
-            // build-time closure. external_cached substitutions never fetch the
-            // .drv, so this only applies to real builds.
+            // build-time closure. A Substitute never fetches the .drv, so this
+            // only applies to real builds.
             gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
 
             // Import cache-resident inputs the daemon will need. A hard
@@ -493,7 +513,7 @@ impl JobExecutor {
             }
 
             let _build = updater.phase(JobPhase::Build);
-            let outputs = build::build_derivation(
+            let built = build::build_derivation(
                 &self.store,
                 build_task,
                 index as u32,
@@ -507,10 +527,15 @@ impl JobExecutor {
                 self.build_cores,
             )
             .await?;
-            for o in &outputs {
+            for o in &built {
                 gc_handles.push(self.gcroots.add(&o.store_path).await);
             }
-            all_output_paths.extend(outputs.into_iter().map(|o| o.store_path));
+            outputs.extend(built.into_iter().map(|o| compress::OutputNar {
+                store_path: o.store_path,
+                source: nar::NarSource::Path {
+                    store: Some(&self.store),
+                },
+            }));
         }
 
         // Always compress+push every realised output. The worker is the sole
@@ -521,8 +546,8 @@ impl JobExecutor {
         // `JobFailed`.
         {
             let mut compress = updater.phase(JobPhase::Compress);
-            compress.record(all_output_paths.len() as u32, 0);
-            compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &abort)
+            compress.record(outputs.len() as u32, 0);
+            compress::push_outputs(updater, outputs, &abort)
                 .await
                 .map_err(failure::BuildError::transient)?;
         }
