@@ -18,7 +18,6 @@ use crate::ids::CachedPathId;
 /// `cached_path_signature`. This row is the AUTHORITATIVE narinfo source for
 /// anything in our cache; `derivation_output`'s narinfo fields are only an
 /// upstream-resolution snapshot for paths not yet pulled.
-/// `missing_references` is maintained by `gradient_db::nar_closure`.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cached_path")]
 pub struct Model {
@@ -37,10 +36,6 @@ pub struct Model {
     pub nar_size: Option<i64>,
     /// NAR hash in `sha256:<nix32>` format.
     pub nar_hash: Option<String>,
-    /// References (self excluded) whose row is absent, unbacked or itself not
-    /// whole. Seeded at commit, moved by the reference ripple; `0` on a backed
-    /// row means the whole runtime closure is in our cache.
-    pub missing_references: i32,
     /// Content-address field, if the path is content-addressed.
     pub ca: Option<String>,
     /// The narinfo `References:` line, ordered, as `hash-name` tokens.
@@ -80,41 +75,5 @@ impl Model {
     /// absent `file_hash` means the upload is pending or failed.
     pub fn is_fully_cached(&self) -> bool {
         self.file_hash.is_some()
-    }
-
-    /// The NAR is stored and every reference resolves to a whole row.
-    pub fn is_whole(&self) -> bool {
-        self.file_hash.is_some() && self.missing_references == 0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn row(file_hash: Option<&str>, missing_references: i32) -> Model {
-        Model {
-            file_hash: file_hash.map(str::to_owned),
-            missing_references,
-            ..Default::default()
-        }
-    }
-
-    /// The Rust twin of `gradient_db::nar_closure::whole_predicate`
-    /// (`file_hash IS NOT NULL AND missing_references = 0`), which a NAR commit
-    /// reads for the pre-commit half of the wholeness flip while the SQL form
-    /// reports the post-commit half. The two must mean the same thing on every
-    /// combination, a counter driven below zero included: a negative counter is a
-    /// lost ripple, and reading it as whole would claim a closure with a hole in it.
-    #[test]
-    fn is_whole_matches_the_sql_wholeness_definition() {
-        assert!(row(Some("sha256:abc"), 0).is_whole());
-        assert!(!row(Some("sha256:abc"), 1).is_whole());
-        assert!(!row(None, 0).is_whole());
-        assert!(!row(None, 1).is_whole());
-        assert!(
-            !row(Some("sha256:abc"), -1).is_whole(),
-            "a negative counter is a lost ripple, never wholeness"
-        );
     }
 }

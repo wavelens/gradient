@@ -51,9 +51,8 @@ pub fn redact_value(
         ("derivation", "name") | ("derivation", "pname") => r.package(&v),
         ("derivation_output", "package") | ("cached_path", "package") => r.package(&v),
         ("derivation_output", "deriver") | ("cached_path", "deriver") => r.store_path(&v),
-        ("derivation_output", "references_list") => r.store_path_list(&v),
-        ("cached_path_reference", "referrer") | ("cached_path_reference", "reference") => {
-            r.store_path(&v)
+        ("derivation_output", "references_list") | ("cached_path", "references") => {
+            r.store_path_list(&v)
         }
         ("evaluation_metric", "worker_id")
         | ("phase_event", "worker_id")
@@ -139,19 +138,15 @@ macro_rules! output_hashes {
     };
 }
 
-/// Those, plus every path they reference. `missing_references` counts one per
-/// reference whose row is absent, unbacked or itself not whole, so the referenced
-/// rows are what makes that count checkable - and what makes an absent row mean the
-/// instance never had the path rather than the export never asked for it. That
-/// distinction is the whole diagnosis on an unwhole closure.
+/// The same set: a runtime reference is an edge of the derivation graph now, so
+/// the one-hop dependency boundary `derivation_scope` carries already names the
+/// producer of every path an exported output references, and `output_hashes`
+/// carries its paths. That is what makes an absent row mean the instance never had
+/// the path rather than the export never asking for it, which is the whole
+/// diagnosis on an unwhole closure.
 macro_rules! cached_path_scope {
     () => {
-        concat!(
-            output_hashes!(),
-            " UNION SELECT r.reference_hash FROM cached_path_reference r WHERE r.referrer IN (",
-            output_hashes!(),
-            ")"
-        )
+        output_hashes!()
     };
 }
 
@@ -448,9 +443,9 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "cached_path",
-            "CREATE TABLE cached_path (id TEXT, hash TEXT, package TEXT, file_hash TEXT, file_size INTEGER, nar_size INTEGER, nar_hash TEXT, ca TEXT, created_at TEXT, deriver TEXT, missing_references INTEGER)",
+            "CREATE TABLE cached_path (id TEXT, hash TEXT, package TEXT, file_hash TEXT, file_size INTEGER, nar_size INTEGER, nar_hash TEXT, ca TEXT, created_at TEXT, deriver TEXT, \"references\" TEXT)",
             concat!(
-                "SELECT c.id::text, c.hash::text, c.package::text, c.file_hash::text, c.file_size::text, c.nar_size::text, c.nar_hash::text, c.ca::text, c.created_at::text, c.deriver::text, c.missing_references::text FROM cached_path c WHERE c.hash IN (",
+                "SELECT c.id::text, c.hash::text, c.package::text, c.file_hash::text, c.file_size::text, c.nar_size::text, c.nar_hash::text, c.ca::text, c.created_at::text, c.deriver::text, c.\"references\"::text FROM cached_path c WHERE c.hash IN (",
                 cached_path_scope!(),
                 ")"
             ),
@@ -466,19 +461,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "ca",
                 "created_at",
                 "deriver",
-                "missing_references"
+                "references"
             ]
-        ),
-        spec!(
-            "cached_path_reference",
-            "CREATE TABLE cached_path_reference (referrer TEXT, reference TEXT, reference_hash TEXT, position INTEGER)",
-            concat!(
-                "SELECT r.referrer::text, r.reference::text, r.reference_hash::text, r.position::text FROM cached_path_reference r WHERE r.referrer IN (",
-                output_hashes!(),
-                ")"
-            ),
-            "the exported derivations' output hashes, with every referenced path exported",
-            ["referrer", "reference", "reference_hash", "position"]
         ),
         spec!(
             "cached_path_signature",
@@ -741,18 +725,23 @@ mod tests {
         }
     }
 
-    /// `missing_references` counts one per reference whose row is absent,
-    /// unbacked or itself not whole, so the referenced rows have to be in the
-    /// file. They are also what separates "the instance never had this path" -
-    /// the finding on an unwhole closure - from "the export did not ask for it".
+    /// A runtime reference is an edge of the graph now, so the dependency
+    /// boundary already carries the producer of every path an exported output
+    /// references and `cached_path` carries their paths. That is what separates
+    /// "the instance never had this path" - the finding on an unwhole closure -
+    /// from "the export did not ask for it".
     #[test]
     fn the_reference_boundary_is_exported_so_an_absent_path_means_absent() {
         let sql = spec_named("cached_path").sql;
         assert!(
             sql.contains(
-                "UNION SELECT r.reference_hash FROM cached_path_reference r WHERE r.referrer IN ("
+                "UNION SELECT e.dependency FROM derivation_dependency e WHERE e.derivation IN ("
             ),
-            "cached_path stops at the exported outputs: {sql}"
+            "cached_path stops at the evaluation's own outputs: {sql}"
+        );
+        assert!(
+            sql.contains("c.\"references\"::text"),
+            "the narinfo line is what a reference closure is read from now: {sql}"
         );
     }
 

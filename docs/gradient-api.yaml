@@ -3313,9 +3313,9 @@ paths:
         Open it with any SQLite client, or with the `gradient-report` inspector.
 
         The export carries the direct dependencies of the evaluation's
-        derivations and the paths their outputs reference, so `unready_deps` and
-        `missing_references` can be recomputed from the file alone and an absent
-        row means the instance never had it.
+        derivations, build-time and runtime alike, and their outputs' paths, so
+        `unready_deps` and `missing_runtime_deps` can be recomputed from the file
+        alone and an absent row means the instance never had it.
 
         Requires authentication even for a public project, whose evaluations are
         otherwise browsable anonymously: a report reads every failed build's log

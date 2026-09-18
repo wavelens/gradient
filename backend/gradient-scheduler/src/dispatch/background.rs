@@ -50,10 +50,9 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
 /// zero, so a dead zone becomes a warning long before a user reports a stuck
 /// evaluation. Transient non-zero counts right after a transition are normal;
 /// persistent ones are not - except the drift counts, which report rows this pass
-/// already repaired, so the warning can be a successful self-repair. `gating`
-/// is the size of the NAR repair's scope and `scope` the readiness repair's,
-/// both logged at `info` on the clean branch too, because a healthy instance is
-/// exactly the case whose cost is unmeasured.
+/// already repaired, so the warning can be a successful self-repair. `scope` is
+/// the size of the readiness repair, logged at `info` on the clean branch too,
+/// because a healthy instance is exactly the case whose cost is unmeasured.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report = gradient_db::graph_consistency_report(&scheduler.state.db()).await?;
     if report.total() > 0 {
@@ -66,18 +65,11 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
             adopted = report.adopted,
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,
             wedged_building_evals = report.wedged_building_evals,
-            nar_counter_drift = report.nar_counter_drift,
-            negative_reference_counters = report.negative_reference_counters,
-            gating = report.gating_paths,
             scope = report.repair_scope,
             "graph consistency sweep found invariant violations"
         );
     } else {
-        info!(
-            gating = report.gating_paths,
-            scope = report.repair_scope,
-            "graph consistency sweep clean"
-        );
+        info!(scope = report.repair_scope, "graph consistency sweep clean");
     }
 
     Ok(())

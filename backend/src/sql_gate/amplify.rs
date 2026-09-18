@@ -107,26 +107,16 @@ const TARGETS: &[Target] = &[
             ("id", Rewrite::Remap),
             ("hash", Rewrite::Rehash),
             ("package", Rewrite::Mark),
+            (
+                "references",
+                Rewrite::Expr("substr(md5(t.hash || g.i::text), 1, 32) || '-amp'"),
+            ),
         ],
     },
     Target {
         table: "cached_path_signature",
         scale: Scale::With("derivation"),
         rewrite: &[("id", Rewrite::Remap), ("cached_path", Rewrite::Remap)],
-    },
-    Target {
-        table: "cached_path_reference",
-        scale: Scale::With("derivation"),
-        rewrite: &[
-            ("referrer", Rewrite::Rehash),
-            ("reference_hash", Rewrite::Rehash),
-            (
-                "reference",
-                Rewrite::Expr(
-                    "'/nix/store/' || substr(md5(t.reference_hash || g.i::text), 1, 32) || '-amp'",
-                ),
-            ),
-        ],
     },
     Target {
         table: "derivation_output",

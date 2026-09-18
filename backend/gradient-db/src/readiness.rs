@@ -16,7 +16,7 @@
 //! [`crate::graph_sql::fetchable_predicate`] is the one definition of the flag and
 //! [`crate::graph_sql::gates_predicate`] the one definition of the gate.
 //!
-//! Like `cached_path.missing_references`, this counter is MOVED and not derived, so
+//! Like `derivation_build.missing_runtime_deps`, this counter is MOVED and not derived, so
 //! every ripple must be driven by a TRANSITION and never by a state: rippling from a
 //! row that did not just flip, or rippling one frontier twice, moves a dependent past
 //! zero, and a negative counter never satisfies `= 0` again. [`became_fetchable`] and
@@ -93,7 +93,7 @@
 //! ripple writes the same dependent, so whichever of the two commits second wins and
 //! the next sweep converges. Closing it would need the lock to cover the transitive
 //! read set, which is the unchunked pass this shape exists to avoid.
-//! `nar_closure::repair_counters_for` carries the identical residual for the same
+//! the wholeness recount carries the identical residual for the same
 //! reason.
 //!
 //! Repaired: both columns, over the pending anchors and their direct dependencies as
@@ -123,7 +123,7 @@
 //!
 //! `unready_deps` carries no `CHECK (unready_deps >= 0)` and must not get one: a ripple
 //! legitimately passes through intermediate values inside its own transaction, so the
-//! constraint would abort correct work. `cached_path.missing_references` omits it for
+//! constraint would abort correct work. `missing_runtime_deps` omits it for
 //! the same reason.
 //!
 //! # What this module deliberately leaves to its callers
@@ -445,7 +445,7 @@ crate::sql! {
 /// leaves nothing to retry around. What the proof does NOT cover is the ripple's own
 /// write set, the flipped anchors' dependents, which no ordered lock names; the module
 /// doc says why that is sound and what it costs. The caveat on
-/// [`crate::nar_closure::ReferenceLock`] applies here too: the proof says the write
+/// The caveat on every lock proof applies here too: it says the write
 /// follows the lock, not that no read preceded it.
 #[must_use = "a lock proves nothing unless a write runs on it"]
 pub struct AnchorLock<'txn> {

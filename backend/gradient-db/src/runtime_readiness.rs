@@ -172,7 +172,44 @@ pub async fn whole_output_hashes<C: ConnectionTrait>(
         .collect())
 }
 
+/// The hash-ordered `FOR UPDATE` pass every retire opens with. It conflicts with
+/// the RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds on the
+/// parent row, so that wait is absorbed in its own statement and the DELETE opens
+/// a snapshot that sees the signature it would otherwise cascade away. It reads
+/// nothing and decides nothing.
+const LOCK_CACHED_PATHS_SQL: &str =
+    "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
+
+fn reset_uncached_producers_sql() -> String {
+    format!(
+        "UPDATE derivation_build db \
+         SET status = {created}, substituted = false, attempt = 0, \
+             updated_at = (now() AT TIME ZONE 'UTC') \
+         FROM derivation_build old \
+         WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) \
+           AND db.status IN ({terminal_success}) AND NOT db.fetchable \
+         RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
+        created = crate::status_sql::build(gradient_entity::build::BuildStatus::Created),
+        terminal_success =
+            crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS),
+    )
+}
+
+crate::sql_fn! {
+    RESET_UNCACHED_PRODUCERS = reset_uncached_producers_sql,
+        params = [DerivationIds(64)];
+}
+
 crate::sql! {
+    LOCK_CACHED_PATHS = LOCK_CACHED_PATHS_SQL,
+        params = [CachedPathHashes(64)];
+
+    DELETE_CACHED_PATHS = "DELETE FROM cached_path cp WHERE cp.hash = ANY($1) RETURNING cp.hash",
+        params = [CachedPathHashes(64)];
+
+    SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
+        params = [CachedPathHashes(64)];
+
     RUNTIME_DEPENDENT_COUNTS = "SELECT e.derivation AS derivation, count(*)::int AS n \
                                 FROM derivation_dependency e \
                                 WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (1, 2) \
@@ -311,6 +348,23 @@ async fn ripple(
     Ok(reached)
 }
 
+/// Take `hashes` `FOR UPDATE` in one hash-ordered statement, before the caller
+/// decides or writes anything. A transaction that will write `derivation_build`
+/// and only then reach a retire has to take its `cached_path` locks FIRST, or it
+/// inverts the class order every other writer follows; re-acquiring a row this
+/// transaction already holds is free, so the retire's own pass repeats it for
+/// nothing.
+pub async fn lock_cached_paths(txn: &DatabaseTransaction, hashes: &[String]) -> Result<(), DbErr> {
+    if hashes.is_empty() {
+        return Ok(());
+    }
+
+    txn.execute_raw(LOCK_CACHED_PATHS.bind([hashes.to_vec().into()]))
+        .await?;
+
+    Ok(())
+}
+
 /// The anchors among `derivations` that are whole right now, held `FOR UPDATE`.
 /// Read BEFORE the event that takes their presence away, because nothing after it
 /// can recover the endpoint.
@@ -362,21 +416,21 @@ pub async fn retire_outputs(
         return Ok(Retired::default());
     }
 
-    txn.execute_raw(crate::nar_closure::LOCK_QUERY.bind([hashes.to_vec().into()]))
+    txn.execute_raw(LOCK_CACHED_PATHS.bind([hashes.to_vec().into()]))
         .await?;
 
     let gone = crate::reachability::producers_of_hashes(txn, hashes).await?;
     let was_whole = whole_among(txn, &gone).await?;
 
     let deleted: Vec<String> = txn
-        .query_all_raw(crate::nar_closure::DELETE_STATEMENT.bind([hashes.to_vec().into()]))
+        .query_all_raw(DELETE_CACHED_PATHS.bind([hashes.to_vec().into()]))
         .await?
         .iter()
         .filter_map(|r| r.try_get::<String>("", "hash").ok())
         .collect();
 
     if !deleted.is_empty() {
-        txn.execute_raw(crate::nar_closure::SET_OUTPUTS_UNCACHED.bind([deleted.clone().into()]))
+        txn.execute_raw(SET_OUTPUTS_UNCACHED.bind([deleted.clone().into()]))
             .await?;
     }
 
@@ -409,7 +463,7 @@ async fn retire_anchors(
 
     if !gone.is_empty() {
         let reset = crate::promotion::returned_transitions(
-            txn.query_all_raw(crate::nar_closure::RESET_UNCACHED_PRODUCERS.bind([ids(gone)]))
+            txn.query_all_raw(RESET_UNCACHED_PRODUCERS.bind([ids(gone)]))
                 .await?,
         );
         if !reset.is_empty() {

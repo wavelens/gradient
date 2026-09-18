@@ -26,7 +26,6 @@ pub mod drv_output_spec;
 pub mod eval_watchdog;
 pub mod gc;
 pub mod graph_sql;
-pub mod nar_closure;
 pub mod outbox;
 pub mod permissions;
 pub mod pool;
@@ -90,10 +89,6 @@ pub use self::graph_sql::{
     ClosureDirection, begin_walk, dependency_closure_cte, eval_closure_cte,
     reachable_derivations_cte,
 };
-pub use self::nar_closure::{
-    PathLock, ReferenceLock, lock_paths, lock_reference_endpoints, retire_paths,
-    retire_paths_where, ripple_unwhole, ripple_whole, seed_references,
-};
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_cache::project_has_writable_cache;
 pub use self::project_derivations::derivation_ids_for_project;
@@ -120,8 +115,9 @@ pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;
 pub use self::runtime_edges::{insert_runtime_edges, producers_of_tokens};
 pub use self::runtime_readiness::{
-    Seeded, recount_missing_runtime_deps, retire_outputs, ripple_anchors_unwhole,
-    ripple_anchors_whole, seed_runtime_deps, whole_among, whole_output_hashes,
+    Seeded, lock_cached_paths, recount_missing_runtime_deps, retire_outputs,
+    ripple_anchors_unwhole, ripple_anchors_whole, seed_runtime_deps, whole_among,
+    whole_output_hashes,
 };
 pub use self::status::*;
 pub use self::task_board::*;
