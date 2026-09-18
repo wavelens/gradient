@@ -23,9 +23,8 @@
 use anyhow::{Context, Result};
 use futures::StreamExt as _;
 use gradient_db::parse_drv;
-use gradient_exec::path_utils::{nix_store_path, strip_store_prefix};
 use gradient_proto::messages::{BuildOutput, BuildProduct, BuildSpec};
-use gradient_sources::get_hash_from_path;
+use gradient_sources::{get_hash_from_path, nix_store_path, strip_store_prefix};
 use gradient_util::hydra::parse_hydra_product_line;
 use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResult, BuildResultInner};
 use harmonia_protocol::log::{ActivityType, Field, LogMessage, ResultType, Verbosity};

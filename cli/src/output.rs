@@ -28,6 +28,29 @@ impl ExitKind {
     }
 }
 
+/// Status colours for human output. Escapes reach the terminal only, so a piped
+/// or `--json` run stays plain text.
+#[derive(Clone, Copy)]
+pub enum Color {
+    Green,
+    Red,
+    White,
+    Yellow,
+    Plain,
+}
+
+impl Color {
+    fn escape(self) -> &'static str {
+        match self {
+            Self::Green => "\x1b[32m",
+            Self::Red => "\x1b[31m",
+            Self::White => "\x1b[37m",
+            Self::Yellow => "\x1b[33m",
+            Self::Plain => "",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Output {
     json: bool,
@@ -50,6 +73,14 @@ impl Output {
             serde_json::to_writer(&mut lock, &env).expect("serialize");
             let _ = writeln!(lock);
         }
+    }
+
+    pub fn paint(&self, text: &str, color: Color) -> String {
+        if self.json || matches!(color, Color::Plain) || !io::stdout().is_terminal() {
+            return text.to_string();
+        }
+
+        format!("{}{}\x1b[0m", color.escape(), text)
     }
 
     pub fn human(&self, msg: impl std::fmt::Display) {
@@ -143,5 +174,17 @@ mod tests {
             .render_err_to_string("missing arg")
             .unwrap();
         assert_eq!(buf.trim(), r#"{"error":true,"message":"missing arg"}"#);
+    }
+
+    #[test]
+    fn a_piped_run_stays_plain() {
+        let out = Output::new(false);
+        assert_eq!(out.paint("build-a", Color::Green), "build-a");
+    }
+
+    #[test]
+    fn json_output_is_never_painted() {
+        let out = Output::new(true);
+        assert_eq!(out.paint("build-a", Color::Red), "build-a");
     }
 }

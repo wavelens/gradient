@@ -25,10 +25,8 @@ gradient-util = { workspace = true }
 gradient-storage = { workspace = true }
 gradient-notify = { workspace = true }
 gradient-db = { workspace = true }
-gradient-nix = { workspace = true }
 gradient-forge = { workspace = true }
 gradient-sources = { workspace = true }
-gradient-exec = { workspace = true }
 gradient-ci = { workspace = true }
 gradient-state = { workspace = true }
 
@@ -44,16 +42,10 @@ futures               = { workspace = true }
 git-url-parse         = { workspace = true }
 git2                  = { workspace = true }
 harmonia-file-nar              = { workspace = true }
-harmonia-protocol              = { workspace = true }
-harmonia-store-content-address = { workspace = true }
-harmonia-store-path            = { workspace = true }
-harmonia-store-remote          = { workspace = true }
-harmonia-utils-hash            = { workspace = true }
 hex                   = { workspace = true }
 hmac                  = { workspace = true }
 ipnet                 = { workspace = true }
 libc                  = { workspace = true }
-nix-bindings          = { workspace = true }
 num_enum              = { workspace = true }
 object_store          = { workspace = true }
 rand                  = { workspace = true }

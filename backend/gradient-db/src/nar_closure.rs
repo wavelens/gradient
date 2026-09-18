@@ -91,14 +91,16 @@
 //! holds `derivation` before `derivation_build`, which is a third class and has no
 //! counter-ordered writer.
 //!
-//! The ripples are outside that, and it is not closed. `FORWARD` and `REVERSE`
-//! compute their referrer set inside the statement, so each takes
-//! `FOR NO KEY UPDATE` on rows no ordered lock set covers, in whatever order its
-//! plan produces. A commit and a concurrent maintenance retire can therefore
-//! still deadlock. Postgres detects it rather than hanging: the retire logs and
-//! retries on its next pass, and a killed commit fails a `NarUploaded` the worker
-//! retries. That is the accepted price of `FOR SHARE` below - a detected, retried
-//! deadlock instead of a permanently false-whole row.
+//! The ripples are inside it too. `FORWARD` and `REVERSE` no longer derive their
+//! referrer set inside the statement: [`REFERRER_COUNTS`] reads it `ORDER BY
+//! referrer` and the update is a nested loop over that bound array, so the
+//! `FOR NO KEY UPDATE` each takes is monotone in `hash` like every other
+//! acquisition here. Derived in the statement, the set was a join the planner
+//! answered with a sequential scan of the whole of `cached_path`, which took
+//! those locks in physical order and deadlocked a commit against a concurrent
+//! maintenance retire. `FOR SHARE` below still buys what it always bought - a
+//! wait instead of a permanently false-whole row - but it no longer buys it at
+//! the price of a detected deadlock.
 
 use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
@@ -237,34 +239,47 @@ pub struct ReferenceLock<'txn> {
     hash: String,
 }
 
+/// The referrers of one ripple frontier and how many edges each has into it,
+/// in hash order. Its own statement so the update below is driven by an array
+/// the caller binds rather than a set the planner has to derive inside the
+/// update: asked to derive it, the planner answered the join with a sequential
+/// scan of the whole of `cached_path`, which both blew the plan gate's budget
+/// and took the update's row locks in physical order - the one unordered
+/// acquisition the module doc's lock discipline could not account for.
+const REFERRER_COUNTS: &str = "\
+    SELECT r.referrer, count(*)::int AS n FROM cached_path_reference r \
+    WHERE r.reference_hash = ANY($1) AND r.referrer <> r.reference_hash \
+    GROUP BY r.referrer ORDER BY r.referrer";
+
+crate::sql! {
+    REFERRER_COUNTS_QUERY = REFERRER_COUNTS,
+        params = [CachedPathHashes(64)];
+}
+
 const FORWARD: &str = r#"
     UPDATE cached_path cp
     SET missing_references = cp.missing_references - c.n
-    FROM (SELECT r.referrer, count(*) AS n FROM cached_path_reference r
-          WHERE r.reference_hash = ANY($1) AND r.referrer <> r.reference_hash
-          GROUP BY r.referrer) c
+    FROM unnest($1::text[], $2::int[]) AS c(referrer, n)
     WHERE cp.hash = c.referrer
     RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS whole
 "#;
 
 crate::sql! {
     FORWARD_QUERY = FORWARD,
-        params = [CachedPathHashes(64)];
+        params = [CachedPathHashes(64), Ints(1, 64)];
 }
 
 const REVERSE: &str = r#"
     UPDATE cached_path cp
     SET missing_references = cp.missing_references + c.n
-    FROM (SELECT r.referrer, count(*) AS n FROM cached_path_reference r
-          WHERE r.reference_hash = ANY($1) AND r.referrer <> r.reference_hash
-          GROUP BY r.referrer) c
+    FROM unnest($1::text[], $2::int[]) AS c(referrer, n)
     WHERE cp.hash = c.referrer
     RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = c.n) AS was_whole
 "#;
 
 crate::sql! {
     REVERSE_QUERY = REVERSE,
-        params = [CachedPathHashes(64)];
+        params = [CachedPathHashes(64), Ints(1, 64)];
 }
 
 fn delete_statement(guard: Option<&str>) -> String {
@@ -340,6 +355,19 @@ pub async fn ripple_unwhole<C: ConnectionTrait>(
     ripple(db, &REVERSE_QUERY, "was_whole", stopped_being_whole).await
 }
 
+/// One level of either ripple: read the frontier's referrers with their edge
+/// counts, then move those counters.
+///
+/// The read is a separate statement so the update is a nested loop over a bound
+/// array, which is what makes the update visit `cached_path` in hash order.
+/// That order is the module doc's lock discipline, and the ripples are no longer
+/// outside it: a commit and a concurrent maintenance retire acquire the rows
+/// they share monotonically in `hash` and cannot form a wait-for cycle.
+///
+/// Splitting the statement does not widen the window the counts are read in.
+/// Both halves run on the caller's transaction, and every caller holds the rows
+/// either through [`ReferenceLock`] or through [`LOCK`], so no edge the read
+/// counts can be added or removed before the update applies it.
 async fn ripple<C: ConnectionTrait>(
     db: &C,
     query: &crate::sql::Query,
@@ -349,7 +377,22 @@ async fn ripple<C: ConnectionTrait>(
     let mut all = seeds.clone();
     let mut frontier = seeds;
     while !frontier.is_empty() {
-        let rows = db.query_all_raw(query.bind([frontier.into()])).await?;
+        let counted = db
+            .query_all_raw(REFERRER_COUNTS_QUERY.bind([frontier.into()]))
+            .await?;
+        let mut referrers: Vec<String> = Vec::with_capacity(counted.len());
+        let mut edges: Vec<i32> = Vec::with_capacity(counted.len());
+        for row in &counted {
+            referrers.push(row.try_get::<String>("", "referrer")?);
+            edges.push(row.try_get::<i32>("", "n")?);
+        }
+        if referrers.is_empty() {
+            break;
+        }
+
+        let rows = db
+            .query_all_raw(query.bind([referrers.into(), edges.into()]))
+            .await?;
 
         let mut next = Vec::new();
         for row in rows {
@@ -738,6 +781,15 @@ mod tests {
         BTreeMap::from([(flag.to_owned(), Value::from(value))])
     }
 
+    /// One `REFERRER_COUNTS` row: a ripple level reads these before it moves
+    /// anything, so every scripted level takes two query results.
+    fn counted(referrer: &str, n: i32) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("referrer".to_owned(), Value::from(referrer.to_owned())),
+            ("n".to_owned(), Value::from(n)),
+        ])
+    }
+
     fn exec(rows_affected: u64) -> MockExecResult {
         MockExecResult {
             last_insert_id: 0,
@@ -882,17 +934,28 @@ mod tests {
 
     /// Both ripples move a referrer once per edge into the frontier, so the
     /// per-referrer edge count and the self-exclusion are what keeps the counter
-    /// sound.
+    /// sound. The count is read by [`REFERRER_COUNTS`] and applied by the two
+    /// updates, so the invariant now spans the pair: a level that counted one way
+    /// and applied another would drift every counter it touched.
     #[test]
     fn both_ripples_count_edges_per_referrer_and_exclude_self_references() {
+        let counts = norm(REFERRER_COUNTS);
+        assert!(
+            counts.contains("count(*)::int AS n FROM cached_path_reference r"),
+            "{counts}"
+        );
+        assert!(counts.contains("r.reference_hash = ANY($1)"), "{counts}");
+        assert!(
+            counts.contains("r.referrer <> r.reference_hash"),
+            "{counts}"
+        );
+        assert!(counts.contains("GROUP BY r.referrer"), "{counts}");
+
         for sql in [norm(FORWARD), norm(REVERSE)] {
             assert!(
-                sql.contains("count(*) AS n FROM cached_path_reference r"),
-                "{sql}"
+                sql.contains("FROM unnest($1::text[], $2::int[]) AS c(referrer, n)"),
+                "the update applies the count it was handed, one row per referrer: {sql}"
             );
-            assert!(sql.contains("r.reference_hash = ANY($1)"), "{sql}");
-            assert!(sql.contains("r.referrer <> r.reference_hash"), "{sql}");
-            assert!(sql.contains("GROUP BY r.referrer"), "{sql}");
             assert!(sql.contains("WHERE cp.hash = c.referrer"), "{sql}");
         }
 
@@ -928,6 +991,7 @@ mod tests {
     #[tokio::test]
     async fn the_forward_ripple_continues_only_from_rows_that_became_whole() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![counted("r1", 1), counted("r2", 2)]])
             .append_query_results([vec![row("r1", "whole", true), row("r2", "whole", false)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
@@ -936,10 +1000,11 @@ mod tests {
 
         assert_eq!(whole, vec!["seed".to_owned(), "r1".to_owned()]);
         let log = crate::pool::statements(db.into_transaction_log());
-        assert_eq!(log.len(), 2, "one statement per level: {log:?}");
-        assert!(log[0].contains("missing_references - c.n") && log[0].contains("\"seed\""));
+        assert_eq!(log.len(), 3, "a read then a move per level: {log:?}");
+        assert!(log[0].contains("count(*)::int AS n") && log[0].contains("\"seed\""));
+        assert!(log[1].contains("missing_references - c.n"), "{log:?}");
         assert!(
-            log[1].contains("\"r1\"") && !log[1].contains("\"r2\""),
+            log[2].contains("\"r1\"") && !log[2].contains("\"r2\""),
             "{log:?}"
         );
     }
@@ -949,6 +1014,7 @@ mod tests {
     #[tokio::test]
     async fn the_reverse_ripple_continues_only_from_rows_that_were_whole() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![counted("r1", 1), counted("r2", 2)]])
             .append_query_results([vec![
                 row("r1", "was_whole", true),
                 row("r2", "was_whole", false),
@@ -960,12 +1026,49 @@ mod tests {
 
         assert_eq!(unwhole, vec!["gone".to_owned(), "r1".to_owned()]);
         let log = crate::pool::statements(db.into_transaction_log());
-        assert_eq!(log.len(), 2, "one statement per level: {log:?}");
-        assert!(log[0].contains("missing_references + c.n") && log[0].contains("\"gone\""));
+        assert_eq!(log.len(), 3, "a read then a move per level: {log:?}");
+        assert!(log[0].contains("count(*)::int AS n") && log[0].contains("\"gone\""));
+        assert!(log[1].contains("missing_references + c.n"), "{log:?}");
         assert!(
-            log[1].contains("\"r1\"") && !log[1].contains("\"r2\""),
+            log[2].contains("\"r1\"") && !log[2].contains("\"r2\""),
             "{log:?}"
         );
+    }
+
+    /// The referrer set the update is driven by is hash-ordered, which is what
+    /// puts the ripples inside the module's lock discipline: an update whose
+    /// driver is unordered takes its row locks in whatever order the plan
+    /// produces, and deadlocks against a concurrent retire holding the same rows.
+    #[test]
+    fn the_ripple_reads_its_referrers_in_hash_order() {
+        let sql = norm(REFERRER_COUNTS);
+        assert!(
+            sql.ends_with("GROUP BY r.referrer ORDER BY r.referrer"),
+            "{sql}"
+        );
+
+        for update in [norm(FORWARD), norm(REVERSE)] {
+            assert!(
+                update.contains("FROM unnest($1::text[], $2::int[]) AS c(referrer, n)"),
+                "the update is driven by the ordered set, not by one it derives: {update}"
+            );
+        }
+    }
+
+    /// A level whose frontier has no referrers stops without a second statement:
+    /// `unnest` of an empty array would update nothing, and the empty bind is what
+    /// the gate's shortest-array rule would have to reason about.
+    #[tokio::test]
+    async fn a_level_with_no_referrers_ends_the_ripple() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+
+        let whole = ripple_whole(&db, vec!["seed".to_owned()]).await.unwrap();
+
+        assert_eq!(whole, vec!["seed".to_owned()]);
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert_eq!(log.len(), 1, "the read alone: {log:?}");
     }
 
     /// A decode failure must not read as "not whole" or as "nothing here": that
@@ -975,6 +1078,7 @@ mod tests {
     #[tokio::test]
     async fn a_row_that_does_not_decode_is_an_error_not_a_dead_end() {
         let ripple_flag = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![counted("r1", 1)]])
             .append_query_results([vec![row("r1", "misspelled", true)]])
             .into_connection();
         assert!(
@@ -984,6 +1088,7 @@ mod tests {
         );
 
         let ripple_hash = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![counted("r1", 1)]])
             .append_query_results([vec![BTreeMap::from([
                 ("misspelled".to_owned(), Value::from("r1".to_owned())),
                 ("whole".to_owned(), Value::from(true)),
@@ -994,6 +1099,19 @@ mod tests {
                 .await
                 .is_err(),
             "the frontier's next level must not silently lose a row"
+        );
+
+        let ripple_count = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([
+                ("referrer".to_owned(), Value::from("r1".to_owned())),
+                ("misspelled".to_owned(), Value::from(1_i32)),
+            ])]])
+            .into_connection();
+        assert!(
+            ripple_whole(&ripple_count, vec!["seed".to_owned()])
+                .await
+                .is_err(),
+            "an undecodable edge count must not move a counter by a guess"
         );
 
         let seed_flag = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1075,9 +1193,10 @@ mod tests {
         assert!(log[0].contains("FOR UPDATE") && !log[0].contains("DELETE"));
         assert!(log[1].contains("DELETE FROM cached_path") && log[1].contains("RETURNING"));
         assert!(
-            log[2].contains("missing_references + c.n")
+            log[2].contains("count(*)::int AS n")
                 && log[2].contains("\"a\"")
-                && !log[2].contains("\"b\"")
+                && !log[2].contains("\"b\""),
+            "the level reads the referrers of what was whole, and stops: {log:?}"
         );
         assert!(
             log[3].contains("is_cached = false")
@@ -1177,7 +1296,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // the delete takes the one path that was whole
             .append_query_results([vec![row("gone", "was_whole", true)]])
-            // the reverse ripple reaches one referrer, then stops
+            // the reverse ripple reads one referrer, moves it, then finds none
+            .append_query_results([vec![counted("referrer", 1)]])
             .append_query_results([vec![row("referrer", "was_whole", true)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             // producers of the union: both

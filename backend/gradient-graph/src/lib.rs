@@ -11,6 +11,7 @@ pub mod actor;
 pub mod messages;
 
 mod demote;
+mod gc;
 mod ingest;
 mod known;
 mod nar;
@@ -194,6 +195,16 @@ impl Graph {
         }
         self.call(|reply| GraphMsg::Demote(demotion, reply)).await
     }
+
+    /// Apply one bounded maintenance delete. The sweep scans on the pool and
+    /// reclaims the objects of what comes back, never of what it asked about.
+    pub async fn gc(&self, request: GcRequest) -> anyhow::Result<GcReport> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(GcReport::default());
+        }
+        self.call(|reply| GraphMsg::Gc(request, reply)).await
+    }
 }
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so
@@ -206,7 +217,7 @@ pub(crate) mod test_ctx {
     use std::sync::Arc;
 
     use clap::Parser as _;
-    use gradient_db::{DbContext, NoReactor, WebDb, WorkerDb};
+    use gradient_db::{DbContext, WebDb, WorkerDb};
     use gradient_storage::{FileLogStorage, NarStore, StorageCtx};
     use gradient_types::{Cli, RuntimeConfig};
     use gradient_util::shutdown::Shutdown;
@@ -239,7 +250,7 @@ pub(crate) mod test_ctx {
             },
             shutdown: Shutdown::new(),
             board_events: tokio::sync::broadcast::channel(16).0,
-            reactor: Arc::new(NoReactor),
+            outbox_wake: Default::default(),
         };
         (ctx, worker_db)
     }

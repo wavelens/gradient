@@ -7,7 +7,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use gradient_types::input::InputError;
+use crate::input::InputError;
 
 /// A validated, normalized repository URL.
 ///
@@ -21,7 +21,7 @@ use gradient_types::input::InputError;
 /// # Example
 ///
 /// ```
-/// use gradient_nix::RepositoryUrl;
+/// use gradient_types::RepositoryUrl;
 ///
 /// let r: RepositoryUrl = "https://github.com/foo/bar.git".parse().unwrap();
 /// assert_eq!(r.to_string(), "git+https://github.com/foo/bar.git");
@@ -95,7 +95,7 @@ impl fmt::Display for RepositoryUrl {
 /// # Example
 ///
 /// ```
-/// use gradient_nix::NixFlakeUrl;
+/// use gradient_types::NixFlakeUrl;
 ///
 /// let u = NixFlakeUrl::new("https://github.com/foo/bar.git",
 ///                          "11c2f8505c234697ccabbc96e5b8a76daf0f31d3").unwrap();

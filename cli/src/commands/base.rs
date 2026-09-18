@@ -215,11 +215,9 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             }
         }
         MainCommands::Config { key, value } => {
-            set_get_value_from_string(key, value, false)
-                .map_err(|_| {
-                    std::process::exit(1);
-                })
-                .unwrap();
+            if let Err(e) = set_or_get_by_name(&key, value, false) {
+                out.err(ExitKind::Usage, e);
+            }
         }
 
         MainCommands::Status => {
@@ -243,7 +241,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 out.err(ExitKind::Usage, "missing argument: --password");
             }
 
-            let server_url = set_get_value(ConfigKey::Server, None, true);
+            let server_url = get_value(ConfigKey::Server, true);
             if server_url.is_none() {
                 out.err(
                     ExitKind::Usage,
@@ -255,17 +253,17 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.clone()))
                 .collect();
-            let input = handle_input(input_fields, true);
+            let input = handle_input(input_fields, true, out);
 
-            let pw = password.unwrap_or_else(ask_for_password);
+            let pw = password.unwrap_or_else(|| ask_for_password(out));
 
             let client = client_from_config(out);
             match client
                 .auth()
                 .register(MakeUserRequest {
-                    username: input.get("Username").unwrap().clone(),
-                    name: input.get("Name").unwrap().clone(),
-                    email: input.get("Email").unwrap().clone(),
+                    username: input.get("Username"),
+                    name: input.get("Name"),
+                    email: input.get("Email"),
                     password: pw,
                 })
                 .await
@@ -285,20 +283,20 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             no_browser,
         } => {
             if let Some(url) = server {
-                set_get_value(ConfigKey::Server, Some(url), true).unwrap();
+                set_value(ConfigKey::Server, url, true);
             }
 
-            let server_url = set_get_value(ConfigKey::Server, None, true);
+            let server_url = get_value(ConfigKey::Server, true);
             if server_url.is_none() {
-                set_get_value(ConfigKey::Server, Some(ask_for_input("Server URL")), true).unwrap();
+                set_value(ConfigKey::Server, ask_for_input("Server URL", out), true);
             }
 
             if username.is_some() || password.is_some() {
                 if out.is_json() && password.is_none() {
                     out.err(ExitKind::Usage, "missing argument: --password");
                 }
-                let username = username.unwrap_or_else(|| ask_for_input("Username"));
-                let pw = password.unwrap_or_else(ask_for_password);
+                let username = username.unwrap_or_else(|| ask_for_input("Username", out));
+                let pw = password.unwrap_or_else(|| ask_for_password(out));
                 let client = client_from_config(out);
                 match client
                     .auth()
@@ -309,7 +307,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                     .await
                 {
                     Ok(token) => {
-                        set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
+                        set_value(ConfigKey::AuthToken, token, true);
                         out.ok(&serde_json::json!({"logged_in": true}));
                         out.human("Logged in.");
                         project::post_login_project_setup(&client_from_config(out), out).await;
@@ -336,7 +334,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         }
 
         MainCommands::Logout => {
-            set_get_value(ConfigKey::AuthToken, Some(String::new()), true).unwrap();
+            set_value(ConfigKey::AuthToken, String::new(), true);
             out.ok(&serde_json::json!({"logged_out": true}));
             out.human("Logged out.");
         }
@@ -382,8 +380,8 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             }
         }
         MainCommands::Hash => {
-            let password = ask_for_password();
-            let confirm = ask_for_password();
+            let password = ask_for_password(out);
+            let confirm = ask_for_password(out);
             if password != confirm {
                 out.err(ExitKind::Usage, "Passwords did not match.");
             }
@@ -433,7 +431,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
                 out.err(ExitKind::Unauthorized, "Authorization was denied.");
             }
             Ok(CliPollOutcome::Token(token)) => {
-                set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
+                set_value(ConfigKey::AuthToken, token, true);
                 out.ok(&serde_json::json!({"logged_in": true}));
                 out.human("Logged in.");
                 project::post_login_project_setup(&client_from_config(out), out).await;

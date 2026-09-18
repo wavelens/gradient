@@ -7,6 +7,7 @@
 use anyhow::{Context, Result};
 use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
+use gradient_graph::GcRequest;
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -90,19 +91,51 @@ pub async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<
     Ok(())
 }
 
+/// Per-task evaluation retention: the plan is read on the pool, the rows are
+/// deleted by the graph actor, and what the delete leaves outside the graph is
+/// reclaimed once the actor reports what went.
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     let tasks = ETask::find()
         .all(&state.worker_db)
         .await
         .context("Failed to query tasks for evaluation GC")?;
 
+    let ctx = state.db();
     for task in tasks {
         let keep = task.keep_evaluations as usize;
         if keep == 0 {
             continue;
         }
-        if let Err(e) = gradient_db::gc_task_evaluations(&state.db(), task.id, keep).await {
-            warn!(error = %e, task_id = %task.id, "Evaluation GC failed for task");
+
+        let plan = match gradient_db::evaluation_gc_plan(&ctx, task.id, keep).await {
+            Ok(plan) if plan.is_empty() => continue,
+            Ok(plan) => plan,
+            Err(e) => {
+                warn!(error = %e, task_id = %task.id, "Evaluation GC selection failed for task");
+                continue;
+            }
+        };
+
+        for chunk in plan.chunks(gradient_db::IN_CHUNK_SIZE) {
+            let request = GcRequest::Evaluations {
+                ids: chunk.iter().map(|e| e.id).collect(),
+            };
+            let report = match state.graph.gc(request).await {
+                Ok(report) => report,
+                Err(e) => {
+                    warn!(error = %e, task_id = %task.id, "Evaluation GC failed for task");
+                    break;
+                }
+            };
+
+            let deleted: Vec<MEvaluation> = chunk
+                .iter()
+                .filter(|e| report.deleted_evaluations.contains(&e.id))
+                .cloned()
+                .collect();
+            if let Err(e) = gradient_db::after_evaluation_delete(&ctx, &deleted).await {
+                warn!(error = %e, task_id = %task.id, "Evaluation GC cleanup failed for task");
+            }
         }
     }
 
@@ -157,6 +190,7 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
         state.config.storage.nar_ttl_hours,
         state.config.storage.nar_upload_grace_hours,
     );
+    let scanned_at = now();
     let stale = gradient_db::stale_cached_paths(&state.worker_db, keep)
         .await
         .context("stale cached-path selection failed")?;
@@ -164,27 +198,26 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
         return Ok(0);
     }
 
-    let ctx = state.db();
     let mut evicted = 0u64;
     for chunk in stale.chunks(gradient_db::IN_CHUNK_SIZE) {
-        for hash in chunk {
+        // The rows go first and the objects follow what the actor actually
+        // retired: deleting an object for a hash the re-check kept live would
+        // leave a zombie row the next pass has to find and purge.
+        let report = state
+            .graph
+            .gc(GcRequest::Paths {
+                hashes: chunk.to_vec(),
+                scanned_at,
+            })
+            .await
+            .context("retire stale paths")?;
+
+        for hash in &report.retired {
             if let Err(e) = state.nar_storage.delete(hash).await {
                 warn!(error = %e, %hash, "failed to remove stale NAR");
             }
         }
-
-        let retired = async {
-            use sea_orm::TransactionTrait;
-            let txn = state.worker_db.begin().await?;
-            let retired = gradient_db::retire_paths(&txn, chunk).await?;
-            txn.commit().await?;
-            Ok::<_, sea_orm::DbErr>(retired)
-        }
-        .await
-        .context("retire stale paths")?;
-
-        gradient_db::emit_transition_effects(&ctx, &retired.transitions).await;
-        evicted += retired.deleted.len() as u64;
+        evicted += report.retired.len() as u64;
     }
 
     let _ = state
@@ -258,21 +291,20 @@ fn zombie_candidates() -> sea_orm::Select<ECachedPath> {
 /// `total_packages` / `total_bytes` cache stats and the sign-sweep workload.
 /// `cached_path_signature` cascades from `cached_path`, so a single delete
 /// drops both.
-async fn purge_zombie_cached_paths(
-    state: &Arc<ServerState>,
-    on_disk: &HashSet<String>,
-) -> Result<u64> {
+/// The rows whose object storage says is really gone.
+///
+/// The listing was taken before these rows were read, so a NAR committed in
+/// between is absent from it and present in storage. Dropping such a row leaves
+/// its producer `Completed` with an output nothing backs, which is fetchable for
+/// nobody: one pass did that to two anchors and wedged 550 dependents of theirs
+/// for the rest of the run. The listing is the prefilter; storage decides, and a
+/// probe that errors preserves.
+async fn zombie_hashes(state: &Arc<ServerState>, on_disk: &HashSet<String>) -> Result<Vec<String>> {
     let rows = zombie_candidates()
         .all(&state.worker_db)
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
 
-    // The listing was taken before these rows were read, so a NAR committed in
-    // between is absent from it and present in storage. Dropping such a row leaves
-    // its producer `Completed` with an output nothing backs, which is fetchable
-    // for nobody: one pass did that to two anchors and wedged 550 dependents of
-    // theirs for the rest of the run. The listing is the prefilter; storage
-    // decides, and a probe that errors preserves.
     let mut zombies = Vec::new();
     for row in rows {
         if on_disk.contains(&row.hash) {
@@ -290,6 +322,14 @@ async fn purge_zombie_cached_paths(
         }
     }
 
+    Ok(zombies)
+}
+
+async fn purge_zombie_cached_paths(
+    state: &Arc<ServerState>,
+    on_disk: &HashSet<String>,
+) -> Result<u64> {
+    let zombies = zombie_hashes(state, on_disk).await?;
     if zombies.is_empty() {
         return Ok(0);
     }
@@ -299,22 +339,22 @@ async fn purge_zombie_cached_paths(
     // finish (and never log). `cached_path_signature` cascades from `cached_path`.
     // Each batch deletes the rows AND moves the counters and gate flags they
     // backed in one transaction, so nothing ever trusts a just-purged zombie.
+    //
+    // `scanned_at` is now: no re-check can make a missing object live again, and
+    // a row whose object landed after the probe was already skipped above.
     const ZOMBIE_DELETE_BATCH: usize = 8000;
+    let scanned_at = now();
     let mut purged = 0u64;
     for chunk in zombies.chunks(ZOMBIE_DELETE_BATCH) {
-        let deleted = async {
-            use sea_orm::TransactionTrait;
-            let txn = state.worker_db.begin().await?;
-            let retired = gradient_db::retire_paths(&txn, chunk).await?;
-            txn.commit().await?;
-            Ok::<_, sea_orm::DbErr>(retired)
-        }
-        .await;
-        match deleted {
-            Ok(retired) => {
-                purged += retired.deleted.len() as u64;
-                gradient_db::emit_transition_effects(&state.db(), &retired.transitions).await;
-            }
+        match state
+            .graph
+            .gc(GcRequest::Paths {
+                hashes: chunk.to_vec(),
+                scanned_at,
+            })
+            .await
+        {
+            Ok(report) => purged += report.retired.len() as u64,
             Err(e) => {
                 warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch")
             }
@@ -552,82 +592,52 @@ mod tests {
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
         let state = test_server_state(nar_storage, db, |_| {});
 
-        let purged = purge_zombie_cached_paths(&state, &HashSet::new())
-            .await
-            .unwrap();
+        let zombies = zombie_hashes(&state, &HashSet::new()).await.unwrap();
 
-        assert_eq!(purged, 0, "storage decides, not the stale listing");
+        assert!(zombies.is_empty(), "storage decides, not the stale listing");
         assert!(nar_file_exists(tmp.path(), fresh));
     }
 
-    /// `cached_path` rows whose NAR is gone from storage are zombies left
-    /// behind by `gc_orphan_derivations`. The orphaned-files pass purges them
-    /// so the per-cache stats query (`COUNT(cached_path_signature.id)`) and
-    /// the sign sweep stop iterating ghosts.
+    /// `cached_path` rows whose NAR is gone from storage are zombies left behind
+    /// by the derivation GC, and inflate the per-cache stats query
+    /// (`COUNT(cached_path_signature.id)`) and the sign sweep until they go. The
+    /// pass names them; the retire that removes them is the graph actor's.
     #[tokio::test]
-    async fn purges_cached_paths_whose_nar_is_missing() {
+    async fn names_cached_paths_whose_nar_is_missing() {
         let tmp = tempfile::tempdir().unwrap();
         let live = "aaaa11111111111111111111111111aaaa";
-        let zombie_id = CachedPathId::now_v7();
         let zombie_hash = "bbbb22222222222222222222222222bbbb";
 
         // Only the live NAR is on disk; the zombie cached_path's hash isn't.
         write_nar_file(tmp.path(), live);
 
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
-        let zombie_row = gradient_entity::cached_path::Model {
-            id: zombie_id,
-            hash: zombie_hash.into(),
-            package: "zombie".into(),
-            file_hash: Some(
-                "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-            ),
-            file_size: Some(1),
-            nar_size: Some(1),
-            nar_hash: Some("sha256:zombie".into()),
-            ..Default::default()
-        };
-        // The purge retires the row: the ordered lock pass, the DELETE that reports
-        // what it removed, the `is_cached` clear (no reverse ripple, the zombie was
-        // not whole), then the anchor side over the hash it asked about.
-        let mut retired = BTreeMap::new();
-        retired.insert("hash".to_string(), Value::String(Some(zombie_hash.into())));
-        retired.insert("was_whole".to_string(), Value::Bool(Some(false)));
+        let rows = vec![
+            gradient_entity::cached_path::Model {
+                id: CachedPathId::now_v7(),
+                hash: live.into(),
+                package: "live".into(),
+                file_hash: Some("sha256:live".into()),
+                ..Default::default()
+            },
+            gradient_entity::cached_path::Model {
+                id: CachedPathId::now_v7(),
+                hash: zombie_hash.into(),
+                package: "zombie".into(),
+                file_hash: Some("sha256:zombie".into()),
+                ..Default::default()
+            },
+        ];
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![hash_row(live)]])
-            .append_query_results([vec![zombie_row.clone()]])
-            .append_query_results([vec![retired]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![
-                sea_orm::MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                };
-                4
-            ])
+            .append_query_results([rows])
             .into_connection();
 
-        let state = test_server_state(nar_storage, db.clone(), |_| {});
+        let state = test_server_state(nar_storage, db, |_| {});
 
-        let report = cleanup_orphaned_cache_files(Arc::clone(&state))
-            .await
-            .unwrap();
+        let zombies = zombie_hashes(&state, &HashSet::new()).await.unwrap();
+
+        assert_eq!(zombies, vec![zombie_hash.to_owned()]);
         assert!(nar_file_exists(tmp.path(), live), "live NAR must survive");
-        assert_eq!(
-            report.zombie_cached_paths_purged, 1,
-            "the zombie row must be retired"
-        );
-
-        drop(state);
-        let log = gradient_db::pool::statements(db.into_transaction_log());
-        assert_eq!(
-            log.len(),
-            8,
-            "keep-set, zombie scan, retire lock, delete, is_cached, producers of the \
-             union, producers of what is gone, owners: {log:?}"
-        );
     }
 
     fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {

@@ -60,8 +60,10 @@ pub fn write_rows(conn: &Connection, spec: &TableSpec, rows: &[Row]) -> Result<(
     Ok(())
 }
 
-/// Representative instantiation for the plan gate: every spec shares the same
-/// single-`$1` shape, so the "evaluation" spec's own query stands for all of them.
+/// Representative instantiation for the plan gate. Every spec binds the same
+/// single uuid, which is what this registers; the SQL each one carries differs,
+/// and only this one is planned. A report is an operator-triggered export that
+/// already takes minutes, so the gate's job here is the binding, not the cost.
 fn report_scope_query_sql() -> String {
     crate::tables::eval_scope_tables()
         .iter()

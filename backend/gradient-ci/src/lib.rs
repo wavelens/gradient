@@ -12,7 +12,7 @@ pub mod context;
 pub mod github_app_manifest;
 pub mod integration_lookup;
 pub mod manifest_state;
-pub mod reactor;
+pub mod reactions;
 pub mod reporting;
 pub mod trigger;
 pub mod unpark;
@@ -24,7 +24,6 @@ pub use self::apply::{
 };
 pub use self::context::CiContext;
 pub use self::integration_lookup::*;
-pub use self::reactor::CiStatusReactor;
 pub use self::reporting::*;
 pub use self::trigger::*;
 pub use self::unpark::{

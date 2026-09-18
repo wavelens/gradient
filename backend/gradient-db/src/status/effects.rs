@@ -17,6 +17,7 @@
 use crate::DbContext;
 use crate::graph_sql::BUILDER_STATUSES;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::outbox::OutboxKind;
 use gradient_types::*;
 use std::collections::{HashMap, HashSet};
 use tracing::error;
@@ -169,9 +170,10 @@ async fn move_demand(
 
 /// The graph version that invalidates the per-entry-point histogram cache, board
 /// `BuildStatusChanged` events for every referencing `build_job`, one
-/// `CacheChanged` on any terminal success, and the CI status reactor for entry
-/// points. Reactor calls are spawned (they talk to external forges); everything
-/// else is awaited so a failure is visible at the call site's log context.
+/// `CacheChanged` on any terminal success, and an outbox row per entry point
+/// whose status the forges report. Every one of them is awaited and written
+/// here; what leaves the process is the effects actor's, reading the rows this
+/// wrote in the transaction that moved the anchors.
 async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
     if changes.is_empty() {
         return;
@@ -250,18 +252,24 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
                     status: i32::from(c.to) as i16,
                 });
 
-            // Only declared entry points get a forge check; skip the spawn for
-            // intermediate builds instead of no-opping inside the reactor.
-            if ci_reports(c.to) && entry_keys.contains(&(job.evaluation, job.derivation)) {
-                let action_ctx = ctx.detached();
-                let job = job.clone();
-                let to = c.to;
-                ctx.shutdown.spawn(async move {
-                    action_ctx
-                        .reactor
-                        .on_build_status_changed(&action_ctx, job, to)
-                        .await;
-                });
+            // Only declared entry points get a forge check; an intermediate
+            // build owes no row rather than a row every consumer drops.
+            if ci_reports(c.to)
+                && entry_keys.contains(&(job.evaluation, job.derivation))
+                && let Err(e) = crate::outbox::enqueue(
+                    db,
+                    OutboxKind::BuildStatus,
+                    format!("{}:{}", job.id, i32::from(c.to)),
+                    serde_json::json!({
+                        "build_job": job.id,
+                        "evaluation": job.evaluation,
+                        "derivation": job.derivation,
+                        "status": i32::from(c.to),
+                    }),
+                )
+                .await
+            {
+                error!(error = %e, build_job = %job.id, "failed to enqueue a build status report");
             }
         }
     }
@@ -292,6 +300,30 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
     for evaluation_id in terminal_evals {
         if let Err(e) = super::eval_finalize::check_evaluation_done(ctx, evaluation_id).await {
             error!(error = %e, %evaluation_id, "eval finalize after transition failed");
+        }
+    }
+
+    // A build that finished owes its log the compression pass, which is storage
+    // work and belongs to the effects actor rather than this transaction. Only a
+    // real move enqueues: a re-announce would re-chunk a log already indexed.
+    let finished: Vec<DerivationId> = changes
+        .iter()
+        .filter(|c| c.from != c.to && crate::state_machine::BuildStateMachine::is_terminal(&c.to))
+        .map(|c| c.derivation)
+        .collect();
+    if !finished.is_empty() {
+        match crate::build_attempt::latest_attempts_by_derivation(db, &finished).await {
+            Ok(attempts) => {
+                let rows = attempts
+                    .values()
+                    .map(|a| (a.to_string(), serde_json::json!({ "attempt": a })))
+                    .collect();
+                if let Err(e) = crate::outbox::enqueue_many(db, OutboxKind::LogFinalize, rows).await
+                {
+                    error!(error = %e, "failed to enqueue the log finalizations");
+                }
+            }
+            Err(e) => error!(error = %e, "failed to look up the attempts of finished builds"),
         }
     }
 }
@@ -432,6 +464,85 @@ mod tests {
         assert_eq!(
             (net[0].from, net[0].to),
             (BuildStatus::Created, BuildStatus::Building)
+        );
+    }
+
+    /// One report per entry-point `build_job` of a status the forges track, and a
+    /// log finalization asked for once the build is finished. Both are rows in
+    /// this transaction, not calls: what leaves the process is the effects
+    /// actor's, reading what this wrote.
+    #[tokio::test]
+    async fn a_finished_entry_point_owes_a_report_and_its_log() {
+        let d = DerivationId::now_v7();
+        let evaluation = EvaluationId::now_v7();
+        let job = MBuildJob {
+            id: BuildJobId::now_v7(),
+            evaluation,
+            derivation: d,
+            ..Default::default()
+        };
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([vec![job.clone()]])
+            .append_query_results([vec![MEntryPoint {
+                evaluation,
+                derivation: d,
+                ..Default::default()
+            }]])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+
+        emit_transition_effects(
+            &ctx,
+            &[TransitionChange {
+                derivation: d,
+                from: BuildStatus::Building,
+                to: BuildStatus::Completed,
+            }],
+        )
+        .await;
+        crate::test_ctx::settle(ctx).await;
+
+        let log = crate::pool::statements(pool.into_transaction_log());
+        let reports: Vec<&String> = log
+            .iter()
+            .filter(|s| s.contains("INSERT INTO outbox"))
+            .collect();
+        assert_eq!(
+            reports.len(),
+            1,
+            "one report for the one entry point: {log:?}"
+        );
+        assert!(reports[0].contains(&job.id.to_string()), "{reports:?}");
+        assert!(
+            log.iter()
+                .any(|s| s.contains("JOIN derivation_build b ON b.id = a.derivation_build")),
+            "the finished build's log is asked for: {log:?}"
+        );
+    }
+
+    /// A re-announce committed nothing, so it owes no log work: re-chunking an
+    /// index that is already written is pure cost.
+    #[tokio::test]
+    async fn a_re_announce_never_asks_to_finalize_a_log_again() {
+        let d = DerivationId::now_v7();
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<MEntryPoint>::new()])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+
+        emit_transition_effects(
+            &ctx,
+            &[TransitionChange::unchanged(d, BuildStatus::Completed)],
+        )
+        .await;
+        crate::test_ctx::settle(ctx).await;
+
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert!(
+            !log.iter()
+                .any(|s| s.contains("JOIN derivation_build b ON b.id = a.derivation_build")),
+            "{log:?}"
         );
     }
 

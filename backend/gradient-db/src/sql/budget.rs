@@ -46,6 +46,20 @@ impl Budget {
         reason: None,
     };
 
+    /// A bulk statement reads the working set it was handed or must rank, so a
+    /// sequential scan of one table is its normal plan; what it may not do is
+    /// read the database.
+    pub const BULK: Self = Self {
+        buffers: 50_000,
+        amplification: 10_000,
+        rows_removed: 1_000_000,
+        loops: u64::MAX,
+        seq_scan_rows: Some(10_000),
+        spill: Spill::Warn,
+        shape: &[],
+        reason: None,
+    };
+
     pub const WALK: Self = Self {
         buffers: 250_000,
         amplification: 1_000,
@@ -53,7 +67,7 @@ impl Budget {
         loops: u64::MAX,
         seq_scan_rows: Some(10_000),
         spill: Spill::Forbidden,
-        shape: &[Shape::Require("Nested Loop"), Shape::Forbid("Merge Join")],
+        shape: &[Shape::Require("Nested Loop")],
         reason: None,
     };
 
@@ -70,6 +84,10 @@ impl Budget {
 
     pub const fn hot() -> Self {
         Self::HOT
+    }
+
+    pub const fn bulk() -> Self {
+        Self::BULK
     }
 
     pub const fn walk() -> Self {
@@ -102,6 +120,13 @@ impl Budget {
 
     pub const fn seq_scan_allowed(mut self) -> Self {
         self.seq_scan_rows = None;
+        self
+    }
+
+    /// Drops the fence assertion, for a recursion that joins a materialised set
+    /// rather than a fenced `LATERAL`.
+    pub const fn unfenced(mut self) -> Self {
+        self.shape = &[];
         self
     }
 

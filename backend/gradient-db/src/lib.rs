@@ -27,6 +27,7 @@ pub mod eval_watchdog;
 pub mod gc;
 pub mod graph_sql;
 pub mod nar_closure;
+pub mod outbox;
 pub mod permissions;
 pub mod pool;
 pub mod project_cache;
@@ -43,7 +44,6 @@ pub mod runtime_closure;
 pub mod sql;
 pub mod state_machine;
 pub mod status;
-pub mod status_reactor;
 pub mod status_sql;
 pub mod task_board;
 
@@ -103,8 +103,9 @@ pub use self::promotion::{
 pub use self::reachability::{
     Adopted, adopt_pending_closure, adopt_pending_closures, anchor_dispatch_state, anchor_status,
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
-    derivations_with_hashes, eval_anchor_states, evals_referencing_derivation,
-    pending_orphan_frontier, pending_orphans_among, producers_of_hashes,
+    derivations_with_hashes, eval_any_anchor_failed, eval_blocked, evals_referencing_derivation,
+    evals_referencing_derivations, pending_orphan_frontier, pending_orphans_among,
+    producers_of_hashes,
 };
 pub use self::readiness::{
     AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,
@@ -115,5 +116,4 @@ pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph
 pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;
 pub use self::status::*;
-pub use self::status_reactor::{NoReactor, StatusReactor};
 pub use self::task_board::*;

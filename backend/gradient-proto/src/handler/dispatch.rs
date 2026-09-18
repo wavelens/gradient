@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_exec::strip_nix_store_prefix;
+use gradient_sources::strip_nix_store_prefix;
 use gradient_types::ids::{DispatchedJobId, ProjectId};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, trace, warn};

@@ -17,7 +17,6 @@ use axum::{Extension, Json};
 
 use gradient_core::ServerState;
 use gradient_db::get_any_project_by_name;
-use gradient_nix::RepositoryUrl;
 use gradient_sources::check_task_updates;
 use gradient_types::consts::*;
 use gradient_types::input::{check_task_name, validate_display_name, vec_to_hex};

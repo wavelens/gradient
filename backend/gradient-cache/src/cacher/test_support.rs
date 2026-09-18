@@ -63,7 +63,7 @@ pub(crate) fn test_server_state_with_log(
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-        reactor: Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
     })
 }

@@ -104,7 +104,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                     ),
                 );
             }
-            set_get_value(ConfigKey::SelectedProject, Some(project), true).unwrap();
+            set_value(ConfigKey::SelectedProject, project, true);
             out.human("Project selected.");
         }
 
@@ -122,21 +122,21 @@ pub async fn handle(cmd: Commands, out: Output) {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-            let input = handle_input(input_fields, true);
-            let name = input.get("Name").unwrap().clone();
+            let input = handle_input(input_fields, true, out);
+            let name = input.get("Name");
 
             let client = client_from_config(out);
             match client
                 .projects()
                 .create(MakeProjectRequest {
                     name: name.clone(),
-                    display_name: input.get("Display Name").unwrap().clone(),
-                    description: input.get("Description").unwrap().clone(),
+                    display_name: input.get("Display Name"),
+                    description: input.get("Description"),
                 })
                 .await
             {
                 Ok(_) => {
-                    set_get_value(ConfigKey::SelectedProject, Some(name), true);
+                    set_value(ConfigKey::SelectedProject, name, true);
                     out.ok(&serde_json::json!({"created": true}));
                     out.human("Project created.");
                 }
@@ -145,7 +145,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Show => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -183,7 +183,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             display_name,
             description,
         } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -209,16 +209,16 @@ pub async fn handle(cmd: Commands, out: Output) {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-            let input = handle_input(input_fields, true);
+            let input = handle_input(input_fields, true, out);
 
             match client
                 .projects()
                 .update(
                     &project,
                     PatchProjectRequest {
-                        name: input.get("Name").cloned(),
-                        display_name: input.get("Display Name").cloned(),
-                        description: input.get("Description").cloned(),
+                        name: Some(input.get("Name")),
+                        display_name: Some(input.get("Display Name")),
+                        description: Some(input.get("Description")),
                     },
                 )
                 .await
@@ -232,7 +232,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Delete => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -248,7 +248,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::User { cmd } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -318,7 +318,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Ssh { cmd } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -345,7 +345,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Cache { cmd } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 None => out.err(ExitKind::Usage, "Project is required for command."),
             };
@@ -394,7 +394,7 @@ pub async fn handle(cmd: Commands, out: Output) {
 /// Names of the projects the current user belongs to, exiting with a clear
 /// login hint when no session is configured or the server rejects it.
 async fn membership_names(out: Output) -> Vec<String> {
-    if set_get_value(ConfigKey::AuthToken, None, true).is_none() {
+    if get_value(ConfigKey::AuthToken, true).is_none() {
         out.err(
             ExitKind::Unauthorized,
             "Not logged in. Run `gradient login <url>` first.",
@@ -418,11 +418,11 @@ pub async fn post_login_project_setup(client: &Client, out: Output) {
         Ok(res) => res.items.into_iter().map(|i| i.name).collect(),
         Err(_) => return,
     };
-    let current = set_get_value(ConfigKey::SelectedProject, None, true);
+    let current = get_value(ConfigKey::SelectedProject, true);
     match decide_project_onboarding(&projects, current.as_deref()) {
         ProjectOnboarding::Keep(_) => {}
         ProjectOnboarding::AutoSelect(name) => {
-            set_get_value(ConfigKey::SelectedProject, Some(name.clone()), true);
+            set_value(ConfigKey::SelectedProject, name.clone(), true);
             out.human(format!("Selected project {name}."));
         }
         ProjectOnboarding::Choose(names) => {

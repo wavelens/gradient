@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use assert_cmd::Command;
 
 fn help(args: &[&str]) -> String {

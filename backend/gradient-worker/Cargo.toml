@@ -21,10 +21,7 @@ workspace = true
 [dependencies]
 gradient-core = { workspace = true }
 gradient-eval = { path = "../gradient-eval" }
-gradient-exec = { workspace = true }
-gradient-flake-lock = { workspace = true }
 gradient-sources = { workspace = true }
-gradient-nix = { workspace = true }
 gradient-db = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
@@ -50,7 +47,6 @@ harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
 hex                   = { workspace = true }
 libc                  = { workspace = true }
-nix-bindings          = { workspace = true, features = ["flake"] }
 reqwest               = { workspace = true }
 rkyv                  = { workspace = true }
 serde                 = { workspace = true }

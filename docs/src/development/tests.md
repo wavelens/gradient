@@ -13,8 +13,16 @@ the catalogue, and a per-test list goes stale and collides on every merge.
 | Shared harness | `backend/gradient-test-support/` | fakes, fixtures and the test server every suite reuses |
 | CLI | `cli/tests/*.rs`, `cli/connector/tests/*.rs` | the installed `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | components and services under vitest |
+| Report inspector | `nix/tools/report-inspector/tests/` | the inspector's commands over a report fixture the test builds |
 | NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
 | SQL plan gate | `backend/src/sql_gate/`, run by the e2e VM test | every registered statement's plan at production scale |
+
+The inspector's fixture is built in the test rather than committed as a `.db`,
+because a checked-in binary drifts silently from the schema it stands for. Its
+pinned `SUPPORTED_SCHEMA` is held to `gradient-report`'s `SCHEMA_VERSION` by a
+Rust test that `include_str!`s the Python constant: the two ship separately, and
+a bump that reaches only one turns the inspector into a tool that refuses every
+report the server writes.
 
 A crate's own `tests/` directory is for anything that has to go through a public
 entry point (an HTTP route, a CLI invocation). Everything else belongs in a
@@ -89,6 +97,12 @@ lift one algorithm out of its I/O (`RelayIo` under the worker's closure relay),
 the fake stays in that module's own `tests`: it is a fixture for one walk, not a
 double anything else will reuse.
 
+**An actor with side effects is tested behind small traits.** `gradient-effects`
+takes its queue and its deliverer as `OutboxStore` and `Dispatch`, so the one
+thing the actor owns - never more than the worker count in flight, one pass per
+burst of wakes - is asserted against in-memory fakes with no database, no
+factory and no clock.
+
 **Closure and scheduling work uses `StoreFixture`.** It carries a real
 derivation graph, so dependency ordering, readiness and cache-presence logic get
 tested against genuine `.drv` shapes instead of a hand-built three-node tree.
@@ -113,13 +127,21 @@ statements so a human reads the numbers the assertion cannot.
 declares a statement, its parameter kinds and its tier, and registers it;
 `backend/clippy.toml` forbids building a `Statement` any other way, so the list
 cannot fall behind. The e2e test's last phase amplifies its database to
-production scale and runs `gradient-sql-gate`, which draws real parameter values
-out of that data, explains each statement in a rolled-back transaction (an
+production scale - every key derived from the original row and the copy index, so
+the copies form one consistent graph and a lookup by evaluation stays as
+selective as it is in production - and runs `gradient-sql-gate`, which draws real
+parameter values out of that data, explains each statement in a rolled-back transaction (an
 `EXPLAIN ANALYZE` of an `INSERT` really does insert) and fails on a sequential
-scan of a large relation, a buffer or amplification budget overrun, a per-row
-rescan or a disk spill. Tier `Hot` is the default, `Walk` covers the recursive
-closure walks and also asserts the `OFFSET 0` fence survived, `Sweep` covers
-timer-driven work that is allowed to scan. Nothing is asserted on wall clock: the
+scan of a large relation that throws most of its read away, a buffer or
+amplification budget overrun, a per-row rescan or a disk spill. Tier `Hot` is the
+default, `Bulk` covers the statements whose cost follows a working set rather
+than a row (a dashboard summary, a metrics scrape, a batch keyed on an array of
+ids, the dispatcher ranking its queue), `Walk` covers the recursive closure walks
+and also asserts the `OFFSET 0` fence survived in the recursive term, `Sweep`
+covers timer-driven work that is allowed to scan. Three of the rules stand aside
+where they mean nothing: a plan that aggregates reads many rows to return one by
+design, a statement that returns nothing has no ratio, and a batch is measured
+against the values it was handed. Nothing is asserted on wall clock: the
 runner is shared and slow, so a millisecond budget would measure the runner. A
 statement whose relations are empty is reported unmeasured rather than passed,
 and the phase fails once more than 40 of them are, so the count is a ratchet
@@ -143,7 +165,7 @@ and `XDG_CONFIG_HOME` pointed at a `TempDir` holding a seeded `config.toml`, and
 `wiremock` stands in for the server. That covers argument parsing, config
 resolution and exit codes in one pass, which is where CLI bugs actually live.
 
-**`unwrap` needs a reason.** The workspace denies `clippy::unwrap_used`. Test
+**`unwrap` needs a reason.** Both workspaces deny `clippy::unwrap_used`. Test
 scaffolding opts out per file with an explicit reason:
 
 ```rust

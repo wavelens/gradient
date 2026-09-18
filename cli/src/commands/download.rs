@@ -6,12 +6,11 @@
 
 use crate::commands::attr_spec;
 use crate::config::*;
-use crate::input::client_from_config;
+use crate::input::{client_from_config, flush_stdout};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use connector::evals::{ArtefactTree, ProductArtefact};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::exit;
 
 pub async fn handle_download(
     flake_ref: Option<String>,
@@ -56,7 +55,7 @@ pub async fn handle_download(
     } else if out.is_json() {
         out.err(ExitKind::Usage, "missing argument: flake ref or --products")
     } else {
-        interactive_select(&flat)
+        interactive_select(&flat, out)
     };
 
     if selection.is_empty() {
@@ -168,7 +167,7 @@ pub(crate) fn safe_relative_name(name: &str) -> PathBuf {
     }
 }
 
-fn interactive_select(flat: &[FlatProduct<'_>]) -> Vec<usize> {
+fn interactive_select(flat: &[FlatProduct<'_>], out: Output) -> Vec<usize> {
     println!("\nAvailable artefacts:");
     for (i, p) in flat.iter().enumerate() {
         println!(
@@ -187,13 +186,14 @@ fn interactive_select(flat: &[FlatProduct<'_>]) -> Vec<usize> {
         "\nSelect products (comma-separated 1-{}, ranges like 1-3, or 'all'): ",
         flat.len()
     );
-    io::stdout().flush().unwrap();
+    flush_stdout(out);
+
     let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    parse_selection_spec(input.trim(), flat.len()).unwrap_or_else(|e| {
-        eprintln!("{}", e);
-        exit(1);
-    })
+    io::stdin()
+        .read_line(&mut input)
+        .unwrap_or_else(|e| out.err(ExitKind::Usage, format!("Failed to read selection: {}", e)));
+
+    parse_selection_spec(input.trim(), flat.len()).unwrap_or_else(|e| out.err(ExitKind::Usage, e))
 }
 
 fn parse_selection_spec(spec: &str, total: usize) -> Result<Vec<usize>, String> {
@@ -311,7 +311,7 @@ fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
         if let Some((project, proj)) = spec.split_once('/') {
             return (project.to_string(), proj.to_string());
         }
-        let project = set_get_value(ConfigKey::SelectedProject, None, true).unwrap_or_else(|| {
+        let project = get_value(ConfigKey::SelectedProject, true).unwrap_or_else(|| {
             out.err(
                 ExitKind::Usage,
                 format!(
@@ -323,7 +323,7 @@ fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
         return (project, spec.to_string());
     }
 
-    if let Some(selected) = set_get_value(ConfigKey::SelectedTask, None, true)
+    if let Some(selected) = get_value(ConfigKey::SelectedTask, true)
         && let Some((project, proj)) = selected.split_once('/')
     {
         return (project.to_string(), proj.to_string());

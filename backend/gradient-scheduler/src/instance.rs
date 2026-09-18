@@ -124,15 +124,15 @@ fn dispatch_windows_sql() -> String {
           (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $1))::float8 AS wait_5m,
           (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $2))::float8 AS wait_1h,
           (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $3))::float8 AS wait_24h,
-          (AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $1))::float8 AS nar_5m,
-          (AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $2))::float8 AS nar_1h,
-          (AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $3))::float8 AS nar_24h,
-          (AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $1))::float8 AS miss_5m,
-          (AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $2))::float8 AS miss_1h,
-          (AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $3))::float8 AS miss_24h,
-          (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $1))::float8 AS dep_5m,
-          (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $2))::float8 AS dep_1h,
-          (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $3))::float8 AS dep_24h
+          (AVG(missing_nar_size / 1048576.0) FILTER (WHERE dispatched_at >= $1))::float8 AS nar_5m,
+          (AVG(missing_nar_size / 1048576.0) FILTER (WHERE dispatched_at >= $2))::float8 AS nar_1h,
+          (AVG(missing_nar_size / 1048576.0) FILTER (WHERE dispatched_at >= $3))::float8 AS nar_24h,
+          (AVG(missing_count) FILTER (WHERE dispatched_at >= $1))::float8 AS miss_5m,
+          (AVG(missing_count) FILTER (WHERE dispatched_at >= $2))::float8 AS miss_1h,
+          (AVG(missing_count) FILTER (WHERE dispatched_at >= $3))::float8 AS miss_24h,
+          (AVG(dependency_count) FILTER (WHERE dispatched_at >= $1))::float8 AS dep_5m,
+          (AVG(dependency_count) FILTER (WHERE dispatched_at >= $2))::float8 AS dep_1h,
+          (AVG(dependency_count) FILTER (WHERE dispatched_at >= $3))::float8 AS dep_24h
         FROM dispatched_job
         WHERE kind = {kind} AND ready_at IS NOT NULL AND dispatched_at >= $3
     "#,

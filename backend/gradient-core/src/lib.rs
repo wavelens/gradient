@@ -195,11 +195,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         Arc::new(local_log_storage)
     };
 
-    let reactor: Arc<dyn gradient_db::StatusReactor> = Arc::new(gradient_ci::CiStatusReactor::new(
-        http.clone(),
-        email.clone(),
-    ));
-
     let upstream_query_concurrency = config.proto.upstream_query_concurrency;
 
     Ok(Arc::new(ServerState {
@@ -226,7 +221,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         oidc_group_roles,
         scim_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor,
+        outbox_wake: Arc::new(tokio::sync::Notify::new()),
         graph: Graph::new(),
     }))
 }

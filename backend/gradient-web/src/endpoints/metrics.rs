@@ -499,7 +499,8 @@ fn observations_sql() -> String {
 
 gradient_db::sql_fn! {
     OBSERVATIONS = observations_sql,
-        params = [];
+        params = [],
+        tier = Bulk;
 }
 
 /// Collect metrics by querying the DB and scheduler in-memory state.

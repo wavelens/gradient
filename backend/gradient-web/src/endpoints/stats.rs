@@ -181,7 +181,8 @@ gradient_db::sql! {
                FROM cached_path_signature cps
                JOIN cached_path cp ON cp.id = cps.cached_path
                WHERE cps.cache = $1"#,
-        params = [CacheId];
+        params = [CacheId],
+        tier = Bulk;
 }
 
 pub async fn get_cache_stats(

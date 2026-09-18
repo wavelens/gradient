@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_exec::path_utils::{nix_store_path, strip_store_prefix};
+use gradient_sources::{nix_store_path, strip_store_prefix};
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};

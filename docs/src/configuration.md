@@ -101,7 +101,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.trustedProxies` | `127.0.0.1/32,::1/128` | Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For` (`GRADIENT_TRUSTED_PROXIES`). |
 | `settings.localIps` | `10.0.0.0/8` | Comma-separated CIDR allowlist whose resolved client IPs receive each cache's `local_priority` value (`GRADIENT_LOCAL_IPS`). |
 | `settings.buildMaxAttempts` | `3` | Maximum number of build attempts before a transient failure is promoted to `FailedPermanent`. (`GRADIENT_BUILD_MAX_ATTEMPTS`) |
-| `settings.substituteMissEscalationThreshold` | `2` | Substitute misses (`SubstituteUnavailable` attempts within one evaluation) after which the anchor stops being substitutable and is built like any other. (`GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD`) |
+| `settings.substituteMissEscalationThreshold` | `2` | Penalty-free re-queues of a relay within one evaluation (attempts recorded `SubstituteUnavailable`, whichever failure produced them) after which the anchor stops being substitutable and is built like any other. The only bound on that loop: a re-queue deliberately does not spend a build attempt. (`GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD`) |
 | `settings.inputsUnavailableMaxLoops` | `3` | Max `InputsUnavailable` self-heal loops per build before the circuit breaker opens and the build fails fast instead of churning the cache. (`GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS`) |
 | `settings.buildRetryBackoffSecs` | `30` | Base back-off in seconds before retrying a transient build failure; doubled after each prior attempt (exponential). (`GRADIENT_BUILD_RETRY_BACKOFF_SECS`) |
 | `settings.buildDefaultTimeoutSecs` | `14400` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
@@ -226,7 +226,7 @@ The Job Board records build/eval phase timings, dispatch decisions (with scoring
 | `cacheMetricFlushIntervalSecs` / `GRADIENT_CACHE_METRIC_FLUSH_INTERVAL` | 10 | How often served NAR bytes and counts, accumulated in memory per cache and minute, are added into `cache_metric`. A serve never writes that row itself, so a failed flush costs at most this much traffic telemetry and never a request. |
 | `metricsRetentionRawDays` / `GRADIENT_METRICS_RETENTION_RAW_DAYS` | 14 | Retention for raw `phase_event` / `worker_sample` rows (0 = forever). |
 | `metricsRetentionRollupDays` / `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | 400 | Retention for minute/hour rollups; day/week kept (0 = forever). |
-| `dispatchRetentionDays` / `GRADIENT_DISPATCH_RETENTION_DAYS` | 30 | Retention for `dispatched_job` forensic rows (0 = forever). |
+| `dispatchRetentionDays` / `GRADIENT_DISPATCH_RETENTION_DAYS` | 30 | Retention for `dispatched_job` forensic rows and settled `outbox` rows, delivered and dead-lettered alike (0 = forever). |
 | `workerSampleIntervalSecs` / `GRADIENT_WORKER_SAMPLE_INTERVAL` | 15 | Worker live-metric sampling interval. |
 | `metricsLabelTopn` / `GRADIENT_METRICS_LABEL_TOPN` | 20 | Per-dimension cardinality cap for rollup labels. |
 | `otlpEndpoint` / `GRADIENT_OTLP_ENDPOINT` | null | OTLP collector endpoint for metric push (null disables). |

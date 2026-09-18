@@ -58,6 +58,10 @@ mod m20260915_000000_demand;
 mod m20260915_000001_cached_path_confirmed;
 mod m20260916_000000_path_retention;
 mod m20260917_000001_derivation_build_demanded;
+mod m20260917_000002_outbox;
+mod m20260917_000003_open_work_indexes;
+mod m20260918_000000_gc_freshness_indexes;
+mod m20260918_000001_dispatch_window_columns;
 
 pub struct Migrator;
 
@@ -112,6 +116,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20260915_000001_cached_path_confirmed::Migration),
             Box::new(m20260916_000000_path_retention::Migration),
             Box::new(m20260917_000001_derivation_build_demanded::Migration),
+            Box::new(m20260917_000002_outbox::Migration),
+            Box::new(m20260917_000003_open_work_indexes::Migration),
+            Box::new(m20260918_000000_gc_freshness_indexes::Migration),
+            Box::new(m20260918_000001_dispatch_window_columns::Migration),
         ]
     }
 }

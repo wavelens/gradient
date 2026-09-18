@@ -194,7 +194,8 @@ static SEED_UNREADY: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     SEED_UNREADY_QUERY = || SEED_UNREADY.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 static MARK_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
@@ -234,7 +235,8 @@ crate::sql! {
     WHERE d.derivation = c.derivation
     RETURNING d.derivation, d.unready_deps = 0 AS ready
 "#,
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
@@ -256,7 +258,8 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     RIPPLE_UP_QUERY = || RIPPLE_UP.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 fn promote_sql(scope: &str) -> String {
@@ -283,14 +286,19 @@ crate::sql_lazy! {
 /// `Created` to `Queued` table-wide. The leading conjunct is implied by the gate (a
 /// relay takes the `substitutable` arm, a build the `unready_deps = 0` one) and is
 /// written out anyway: it is the predicate of `idx-derivation_build-promotable`, and
-/// spelling it makes the implication syntactic, so this stays a partial-index lookup
-/// instead of a table pass.
+/// spelling it makes the implication syntactic.
+///
+/// It is still the sweep's, not the queue's: the selective term is the gate's
+/// `build_job` EXISTS, so the planner rightly drives from the jobs and reaches the
+/// anchors through that index rather than scanning it. [`repair_pending`] is the
+/// only caller and it runs table-wide by design.
 static PROMOTE_ANY: LazyLock<String> =
     LazyLock::new(|| promote_sql("(db.unready_deps = 0 OR db.substitutable) AND "));
 
 crate::sql_lazy! {
     PROMOTE_ANY_QUERY = || PROMOTE_ANY.as_str(),
-        params = [];
+        params = [],
+        tier = Sweep;
 }
 
 static PROMOTE_CLOSURE: LazyLock<String> = LazyLock::new(|| {
@@ -305,6 +313,9 @@ crate::sql_lazy! {
     PROMOTE_CLOSURE_QUERY = || PROMOTE_CLOSURE.as_str(),
         params = [EvaluationId],
         tier = Walk,
+        budget = crate::sql::Budget::walk().buffers(1_400_000)
+            .because("the scope is an evaluation's whole dependency closure, and the \
+                      walk that names it reads ~8 buffers per node it visits"),
         flags = [Walk];
 }
 
@@ -411,7 +422,8 @@ static RECOUNT_UNREADY: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     RECOUNT_UNREADY_QUERY = || RECOUNT_UNREADY.as_str(),
-        params = [DerivationIds(64)];
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 crate::sql! {
@@ -665,13 +677,18 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
         "region",
         "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
     );
+    // The parent lookup is fenced with `OFFSET 0` so it stays correlated to the
+    // region member. Unfenced, the planner hoists the whole EXISTS out and answers
+    // it standalone - a sequential scan of every anchor filtered on `demanded`,
+    // which reads the graph to find the parents of a region of a few dozen.
     let seed = format!(
         "SELECT r.derivation FROM region r \
          WHERE EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) \
-            OR EXISTS (SELECT 1 FROM derivation_dependency e \
-                       JOIN derivation_build p ON p.derivation = e.derivation \
+            OR EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent FROM derivation_dependency e \
+                                      WHERE e.dependency = r.derivation OFFSET 0) pe \
+                       JOIN derivation_build p ON p.derivation = pe.parent \
                        JOIN derivation w ON w.id = p.derivation \
-                       WHERE e.dependency = r.derivation AND p.demanded \
+                       WHERE p.demanded \
                          AND p.derivation NOT IN (SELECT derivation FROM region) \
                          AND ({builder}) \
                          AND EXISTS (SELECT 1 FROM build_job bj \

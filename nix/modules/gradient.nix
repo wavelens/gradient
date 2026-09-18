@@ -324,7 +324,7 @@ in {
           cannot starve dispatch.
         '';
         type = lib.types.ints.positive;
-        default = 16;
+        default = 32;
       };
 
       databaseCacheMinConnections = lib.mkOption {
@@ -637,7 +637,7 @@ in {
         };
 
         dispatchRetentionDays = lib.mkOption {
-          description = "Days to retain dispatched_job forensic rows. 0 = keep forever.";
+          description = "Days to retain dispatched_job forensic rows and settled outbox rows. 0 = keep forever.";
           type = lib.types.ints.unsigned;
           default = 30;
         };
@@ -691,7 +691,7 @@ in {
         };
 
         substituteMissEscalationThreshold = lib.mkOption {
-          description = "Substitute misses (SubstituteUnavailable attempts within one evaluation) after which the anchor stops being substitutable and is built like any other (must be >= 1).";
+          description = "Penalty-free re-queues of a relay within one evaluation (attempts recorded SubstituteUnavailable, whichever failure produced them) after which the anchor stops being substitutable and is built like any other (must be >= 1). This is the only bound on that loop: a re-queue deliberately does not spend a build attempt.";
           type = lib.types.ints.positive;
           default = 2;
         };

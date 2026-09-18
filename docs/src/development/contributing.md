@@ -90,16 +90,22 @@ nix build .#checks.x86_64-linux.cli-unittest -L
 #### Toolchain, formatting and lints
 
 The toolchain is pinned in `rust-toolchain.toml` (rustup) and mirrored by the nix devShell
-(`flake.lock`), which stays the source of truth. Formatting is pinned via `backend/rustfmt.toml`
+(`flake.lock`), which stays the source of truth. Formatting is pinned via `rustfmt.toml`
 (`style_edition = "2024"`), so `cargo fmt` is reproducible across rustfmt versions.
 
-Run before pushing (matches CI):
+Both Rust workspaces (`backend/` and `cli/`) carry the same `deny.toml`, `clippy.toml`,
+`rustfmt.toml` and `[workspace.lints]`. Run this from each before pushing (matches CI):
 
 ```sh
-cd backend
 cargo fmt --all --check
 cargo deny check                            # license/advisory policy - GPL-family deps are banned
-nix build .#checks.x86_64-linux.clippy -L   # cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Clippy runs as a flake check per workspace:
+
+```sh
+nix build .#checks.x86_64-linux.clippy -L      # backend
+nix build .#checks.x86_64-linux.cli-clippy -L  # cli
 ```
 
 `#[allow]` policy:
@@ -113,8 +119,8 @@ nix build .#checks.x86_64-linux.clippy -L   # cargo clippy --workspace --all-tar
   those files carry a crate-level `#![expect(clippy::unwrap_used, reason = "...")]` - `expect` rather
   than `allow` so the attribute itself warns once the last `unwrap()` in the file is gone.
 
-CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny; clippy runs as the
-`checks.clippy` flake check.
+CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny over both workspaces as a
+matrix; clippy runs as the `checks.clippy` and `checks.cli-clippy` flake checks.
 
 ### Angular / TypeScript
 

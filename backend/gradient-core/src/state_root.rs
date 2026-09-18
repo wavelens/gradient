@@ -14,13 +14,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use tokio::sync::{Semaphore, broadcast};
+use tokio::sync::{Notify, Semaphore, broadcast};
 use uuid::Uuid;
 
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::cache_metric::CacheTraffic;
-use gradient_db::{CacheDb, DbContext, StatusReactor, WebDb, WorkerDb};
+use gradient_db::{CacheDb, DbContext, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_graph::Graph;
 use gradient_notify::EmailSender;
@@ -81,10 +81,9 @@ pub struct AppState {
     pub scim_group_roles: Arc<ScimGroupRoles>,
     /// Broadcast of live board events to WebSocket subscribers.
     pub board_events: broadcast::Sender<BoardEvent>,
-    /// Terminal-status reaction hook: `ci` turns terminal build/eval statuses
-    /// into forge events and PR-comment reactions. Tests and worker-side flows
-    /// use [`gradient_db::NoReactor`].
-    pub reactor: Arc<dyn StatusReactor>,
+    /// Nudged after every committed write that owes an effect; the effects
+    /// actor waits on it so a delivery does not sit out the 30 s tick.
+    pub outbox_wake: Arc<Notify>,
     /// The graph actor's handle: every write to the dependency graph and the
     /// cache index goes through it.
     pub graph: Arc<Graph>,
@@ -119,7 +118,7 @@ impl AppState {
             storage: self.storage(),
             shutdown: self.shutdown.clone(),
             board_events: self.board_events.clone(),
-            reactor: self.reactor.clone(),
+            outbox_wake: self.outbox_wake.clone(),
         }
     }
 

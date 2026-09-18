@@ -28,11 +28,14 @@ gradient_db::sql! {
     FAILED_ATTEMPT_SQL = "SELECT a.id::text FROM build_attempt a \
      WHERE a.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1) \
        AND a.outcome IN (3, 4)",
-        params = [EvaluationId];
+        params = [EvaluationId],
+        tier = Bulk,
+        budget = gradient_db::sql::Budget::bulk().seq_scan_allowed();
 
     ALL_ATTEMPT_SQL = "SELECT count(*)::text FROM build_attempt a \
      WHERE a.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1)",
-        params = [EvaluationId];
+        params = [EvaluationId],
+        tier = Bulk;
 }
 
 pub fn create_log_table(conn: &Connection) -> Result<()> {

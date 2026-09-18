@@ -15,11 +15,15 @@ permissions:
 
 jobs:
   advisories:
-    name: "cargo-deny advisories"
+    name: "cargo-deny advisories (${{ matrix.workspace }})"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [ backend, cli ]
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          manifest-path: backend/Cargo.toml
+          manifest-path: ${{ matrix.workspace }}/Cargo.toml
           command: check advisories

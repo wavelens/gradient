@@ -6,8 +6,8 @@
 
 //! Background pruning of the metrics firehose tables so they stay bounded.
 //!
-//! Raw `phase_event` / `worker_sample` rows and `dispatched_job` forensic rows
-//! are dropped past their configured age; `metric_rollup` minute/hour buckets
+//! Raw `phase_event` / `worker_sample` rows, `dispatched_job` forensic rows and
+//! settled `outbox` rows are dropped past their configured age; `metric_rollup` minute/hour buckets
 //! are pruned while day/week aggregates are kept indefinitely. All bounds come
 //! from [`MetricsArgs`]; a `0` day-count disables that table's pruning.
 
@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_util::supervision::ChildSpec;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use tracing::{debug, warn};
 
 use super::DbContext;
@@ -69,6 +69,17 @@ async fn run_retention(ctx: &DbContext) {
             .await
         {
             warn!(error = %e, "dispatched_job retention failed");
+        }
+        if let Err(e) = gradient_entity::outbox::Entity::delete_many()
+            .filter(
+                Condition::any()
+                    .add(gradient_entity::outbox::Column::DeliveredAt.lt(cutoff))
+                    .add(gradient_entity::outbox::Column::FailedAt.lt(cutoff)),
+            )
+            .exec(db)
+            .await
+        {
+            warn!(error = %e, "outbox retention failed");
         }
     }
 

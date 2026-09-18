@@ -5,15 +5,14 @@
  */
 
 //! Git source operations: remote ref polling ([`check_task_updates`]),
-//! commit metadata ([`get_commit_info`]), HEAD resolution ([`resolve_head`]),
-//! and SSH flake prefetch ([`Libgit2Prefetcher`]). The shared per-cycle state
-//! lives in [`context::TaskGitContext`]; the public entry points below are
-//! thin wrappers around it.
+//! commit metadata ([`get_commit_info`]), and HEAD resolution
+//! ([`resolve_head`]). The shared per-cycle state lives in
+//! [`context::TaskGitContext`]; the public entry points below are thin
+//! wrappers around it.
 
 mod commit_info;
 mod context;
 mod pktline;
-mod prefetch;
 mod remote;
 mod update_check;
 mod url;
@@ -25,7 +24,6 @@ use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use tracing::instrument;
 
-pub use prefetch::Libgit2Prefetcher;
 pub use remote::{accept_cert, fetch_options_with_ssh};
 
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]

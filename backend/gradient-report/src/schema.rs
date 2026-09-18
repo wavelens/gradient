@@ -11,9 +11,14 @@ use std::path::Path;
 use anyhow::{Context as _, Result};
 use rusqlite::Connection;
 
-/// Bumped whenever an exported table's shape changes, so an inspector can
-/// refuse a file it does not understand rather than print wrong answers.
-pub const SCHEMA_VERSION: i64 = 11;
+/// Bumped whenever an exported table's shape or scope changes, so an inspector
+/// can refuse a file it does not understand rather than print wrong answers.
+///
+/// The inspector ships separately and pins the one version it reads, so a bump
+/// that does not reach it makes it refuse every report this writes - which it
+/// did, sitting on 10 against an exporter writing 11. `report-inspector`'s
+/// derivation reads both constants and fails evaluation when they disagree.
+pub const SCHEMA_VERSION: i64 = 12;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {

@@ -343,6 +343,8 @@ export interface BoardHealth {
   draining: boolean;
   supervised: SupervisedLoop[];
   proto_sessions: number;
+  outbox_pending: number;
+  outbox_failed: number;
 }
 
 export interface DurationsHeatmap {

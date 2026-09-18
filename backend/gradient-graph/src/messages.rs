@@ -8,11 +8,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chrono::NaiveDateTime;
 use gradient_db::ReconcileScope;
 use gradient_types::MCachedPath;
 use gradient_types::ids::{
-    CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
-    ProjectId, TaskId,
+    BuildAttemptId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId,
+    EvaluationId, ProjectId, TaskId,
 };
 use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
@@ -203,4 +204,34 @@ pub struct DemoteReport {
     pub producers: Vec<DerivationId>,
     pub cached_path: Option<MCachedPath>,
     pub others_remain: bool,
+}
+
+/// A bounded maintenance delete, scanned on the pool and applied here. Each
+/// request carries when its scan ran so the actor can re-check what became live
+/// since; `Evaluations` needs no such mark, because an evaluation the sweep
+/// picked cannot become live again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GcRequest {
+    Derivations {
+        candidates: Vec<DerivationId>,
+        scanned_at: NaiveDateTime,
+    },
+    Paths {
+        hashes: Vec<String>,
+        scanned_at: NaiveDateTime,
+    },
+    Evaluations {
+        ids: Vec<EvaluationId>,
+    },
+}
+
+/// What the actor actually removed. The sweep reclaims the objects and log files
+/// of exactly these, never of what it asked about: a row the re-check kept live
+/// must keep its bytes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GcReport {
+    pub deleted_derivations: Vec<DerivationId>,
+    pub attempt_logs: Vec<BuildAttemptId>,
+    pub retired: Vec<String>,
+    pub deleted_evaluations: Vec<EvaluationId>,
 }

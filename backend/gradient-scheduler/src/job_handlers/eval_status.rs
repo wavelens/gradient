@@ -10,8 +10,8 @@ use anyhow::Result;
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
-use gradient_exec::strip_nix_store_prefix;
 use gradient_graph::IngestBatch;
+use gradient_sources::strip_nix_store_prefix;
 use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
 

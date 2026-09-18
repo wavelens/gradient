@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Task Actions dispatch and execution. This module fans build/evaluation
-//! events out to the configured actions ([`dispatch_event`]); the execution and
-//! per-config executors live in [`executor`] and [`send`].
+//! Task Actions dispatch and execution. [`matching_actions`] decides which of a
+//! task's actions an event reaches; the execution and per-config executors live
+//! in [`executor`] and [`send`].
 
 mod crypto;
 mod executor;
@@ -19,7 +19,6 @@ use crate::context::CiContext;
 use gradient_types::{ActionType, CTaskAction, ETaskAction, TaskId};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
-use tracing::{error, warn};
 
 pub use crypto::{
     decrypt_action_secret, decrypt_secret_with_file, encrypt_action_secret,
@@ -50,148 +49,41 @@ fn truncate(mut s: String, max: usize) -> String {
     s
 }
 
-pub async fn dispatch_evaluation_event(
+/// The active actions of `task_id`, in insertion order.
+pub async fn active_actions_for_task(
     ctx: &CiContext,
     task_id: TaskId,
-    event: &str,
-    payload: JsonValue,
-) {
-    dispatch_event(ctx, task_id, event, payload).await;
-}
-
-/// Dispatch the first forge-status event for a freshly-created evaluation.
-///
-/// Replaces the legacy `spawn_pending_ci_for_eval` reporter that was removed
-/// alongside the per-task outbound integration: an eval row that has just
-/// been INSERTed (Queued, or Waiting+Approval/NoCache/Workers due to the
-/// trigger-time gates) never transitions through `update_evaluation_status`,
-/// so the terminal-status reactor would not fire for it. Without
-/// this helper, the commit shows no Gradient check at all until an eval
-/// worker actually starts processing it.
-///
-/// Maps the eval's creation-time state to the matching event:
-/// - `Queued` → `evaluation.queued` (Pending).
-/// - `Waiting + Approval` → `evaluation.action_required` (ActionRequired,
-///   carries the maintainer-approval description).
-/// - `Waiting + NoCache` → `evaluation.queued` (Pending, "no cache" description).
-/// - `Waiting + Workers` → `evaluation.queued` (Pending, "no eval-capable
-///   worker" description). Issue #268.
-pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &gradient_types::MEvaluation) {
-    use gradient_entity::evaluation::EvaluationStatus;
-    use gradient_types::waiting_reason::WaitingReason;
-
-    let Some(task_id) = eval.task else {
-        return;
-    };
-
-    let reason = eval
-        .waiting_reason
-        .as_ref()
-        .and_then(WaitingReason::from_json);
-
-    let (event, description) = match (eval.status, reason) {
-        (EvaluationStatus::Queued, _) => ("evaluation.queued", None),
-        (EvaluationStatus::Waiting, Some(WaitingReason::Approval { .. })) => (
-            "evaluation.action_required",
-            Some("Awaiting maintainer approval for external contributor PR."),
-        ),
-        (EvaluationStatus::Waiting, Some(WaitingReason::NoCache)) => (
-            "evaluation.queued",
-            Some("Waiting for a writable cache subscription before this evaluation can run."),
-        ),
-        (EvaluationStatus::Waiting, Some(WaitingReason::CacheStorageFull)) => (
-            "evaluation.queued",
-            Some("Waiting for cache storage to free up before this evaluation can run."),
-        ),
-        (
-            EvaluationStatus::Waiting,
-            Some(WaitingReason::Workers {
-                connected_workers: 0,
-                ..
-            }),
-        ) => (
-            "evaluation.queued",
-            Some("Waiting for an eval-capable worker to be registered on the project."),
-        ),
-        _ => return,
-    };
-
-    let mut payload = serde_json::json!({
-        "evaluation_id": eval.id,
-        "task_id": eval.task,
-        "repository": eval.repository,
-        "status": event,
-    });
-    if let Some(text) = description {
-        payload["description"] = JsonValue::String(text.to_string());
-    }
-
-    dispatch_evaluation_event(ctx, task_id, event, payload).await;
-}
-
-pub async fn dispatch_build_event(
-    ctx: &CiContext,
-    task_id: TaskId,
-    event: &str,
-    payload: JsonValue,
-) {
-    dispatch_event(ctx, task_id, event, payload).await;
-}
-
-async fn dispatch_event(ctx: &CiContext, task_id: TaskId, event: &str, payload: JsonValue) {
-    let actions = match ETaskAction::find()
+) -> Result<Vec<gradient_types::MTaskAction>, sea_orm::DbErr> {
+    ETaskAction::find()
         .filter(CTaskAction::Task.eq(task_id))
         .filter(CTaskAction::Active.eq(true))
         .all(&ctx.db.worker_db)
         .await
-    {
-        Ok(a) => a,
-        Err(e) => {
-            error!(error = %e, %task_id, "Failed to load task actions");
-            return;
-        }
-    };
-
-    for action in actions {
-        if !matches_event(&action, event) {
-            continue;
-        }
-        let is_input_update =
-            payload.get("evaluation_kind").and_then(|v| v.as_str()) == Some("input_update");
-
-        // `OpenPr` fires on a normal gate event (build/eval completed) but must
-        // only act on `input_update` evaluations, never regular CI runs.
-        if action.action_type == ActionType::OpenPr && !is_input_update {
-            continue;
-        }
-        // `forge_status_report` posts a CI status against a real commit/PR; an
-        // `input_update` eval is an internal bump whose own commit is blank until
-        // its PR is pushed, so skip it - the PR's own CI run reports normally.
-        if action.action_type == ActionType::ForgeStatusReport && is_input_update {
-            continue;
-        }
-
-        let ctx = ctx.clone();
-        let payload = payload.clone();
-        let event = event.to_string();
-        let shutdown = ctx.db.shutdown.clone();
-        shutdown.spawn(async move {
-            // A mass status-transition wave (promotion, thaw, requeue) fires
-            // one event per anchor; unbounded execution exhausted the DB pool
-            // and convoyed on the per-action bookkeeping row.
-            let Ok(_permit) = std::sync::Arc::clone(&ACTION_PERMITS).acquire_owned().await else {
-                return;
-            };
-            if let Err(e) = execute_action(&ctx, action, &event, payload).await {
-                warn!(error = %e, "Action execution failed");
-            }
-        });
-    }
 }
 
-/// Process-wide bound on concurrently executing task actions.
-static ACTION_PERMITS: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
-    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(8)));
+/// The actions that react to `event`, with the two payload rules: `OpenPr` only
+/// on input-update evaluations, forge reports never on them.
+///
+/// `OpenPr` fires on a normal gate event (build/eval completed) but must only
+/// act on `input_update` evaluations, never regular CI runs. A
+/// `forge_status_report` posts a CI status against a real commit/PR, and an
+/// `input_update` eval is an internal bump whose own commit is blank until its
+/// PR is pushed, so it is skipped there: the PR's own CI run reports normally.
+pub fn matching_actions(
+    actions: Vec<gradient_types::MTaskAction>,
+    event: &str,
+    payload: &JsonValue,
+) -> Vec<gradient_types::MTaskAction> {
+    let is_input_update =
+        payload.get("evaluation_kind").and_then(|v| v.as_str()) == Some("input_update");
+
+    actions
+        .into_iter()
+        .filter(|a| matches_event(a, event))
+        .filter(|a| a.action_type != ActionType::OpenPr || is_input_update)
+        .filter(|a| a.action_type != ActionType::ForgeStatusReport || !is_input_update)
+        .collect()
+}
 
 #[cfg(test)]
 mod tests;

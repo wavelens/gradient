@@ -6,15 +6,16 @@
 
 //! State-machine-guarded transitions of the global `derivation_build` anchor.
 //! One anchor transition fans out to every evaluation that references the
-//! derivation (its `build_job`s): board events, per-eval CI reactor calls, and one
+//! derivation (its `build_job`s): board events, per-eval outbox rows, and one
 //! bump of every referencing evaluation's graph version. Graph-driven promotion
 //! runs on terminal-success; dependency-failure cascades on terminal-failure.
 
 use super::effects::{TransitionChange, emit_transition_effects};
-use super::logging::{PhaseSubjectKind, finalize_build_log, record_phase_event};
+use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::outbox::OutboxKind;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -68,7 +69,7 @@ pub async fn update_derivation_build_status(
         }
     };
 
-    // All fan-out (graph version, board events, CI reactor, cache-changed) goes
+    // All fan-out (graph version, board events, outbox rows, cache-changed) goes
     // through the one effects emitter - the same path the bulk sweeps feed - so
     // the reactive and proactive models can never drift apart.
     emit_transition_effects(
@@ -105,33 +106,22 @@ pub async fn update_derivation_build_status(
         }
     }
 
-    let pe_ctx = ctx.detached();
-    let pe_worker = crate::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id)
+    // Awaited, not spawned: the emitter above already wrote this transition's
+    // outbox rows in this transaction, and a detached writer racing it was how a
+    // phase timeline went missing for a build the reader had already seen.
+    let worker = crate::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id)
         .await
         .ok()
         .flatten();
-    let pe_id = updated.id.into_inner();
-    ctx.shutdown.spawn(async move {
-        record_phase_event(
-            &pe_ctx.worker_db,
-            PhaseSubjectKind::Build,
-            pe_id,
-            i32::from(status) as i16,
-            pe_worker,
-            now,
-        )
-        .await;
-    });
-
-    if BuildStateMachine::is_terminal(&status)
-        && let Ok(Some(attempt_id)) =
-            crate::build_attempt::latest_attempt_id(&ctx.worker_db, updated.id).await
-    {
-        let log_ctx = ctx.detached();
-        ctx.shutdown.spawn(async move {
-            finalize_build_log(&log_ctx, attempt_id).await;
-        });
-    }
+    record_phase_event(
+        &ctx.worker_db,
+        PhaseSubjectKind::Build,
+        updated.id.into_inner(),
+        i32::from(status) as i16,
+        worker,
+        now,
+    )
+    .await;
 
     updated
 }
@@ -167,9 +157,9 @@ pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &
     emit_transition_effects(ctx, &changes).await;
 }
 
-/// Announce each entry point's current anchor status through the CI reactor as
-/// its `entry_point` row is recorded, so a forge check exists the moment the
-/// entry point evaluates: pending for `Created`, immediate green/red for an
+/// Write the outbox row for each entry point's current anchor status as its
+/// `entry_point` row is recorded, so a forge check exists the moment the entry
+/// point evaluates: pending for `Created`, immediate green/red for an
 /// already-terminal anchor that never transitions in this eval. Unlike
 /// [`emit_transition_effects`] this reports `Created` too; callers pass one
 /// streamed batch, and every query is scoped to `evaluation`.
@@ -230,12 +220,21 @@ pub async fn announce_entry_point_statuses(
             continue;
         };
 
-        let action_ctx = ctx.detached();
-        ctx.shutdown.spawn(async move {
-            action_ctx
-                .reactor
-                .on_build_status_changed(&action_ctx, job, status)
-                .await;
-        });
+        if let Err(e) = crate::outbox::enqueue(
+            db,
+            OutboxKind::BuildStatus,
+            format!("{}:{}", job.id, i32::from(status)),
+            serde_json::json!({
+                "build_job": job.id,
+                "evaluation": job.evaluation,
+                "derivation": job.derivation,
+                "status": i32::from(status),
+            }),
+        )
+        .await
+        {
+            error!(error = %e, build_job = %job.id, "failed to enqueue an entry point's first report");
+        }
     }
+    ctx.outbox_wake.notify_one();
 }

@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-use crate::lock::FlakeLock;
-use crate::resolver::RevisionResolver;
+use super::lock::FlakeLock;
+use super::resolver::RevisionResolver;
 
 /// A tracked flake input name (a key in the root node's `inputs`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -186,9 +186,9 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::lock::LockedRef;
+    use super::super::resolver::ResolvedRev;
     use super::*;
-    use crate::lock::LockedRef;
-    use crate::resolver::ResolvedRev;
     use std::collections::HashMap;
 
     struct FakeResolver(HashMap<String, ResolvedRev>);

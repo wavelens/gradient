@@ -3312,6 +3312,11 @@ paths:
         failed-build logs as a SQLite database, for attaching to a bug report.
         Open it with any SQLite client, or with the `gradient-report` inspector.
 
+        The export carries the direct dependencies of the evaluation's
+        derivations and the paths their outputs reference, so `unready_deps` and
+        `missing_references` can be recomputed from the file alone and an absent
+        row means the instance never had it.
+
         Requires authentication even for a public project, whose evaluations are
         otherwise browsable anonymously: a report reads every failed build's log
         in one request. Reading the evaluation requires `ViewProject`.
@@ -7189,6 +7194,12 @@ paths:
                           unconfirmed_nars:
                             type: integer
                             description: cached_path rows whose object the background uploader still owes to storage.
+                          outbox_pending:
+                            type: integer
+                            description: Effect rows still owed to the outside world (forge reports, action deliveries, log finalization).
+                          outbox_failed:
+                            type: integer
+                            description: Effect rows that gave up after their last retry and stay as dead letters until the retention pass.
                           hot_nar_cache:
                             type: object
                             description: The in-memory small-NAR cache.

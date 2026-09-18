@@ -12,105 +12,184 @@
 //! Grows the e2e VM's real rows to production shape. A sequential scan of 951
 //! derivations is the planner's correct choice, so a budget measured at that
 //! size means nothing. Clones copy real rows rather than generating uniform
-//! ones, which keeps the graph's own distribution.
+//! ones, which keeps the graph's own distribution, and every key is derived
+//! from the original and the copy index: a copy of a row that referenced
+//! another therefore references that row's copy, and the whole database grows
+//! as one consistent graph rather than a pile of orphans.
+
+use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, Value};
 
 pub enum Rewrite {
-    /// Primary key: a fresh uuid per copy.
-    NewUuid,
-    /// Unique 32-char store hash: deterministic per copy, so an edge table can
-    /// join a clone to its original without a mapping table.
+    /// A uuid key or foreign key. The copy's value is a function of the
+    /// original and the copy index, so a reference finds the copy of the row it
+    /// pointed at without a mapping table, and a NULL stays NULL.
+    Remap,
+    /// A 32-char store hash, derived the same way.
     Rehash,
-    /// The marker column. Its `amp-` prefix is what keeps a clone from being
-    /// cloned again, and what a later phase would exclude on.
+    /// A column a unique index covers: the copy index keeps it unique and the
+    /// `amp` prefix says the row is synthetic.
     Mark,
-    /// FK to `derivation`: the row follows its derivation, so the copy points at
-    /// the copy of that derivation and never at the original. A table with one
-    /// of these carries no marker of its own - the derivation it hangs off is
-    /// what says whether the row is already a clone.
-    ClonedDerivation,
-    /// FK to `derivation_build`: the anchor of that copied derivation. Joined
-    /// rather than computed, so a copy with no anchor is dropped instead of
-    /// pointing at a row that does not exist.
-    ClonedAnchor,
+    /// A column spelled out rather than copied, for a value derived from one of
+    /// the rewritten ones.
+    Expr(&'static str),
+}
+
+enum Scale {
+    /// Copy until the table holds about this many rows.
+    To(u64),
+    /// Take another table's copy count, so a copy never points at one that was
+    /// never made.
+    With(&'static str),
 }
 
 struct Target {
     table: &'static str,
-    rows: u64,
+    scale: Scale,
     rewrite: &'static [(&'static str, Rewrite)],
 }
 
+/// Ordered by foreign key: a table is cloned only once the tables it points at
+/// have been. `build_job` appears twice on purpose - once per cloned derivation
+/// so the live evaluation carries a full-size job set, then once per cloned
+/// evaluation so the table is many evaluations wide, which is what makes a
+/// lookup by evaluation selective the way it is in production.
 const TARGETS: &[Target] = &[
     Target {
-        table: "derivation",
-        rows: 500_000,
+        table: "project",
+        scale: Scale::To(20),
+        rewrite: &[("id", Rewrite::Remap), ("name", Rewrite::Mark)],
+    },
+    Target {
+        table: "task",
+        scale: Scale::With("project"),
+        rewrite: &[("id", Rewrite::Remap), ("project", Rewrite::Remap)],
+    },
+    Target {
+        table: "evaluation",
+        scale: Scale::With("project"),
         rewrite: &[
-            ("id", Rewrite::NewUuid),
+            ("id", Rewrite::Remap),
+            ("task", Rewrite::Remap),
+            ("previous", Rewrite::Remap),
+            ("next", Rewrite::Remap),
+        ],
+    },
+    Target {
+        table: "entry_point",
+        scale: Scale::With("project"),
+        rewrite: &[
+            ("id", Rewrite::Remap),
+            ("task", Rewrite::Remap),
+            ("evaluation", Rewrite::Remap),
+        ],
+    },
+    Target {
+        table: "derivation",
+        scale: Scale::To(100_000),
+        rewrite: &[
+            ("id", Rewrite::Remap),
             ("hash", Rewrite::Rehash),
             ("name", Rewrite::Mark),
         ],
     },
     Target {
+        table: "derivation_build",
+        scale: Scale::With("derivation"),
+        rewrite: &[("id", Rewrite::Remap), ("derivation", Rewrite::Remap)],
+    },
+    Target {
         table: "cached_path",
-        rows: 300_000,
+        scale: Scale::With("derivation"),
         rewrite: &[
-            ("id", Rewrite::NewUuid),
+            ("id", Rewrite::Remap),
             ("hash", Rewrite::Rehash),
             ("package", Rewrite::Mark),
         ],
     },
     Target {
-        table: "derivation_build",
-        rows: 500_000,
+        table: "cached_path_signature",
+        scale: Scale::With("derivation"),
+        rewrite: &[("id", Rewrite::Remap), ("cached_path", Rewrite::Remap)],
+    },
+    Target {
+        table: "cached_path_reference",
+        scale: Scale::With("derivation"),
         rewrite: &[
-            ("id", Rewrite::NewUuid),
-            ("derivation", Rewrite::ClonedDerivation),
+            ("referrer", Rewrite::Rehash),
+            ("reference_hash", Rewrite::Rehash),
+            (
+                "reference",
+                Rewrite::Expr(
+                    "'/nix/store/' || substr(md5(t.reference_hash || g.i::text), 1, 32) || '-amp'",
+                ),
+            ),
+        ],
+    },
+    Target {
+        table: "derivation_output",
+        scale: Scale::With("derivation"),
+        rewrite: &[
+            ("id", Rewrite::Remap),
+            ("derivation", Rewrite::Remap),
+            ("hash", Rewrite::Rehash),
+            ("cached_path", Rewrite::Remap),
+        ],
+    },
+    Target {
+        table: "derivation_dependency",
+        scale: Scale::With("derivation"),
+        rewrite: &[
+            ("derivation", Rewrite::Remap),
+            ("dependency", Rewrite::Remap),
+        ],
+    },
+    Target {
+        table: "derivation_input_source",
+        scale: Scale::With("derivation"),
+        rewrite: &[("derivation", Rewrite::Remap), ("hash", Rewrite::Rehash)],
+    },
+    Target {
+        table: "debug_info",
+        scale: Scale::With("derivation"),
+        rewrite: &[("id", Rewrite::Remap), ("cached_path", Rewrite::Remap)],
+    },
+    Target {
+        table: "build_job",
+        scale: Scale::With("derivation"),
+        rewrite: &[
+            ("id", Rewrite::Remap),
+            ("derivation", Rewrite::Remap),
+            ("derivation_build", Rewrite::Remap),
+        ],
+    },
+    Target {
+        table: "dispatched_job",
+        scale: Scale::With("derivation"),
+        rewrite: &[("id", Rewrite::Remap)],
+    },
+    Target {
+        table: "build_attempt",
+        scale: Scale::With("derivation"),
+        rewrite: &[
+            ("id", Rewrite::Remap),
+            ("derivation_build", Rewrite::Remap),
+            ("dispatched_job", Rewrite::Remap),
+            ("build_job", Rewrite::Remap),
         ],
     },
     Target {
         table: "build_job",
-        rows: 200_000,
-        rewrite: &[
-            ("id", Rewrite::NewUuid),
-            ("derivation", Rewrite::ClonedDerivation),
-            ("derivation_build", Rewrite::ClonedAnchor),
-        ],
-    },
-    Target {
-        table: "project",
-        rows: 10_000,
-        rewrite: &[("id", Rewrite::NewUuid), ("name", Rewrite::Mark)],
+        scale: Scale::With("project"),
+        rewrite: &[("id", Rewrite::Remap), ("evaluation", Rewrite::Remap)],
     },
 ];
 
-const EDGE_DEPENDENCY: &str = "\
-INSERT INTO derivation_dependency (derivation, dependency) \
-SELECT ca.id, cb.id \
-FROM derivation_dependency e \
-JOIN derivation oa ON oa.id = e.derivation \
-JOIN derivation ob ON ob.id = e.dependency \
-CROSS JOIN generate_series(1, $1) g(i) \
-JOIN derivation ca ON ca.hash = substr(md5(oa.hash || g.i::text), 1, 32) \
-JOIN derivation cb ON cb.hash = substr(md5(ob.hash || g.i::text), 1, 32) \
-WHERE oa.name NOT LIKE 'amp-%' AND ob.name NOT LIKE 'amp-%' \
-ON CONFLICT DO NOTHING";
-
-const EDGE_REFERENCE: &str = "\
-INSERT INTO cached_path_reference (referrer, reference, reference_hash, position) \
-SELECT ca.hash, ca.hash || '-' || r.position::text, cb.hash, r.position \
-FROM cached_path_reference r \
-JOIN cached_path oa ON oa.hash = r.referrer \
-JOIN cached_path ob ON ob.hash = r.reference_hash \
-CROSS JOIN generate_series(1, $1) g(i) \
-JOIN cached_path ca ON ca.hash = substr(md5(oa.hash || g.i::text), 1, 32) \
-JOIN cached_path cb ON cb.hash = substr(md5(ob.hash || g.i::text), 1, 32) \
-WHERE oa.package NOT LIKE 'amp-%' AND ob.package NOT LIKE 'amp-%' \
-ON CONFLICT DO NOTHING";
-
 pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
+    let mut counts: HashMap<&str, i32> = HashMap::new();
+
     for target in TARGETS {
         let live = count(db, target.table).await?;
         if live == 0 {
@@ -118,11 +197,22 @@ pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
             continue;
         }
 
-        let copies = (target.rows / u64::from(scale.max(1)) / live).max(1);
+        let copies = match target.scale {
+            Scale::To(rows) => {
+                let copies = (rows / u64::from(scale.max(1)) / live).max(1) as i32;
+                counts.insert(target.table, copies);
+                copies
+            }
+
+            Scale::With(table) => *counts
+                .get(table)
+                .with_context(|| format!("{} follows {table}, which set no count", target.table))?,
+        };
+
         let columns = columns(db, target.table).await?;
         let sql = clone_sql(target.table, &columns, target.rewrite);
 
-        execute(db, &sql, copies as i32)
+        execute(db, &sql, copies)
             .await
             .with_context(|| format!("amplifying {}", target.table))?;
 
@@ -135,25 +225,14 @@ pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
         );
     }
 
-    for (table, sql) in [
-        ("derivation_dependency", EDGE_DEPENDENCY),
-        ("cached_path_reference", EDGE_REFERENCE),
-    ] {
-        let copies = edge_copies(db, table, scale).await?;
-        execute(db, sql, copies)
-            .await
-            .with_context(|| format!("amplifying {table}"))?;
-
-        analyze(db, table).await?;
-        println!("amplify: {table} -> {} rows", count(db, table).await?);
-    }
-
     Ok(())
 }
 
 /// One clone pass over `table`: every column is copied verbatim unless the
 /// rewrite list gives it a new value. The column list comes from the database,
-/// so a schema change cannot leave a stale one behind.
+/// so a schema change cannot leave a stale one behind, and the pass needs no
+/// guard against reading its own output because an `INSERT ... SELECT` never
+/// sees the rows it is writing.
 pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -> String {
     let exprs: Vec<String> = columns
         .iter()
@@ -163,50 +242,18 @@ pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -
                 .find(|(name, _)| name == column)
                 .map(|(_, r)| r)
             {
-                Some(Rewrite::NewUuid) => "uuidv7()".to_string(),
+                Some(Rewrite::Remap) => format!("md5(t.{column}::text || g.i::text)::uuid"),
                 Some(Rewrite::Rehash) => format!("substr(md5(t.{column} || g.i::text), 1, 32)"),
-                Some(Rewrite::Mark) => format!("'amp-' || t.{column}"),
-                Some(Rewrite::ClonedDerivation) => "c.id".to_string(),
-                Some(Rewrite::ClonedAnchor) => "cb.id".to_string(),
+                Some(Rewrite::Mark) => format!("'amp' || g.i::text || '-' || t.{column}"),
+                Some(Rewrite::Expr(sql)) => (*sql).to_string(),
                 None => format!("t.{column}"),
             }
         })
         .collect();
 
-    let derivation = rewrite
-        .iter()
-        .find(|(_, r)| matches!(r, Rewrite::ClonedDerivation))
-        .map(|(column, _)| *column);
-
-    let (from, guard) = match derivation {
-        Some(column) => (
-            format!(
-                "FROM {table} t CROSS JOIN generate_series(1, $1) g(i) \
-                 JOIN derivation o ON o.id = t.{column} \
-                 JOIN derivation c ON c.hash = substr(md5(o.hash || g.i::text), 1, 32){anchor}",
-                anchor = if rewrite
-                    .iter()
-                    .any(|(_, r)| matches!(r, Rewrite::ClonedAnchor))
-                {
-                    " JOIN derivation_build cb ON cb.derivation = c.id"
-                } else {
-                    ""
-                },
-            ),
-            " WHERE o.name NOT LIKE 'amp-%'".to_string(),
-        ),
-        None => (
-            format!("FROM {table} t, generate_series(1, $1) g(i)"),
-            rewrite
-                .iter()
-                .find(|(_, r)| matches!(r, Rewrite::Mark))
-                .map(|(column, _)| format!(" WHERE t.{column} NOT LIKE 'amp-%'"))
-                .unwrap_or_default(),
-        ),
-    };
-
     format!(
-        "INSERT INTO {table} ({}) SELECT {} {from}{guard} ON CONFLICT DO NOTHING",
+        "INSERT INTO {table} ({}) SELECT {} FROM {table} t, generate_series(1, $1) g(i) \
+         ON CONFLICT DO NOTHING",
         columns.join(", "),
         exprs.join(", "),
     )
@@ -269,25 +316,9 @@ async fn count(db: &DatabaseConnection, table: &str) -> Result<u64> {
     Ok(row.try_get::<i64>("", "n")? as u64)
 }
 
-/// Edges follow their endpoints: cloning them more often than the derivations
-/// they join would only re-insert the same pairs.
-async fn edge_copies(db: &DatabaseConnection, table: &str, scale: u32) -> Result<i32> {
-    let endpoints = match table {
-        "cached_path_reference" => count(db, "cached_path").await?,
-        _ => count(db, "derivation").await?,
-    };
-
-    let target = match table {
-        "cached_path_reference" => 300_000,
-        _ => 500_000,
-    };
-
-    Ok((target / u64::from(scale.max(1)) / endpoints.max(1)).max(1) as i32)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Rewrite, clone_sql};
+    use super::{Rewrite, Scale, TARGETS, clone_sql};
 
     #[test]
     fn a_clone_rewrites_the_key_and_copies_the_rest() {
@@ -296,7 +327,7 @@ mod tests {
             "derivation",
             &columns,
             &[
-                ("id", Rewrite::NewUuid),
+                ("id", Rewrite::Remap),
                 ("hash", Rewrite::Rehash),
                 ("name", Rewrite::Mark),
             ],
@@ -306,12 +337,12 @@ mod tests {
             sql.starts_with("INSERT INTO derivation (id, hash, name)"),
             "{sql}"
         );
-        assert!(sql.contains("uuidv7()"), "{sql}");
+        assert!(sql.contains("md5(t.id::text || g.i::text)::uuid"), "{sql}");
         assert!(
             sql.contains("substr(md5(t.hash || g.i::text), 1, 32)"),
             "{sql}"
         );
-        assert!(sql.contains("'amp-' || t.name"), "{sql}");
+        assert!(sql.contains("'amp' || g.i::text || '-' || t.name"), "{sql}");
         assert!(sql.contains("generate_series(1, $1) g(i)"), "{sql}");
         assert!(sql.ends_with("ON CONFLICT DO NOTHING"), "{sql}");
     }
@@ -319,47 +350,39 @@ mod tests {
     #[test]
     fn an_unrewritten_column_is_copied_verbatim() {
         let columns = ["id".to_string(), "created_at".to_string()];
-        let sql = clone_sql("derivation", &columns, &[("id", Rewrite::NewUuid)]);
+        let sql = clone_sql("derivation", &columns, &[("id", Rewrite::Remap)]);
         assert!(sql.contains("t.created_at"), "{sql}");
     }
 
+    /// A foreign key and the primary key it points at are rewritten by the same
+    /// function, which is what keeps a copied row pointing at copied rows.
     #[test]
-    fn a_row_that_hangs_off_a_derivation_follows_its_copy() {
-        let columns = [
-            "id".to_string(),
-            "derivation".to_string(),
-            "derivation_build".to_string(),
-        ];
-        let sql = clone_sql(
-            "build_job",
-            &columns,
-            &[
-                ("id", Rewrite::NewUuid),
-                ("derivation", Rewrite::ClonedDerivation),
-                ("derivation_build", Rewrite::ClonedAnchor),
-            ],
+    fn a_foreign_key_lands_on_the_copy_of_the_row_it_named() {
+        let key = clone_sql("derivation", &["id".to_string()], &[("id", Rewrite::Remap)]);
+        let fk = clone_sql(
+            "derivation_build",
+            &["derivation".to_string()],
+            &[("derivation", Rewrite::Remap)],
         );
 
-        assert!(sql.contains("SELECT uuidv7(), c.id, cb.id"), "{sql}");
+        assert!(key.contains("md5(t.id::text || g.i::text)::uuid"), "{key}");
         assert!(
-            sql.contains("JOIN derivation o ON o.id = t.derivation"),
-            "{sql}"
+            fk.contains("md5(t.derivation::text || g.i::text)::uuid"),
+            "{fk}"
         );
-        assert!(
-            sql.contains("JOIN derivation c ON c.hash = substr(md5(o.hash || g.i::text), 1, 32)"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("JOIN derivation_build cb ON cb.derivation = c.id"),
-            "{sql}"
-        );
-        assert!(sql.contains("WHERE o.name NOT LIKE 'amp-%'"), "{sql}");
     }
 
     #[test]
-    fn the_clone_never_reads_its_own_output() {
-        let columns = ["id".to_string(), "name".to_string()];
-        let sql = clone_sql("derivation", &columns, &[("name", Rewrite::Mark)]);
-        assert!(sql.contains("WHERE t.name NOT LIKE 'amp-%'"), "{sql}");
+    fn every_followed_table_is_cloned_before_the_tables_that_follow_it() {
+        let mut set: Vec<&str> = Vec::new();
+
+        for target in TARGETS {
+            match target.scale {
+                Scale::To(_) => set.push(target.table),
+                Scale::With(table) => {
+                    assert!(set.contains(&table), "{} follows {table}", target.table)
+                }
+            }
+        }
     }
 }

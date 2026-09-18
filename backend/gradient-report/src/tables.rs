@@ -82,7 +82,7 @@ pub fn redact_value(
 }
 
 macro_rules! spec {
-    ($name:literal, $ddl:literal, $sql:literal, $scope:literal, [$($col:literal),* $(,)?]) => {
+    ($name:literal, $ddl:literal, $sql:expr, $scope:literal, [$($col:literal),* $(,)?]) => {
         TableSpec {
             name: $name,
             ddl: $ddl,
@@ -90,6 +90,68 @@ macro_rules! spec {
             scope: $scope,
             columns: &[$($col),*],
         }
+    };
+}
+
+/// The derivations this evaluation drove: the ones it opened a `build_job` for.
+macro_rules! own_derivations {
+    () => {
+        "SELECT derivation FROM build_job WHERE evaluation = $1"
+    };
+}
+
+/// The anchors behind those derivations.
+macro_rules! own_anchors {
+    () => {
+        "SELECT derivation_build FROM build_job WHERE evaluation = $1"
+    };
+}
+
+/// Those derivations plus every direct dependency of one.
+///
+/// `unready_deps` is one count per EDGE over exactly this set, and the readiness it
+/// counts is a property of the dependency's own anchor, outputs and cached paths.
+/// Export the edges without their far end and neither counter can be checked: the
+/// `LEFT JOIN ... IS NULL` rule that makes a missing dependency count as unready
+/// fires on every dependency the file merely left out, which turned a correct
+/// stored `1` into a recomputed `24` on a real report. One hop is the whole
+/// requirement - a dependency's own dependencies are already summarised in its
+/// stored `unready_deps`, which is why this is a boundary and not a closure.
+macro_rules! derivation_scope {
+    () => {
+        concat!(
+            own_derivations!(),
+            " UNION SELECT e.dependency FROM derivation_dependency e WHERE e.derivation IN (",
+            own_derivations!(),
+            ")"
+        )
+    };
+}
+
+/// Every output hash of every derivation the report carries.
+macro_rules! output_hashes {
+    () => {
+        concat!(
+            "SELECT o.hash FROM derivation_output o WHERE o.derivation IN (",
+            derivation_scope!(),
+            ")"
+        )
+    };
+}
+
+/// Those, plus every path they reference. `missing_references` counts one per
+/// reference whose row is absent, unbacked or itself not whole, so the referenced
+/// rows are what makes that count checkable - and what makes an absent row mean the
+/// instance never had the path rather than the export never asked for it. That
+/// distinction is the whole diagnosis on an unwhole closure.
+macro_rules! cached_path_scope {
+    () => {
+        concat!(
+            output_hashes!(),
+            " UNION SELECT r.reference_hash FROM cached_path_reference r WHERE r.referrer IN (",
+            output_hashes!(),
+            ")"
+        )
     };
 }
 
@@ -188,8 +250,12 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         spec!(
             "build_job",
             "CREATE TABLE build_job (id TEXT, evaluation TEXT, derivation TEXT, derivation_build TEXT, score REAL, score_breakdown TEXT, created_at TEXT)",
-            "SELECT id::text, evaluation::text, derivation::text, derivation_build::text, score::text, score_breakdown::text, created_at::text FROM build_job WHERE evaluation = $1",
-            "the evaluation",
+            concat!(
+                "SELECT id::text, evaluation::text, derivation::text, derivation_build::text, score::text, score_breakdown::text, created_at::text FROM build_job WHERE evaluation = $1 OR id IN (SELECT a.build_job FROM build_attempt a WHERE a.derivation_build IN (",
+                own_anchors!(),
+                "))"
+            ),
+            "the evaluation, plus every job an exported attempt was made under",
             [
                 "id",
                 "evaluation",
@@ -202,9 +268,13 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_build",
-            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER)",
-            "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text FROM derivation_build db WHERE db.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
-            "the evaluation's derivations, shared with every other evaluation that built them",
+            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER)",
+            concat!(
+                "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text, db.demanded::int::text FROM derivation_build db WHERE db.derivation IN (",
+                derivation_scope!(),
+                ")"
+            ),
+            "the evaluation's derivations and their direct dependencies, shared with every other evaluation that built them",
             [
                 "id",
                 "derivation",
@@ -220,14 +290,19 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "ready_at",
                 "dispatched_at",
                 "fetchable",
-                "unready_deps"
+                "unready_deps",
+                "demanded"
             ]
         ),
         spec!(
             "derivation",
             "CREATE TABLE derivation (id TEXT, created_at TEXT, architecture TEXT, hash TEXT, name TEXT, pname TEXT, prefer_local_build INTEGER, allow_substitutes INTEGER, closure_size INTEGER, is_fixed_output INTEGER, walked INTEGER)",
-            "SELECT d.id::text, d.created_at::text, d.architecture::text, d.hash::text, d.name::text, d.pname::text, d.prefer_local_build::int::text, d.allow_substitutes::int::text, d.closure_size::text, d.is_fixed_output::int::text, d.walked::int::text FROM derivation d WHERE d.id IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
-            "the evaluation's derivations, shared with every other evaluation that built them",
+            concat!(
+                "SELECT d.id::text, d.created_at::text, d.architecture::text, d.hash::text, d.name::text, d.pname::text, d.prefer_local_build::int::text, d.allow_substitutes::int::text, d.closure_size::text, d.is_fixed_output::int::text, d.walked::int::text FROM derivation d WHERE d.id IN (",
+                derivation_scope!(),
+                ")"
+            ),
+            "the evaluation's derivations and their direct dependencies, shared with every other evaluation that built them",
             [
                 "id",
                 "created_at",
@@ -245,8 +320,12 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         spec!(
             "derivation_output",
             "CREATE TABLE derivation_output (id TEXT, derivation TEXT, name TEXT, hash TEXT, package TEXT, ca TEXT, nar_size INTEGER, is_cached INTEGER, created_at TEXT, cached_path TEXT, external_url TEXT, nar_hash TEXT, file_size INTEGER, references_list TEXT, deriver TEXT, file_hash TEXT)",
-            "SELECT o.id::text, o.derivation::text, o.name::text, o.hash::text, o.package::text, o.ca::text, o.nar_size::text, o.is_cached::int::text, o.created_at::text, o.cached_path::text, o.external_url::text, o.nar_hash::text, o.file_size::text, o.references_list::text, o.deriver::text, o.file_hash::text FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
-            "the evaluation's derivations, shared with every other evaluation that built them",
+            concat!(
+                "SELECT o.id::text, o.derivation::text, o.name::text, o.hash::text, o.package::text, o.ca::text, o.nar_size::text, o.is_cached::int::text, o.created_at::text, o.cached_path::text, o.external_url::text, o.nar_hash::text, o.file_size::text, o.references_list::text, o.deriver::text, o.file_hash::text FROM derivation_output o WHERE o.derivation IN (",
+                derivation_scope!(),
+                ")"
+            ),
+            "the evaluation's derivations and their direct dependencies, shared with every other evaluation that built them",
             [
                 "id",
                 "derivation",
@@ -269,7 +348,11 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         spec!(
             "build_attempt",
             "CREATE TABLE build_attempt (id TEXT, build_job TEXT, derivation_build TEXT, dispatched_job TEXT, substitute INTEGER, outcome INTEGER, reason INTEGER, failure_message TEXT, build_context TEXT, build_started_at TEXT, build_finished_at TEXT, created_at TEXT)",
-            "SELECT a.id::text, a.build_job::text, a.derivation_build::text, a.dispatched_job::text, a.substitute::int::text, a.outcome::text, a.reason::text, a.failure_message::text, a.build_context::text, a.build_started_at::text, a.build_finished_at::text, a.created_at::text FROM build_attempt a WHERE a.derivation_build IN (SELECT derivation_build FROM build_job WHERE evaluation = $1)",
+            concat!(
+                "SELECT a.id::text, a.build_job::text, a.derivation_build::text, a.dispatched_job::text, a.substitute::int::text, a.outcome::text, a.reason::text, a.failure_message::text, a.build_context::text, a.build_started_at::text, a.build_finished_at::text, a.created_at::text FROM build_attempt a WHERE a.derivation_build IN (",
+                own_anchors!(),
+                ")"
+            ),
             "the evaluation's build anchors, so attempts made for other evaluations are included",
             [
                 "id",
@@ -333,7 +416,11 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         spec!(
             "phase_event",
             "CREATE TABLE phase_event (id TEXT, subject_kind INTEGER, subject_id TEXT, phase INTEGER, event INTEGER, at TEXT, worker_id TEXT, detail TEXT)",
-            "SELECT p.id::text, p.subject_kind::text, p.subject_id::text, p.phase::text, p.event::text, p.at::text, p.worker_id::text, p.detail::text FROM phase_event p WHERE p.subject_id = $1 OR p.subject_id IN (SELECT derivation_build FROM build_job WHERE evaluation = $1)",
+            concat!(
+                "SELECT p.id::text, p.subject_kind::text, p.subject_id::text, p.phase::text, p.event::text, p.at::text, p.worker_id::text, p.detail::text FROM phase_event p WHERE p.subject_id = $1 OR p.subject_id IN (",
+                own_anchors!(),
+                ")"
+            ),
             "the evaluation and its build anchors, so events from other evaluations are included",
             [
                 "id",
@@ -349,15 +436,23 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         spec!(
             "derivation_dependency",
             "CREATE TABLE derivation_dependency (derivation TEXT, dependency TEXT)",
-            "SELECT dd.derivation::text, dd.dependency::text FROM derivation_dependency dd WHERE dd.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
-            "the evaluation's derivations, shared with every other evaluation that built them",
+            concat!(
+                "SELECT dd.derivation::text, dd.dependency::text FROM derivation_dependency dd WHERE dd.derivation IN (",
+                own_derivations!(),
+                ")"
+            ),
+            "the evaluation's own derivations, with both ends of every edge exported",
             ["derivation", "dependency"]
         ),
         spec!(
             "cached_path",
             "CREATE TABLE cached_path (id TEXT, hash TEXT, package TEXT, file_hash TEXT, file_size INTEGER, nar_size INTEGER, nar_hash TEXT, ca TEXT, created_at TEXT, deriver TEXT, missing_references INTEGER)",
-            "SELECT c.id::text, c.hash::text, c.package::text, c.file_hash::text, c.file_size::text, c.nar_size::text, c.nar_hash::text, c.ca::text, c.created_at::text, c.deriver::text, c.missing_references::text FROM cached_path c WHERE c.hash IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1))",
-            "the evaluation's output hashes, shared with every other evaluation that produced them",
+            concat!(
+                "SELECT c.id::text, c.hash::text, c.package::text, c.file_hash::text, c.file_size::text, c.nar_size::text, c.nar_hash::text, c.ca::text, c.created_at::text, c.deriver::text, c.missing_references::text FROM cached_path c WHERE c.hash IN (",
+                cached_path_scope!(),
+                ")"
+            ),
+            "the exported derivations' output hashes and every path they reference, shared with every other evaluation that produced them",
             [
                 "id",
                 "hash",
@@ -375,15 +470,23 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         spec!(
             "cached_path_reference",
             "CREATE TABLE cached_path_reference (referrer TEXT, reference TEXT, reference_hash TEXT, position INTEGER)",
-            "SELECT r.referrer::text, r.reference::text, r.reference_hash::text, r.position::text FROM cached_path_reference r WHERE r.referrer IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1))",
-            "the evaluation's output hashes, shared with every other evaluation that produced them",
+            concat!(
+                "SELECT r.referrer::text, r.reference::text, r.reference_hash::text, r.position::text FROM cached_path_reference r WHERE r.referrer IN (",
+                output_hashes!(),
+                ")"
+            ),
+            "the exported derivations' output hashes, with every referenced path exported",
             ["referrer", "reference", "reference_hash", "position"]
         ),
         spec!(
             "cached_path_signature",
             "CREATE TABLE cached_path_signature (id TEXT, cached_path TEXT, cache TEXT, cache_name TEXT, signed INTEGER, last_fetched_at TEXT, fetch_count INTEGER, created_at TEXT)",
-            "SELECT s.id::text, s.cached_path::text, s.cache::text, c.name::text, (s.signature IS NOT NULL)::int::text, s.last_fetched_at::text, s.fetch_count::text, s.created_at::text FROM cached_path_signature s LEFT JOIN cache c ON c.id = s.cache WHERE s.cached_path IN (SELECT cp.id FROM cached_path cp WHERE cp.hash IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)))",
-            "the evaluation's output hashes, one row per cache holding the path",
+            concat!(
+                "SELECT s.id::text, s.cached_path::text, s.cache::text, c.name::text, (s.signature IS NOT NULL)::int::text, s.last_fetched_at::text, s.fetch_count::text, s.created_at::text FROM cached_path_signature s LEFT JOIN cache c ON c.id = s.cache WHERE s.cached_path IN (SELECT cp.id FROM cached_path cp WHERE cp.hash IN (",
+                cached_path_scope!(),
+                "))"
+            ),
+            "the exported cached paths, one row per cache holding the path",
             [
                 "id",
                 "cached_path",
@@ -576,13 +679,14 @@ mod tests {
         }
     }
 
-    /// The report inspector's `why_stuck` tells an operator that the `build_job`
-    /// promotion gate is open for every anchor it carries, which is only true
-    /// because this spec selects its anchors BY their `build_job`. Nothing else
-    /// ties the two, so a rewrite that scopes `derivation_build` some other way
-    /// would silently make that claim wrong.
+    /// The report inspector's `why_stuck` weighs the `build_job` promotion gate
+    /// by looking the row up in the exported `build_job` table, which only works
+    /// because the anchor scope starts from that same set. The boundary rows the
+    /// scope adds on top have no `build_job`, and that is the difference the
+    /// inspector reads: a rewrite that scoped `derivation_build` some other way
+    /// would leave it unable to tell the two apart.
     #[test]
-    fn the_anchor_spec_is_scoped_by_build_job_so_that_gate_is_always_open() {
+    fn the_anchor_scope_starts_from_the_build_jobs_that_open_that_gate() {
         let specs = eval_scope_tables();
         let spec = specs
             .iter()
@@ -591,9 +695,89 @@ mod tests {
         assert!(
             spec.sql
                 .contains("SELECT derivation FROM build_job WHERE evaluation = $1"),
-            "why_stuck reports the build_job gate as open by construction: {}",
+            "why_stuck reads the build_job gate against this set: {}",
             spec.sql
         );
+    }
+
+    /// Every table an offline reader re-derives `unready_deps` from is scoped to
+    /// the evaluation's derivations AND their direct dependencies. Without the
+    /// boundary the `LEFT JOIN ... IS NULL` rule that makes an absent dependency
+    /// count as unready fires on every dependency the export merely left out, so
+    /// a correct stored counter recomputes as a wildly larger number and the file
+    /// accuses the instance of a dead zone it does not have.
+    #[test]
+    fn the_readiness_tables_carry_the_dependency_boundary() {
+        for name in ["derivation", "derivation_build", "derivation_output"] {
+            let sql = spec_named(name).sql;
+            assert!(
+                sql.contains(
+                    "UNION SELECT e.dependency FROM derivation_dependency e WHERE e.derivation IN ("
+                ),
+                "{name} stops at the evaluation's own derivations: {sql}"
+            );
+        }
+    }
+
+    /// One fragment behind all of them, for the reason `readiness.rs` keeps one
+    /// behind its seed and its recount: two spellings of the same scope drift,
+    /// and a reader cannot see that they have.
+    #[test]
+    fn every_derivation_keyed_scope_is_the_same_fragment() {
+        let anchor = spec_named("derivation_build").sql;
+        let scope = anchor
+            .split_once("WHERE db.derivation IN (")
+            .and_then(|(_, rest)| rest.rsplit_once(')'))
+            .map(|(scope, _)| scope)
+            .expect("the anchor spec is scoped by a derivation set");
+
+        for name in ["derivation", "derivation_output"] {
+            assert!(
+                spec_named(name).sql.contains(scope),
+                "{name} spells the derivation scope differently"
+            );
+        }
+    }
+
+    /// `missing_references` counts one per reference whose row is absent,
+    /// unbacked or itself not whole, so the referenced rows have to be in the
+    /// file. They are also what separates "the instance never had this path" -
+    /// the finding on an unwhole closure - from "the export did not ask for it".
+    #[test]
+    fn the_reference_boundary_is_exported_so_an_absent_path_means_absent() {
+        let sql = spec_named("cached_path").sql;
+        assert!(
+            sql.contains(
+                "UNION SELECT r.reference_hash FROM cached_path_reference r WHERE r.referrer IN ("
+            ),
+            "cached_path stops at the exported outputs: {sql}"
+        );
+    }
+
+    /// An attempt's substitute-miss budget is scoped per `(anchor, evaluation)`
+    /// through its `build_job`. Export the attempts without those rows and the
+    /// budget cannot be bucketed at all, which is how a loop that ran 788 misses
+    /// against a threshold of 2 read as an ordinary retry history.
+    #[test]
+    fn the_jobs_behind_the_exported_attempts_are_exported() {
+        let sql = spec_named("build_job").sql;
+        assert!(
+            sql.contains("SELECT a.build_job FROM build_attempt a WHERE a.derivation_build IN ("),
+            "an attempt from another evaluation cannot be bucketed: {sql}"
+        );
+    }
+
+    /// The gate the promoter reads is
+    /// `walked AND build_job AND demanded AND (substitutable OR unready_deps = 0)`.
+    /// A report that carries every term but `demanded` reports "every gate open"
+    /// for an anchor held by the one gate it cannot see, which is exactly the
+    /// state an undemanded relay sits in forever.
+    #[test]
+    fn an_anchor_exports_the_demand_gate() {
+        let spec = spec_named("derivation_build");
+        assert!(spec.columns.contains(&"demanded"), "{:?}", spec.columns);
+        assert!(spec.ddl.contains("demanded INTEGER"), "{}", spec.ddl);
+        assert!(spec.sql.contains("db.demanded::int::text"), "{}", spec.sql);
     }
 
     #[test]
@@ -810,9 +994,14 @@ mod tests {
             "{}",
             spec.sql
         );
+        let paths = spec_named("cached_path").sql;
+        let scope = paths
+            .split_once("WHERE c.hash IN (")
+            .and_then(|(_, rest)| rest.rsplit_once(')'))
+            .map(|(scope, _)| scope)
+            .expect("cached_path is scoped by a hash set");
         assert!(
-            spec.sql
-                .contains("SELECT derivation FROM build_job WHERE evaluation = $1"),
+            spec.sql.contains(scope),
             "the gate has to cover exactly the paths cached_path exports: {}",
             spec.sql
         );

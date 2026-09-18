@@ -1,42 +1,95 @@
+[workspace]
+members      = [".", "connector"]
+resolver     = "2"
+
+[workspace.package]
+version     = "1.3.0"
+edition     = "2024"
+license     = "AGPL-3.0-only"
+authors     = ["Wavelens GmbH <info@wavelens.io>"]
+repository  = "https://github.com/wavelens/gradient"
+publish     = false
+
+[workspace.lints.rust]
+unused           = "warn"
+dead_code        = "warn"
+unreachable_code = "warn"
+
+[workspace.lints.clippy]
+dbg_macro                       = "warn"
+todo                            = "warn"
+allow_attributes_without_reason = "warn"
+unwrap_used                     = "deny"
+
+[workspace.dependencies]
+# Internal crates
+connector     = { path = "connector" }
+gradient-eval = { path = "../backend/gradient-eval" }
+
+# Async / runtime
+futures = { version = "0.3" }
+tokio   = { version = "1.50", features = ["macros", "process", "rt-multi-thread", "time"] }
+
+# HTTP / TLS
+reqwest              = { version = "0.13", features = ["multipart"] }
+reqwest-streams      = { version = "0.19", features = ["json"] }
+rustls               = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }
+rustls-native-certs  = { version = "0.8" }
+webpki-roots         = { version = "1.0", default-features = false }
+
+# Serialization
+bytes      = { version = "1" }
+schemars   = { version = "1" }
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+toml       = { version = "1.0" }
+
+# Nix store access, behind the `nix` feature
+harmonia-file-nar    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-path  = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-remote = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-hash  = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+zstd                 = { version = "0.13", default-features = false }
+
+# CLI surface
+clap          = { version = "4.6", features = ["derive", "unstable-ext"] }
+clap_complete = { version = "4", features = ["unstable-dynamic"] }
+ratatui       = { version = "0.30" }
+rmcp          = { version = "3.2", features = ["server", "macros", "transport-io"] }
+rpassword     = { version = "7.4" }
+strum         = { version = "0.28" }
+strum_macros  = { version = "0.28" }
+
+# Misc
+anyhow        = { version = "1" }
+blake3        = { version = "1", default-features = false, features = ["std"] }
+etcetera      = { version = "0.11" }
+git2          = { version = "0.21" }
+password-auth = { version = "1.0", features = ["argon2"] }
+rand          = { version = "0.10", features = ["std_rng"] }
+tempfile      = { version = "3" }
+
+# Test-only
+assert_cmd = { version = "2" }
+predicates = { version = "3" }
+wiremock   = { version = "0.6" }
+
 [package]
-name = "gradient-cli"
-version = "1.3.0"
-edition = "2024"
-license = "AGPL-3.0-only"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
-description = "CLI-Tool for Gradient"
-repository = "https://github.com/wavelens/gradient"
+name                 = "gradient-cli"
+description          = "CLI-Tool for Gradient"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish.workspace    = true
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "gradient"
 path = "src/main.rs"
-
-[workspace]
-members = [".", "connector"]
-
-[dependencies]
-blake3 = { version = "1", default-features = false, features = ["std"] }
-clap = { version = "4.6", features = ["derive", "unstable-ext"] }
-password-auth = { version = "1.0", features = ["argon2"] }
-rpassword = "7.4"
-clap_complete = { version = "4", features = ["unstable-dynamic"] }
-strum = "0.28"
-strum_macros = "0.28"
-serde = { version = "1.0", features = ["derive"] }
-etcetera = "0.11"
-toml = "1.0"
-tokio = { version = "1.50", features = ["macros", "process", "rt-multi-thread", "time"] }
-serde_json = "1.0"
-connector = { path = "connector" }
-rand = { version = "0.10", features = ["std_rng"] }
-colored = "3.1"
-anyhow = "1"
-futures = "0.3"
-git2 = "0.21"
-reqwest = { version = "0.13", features = ["multipart"] }
-ratatui = "0.30"
-rmcp = { version = "3.2", features = ["server", "macros", "transport-io"] }
-schemars = "1"
 
 [features]
 default = []
@@ -45,41 +98,44 @@ nix = ["dep:harmonia-file-nar", "dep:harmonia-store-path", "dep:harmonia-store-r
 # thus libnix; off by default so the lean CLI builds without Nix dev libraries.
 eval = ["dep:gradient-eval"]
 
-[dependencies.gradient-eval]
-path = "../backend/gradient-eval"
-optional = true
+[dependencies]
+anyhow        = { workspace = true }
+blake3        = { workspace = true }
+clap          = { workspace = true }
+clap_complete = { workspace = true }
+connector     = { workspace = true }
+etcetera      = { workspace = true }
+futures       = { workspace = true }
+git2          = { workspace = true }
+password-auth = { workspace = true }
+rand          = { workspace = true }
+ratatui       = { workspace = true }
+reqwest       = { workspace = true }
+rmcp          = { workspace = true }
+rpassword     = { workspace = true }
+schemars      = { workspace = true }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+strum         = { workspace = true }
+strum_macros  = { workspace = true }
+tokio         = { workspace = true }
+toml          = { workspace = true }
 
-[dependencies.tempfile]
-version = "3"
-optional = true
-
-[dependencies.zstd]
-version = "0.13"
-default-features = false
-optional = true
-
-[dependencies.harmonia-file-nar]
-git = "https://github.com/nix-community/harmonia.git"
-default-features = false
-optional = true
-
-[dependencies.harmonia-store-path]
-git = "https://github.com/nix-community/harmonia.git"
-default-features = false
-optional = true
-
-[dependencies.harmonia-store-remote]
-git = "https://github.com/nix-community/harmonia.git"
-default-features = false
-optional = true
-
-[dependencies.harmonia-utils-hash]
-git = "https://github.com/nix-community/harmonia.git"
-default-features = false
-optional = true
+gradient-eval         = { workspace = true, optional = true }
+harmonia-file-nar     = { workspace = true, optional = true }
+harmonia-store-path   = { workspace = true, optional = true }
+harmonia-store-remote = { workspace = true, optional = true }
+harmonia-utils-hash   = { workspace = true, optional = true }
+tempfile              = { workspace = true, optional = true }
+zstd                  = { workspace = true, optional = true }
 
 [dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-tempfile = "3"
-wiremock = "0.6"
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+tempfile   = { workspace = true }
+wiremock   = { workspace = true }
+
+[patch.crates-io]
+# gradient-eval (the `eval` feature) needs the nix-bindings fork; without this
+# the requirement would resolve to upstream, which lacks the fork's eval API.
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }

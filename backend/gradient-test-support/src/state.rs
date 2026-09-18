@@ -58,7 +58,7 @@ pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) ->
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         scim_group_roles: Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -92,7 +92,7 @@ pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         scim_group_roles: Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -127,7 +127,7 @@ pub fn test_state_with_log_storage(
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         scim_group_roles: Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
-        reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        outbox_wake: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })

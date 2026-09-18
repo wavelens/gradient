@@ -20,7 +20,6 @@ gradient-state = { workspace = true }
 gradient-ci = { workspace = true }
 gradient-sources = { workspace = true }
 gradient-forge = { workspace = true }
-gradient-nix = { workspace = true }
 gradient-db = { workspace = true }
 gradient-graph = { workspace = true }
 gradient-storage = { workspace = true }

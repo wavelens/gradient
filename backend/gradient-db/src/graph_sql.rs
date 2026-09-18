@@ -230,6 +230,17 @@ pub fn blocks_evaluation(status: BuildStatus, demanded: bool) -> bool {
     demanded || matches!(status, BuildStatus::Queued | BuildStatus::Building)
 }
 
+/// [`blocks_evaluation`] as a predicate on anchor `{alias}`, so the decision has
+/// one definition and the reader that asks the database for it cannot drift from
+/// the reader that evaluates it in Rust.
+pub fn blocks_evaluation_predicate(alias: &str) -> String {
+    format!(
+        "({alias}.status IN ({pending}) AND ({alias}.demanded OR {alias}.status IN ({in_flight})))",
+        pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+        in_flight = crate::status_sql::build_in(&[BuildStatus::Queued, BuildStatus::Building]),
+    )
+}
+
 /// Anchor `{anchor}` (its `derivation` row aliased `{walked}`) is a builder:
 /// recorded, not a relay, and in a status an evaluation will still have built.
 /// The one definition of what demands its inputs and of what the adoption walk
@@ -513,6 +524,27 @@ mod tests {
         for status in [Completed, Substituted, FailedPermanent, DependencyFailed] {
             assert!(!blocks_evaluation(status, true), "{status:?} is settled");
         }
+    }
+
+    /// The database asks the same question the Rust does, so the two must name the
+    /// same statuses. Eval-done reads the predicate and nothing else now: a drift
+    /// between them would settle an evaluation whose builds are still running,
+    /// with no test failing on either side alone.
+    #[test]
+    fn the_predicate_names_what_blocks_evaluation_names() {
+        use BuildStatus::*;
+
+        let sql = blocks_evaluation_predicate("db");
+        assert_eq!(
+            sql,
+            format!(
+                "(db.status IN ({pending}) AND (db.demanded OR db.status IN ({in_flight})))",
+                pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+                in_flight = crate::status_sql::build_in(&[Queued, Building]),
+            ),
+            "the predicate is the Rust rule written out; changing one without the \
+             other settles an evaluation whose builds are still running",
+        );
     }
 
     /// The raise has to be `SET LOCAL` and it has to happen inside the walk's own

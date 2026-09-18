@@ -157,7 +157,10 @@ in {
         };
 
         networking.hosts = {
-          "127.0.0.1" = [ "gradient.local" ];
+          # `hook.local` is phase 14's webhook target. A name, not `127.0.0.1`:
+          # `validate_webhook_url` rejects every loopback and private literal, and
+          # every address in a NixOS VM network is one of those.
+          "127.0.0.1" = [ "gradient.local" "hook.local" ];
         };
 
         services = {
@@ -205,6 +208,19 @@ in {
                     {
                       type = "polling";
                       config = { interval_secs = 10; };
+                    }
+                  ];
+                  # Phase 14's probe. It lives in state because provisioning runs
+                  # on every boot and deletes actions state does not declare, so
+                  # an API-created one would not survive that phase's restart; it
+                  # subscribes to an event this VM never raises, so the only thing
+                  # that ever reaches the hook is the row the phase writes.
+                  actions = [
+                    {
+                      name = "restart-probe";
+                      type = "send_web_request";
+                      events = [ "evaluation.approval_granted" ];
+                      config = { url = "http://hook.local:8099/hook"; };
                     }
                   ];
                 };
@@ -2047,7 +2063,7 @@ in {
       health = json.loads(api_get(token, "board/health"))["message"]
       names = sorted(l["name"] for l in health["supervised"])
       print(names)
-      for want in ["graph", "build-dispatch", "eval-dispatch", "trigger-dispatch",
+      for want in ["graph", "effects", "build-dispatch", "eval-dispatch", "trigger-dispatch",
                    "cache-maintenance", "sign-sweep", "debug-index",
                    "eval-cache-sweep", "retention", "rollup", "outbound-connect",
                    "nar-uploader"]:
@@ -2092,6 +2108,39 @@ in {
       assert builder.succeed(
           "systemctl show -p Result --value gradient-worker.service"
       ).strip() == "success"
+
+      # ── Phase 14: an outbox row written before a restart is delivered after it ─
+      # The point of the outbox: an effect owed to the outside world is a row, so
+      # it survives the process that owed it. The row is inserted while the server
+      # is down, which no in-process spawn could have carried across.
+      banner("Phase 14: the outbox survives a restart (#597)")
+      action_id = sql("SELECT id FROM task_action WHERE name = 'restart-probe';")
+      assert len(action_id) == 36, f"the state-declared probe action is missing: {action_id}"
+
+      server.succeed("cat > /root/hook.py <<'PY'\n"
+                     "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+                     "class H(BaseHTTPRequestHandler):\n"
+                     "    def do_POST(self):\n"
+                     "        n = int(self.headers.get('Content-Length', 0))\n"
+                     "        open('/root/hook.log', 'ab').write(self.rfile.read(n) + b'\\n')\n"
+                     "        self.send_response(200); self.end_headers()\n"
+                     "HTTPServer(('127.0.0.1', 8099), H).serve_forever()\n"
+                     "PY")
+      server.succeed("systemd-run --unit hook-probe ${pkgs.python3}/bin/python3 /root/hook.py")
+
+      server.succeed("systemctl stop gradient-server.service")
+      sql(
+          "INSERT INTO outbox (id, kind, key, payload, created_at, next_attempt_at) VALUES ("
+          "gen_random_uuid(), 3, 'restart-probe', "
+          f"""'{{"action": "{action_id}", "event": "evaluation.approval_granted", "payload": {{"probe": "restart"}}}}'::jsonb, """
+          "now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
+      )
+      server.succeed("systemctl start gradient-server.service")
+      server.wait_for_open_port(3000)
+
+      server.wait_until_succeeds("grep -q restart /root/hook.log", timeout=120)
+      assert sql("SELECT delivered_at IS NOT NULL FROM outbox WHERE key = 'restart-probe';") == "t", \
+          "the row must settle, not be redelivered on every tick"
 
       # ── Phase 13: every registered statement plans sanely (#651) ──────────
       # The gate amplifies this database to production scale, so it runs last and

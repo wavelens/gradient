@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -28,13 +28,11 @@ gradient-cache        = { path = "gradient-cache" }
 gradient-ci           = { path = "gradient-ci" }
 gradient-core         = { path = "gradient-core" }
 gradient-db           = { path = "gradient-db" }
+gradient-effects      = { path = "gradient-effects" }
 gradient-entity       = { path = "gradient-entity" }
-gradient-exec         = { path = "gradient-exec" }
-gradient-flake-lock   = { path = "gradient-flake-lock" }
 gradient-forge        = { path = "gradient-forge" }
 gradient-graph        = { path = "gradient-graph" }
 gradient-migration    = { path = "gradient-migration" }
-gradient-nix          = { path = "gradient-nix" }
 gradient-notify       = { path = "gradient-notify" }
 gradient-proto        = { path = "gradient-proto" }
 gradient-report       = { path = "gradient-report" }
@@ -151,8 +149,9 @@ harmonia-utils-hash            = { git = "https://github.com/nix-community/harmo
 harmonia-utils-io              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-utils-signature       = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 
-# Nix bindings
-nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats", default-features = false }
+# Nix bindings. The version tracks the FORK below, not upstream: the patch
+# replaces the source, so only the requirement is resolved against the index.
+nix-bindings = { version = "0.2347", default-features = false }
 
 # Shared utilities promoted from member crates
 git-url-parse = { version = "0.6" } # defaults: re-exports the `url` crate
@@ -196,16 +195,11 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
-harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-protocol              = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-protocol-derive       = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-store-content-address = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-store-derivation      = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-store-path            = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-base-encoding   = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-hash            = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-io              = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-signature       = { git = "https://github.com/nix-community/harmonia.git" }
+# Only crates published on crates.io can be patched: the requirement resolves
+# against the index, then the source is replaced by the one named here. Every
+# harmonia-* crate is unpublished, so those stay plain git deps above.
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }
+
 
 [package]
 name        = "gradient-server"
@@ -236,6 +230,7 @@ sql-gate = ["dep:anyhow", "dep:gradient-db", "dep:gradient-ci", "dep:gradient-gr
 
 [dependencies]
 gradient-cache     = { workspace = true }
+gradient-effects   = { workspace = true }
 clap               = { workspace = true }
 anyhow             = { workspace = true, optional = true }
 gradient-db        = { workspace = true, optional = true }

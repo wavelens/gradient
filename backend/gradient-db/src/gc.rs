@@ -7,35 +7,12 @@
 use anyhow::{Context, Result};
 use chrono::Duration as ChronoDuration;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::DbContext;
 use gradient_types::*;
-
-crate::sql! {
-    ANCHORS_LOSING_AN_EVALUATION = "SELECT derivation FROM build_job WHERE evaluation = ANY($1::uuid[]) \
-             UNION SELECT derivation FROM entry_point WHERE evaluation = ANY($1::uuid[]) \
-             UNION SELECT e.dependency AS derivation FROM derivation_dependency e \
-             JOIN build_job bj ON bj.derivation = e.derivation \
-             WHERE bj.evaluation = ANY($1::uuid[])",
-        params = [EvaluationIds(64)],
-        tier = Sweep;
-
-    ORPHAN_DEPENDENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
-                 WHERE e.dependency = ANY($1)",
-        params = [DerivationIds(64)],
-        tier = Sweep;
-
-    UNWALK_ORPHAN_SURVIVORS = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
-        params = [DerivationIds(64)],
-        tier = Sweep;
-}
 
 /// The keep-set is the shared build-graph walk (`graph_sql`), reused verbatim by
 /// the candidate scan and the delete re-check so they can never diverge.
@@ -52,25 +29,7 @@ fn gc_orphan_candidates_sql() -> String {
 crate::sql_fn! {
     GC_ORPHAN_CANDIDATES = gc_orphan_candidates_sql,
         params = [Now],
-        tier = Walk,
-        flags = [Walk];
-}
-
-fn gc_orphan_delete_sql() -> String {
-    format!(
-        "{reachable}
-         DELETE FROM derivation d
-         WHERE d.id = ANY($1)
-           AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)
-         RETURNING d.id",
-        reachable = crate::graph_sql::reachable_derivations_cte(),
-    )
-}
-
-crate::sql_fn! {
-    GC_ORPHAN_DELETE = gc_orphan_delete_sql,
-        params = [DerivationIds(64)],
-        tier = Walk,
+        tier = Sweep,
         flags = [Walk];
 }
 
@@ -91,7 +50,9 @@ fn stale_cached_paths_sql() -> String {
 crate::sql_fn! {
     STALE_CACHED_PATHS = stale_cached_paths_sql,
         params = [Int(336)],
-        tier = Walk,
+        tier = Sweep,
+        budget = crate::sql::Budget::sweep().buffers(1_500_000)
+            .because("the collector walks every live path before it can name a dead one"),
         flags = [Walk];
 }
 
@@ -119,15 +80,19 @@ where
         .collect())
 }
 
-/// Deletes evaluations for `task_id`, retaining the most recent `keep`
-/// terminal evaluations (see [`evaluations_to_gc`]).
+/// The evaluations of `task_id` this pass should delete, retaining the most
+/// recent `keep` terminal ones (see [`evaluations_to_gc`]).
 ///
-/// Handles DB deletion, build log removal, NAR cache files, and GC root symlinks.
-/// Skipped entirely while the task has any active evaluation, so an in-flight
-/// run never loses NARs it is about to reuse.
-pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) -> Result<()> {
+/// Selection only: the rows are deleted by the graph actor, which owns every
+/// write to the graph, and the log files and orphaned commits are reclaimed by
+/// [`after_evaluation_delete`] once the actor reports what it removed.
+pub async fn evaluation_gc_plan(
+    ctx: &DbContext,
+    task_id: TaskId,
+    keep: usize,
+) -> Result<Vec<MEvaluation>> {
     if keep == 0 {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     // Newest first; deletion selection counts only terminal evaluations.
@@ -142,70 +107,29 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
         .iter()
         .map(|e| (e.status, last_progress_at(e)))
         .collect();
-    let delete_indices = evaluations_to_gc(
+
+    Ok(evaluations_to_gc(
         &evals,
         keep,
         ctx.config.storage.gc_wedged_eval_hours,
         gradient_types::now(),
-    );
-    if delete_indices.is_empty() {
+    )
+    .into_iter()
+    .map(|i| all_evals[i].clone())
+    .collect())
+}
+
+/// What the evaluation delete leaves behind outside the graph: commits nothing
+/// references any more. The `build_job` rows cascaded with their evaluation, and
+/// the `build_attempt` rows were set-null'd onto the surviving `derivation_build`
+/// anchor - their true, build-once owner - so their logs are the derivation GC's
+/// to reclaim, not this pass's.
+pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -> Result<()> {
+    if deleted.is_empty() {
         return Ok(());
     }
 
-    let to_delete: Vec<MEvaluation> = delete_indices
-        .iter()
-        .map(|&i| all_evals[i].clone())
-        .collect();
-    let deleted_ids: std::collections::HashSet<EvaluationId> =
-        to_delete.iter().map(|e| e.id).collect();
-
-    info!(
-        task_id = %task_id,
-        deleting = to_delete.len(),
-        "Running per-task evaluation GC"
-    );
-
-    let lost = anchors_losing_an_evaluation(ctx, &to_delete).await?;
-
-    // Break the linked list so deletions never violate previous/next FKs:
-    // NULL the deleted rows' own pointers and any surviving pointer into them.
-    for eval in &all_evals {
-        let drop_prev = eval.previous.is_some_and(|p| deleted_ids.contains(&p));
-        let drop_next = eval.next.is_some_and(|n| deleted_ids.contains(&n));
-        if !deleted_ids.contains(&eval.id) && !drop_prev && !drop_next {
-            continue;
-        }
-
-        let mut a: AEvaluation = eval.clone().into_active_model();
-        if deleted_ids.contains(&eval.id) || drop_prev {
-            a.previous = Set(None);
-        }
-        if deleted_ids.contains(&eval.id) || drop_next {
-            a.next = Set(None);
-        }
-        a.update(&ctx.worker_db)
-            .await
-            .context("GC: failed to NULL evaluation linked-list pointers")?;
-    }
-
-    // The evals' `build_job` rows cascade away, but their `build_attempt` rows
-    // (and their logs) are set-null'd onto the surviving `derivation_build`
-    // anchor - their true, build-once owner - and reclaimed only when the
-    // derivation GC deletes that anchor. NAR files and GC roots are likewise
-    // owned by `derivation_output` / `cache_derivation` and cleaned up there.
-    //
-    // Commits are not cascaded, so they are reclaimed afterwards in one pass:
-    // deleting every evaluation first means the reference check sees the final
-    // state, exactly as the per-evaluation check used to.
-    let commit_ids: Vec<CommitId> = to_delete.iter().map(|e| e.commit).collect();
-
-    for eval in &to_delete {
-        let a: AEvaluation = eval.clone().into_active_model();
-        a.delete(&ctx.worker_db)
-            .await
-            .context("GC: failed to delete evaluation")?;
-    }
-
+    let commit_ids: Vec<CommitId> = deleted.iter().map(|e| e.commit).collect();
     let still_referenced: std::collections::HashSet<CommitId> = EEvaluation::find()
         .filter(CEvaluation::Commit.is_in(commit_ids.clone()))
         .all(&ctx.worker_db)
@@ -229,10 +153,6 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
         warn!(error = %e, "GC: failed to delete orphaned commits");
     }
 
-    let (adopted, changes) = settle_after_delete(ctx, &lost).await?;
-    crate::status::emit_transition_effects(ctx, &changes).await;
-
-    info!(task_id = %task_id, deleted = to_delete.len(), adopted, "Per-task evaluation GC done");
     Ok(())
 }
 
@@ -242,7 +162,7 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
 /// evaluations that reach it take the names over BEFORE the lost set is re-gated,
 /// so nothing a live evaluation waits on leaves the queue, and what they adopted
 /// is queued where its gates hold. Returns the adopted pair count and the moves.
-async fn settle_after_delete(
+pub async fn settle_after_delete(
     ctx: &DbContext,
     lost: &[DerivationId],
 ) -> Result<(usize, Vec<crate::status::TransitionChange>)> {
@@ -313,29 +233,6 @@ async fn settle_after_delete(
     Ok((adopted.pairs.len(), changes))
 }
 
-/// Every anchor whose queue membership the deletion of `evaluations` can close: the
-/// derivations they name (a lost `build_job` or `entry_point` row) and the direct
-/// inputs of those, which lose a demander with them.
-///
-/// Collected BEFORE the delete, because the rows it reads are what cascades away.
-async fn anchors_losing_an_evaluation(
-    ctx: &DbContext,
-    evaluations: &[MEvaluation],
-) -> Result<Vec<DerivationId>> {
-    let ids: Vec<Uuid> = evaluations.iter().map(|e| e.id.into_inner()).collect();
-    let rows = ctx
-        .worker_db
-        .query_all_raw(ANCHORS_LOSING_AN_EVALUATION.bind([ids.into()]))
-        .await
-        .context("GC: failed to collect the derivations of the evaluations to delete")?;
-
-    Ok(rows
-        .iter()
-        .filter_map(|r| r.try_get::<Uuid>("", "derivation").ok())
-        .map(DerivationId::new)
-        .collect())
-}
-
 /// When an evaluation last advanced, as opposed to when its row was last
 /// written. A wedged run keeps taking writes, so `updated_at` never goes stale
 /// and the wedged escape hatch never fires for it; the phase stamps move only
@@ -402,10 +299,11 @@ fn evaluations_to_gc(
     delete
 }
 
-/// Derivation GC pass (mark-and-sweep): deletes global `derivation` rows that lie
-/// *outside the build-dependency closure of every live root* - an `entry_point` or
-/// a derivation a retained eval's `build_job` references - and whose grace period
-/// has expired. The grace lets rapid re-evaluations reuse recent derivations.
+/// Derivation GC candidate scan (the mark half of mark-and-sweep): global
+/// `derivation` rows that lie *outside the build-dependency closure of every live
+/// root* - an `entry_point` or a derivation a retained eval's `build_job`
+/// references - and whose grace period has expired. The grace lets rapid
+/// re-evaluations reuse recent derivations.
 ///
 /// Reachability matters because `build_job` rows are pruned with old evals while
 /// `derivation_dependency` edges and anchors persist: a derivation still needed as
@@ -413,209 +311,47 @@ fn evaluations_to_gc(
 /// yet must be kept. A naive "no `build_job`" test reclaimed those, deleting build
 /// inputs of live anchors and stranding dependents on `InputsUnavailable`.
 ///
-/// The delete re-checks the orphan predicate inside the statement, because
-/// derivations are global and content-addressed and a concurrent evaluation can
-/// re-attach a `build_job` to a past-grace orphan at any moment, so a single
-/// SELECT-then-delete would race the FK. Rows and attempt logs are all this pass
-/// reclaims: the NARs of what it deletes leave the live set with it and are the
-/// eviction pass's (`evict_stale_cached_paths`) to remove once past the fetch
-/// TTL. FK cascade cleans up `derivation_output`, `derivation_build`, dep/closure
-/// edges, features, metrics, and `cache_derivation`.
-pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<()> {
-    use std::collections::HashSet;
+/// Read-only, and run on the pool: the whole keep-set walk is too long to hold the
+/// graph actor's single writer lock. The returned timestamp is taken BEFORE the
+/// walk, so the actor's delete can re-check exactly what became live since - see
+/// `gradient_graph::gc`. Rows and attempt logs are all this pass reclaims: the
+/// NARs of what it deletes leave the live set with it and are the eviction pass's
+/// (`evict_stale_cached_paths`) to remove once past the fetch TTL. FK cascade
+/// cleans up `derivation_output`, `derivation_build`, dep/closure edges, features,
+/// metrics, and `cache_derivation`.
+pub async fn orphan_derivation_candidates<C>(
+    db: &C,
+    grace_hours: i64,
+) -> Result<(Vec<DerivationId>, chrono::NaiveDateTime), sea_orm::DbErr>
+where
+    C: ConnectionTrait
+        + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>
+        + Sync,
+{
+    let scanned_at = gradient_types::now();
+    let cutoff = scanned_at - ChronoDuration::hours(grace_hours.max(0));
 
-    let cutoff = gradient_types::now() - ChronoDuration::hours(grace_hours.max(0));
-    let db = &ctx.worker_db;
-
-    let walk = crate::graph_sql::begin_walk(db)
-        .await
-        .context("GC: failed to open the keep-set walk")?;
+    let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
         .query_all_raw(GC_ORPHAN_CANDIDATES.bind([sea_orm::Value::ChronoDateTime(Some(cutoff))]))
-        .await
-        .context("Failed to query orphan derivations")?;
-    walk.commit()
-        .await
-        .context("GC: failed to close the keep-set walk")?;
+        .await?;
+    walk.commit().await?;
 
-    let candidate_ids: Vec<DerivationId> = rows
+    let candidates: Vec<DerivationId> = rows
         .iter()
         .filter_map(|r| r.try_get::<Uuid>("", "id").ok().map(DerivationId::new))
         .collect();
-
-    if candidate_ids.is_empty() {
-        return Ok(());
+    if !candidates.is_empty() {
+        info!(count = candidates.len(), "Running orphan derivation GC");
     }
 
-    info!(count = candidate_ids.len(), "Running orphan derivation GC");
-
-    // Snapshot each candidate derivation's build-attempt logs before the delete
-    // cascades the attempt rows away: their log files live in `log_storage`
-    // (keyed by attempt id), outside the DB, so they must be reclaimed by hand
-    // like the NARs. `pass_logs` in the deep GC is the backstop for any missed.
-    let candidate_anchors = crate::fetch_in_chunks(&candidate_ids, |chunk| async move {
-        EDerivationBuild::find()
-            .filter(CDerivationBuild::Derivation.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    .context("GC: failed to query orphan derivation anchors")?;
-    let anchor_derivation: std::collections::HashMap<DerivationBuildId, DerivationId> =
-        candidate_anchors
-            .iter()
-            .map(|a| (a.id, a.derivation))
-            .collect();
-    let anchor_ids: Vec<DerivationBuildId> = anchor_derivation.keys().copied().collect();
-
-    let candidate_attempts = crate::fetch_in_chunks(&anchor_ids, |chunk| async move {
-        EBuildAttempt::find()
-            .filter(CBuildAttempt::DerivationBuild.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    .context("GC: failed to query orphan derivation build attempts")?;
-    let attempt_snapshot: Vec<(DerivationId, BuildAttemptId)> = candidate_attempts
-        .iter()
-        .filter_map(|a| {
-            anchor_derivation
-                .get(&a.derivation_build)
-                .map(|d| (*d, a.id))
-        })
-        .collect();
-
-    // Snapshot the edges INTO the candidates before the delete, never after: the
-    // `dependency` FK is ON DELETE CASCADE, so the rows naming a reclaimed
-    // derivation are gone the moment it is, and a dependent that survived it has
-    // lost part of its record and must be re-walked.
-    let mut dependents: Vec<(Uuid, Uuid)> = Vec::new();
-    for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
-        let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        dependents.extend(
-            db.query_all_raw(ORPHAN_DEPENDENTS.bind([ids.into()]))
-                .await
-                .context("GC: failed to query dependents of the candidates")?
-                .into_iter()
-                .filter_map(|r| {
-                    Some((
-                        r.try_get::<Uuid>("", "derivation").ok()?,
-                        r.try_get::<Uuid>("", "dependency").ok()?,
-                    ))
-                }),
-        );
-    }
-
-    let mut deleted: HashSet<DerivationId> = HashSet::new();
-    for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
-        let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        // The re-check walks the whole keep-set again, so the chunk gets its own
-        // walk transaction; a failed chunk rolls its delete back and is skipped.
-        let outcome = async {
-            let walk = crate::graph_sql::begin_walk(db).await?;
-            let returned = walk
-                .query_all_raw(GC_ORPHAN_DELETE.bind([ids.into()]))
-                .await?;
-            walk.commit().await?;
-            Ok::<Vec<sea_orm::QueryResult>, sea_orm::DbErr>(returned)
-        }
-        .await;
-
-        match outcome {
-            Ok(returned) => deleted.extend(
-                returned
-                    .iter()
-                    .filter_map(|r| r.try_get::<Uuid>("", "id").ok().map(DerivationId::new)),
-            ),
-            Err(e) => warn!(error = %e, "GC: orphan derivation delete chunk failed; skipping"),
-        }
-    }
-
-    if deleted.is_empty() {
-        return Ok(());
-    }
-
-    // A surviving dependent's record lost an edge, so `walked` is no longer true
-    // of it and every gate that reads it must close until a fresh evaluation
-    // re-walks it. The un-promote re-checks the gates rather than the list, so a
-    // dependent a concurrent eval already re-walked keeps its place in the queue.
-    let orphaned = orphaned_survivors(&dependents, &deleted);
-    if !orphaned.is_empty() {
-        let survivors: Vec<DerivationId> =
-            orphaned.iter().copied().map(DerivationId::new).collect();
-        let settled = async {
-            use sea_orm::TransactionTrait;
-            let txn = db.begin().await?;
-            txn.execute_raw(UNWALK_ORPHAN_SURVIVORS.bind([orphaned.into()]))
-                .await?;
-            let changes = crate::readiness::unpromote_ungated(&txn, &survivors).await?;
-            txn.commit().await?;
-            Ok::<_, sea_orm::DbErr>(changes)
-        }
-        .await;
-        match settled {
-            Ok(changes) => crate::status::emit_transition_effects(ctx, &changes).await,
-            Err(e) => {
-                warn!(error = %e, "GC: failed to re-walk the survivors of a deleted dependency")
-            }
-        }
-    }
-
-    // Reclaim the log files of every attempt whose derivation was just deleted;
-    // their `build_attempt`/`build_log_chunk` rows already cascaded away.
-    for attempt_id in attempt_logs_to_reclaim(&attempt_snapshot, &deleted) {
-        if let Err(e) = ctx.storage.log_storage.delete(attempt_id).await {
-            warn!(error = %e, %attempt_id, "GC: failed to remove orphan build log");
-        }
-    }
-
-    info!(deleted = deleted.len(), "Orphan derivation GC done");
-    Ok(())
-}
-
-/// The derivations that SURVIVED the sweep while at least one of their
-/// dependencies was reclaimed, sorted and deduplicated. Their record is now
-/// incomplete - the edge went with the dependency - so they are exactly the rows
-/// that must lose `walked`. A dependent that was itself deleted is excluded: its
-/// row is gone and updating it would be a no-op on a cascaded id.
-fn orphaned_survivors(
-    dependents: &[(Uuid, Uuid)],
-    deleted: &std::collections::HashSet<DerivationId>,
-) -> Vec<Uuid> {
-    let mut survivors: Vec<Uuid> = dependents
-        .iter()
-        .filter(|(dependent, dependency)| {
-            deleted.contains(&DerivationId::new(*dependency))
-                && !deleted.contains(&DerivationId::new(*dependent))
-        })
-        .map(|(dependent, _)| *dependent)
-        .collect();
-    survivors.sort_unstable();
-    survivors.dedup();
-
-    survivors
-}
-
-/// From a pre-delete `(derivation, attempt)` snapshot, the attempt ids whose
-/// derivation was actually reclaimed - their `log_storage` files can now be
-/// deleted. Attempts of derivations that survived the delete re-check (a
-/// concurrent eval re-attached a `build_job`) keep their logs.
-fn attempt_logs_to_reclaim(
-    snapshot: &[(DerivationId, BuildAttemptId)],
-    deleted: &std::collections::HashSet<DerivationId>,
-) -> Vec<BuildAttemptId> {
-    snapshot
-        .iter()
-        .filter(|(derivation, _)| deleted.contains(derivation))
-        .map(|(_, attempt)| *attempt)
-        .collect()
+    Ok((candidates, scanned_at))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use EvaluationStatus::*;
-    use std::collections::HashSet;
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -662,53 +398,6 @@ mod tests {
             "{sql}"
         );
         assert_eq!(stmt.values.as_ref().map(|v| v.0.len()), Some(1));
-    }
-
-    /// A dependent that survives the sweep while one of its dependencies is
-    /// reclaimed has an incomplete record: it must be re-walked, so it is
-    /// exactly the survivors of deleted dependencies that lose `walked`. A
-    /// dependent of a kept dependency, and one that was itself deleted, are not.
-    #[test]
-    fn survivors_of_a_deleted_dependency_lose_walked() {
-        let gone = DerivationId::now_v7();
-        let kept = DerivationId::now_v7();
-        let survivor = DerivationId::now_v7();
-        let also_gone = DerivationId::now_v7();
-        let dependents = vec![
-            (survivor.into_inner(), gone.into_inner()),
-            (survivor.into_inner(), kept.into_inner()),
-            (also_gone.into_inner(), gone.into_inner()),
-        ];
-        let deleted: HashSet<DerivationId> = [gone, also_gone].into_iter().collect();
-
-        assert_eq!(
-            orphaned_survivors(&dependents, &deleted),
-            vec![survivor.into_inner()]
-        );
-    }
-
-    /// Nothing deleted is nothing to re-walk: an empty deleted set must not read
-    /// as "every dependent lost an edge".
-    #[test]
-    fn no_deletion_orphans_nobody() {
-        let a = DerivationId::now_v7();
-        let b = DerivationId::now_v7();
-        let dependents = vec![(a.into_inner(), b.into_inner())];
-
-        assert!(orphaned_survivors(&dependents, &HashSet::new()).is_empty());
-    }
-
-    #[test]
-    fn reclaims_attempt_logs_only_for_deleted_derivations() {
-        // `d_kept` survived the delete re-check (a concurrent eval re-attached a
-        // build_job), so its attempt's log is retained; `d_gone`'s is reclaimed.
-        let d_gone = DerivationId::now_v7();
-        let d_kept = DerivationId::now_v7();
-        let a_gone = BuildAttemptId::now_v7();
-        let a_kept = BuildAttemptId::now_v7();
-        let snapshot = vec![(d_gone, a_gone), (d_kept, a_kept)];
-        let deleted: HashSet<DerivationId> = [d_gone].into_iter().collect();
-        assert_eq!(attempt_logs_to_reclaim(&snapshot, &deleted), vec![a_gone]);
     }
 
     const WEDGED_HOURS: i64 = 24;
