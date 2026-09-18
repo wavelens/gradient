@@ -91,6 +91,7 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
                     |s| async move { eval::dispatch_queued_evals(&s).await },
                 ),
                 build::child_spec(scheduler),
+                crate::probe::child_spec(&scheduler.state),
             ],
         ),
         periodic(

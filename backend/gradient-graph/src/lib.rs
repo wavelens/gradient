@@ -139,6 +139,19 @@ impl Graph {
             .await
     }
 
+    /// Apply what the upstream probe found for a batch of outputs: the narinfo,
+    /// the runtime edges it names, the relay flag and the demand all of it moves.
+    pub async fn upstream_hits(
+        &self,
+        hits: std::collections::HashMap<String, UpstreamHit>,
+    ) -> anyhow::Result<()> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(());
+        }
+        self.call(|reply| GraphMsg::UpstreamHits(hits, reply)).await
+    }
+
     /// Record a NAR already in storage: the `cached_path` row, its references,
     /// signature placeholders and the outputs it backs, in one transaction.
     pub async fn commit_nar(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
@@ -251,6 +264,7 @@ pub(crate) mod test_ctx {
             shutdown: Shutdown::new(),
             board_events: tokio::sync::broadcast::channel(16).0,
             outbox_wake: Default::default(),
+            probe_requests: Default::default(),
         };
         (ctx, worker_db)
     }

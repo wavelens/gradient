@@ -32,7 +32,8 @@ message is one transaction:
 
 | message | what it writes |
 |---|---|
-| `Ingest` | one worker batch: derivations, outputs, input sources, upstream hits, anchors, build jobs, features, messages, entry points, and the edges that resolve so far |
+| `Ingest` | one worker batch: derivations, outputs, input sources, anchors, build jobs, features, messages, entry points, and the edges that resolve so far |
+| `UpstreamHits` | what the probe found: the narinfo, the runtime edges it names, the relay flag and the demand all of it moves |
 | `KnownDerivations` | nothing; a read answered after every batch queued before it |
 | `CommitNar` | the `cached_path` row, its references, signature placeholders and the outputs it backs |
 | `Transition` | an anchor or evaluation state change: build started, output, completed, failed, dispatched, orphaned, ready, a reconcile scope, an abort |
@@ -46,10 +47,11 @@ reply (ten minutes), which is the backpressure that stops a worker's reader
 instead of dropping its batch; the actor's own work is bounded at 120 s per
 transaction, past which it rolls back and the caller sees an error.
 
-The facts a batch needs from outside the graph are established by the
-scheduler before the message is sent: which derivations are already whole in
-the cache and which an upstream serves (the narinfo probe). They are keyed by
-drv path and output hash; ids are assigned inside the transaction.
+The one fact a batch needs from outside the graph is established by the
+scheduler before the message is sent: which derivations are already whole in our
+own cache. What an upstream serves is not asked here - that is the probe's, and it
+runs for the anchors demand turns on. The fact is keyed by drv path; ids are
+assigned inside the transaction.
 
 Merging graphs from concurrent workers. Two evaluations of overlapping graphs
 converge on one `derivation` row per hash because the existence check and the
@@ -62,9 +64,9 @@ worker that died mid-walk cannot merge late batches into the re-dispatched walk
 once it has completed. Two walks of the *same* evaluation are told apart by the
 dispatch id the scheduler mints at assignment: the worker echoes it on every
 report, and a report naming a dispatch its session did not hand out is dropped.
-The one fact a batch writes globally is `substitutable`, only ever set, never
-cleared, and only on an anchor that has not yet succeeded, so one evaluation's
-upstream probe can add a substitution for another walk but never take one away.
+`substitutable` is global, only ever set, never cleared, and only on an anchor
+that has not yet succeeded, so one project's probe can add a substitution for
+another walk but never take one away. A batch never writes it.
 
 Nothing is deferred between messages, so a restart leaves no pending graph
 state: a batch's stubs, records, edges, anchors and jobs are one transaction
@@ -675,14 +677,25 @@ narinfo endpoint, so a dead upstream is learned about once.
 
 A derivation is just another build that can be substituted when its output is
 available on a cache, exactly like any other - fixed-output derivations are not
-special-cased. At eval time `resolve_anchors` runs a project-scoped lookup
-(`compute_upstream_substitutable`): for every derivation not already in the
-gradient cache it probes each output's `.narinfo` across the project's configured
-upstream caches. A derivation is marked substitutable only when *every* one of
-its outputs is cached somewhere (the gradient cache or an upstream); otherwise it
-is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
+special-cased.
+
+An output is probed when its anchor gains demand, never when its batch lands. The
+`upstream-probe` loop takes the gained set the transition emitter hands it, drops
+what it asked for in the last five minutes, skips every output already cached
+anywhere, and asks each output's `.narinfo` across the upstreams of the project
+whose evaluation names the anchor. A hit makes the anchor a relay and demands what
+its narinfo references; a miss leaves it a builder and demands its build inputs.
+Either answer moves demand, and what that turns on comes back to the loop as the
+next round, so the rounds are the demand fixpoint and an evaluation probes what
+something wants rather than every output it walked. A derivation is marked
+substitutable only when *every* one of its outputs is served; otherwise it is
+built. The resolved upstream NAR URL plus narinfo metadata is persisted once
 onto `derivation_output` (`external_url`, `nar_hash`, `file_size`,
 `references_list`, `deriver`), so the narinfo lookup runs only once.
+
+The loop runs off every graph path on purpose: probing is HTTP, and a network
+round trip inside the graph actor's transaction would hold the single writer to
+the graph for its duration.
 
 A substitutable anchor dispatches as a `BuildSpecKind::Substitute` job on any
 worker once something demands it (see [Promotion](#promotion)). The dispatch

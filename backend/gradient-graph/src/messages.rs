@@ -6,7 +6,7 @@
 
 //! What the graph actor is asked to do, and what it answers.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use chrono::NaiveDateTime;
 use gradient_db::ReconcileScope;
@@ -17,10 +17,12 @@ use gradient_types::ids::{
 };
 use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
-/// One worker batch of discovered derivations plus the substitution facts the
-/// scheduler established outside the actor (cache reads and the upstream probe).
-/// Paths are in bare `<hash>-<name>` form; the facts are keyed by drv path and
-/// by output hash because ids are only assigned inside the actor's transaction.
+/// One worker batch of discovered derivations plus the one substitution fact the
+/// scheduler establishes outside the actor: which of them our own cache already
+/// holds whole. What an upstream serves is not asked here - the probe runs for the
+/// anchors a demand recompute turns on, and reports through `UpstreamHits`. Paths
+/// are in bare `<hash>-<name>` form, because ids are only assigned inside the
+/// actor's transaction.
 #[derive(Debug, Clone, Default)]
 pub struct IngestBatch {
     pub evaluation: EvaluationId,
@@ -29,8 +31,6 @@ pub struct IngestBatch {
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
     pub truly_substituted: HashSet<String>,
-    pub upstream_substitutable: HashSet<String>,
-    pub upstream_hits: HashMap<String, UpstreamHit>,
 }
 
 /// A narinfo hit on a project upstream, persisted onto every `derivation_output`

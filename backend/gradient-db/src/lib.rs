@@ -69,7 +69,7 @@ pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;
 pub use self::connection::*;
 pub use self::consistency::{ConsistencyReport, graph_consistency_report};
-pub use self::context::DbContext;
+pub use self::context::{DbContext, ProbeRequests};
 pub use self::debug_info::{
     DebugInfoTarget, carries_debug_info, index_cached_path, lookup_for_cache, pending_debug_index,
 };

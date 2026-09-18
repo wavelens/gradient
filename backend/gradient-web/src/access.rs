@@ -802,6 +802,7 @@ mod tests {
             forge: gradient_forge::ForgeRegistry::with_builtin(),
             upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
             outbox_wake: Default::default(),
+            probe_requests: Default::default(),
             graph: gradient_core::Graph::stub(),
         })
     }

@@ -18,7 +18,9 @@ root
 ├── scheduler                            supervisor node
 │   ├── scheduler-core                   actor: WorkerPool + JobTracker behind messages
 │   ├── trigger-dispatch, eval-dispatch  periodic passes (5s)
-│   └── build-dispatch                   actor: 5s tick plus coalesced kicks
+│   ├── build-dispatch                   actor: 5s tick plus coalesced kicks
+│   └── upstream-probe                   periodic pass (1s): asks the upstreams
+│                                        for what just gained demand
 ├── sessions                             supervisor: one actor per worker connection
 ├── worker-sample, instance-metrics      periodic passes
 ├── worker-liveness, graph-consistency   periodic passes, absent when disabled
