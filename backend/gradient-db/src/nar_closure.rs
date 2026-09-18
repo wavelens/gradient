@@ -934,17 +934,28 @@ mod tests {
 
     /// Both ripples move a referrer once per edge into the frontier, so the
     /// per-referrer edge count and the self-exclusion are what keeps the counter
-    /// sound.
+    /// sound. The count is read by [`REFERRER_COUNTS`] and applied by the two
+    /// updates, so the invariant now spans the pair: a level that counted one way
+    /// and applied another would drift every counter it touched.
     #[test]
     fn both_ripples_count_edges_per_referrer_and_exclude_self_references() {
+        let counts = norm(REFERRER_COUNTS);
+        assert!(
+            counts.contains("count(*)::int AS n FROM cached_path_reference r"),
+            "{counts}"
+        );
+        assert!(counts.contains("r.reference_hash = ANY($1)"), "{counts}");
+        assert!(
+            counts.contains("r.referrer <> r.reference_hash"),
+            "{counts}"
+        );
+        assert!(counts.contains("GROUP BY r.referrer"), "{counts}");
+
         for sql in [norm(FORWARD), norm(REVERSE)] {
             assert!(
-                sql.contains("count(*) AS n FROM cached_path_reference r"),
-                "{sql}"
+                sql.contains("FROM unnest($1::text[], $2::int[]) AS c(referrer, n)"),
+                "the update applies the count it was handed, one row per referrer: {sql}"
             );
-            assert!(sql.contains("r.reference_hash = ANY($1)"), "{sql}");
-            assert!(sql.contains("r.referrer <> r.reference_hash"), "{sql}");
-            assert!(sql.contains("GROUP BY r.referrer"), "{sql}");
             assert!(sql.contains("WHERE cp.hash = c.referrer"), "{sql}");
         }
 

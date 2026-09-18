@@ -801,6 +801,7 @@ mod tests {
                 vec![returned_cached_path(HASH)],
             ])
             .append_query_results([seed_reply(false)])
+            .append_query_results([referrer_counts(DEP_HASH, 1)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
