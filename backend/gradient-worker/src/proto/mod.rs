@@ -15,4 +15,3 @@ pub(crate) mod nar_daemon_import;
 pub mod nar_recv;
 pub(crate) mod prefetch;
 pub mod scorer;
-pub(crate) mod substitute_relay;

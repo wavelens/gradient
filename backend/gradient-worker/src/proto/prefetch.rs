@@ -639,11 +639,8 @@ impl<'a> InputPrefetcher<'a> {
             .await
     }
 
-    /// Fetch a seed set of paths plus their transitive closure into the
-    /// local nix store. Used both by `run` (for build inputs) and by
-    /// `execute_external_cached_task` (for the build outputs of
-    /// upstream-substituted derivations the worker needs to repack into the
-    /// gradient cache).
+    /// Fetch a seed set of paths plus their transitive closure into the local nix
+    /// store. Used by `run` for a build's inputs and by [`ensure_path`].
     ///
     /// `mode` controls how the walker treats `.drv` content: see [`ClosureMode`].
     async fn fetch_closure(

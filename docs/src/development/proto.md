@@ -705,7 +705,7 @@ sequenceDiagram
 
 The server checks its local NAR store first. For paths not found locally it serves the upstream availability already persisted on `derivation_output.external_url` at eval time, and only then fetches `.narinfo` live from the upstream external caches configured for the project (the project's `project_cache` rows, their `cache`, and each cache's `cache_upstream` entries). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
-An entry with `cached: true` is serveable regardless of `url`. In `Normal` mode a `url` only ever names an upstream - a local hit answers presence alone - and the worker downloads that NAR directly from the URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
+An entry with `cached: true` is serveable regardless of `url`. In `Normal` mode a `url` only ever names an upstream - a local hit answers presence alone - and the worker downloads that NAR directly from the URL. Whatever the upstream's compression, the payload is decompressed, verified against the upstream `nar_hash`, and recompressed at our level before it enters our cache: the metadata the server stores is this side's, never the upstream's word for it.
 
 ### Cache population
 
@@ -1048,11 +1048,10 @@ milliseconds from job acceptance, never from the enclosing span.
 | `known_derivations_wait` | waiting on `QueryKnownDerivations` |
 | `drv_closure_push` | pushing a batch's `.drv` runtime closure |
 | `prefetch` | importing a build's cache-resident inputs |
-| `substitute_relay` | relaying an `external_cached` output |
-| `substitute_fetch` | downloading one upstream NAR, nested under `substitute_relay` |
+| `substitute_fetch` | downloading one upstream NAR per output of a Substitute |
 | `build` | one derivation build |
-| `compress` | the post-build compress and push loop, and a relayed NAR's recompress |
-| `nar_push` | one output NAR upload, nested under `compress` or `substitute_relay` |
+| `compress` | the push every job kind ends in: the outputs it produced, and only those |
+| `nar_push` | one output NAR upload, nested under `compress` |
 | `cache_query_wait` | waiting for a `CacheStatus` or `CacheError` reply |
 
 The server writes one `dispatched_job_phase` row per span, derives the eval

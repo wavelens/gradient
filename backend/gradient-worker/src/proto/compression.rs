@@ -171,7 +171,7 @@ pub(crate) fn zstd_window_size(frame: &[u8]) -> Option<u64> {
 /// Extract the single regular-file payload from a NAR. `.drv` files are
 /// stored as exactly that, so this is enough to recover the .drv bytes
 /// without writing them to disk first.
-async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
+pub(crate) async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
     use futures::StreamExt as _;
     use harmonia_file_nar::{NarEvent, parse_nar};
     use tokio::io::AsyncReadExt as _;
