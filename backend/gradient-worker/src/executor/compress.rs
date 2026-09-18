@@ -85,7 +85,7 @@ mod tests {
     use crate::executor::UPLOAD_CONCURRENCY;
     use crate::executor::timeline::JobTimeline;
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
-    use crate::proto::job::{DispatchHandle, JobUpdater};
+    use crate::proto::job::{CacheWaiters, DispatchHandle, JobUpdater, deliver_cache_reply};
     use crate::proto::nar::NarSource;
     use crate::proto::nar_recv::NarReceiver;
 
@@ -109,16 +109,30 @@ mod tests {
 
     /// Stand in for the dispatch loop: route the server's resume answers back
     /// to the pushers waiting on their gates.
-    fn pump_resumes(mut reader: ProtoReader, nar_recv: NarReceiver) -> tokio::task::JoinHandle<()> {
+    /// Stand in for the dispatch loop. It routes the resume a stream waits on AND
+    /// the `CacheStatus` a query waits on: [`push_outputs`] asks the cache first,
+    /// and a pump that drops that answer leaves the query to time out and every
+    /// path to be reported uncached.
+    fn pump_resumes(
+        mut reader: ProtoReader,
+        nar_recv: NarReceiver,
+        cache_waiters: CacheWaiters,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             while let Some(inbound) = reader.recv().await {
-                if let gradient_proto::Inbound::Control(ServerMessage::NarPushResume {
-                    job_id,
-                    store_path,
-                    received_bytes,
-                }) = inbound
-                {
-                    nar_recv.resolve_push(&job_id, &store_path, received_bytes);
+                match inbound {
+                    gradient_proto::Inbound::Control(ServerMessage::NarPushResume {
+                        job_id,
+                        store_path,
+                        received_bytes,
+                    }) => nar_recv.resolve_push(&job_id, &store_path, received_bytes),
+                    gradient_proto::Inbound::Control(ServerMessage::CacheStatus {
+                        query_id,
+                        cached,
+                    }) => {
+                        deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
+                    }
+                    _ => {}
                 }
             }
         })
@@ -191,18 +205,19 @@ mod tests {
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
         let nar_recv = NarReceiver::new();
+        let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
         let updater = JobUpdater::new(
             JOB.to_owned(),
             DispatchHandle::new("dispatch-1".to_owned()),
             writer,
-            Arc::new(Mutex::new(HashMap::new())),
+            cache_waiters.clone(),
             Arc::new(Mutex::new(HashMap::new())),
             nar_recv.clone(),
             EvalCacheReceiver::new(),
             None,
             JobTimeline::new(),
         );
-        let pump = pump_resumes(reader, nar_recv);
+        let pump = pump_resumes(reader, nar_recv, cache_waiters);
 
         let entries: Vec<CachedPath> = store_paths.iter().map(|p| uncached(p)).collect();
         crate::executor::upload_all(
@@ -274,18 +289,19 @@ mod tests {
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
         let nar_recv = NarReceiver::new();
+        let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
         let mut updater = JobUpdater::new(
             JOB.to_owned(),
             DispatchHandle::new("dispatch-1".to_owned()),
             writer,
-            Arc::new(Mutex::new(HashMap::new())),
+            cache_waiters.clone(),
             Arc::new(Mutex::new(HashMap::new())),
             nar_recv.clone(),
             EvalCacheReceiver::new(),
             None,
             JobTimeline::new(),
         );
-        let pump = pump_resumes(reader, nar_recv);
+        let pump = pump_resumes(reader, nar_recv, cache_waiters);
         let (_tx, abort) = tokio::sync::watch::channel(false);
 
         push_outputs(
