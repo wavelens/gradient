@@ -234,6 +234,19 @@ A dependency the file does not carry prints as `not in this report` rather than
 being dropped, so a count is never left with nothing under it. A closed export
 has none; a report from before schema 12 is full of them.
 
+Two more dependency lines name an incomplete walk. `is a stub: never walked` is a
+derivation a walk named but never read, and `walked over N unwalked inputs` is
+`derivation.unwalked_inputs`: a walked derivation with a non-zero count sits above
+an input whose subtree was never recorded, which is what a walk abandoned between
+batches leaves behind. Both mean the graph under that anchor is not the graph the
+evaluation needs, and the walk, not the build, is where to look:
+
+```
+vendor-registry: Queued, waiting on walked, unready_deps = 1
+    dep openssl-3.6.3 is a stub: never walked
+    dep curl-8.21.0 walked over 2 unwalked inputs
+```
+
 The inspector reads exactly one report schema version and refuses every other,
 rather than answering from whichever columns still happen to line up. The export
 has both added and dropped columns over its life, so this cuts both ways: a
