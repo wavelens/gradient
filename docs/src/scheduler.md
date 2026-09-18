@@ -190,8 +190,19 @@ stub is never promoted, dispatched or pruned: its subtree is not recorded, and
 treating it as dependency-free would dispatch a build without its inputs. The
 bit is content-addressed - edges never change once written - so a later requeue
 keeps the derivation promotable without re-evaluation, and a counter seeded over
-a partial edge set can never be read as zero. Exactly one event clears it
-again.
+a partial edge set can never be read as zero.
+
+That is one batch's claim about one row. The walk prunes on a second bit,
+`unwalked_inputs = 0`: the number of direct inputs whose subtree is not recorded,
+written with the record as its input count, recounted once the edges land, and
+counted down by a ripple as inputs complete. A walk abandoned between batches
+leaves `walked` parents above inputs it only named; without the counter every
+later walk pruned at those parents and the stubs stayed stubs. The sweep recounts
+the column table-wide (`walk_drift`).
+
+Two events clear the record again: the derivation GC below, and the missing-input
+self-heal; both take the dependents of what was complete out of completeness with
+it.
 
 The one event that can invalidate the bit is the derivation GC deleting a
 derivation another one still depends on: the FK cascade drops the edge and
@@ -293,6 +304,9 @@ what it repaired next to the two read-only alarms: terminal-success producers
 with an unbacked output, and `Building` evaluations with no non-terminal anchor
 left. The NAR repair runs first because the readiness recount reads wholeness,
 so a drifted path would otherwise teach the anchors a count this very pass fixes.
+It also recounts `derivation.unwalked_inputs` table-wide and reports what
+disagreed as `walk_drift`; the `unwalked_inputs` recount runs first, since the
+walk's prune reads it and the demand recount reads what the walk recorded.
 
 Each chunk of either repair is its own transaction that takes the same ordered
 `FOR UPDATE` pass a retire takes and only then recounts, so the recount's

@@ -799,6 +799,8 @@ in {
           "WHERE NOT d.walked;"
       ))
       assert unwalked_deps == 0, f"{unwalked_deps} of {edges} dependency edges point at a stub"
+      incomplete = int(sql("SELECT count(*) FROM derivation WHERE walked AND unwalked_inputs <> 0;"))
+      assert incomplete == 0, f"{incomplete} walked derivations still count an unwalked input after a complete walk"
       j = server.succeed("journalctl -u gradient-server --no-pager")
       for needle in ("pool timed out", "graph call timed out", "graph actor unreachable",
                      "ingest transaction failed", "dropped as stale"):

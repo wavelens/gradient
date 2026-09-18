@@ -761,13 +761,13 @@ sequenceDiagram
 
 #### BFS Subtree Pruning
 
-Before enqueuing each wave of input-derivation paths, the worker sends `QueryKnownDerivations` with all newly-discovered `.drv` paths in that wave. The server returns the subset it already has in its `derivation` table for the owning project. The worker:
+Before enqueuing each wave of input-derivation paths, the worker sends `QueryKnownDerivations` with all newly-discovered `.drv` paths in that wave. The server returns the subset it has recorded to the leaves: `walked AND unwalked_inputs = 0`. The worker:
 
  1. Pre-marks all new dep paths as visited (prevents double-enqueuing).
  2. Enqueues **unknown** paths for further BFS traversal.
  3. For **known** paths, nothing: the path stays in its parent's `dependencies`, and the server records a stub row, the edge and this evaluation's `build_job` from that name. The subtree is never walked twice.
 
-This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same project. The server answers `KnownDerivations` from the graph actor, after every evaluation batch queued before the query, so a subtree is never reported known while its edges are still unwritten.
+This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same project. The server answers `KnownDerivations` from the graph actor, after every evaluation batch queued before the query, so a subtree is never reported known while its edges are still unwritten. The second bit is what makes the answer safe against a walk that was abandoned mid-way: the parents that walk wrote read incomplete until their own inputs are recorded, so this walk descends into the stubs it left rather than pruning above them.
 
 ```mermaid
 sequenceDiagram
