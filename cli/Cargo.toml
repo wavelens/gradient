@@ -83,3 +83,8 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 wiremock = "0.6"
+
+[patch.crates-io]
+# gradient-eval (the `eval` feature) needs the nix-bindings fork; without this
+# the requirement would resolve to upstream, which lacks the fork's eval API.
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }
