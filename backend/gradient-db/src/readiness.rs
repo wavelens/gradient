@@ -604,6 +604,84 @@ pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCh
         .collect())
 }
 
+crate::sql! {
+    /// A `Created` anchor nothing demands and no entry point names: a build-time
+    /// dependency of something we relay, which will never be built and is not
+    /// waiting for anything either. `Skipped` is what settles it on the board.
+    ///
+    /// Bounded by the ids the demand move reports, so the sweep's table-wide form
+    /// below is the only pass that reads the whole table.
+    SKIP_UNDEMANDED = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.derivation = ANY($1::uuid[]) AND db.status = 0 AND NOT db.demanded \
+           AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
+         RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
+        params = [DerivationIds(64)];
+
+    /// The mirror: demand came back, so the anchor is pending work again. It goes
+    /// to `Created` and not to `Queued` - the promote that follows reads the gates.
+    THAW_SKIPPED = "UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.derivation = ANY($1::uuid[]) AND db.status = 10 AND db.demanded \
+         RETURNING db.derivation, 10 AS from_status, 0 AS to_status",
+        params = [DerivationIds(64)];
+
+    /// [`SKIP_UNDEMANDED`] over the whole table: the sweep's backstop for a lost
+    /// move, and the backfill for every anchor that was already settled when the
+    /// status existed.
+    SKIP_UNDEMANDED_ALL = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.status = 0 AND NOT db.demanded \
+           AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
+         RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
+        params = [],
+        tier = Sweep;
+
+    THAW_SKIPPED_ALL = "UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.status = 10 AND db.demanded \
+         RETURNING db.derivation, 10 AS from_status, 0 AS to_status",
+        params = [],
+        tier = Sweep;
+}
+
+/// Settle every `Created` anchor among `candidates` that nothing demands.
+pub async fn skip_undemanded<C: ConnectionTrait>(
+    db: &C,
+    candidates: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(returned_transitions(
+        db.query_all_raw(SKIP_UNDEMANDED.bind([ids(candidates)]))
+            .await?,
+    ))
+}
+
+/// Wake every `Skipped` anchor among `candidates` that something wants again.
+pub async fn thaw_skipped<C: ConnectionTrait>(
+    db: &C,
+    candidates: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(returned_transitions(
+        db.query_all_raw(THAW_SKIPPED.bind([ids(candidates)]))
+            .await?,
+    ))
+}
+
+/// The sweep's table-wide pair, run after the demand recount so both read a
+/// corrected column. Returns every row either moved.
+pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
+    let mut changes = returned_transitions(db.query_all_raw(THAW_SKIPPED_ALL.stmt()).await?);
+    changes.extend(returned_transitions(
+        db.query_all_raw(SKIP_UNDEMANDED_ALL.stmt()).await?,
+    ));
+
+    Ok(changes)
+}
+
 /// Table-wide, seeded from every entry point: the backstop for a lost recompute and
 /// the backfill the migration deliberately does not carry.
 ///
@@ -1523,6 +1601,32 @@ mod tests {
             columns,
             ["fetchable", "fetchable", "unready_deps", "unready_deps"],
             "two chunks, both fetchable passes first: {log:?}"
+        );
+    }
+
+    /// `Skipped` is the projection of "Created, and nothing wants it". An entry
+    /// point is demand by definition, so a named root can never be settled by it,
+    /// and the thaw goes back to `Created` rather than to the queue: the promote
+    /// that follows is what reads the gates.
+    #[test]
+    fn skip_moves_only_a_created_undemanded_anchor_no_entry_point_names() {
+        let sql = SKIP_UNDEMANDED.text();
+        assert!(sql.contains("SET status = 10"), "{sql}");
+        assert!(
+            sql.contains("AND db.status = 0 AND NOT db.demanded"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(
+                "NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation)"
+            ),
+            "{sql}"
+        );
+
+        let thaw = THAW_SKIPPED.text();
+        assert!(
+            thaw.contains("SET status = 0") && thaw.contains("AND db.status = 10 AND db.demanded"),
+            "{thaw}"
         );
     }
 

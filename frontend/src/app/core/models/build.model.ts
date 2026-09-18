@@ -25,7 +25,8 @@ export type BuildStatus =
   | 'FailedTransient'
   | 'FailedTimeout'
   | 'Aborted'
-  | 'DependencyFailed';
+  | 'DependencyFailed'
+  | 'Skipped';
 
 export type Architecture = string;
 

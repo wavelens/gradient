@@ -434,7 +434,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed': case 'Substituted': return 'ok';
       case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'err';
-      case 'Aborted': case 'DependencyFailed': return 'muted';
+      case 'Aborted': case 'DependencyFailed': case 'Skipped': return 'muted';
       case 'Building': return 'run';
       default: return 'warn';
     }
@@ -445,6 +445,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       case 'Completed': case 'Substituted': return 'check_circle';
       case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'error';
       case 'Aborted': case 'DependencyFailed': return 'cancel';
+      case 'Skipped': return 'remove_circle_outline';
       case 'Building': return 'sync';
       default: return 'schedule';
     }
@@ -564,6 +565,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': c.failed++; break;
       case 'Aborted': case 'DependencyFailed': c.aborted++; break;
       case 'Building': c.building++; break;
+      // Settled work with no result: it is not pending, so it draws nothing.
+      case 'Skipped': break;
       default: c.queued++;
     }
     return c;

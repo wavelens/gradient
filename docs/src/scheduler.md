@@ -125,6 +125,17 @@ write returns each row with its new value, so the caller queues what gained dema
 and releases what lost it. An anchor already `Building` is left to finish: the bytes
 it produces are cached and useful, while an abort throws the work away.
 
+A `Created` anchor that nothing demands and no entry point names reads **`Skipped`**
+on the board. It is the status projection of exactly that condition, written on the
+lost side of every demand recompute after the un-promote and taken back on the
+gained side before the promote, so a build-time dependency of something we relay
+says what it is instead of sitting at `Created` forever. `Skipped` is settled work:
+no gate acts on it, no walk steps through it, and no evaluation waits for it. It
+thaws to `Created`, never straight to the queue, because it has passed no gate; the
+promote that follows the thaw is what reads them. The consistency sweep runs both
+directions table-wide after its demand recount and reports what moved as
+`skipped_moves`, which is also the status's own backfill.
+
 What nothing demands is never promoted and never built, so it is settled work and
 not pending work. Both readers of "is this evaluation still waiting" -
 `check_evaluation_done` and the scheduler's pending set - ask

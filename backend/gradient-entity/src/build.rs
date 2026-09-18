@@ -59,6 +59,10 @@ pub enum BuildStatus {
     /// Terminal failure: the build exceeded its wall-clock or silent timeout.
     #[sea_orm(num_value = 9)]
     FailedTimeout = 9,
+    /// A build-time dependency nothing needs: not demanded, named by no entry
+    /// point, never built or substituted. Thaws to `Created` when demand returns.
+    #[sea_orm(num_value = 10)]
+    Skipped = 10,
 }
 
 impl BuildStatus {

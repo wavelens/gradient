@@ -27,6 +27,12 @@
         <span class="summary-value">{{ substitutedCount() }}</span>
         <span class="summary-label">Substituted</span>
       </div>
+      @if (skippedCount() > 0) {
+        <div class="summary-card">
+          <span class="summary-value">{{ skippedCount() }}</span>
+          <span class="summary-label">Skipped</span>
+        </div>
+      }
       <div class="summary-card">
         <span class="summary-value">{{ points().length }}</span>
         <span class="summary-label">Total evaluations</span>

@@ -759,6 +759,18 @@ mod tests {
         );
     }
 
+    /// `Skipped` is settled work: no gate acts on it, no walk steps through it and
+    /// no evaluation waits for it. It is in none of the three sets that decide any
+    /// of those, and the thaw back to `Created` is what re-opens all three at once.
+    #[test]
+    fn skipped_is_neither_a_builder_nor_pending_nor_terminal() {
+        assert!(!BUILDER_STATUSES.contains(&BuildStatus::Skipped));
+        assert!(!BuildStatus::PENDING.contains(&BuildStatus::Skipped));
+        assert!(!BuildStatus::TERMINAL_SUCCESS.contains(&BuildStatus::Skipped));
+        assert!(!BuildStatus::FAILURE.contains(&BuildStatus::Skipped));
+        assert!(!BuildStatus::REQUEUEABLE.contains(&BuildStatus::Skipped));
+    }
+
     /// The demand arm reads a DEPENDENT's status, which is only safe while both
     /// promotion moves stay inside the set it tests: a demote-then-promote pair in
     /// one transaction would otherwise change what the second statement's gate

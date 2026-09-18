@@ -31,6 +31,7 @@ BUILD_STATUS = {
     7: "Substituted",
     8: "FailedTransient",
     9: "FailedTimeout",
+    10: "Skipped",
 }
 
 ATTEMPT_REASON = {

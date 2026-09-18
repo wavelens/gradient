@@ -3176,7 +3176,7 @@ paths:
       summary: List evaluation builds
       description: |-
         Returns `.drv` builds associated with the evaluation, sorted by status
-        (Building → Queued → FailedTransient/FailedPermanent/FailedTimeout → Aborted/DependencyFailed → Completed/Substituted),
+        (Building, then Queued, then FailedTransient/FailedPermanent/FailedTimeout, then Aborted/DependencyFailed, then Completed/Substituted, then Skipped),
         then by display name. Supports optional `limit` and `offset` query parameters
         for pagination, and an optional `scope` to restrict the list to one
         package's build-time dependency closure.
@@ -8944,6 +8944,7 @@ components:
         completed=Completed; failed=FailedPermanent|FailedTimeout|DependencyFailed;
         building=Building; queued=Queued|Created|FailedTransient.
         substituted and aborted are reported separately and excluded from bars and from total_builds.
+        Skipped is counted in no segment at all: it is neither pending work nor a result.
       properties:
         completed: { type: integer }
         failed: { type: integer }
@@ -9715,7 +9716,7 @@ components:
 
     BuildStatus:
       type: string
-      enum: [Queued, Building, Completed, Substituted, FailedPermanent, FailedTransient, FailedTimeout, Aborted, DependencyFailed]
+      enum: [Queued, Building, Completed, Substituted, FailedPermanent, FailedTransient, FailedTimeout, Aborted, DependencyFailed, Skipped]
       description: |-
         Current state of a single build.
 
@@ -9730,11 +9731,14 @@ components:
         | `FailedTimeout` | Yes | Exceeded the wall-clock or silent-output timeout |
         | `Aborted` | Yes | Cancelled by user |
         | `DependencyFailed` | Yes | A dependency build failed, so this build was not attempted |
+        | `Skipped` | No | A build-time dependency nothing needs: no entry point names it and nothing demands it, so it will not be built. Returns to `Queued` if demand comes back |
 
         `FailedTransient` is non-terminal: the scheduler will re-queue the build
         automatically. Treat it as in-progress when deciding whether an evaluation
-        has finished. The frontend renders `FailedPermanent`, `FailedTransient`, and
-        `FailedTimeout` all as "Failed", and `Completed`/`Substituted` both as success.
+        has finished. `Skipped` is non-terminal but is NOT in progress: nothing is
+        coming for it, so an evaluation never waits on one. The frontend renders
+        `FailedPermanent`, `FailedTransient`, and `FailedTimeout` all as "Failed",
+        and `Completed`/`Substituted` both as success.
 
     Architecture:
       type: string

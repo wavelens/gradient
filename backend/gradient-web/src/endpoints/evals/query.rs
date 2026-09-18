@@ -175,6 +175,8 @@ fn status_rank(status: BuildStatus) -> u32 {
         Aborted => 2,
         Created | Queued => 3,
         Completed | Substituted => 4,
+        // Settled work with no result: below everything that has one.
+        Skipped => 5,
     }
 }
 
