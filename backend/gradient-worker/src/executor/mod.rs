@@ -24,7 +24,9 @@ pub mod timeline;
 use std::sync::Arc;
 
 use anyhow::Result;
-use gradient_proto::messages::{BuildJob, BuildSpecKind, FlakeJob, FlakeStep};
+use gradient_proto::messages::{
+    BuildJob, BuildOutput, BuildSpec, BuildSpecKind, FlakeJob, FlakeStep,
+};
 use tokio::sync::watch;
 use tracing::instrument;
 
@@ -35,6 +37,7 @@ use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::{credentials::CredentialStore, job::JobUpdater, nar};
 use gradient_proto::messages::CachedPath;
+use gradient_proto::traits::WorkerStore;
 
 pub use eval::WorkerEvaluator;
 
@@ -280,6 +283,52 @@ async fn upload_unless_aborted(
     result
 }
 
+/// The `(name, path)` of every output a spec actually names.
+fn named_outputs(task: &BuildSpec) -> Vec<(String, String)> {
+    task.outputs
+        .iter()
+        .filter(|o| !o.path.is_empty())
+        .map(|o| (o.name.clone(), o.path.clone()))
+        .collect()
+}
+
+/// Split what the local store already holds out of what a Substitute or a Download
+/// would go and get. An output on disk is already realised, so fetching it again
+/// costs a round trip to answer a question the store answers for free - and on a
+/// host with no route out, the fetch is not an answer at all. A worker with no
+/// daemon errors on every ask and fetches everything, exactly as before.
+async fn split_already_realised<S: WorkerStore + ?Sized>(
+    store: &S,
+    wanted: Vec<(String, String)>,
+) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    let mut realised = Vec::new();
+    let mut fetch = Vec::new();
+    for (name, path) in wanted {
+        if store.has_path(&path).await.unwrap_or(false) {
+            realised.push((name, path));
+        } else {
+            fetch.push((name, path));
+        }
+    }
+
+    (realised, fetch)
+}
+
+/// The report for an output nobody had to fetch. Sizes stay `None` for the compress
+/// step to fill in, the way a real build reports what it just wrote.
+fn realised_output(name: &str, store_path: &str) -> BuildOutput {
+    BuildOutput {
+        name: name.to_owned(),
+        store_path: store_path.to_owned(),
+        hash: gradient_sources::get_hash_from_path(store_path.to_owned())
+            .map(|(h, _)| h)
+            .unwrap_or_default(),
+        nar_size: None,
+        nar_hash: None,
+        products: Vec::new(),
+    }
+}
+
 /// Executes jobs dispatched by the server.
 ///
 /// Each method corresponds to one `Job` variant from the proto spec.
@@ -462,22 +511,28 @@ impl JobExecutor {
             updater.report_building(build_task.build_id.clone()).await?;
 
             if build_task.kind == BuildSpecKind::Substitute {
-                let pairs: Vec<(String, String)> = build_task
-                    .outputs
-                    .iter()
-                    .filter(|o| !o.path.is_empty())
-                    .map(|o| (o.name.clone(), o.path.clone()))
-                    .collect();
+                let (realised, missing) =
+                    split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
+                // What the store already held is pinned before the fetch that runs
+                // beside it; what an upstream serves never lands there, so it needs
+                // no root.
+                for (_, path) in &realised {
+                    gc_handles.push(self.gcroots.add(path).await);
+                }
+
                 let fetched =
-                    substitute::fetch_outputs(&mut substitute::JobUpdaterIo(updater), &pairs)
+                    substitute::fetch_outputs(&mut substitute::JobUpdaterIo(updater), &missing)
                         .await
                         .map_err(|e| {
                             failure::classify_substitute_failure(&build_task.build_id, e)
                         })?;
 
-                let reported: Vec<gradient_proto::messages::BuildOutput> = fetched
+                let mut reported: Vec<BuildOutput> = realised
                     .iter()
-                    .map(|f| gradient_proto::messages::BuildOutput {
+                    .map(|(name, path)| realised_output(name, path))
+                    .collect();
+                reported.extend(fetched.iter().map(|f| {
+                    BuildOutput {
                         name: f.name.clone(),
                         store_path: f.store_path.clone(),
                         hash: gradient_sources::get_hash_from_path(f.store_path.clone())
@@ -486,14 +541,22 @@ impl JobExecutor {
                         nar_size: f.nar.as_ref().map(|n| n.nar.len() as i64),
                         nar_hash: f.nar.as_ref().map(|n| nar::sha256_nix32(&n.nar)),
                         products: Vec::new(),
-                    })
-                    .collect();
+                    }
+                }));
                 updater
                     .report_build_output(build_task.build_id.clone(), reported, None, true)
                     .await?;
 
-                // Nothing landed in the local store, so no GC roots; the one push
-                // at the end of the loop uploads what the upstream served.
+                outputs.extend(
+                    realised
+                        .into_iter()
+                        .map(|(_, store_path)| compress::OutputNar {
+                            store_path,
+                            source: nar::NarSource::Path {
+                                store: Some(&self.store),
+                            },
+                        }),
+                );
                 outputs.extend(fetched.into_iter().filter_map(|f| {
                     f.nar.map(|raw| compress::OutputNar {
                         store_path: f.store_path,
@@ -509,13 +572,34 @@ impl JobExecutor {
             }
 
             if build_task.kind == BuildSpecKind::Download {
+                let (realised, _) =
+                    split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
+                if let Some((name, store_path)) = realised.into_iter().next() {
+                    gc_handles.push(self.gcroots.add(&store_path).await);
+                    updater
+                        .report_build_output(
+                            build_task.build_id.clone(),
+                            vec![realised_output(&name, &store_path)],
+                            None,
+                            true,
+                        )
+                        .await?;
+                    outputs.push(compress::OutputNar {
+                        store_path,
+                        source: nar::NarSource::Path {
+                            store: Some(&self.store),
+                        },
+                    });
+                    continue;
+                }
+
                 let (store_path, raw) = {
                     let _phase = updater.phase(JobPhase::Download);
                     download::download_output(&mut download::JobUpdaterIo(updater), build_task)
                         .await
                         .map_err(|e| failure::classify_download_failure(&build_task.build_id, e))?
                 };
-                let reported = vec![gradient_proto::messages::BuildOutput {
+                let reported = vec![BuildOutput {
                     name: "out".to_owned(),
                     store_path: store_path.clone(),
                     hash: gradient_sources::get_hash_from_path(store_path.clone())
@@ -621,6 +705,7 @@ pub(crate) fn check_abort(abort: &watch::Receiver<bool>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_test_support::fakes::worker_store::FakeWorkerStore;
 
     /// Regression: a `.drv`'s `inputSrcs` (e.g. `builtins.toFile` configs like
     /// `grub-config.xml`) must be discovered by parsing the `.drv`, not via the
@@ -652,5 +737,94 @@ mod tests {
     async fn drv_input_sources_skips_unreadable_drv() {
         let srcs = drv_input_sources(&["/nix/store/does-not-exist.drv".to_string()]).await;
         assert!(srcs.is_empty());
+    }
+
+    fn spec(kind: BuildSpecKind, outputs: &[(&str, &str)]) -> BuildSpec {
+        BuildSpec {
+            build_id: "b".to_owned(),
+            drv_path: "/nix/store/x.drv".to_owned(),
+            kind,
+            is_fixed_output: false,
+            outputs: outputs
+                .iter()
+                .map(|(name, path)| gradient_proto::messages::DerivationOutput {
+                    name: (*name).to_owned(),
+                    path: (*path).to_owned(),
+                })
+                .collect(),
+            timeout_secs: None,
+            max_silent_secs: None,
+        }
+    }
+
+    /// An output with no path is not a path to look for: the spec names it, but
+    /// there is nothing to ask the store about and nothing to pack.
+    #[test]
+    fn named_outputs_drops_the_ones_with_no_path() {
+        let task = spec(
+            BuildSpecKind::Substitute,
+            &[("out", "/nix/store/a-out"), ("dev", "")],
+        );
+
+        assert_eq!(
+            named_outputs(&task),
+            vec![("out".to_owned(), "/nix/store/a-out".to_owned())]
+        );
+    }
+
+    /// The reason the check exists: an output already on disk must not be fetched.
+    /// A Download that reaches for its URL anyway fails on a host with no route
+    /// out, which is every hermetic test VM and every offline builder.
+    #[tokio::test]
+    async fn what_the_store_already_holds_is_not_fetched() {
+        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-out");
+        let wanted = vec![
+            ("out".to_owned(), "/nix/store/a-out".to_owned()),
+            ("dev".to_owned(), "/nix/store/b-dev".to_owned()),
+        ];
+
+        let (realised, missing) = split_already_realised(&store, wanted).await;
+
+        assert_eq!(
+            realised,
+            vec![("out".to_owned(), "/nix/store/a-out".to_owned())]
+        );
+        assert_eq!(
+            missing,
+            vec![("dev".to_owned(), "/nix/store/b-dev".to_owned())]
+        );
+    }
+
+    struct NoDaemon;
+
+    #[async_trait::async_trait]
+    impl WorkerStore for NoDaemon {
+        async fn has_path(&self, _store_path: &str) -> Result<bool> {
+            Err(anyhow::anyhow!("acquire daemon connection: no such file"))
+        }
+    }
+
+    /// A Download runs on workers that have no nix at all, which is the point of
+    /// the kind. The store that cannot answer must not swallow the output: every
+    /// path falls through to the fetch it would have had before this check.
+    #[tokio::test]
+    async fn a_worker_without_a_daemon_fetches_everything() {
+        let wanted = vec![("out".to_owned(), "/nix/store/a-out".to_owned())];
+
+        let (realised, missing) = split_already_realised(&NoDaemon, wanted.clone()).await;
+
+        assert!(realised.is_empty());
+        assert_eq!(missing, wanted);
+    }
+
+    /// The sizes are left for the compress step, the way a real build reports the
+    /// outputs it just wrote; the hash is the store path's own.
+    #[test]
+    fn a_realised_output_reports_no_sizes() {
+        let out = realised_output("out", "/nix/store/xa1b2c3-thing");
+
+        assert_eq!(out.name, "out");
+        assert_eq!(out.store_path, "/nix/store/xa1b2c3-thing");
+        assert!(out.nar_size.is_none() && out.nar_hash.is_none());
     }
 }
