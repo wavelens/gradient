@@ -17,12 +17,13 @@ use gradient_db::DbContext;
 use gradient_util::supervision::SupervisorHealth;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use sea_orm::TransactionTrait;
+use std::collections::HashMap;
 use tracing::{info, warn};
 
 use crate::ingest;
 use crate::messages::{
     DemoteReport, Demotion, GcReport, GcRequest, IngestBatch, IngestReport, NarCommit,
-    NarCommitted, NarConfirm, RequeueScope, Transition, TransitionReport,
+    NarCommitted, NarConfirm, RequeueScope, Transition, TransitionReport, UpstreamHit,
 };
 use crate::{demote, gc, known, nar, requeue, transition};
 
@@ -46,6 +47,7 @@ pub enum GraphMsg {
         drv_hashes: Vec<String>,
         reply: Reply<Vec<String>>,
     },
+    UpstreamHits(HashMap<String, UpstreamHit>, Reply<()>),
     CommitNar(NarCommit, Reply<NarCommitted>),
     ConfirmNar(NarConfirm, Reply<bool>),
     Transition(Transition, Reply<TransitionReport>),
@@ -130,6 +132,15 @@ impl Actor for GraphActor {
                 let result = known::prunable(&st.ctx.worker_db, drv_hashes)
                     .await
                     .map_err(Into::into);
+                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                let _ = reply.send(result);
+            }
+            GraphMsg::UpstreamHits(hits, reply) => {
+                flush(&myself, st).await;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+                    ingest::apply_upstream_hits(scoped, &hits).await
+                })
+                .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
                 let _ = reply.send(result);
             }

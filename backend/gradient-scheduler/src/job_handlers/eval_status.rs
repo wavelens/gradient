@@ -203,13 +203,7 @@ impl Scheduler {
             }
         }
 
-        let Some(evaluation) = EEvaluation::find_by_id(job.evaluation_id)
-            .one(&self.state.worker_db)
-            .await?
-        else {
-            anyhow::bail!("evaluation {} not found", job.evaluation_id);
-        };
-        let facts = eval::assess_substitutability(&self.state, &evaluation, &derivations).await;
+        let truly_substituted = eval::assess_cached(&self.state, &derivations).await;
         self.state
             .graph
             .ingest(IngestBatch {
@@ -218,9 +212,7 @@ impl Scheduler {
                 derivations,
                 warnings,
                 errors,
-                truly_substituted: facts.truly_substituted,
-                upstream_substitutable: facts.upstream_substitutable,
-                upstream_hits: facts.upstream_hits,
+                truly_substituted,
             })
             .await?;
 

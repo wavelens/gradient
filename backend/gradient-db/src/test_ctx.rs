@@ -16,7 +16,7 @@ use gradient_types::{Cli, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 
-use crate::{DbContext, WebDb, WorkerDb};
+use crate::{DbContext, ProbeRequests, WebDb, WorkerDb};
 
 /// Drain the detached work a context spawned, then drop it, so the `WorkerDb` the
 /// builder returned is the last handle on the pool - which is what
@@ -34,8 +34,33 @@ pub(crate) async fn settle(ctx: DbContext) {
 /// Drop the context before draining that log: `WorkerDb::into_transaction_log`
 /// requires the handle it is called on to be the last one alive.
 pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
+    let (ctx, pool, _probes) = ctx_with_probes(db).await;
+    (ctx, pool)
+}
+
+/// [`ctx`] with the probe channel's receiving end, for a test whose subject is
+/// what a demand move hands the upstream probe.
+pub(crate) async fn ctx_with_probes(
+    db: DatabaseConnection,
+) -> (
+    DbContext,
+    WorkerDb,
+    tokio::sync::mpsc::UnboundedReceiver<Vec<gradient_types::DerivationId>>,
+) {
     let dir = std::env::temp_dir().join(format!("gradient-db-{}", uuid::Uuid::now_v7()));
-    ctx_at(db, &dir).await
+    let probe_requests = ProbeRequests::channel();
+    let probes = probe_requests
+        .take_inbox()
+        .expect("a fresh channel has one");
+    let (ctx, pool) = ctx_at(db, &dir).await;
+    (
+        DbContext {
+            probe_requests,
+            ..ctx
+        },
+        pool,
+        probes,
+    )
 }
 
 /// [`ctx`] over a caller-owned directory, for a test that must place a NAR object
@@ -56,6 +81,8 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
     .expect("test cli");
 
     let worker_db = WorkerDb::new(db);
+    // The receiver is dropped with the harness: a test that wants the probe
+    // requests reads them off its own channel instead.
     let ctx = DbContext {
         worker_db: worker_db.clone(),
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
@@ -67,6 +94,7 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         shutdown: Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(16).0,
         outbox_wake: Default::default(),
+        probe_requests: ProbeRequests::default(),
     };
 
     (ctx, worker_db)

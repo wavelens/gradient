@@ -20,7 +20,7 @@ use uuid::Uuid;
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::cache_metric::CacheTraffic;
-use gradient_db::{CacheDb, DbContext, WebDb, WorkerDb};
+use gradient_db::{CacheDb, DbContext, ProbeRequests, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_graph::Graph;
 use gradient_notify::EmailSender;
@@ -87,6 +87,9 @@ pub struct AppState {
     /// The graph actor's handle: every write to the dependency graph and the
     /// cache index goes through it.
     pub graph: Arc<Graph>,
+    /// Where a demand recompute reports what it turned on, so the upstream probe
+    /// asks only for what something wants.
+    pub probe_requests: ProbeRequests,
 }
 
 /// Kept as an alias so handler signatures and `Arc<ServerState>` call sites in
@@ -119,6 +122,7 @@ impl AppState {
             shutdown: self.shutdown.clone(),
             board_events: self.board_events.clone(),
             outbox_wake: self.outbox_wake.clone(),
+            probe_requests: self.probe_requests.clone(),
         }
     }
 

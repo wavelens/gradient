@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What the graph actor cannot establish itself about an eval batch: which
-//! derivations our cache already holds whole, and which an upstream serves.
+//! What the graph actor cannot establish itself: which derivations our cache
+//! already holds whole (asked once per eval batch), and which an upstream serves
+//! (asked by the probe loop, for the anchors demand turns on).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -15,27 +16,19 @@ use gradient_entity::StorePath;
 use gradient_graph::UpstreamHit;
 use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
 
 const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-#[derive(Debug, Default)]
-pub struct SubstitutionFacts {
-    pub truly_substituted: HashSet<String>,
-    pub upstream_substitutable: HashSet<String>,
-    pub upstream_hits: HashMap<String, UpstreamHit>,
-}
-
-/// The substitution facts the graph actor cannot establish itself: which
-/// derivations are already whole in our cache, which an upstream serves, and
-/// the narinfo hits to persist. Reads run on the pool; the probe is network.
-pub async fn assess_substitutability(
+/// The drv paths of `derivations` whose every output is already whole in our own
+/// cache, so the anchor can be resigned instead of rebuilt. A pure read: the
+/// upstream question is [`probe_outputs`]'s and runs only once something wants
+/// the anchor.
+pub async fn assess_cached(
     state: &Arc<ServerState>,
-    evaluation: &MEvaluation,
     derivations: &[DiscoveredDerivation],
-) -> SubstitutionFacts {
-    let mut facts = SubstitutionFacts::default();
+) -> HashSet<String> {
+    let mut truly_substituted = HashSet::new();
     let outputs_by_drv: HashMap<&str, Vec<String>> = derivations
         .iter()
         .map(|d| {
@@ -56,7 +49,7 @@ pub async fn assess_substitutability(
         .into_iter()
         .collect();
     if all_hashes.is_empty() {
-        return facts;
+        return truly_substituted;
     }
 
     let db = &state.worker_db;
@@ -76,52 +69,38 @@ pub async fn assess_substitutability(
         .collect();
     for (drv, hashes) in &outputs_by_drv {
         if !hashes.is_empty() && hashes.iter().all(|h| fully_cached.contains(h)) {
-            facts.truly_substituted.insert((*drv).to_owned());
+            truly_substituted.insert((*drv).to_owned());
         }
     }
 
+    truly_substituted
+}
+
+/// Ask the upstreams of `evaluation`'s project for `to_probe`, folding the
+/// per-endpoint metrics the round produced. Network: the only function here that
+/// leaves the process, and the reason probing runs on its own loop rather than on
+/// a graph path.
+pub async fn probe_outputs(
+    state: &Arc<ServerState>,
+    evaluation: &MEvaluation,
+    to_probe: Vec<(String, String)>,
+) -> HashMap<String, UpstreamHit> {
+    let mut hits = HashMap::new();
+    if to_probe.is_empty() {
+        return hits;
+    }
+
+    let db = &state.worker_db;
     let Some(project_id) = crate::dispatch::project_id_for_eval(state, evaluation).await else {
-        return facts;
+        return hits;
     };
     let endpoints =
         gradient_db::upstream_endpoints_for_project(db, project_id, UPSTREAM_WINDOW_MINUTES)
             .await
             .unwrap_or_default();
     if endpoints.is_empty() {
-        return facts;
+        return hits;
     }
-
-    let known_outputs = gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
-        EDerivationOutput::find()
-            .filter(CDerivationOutput::Hash.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    .unwrap_or_else(|e| {
-        error!(error = %e, "substitutability: derivation_output lookup failed");
-        Vec::new()
-    });
-    let mut available: HashSet<String> = known_outputs
-        .iter()
-        .filter(|o| o.external_url.is_some())
-        .map(|o| o.hash.clone())
-        .collect();
-    let cached_anywhere: HashSet<String> = known_outputs
-        .iter()
-        .filter(|o| o.is_cached_anywhere())
-        .map(|o| o.hash.clone())
-        .collect();
-    let to_probe: Vec<(String, String)> = derivations
-        .iter()
-        .filter(|d| !facts.truly_substituted.contains(&d.drv_path))
-        .flat_map(|d| d.outputs.iter())
-        .filter_map(|o| StorePath::parse(&o.path).ok())
-        .filter(|sp| !cached_anywhere.contains(sp.hash()))
-        .map(|sp| (sp.hash().to_owned(), sp.full()))
-        .collect::<HashMap<_, _>>()
-        .into_iter()
-        .collect();
 
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
     let (found, stats) = gradient_core::upstream::probe_batch(
@@ -152,8 +131,7 @@ pub async fn assess_substitutability(
     }
 
     for (hash, cp) in found {
-        available.insert(hash.clone());
-        facts.upstream_hits.insert(
+        hits.insert(
             hash,
             UpstreamHit {
                 url: cp.url.clone(),
@@ -168,19 +146,5 @@ pub async fn assess_substitutability(
         );
     }
 
-    // A derivation is upstream-substitutable only when every one of its outputs
-    // is served, and internal cache presence deliberately does not count: an
-    // output whose runtime closure is incomplete would otherwise be flagged,
-    // fail substitution, and escalate into a build whose inputs were never
-    // produced. The genuinely-whole internal case is `truly_substituted` above.
-    for (drv, hashes) in &outputs_by_drv {
-        if facts.truly_substituted.contains(*drv) {
-            continue;
-        }
-        if !hashes.is_empty() && hashes.iter().all(|h| available.contains(h)) {
-            facts.upstream_substitutable.insert((*drv).to_owned());
-        }
-    }
-
-    facts
+    hits
 }

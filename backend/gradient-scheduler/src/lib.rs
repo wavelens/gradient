@@ -26,6 +26,7 @@ pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
 pub mod peer_auth;
+pub mod probe;
 pub mod views;
 pub mod waiting_state;
 pub mod worker_pool;
