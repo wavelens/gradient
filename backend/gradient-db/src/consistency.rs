@@ -402,7 +402,7 @@ mod tests {
         assert!(
             log[18].contains("SET LOCAL work_mem")
                 && log[19].contains("ORDER BY derivation FOR UPDATE")
-                && log[20].contains("SET demanded ="),
+                && log[20].contains("FROM region r ORDER BY r.derivation"),
             "a name gives the closure below it demand, in this pass and not the next: {log:?}"
         );
         assert!(
