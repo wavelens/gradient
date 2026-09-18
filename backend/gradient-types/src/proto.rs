@@ -144,6 +144,9 @@ pub enum BuildSpecKind {
     /// Fetch each output's NAR from an upstream cache and repack it. No nix store,
     /// no dependency, any worker.
     Substitute,
+    /// A `builtin:fetchurl` derivation: fetch the URL, verify the fixed output
+    /// hash, pack the result. No nix store, no dependency, any worker.
+    Download,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -526,6 +529,7 @@ pub enum JobPhase {
     DrvClosurePush,
     Prefetch,
     SubstituteFetch,
+    Download,
     Build,
     Compress,
     NarPush,
@@ -546,6 +550,7 @@ impl JobPhase {
             Self::DrvClosurePush => "drv_closure_push",
             Self::Prefetch => "prefetch",
             Self::SubstituteFetch => "substitute_fetch",
+            Self::Download => "download",
             Self::Build => "build",
             Self::Compress => "compress",
             Self::NarPush => "nar_push",
@@ -572,6 +577,7 @@ impl JobPhase {
             Self::NarPush => 12,
             Self::CacheQueryWait => 13,
             Self::SubstituteFetch => 14,
+            Self::Download => 15,
         }
     }
 
@@ -591,6 +597,7 @@ impl JobPhase {
             12 => Self::NarPush,
             13 => Self::CacheQueryWait,
             14 => Self::SubstituteFetch,
+            15 => Self::Download,
             _ => return None,
         })
     }

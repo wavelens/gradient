@@ -11327,6 +11327,7 @@ components:
             - drv_closure_push
             - prefetch
             - substitute_fetch
+            - download
             - build
             - compress
             - nar_push

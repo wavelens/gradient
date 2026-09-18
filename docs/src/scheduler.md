@@ -691,6 +691,11 @@ eval left not-yet-succeeded are flipped substitutable when an upstream is newly
 found, so a previously-failed fetcher substitutes instead of rebuilding; the
 anchors that flipped stop being builders, so what they demanded is released.
 
+A `builtin` fixed-output derivation nothing serves is downloaded by any worker
+without nix: the URL, the hash check and the one-file NAR are the worker's, and it
+takes the same push. `builtin:buildenv` and the rest of the `builtin` builders are
+not fixed-output, so they stay builds the daemon runs.
+
 A `SubstituteUnavailable` miss re-queues the substitute penalty-free. At
 `substituteMissEscalationThreshold` misses within one evaluation the graph actor
 exhausts the substitution instead: `substitutable` is cleared, the outputs forget
