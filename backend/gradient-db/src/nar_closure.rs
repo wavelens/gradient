@@ -159,7 +159,7 @@ crate::sql_fn! {
 const LOCK: &str = "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
 
 crate::sql! {
-    LOCK_QUERY = LOCK,
+    pub(crate) LOCK_QUERY = LOCK,
         params = [CachedPathHashes(64)];
 }
 
@@ -292,7 +292,7 @@ fn delete_statement(guard: Option<&str>) -> String {
 }
 
 crate::sql_fn! {
-    DELETE_STATEMENT = || delete_statement(None),
+    pub(crate) DELETE_STATEMENT = || delete_statement(None),
         params = [CachedPathHashes(64)];
 
     // The shape a guarded retire runs; see `retire_paths_where`.
@@ -488,7 +488,7 @@ pub async fn retire_paths_where(
 }
 
 crate::sql! {
-    SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
+    pub(crate) SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
         params = [CachedPathHashes(64)];
 }
 
@@ -571,7 +571,7 @@ fn reset_uncached_producers_sql() -> String {
 }
 
 crate::sql_fn! {
-    RESET_UNCACHED_PRODUCERS = reset_uncached_producers_sql,
+    pub(crate) RESET_UNCACHED_PRODUCERS = reset_uncached_producers_sql,
         params = [DerivationIds(64)];
 }
 

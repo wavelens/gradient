@@ -345,7 +345,7 @@ pub async fn demote_cached_output(
             .await?;
     }
 
-    let mut retired = crate::nar_closure::retire_paths(&txn, &[hash.to_owned()]).await?;
+    let mut retired = crate::runtime_readiness::retire_outputs(&txn, &[hash.to_owned()]).await?;
     retired
         .transitions
         .extend(crate::readiness::unpromote_ungated(&txn, &producers).await?);

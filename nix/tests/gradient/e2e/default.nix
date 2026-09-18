@@ -1178,13 +1178,41 @@ in {
               "  LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
               "  WHERE e.derivation = db.derivation "
               "    AND (dep.derivation IS NULL OR NOT dep.fetchable)) "
-              "OR db.fetchable <> (db.status IN (3, 7) AND EXISTS ("
+              "OR db.fetchable <> (db.status IN (3, 7) AND db.missing_runtime_deps = 0 "
+              "AND EXISTS ("
               "  SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) "
               "AND NOT EXISTS ("
               "  SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash "
-              "  WHERE o.derivation = db.derivation "
-              "    AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)));"
+              "  WHERE o.derivation = db.derivation AND cp.file_hash IS NULL));"
           ))
+
+      # The second readiness counter, one per edge kind (#671). Wholeness moved from
+      # the path to the anchor: an anchor is whole when every output is present and
+      # no runtime edge leads to something that is not, so the recompute is a walk up
+      # from what is not present and has to agree with every stored count.
+      def runtime_drift():
+          return int(sql(
+              "WITH RECURSIVE unwhole(derivation) AS ("
+              "  SELECT db.derivation FROM derivation_build db WHERE NOT ("
+              "    EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) "
+              "    AND NOT EXISTS (SELECT 1 FROM derivation_output o "
+              "                    LEFT JOIN cached_path cp ON cp.hash = o.hash "
+              "                    WHERE o.derivation = db.derivation AND cp.file_hash IS NULL)) "
+              "  UNION "
+              "  SELECT e.derivation FROM derivation_dependency e "
+              "  JOIN unwhole u ON u.derivation = e.dependency WHERE e.kind IN (1, 2)) "
+              "SELECT count(*) FROM derivation_build db WHERE db.missing_runtime_deps <> ("
+              "  SELECT count(*) FROM derivation_dependency e "
+              "  JOIN unwhole u ON u.derivation = e.dependency "
+              "  WHERE e.derivation = db.derivation AND e.kind IN (1, 2));"
+          ))
+
+      def anchor_whole(drv):
+          return sql(
+              f"SELECT db.missing_runtime_deps::text || ' ' || db.fetchable::int::text "
+              f"FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
+              f"WHERE d.hash = '{drv}';"
+          ).split()
 
       # The third counter (#666). Demand is reachability from the entry points
       # through named builders, so the recompute is a walk and not a per-row
@@ -1227,6 +1255,7 @@ in {
           raise Exception(f"{what} (still {sql(query)!r}, want {want!r})")
 
       assert drift() == 0, "counters disagree with their recompute before the retire"
+      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute before the retire"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute before the retire"
       assert unbacked() == 0, "a producer this build settled has an output nothing backs"
       assert counter(store_hash) == 0, "hello's own output is not whole to start with"
@@ -1308,6 +1337,7 @@ in {
       missing = counter(store_hash)
       assert missing >= 1, f"hello's output should miss the retired path, has {missing}"
       assert drift() == 0, "counters disagree with their recompute after the retire"
+      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute after the retire"
       # The retire moves the anchor side in its own transaction: the producer of a
       # path it deleted stops being fetchable, and a terminal-success producer with
       # nothing left to serve is reset to a fresh build intent. Only the terminal
@@ -1332,6 +1362,15 @@ in {
       ))
       assert hello_unready >= 1, f"hello must count its unfetchable dependencies as unready: {hello_unready}"
 
+      # The same fact on the anchor. hello references the retired path, so the
+      # runtime edge to its producer is a hole and hello stops being whole; the
+      # counter is moved by the retire's ripple, never re-derived.
+      hello_missing, hello_fetchable = anchor_whole(drv_hash)
+      assert int(hello_missing) >= 1, (
+          f"hello's anchor must count the retired reference as a missing runtime dep, "
+          f"has {hello_missing}")
+      assert hello_fetchable == "0", "an anchor that is not whole must not be fetchable"
+
       # The other half of the reset's scope, and the one that costs a fleet when it
       # is wrong. hello only REFERENCES the retired path; its own output is still on
       # disk, so it loses fetchability and keeps its terminal status. Resetting the
@@ -1352,7 +1391,11 @@ in {
       poll(f"SELECT missing_references FROM cached_path WHERE hash = '{store_hash}';", "0",
            "the re-upload did not ripple hello's output back to whole")
       assert drift() == 0, "counters disagree with their recompute after the re-upload"
+      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute after the re-upload"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the re-upload"
+      poll(f"SELECT missing_runtime_deps FROM derivation_build db "
+           f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';", "0",
+           "the re-upload did not ripple hello's anchor back to whole")
 
       # A re-upload restores wholeness, not trust. `fetchable` also needs a
       # terminal-success status, which only an evaluation's ingest or a finished
@@ -1941,6 +1984,7 @@ in {
       poll(f"SELECT count(*) FROM derivation_build WHERE derivation IN ({chain}) AND status = 0;", "3",
            "the retire did not reset every producer of the chain")
       assert drift() == 0, "counters disagree with their recompute after the retire"
+      assert runtime_drift() == 0, "anchor wholeness disagrees with its recompute after the retire"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the retire"
 
       # The dead zone, stated: nothing queues an unnamed anchor, however ready.
