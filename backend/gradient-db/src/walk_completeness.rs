@@ -36,7 +36,7 @@
 use std::collections::BTreeMap;
 
 use gradient_types::DerivationId;
-use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait, Value};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 
 use crate::readiness::ids;
 
@@ -239,7 +239,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
 
     fn id_row(id: DerivationId, flags: &[(&str, bool)]) -> BTreeMap<String, Value> {
         let mut row = BTreeMap::from([("id".to_owned(), Value::from(id.into_inner()))]);
