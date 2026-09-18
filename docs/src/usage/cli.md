@@ -96,12 +96,17 @@ gradient task eval <name>          # Trigger a new evaluation
 
 ### Caches
 
-Cache CRUD:
+Cache CRUD. `edit` opens the fields in `$EDITOR` prefilled with the cache's
+current values, so a flag you omit keeps what the cache already has:
 
 ```sh
+gradient cache create [-n <name>] [-d <display-name>] [-c <description>] \
+  [-p <priority>] [-m <max-storage-gb>]
 gradient cache list
-gradient cache add
-gradient cache remove <name>
+gradient cache show <name>
+gradient cache edit <name> [-d <display-name>] [-c <description>] \
+  [-p <priority>] [-m <max-storage-gb>]
+gradient cache delete <name>
 ```
 
 NAR management (list, inspect, delete, and upload cached store paths inside a
