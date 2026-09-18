@@ -691,7 +691,7 @@ in {
         };
 
         substituteMissEscalationThreshold = lib.mkOption {
-          description = "Substitute misses (SubstituteUnavailable attempts within one evaluation) after which the anchor stops being substitutable and is built like any other (must be >= 1).";
+          description = "Penalty-free re-queues of a relay within one evaluation (attempts recorded SubstituteUnavailable, whichever failure produced them) after which the anchor stops being substitutable and is built like any other (must be >= 1). This is the only bound on that loop: a re-queue deliberately does not spend a build attempt.";
           type = lib.types.ints.positive;
           default = 2;
         };
