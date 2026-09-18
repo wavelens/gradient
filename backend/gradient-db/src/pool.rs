@@ -123,10 +123,20 @@ impl WorkerDb {
 /// `gradient_graph::actor` does) must keep formatting whole entries; this drops
 /// exactly what such a test is looking for.
 pub fn statements(log: Vec<sea_orm::Transaction>) -> Vec<String> {
+    raw_statements(log)
+        .iter()
+        .map(|s| format!("{s:?}"))
+        .collect()
+}
+
+/// The same list unformatted, for an assertion that reads a quoted identifier or
+/// one bound value: `Debug` on a `Statement` escapes every `"` a sea-orm query
+/// writes, so a `contains` over [`statements`] can never match one.
+pub fn raw_statements(log: Vec<sea_orm::Transaction>) -> Vec<sea_orm::Statement> {
     log.iter()
         .flat_map(|t| t.statements().iter())
         .filter(|s| !is_transaction_control(&s.sql))
-        .map(|s| format!("{s:?}"))
+        .cloned()
         .collect()
 }
 
