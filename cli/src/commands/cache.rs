@@ -98,22 +98,22 @@ pub async fn handle(cmd: Commands, out: Output) {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-            let input = handle_input(input_fields, true);
-            let name = input.get("Name").unwrap().clone();
+            let input = handle_input(input_fields, true, out);
+            let name = input.get("Name");
 
-            let priority = match input.get("Priority").unwrap().parse::<i32>() {
+            let priority = match input.get("Priority").parse::<i32>() {
                 Ok(p) => p,
                 Err(_) => out.err(ExitKind::Usage, "Priority must be an integer."),
             };
-            let max_storage_gb = parse_max_storage_gb(input.get("Max Storage (GB)").unwrap(), out);
+            let max_storage_gb = parse_max_storage_gb(&input.get("Max Storage (GB)"), out);
 
             let client = client_from_config(out);
             match client
                 .caches()
                 .create(MakeCacheRequest {
                     name,
-                    display_name: input.get("Display Name").unwrap().clone(),
-                    description: input.get("Description").unwrap().clone(),
+                    display_name: input.get("Display Name"),
+                    description: input.get("Description"),
                     priority,
                     max_storage_gb,
                 })
@@ -161,21 +161,21 @@ pub async fn handle(cmd: Commands, out: Output) {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-            let input = handle_input(input_fields, false);
+            let input = handle_input(input_fields, false, out);
 
-            let priority = match input.get("Priority").unwrap().parse::<i32>() {
+            let priority = match input.get("Priority").parse::<i32>() {
                 Ok(p) => p,
                 Err(_) => out.err(ExitKind::Usage, "Priority must be an integer."),
             };
-            let max_storage_gb = parse_max_storage_gb(input.get("Max Storage (GB)").unwrap(), out);
+            let max_storage_gb = parse_max_storage_gb(&input.get("Max Storage (GB)"), out);
 
             let client = client_from_config(out);
             match client
                 .caches()
                 .create(MakeCacheRequest {
                     name,
-                    display_name: input.get("Display Name").unwrap().clone(),
-                    description: input.get("Description").unwrap().clone(),
+                    display_name: input.get("Display Name"),
+                    description: input.get("Description"),
                     priority,
                     max_storage_gb,
                 })

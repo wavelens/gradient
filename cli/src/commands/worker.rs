@@ -47,7 +47,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             url,
             token,
         } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 _ => out.err(
                     ExitKind::Usage,
@@ -88,7 +88,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::List => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 _ => out.err(
                     ExitKind::Usage,
@@ -123,7 +123,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Delete { worker_id } => {
-            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
+            let project = match get_value(ConfigKey::SelectedProject, true) {
                 Some(id) => id,
                 _ => out.err(
                     ExitKind::Usage,

@@ -1,0 +1,5 @@
+allow-unwrap-in-tests = true
+
+disallowed-methods = [
+    { path = "reqwest::Client::new", reason = "use connector::Client::builder, which installs a CA bundle; a bare client panics in the Nix sandbox" },
+]

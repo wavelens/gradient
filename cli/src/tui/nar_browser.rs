@@ -63,11 +63,6 @@ impl NarBrowser {
     pub fn move_up(&mut self) {
         self.selected = self.selected.saturating_sub(1);
     }
-
-    #[allow(dead_code)]
-    pub fn selected_item(&self) -> Option<&NarSummary> {
-        self.filtered_idx.get(self.selected).map(|&i| &self.all[i])
-    }
 }
 
 impl View for NarBrowser {
