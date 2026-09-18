@@ -564,13 +564,16 @@ mod tests {
                     rows_affected: 1,
                 },
             ])
-            .append_query_results([vec![std::collections::BTreeMap::from([
-                (
-                    "derivation".to_owned(),
-                    sea_orm::Value::from(lost.into_inner()),
-                ),
-                ("demanded".to_owned(), sea_orm::Value::from(false)),
-            ])]])
+            .append_query_results(std::iter::repeat_n(
+                vec![std::collections::BTreeMap::from([
+                    (
+                        "derivation".to_owned(),
+                        sea_orm::Value::from(lost.into_inner()),
+                    ),
+                    ("demanded".to_owned(), sea_orm::Value::from(false)),
+                ])],
+                2,
+            ))
             .append_query_results([
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
             ])

@@ -729,7 +729,8 @@ RETURNING db.derivation, db.demanded
 }
 
 /// Write the region's recomputed demand and return the rows that disagreed, which is
-/// what [`recompute_demand`] reports as gained and lost.
+/// what [`recompute_demand`] reports as gained and lost. An empty region writes
+/// nothing rather than binding two empty arrays.
 async fn write_demand(
     txn: &DatabaseTransaction,
     region: &[QueryResult],
@@ -737,8 +738,15 @@ async fn write_demand(
     let mut derivations: Vec<uuid::Uuid> = Vec::with_capacity(region.len());
     let mut demanded: Vec<bool> = Vec::with_capacity(region.len());
     for row in region {
-        derivations.push(row.try_get("", "derivation")?);
-        demanded.push(row.try_get("", "demanded")?);
+        let (Ok(derivation), Ok(want)) = (
+            row.try_get::<uuid::Uuid>("", "derivation"),
+            row.try_get::<bool>("", "demanded"),
+        ) else {
+            continue;
+        };
+
+        derivations.push(derivation);
+        demanded.push(want);
     }
 
     if derivations.is_empty() {

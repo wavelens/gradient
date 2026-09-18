@@ -1615,8 +1615,8 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // what the recompute gave demand to, then the relay it queues
-            .append_query_results([vec![demand_row(b.id, true)]])
+            // what the recompute walk found and then wrote, then the relay it queues
+            .append_query_results([vec![demand_row(b.id, true)], vec![demand_row(b.id, true)]])
             .append_query_results([vec![drv_row(b.id)]])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();

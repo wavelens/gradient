@@ -227,7 +227,7 @@ mod tests {
         );
         let demand = log
             .iter()
-            .position(|s| s.contains("SET demanded ="))
+            .position(|s| s.contains("FROM region r ORDER BY r.derivation"))
             .expect("the adoption recomputes what it named");
         assert!(
             adopt < demand && demand < bump && bump < promote,
