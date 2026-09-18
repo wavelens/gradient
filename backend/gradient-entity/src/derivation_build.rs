@@ -33,6 +33,9 @@ pub struct Model {
     pub fetchable: bool,
     /// Direct dependencies that are not fetchable. Zero is the readiness gate.
     pub unready_deps: i32,
+    /// Runtime edges whose dependency is not whole. Zero, with every output
+    /// present, is whole.
+    pub missing_runtime_deps: i32,
     /// Something still wants this anchor's outputs in our cache: an entry point
     /// names it, or a demanded, named builder depends on it. Recomputed by
     /// `readiness::recompute_demand` on the events that change it; every arm of

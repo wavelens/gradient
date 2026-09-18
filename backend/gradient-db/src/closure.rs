@@ -265,6 +265,7 @@ mod tests {
         derivation_dependency::Model {
             derivation,
             dependency,
+            ..Default::default()
         }
     }
 

@@ -268,9 +268,9 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_build",
-            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER)",
+            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER, missing_runtime_deps INTEGER)",
             concat!(
-                "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text, db.demanded::int::text FROM derivation_build db WHERE db.derivation IN (",
+                "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text, db.demanded::int::text, db.missing_runtime_deps::text FROM derivation_build db WHERE db.derivation IN (",
                 derivation_scope!(),
                 ")"
             ),
@@ -291,7 +291,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "dispatched_at",
                 "fetchable",
                 "unready_deps",
-                "demanded"
+                "demanded",
+                "missing_runtime_deps"
             ]
         ),
         spec!(
@@ -436,14 +437,14 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_dependency",
-            "CREATE TABLE derivation_dependency (derivation TEXT, dependency TEXT)",
+            "CREATE TABLE derivation_dependency (derivation TEXT, dependency TEXT, kind INTEGER)",
             concat!(
-                "SELECT dd.derivation::text, dd.dependency::text FROM derivation_dependency dd WHERE dd.derivation IN (",
+                "SELECT dd.derivation::text, dd.dependency::text, dd.kind::text FROM derivation_dependency dd WHERE dd.derivation IN (",
                 own_derivations!(),
                 ")"
             ),
             "the evaluation's own derivations, with both ends of every edge exported",
-            ["derivation", "dependency"]
+            ["derivation", "dependency", "kind"]
         ),
         spec!(
             "cached_path",

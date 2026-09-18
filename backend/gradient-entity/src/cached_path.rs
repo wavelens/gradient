@@ -43,6 +43,8 @@ pub struct Model {
     pub missing_references: i32,
     /// Content-address field, if the path is content-addressed.
     pub ca: Option<String>,
+    /// The narinfo `References:` line, ordered, as `hash-name` tokens.
+    pub references: Option<String>,
     /// Full `.drv` path that produced this output, if known.
     pub deriver: Option<String>,
     /// True once the NAR has been walked for `lib/debug/.build-id` members.

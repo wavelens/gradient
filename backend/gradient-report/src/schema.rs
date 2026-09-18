@@ -19,8 +19,8 @@ use rusqlite::Connection;
 /// did, sitting on 10 against an exporter writing 11. `report-inspector`'s
 /// derivation reads both constants and fails evaluation when they disagree.
 ///
-/// 13 adds derivation.unwalked_inputs.
-pub const SCHEMA_VERSION: i64 = 13;
+/// 14 adds derivation_dependency.kind and derivation_build.missing_runtime_deps.
+pub const SCHEMA_VERSION: i64 = 14;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
