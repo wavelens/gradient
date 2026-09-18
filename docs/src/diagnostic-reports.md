@@ -80,6 +80,45 @@ base workers this project opted into; `worker_connection` and `worker_sample`
 cover the workers that ran this evaluation, from its creation until it finished
 (or until the report was taken, if it had not).
 
+## What closes over what
+
+The readiness counters are counts over edges, so the far end of every edge is in
+the file. That is what lets you recompute them offline, and what makes an absent
+row mean the *instance* never had the path rather than the export never asked
+for it - a distinction the whole diagnosis of an unwhole closure rests on.
+
+| Table | Carries |
+| --- | --- |
+| `derivation`, `derivation_build`, `derivation_output` | the evaluation's derivations **and their direct dependencies** |
+| `derivation_dependency` | the evaluation's own edges, both ends exported |
+| `cached_path` | those derivations' output hashes **and every path they reference** |
+| `cached_path_reference` | those output hashes as referrers, every referenced path exported |
+| `build_job` | the evaluation's jobs **and every job an exported attempt was made under** |
+
+One hop is the whole requirement, not an arbitrary cut. `unready_deps` counts one
+per edge and reads a dependency's own anchor, outputs and cached paths; a
+dependency's *own* dependencies are already summarised in its stored
+`unready_deps`. The same holds for `missing_references` over
+`cached_path_reference`. So the file is a boundary, not a closure, and a
+dependency row in it is evidence about this evaluation's work rather than work of
+its own - it has no `build_job` row, which is how `why-stuck` tells the two apart.
+
+`build_job` reaches past this evaluation because an attempt's substitute-miss
+budget is scoped per `(anchor, evaluation)` through `build_attempt.build_job`.
+Without those rows a retry history cannot be bucketed at all, and a loop running
+hundreds of misses against a threshold of two reads as ordinary churn:
+
+```sh
+sqlite3 gradient-report-01a05a38-2026-09-01.db \
+  'SELECT d.name, j.evaluation, count(*) AS misses
+     FROM build_attempt a
+     JOIN build_job j ON j.id = a.build_job
+     JOIN derivation_build db ON db.id = a.derivation_build
+     JOIN derivation d ON d.id = db.derivation
+    WHERE a.reason = 0
+    GROUP BY 1, 2 HAVING misses > 2 ORDER BY misses DESC'
+```
+
 A worker only opens a `worker_connection` row once it has a
 `worker_registration`, so on an instance whose fleet is base workers those two
 tables and `worker_sample` come back empty. Read `base_worker` before concluding
@@ -175,10 +214,25 @@ gradient-report REPORT sql "QUERY"  raw access
 ```
 
 `why-stuck` is the one to reach for first on a hung evaluation: for every anchor
-that never reached a terminal state it names which of `walked` and `unready_deps`
-holds it, lists every dependency underneath it that is not `fetchable`, and says
-plainly when the only gate left is the one the report does not carry, whether the
-anchor's own `.drv` is whole.
+this evaluation drove that never reached a terminal state it names which of
+`walked`, `demanded` and `unready_deps` holds it, lists every dependency
+underneath it that is not `fetchable`, and says plainly when the only gate left
+is the one the report does not carry, whether the anchor's own `.drv` is whole.
+
+`demanded` is the gate to read twice. It sits outside the `(substitutable OR
+unready_deps = 0)` arm, and demand walks build edges through anchors that will
+themselves be built - so it stops at a relay and at a finished build. An anchor
+that is `Created`, `substitutable` and undemanded is one nothing will ever fetch,
+and if a cached output references its store path, that path stays absent and the
+referrer stays unwhole forever:
+
+```
+ed-1.22.5: Created, waiting on demanded
+```
+
+A dependency the file does not carry prints as `not in this report` rather than
+being dropped, so a count is never left with nothing under it. A closed export
+has none; a report from before schema 12 is full of them.
 
 The inspector reads exactly one report schema version and refuses every other,
 rather than answering from whichever columns still happen to line up. The export

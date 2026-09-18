@@ -13,8 +13,16 @@ the catalogue, and a per-test list goes stale and collides on every merge.
 | Shared harness | `backend/gradient-test-support/` | fakes, fixtures and the test server every suite reuses |
 | CLI | `cli/tests/*.rs`, `cli/connector/tests/*.rs` | the installed `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | components and services under vitest |
+| Report inspector | `nix/tools/report-inspector/tests/` | the inspector's commands over a report fixture the test builds |
 | NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
 | SQL plan gate | `backend/src/sql_gate/`, run by the e2e VM test | every registered statement's plan at production scale |
+
+The inspector's fixture is built in the test rather than committed as a `.db`,
+because a checked-in binary drifts silently from the schema it stands for. Its
+pinned `SUPPORTED_SCHEMA` is held to `gradient-report`'s `SCHEMA_VERSION` by a
+Rust test that `include_str!`s the Python constant: the two ship separately, and
+a bump that reaches only one turns the inspector into a tool that refuses every
+report the server writes.
 
 A crate's own `tests/` directory is for anything that has to go through a public
 entry point (an HTTP route, a CLI invocation). Everything else belongs in a
