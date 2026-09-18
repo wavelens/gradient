@@ -181,7 +181,11 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
         | BuildStatus::FailedTimeout
         | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
         BuildStatus::Aborted => Some(CiStatus::Error),
-        BuildStatus::Created | BuildStatus::Queued | BuildStatus::FailedTransient => None,
+        // `Skipped` never reaches a forge: nothing names it, so no check exists.
+        BuildStatus::Created
+        | BuildStatus::Queued
+        | BuildStatus::FailedTransient
+        | BuildStatus::Skipped => None,
     }
 }
 
@@ -204,6 +208,7 @@ pub fn build_event_for_status(status: BuildStatus) -> Option<&'static str> {
         | BuildStatus::Aborted => "build.failed",
         BuildStatus::FailedTransient => "build.failed_transient",
         BuildStatus::Substituted => "build.substituted",
+        BuildStatus::Skipped => return None,
     })
 }
 

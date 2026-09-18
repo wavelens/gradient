@@ -152,7 +152,14 @@ async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
             }
         };
 
+        // Order is load-bearing on both sides. A thaw has to precede the promote
+        // or the gate reads a `Skipped` row and passes it over; the skip has to
+        // follow the un-promote or it would try to settle a row still `Queued`.
         for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
+            match crate::readiness::thaw_skipped(db, gained).await {
+                Ok(changes) => moved_out.regated.extend(changes),
+                Err(e) => error!(error = %e, "failed to thaw what an anchor demands again"),
+            }
             match crate::readiness::promote(db, gained).await {
                 Ok(changes) => moved_out.regated.extend(changes),
                 Err(e) => error!(error = %e, "failed to queue what an anchor demands"),
@@ -162,6 +169,10 @@ async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
             match crate::readiness::unpromote_ungated(db, lost).await {
                 Ok(changes) => moved_out.regated.extend(changes),
                 Err(e) => error!(error = %e, "failed to release undemanded anchors"),
+            }
+            match crate::readiness::skip_undemanded(db, lost).await {
+                Ok(changes) => moved_out.regated.extend(changes),
+                Err(e) => error!(error = %e, "failed to settle undemanded anchors"),
             }
         }
         moved_out.gained.extend(moved.gained);
@@ -590,6 +601,7 @@ mod tests {
             ))
             .append_query_results([
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
             ])
             .into_connection();
         let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(db).await;
@@ -641,6 +653,7 @@ mod tests {
                 2,
             ))
             .append_query_results([
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
             ])
             .into_connection();

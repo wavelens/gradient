@@ -61,6 +61,7 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
             walk_drift = report.walk_drift,
             runtime_drift = report.runtime_drift,
             demand_drift = report.demand_drift,
+            skipped_moves = report.skipped_moves,
             unpromoted_ready = report.unpromoted_ready,
             adopted = report.adopted,
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,

@@ -41,6 +41,9 @@ pub struct ConsistencyReport {
     pub runtime_drift: i64,
     /// Anchors whose `demanded` disagreed with the walk from the entry points.
     pub demand_drift: i64,
+    /// Anchors this pass settled to `Skipped` or thawed back out of it. The
+    /// backstop for a lost move, and the backfill of the status itself.
+    pub skipped_moves: i64,
     /// Promotable anchors found unpromoted, queued by this pass.
     pub unpromoted_ready: i64,
     /// `build_job` rows this pass inserted for pending anchors a live evaluation
@@ -69,6 +72,7 @@ impl ConsistencyReport {
             + self.walk_drift
             + self.runtime_drift
             + self.demand_drift
+            + self.skipped_moves
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
@@ -139,6 +143,11 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     // corrected column rather than promoting against a stale demand.
     let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
 
+    // Both directions read the column the recount above just corrected: what
+    // nothing wants any more settles, what something wants again wakes.
+    let settled = crate::readiness::settle_skipped(db).await?;
+    crate::status::emit_transition_effects(ctx, &settled).await;
+
     let repaired = crate::readiness::repair_pending(db).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
     // the board at the status the earlier statement wrote.
@@ -190,6 +199,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         walk_drift,
         runtime_drift,
         demand_drift,
+        skipped_moves: settled.len() as i64,
         unpromoted_ready: repaired.promoted.len() as i64,
         adopted,
         unbacked_trusted_outputs,
@@ -228,6 +238,7 @@ mod tests {
         let mut db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_exec_results([exec(0), exec(7), exec(0), exec(6), exec(0)])
             .append_query_results([drifted])
+            .append_query_results([empty.clone(), empty.clone()])
             .append_query_results([vec![BTreeMap::from([(
                 "derivation".to_owned(),
                 Value::from(uuid::Uuid::now_v7()),
@@ -303,32 +314,37 @@ mod tests {
             "the table-wide demand walk runs under its own raise: {log:?}"
         );
         assert!(
-            log[6].contains("SELECT q.derivation FROM derivation_build q"),
+            log[6].contains("db.status = 10 AND db.demanded")
+                && log[7].contains("db.status = 0 AND NOT db.demanded"),
+            "both Skipped directions read the demand this pass corrected: {log:?}"
+        );
+        assert!(
+            log[8].contains("SELECT q.derivation FROM derivation_build q"),
             "the demand recount precedes the readiness repair, so the settle below it reads a corrected column: {log:?}"
         );
         assert!(
-            log[7].contains("FOR UPDATE") && log[8].contains("SET fetchable"),
+            log[9].contains("FOR UPDATE") && log[10].contains("SET fetchable"),
             "the fetchable recount runs under its own ordered lock: {log:?}"
         );
         assert!(
-            log[9].contains("FOR UPDATE") && log[10].contains("SET unready_deps"),
+            log[11].contains("FOR UPDATE") && log[12].contains("SET unready_deps"),
             "and the counter recount after it, in a second locked pass: {log:?}"
         );
         assert!(
-            log[11].contains("SET status = 0") && log[12].contains("SET status = 1"),
+            log[13].contains("SET status = 0") && log[14].contains("SET status = 1"),
             "the queue is settled against the repaired counters: {log:?}"
         );
         assert!(
-            log[13].contains(
+            log[15].contains(
                 "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
             ),
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[14].contains("SELECT DISTINCT o.hash") && log[15].contains("FROM evaluation ev"),
+            log[16].contains("SELECT DISTINCT o.hash") && log[17].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
         );
-        assert_eq!(log.len(), 16, "{log:?}");
+        assert_eq!(log.len(), 18, "{log:?}");
     }
 
     /// A pending anchor nobody names below a live evaluation's builder is the one
@@ -375,13 +391,14 @@ mod tests {
             walk_drift: 9,
             runtime_drift: 10,
             demand_drift: 8,
+            skipped_moves: 11,
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
             repair_scope: 2000,
             adopted: 2,
         };
-        assert_eq!(r.total(), 42);
+        assert_eq!(r.total(), 53);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }
