@@ -1537,15 +1537,11 @@ mod tests {
     async fn an_unwalk_moves_the_counter_before_it_reaches_the_anchors() {
         let gone = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(1), exec(0)])
             .append_query_results([vec![BTreeMap::from([(
                 "id".to_owned(),
                 Value::from(gone.into_inner()),
             )])]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
