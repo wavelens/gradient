@@ -396,49 +396,66 @@ pub fn live_cached_paths_cte() -> String {
 
 /// `WITH RECURSIVE pending(evaluation, derivation, builder) AS (...)`: from the
 /// `(evaluation, derivation, builder)` rows of `seed_select`, every anchor in a
-/// builder status that the evaluation reaches walking dependencies through
-/// builders. A relay is reached and never stepped through, since it fetches
-/// finished bytes and waits on nothing below it; a terminal anchor stops the walk
-/// the same way, because what is below a finished build is served from its
-/// outputs and what is below a failed one is the requeue's to thaw first. This is
-/// what names a pruned subtree for the evaluations that build against it.
+/// builder status that the evaluation reaches walking dependencies. Two arms over
+/// the two edge kinds, mirroring [`demand_closure_cte`]: every member steps over
+/// its runtime edges, because whatever wants an anchor wants what its outputs
+/// reference, and only a builder steps over its build edges, since a relay fetches
+/// finished bytes and waits on nothing below it. A terminal anchor stops the walk
+/// either way, because what is below a finished build is served from its outputs
+/// and what is below a failed one is the requeue's to thaw first. This is what
+/// names a pruned subtree for the evaluations that build against it.
 pub fn pending_closure_cte(name: &str, seed_select: &str) -> String {
+    let arm = |restrict: &str| {
+        format!(
+            "SELECT e.dependency AS next, ({builder}) AS builder \
+             FROM derivation_dependency e \
+             JOIN derivation_build dep ON dep.derivation = e.dependency \
+             JOIN derivation w ON w.id = dep.derivation \
+             WHERE e.derivation = c.derivation AND {restrict} AND dep.status IN ({pending})",
+            builder = builder_predicate("dep", "w"),
+            pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+        )
+    };
+
     format!(
         "WITH RECURSIVE {name}(evaluation, derivation, builder) AS ({seed_select} UNION {})",
         lateral_step(
             name,
             "c.evaluation, s.next, s.builder",
             &format!(
-                "SELECT e.dependency AS next, ({builder}) AS builder \
-                 FROM derivation_dependency e \
-                 JOIN derivation_build dep ON dep.derivation = e.dependency \
-                 JOIN derivation w ON w.id = dep.derivation \
-                 WHERE e.derivation = c.derivation AND c.builder AND dep.status IN ({pending})",
-                builder = builder_predicate("dep", "w"),
-                pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+                "{runtime} UNION {build}",
+                runtime = arm("e.kind IN (1, 2)"),
+                build = arm("c.builder AND e.kind IN (0, 2)"),
             ),
         )
     )
 }
 
 /// `WITH RECURSIVE demanded(derivation) AS (...)`: from `seed_select`, every anchor
-/// something still wants in our cache, walking dependencies out of named builders
-/// only.
-///
-/// Something wants an anchor's outputs when an entry point names it, or a dependent
-/// that will itself be built lists it as an input. That dependent is a builder by
-/// [`builder_predicate`] and demands its own inputs by the same rule, which is the
-/// recursion: a relay is reached and never stepped through, because it fetches
-/// finished bytes and needs nothing below it, and a terminal anchor stops the walk
-/// because what is below a finished build is served from its outputs. The one
-/// definition of demand; every recompute steps with it. `bound` is an extra predicate
-/// over the edge alias `e`, applied inside the probe so a region-scoped recompute
-/// prunes at the index lookup instead of walking the live graph and discarding it.
-pub fn demand_closure_cte(seed_select: &str, bound: &str) -> String {
-    let restrict = if bound.is_empty() {
+/// something still wants in our cache. Two arms over the two edge kinds. Anything
+/// wanted wants what its outputs reference at run time, so a demanded anchor named
+/// by a `build_job` steps over its runtime edges whatever it is. Only something
+/// that will be built wants its inputs, so a demanded builder steps over its build
+/// edges; a relay is reached and never stepped through that way. A terminal anchor
+/// stops the walk because what is below a finished build is served from its
+/// outputs. The one definition of demand; every recompute steps with it.
+/// `region_select` bounds both arms, applied inside the probe so a region-scoped
+/// recompute prunes at the index lookup instead of walking the live graph and
+/// discarding it.
+pub fn demand_closure_cte(seed_select: &str, region_select: &str) -> String {
+    let bound = if region_select.is_empty() {
         String::new()
     } else {
-        format!(" AND {bound}")
+        format!(" AND e.dependency IN ({region_select})")
+    };
+    let arm = |restrict: String| {
+        format!(
+            "SELECT e.dependency AS next FROM derivation_dependency e \
+             JOIN derivation_build p ON p.derivation = c.derivation \
+             {restrict} \
+               AND EXISTS (SELECT 1 FROM build_job bj \
+                           WHERE bj.derivation = p.derivation){bound}"
+        )
     };
 
     format!(
@@ -447,13 +464,13 @@ pub fn demand_closure_cte(seed_select: &str, bound: &str) -> String {
             "demanded",
             "s.next",
             &format!(
-                "SELECT e.dependency AS next FROM derivation_dependency e \
-                 JOIN derivation_build p ON p.derivation = c.derivation \
-                 JOIN derivation w ON w.id = p.derivation \
-                 WHERE e.derivation = c.derivation AND {builder} \
-                   AND EXISTS (SELECT 1 FROM build_job bj \
-                               WHERE bj.derivation = p.derivation){restrict}",
-                builder = builder_predicate("p", "w"),
+                "{runtime} UNION {build}",
+                runtime = arm("WHERE e.derivation = c.derivation AND e.kind IN (1, 2)".to_owned()),
+                build = arm(format!(
+                    "JOIN derivation w ON w.id = p.derivation \
+                     WHERE e.derivation = c.derivation AND e.kind IN (0, 2) AND {builder}",
+                    builder = builder_predicate("p", "w"),
+                )),
             ),
         ),
     )
@@ -914,7 +931,7 @@ mod tests {
         );
         assert!(
             cte.contains(
-                "WHERE e.derivation = c.derivation AND c.builder \
+                "WHERE e.derivation = c.derivation AND c.builder AND e.kind IN (0, 2) \
                  AND dep.status IN (0, 1, 2, 8) OFFSET 0) s"
             ),
             "{cte}"
@@ -927,7 +944,7 @@ mod tests {
     /// re-demands everything below it (#666). A relay is reached and never stepped
     /// through, and that single fact is what stops a relayed subtree being built.
     #[test]
-    fn the_demand_walk_steps_only_out_of_named_builders() {
+    fn the_build_arm_steps_only_out_of_named_builders() {
         let sql = norm(&demand_closure_cte(
             "SELECT derivation FROM entry_point",
             "",
@@ -950,6 +967,56 @@ mod tests {
         assert!(
             sql.contains("OFFSET 0"),
             "the lateral fence must survive: {sql}"
+        );
+    }
+
+    /// Two arms, one definition: a demanded anchor named by a build_job demands the
+    /// producers over its runtime edges; only a demanded builder demands over its
+    /// build edges. A relay's build inputs are never reached.
+    #[test]
+    fn demand_steps_over_runtime_edges_from_any_anchor_and_build_edges_from_builders() {
+        let cte = norm(&demand_closure_cte(
+            "SELECT derivation FROM entry_point",
+            "",
+        ));
+        assert!(
+            cte.contains("WHERE e.derivation = c.derivation AND e.kind IN (1, 2)"),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(
+                "WHERE e.derivation = c.derivation AND e.kind IN (0, 2) AND w.walked AND NOT p.substitutable"
+            ),
+            "{cte}"
+        );
+    }
+
+    #[test]
+    fn a_region_bounds_both_arms_of_the_demand_walk() {
+        let cte = norm(&demand_closure_cte(
+            "SELECT derivation FROM roots",
+            "SELECT derivation FROM region",
+        ));
+        assert_eq!(
+            cte.matches("AND e.dependency IN (SELECT derivation FROM region)")
+                .count(),
+            2,
+            "{cte}"
+        );
+    }
+
+    /// A region is every anchor whose demand an event can have moved, so it steps
+    /// over the runtime edges of every member and over the build edges of the ones
+    /// that are builders.
+    #[test]
+    fn the_region_steps_over_runtime_edges_out_of_every_pending_member() {
+        let cte = norm(&pending_closure_cte(
+            "region",
+            "SELECT NULL::uuid, unnest($1::uuid[]), true",
+        ));
+        assert!(
+            cte.contains("e.kind IN (1, 2)") && cte.contains("c.builder AND e.kind IN (0, 2)"),
+            "{cte}"
         );
     }
 }

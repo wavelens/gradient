@@ -675,24 +675,37 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
     // region member. Unfenced, the planner hoists the whole EXISTS out and answers
     // it standalone - a sequential scan of every anchor filtered on `demanded`,
     // which reads the graph to find the parents of a region of a few dozen.
+    // One lookup per edge kind, each demanding what its own arm of the walk would:
+    // a parent over a runtime edge needs only to be demanded and named, a parent
+    // over a build edge has to be a builder as well.
+    let parent = |kind: &str, join: &str, restrict: &str| {
+        format!(
+            "EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent FROM derivation_dependency e \
+                                    WHERE e.dependency = r.derivation AND e.kind IN ({kind}) \
+                                    OFFSET 0) pe \
+                     JOIN derivation_build p ON p.derivation = pe.parent {join} \
+                     WHERE p.demanded \
+                       AND p.derivation NOT IN (SELECT derivation FROM region){restrict} \
+                       AND EXISTS (SELECT 1 FROM build_job bj \
+                                   WHERE bj.derivation = p.derivation))"
+        )
+    };
     let seed = format!(
         "SELECT r.derivation FROM region r \
          WHERE EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) \
-            OR EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent FROM derivation_dependency e \
-                                      WHERE e.dependency = r.derivation OFFSET 0) pe \
-                       JOIN derivation_build p ON p.derivation = pe.parent \
-                       JOIN derivation w ON w.id = p.derivation \
-                       WHERE p.demanded \
-                         AND p.derivation NOT IN (SELECT derivation FROM region) \
-                         AND ({builder}) \
-                         AND EXISTS (SELECT 1 FROM build_job bj \
-                                     WHERE bj.derivation = p.derivation))",
-        builder = crate::graph_sql::builder_predicate("p", "w"),
+            OR {runtime} \
+            OR {build}",
+        runtime = parent("1, 2", "", ""),
+        build = parent(
+            "0, 2",
+            "JOIN derivation w ON w.id = p.derivation",
+            &format!(
+                " AND ({builder})",
+                builder = crate::graph_sql::builder_predicate("p", "w")
+            ),
+        ),
     );
-    let closure = crate::graph_sql::demand_closure_cte(
-        &seed,
-        "e.dependency IN (SELECT derivation FROM region)",
-    );
+    let closure = crate::graph_sql::demand_closure_cte(&seed, "SELECT derivation FROM region");
 
     format!(
         "{region}, {rest} \

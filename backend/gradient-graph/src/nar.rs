@@ -52,13 +52,19 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     sync_reference_index(db, sp.hash(), &c.references).await?;
 
     // The NAR is where a built output's runtime references are learned, so the
-    // graph edges they name are written from the same report the index is.
+    // graph edges they name are written from the same report the index is, and what
+    // demand those edges carry is recomputed from the anchor they hang off.
     let referenced = gradient_db::producers_of_tokens(txn, &c.references).await?;
     if !referenced.is_empty() {
         let producers = gradient_db::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
         for producer in &producers {
             gradient_db::insert_runtime_edges(txn, *producer, &referenced).await?;
         }
+
+        let moved = gradient_db::recompute_demand(txn, &producers).await?;
+        let mut changes = gradient_db::promote(txn, &moved.gained).await?;
+        changes.extend(gradient_db::unpromote_ungated(txn, &moved.lost).await?);
+        gradient_db::emit_transition_effects(ctx, &changes).await;
     }
 
     // The seed reports the state; this commit's own row read holds the other end
@@ -449,6 +455,14 @@ mod tests {
         BTreeMap::from([("derivation".to_owned(), Value::from(Uuid::now_v7()))])
     }
 
+    /// One region row of the bounded demand walk: the anchor and what it now reads.
+    fn demand_row() -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("derivation".to_owned(), Value::from(Uuid::now_v7())),
+            ("demanded".to_owned(), Value::from(true)),
+        ])
+    }
+
     /// The seed's reply: whether the path is whole after the recount.
     fn seed_reply(whole: bool) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([("whole".to_owned(), Value::from(whole))])]
@@ -697,7 +711,10 @@ mod tests {
     }
 
     /// The NAR is where a built output's runtime references are learned: every
-    /// reference with a producer becomes a runtime edge from the path's producer.
+    /// reference with a producer becomes a runtime edge from the path's producer,
+    /// and the demand those edges carry is recomputed over the producer at once.
+    /// Without it the anchors the new edges reach wait a sweep interval for demand
+    /// they already have, which is the whole point of learning them here.
     #[tokio::test]
     async fn a_commit_writes_the_runtime_edges_its_references_name() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -705,8 +722,10 @@ mod tests {
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([vec![producer_row()]])
             .append_query_results([vec![producer_row()]])
+            .append_query_results([vec![demand_row()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
-            .append_exec_results([exec(0), exec(1), exec(1), exec(0)])
+            .append_exec_results([exec(0), exec(1), exec(1), exec(0), exec(1), exec(0)])
             .into_connection();
 
         let log = commit_and_log(
@@ -718,11 +737,19 @@ mod tests {
         )
         .await;
 
+        let edges = log
+            .iter()
+            .position(|s| {
+                s.contains("INSERT INTO derivation_dependency (derivation, dependency, kind)")
+            })
+            .expect("the runtime edges are written");
+        let demand = log
+            .iter()
+            .position(|s| s.contains("region(evaluation, derivation, builder) AS"))
+            .expect("demand is recomputed over the producer");
         assert!(
-            log.iter()
-                .any(|s| s
-                    .contains("INSERT INTO derivation_dependency (derivation, dependency, kind)")),
-            "{log:?}"
+            edges < demand,
+            "the recompute must see the edges it walks: {log:?}"
         );
     }
 

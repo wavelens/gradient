@@ -97,20 +97,23 @@ its `.drv` NAR arriving, an upstream hit, a thaw at stream completion.
 
 Demand is what keeps the fleet from relaying half of nixpkgs, and from building the
 input closure of everything it relays. An anchor is demanded when an entry point of
-a retained evaluation names it, or a dependent that will itself be built (walked,
-not substitutable, pending, with a `build_job`) lists it as an input and is itself
-demanded. That last clause is a fixpoint, so demand is a column,
-`derivation_build.demanded`, and not a subquery: it flows DOWN from the entry
-points while readiness flows UP from the leaves, and a per-row predicate that looks
-one hop cannot carry the downward direction. It used to look one hop, which is why
-a relayed anchor's whole source closure was still built.
+a retained evaluation names it, or a demanded, named dependent reaches it over one
+of the two edge kinds. Anything wanted wants what its outputs reference at run
+time, so a demanded anchor steps over its runtime edges whatever it is; only
+something that will itself be built wants its inputs, so the build edges are
+stepped only out of a builder (walked, not substitutable, pending). That is a
+fixpoint, so demand is a column, `derivation_build.demanded`, and not a subquery:
+it flows DOWN from the entry points while readiness flows UP from the leaves, and a
+per-row predicate that looks one hop cannot carry the downward direction. It used
+to look one hop, which is why a relayed anchor's whole source closure was still
+built.
 
 `readiness::recompute_demand` rewrites the column absolutely over the anchors an
-event changed and the pending closure below them. The walk steps out of named
-builders only: a relay is reached and never stepped through, because it fetches
-finished bytes and needs nothing below it. The region includes the anchors it was
-given, because a thaw makes one a builder again and its own stored value is as
-stale as its subtree's. The walk answers and a second statement in the same
+event changed and the pending closure below them. Both arms are bounded by the
+region, and a relay is reached over a build edge and never stepped through that
+way, because it fetches finished bytes and needs nothing below it. The region
+includes the anchors it was given, because a thaw makes one a builder again and its
+own stored value is as stale as its subtree's. The walk answers and a second statement in the same
 transaction writes what it answered, as a bound array rather than as a subquery the
 write names: a recursive CTE carries no row estimate the planner believes, so a
 region of a few dozen anchors loses to a sequential scan of the whole table. The
