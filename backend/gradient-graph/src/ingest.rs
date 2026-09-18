@@ -1635,10 +1635,14 @@ mod tests {
 
         drop(ctx);
         let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let walk = log
+            .iter()
+            .position(|s| s.contains("FROM region r ORDER BY r.derivation"))
+            .expect("the batch recomputes what it demands");
         let demand = log
             .iter()
             .position(|s| s.contains("SET demanded ="))
-            .expect("the batch recomputes what it demands");
+            .expect("the batch writes what the recompute answered");
         let seed = log
             .iter()
             .position(|s| s.contains("SET unready_deps = (SELECT count(*)"))
@@ -1652,11 +1656,11 @@ mod tests {
             .expect("the demanded relay is promoted");
 
         assert!(
-            seed < demand && demand < promote,
+            seed < walk && walk < demand && demand < promote,
             "demand settles after the counters, and its promote reads the settled gate: {log:?}"
         );
         assert!(
-            log[demand].contains("demanded(derivation) AS"),
+            log[walk].contains("demanded(derivation) AS"),
             "the recompute is the closure walk, not one hop: {log:?}"
         );
         assert!(
