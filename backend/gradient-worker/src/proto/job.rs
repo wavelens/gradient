@@ -370,13 +370,23 @@ impl JobUpdater {
         Ok(answers.into_iter().find(|cp| cp.cached && cp.url.is_some()))
     }
 
-    /// `CacheQuery { Push }` with each path's uncompressed size, so the server
-    /// can route small NARs over the stream. Without a store every size is unknown.
-    pub async fn query_push(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
-        let nar_sizes = match &self.store {
+    /// `CacheQuery { Push }` with each path's uncompressed size, so the server can
+    /// route small NARs over the stream. A size the caller already knows wins; the
+    /// rest come from the store, and without a store they stay unknown.
+    pub async fn query_push(
+        &mut self,
+        paths: Vec<String>,
+        sizes: Vec<Option<u64>>,
+    ) -> Result<Vec<CachedPath>> {
+        let from_store = match &self.store {
             Some(store) => store.nar_sizes(&paths).await,
             None => vec![u64::MAX; paths.len()],
         };
+        let nar_sizes: Vec<u64> = from_store
+            .into_iter()
+            .enumerate()
+            .map(|(i, stored)| sizes.get(i).copied().flatten().unwrap_or(stored))
+            .collect();
 
         let mut guard = self.phase(JobPhase::CacheQueryWait);
         guard.record(paths.len() as u32, 0);
@@ -1248,16 +1258,19 @@ mod tests {
             updater.known_derivation_waiters.clone(),
         );
         let paths: Vec<String> = (0..3).map(|i| format!("/nix/store/path-{i}")).collect();
-        let got = updater.query_push(paths.clone()).await.unwrap();
+        let got = updater
+            .query_push(paths.clone(), vec![None; paths.len()])
+            .await
+            .unwrap();
 
         assert_eq!(got.into_iter().map(|c| c.path).collect::<Vec<_>>(), paths);
         server_task.await.unwrap();
         pump.abort();
     }
 
-    /// The substitute relay asks for PUT targets before it has pulled a single
-    /// narinfo, so it queries through the unsized `query_cache`. A Push the server
-    /// accepts still carries one size per path: unknown, never absent.
+    /// A caller that cannot know its sizes yet queries through the unsized
+    /// `query_cache`. A Push the server accepts still carries one size per path:
+    /// unknown, never absent.
     #[tokio::test]
     async fn an_unsized_push_query_still_carries_one_size_per_path() {
         use gradient_proto::messages::ServerMessage;

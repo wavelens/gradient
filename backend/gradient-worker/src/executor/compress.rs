@@ -4,59 +4,63 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Dump store paths to NAR and compress with zstd before upload.
-//!
-//! Uses `harmonia-file-nar`'s `NarByteStream` for pure-Rust NAR packing (no `nix nar`
-//! subprocess). When the cache is S3-backed the worker uploads the compressed
-//! NAR straight to object storage via a presigned PUT URL; otherwise it falls
-//! back to chunked [`ClientMessage::NarPush`] over the WebSocket.
-//!
-//! The worker always compresses before upload; the server never sees or
-//! writes an uncompressed NAR.
+//! The one push every job kind ends in: the outputs it produced, and only those,
+//! hashed, compressed and uploaded. Nothing below an output is looked at; the gate
+//! that dispatched the job made its build closure whole in our cache first, and a
+//! substitute's runtime references are the server's to demand.
+
+use std::collections::HashMap;
 
 use anyhow::Result;
+use gradient_proto::messages::CachedPath;
+use gradient_sources::nix_store_path;
 use tokio::sync::watch;
-use tracing::debug;
 
-use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
+use crate::proto::nar::NarSource;
 
-/// Compress every path in `store_paths` into a zstd NAR and upload it to the
-/// cache. The worker first asks the server (`CacheQuery {Push}`) how each path
-/// should be uploaded: a presigned S3 PUT straight to object storage when the
-/// cache is S3-backed, else a direct WebSocket `NarPush`. Used for built
-/// outputs so multi-GB NARs never relay through the server connection.
-///
-/// `abort` is checked before each path. When the server signals `AbortJob`
-/// (e.g. the session NAR upload buffer was exceeded) the loop bails with an
-/// error so the outer job resolves to `JobFailed` instead of `JobCompleted`.
-pub async fn compress_and_push_paths(
-    store: &LocalNixStore,
-    store_paths: &[String],
+pub(crate) struct OutputNar<'a> {
+    pub store_path: String,
+    pub source: NarSource<'a>,
+}
+
+pub async fn push_outputs(
     updater: &mut JobUpdater,
+    outputs: Vec<OutputNar<'_>>,
     abort: &watch::Receiver<bool>,
 ) -> Result<()> {
-    if store_paths.is_empty() {
+    if outputs.is_empty() {
         return Ok(());
     }
 
     updater.report_compressing().await?;
-
-    // Push each output's full runtime closure, not just the output itself: the
-    // gradient cache must be closure-complete so a downstream build can fetch
-    // every reference (a build's input is a dep output *and its closure*).
-    // `upload_one_nar` skips members the cache already holds, so this only
-    // uploads paths the cache is missing - e.g. a `-source` referenced by a
-    // config that would otherwise strand dependents on `InputsUnavailable`.
-    let closure: Vec<String> = store
-        .collect_runtime_closure(store_paths)
-        .await
+    let paths: Vec<String> = outputs
+        .iter()
+        .map(|o| nix_store_path(&o.store_path))
+        .collect();
+    let sizes: Vec<Option<u64>> = outputs
+        .iter()
+        .map(|o| match &o.source {
+            NarSource::Raw { nar, .. } => Some(nar.len() as u64),
+            NarSource::Path { .. } => None,
+        })
+        .collect();
+    let entries = super::query_fetched_paths(updater, paths, sizes).await;
+    let mut sources: HashMap<String, NarSource<'_>> = outputs
         .into_iter()
+        .map(|o| (nix_store_path(&o.store_path), o.source))
+        .collect();
+    let uploads: Vec<(CachedPath, NarSource<'_>)> = entries
+        .into_iter()
+        .filter(|cp| !cp.cached)
+        .filter_map(|cp| {
+            sources
+                .remove(&nix_store_path(&cp.path))
+                .map(|source| (cp, source))
+        })
         .collect();
 
-    let entries = super::query_fetched_paths(updater, closure).await;
-    debug!(paths = entries.len(), "compressing and pushing NARs");
-    super::upload_all(updater, &entries, Some(store), Some(abort)).await
+    super::upload_all(updater, uploads, Some(abort)).await
 }
 
 #[cfg(test)]
@@ -82,7 +86,10 @@ mod tests {
     use crate::executor::timeline::JobTimeline;
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
     use crate::proto::job::{DispatchHandle, JobUpdater};
+    use crate::proto::nar::NarSource;
     use crate::proto::nar_recv::NarReceiver;
+
+    use super::{OutputNar, push_outputs};
 
     fn uncached(path: &str) -> CachedPath {
         CachedPath {
@@ -198,11 +205,122 @@ mod tests {
         let pump = pump_resumes(reader, nar_recv);
 
         let entries: Vec<CachedPath> = store_paths.iter().map(|p| uncached(p)).collect();
-        crate::executor::upload_all(&updater, &entries, None, None)
-            .await
-            .unwrap();
+        crate::executor::upload_all(
+            &updater,
+            entries
+                .into_iter()
+                .map(|cp| (cp, NarSource::Path { store: None }))
+                .collect(),
+            None,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(server_task.await.unwrap(), UPLOAD_CONCURRENCY);
+        pump.abort();
+    }
+
+    /// The push is the outputs handed to it and nothing else: one is already in
+    /// the cache and is skipped, the other is a raw NAR and is compressed here;
+    /// no closure is walked and no third path is ever named to the server.
+    #[tokio::test]
+    async fn push_outputs_pushes_exactly_what_it_is_given() {
+        const JOB: &str = "job-push-outputs";
+        let cached = format!("/nix/store/{}-cached", "c".repeat(32));
+        let raw_path = format!("/nix/store/{}-raw", "r".repeat(32));
+        let raw_nar = b"\x0d\x00\x00\x00\x00\x00\x00\x00nix-archive-1\x00\x00\x00".to_vec();
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let cached_for_server = cached.clone();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let mut queried: Vec<String> = Vec::new();
+            let mut opened: Vec<String> = Vec::new();
+            loop {
+                match sc.recv().await.unwrap() {
+                    ClientMessage::CacheQuery {
+                        query_id, paths, ..
+                    } => {
+                        queried.extend(paths.iter().cloned());
+                        let cached: Vec<CachedPath> = paths
+                            .into_iter()
+                            .map(|p| CachedPath {
+                                cached: p == cached_for_server,
+                                ..uncached(&p)
+                            })
+                            .collect();
+                        sc.send(ServerMessage::CacheStatus { query_id, cached })
+                            .await
+                            .unwrap();
+                    }
+                    ClientMessage::NarStreamHeader { store_path, .. } => {
+                        opened.push(store_path.clone());
+                        sc.send(ServerMessage::NarPushResume {
+                            job_id: JOB.to_owned(),
+                            store_path,
+                            received_bytes: 0,
+                        })
+                        .await
+                        .unwrap();
+                    }
+                    ClientMessage::NarUploaded { .. } => break,
+                    _ => {}
+                }
+            }
+            (queried, opened)
+        });
+
+        let conn = ProtoConnection::open(&url).await.unwrap();
+        let (writer, reader, _flush) = conn.split();
+        let nar_recv = NarReceiver::new();
+        let mut updater = JobUpdater::new(
+            JOB.to_owned(),
+            DispatchHandle::new("dispatch-1".to_owned()),
+            writer,
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            nar_recv.clone(),
+            EvalCacheReceiver::new(),
+            None,
+            JobTimeline::new(),
+        );
+        let pump = pump_resumes(reader, nar_recv);
+        let (_tx, abort) = tokio::sync::watch::channel(false);
+
+        push_outputs(
+            &mut updater,
+            vec![
+                OutputNar {
+                    store_path: cached.clone(),
+                    source: NarSource::Path { store: None },
+                },
+                OutputNar {
+                    store_path: raw_path.clone(),
+                    source: NarSource::Raw {
+                        nar: raw_nar,
+                        references: vec![],
+                        deriver: None,
+                        ca: None,
+                    },
+                },
+            ],
+            &abort,
+        )
+        .await
+        .unwrap();
+
+        let (queried, opened) = server_task.await.unwrap();
+        assert_eq!(
+            queried,
+            vec![cached, raw_path.clone()],
+            "only the two outputs are named"
+        );
+        assert_eq!(
+            opened,
+            vec![raw_path],
+            "only the uncached output is streamed"
+        );
         pump.abort();
     }
 

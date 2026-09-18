@@ -137,12 +137,11 @@ pub enum NarSource<'a> {
     /// on the fly. References and deriver come from the nix daemon when a
     /// `store` is provided (eval-internal pushes and tests pass `None`).
     Path { store: Option<&'a LocalNixStore> },
-    /// Already-compressed bytes with precomputed metadata - the substitute
-    /// relay path. Nothing is recompressed or rehashed; a substitutable
-    /// output is mirrored into our cache as a pure copy.
-    Compressed {
-        bytes: &'a [u8],
-        meta: CompressedNarMeta,
+    /// An uncompressed NAR already in memory, with the narinfo facts that travel
+    /// with it. Compressed and hashed here, so nothing upstream is trusted for
+    /// the metadata the server stores.
+    Raw {
+        nar: Vec<u8>,
         references: Vec<String>,
         deriver: Option<String>,
         ca: Option<String>,
@@ -241,29 +240,27 @@ pub async fn upload_nar(
             )
             .await
         }
-        NarSource::Compressed {
-            bytes,
-            meta,
+        NarSource::Raw {
+            nar,
             references,
             deriver,
             ca,
         } => {
+            let (compressed, meta) = tokio::task::spawn_blocking(move || compress_nar(&nar))
+                .await
+                .context("compress task panicked")??;
             match sink {
                 NarSink::Relay { nar_recv } => {
-                    debug!(
-                        store_path,
-                        bytes = bytes.len(),
-                        "compressed NAR direct push"
-                    );
+                    debug!(store_path, bytes = compressed.len(), "raw NAR direct push");
                     let mut relay = RelayStream::open(
                         job_id,
                         store_path,
                         writer,
                         nar_recv,
-                        Some(bytes.len() as u64),
+                        Some(compressed.len() as u64),
                     )
                     .await?;
-                    for part in bytes.chunks(BULK_CHUNK_SIZE) {
+                    for part in compressed.chunks(BULK_CHUNK_SIZE) {
                         relay.send_part(part.to_vec()).await?;
                     }
                     relay.finish().await?;
@@ -273,8 +270,8 @@ pub async fn upload_nar(
                     method,
                     headers,
                 } => {
-                    debug!(store_path, method, "compressed presigned NAR upload");
-                    http_put(url, method, headers, bytes.to_vec()).await?;
+                    debug!(store_path, method, "raw presigned NAR upload");
+                    http_put(url, method, headers, compressed).await?;
                 }
             }
             send_nar_uploaded(writer, job_id, store_path, meta, references, deriver, ca).await
@@ -1125,21 +1122,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&store_path);
     }
 
-    /// Relay fallback for local-disk caches (no presigned PUT URL): an
-    /// already-compressed in-memory NAR must reach the server as `NarPush`
-    /// chunks that reconstruct the bytes verbatim, followed by a `NarUploaded`
-    /// carrying the supplied compressed/uncompressed metadata.
+    /// Relay fallback for local-disk caches (no presigned PUT URL): a raw NAR is
+    /// compressed here, must reach the server as `NarPush` chunks that decode back
+    /// to the raw bytes, and be confirmed with metadata this side computed.
     #[tokio::test]
-    async fn compressed_relay_streams_bytes_and_confirms() {
-        let raw = b"relayed substitute nar payload";
-        let (compressed, meta) = compress_nar(raw).unwrap();
+    async fn raw_relay_compresses_streams_and_confirms() {
+        let raw = b"relayed substitute nar payload".to_vec();
+        let expected_nar_hash = sha256_nix32(&raw);
+        let expected_nar_size = raw.len() as u64;
 
         let store_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-relay";
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
 
-        let expected_bytes = compressed.clone();
-        let expected_file_hash = meta.file_hash.clone();
+        let expected_raw = raw.clone();
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
             let mut data: Vec<u8> = Vec::new();
@@ -1149,20 +1145,21 @@ mod tests {
                     ClientMessage::NarPush { data: chunk, .. } => data.extend_from_slice(&chunk),
                     ClientMessage::NarUploaded {
                         store_path: sp,
-                        file_hash,
                         file_size,
+                        nar_hash,
                         nar_size,
                         references,
                         ..
                     } => {
                         assert_eq!(
-                            data, expected_bytes,
-                            "streamed bytes must reconstruct the compressed NAR"
+                            zstd::decode_all(data.as_slice()).unwrap(),
+                            expected_raw,
+                            "streamed bytes must decompress back to the raw NAR"
                         );
                         assert_eq!(sp, store_path);
-                        assert_eq!(file_hash, expected_file_hash);
-                        assert_eq!(file_size, expected_bytes.len() as u64);
-                        assert_eq!(nar_size, raw.len() as u64);
+                        assert_eq!(file_size, data.len() as u64);
+                        assert_eq!(nar_hash, expected_nar_hash);
+                        assert_eq!(nar_size, expected_nar_size);
                         assert_eq!(
                             references,
                             vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()]
@@ -1184,9 +1181,8 @@ mod tests {
             upload_nar(
                 "job-relay",
                 store_path,
-                NarSource::Compressed {
-                    bytes: &compressed,
-                    meta,
+                NarSource::Raw {
+                    nar: raw,
                     references: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()],
                     deriver: None,
                     ca: None,
@@ -1202,10 +1198,10 @@ mod tests {
         server_task.await.unwrap();
     }
 
-    /// The upstream content address must thread through the relay's
-    /// `NarSource::Compressed` into the `NarUploaded` the server receives.
+    /// The upstream content address must thread through `NarSource::Raw` into the
+    /// `NarUploaded` the server receives.
     #[tokio::test]
-    async fn compressed_source_threads_content_address() {
+    async fn raw_source_threads_content_address() {
         let ca = "text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944";
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
@@ -1227,18 +1223,11 @@ mod tests {
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
-        let meta = CompressedNarMeta {
-            file_hash: "sha256:abc".into(),
-            file_size: 3,
-            nar_hash: "sha256:def".into(),
-            nar_size: 3,
-        };
         upload_nar(
             "job-ca",
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12",
-            NarSource::Compressed {
-                bytes: b"abc",
-                meta,
+            NarSource::Raw {
+                nar: b"abc".to_vec(),
                 references: vec![],
                 deriver: None,
                 ca: Some(ca.to_string()),
@@ -1255,13 +1244,13 @@ mod tests {
         server_task.await.unwrap();
     }
 
-    /// Fourth quadrant: pre-compressed bytes PUT verbatim to a presigned URL,
-    /// confirmed with the caller-supplied metadata.
+    /// Fourth quadrant: a raw NAR compressed here and PUT to a presigned URL,
+    /// confirmed with the metadata this side computed.
     #[tokio::test]
-    async fn compressed_presigned_puts_verbatim_and_confirms() {
-        let raw = b"verbatim upstream nar payload";
-        let (compressed, meta) = compress_nar(raw).unwrap();
-        let expected_file_hash = meta.file_hash.clone();
+    async fn raw_presigned_puts_and_confirms() {
+        let raw = b"verbatim upstream nar payload".to_vec();
+        let expected_nar_hash = sha256_nix32(&raw);
+        let expected_nar_size = raw.len() as u64;
 
         let (http_url, http_task) = one_shot_http_server().await;
         let server = MockProtoServer::bind().await;
@@ -1270,8 +1259,11 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
             match sc.recv().await.unwrap() {
-                ClientMessage::NarUploaded { file_hash, .. } => {
-                    assert_eq!(file_hash, expected_file_hash);
+                ClientMessage::NarUploaded {
+                    nar_hash, nar_size, ..
+                } => {
+                    assert_eq!(nar_hash, expected_nar_hash);
+                    assert_eq!(nar_size, expected_nar_size);
                 }
                 msg => panic!("expected NarUploaded, got {msg:?}"),
             }
@@ -1284,9 +1276,8 @@ mod tests {
         upload_nar(
             "job-verbatim",
             "/nix/store/cccccccccccccccccccccccccccccccc-verbatim",
-            NarSource::Compressed {
-                bytes: &compressed,
-                meta,
+            NarSource::Raw {
+                nar: raw,
                 references: vec![],
                 deriver: None,
                 ca: None,
