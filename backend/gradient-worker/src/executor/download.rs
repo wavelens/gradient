@@ -12,7 +12,7 @@
 use std::fmt;
 
 use anyhow::{Context, Result, bail};
-use gradient_proto::messages::{BuildSpec, BuildSpecKind, QueryMode};
+use gradient_proto::messages::{BuildSpec, QueryMode};
 use gradient_util::nix_hash::nix32_encode;
 use sha2::{Digest, Sha256};
 
@@ -235,6 +235,7 @@ impl DownloadIo for JobUpdaterIo<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_proto::messages::BuildSpecKind;
     use std::collections::{BTreeMap, HashMap};
 
     const OUT: &str = "/nix/store/oooooooooooooooooooooooooooooooo-hello.txt";
