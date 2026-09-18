@@ -46,6 +46,7 @@ pub mod state_machine;
 pub mod status;
 pub mod status_sql;
 pub mod task_board;
+pub mod walk_completeness;
 
 #[cfg(test)]
 pub(crate) mod test_ctx;
@@ -117,3 +118,4 @@ pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;
 pub use self::status::*;
 pub use self::task_board::*;
+pub use self::walk_completeness::{recount_walk_completeness, seed_walk_completeness, unwalk};
