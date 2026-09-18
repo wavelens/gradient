@@ -34,6 +34,8 @@ pub struct ConsistencyReport {
     /// `fetchable` and `unready_deps` rows rewritten over the pending anchors
     /// and their direct dependencies.
     pub counter_drift: i64,
+    /// Walked derivations whose `unwalked_inputs` disagreed with the stubs below them.
+    pub walk_drift: i64,
     /// Anchors whose `demanded` disagreed with the walk from the entry points.
     pub demand_drift: i64,
     /// Promotable anchors found unpromoted, queued by this pass.
@@ -72,6 +74,7 @@ impl ConsistencyReport {
     /// measurements and are deliberately not summed.
     pub fn total(&self) -> i64 {
         self.counter_drift
+            + self.walk_drift
             + self.demand_drift
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
@@ -159,6 +162,10 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
     let negative_reference_counters = count(db, NEGATIVE_REFERENCE_COUNTERS.stmt()).await?;
 
+    // The walk's own bit before the demand it gates: an abandoned walk's parents
+    // read complete until this runs, and the prune trusts the column.
+    let walk_drift = crate::walk_completeness::recount_walk_completeness(db).await? as i64;
+
     // Before the readiness repair, so the queue settle that follows reads a
     // corrected column rather than promoting against a stale demand.
     let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
@@ -211,6 +218,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
 
     Ok(ConsistencyReport {
         counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
+        walk_drift,
         demand_drift,
         unpromoted_ready: repaired.promoted.len() as i64,
         adopted,
@@ -256,7 +264,7 @@ mod tests {
                 "hash".to_owned(),
                 Value::from("h".to_owned()),
             )])]])
-            .append_exec_results([exec(0), exec(2)])
+            .append_exec_results([exec(0), exec(2), exec(0), exec(7)])
             .append_query_results([n()])
             .append_exec_results([exec(0)])
             .append_query_results([drifted])
@@ -314,6 +322,10 @@ mod tests {
             report.demand_drift, 4,
             "every anchor the recount rewrote is reported"
         );
+        assert_eq!(
+            report.walk_drift, 7,
+            "the walk recount runs before the demand recount"
+        );
         assert_eq!(report.adopted, 0);
 
         let log = crate::pool::statements(pool.into_transaction_log());
@@ -332,36 +344,41 @@ mod tests {
             "a counter below zero is unrecoverable, so it must be counted: {log:?}"
         );
         assert!(
-            log[4].contains("SET LOCAL work_mem") && log[5].contains("SET demanded ="),
+            log[4].contains("SET LOCAL work_mem")
+                && log[5].contains("SET unwalked_inputs = coalesce(c.n, 0)"),
+            "the walk recount runs under its own raise, before the demand it gates: {log:?}"
+        );
+        assert!(
+            log[6].contains("SET LOCAL work_mem") && log[7].contains("SET demanded ="),
             "the table-wide demand walk runs under its own raise: {log:?}"
         );
         assert!(
-            log[6].contains("SELECT q.derivation FROM derivation_build q"),
+            log[8].contains("SELECT q.derivation FROM derivation_build q"),
             "the demand recount precedes the readiness repair, so the settle below it reads a corrected column: {log:?}"
         );
         assert!(
-            log[7].contains("FOR UPDATE") && log[8].contains("SET fetchable"),
+            log[9].contains("FOR UPDATE") && log[10].contains("SET fetchable"),
             "the fetchable recount runs under its own ordered lock: {log:?}"
         );
         assert!(
-            log[9].contains("FOR UPDATE") && log[10].contains("SET unready_deps"),
+            log[11].contains("FOR UPDATE") && log[12].contains("SET unready_deps"),
             "and the counter recount after it, in a second locked pass: {log:?}"
         );
         assert!(
-            log[11].contains("SET status = 0") && log[12].contains("SET status = 1"),
+            log[13].contains("SET status = 0") && log[14].contains("SET status = 1"),
             "the queue is settled against the repaired counters: {log:?}"
         );
         assert!(
-            log[13].contains(
+            log[15].contains(
                 "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
             ),
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[14].contains("SELECT DISTINCT o.hash") && log[15].contains("FROM evaluation ev"),
+            log[16].contains("SELECT DISTINCT o.hash") && log[17].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
         );
-        assert_eq!(log.len(), 16, "{log:?}");
+        assert_eq!(log.len(), 18, "{log:?}");
     }
 
     /// A pending anchor nobody names below a live evaluation's builder is the one
@@ -377,24 +394,24 @@ mod tests {
         assert_eq!(report.adopted, 1);
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log[13].contains("LIMIT 1")
-                && log[14].contains("SET LOCAL work_mem")
-                && log[15].contains("INSERT INTO build_job"),
+            log[15].contains("LIMIT 1")
+                && log[16].contains("SET LOCAL work_mem")
+                && log[17].contains("INSERT INTO build_job"),
             "the probe guards the walk that names: {log:?}"
         );
         assert!(
-            log[16].contains("SET LOCAL work_mem")
-                && log[17].contains("ORDER BY derivation FOR UPDATE")
-                && log[18].contains("SET demanded ="),
+            log[18].contains("SET LOCAL work_mem")
+                && log[19].contains("ORDER BY derivation FOR UPDATE")
+                && log[20].contains("SET demanded ="),
             "a name gives the closure below it demand, in this pass and not the next: {log:?}"
         );
         assert!(
-            log[19].contains("SET status = 1")
-                && log[20].contains("graph_version = e.graph_version + 1"),
+            log[21].contains("SET status = 1")
+                && log[22].contains("graph_version = e.graph_version + 1"),
             "then queue what was named and bump: {log:?}"
         );
         assert!(
-            log[21].contains("SELECT DISTINCT o.hash") && log[22].contains("FROM evaluation ev"),
+            log[23].contains("SELECT DISTINCT o.hash") && log[24].contains("FROM evaluation ev"),
             "the read-only alarms still come last: {log:?}"
         );
     }
@@ -405,6 +422,7 @@ mod tests {
     fn total_sums_every_dimension() {
         let r = ConsistencyReport {
             counter_drift: 1,
+            walk_drift: 9,
             demand_drift: 8,
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
@@ -415,7 +433,7 @@ mod tests {
             repair_scope: 2000,
             adopted: 2,
         };
-        assert_eq!(r.total(), 36);
+        assert_eq!(r.total(), 45);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }
