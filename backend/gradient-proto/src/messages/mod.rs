@@ -11,7 +11,7 @@ pub mod server;
 // backward compatibility so existing `crate::messages::FlakeJob` paths still work.
 pub use client::{ArchivedClientMessage, ClientMessage};
 pub use gradient_types::proto::{
-    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec,
+    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec, BuildSpecKind,
     BumpedInputWire, CacheInfo, CachedPath, CandidateScore, CredentialKind, DerivationOutput,
     DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel,
     EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep,
@@ -39,7 +39,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      512 KiB and a bulk write batch is byte-capped.
 /// v13: `CacheQuery` carries `nar_sizes` in Push mode; the server relays NARs at
 ///      or under `smallNarBytes` and pulls small or unconfirmed ones over the stream.
-pub const PROTO_VERSION: u16 = 13;
+/// v14: BuildSpec.kind (BuildSpecKind) replaces external_cached; CacheQuery.external;
+///      QueryMode::PullClosure removed.
+pub const PROTO_VERSION: u16 = 14;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

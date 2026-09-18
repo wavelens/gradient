@@ -332,8 +332,9 @@ impl<'a> DispatchContext<'a> {
                 paths,
                 mode,
                 nar_sizes,
+                external,
             } => {
-                self.spawn_cache_query(job_id, query_id, paths, nar_sizes, mode);
+                self.spawn_cache_query(job_id, query_id, paths, nar_sizes, mode, external);
                 true
             }
             ClientMessage::QueryKnownDerivations {
@@ -419,10 +420,11 @@ impl<'a> DispatchContext<'a> {
         paths: Vec<String>,
         nar_sizes: Vec<u64>,
         mode: QueryMode,
+        external: bool,
     ) {
         let rpc = self.rpc();
         self.state.shutdown.spawn(async move {
-            rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode)
+            rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode, external)
                 .await
         });
     }
@@ -964,8 +966,9 @@ impl RpcContext {
         paths: Vec<String>,
         nar_sizes: Vec<u64>,
         mode: gradient_types::proto::QueryMode,
+        external: bool,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, "CacheQuery");
+        debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
         let project_id = self.scheduler.project_for_job(&job_id).await;
 
         // A DB error or an over-budget handler is *indeterminate*, never
@@ -974,7 +977,7 @@ impl RpcContext {
         // `InputsUnavailable`, which fails the whole eval).
         let reply = match tokio::time::timeout(
             CACHE_QUERY_BUDGET,
-            handle_cache_query(&self.state, project_id, &paths, &nar_sizes, mode),
+            handle_cache_query(&self.state, project_id, &paths, &nar_sizes, mode, external),
         )
         .await
         {

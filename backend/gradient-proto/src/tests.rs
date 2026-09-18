@@ -5,10 +5,10 @@
  */
 
 use crate::messages::{
-    BuildFailureKind, BuildMetrics, BuildOutput, CachedPath, ClientMessage, EvalCachePullOutcome,
-    EvalCachePushMode, FlakeInputOverride, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
-    Job, JobCandidate, JobPhase, JobPhaseSpan, JobUpdateKind, PROTO_VERSION, QueryMode,
-    RequiredPath, ServerMessage,
+    BuildFailureKind, BuildMetrics, BuildOutput, BuildSpec, BuildSpecKind, CachedPath,
+    ClientMessage, EvalCachePullOutcome, EvalCachePushMode, FlakeInputOverride, FlakeJob,
+    FlakeSource, FlakeStep, GradientCapabilities, Job, JobCandidate, JobPhase, JobPhaseSpan,
+    JobUpdateKind, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -176,6 +176,7 @@ fn cache_query_normal_roundtrip() {
         paths: vec!["/nix/store/aaaa-hello".into()],
         mode: QueryMode::Normal,
         nar_sizes: vec![],
+        external: false,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -190,6 +191,7 @@ fn cache_query_push_roundtrip() {
         paths: vec!["/nix/store/aaaa-foo".into(), "/nix/store/bbbb-bar".into()],
         mode: QueryMode::Push,
         nar_sizes: vec![4096, u64::MAX],
+        external: false,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -204,6 +206,7 @@ fn cache_query_pull_roundtrip() {
         paths: vec!["/nix/store/cccc-baz".into()],
         mode: QueryMode::Pull,
         nar_sizes: vec![],
+        external: false,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -211,8 +214,41 @@ fn cache_query_pull_roundtrip() {
 }
 
 #[test]
-fn the_handshake_speaks_version_thirteen() {
-    assert_eq!(PROTO_VERSION, 13);
+fn the_handshake_speaks_version_fourteen() {
+    assert_eq!(PROTO_VERSION, 14);
+}
+
+#[test]
+fn cache_query_external_roundtrip() {
+    let original = ClientMessage::CacheQuery {
+        job_id: "job-4".into(),
+        query_id: "query-4".into(),
+        paths: vec!["/nix/store/dddd-qux".into()],
+        mode: QueryMode::Pull,
+        nar_sizes: vec![],
+        external: true,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn build_spec_kind_roundtrip() {
+    for kind in [BuildSpecKind::Build, BuildSpecKind::Substitute] {
+        let original = BuildSpec {
+            build_id: "b".into(),
+            drv_path: "/nix/store/aaaa-x.drv".into(),
+            kind,
+            is_fixed_output: false,
+            outputs: vec![],
+            timeout_secs: None,
+            max_silent_secs: None,
+        };
+        let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+        let decoded = rkyv::from_bytes::<BuildSpec, RkyvError>(&bytes).unwrap();
+        assert_eq!(decoded, original);
+    }
 }
 
 #[test]

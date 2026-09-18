@@ -154,7 +154,7 @@ mod tests {
     use super::*;
     use gradient_score::ScoredJob;
     use gradient_types::ids::{DerivationBuildId, EvaluationId, ProjectId};
-    use gradient_types::proto::{BuildJob, BuildSpec};
+    use gradient_types::proto::{BuildJob, BuildSpec, BuildSpecKind};
 
     fn build_pending() -> PendingJob {
         let now = gradient_types::now();
@@ -166,7 +166,7 @@ mod tests {
                 builds: vec![BuildSpec {
                     build_id: "b1".into(),
                     drv_path: "/nix/store/aaa-curl.drv".into(),
-                    external_cached: false,
+                    kind: BuildSpecKind::Build,
                     is_fixed_output: false,
                     outputs: vec![],
                     timeout_secs: None,

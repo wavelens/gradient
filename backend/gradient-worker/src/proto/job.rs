@@ -347,8 +347,27 @@ impl JobUpdater {
             paths,
             Vec::new(),
             mode,
+            false,
         )
         .await
+    }
+
+    /// One path, and the server may leave our cache for it.
+    pub async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
+        let mut guard = self.phase(JobPhase::CacheQueryWait);
+        guard.record(1, 0);
+        let answers = cache_query_with_timeout(
+            &self.job_id,
+            &self.writer,
+            &self.cache_waiters,
+            vec![path],
+            Vec::new(),
+            QueryMode::Pull,
+            true,
+        )
+        .await?;
+
+        Ok(answers.into_iter().find(|cp| cp.cached && cp.url.is_some()))
     }
 
     /// `CacheQuery { Push }` with each path's uncompressed size, so the server
@@ -368,6 +387,7 @@ impl JobUpdater {
             paths,
             nar_sizes,
             QueryMode::Push,
+            false,
         )
         .await
     }
@@ -616,10 +636,10 @@ async fn cache_query_with_timeout(
     paths: Vec<String>,
     nar_sizes: Vec<u64>,
     mode: QueryMode,
+    external: bool,
 ) -> Result<Vec<CachedPath>> {
     // A Push carries one size per path or the server rejects it. A caller that
-    // cannot know them yet - the substitute relay asks for PUT targets before it
-    // pulls any narinfo - says so with the unknown sentinel rather than nothing.
+    // cannot know them yet says so with the unknown sentinel rather than nothing.
     let nar_sizes = match mode {
         QueryMode::Push if nar_sizes.len() != paths.len() => vec![u64::MAX; paths.len()],
         _ => nar_sizes,
@@ -639,7 +659,15 @@ async fn cache_query_with_timeout(
         .collect();
     let answers: Vec<Vec<CachedPath>> = futures::stream::iter(chunks)
         .map(|(chunk, sizes)| {
-            cache_query_chunk(job_id, writer, cache_waiters, chunk, sizes, mode.clone())
+            cache_query_chunk(
+                job_id,
+                writer,
+                cache_waiters,
+                chunk,
+                sizes,
+                mode.clone(),
+                external,
+            )
         })
         .buffered(CACHE_QUERY_WINDOW)
         .try_collect()
@@ -657,6 +685,7 @@ async fn cache_query_chunk(
     paths: Vec<String>,
     nar_sizes: Vec<u64>,
     mode: QueryMode,
+    external: bool,
 ) -> Result<Vec<CachedPath>> {
     let path_count = paths.len();
     let query_id = uuid::Uuid::now_v7().to_string();
@@ -668,6 +697,7 @@ async fn cache_query_chunk(
             paths,
             mode,
             nar_sizes,
+            external,
         })
         .await?;
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
@@ -695,6 +725,10 @@ async fn cache_query_chunk(
 
 #[async_trait]
 impl JobReporter for JobUpdater {
+    async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
+        JobUpdater::query_upstream(self, path).await
+    }
+
     async fn query_cache(
         &mut self,
         paths: Vec<String>,
@@ -707,6 +741,7 @@ impl JobReporter for JobUpdater {
             paths,
             Vec::new(),
             mode,
+            false,
         )
         .await
     }

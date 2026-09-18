@@ -13,7 +13,8 @@ use std::sync::Arc;
 use gradient_types::ids::*;
 
 use gradient_types::proto::{
-    BuildJob, BuildSpec, CandidateScore, FlakeJob, FlakeStep, GradientCapabilities, JobKind,
+    BuildJob, BuildSpec, BuildSpecKind, CandidateScore, FlakeJob, FlakeStep, GradientCapabilities,
+    JobKind,
 };
 
 use super::Scheduler;
@@ -108,7 +109,7 @@ fn build_job(
             builds: vec![BuildSpec {
                 build_id: derivation_build.to_string(),
                 drv_path: "aaaa-hello.drv".into(),
-                external_cached: false,
+                kind: BuildSpecKind::Build,
                 is_fixed_output: false,
                 outputs: vec![],
                 timeout_secs: None,
