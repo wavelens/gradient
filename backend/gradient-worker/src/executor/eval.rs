@@ -21,11 +21,11 @@ use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
-use gradient_nix::{DerivationResolver, FlakeDiscovery};
 use gradient_proto::messages::{
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob,
     FlakeOutputNode, FlakeSource,
 };
+use gradient_sources::{DerivationResolver, FlakeDiscovery};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
@@ -482,7 +482,7 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
         return format!("path:{}", path);
     }
     match &job.source {
-        FlakeSource::Repository { url, commit } => gradient_nix::NixFlakeUrl::new(url, commit)
+        FlakeSource::Repository { url, commit } => gradient_types::NixFlakeUrl::new(url, commit)
             .map(|u| u.to_string())
             .unwrap_or_else(|_| url.clone()),
         // Eval-only: Nix accepts `/nix/store/...` directly as a flake URI.

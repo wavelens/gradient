@@ -12,6 +12,7 @@ pub mod cli;
 pub mod config;
 pub mod constants;
 pub mod consts;
+pub mod flake_url;
 pub mod forge;
 pub mod ids;
 pub mod input;
@@ -41,6 +42,7 @@ pub use self::config::{
 };
 pub use self::consts::*;
 pub use self::entity_aliases::*;
+pub use self::flake_url::{NixFlakeUrl, RepositoryUrl};
 pub use self::forge::ForgeType;
 pub use self::ids::*;
 pub use self::input::*;

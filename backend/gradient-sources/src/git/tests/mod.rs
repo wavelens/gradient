@@ -7,7 +7,7 @@
 mod fixtures;
 
 use super::pktline::read_ref_from_pktlines;
-use super::url::{git_transport_url, parse_git_protocol_url, parse_nix_git_url};
+use super::url::{git_transport_url, parse_git_protocol_url};
 use crate::SourceError;
 use fixtures::{FAKE_SHA, FLUSH, ref_line, ref_line_with_caps};
 
@@ -35,72 +35,6 @@ fn git_transport_url_passes_through_bare_schemes_and_scp() {
         git_transport_url("git@github.com:u/r.git"),
         "git@github.com:u/r.git"
     );
-}
-
-// ── parse_nix_git_url ────────────────────────────────────────────────────
-
-/// `POST /build-requests/url` builds an evaluation's source string with
-/// `repository_url_to_nix` and the worker reads it back with
-/// `parse_nix_git_url`. Pin that round trip, in both URL shapes, so a change to
-/// either side cannot silently strand remote build requests (#564).
-#[test]
-fn repository_url_to_nix_round_trips_through_parse_nix_git_url() {
-    for url in [
-        "https://example.com/repo.git",
-        "ssh://git@example.com/org/repo.git",
-    ] {
-        let nix_url = gradient_types::input::repository_url_to_nix(url, FAKE_SHA).unwrap();
-        let (parsed_url, parsed_rev) = parse_nix_git_url(&nix_url).unwrap();
-
-        assert_eq!(parsed_url, url, "url round trip for {url}");
-        assert_eq!(parsed_rev, FAKE_SHA, "rev round trip for {url}");
-    }
-}
-
-#[test]
-fn parse_nix_git_url_strips_git_plus_prefix() {
-    let (url, rev) = parse_nix_git_url("git+https://example.com/repo.git?rev=deadbeef").unwrap();
-    assert_eq!(url, "https://example.com/repo.git");
-    assert_eq!(rev, "deadbeef");
-}
-
-#[test]
-fn parse_nix_git_url_without_git_plus_prefix() {
-    let (url, rev) = parse_nix_git_url("https://example.com/repo.git?rev=abc123").unwrap();
-    assert_eq!(url, "https://example.com/repo.git");
-    assert_eq!(rev, "abc123");
-}
-
-#[test]
-fn parse_nix_git_url_rev_among_multiple_query_params() {
-    let (url, rev) =
-        parse_nix_git_url("git+ssh://git@host/repo.git?ref=main&rev=cafef00d&shallow=1").unwrap();
-    assert_eq!(url, "ssh://git@host/repo.git");
-    assert_eq!(rev, "cafef00d");
-}
-
-#[test]
-fn parse_nix_git_url_missing_query_rejected() {
-    assert!(matches!(
-        parse_nix_git_url("git+https://example.com/repo.git"),
-        Err(SourceError::UrlParsing)
-    ));
-}
-
-#[test]
-fn parse_nix_git_url_missing_rev_rejected() {
-    assert!(matches!(
-        parse_nix_git_url("git+https://example.com/repo.git?ref=main"),
-        Err(SourceError::MissingHash)
-    ));
-}
-
-#[test]
-fn parse_nix_git_url_empty_query_missing_rev() {
-    assert!(matches!(
-        parse_nix_git_url("git+https://example.com/repo.git?"),
-        Err(SourceError::MissingHash)
-    ));
 }
 
 // ── parse_git_protocol_url ───────────────────────────────────────────────

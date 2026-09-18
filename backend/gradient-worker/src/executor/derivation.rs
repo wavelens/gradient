@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use gradient_db::{DrvOutputSpec, parse_drv};
-use gradient_exec::path_utils::{nix_store_path, strip_nix_store_prefix};
+use gradient_sources::{nix_store_path, strip_nix_store_prefix};
 use harmonia_store_content_address::{ContentAddress, ContentAddressMethod};
 use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, DerivationT};
 use harmonia_store_path::StorePath;

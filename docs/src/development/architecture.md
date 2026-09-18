@@ -131,12 +131,12 @@ storage        NAR and log storage (local FS or S3), the staged upload queue
                and the hot RAM cache
 worker         gradient-worker binary (fetch, eval, build, sign)
 eval           standalone flake evaluator used by the worker
-nix, sources   nix bindings and store-path/source helpers
-exec, util     process execution, shutdown, supervision, HTTP clients
+sources        store paths, the nix daemon pool, git and SSH sources, cache
+               signing keys, and the native `flake.lock` updater
+util           shutdown, supervision, HTTP clients
 score          scoring policies for job assignment
 notify         email and notification senders
 report         evaluation snapshots for support reports
-flake-lock     native `flake.lock` model and updater
 types          shared ids, wire types, runtime config
 test-support   shared test fixtures for the workspace
 ```

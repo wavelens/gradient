@@ -6,25 +6,26 @@
 
 pub mod build_log;
 pub mod cache_key;
+pub mod daemon;
+pub mod evaluator;
+pub mod flake_lock;
 pub mod git;
-pub mod nar_path;
 pub mod secret;
 pub mod ssh_key;
+pub mod store;
 
 pub use self::build_log::strip_nix_log_tail;
 pub use self::cache_key::*;
+pub use self::daemon::*;
+pub use self::evaluator::*;
 pub use self::git::{
-    Libgit2Prefetcher, accept_cert, check_task_updates, fetch_options_with_ssh, get_commit_info,
-    resolve_head, resolve_remote_ref,
+    accept_cert, check_task_updates, fetch_options_with_ssh, get_commit_info, resolve_head,
+    resolve_remote_ref,
 };
-pub use self::nar_path::*;
 pub use self::secret::{decrypt_secret, encrypt_secret};
 pub use self::ssh_key::{decrypt_ssh_private_key, format_public_key, generate_ssh_key};
+pub use self::store::*;
 
-use anyhow::Result;
-use async_trait::async_trait;
-use gradient_types::*;
-use std::path::PathBuf;
 use thiserror::Error;
 
 /// Strips the URL scheme and replaces `:` with `-` to form the host portion of
@@ -117,33 +118,4 @@ pub enum SourceError {
     GitHashExtraction,
     #[error("Project not found with ID: {id}")]
     ProjectNotFound { id: gradient_types::ids::ProjectId },
-}
-
-/// Result of a successful prefetch. Owns the temporary clone directory so the
-/// caller keeps it alive for as long as the path is used.
-#[derive(Debug)]
-pub struct PrefetchedFlake {
-    _dir: tempfile::TempDir,
-    pub path: PathBuf,
-}
-
-impl PrefetchedFlake {
-    pub fn from_tempdir(dir: tempfile::TempDir) -> Self {
-        let path = dir.path().to_path_buf();
-        Self { _dir: dir, path }
-    }
-}
-
-/// Prefetches a flake repository for evaluation. Production impl uses libgit2
-/// + the Nix C API to clone SSH repos and lock their inputs into the store;
-/// tests can substitute a fake that returns `None` or a stub directory.
-#[async_trait]
-pub trait FlakePrefetcher: Send + Sync + std::fmt::Debug + 'static {
-    async fn prefetch(
-        &self,
-        crypt_secret_file: String,
-        serve_url: String,
-        repository: String,
-        project: MProject,
-    ) -> Result<Option<PrefetchedFlake>>;
 }

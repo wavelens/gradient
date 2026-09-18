@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_exec::path_utils::strip_store_prefix;
+use gradient_sources::strip_store_prefix;
 use tokio::fs;
 use tracing::{debug, warn};
 
