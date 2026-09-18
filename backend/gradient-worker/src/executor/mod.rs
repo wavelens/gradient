@@ -17,6 +17,7 @@ pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
 pub mod log_limit;
+mod substitute;
 pub mod timeline;
 
 use std::sync::Arc;
@@ -460,35 +461,49 @@ impl JobExecutor {
             updater.report_building(build_task.build_id.clone()).await?;
 
             if build_task.kind == BuildSpecKind::Substitute {
-                // Relay the outputs and their runtime closure from upstream;
-                // nothing enters the local store.
-                let _relay = updater.phase(JobPhase::SubstituteRelay);
-                let relayed = crate::proto::substitute_relay::relay_external_cached_outputs(
-                    build_task, updater,
-                )
-                .await
-                .map_err(|e| failure::classify_substitute_failure(&build_task.build_id, e))?;
-
-                let reported: Vec<gradient_proto::messages::BuildOutput> = relayed
+                let pairs: Vec<(String, String)> = build_task
+                    .outputs
                     .iter()
-                    .map(|(name, path)| gradient_proto::messages::BuildOutput {
-                        name: name.clone(),
-                        store_path: path.clone(),
-                        hash: gradient_sources::get_hash_from_path(path.clone())
+                    .filter(|o| !o.path.is_empty())
+                    .map(|o| (o.name.clone(), o.path.clone()))
+                    .collect();
+                let fetched =
+                    substitute::fetch_outputs(&mut substitute::JobUpdaterIo(updater), &pairs)
+                        .await
+                        .map_err(|e| {
+                            failure::classify_substitute_failure(&build_task.build_id, e)
+                        })?;
+
+                let reported: Vec<gradient_proto::messages::BuildOutput> = fetched
+                    .iter()
+                    .map(|f| gradient_proto::messages::BuildOutput {
+                        name: f.name.clone(),
+                        store_path: f.store_path.clone(),
+                        hash: gradient_sources::get_hash_from_path(f.store_path.clone())
                             .map(|(h, _)| h)
                             .unwrap_or_default(),
-                        nar_size: None,
-                        nar_hash: None,
+                        nar_size: f.nar.as_ref().map(|n| n.nar.len() as i64),
+                        nar_hash: f.nar.as_ref().map(|n| nar::sha256_nix32(&n.nar)),
                         products: Vec::new(),
                     })
                     .collect();
-
-                // The relay already pushed each NAR (NarUploaded), and nothing
-                // landed in the local store, so no GC roots and no post-loop
-                // compress_and_push for these outputs.
                 updater
-                    .report_build_output(build_task.build_id.clone(), reported, None, false)
+                    .report_build_output(build_task.build_id.clone(), reported, None, true)
                     .await?;
+
+                // Nothing landed in the local store, so no GC roots; the one push
+                // at the end of the loop uploads what the upstream served.
+                outputs.extend(fetched.into_iter().filter_map(|f| {
+                    f.nar.map(|raw| compress::OutputNar {
+                        store_path: f.store_path,
+                        source: nar::NarSource::Raw {
+                            nar: raw.nar,
+                            references: raw.references,
+                            deriver: raw.deriver,
+                            ca: raw.ca,
+                        },
+                    })
+                }));
                 continue;
             }
 

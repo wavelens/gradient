@@ -11326,7 +11326,6 @@ components:
             - known_derivations_wait
             - drv_closure_push
             - prefetch
-            - substitute_relay
             - substitute_fetch
             - build
             - compress

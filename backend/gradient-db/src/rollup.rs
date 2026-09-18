@@ -394,8 +394,9 @@ fn build_duration_attempt_sql() -> String {
 
 /// `phase.<kind>.<phase>.ms`: one series per job kind and phase, so the board
 /// can compare where eval and build time actually goes. The phase name array is
-/// indexed by `phase + 1` because Postgres arrays are 1-based; it must stay in
-/// the order of `JobPhase::as_str`.
+/// indexed by `phase + 1` because Postgres arrays are 1-based, and it is keyed by
+/// `JobPhase::as_i16`, not by the enum's current order: position 10 is the retired
+/// discriminant 9 (`substitute_relay`), which historical rows still carry.
 fn phase_duration_sql() -> String {
     let ms = "(p.end_ms - p.start_ms)::double precision";
     format!(

@@ -673,27 +673,25 @@ is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
 onto `derivation_output` (`external_url`, `nar_hash`, `file_size`,
 `references_list`, `deriver`), so the narinfo lookup runs only once.
 
-A substitutable anchor dispatches as a relay job on any worker once something
-demands it (see [Promotion](#promotion)). The dispatch carries the derivation's
-output `(name, store_path)` pairs in the `BuildSpec` so the worker fetches the
-outputs directly and never touches the `.drv`: a substitution needs only the
-output NAR plus its runtime closure, never the `.drv`'s build-time
+A substitutable anchor dispatches as a `BuildSpecKind::Substitute` job on any
+worker once something demands it (see [Promotion](#promotion)). The dispatch
+carries the derivation's output `(name, store_path)` pairs in the `BuildSpec` so
+the worker fetches the outputs directly and never touches the `.drv`: a
+substitution needs only the output NAR, never the `.drv`'s build-time
 `input_sources` (binary caches do not serve those, so importing the `.drv` would
-fail with a spurious `SubstituteUnavailable`). The worker walks the upstream
-references breadth-first from the outputs and pushes every member our cache
-lacks - relaying each NAR verbatim when it is already zstd-compressed at our
-2 MiB level-6 window, else recompressing - so the outputs land whole
-(`missing_references = 0`) and the binary-cache invariant holds for substituted
-anchors exactly as for built ones. Relaying the outputs alone is what used to
-break it: the closure members below a pruned node have no anchor of their own, so
-nothing ever fetched them and every dependent's build fell back to the upstream.
-`use_substitutes` stays off in the daemon - substitution always goes through
+fail with a spurious `SubstituteUnavailable`). It is one path per output and
+nothing below it: the worker asks the server for that one upstream narinfo
+(`CacheQuery { external: true }`), downloads the NAR, verifies it against the
+declared `nar_hash`, and hands the raw bytes to the same push every other kind
+ends in. No closure is walked on the worker; what the NAR references is the
+server's to demand, and the producers of those references are anchors of their
+own. `use_substitutes` stays off in the daemon - substitution always goes through
 gradient, never the worker's own nix config. Existing build-once anchors a prior
 eval left not-yet-succeeded are flipped substitutable when an upstream is newly
 found, so a previously-failed fetcher substitutes instead of rebuilding; the
 anchors that flipped stop being builders, so what they demanded is released.
 
-A `SubstituteUnavailable` miss re-queues the relay penalty-free. At
+A `SubstituteUnavailable` miss re-queues the substitute penalty-free. At
 `substituteMissEscalationThreshold` misses within one evaluation the graph actor
 exhausts the substitution instead: `substitutable` is cleared, the outputs forget
 their upstream columns, and the anchor goes back to `Created` to be built through
@@ -750,10 +748,13 @@ A stub is never pruned: `walked = false` means the subtree was never recorded.
 #### The cache closure invariant
 
 The cache holds a binary-cache invariant: *if an output is in our cache, its
-entire runtime closure is too*. A build (and a substitution, which fetches the
-output's closure locally first) pushes the **full runtime closure** of its
-outputs, not just the output paths; already-cached members are skipped, so only
-paths the cache is actually missing upload. Each upload's bytes are written to
+entire runtime closure is too*. A job pushes its own outputs and nothing below
+them; what keeps the invariant is that everything below is already there by the
+time the push runs. A build's runtime references are a subset of the build
+closure the dispatch gate made whole in our cache before the job was offered, and
+a substitute's references are producers the server demands as anchors of their
+own. Already-cached outputs are skipped, so only paths the cache is actually
+missing upload. Each upload's bytes are written to
 storage by a tracked task per NAR, and its metadata is committed by the graph
 actor's `CommitNar` message; the per-connection commit semaphore that used to
 serialise two commits per session is gone, because the actor already serialises

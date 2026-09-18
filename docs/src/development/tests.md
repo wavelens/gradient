@@ -96,8 +96,8 @@ filesystem or the network is behind a trait; implement the trait in
 `test-support/src/fakes/` and record the calls. Recording fakes
 (`RecordingJobReporter`, `RecordingWebhookClient`) let a test assert on the
 sequence of effects rather than on internal state. When the trait exists only to
-lift one algorithm out of its I/O (`RelayIo` under the worker's closure relay),
-the fake stays in that module's own `tests`: it is a fixture for one walk, not a
+lift one algorithm out of its I/O (`UpstreamIo` under the worker's substitute),
+the fake stays in that module's own `tests`: it is a fixture for one fetch, not a
 double anything else will reuse.
 
 **An actor with side effects is tested behind small traits.** `gradient-effects`

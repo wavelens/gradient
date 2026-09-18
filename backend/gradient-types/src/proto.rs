@@ -525,7 +525,6 @@ pub enum JobPhase {
     KnownDerivationsWait,
     DrvClosurePush,
     Prefetch,
-    SubstituteRelay,
     SubstituteFetch,
     Build,
     Compress,
@@ -546,7 +545,6 @@ impl JobPhase {
             Self::KnownDerivationsWait => "known_derivations_wait",
             Self::DrvClosurePush => "drv_closure_push",
             Self::Prefetch => "prefetch",
-            Self::SubstituteRelay => "substitute_relay",
             Self::SubstituteFetch => "substitute_fetch",
             Self::Build => "build",
             Self::Compress => "compress",
@@ -556,7 +554,8 @@ impl JobPhase {
     }
 
     /// Wire/DB discriminant, written out so reordering the enum cannot silently
-    /// re-label historical rows.
+    /// re-label historical rows. 9 is retired (`substitute_relay`) and must stay
+    /// unused; a historical span carrying it renders as `unknown_9`.
     pub const fn as_i16(self) -> i16 {
         match self {
             Self::Fetch => 0,
@@ -568,7 +567,6 @@ impl JobPhase {
             Self::KnownDerivationsWait => 6,
             Self::DrvClosurePush => 7,
             Self::Prefetch => 8,
-            Self::SubstituteRelay => 9,
             Self::Build => 10,
             Self::Compress => 11,
             Self::NarPush => 12,
@@ -588,7 +586,6 @@ impl JobPhase {
             6 => Self::KnownDerivationsWait,
             7 => Self::DrvClosurePush,
             8 => Self::Prefetch,
-            9 => Self::SubstituteRelay,
             10 => Self::Build,
             11 => Self::Compress,
             12 => Self::NarPush,

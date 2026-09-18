@@ -162,19 +162,19 @@ pub(super) fn classify_prefetch_error(build_id: &str, e: anyhow::Error) -> Build
     }
 }
 
-/// Classify an `external_cached` substitute-relay failure.
+/// Classify a Substitute failure.
 pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> BuildError {
     if e.chain().any(|c| c.is::<SubstituteNotOnUpstream>()) {
-        tracing::warn!(%build_id, error = %e, "external_cached relay: output on no upstream; SubstituteUnavailable");
+        tracing::warn!(%build_id, error = %e, "substitute: output on no upstream; SubstituteUnavailable");
         BuildError::substitute_unavailable(e)
     } else if let Some(mi) = e.chain().find_map(|c| c.downcast_ref::<MissingInputs>()) {
         // The upstream advertised the path but the object GET 404'd: surface
         // the paths so the server's demote/reconcile self-heal clears the
         // stale record instead of this build retrying against it forever.
-        tracing::warn!(%build_id, error = %e, "external_cached relay: advertised NAR object missing; InputsUnavailable");
+        tracing::warn!(%build_id, error = %e, "substitute: advertised NAR object missing; InputsUnavailable");
         BuildError::inputs_unavailable(mi.0.clone(), e)
     } else {
-        tracing::warn!(%build_id, error = %e, "external_cached relay failed transiently; retrying without escalating");
+        tracing::warn!(%build_id, error = %e, "substitute failed transiently; retrying without escalating");
         BuildError::transient(e)
     }
 }
@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn substitute_relay_404_is_inputs_unavailable() {
+    fn a_substitute_404_is_inputs_unavailable() {
         let e = anyhow::Error::new(crate::proto::prefetch::MissingInputs(vec![
             "/nix/store/a-b".into(),
         ]))
