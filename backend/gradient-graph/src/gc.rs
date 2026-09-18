@@ -105,10 +105,6 @@ gradient_db::sql! {
         params = [DerivationIds(64)],
         tier = Sweep;
 
-    GC_UNWALK_SURVIVORS = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
-        params = [DerivationIds(64)],
-        tier = Sweep;
-
     /// Every anchor whose queue membership deleting these evaluations can close:
     /// the derivations they name, and the direct inputs of those, which lose a
     /// demander with them.
@@ -220,9 +216,13 @@ async fn delete_derivations(
     // dependent a concurrent eval already re-walked keeps its place in the queue.
     let survivors: Vec<DerivationId> = orphaned_survivors(&dependents, &deleted);
     if !survivors.is_empty() {
-        db.execute_raw(GC_UNWALK_SURVIVORS.bind([ids(&survivors)]))
+        let txn = db.begin().await.context("GC: begin the survivor un-walk")?;
+        gradient_db::unwalk(&txn, &survivors)
             .await
             .context("GC: failed to re-walk the survivors of a deleted dependency")?;
+        txn.commit()
+            .await
+            .context("GC: commit the survivor un-walk")?;
         let changes = gradient_db::unpromote_ungated(db, &survivors)
             .await
             .context("GC: failed to settle the survivors of a deleted dependency")?;
