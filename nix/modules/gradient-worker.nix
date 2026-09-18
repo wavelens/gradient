@@ -176,7 +176,7 @@ in {
       maxConcurrentBuilds = lib.mkOption {
         description = "Maximum number of concurrent builds";
         type = lib.types.ints.positive;
-        default = 64;
+        default = 32;
       };
 
       maxBuildCores = lib.mkOption {

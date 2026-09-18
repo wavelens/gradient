@@ -511,7 +511,7 @@ async fn build_failed(
     // but once the breaker trips the input is unrecoverable - stop retrying.
     let substitution = policy::Substitution {
         substitutable: anchor.substitutable,
-        misses: substitute_misses(ctx, derivation_build, kind).await,
+        misses: substitute_misses(ctx, derivation_build, kind, anchor.substitutable).await,
         threshold: i64::from(ctx.config.eval.substitute_miss_escalation_threshold),
     };
     let outcome = match policy::decide_failure_outcome(kind, attempt, max_attempts, substitution) {
@@ -586,14 +586,15 @@ async fn build_failed(
 }
 
 /// The anchor's prior `SubstituteUnavailable` attempts within the evaluation that
-/// drove this one. Zero for any other failure kind: nothing else spends the budget,
-/// so nothing else needs to read it.
+/// drove this one. Zero where no re-queue is reachable: a kind that cannot produce
+/// one never reads the budget, and neither does an anchor that is not a relay.
 async fn substitute_misses(
     ctx: &DbContext,
     derivation_build: DerivationBuildId,
     kind: BuildFailureKind,
+    substitutable: bool,
 ) -> i64 {
-    if !matches!(kind, BuildFailureKind::SubstituteUnavailable) {
+    if !substitutable || !policy::spends_substitute_budget(kind) {
         return 0;
     }
 

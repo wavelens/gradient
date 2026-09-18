@@ -13,7 +13,9 @@ use gradient_types::proto::BuildFailureKind;
 /// How the anchor was being fulfilled when it failed, and how much of its
 /// substitute-miss budget is already spent. `misses` counts the anchor's prior
 /// `SubstituteUnavailable` attempts within the driving evaluation, so a new
-/// evaluation retries substitution from zero.
+/// evaluation retries substitution from zero. Every penalty-free re-queue is
+/// recorded under that reason, whatever kind produced it, so one budget bounds
+/// the whole relay loop - see [`attempt_reason_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Substitution {
     pub substitutable: bool,
@@ -52,16 +54,7 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
         BuildFailureKind::Aborted => FailureOutcome::Aborted,
-        // Only a miss spends the budget. A transient failure of a relay is our
-        // cache write breaking, not the upstream refusing to serve, so it must not
-        // push the anchor toward a from-scratch build.
-        BuildFailureKind::SubstituteUnavailable => {
-            if substitution.misses + 1 < substitution.threshold {
-                FailureOutcome::Requeue
-            } else {
-                FailureOutcome::Exhausted
-            }
-        }
+        BuildFailureKind::SubstituteUnavailable => requeue_or_exhaust(substitution),
         // A missing input self-heals, so it retries in-eval like a transient
         // failure; the caller forces `Permanent` when the circuit trips.
         BuildFailureKind::InputsUnavailable | BuildFailureKind::Transient => {
@@ -75,7 +68,7 @@ pub(crate) fn decide_failure_outcome(
                 // `DependencyFailed` over everything above it. Fall into the
                 // substitute-miss loop instead, which escalates to a real build
                 // once the miss budget is spent.
-                FailureOutcome::Requeue
+                requeue_or_exhaust(substitution)
             } else {
                 FailureOutcome::Permanent
             }
@@ -83,6 +76,35 @@ pub(crate) fn decide_failure_outcome(
         // Eval-only kind; a build never produces it, so treat it as terminal.
         BuildFailureKind::CorruptEvalCache => FailureOutcome::Permanent,
     }
+}
+
+/// One penalty-free re-queue per unspent miss, then the anchor is built.
+///
+/// Both arms that can re-queue go through this, because both record the same
+/// reason and are therefore counted by the same budget. Reading it on only one
+/// of them is what let a persistently failing relay loop forever: the attempt
+/// counter a re-queue deliberately does not bump was the only other bound, and a
+/// re-queue is exactly the path that does not bump it.
+const fn requeue_or_exhaust(substitution: Substitution) -> FailureOutcome {
+    if substitution.misses + 1 < substitution.threshold {
+        FailureOutcome::Requeue
+    } else {
+        FailureOutcome::Exhausted
+    }
+}
+
+/// Whether a failure of `kind` can end in a penalty-free re-queue, and so needs
+/// its budget counted before [`decide_failure_outcome`] is asked. The caller
+/// skips the count otherwise, so this and the match above are one decision split
+/// in two: a kind missing here decides against a budget of zero and never
+/// terminates.
+pub(crate) const fn spends_substitute_budget(kind: BuildFailureKind) -> bool {
+    matches!(
+        kind,
+        BuildFailureKind::SubstituteUnavailable
+            | BuildFailureKind::InputsUnavailable
+            | BuildFailureKind::Transient
+    )
 }
 
 /// Terminal success status for a build whose job completed. `Substituted` when
@@ -212,7 +234,8 @@ mod tests {
     use super::{
         FailureOutcome, Substitution, attempt_outcome, attempt_reason, attempt_reason_for,
         decide_failure_outcome, inputs_unavailable_circuit_open, retry_backoff_elapsed,
-        terminal_success_outcome, terminal_success_status, truncate_failure_message,
+        spends_substitute_budget, terminal_success_outcome, terminal_success_status,
+        truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -335,19 +358,71 @@ mod tests {
         );
     }
 
-    /// Exhaustion is reached only by misses. A transient failure of a relay is our
-    /// own cache write breaking, so it re-queues however much of the budget an
-    /// unrelated upstream outage already spent.
+    /// Every penalty-free re-queue spends the same budget, whatever produced it.
+    /// A transient failure of a relay used to re-queue unconditionally once the
+    /// attempt budget was spent, on the reasoning that our own cache write
+    /// breaking is not a verdict on the upstream - but nothing then bounded it:
+    /// one anchor took 788 identical `CacheQuery Push (substitute)` failures, one
+    /// every 25 s for five and a half hours, until the co-located worker was
+    /// OOM-killed. A relay that cannot be written is one that has to be built.
     #[test]
-    fn a_transient_failure_never_exhausts_a_substitution() {
-        assert_eq!(
-            decide_failure_outcome(BuildFailureKind::Transient, 2, 3, sub(true, 5)),
-            FailureOutcome::Requeue
-        );
-        assert_eq!(
-            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 2, 3, sub(true, 5)),
-            FailureOutcome::Requeue
-        );
+    fn a_transient_relay_requeue_is_bounded_by_the_same_budget() {
+        for kind in [
+            BuildFailureKind::Transient,
+            BuildFailureKind::InputsUnavailable,
+        ] {
+            assert_eq!(
+                decide_failure_outcome(kind, 2, 3, sub(true, 0)),
+                FailureOutcome::Requeue,
+                "{kind:?} must still get its first penalty-free re-queue"
+            );
+            assert_eq!(
+                decide_failure_outcome(kind, 2, 3, sub(true, 1)),
+                FailureOutcome::Exhausted,
+                "{kind:?} re-queued past the budget"
+            );
+            assert_eq!(
+                decide_failure_outcome(kind, 2, 3, sub(true, 5)),
+                FailureOutcome::Exhausted,
+                "{kind:?} re-queued past the budget"
+            );
+        }
+    }
+
+    /// The budget is only read on the arms that can return a penalty-free
+    /// re-queue, and it has to be read on all of them: the caller skips the
+    /// count for every other kind, so an arm this forgets silently decides
+    /// against zero and never terminates.
+    #[test]
+    fn exactly_the_kinds_that_can_requeue_spend_the_budget() {
+        for kind in [
+            BuildFailureKind::Transient,
+            BuildFailureKind::InputsUnavailable,
+            BuildFailureKind::SubstituteUnavailable,
+        ] {
+            assert!(spends_substitute_budget(kind), "{kind:?}");
+            assert_eq!(
+                decide_failure_outcome(kind, 99, 3, sub(true, 0)),
+                FailureOutcome::Requeue,
+                "{kind:?} cannot reach a re-queue at all"
+            );
+        }
+
+        for kind in [
+            BuildFailureKind::Permanent,
+            BuildFailureKind::Timeout,
+            BuildFailureKind::Aborted,
+            BuildFailureKind::CorruptEvalCache,
+        ] {
+            assert!(!spends_substitute_budget(kind), "{kind:?}");
+            assert!(
+                !matches!(
+                    decide_failure_outcome(kind, 99, 3, sub(true, 0)),
+                    FailureOutcome::Requeue | FailureOutcome::Exhausted
+                ),
+                "{kind:?} re-queues against a budget nothing counts for it"
+            );
+        }
     }
 
     #[test]
