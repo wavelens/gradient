@@ -235,7 +235,11 @@ fn cache_query_external_roundtrip() {
 
 #[test]
 fn build_spec_kind_roundtrip() {
-    for kind in [BuildSpecKind::Build, BuildSpecKind::Substitute] {
+    for kind in [
+        BuildSpecKind::Build,
+        BuildSpecKind::Substitute,
+        BuildSpecKind::Download,
+    ] {
         let original = BuildSpec {
             build_id: "b".into(),
             drv_path: "/nix/store/aaaa-x.drv".into(),

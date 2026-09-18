@@ -47,6 +47,7 @@ NAR push sits under the compress that started it.
 | `drv_closure_push` | Pushing a batch's `.drv` runtime closure. |
 | `prefetch` | Importing a build's cache-resident inputs. |
 | `substitute_fetch` | One upstream NAR per output, repacked, no store. |
+| `download` | One `builtin:fetchurl`, executed by the worker without nix. |
 | `build` | One derivation build. |
 | `compress` | The push every job kind ends in: the outputs it produced, and only those. |
 | `nar_push` | One output NAR upload; nested under `compress`. |

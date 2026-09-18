@@ -179,6 +179,28 @@ pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> B
     }
 }
 
+/// `FixedOutputMismatch` and `UnsupportedFetch` are permanent: a retry fetches the
+/// same bytes. A `.drv` our cache lacks is `InputsUnavailable`; everything else is
+/// the network.
+pub(super) fn classify_download_failure(build_id: &str, e: anyhow::Error) -> BuildError {
+    use crate::executor::download::{FixedOutputMismatch, UnsupportedFetch};
+
+    if e.chain().any(|c| {
+        c.downcast_ref::<FixedOutputMismatch>().is_some()
+            || c.downcast_ref::<UnsupportedFetch>().is_some()
+    }) {
+        tracing::warn!(%build_id, error = %e, "download: not retryable");
+        return BuildError::permanent(e);
+    }
+    if let Some(mi) = e.chain().find_map(|c| c.downcast_ref::<MissingInputs>()) {
+        tracing::warn!(%build_id, error = %e, "download: the .drv is not in our cache; InputsUnavailable");
+        return BuildError::inputs_unavailable(mi.0.clone(), e);
+    }
+
+    tracing::warn!(%build_id, error = %e, "download failed transiently; retrying");
+    BuildError::transient(e)
+}
+
 // ── Wire mapping ──────────────────────────────────────────────────────────────
 
 /// Map a finished job's error to the `(kind, missing_paths)` pair reported in

@@ -13,6 +13,7 @@ pub mod build;
 mod build_metrics;
 pub mod compress;
 mod derivation;
+mod download;
 pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
@@ -504,6 +505,38 @@ impl JobExecutor {
                         },
                     })
                 }));
+                continue;
+            }
+
+            if build_task.kind == BuildSpecKind::Download {
+                let (store_path, raw) = {
+                    let _phase = updater.phase(JobPhase::Download);
+                    download::download_output(&mut download::JobUpdaterIo(updater), build_task)
+                        .await
+                        .map_err(|e| failure::classify_download_failure(&build_task.build_id, e))?
+                };
+                let reported = vec![gradient_proto::messages::BuildOutput {
+                    name: "out".to_owned(),
+                    store_path: store_path.clone(),
+                    hash: gradient_sources::get_hash_from_path(store_path.clone())
+                        .map(|(h, _)| h)
+                        .unwrap_or_default(),
+                    nar_size: Some(raw.nar.len() as i64),
+                    nar_hash: Some(nar::sha256_nix32(&raw.nar)),
+                    products: Vec::new(),
+                }];
+                updater
+                    .report_build_output(build_task.build_id.clone(), reported, None, false)
+                    .await?;
+                outputs.push(compress::OutputNar {
+                    store_path,
+                    source: nar::NarSource::Raw {
+                        nar: raw.nar,
+                        references: raw.references,
+                        deriver: raw.deriver,
+                        ca: raw.ca,
+                    },
+                });
                 continue;
             }
 

@@ -822,6 +822,7 @@ BuildSpec {
 |------|----------------------|---------------|
 | `Build` | Prefetch the inputs, run the builder through the daemon. | A worker of the derivation's architecture. |
 | `Substitute` | Fetch each output's NAR from an upstream cache and repack it. No nix store, no dependency, nothing below an output. | Any worker. |
+| `Download` | Execute `builtin:fetchurl` directly: fetch the URL, verify the fixed output hash, pack the result as a one-file NAR. No nix store, no dependency. | Any worker. |
 
 Every kind ends in the same push: the outputs it produced, and only those.
 
@@ -1049,6 +1050,7 @@ milliseconds from job acceptance, never from the enclosing span.
 | `drv_closure_push` | pushing a batch's `.drv` runtime closure |
 | `prefetch` | importing a build's cache-resident inputs |
 | `substitute_fetch` | downloading one upstream NAR per output of a Substitute |
+| `download` | executing one `builtin:fetchurl` |
 | `build` | one derivation build |
 | `compress` | the push every job kind ends in: the outputs it produced, and only those |
 | `nar_push` | one output NAR upload, nested under `compress` |

@@ -110,8 +110,8 @@ impl BuildabilityChecker {
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 return false;
             };
-            match decide_build_spec_kind(a.substitutable) {
-                BuildSpecKind::Substitute => true,
+            match decide_build_spec_kind(a.substitutable, &drv.architecture, drv.is_fixed_output) {
+                BuildSpecKind::Substitute | BuildSpecKind::Download => true,
                 BuildSpecKind::Build => {
                     let required: Vec<&str> = self.required_features_for(&a.derivation);
                     worker_caps.iter().any(|(arch, feats)| {
@@ -151,12 +151,14 @@ impl BuildabilityChecker {
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
         for a in anchors {
-            if decide_build_spec_kind(a.substitutable) == BuildSpecKind::Substitute {
-                continue;
-            }
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 continue;
             };
+            if decide_build_spec_kind(a.substitutable, &drv.architecture, drv.is_fixed_output)
+                != BuildSpecKind::Build
+            {
+                continue;
+            }
             let required_owned: Vec<String> = self
                 .required_features_for(&a.derivation)
                 .into_iter()

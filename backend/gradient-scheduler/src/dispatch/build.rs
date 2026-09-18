@@ -514,7 +514,11 @@ impl BuildDispatchMaps {
             return DispatchOutcome::Skip("could not resolve project_id for anchor");
         };
 
-        let kind = decide_build_spec_kind(anchor.substitutable);
+        let kind = decide_build_spec_kind(
+            anchor.substitutable,
+            &derivation.architecture,
+            derivation.is_fixed_output,
+        );
         let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, project_id, kind);
         DispatchOutcome::Dispatch(job_id, Box::new(pending))
     }
@@ -530,6 +534,9 @@ impl BuildDispatchMaps {
     ) -> (String, PendingBuildJob) {
         let job_id = crate::jobs::build_job_key(anchor.id);
         let substitute = kind == BuildSpecKind::Substitute;
+        // Neither a Substitute nor a Download needs a nix store, so neither needs a
+        // worker of the derivation's architecture, its features, or its inputs.
+        let anywhere = kind != BuildSpecKind::Build;
         // The worker round-trips this anchor uuid as the opaque BuildSpec.build_id.
         let build_job = BuildJob {
             builds: vec![BuildSpec {
@@ -549,7 +556,7 @@ impl BuildDispatchMaps {
                 ),
             }],
         };
-        let (architecture, required_features) = if substitute {
+        let (architecture, required_features) = if anywhere {
             (gradient_types::BUILTIN_ARCH.to_string(), Vec::new())
         } else {
             (
@@ -558,11 +565,11 @@ impl BuildDispatchMaps {
             )
         };
 
-        // A substitute job downloads its outputs straight from upstream, so it
-        // neither prefetches build-dependency inputs nor is worth scoring: leaving
-        // required_paths empty stops the worker pulling deps and makes every
+        // A substitute or a download produces its outputs without the local store,
+        // so it neither prefetches build-dependency inputs nor is worth scoring:
+        // leaving required_paths empty stops the worker pulling deps and makes every
         // worker's score the same assumed zero (#456).
-        let required_paths = if substitute {
+        let required_paths = if anywhere {
             Vec::new()
         } else {
             self.direct_inputs
