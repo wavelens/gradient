@@ -242,6 +242,7 @@ async fn upsert_cached_path(
 
             active.nar_size = Set(Some(c.nar_size));
             active.nar_hash = Set(Some(normalize_nar_hash(&c.nar_hash)));
+            active.references = Set(Some(c.references.join(" ")));
             if c.deriver.is_some() {
                 active.deriver = Set(c.deriver.clone());
             }
@@ -269,6 +270,7 @@ async fn upsert_cached_path(
                 nar_hash: Some(normalize_nar_hash(&c.nar_hash)),
                 deriver: c.deriver.clone(),
                 ca: c.ca.clone(),
+                references: Some(c.references.join(" ")),
                 created_at: now(),
                 confirmed: c.confirmed,
                 ..Default::default()

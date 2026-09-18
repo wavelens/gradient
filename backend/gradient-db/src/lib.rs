@@ -121,7 +121,7 @@ pub use self::runtime_closure::*;
 pub use self::runtime_edges::{insert_runtime_edges, producers_of_tokens};
 pub use self::runtime_readiness::{
     Seeded, recount_missing_runtime_deps, retire_outputs, ripple_anchors_unwhole,
-    ripple_anchors_whole, seed_runtime_deps, whole_among,
+    ripple_anchors_whole, seed_runtime_deps, whole_among, whole_output_hashes,
 };
 pub use self::status::*;
 pub use self::task_board::*;

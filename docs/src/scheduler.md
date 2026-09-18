@@ -614,12 +614,13 @@ evaluations (set-null'd onto the anchor), the same pass also deletes the
 but the log objects live outside the database, so they are reclaimed by hand like
 the NARs. `pass_logs` in the deep GC is the backstop for any log object left behind.
 
-The same reachability is the cache's keep-set. A cached path is live while the NAR
-reference closure of a reachable derivation's outputs or `.drv` contains it; the
-eviction pass (`evict_stale_cached_paths`, every cache-maintenance tick) removes
-every path outside that set whose last fetch or commit is older than `cacheTtlHours`,
-retiring the row through `retire_paths` so the closure counters and any producer's
-`fetchable` follow. Derivation rows outside the reachable set are collected
+The same reachability is the cache's keep-set, walked one relation down. A cached
+path is live while it is an output of something the runtime edges reach out of a
+reachable derivation, or the `.drv` or an `inputSrc` of a reachable derivation
+itself; the eviction pass (`evict_stale_cached_paths`, every cache-maintenance
+tick) removes every path outside that set whose last fetch or commit is older than
+`cacheTtlHours`, retiring the row through `retire_outputs` so the anchor's
+wholeness and any producer's `fetchable` follow. Derivation rows outside the reachable set are collected
 separately after `keepOrphanDerivationsHours`; nothing else reclaims a NAR.
 
 The keep-set is built from committed DB rows, so it cannot reference a NAR that is

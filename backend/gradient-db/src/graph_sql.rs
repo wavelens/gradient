@@ -6,7 +6,7 @@
 
 //! The single definition of the recursive graph walks. Every traversal of
 //! `derivation_dependency` (failure cascades, eval-closure sweeps, GC
-//! reachability) and of `cached_path_reference` (NAR reference closures) is
+//! reachability), build-time and runtime alike, is
 //! generated here so the walkers can never disagree on what "reachable" means,
 //! and so the join shape below has exactly one place to live.
 //!
@@ -19,8 +19,8 @@
 //! subquery with an `OFFSET 0` optimisation fence: the fence stops the planner
 //! pulling the subquery back up, which leaves a nested loop with a per-row index
 //! lookup as the only legal plan. Measured on production: eval closure 5,278 ms
-//! to 955 ms, GC keep-set 40,069 ms to 9,746 ms, the `cached_path_reference`
-//! walk from over 180,000 ms to 18,425 ms.
+//! to 955 ms, GC keep-set 40,069 ms to 9,746 ms, the runtime-reference walk
+//! from over 180,000 ms to 18,425 ms.
 //!
 //! The set operator stays `UNION`. It is what deduplicates the frontier on each
 //! iteration, and these graphs are diamond-heavy enough that the dependents walk
@@ -140,27 +140,25 @@ fn lateral_step(name: &str, project: &str, probe_select: &str) -> String {
     format!("SELECT {project} FROM {name} c, LATERAL ({probe_select} OFFSET 0) s")
 }
 
-/// A `WITH RECURSIVE {name}(hash) AS (...)` prelude closing `seed_select` over
-/// `cached_path_reference`, walking from a referrer to the store hashes it
-/// references. This is the NAR-level closure (what a client must fetch), as
-/// opposed to the build-time closure over `derivation_dependency`.
-pub fn reference_closure_cte(name: &str, seed_select: &str) -> String {
+/// A `WITH RECURSIVE {name}(derivation) AS (...)` prelude closing `seed_select`
+/// over the RUNTIME edges of the derivation graph: what a client must fetch
+/// alongside an output, as opposed to the build-time closure the same relation
+/// carries under `kind IN (0, 2)`.
+pub fn runtime_closure_cte(name: &str, seed_select: &str) -> String {
     format!(
         "WITH RECURSIVE {}",
-        reference_closure_cte_body(name, seed_select)
+        runtime_closure_cte_body(name, seed_select)
     )
 }
 
-/// The bare `{name}(hash) AS (...)` reference-closure body, for statements that
-/// bind it as a prelude to an UPDATE or alongside another CTE.
-pub fn reference_closure_cte_body(name: &str, seed_select: &str) -> String {
-    format!(
-        "{name}(hash) AS ({seed_select} UNION {})",
-        lateral_step(
-            name,
-            "s.next",
-            "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash",
-        )
+/// The bare `{name}(derivation) AS (...)` runtime-closure body, for statements
+/// that bind it alongside another CTE.
+pub fn runtime_closure_cte_body(name: &str, seed_select: &str) -> String {
+    bounded_dependency_closure_cte_body(
+        name,
+        seed_select,
+        ClosureDirection::Dependencies,
+        "e.kind IN (1, 2)",
     )
 }
 
@@ -399,14 +397,26 @@ pub fn reachable_derivations_cte_body() -> String {
 /// eviction pass's to reclaim once past the fetch TTL.
 pub fn live_cached_paths_cte() -> String {
     format!(
-        "WITH RECURSIVE {reachable}, \
-         roots(hash) AS (\
-         SELECT o.hash FROM derivation_output o JOIN reachable r ON r.derivation = o.derivation \
-         UNION \
-         SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id), \
-         {live}",
+        "WITH RECURSIVE {reachable}, {runtime}, {kept}",
         reachable = reachable_derivations_cte_body(),
-        live = reference_closure_cte_body("live", "SELECT hash FROM roots"),
+        runtime = runtime_closure_cte_body("runtime", "SELECT derivation FROM reachable"),
+        kept = kept_hashes_cte_body("reachable", "runtime"),
+    )
+}
+
+/// The `live(hash)` body over a reachable set and its runtime closure: the outputs
+/// of everything the closure reaches, plus the `.drv` NAR and the `inputSrcs` of
+/// every reachable derivation. The sources hang off the `.drv` and have no
+/// producer of their own, so nothing else in the walk names them.
+pub fn kept_hashes_cte_body(reachable: &str, runtime: &str) -> String {
+    format!(
+        "live(hash) AS (\
+         SELECT o.hash FROM derivation_output o JOIN {runtime} t ON t.derivation = o.derivation \
+         UNION \
+         SELECT d.hash FROM derivation d JOIN {reachable} r ON r.derivation = d.id \
+         UNION \
+         SELECT s.hash FROM derivation_input_source s \
+         JOIN {reachable} r ON r.derivation = s.derivation)"
     )
 }
 
@@ -500,8 +510,10 @@ mod tests {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    /// The live set starts at the outputs and `.drv` hashes of every reachable
-    /// derivation and closes over `cached_path_reference` with the fenced step.
+    /// The live set walks the runtime edges out of every reachable derivation and
+    /// keeps the outputs of everything they reach, plus each reachable
+    /// derivation's own `.drv` and its `inputSrcs`, which hang off the `.drv` and
+    /// have no producer of their own.
     #[test]
     fn live_cached_paths_close_reachable_outputs_and_drvs_over_references() {
         let cte = norm(&live_cached_paths_cte());
@@ -511,18 +523,18 @@ mod tests {
             "{cte}"
         );
         assert!(
-            cte.contains(concat!(
-                "roots(hash) AS (SELECT o.hash FROM derivation_output o ",
-                "JOIN reachable r ON r.derivation = o.derivation UNION ",
-                "SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id)",
-            )),
+            cte.contains(
+                "runtime(derivation) AS (SELECT derivation FROM reachable UNION SELECT s.next"
+            ),
             "{cte}"
         );
         assert!(
             cte.contains(concat!(
-                "live(hash) AS (SELECT hash FROM roots UNION SELECT s.next FROM live c, ",
-                "LATERAL (SELECT r.reference_hash AS next FROM cached_path_reference r ",
-                "WHERE r.referrer = c.hash OFFSET 0) s)",
+                "live(hash) AS (SELECT o.hash FROM derivation_output o ",
+                "JOIN runtime t ON t.derivation = o.derivation UNION ",
+                "SELECT d.hash FROM derivation d JOIN reachable r ON r.derivation = d.id UNION ",
+                "SELECT s.hash FROM derivation_input_source s ",
+                "JOIN reachable r ON r.derivation = s.derivation)",
             )),
             "{cte}"
         );
@@ -856,7 +868,7 @@ mod tests {
                 "SELECT $1::uuid",
                 ClosureDirection::Dependents,
             )),
-            norm(&reference_closure_cte("refs", "SELECT $1::text")),
+            norm(&runtime_closure_cte("refs", "SELECT $1::uuid")),
             norm(&pending_closure_cte(
                 "pending",
                 "SELECT $1::uuid, $2::uuid, true",
@@ -898,26 +910,38 @@ mod tests {
         );
     }
 
-    /// The reference closure walks NAR references (what a client must fetch),
-    /// not build inputs, so it keys on `cached_path_reference` and carries a
-    /// `hash` column rather than a `derivation` one.
+    /// The runtime closure walks what a client must fetch alongside an output,
+    /// not the build inputs, so it is the same relation restricted to the runtime
+    /// edge kinds.
     #[test]
-    fn reference_closure_walks_cached_path_reference_by_referrer() {
-        let cte = norm(&reference_closure_cte(
-            "eval_paths",
-            "SELECT $1::text AS hash",
-        ));
+    fn the_runtime_closure_walks_runtime_edges_only() {
+        let cte = norm(&runtime_closure_cte("eval_paths", "SELECT $1::uuid"));
 
         assert!(
-            cte.starts_with("WITH RECURSIVE eval_paths(hash) AS"),
+            cte.starts_with("WITH RECURSIVE eval_paths(derivation) AS"),
             "{cte}"
         );
         assert!(
             cte.contains(
-                "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash"
+                "SELECT e.dependency AS next FROM derivation_dependency e \
+                 WHERE e.derivation = c.derivation AND e.kind IN (1, 2) OFFSET 0) s"
             ),
-            "must walk referrer to referenced hash: {cte}"
+            "{cte}"
         );
+    }
+
+    /// The keep-set is a derivation-level walk now: the outputs of everything the
+    /// runtime closure reaches, plus the `.drv` and the `inputSrcs` of every
+    /// reachable derivation, which hang off the `.drv` and have no producer.
+    #[test]
+    fn the_live_set_walks_runtime_edges_from_live_derivations_and_keeps_their_sources() {
+        let cte = norm(&live_cached_paths_cte());
+        assert!(cte.contains("e.kind IN (1, 2)"), "{cte}");
+        assert!(
+            cte.contains("SELECT s.hash FROM derivation_input_source s JOIN"),
+            "{cte}"
+        );
+        assert!(!cte.contains("cached_path_reference"), "{cte}");
     }
 
     /// Demand and adoption read one definition of a builder, so an anchor an

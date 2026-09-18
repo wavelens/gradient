@@ -61,23 +61,18 @@ pub async fn assess_substitutability(
 
     let db = &state.worker_db;
 
-    // Whole in our own cache: every output present with a complete closure, so
-    // the anchor can be resigned instead of rebuilt.
+    // Whole in our own cache: every output present and its producing anchor whole,
+    // so the anchor can be resigned instead of rebuilt.
     let fully_cached: HashSet<String> =
         gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
-            ECachedPath::find()
-                .filter(CCachedPath::Hash.is_in(chunk))
-                .all(db)
-                .await
+            gradient_db::whole_output_hashes(db, &chunk).await
         })
         .await
         .unwrap_or_else(|e| {
-            error!(error = %e, "substitutability: cached_path lookup failed");
+            error!(error = %e, "substitutability: whole-output lookup failed");
             Vec::new()
         })
         .into_iter()
-        .filter(|cp| cp.is_whole())
-        .map(|cp| cp.hash)
         .collect();
     for (drv, hashes) in &outputs_by_drv {
         if !hashes.is_empty() && hashes.iter().all(|h| fully_cached.contains(h)) {

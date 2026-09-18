@@ -353,6 +353,6 @@ mod tests {
         );
     }
 
-    // The runtime closure graph walks `cached_path_reference` in one recursive
+    // The runtime closure graph walks the graph's runtime edges in one recursive
     // statement; it is covered end to end by the cache integration test.
 }

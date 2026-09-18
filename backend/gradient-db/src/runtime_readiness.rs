@@ -135,6 +135,43 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
+fn whole_output_hashes_sql() -> String {
+    format!(
+        "SELECT cp.hash FROM cached_path cp \
+         WHERE cp.hash = ANY($1) AND cp.file_hash IS NOT NULL \
+           AND NOT EXISTS (SELECT 1 FROM derivation_output o \
+                           JOIN derivation_build db ON db.derivation = o.derivation \
+                           WHERE o.hash = cp.hash AND NOT {whole})",
+        whole = anchor_whole_predicate("db"),
+    )
+}
+
+crate::sql_fn! {
+    /// The hashes among `$1` whose path is in our cache and whose producing anchor
+    /// is whole. An output with no anchor row yet counts on presence alone, which
+    /// is what that anchor's first seed concludes anyway.
+    WHOLE_OUTPUT_HASHES = whole_output_hashes_sql,
+        params = [CachedPathHashes(64)],
+        tier = Bulk;
+}
+
+/// The subset of `hashes` an evaluation already has whole in our own cache.
+pub async fn whole_output_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<Vec<String>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(db
+        .query_all_raw(WHOLE_OUTPUT_HASHES.bind([hashes.to_vec().into()]))
+        .await?
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "hash").ok())
+        .collect())
+}
+
 crate::sql! {
     RUNTIME_DEPENDENT_COUNTS = "SELECT e.derivation AS derivation, count(*)::int AS n \
                                 FROM derivation_dependency e \

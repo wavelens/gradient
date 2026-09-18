@@ -1262,10 +1262,11 @@ in {
 
       # glibc first, since hello links against it.
       refs = sql(
-          f"SELECT cp.hash || '-' || cp.package FROM cached_path_reference r "
-          f"JOIN cached_path cp ON cp.hash = r.reference_hash "
-          f"WHERE r.referrer = '{store_hash}' AND r.reference_hash <> '{store_hash}' "
-          f"  AND cp.file_hash IS NOT NULL AND cp.missing_references = 0 "
+          f"SELECT cp.hash || '-' || cp.package FROM cached_path cp "
+          f"WHERE cp.hash IN (SELECT split_part(t.tok, '-', 1) FROM cached_path r, "
+          f"    unnest(string_to_array(r.\"references\", ' ')) AS t(tok) "
+          f"    WHERE r.hash = '{store_hash}' AND length(t.tok) > 0) "
+          f"  AND cp.hash <> '{store_hash}' AND cp.file_hash IS NOT NULL "
           f"ORDER BY (cp.package LIKE 'glibc-%') DESC, cp.package;"
       ).splitlines()
 
@@ -1651,7 +1652,7 @@ in {
           )
           assert sql(
               f"SELECT db.fetchable::int::text || ' ' || (SELECT count(*)::text FROM cached_path "
-              f"WHERE hash = '{out_hash}' AND file_hash IS NOT NULL AND missing_references = 0) "
+              f"WHERE hash = '{out_hash}' AND file_hash IS NOT NULL) "
               f"FROM derivation_build db WHERE db.derivation = '{drv}';"
           ) == "0 1", f"the {name} fixture did not land as a drifted anchor over a whole output"
 
@@ -1716,7 +1717,7 @@ in {
       # busybox is the probe: served only by a file binary cache on this host,
       # wanted only by busywrap, which is built here. Every assertion is on the
       # database, because "was it relayed" is a `build_attempt` row and "did the
-      # closure come with it" is `missing_references`.
+      # closure come with it" is the anchor's `missing_runtime_deps`.
       banner("Phase 10g: demand-driven substitution (#593)")
 
       # A narinfo whose Sig does not verify against the upstream's configured
@@ -1758,11 +1759,8 @@ in {
           )
 
       def output_missing(drv):
-          return sql(
-              f"SELECT cp.missing_references::text FROM cached_path cp "
-              f"JOIN derivation_output o ON o.hash = cp.hash "
-              f"WHERE o.derivation = '{drv}' AND o.name = 'out';"
-          )
+          """The anchor's runtime holes: zero means the whole relayed closure landed."""
+          return sql(anchor_column(drv, "db.missing_runtime_deps::text"))
 
       def output_hash(drv):
           return sql(
@@ -1949,7 +1947,7 @@ in {
               f"JOIN cached_path drv ON drv.hash = d.hash "
               f"WHERE e.derivation = '{derivation}' AND d.walked AND NOT db.substitutable "
               f"  AND db.status IN (3, 7) AND db.fetchable AND db.unready_deps = 0 "
-              f"  AND drv.file_hash IS NOT NULL AND drv.missing_references = 0 {inputs}"
+              f"  AND drv.file_hash IS NOT NULL {inputs}"
               f"ORDER BY (SELECT count(*) FROM derivation_dependency r WHERE r.dependency = e.dependency), "
               f"         d.name LIMIT 1;"
           )
@@ -2032,8 +2030,12 @@ in {
       ) == "3", "the chain is not terminal-success and fetchable again"
       for h in outputs:
           assert sql(
-              f"SELECT count(*) FROM cached_path WHERE hash = '{h}' AND file_hash IS NOT NULL AND missing_references = 0;"
-          ) == "1", f"{h} did not come back whole"
+              f"SELECT count(*) FROM cached_path WHERE hash = '{h}' AND file_hash IS NOT NULL;"
+          ) == "1", f"{h} did not come back"
+      assert sql(
+          f"SELECT count(*) FROM derivation_build WHERE derivation IN ({chain}) "
+          f"AND missing_runtime_deps = 0;"
+      ) == "3", "the chain did not come back whole"
       attributed = int(sql(
           f"SELECT count(DISTINCT bj.derivation) FROM build_attempt a JOIN build_job bj ON bj.id = a.build_job "
           f"WHERE bj.evaluation = '{task2_eval}' AND bj.derivation IN ('{d1}', '{d2}');"
