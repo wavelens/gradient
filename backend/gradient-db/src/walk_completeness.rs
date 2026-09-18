@@ -64,6 +64,10 @@ crate::sql! {
     /// Recount freshly recorded derivations against their inputs as they stand.
     /// `fresh` names a row this batch walked, which was incomplete before it
     /// whatever the pre-image says, so the caller ripples exactly what flipped.
+    ///
+    /// `Bulk` for the reason the readiness seed it mirrors is: a batch that reads
+    /// the inputs of every value it was handed costs more than one row lookup per
+    /// value, which is all the hot tier's ceiling allows for.
     SEED_UNWALKED_INPUTS = r#"
 UPDATE derivation d SET unwalked_inputs = x.n
 FROM (SELECT s.id,
@@ -77,7 +81,8 @@ FROM (SELECT s.id,
 WHERE d.id = x.id
 RETURNING d.id, x.was_complete, (d.walked AND d.unwalked_inputs = 0) AS complete
 "#,
-        params = [DerivationIds(64), Bools(false, 64)];
+        params = [DerivationIds(64), Bools(false, 64)],
+        tier = Bulk;
 
     DEPENDENT_COUNTS = "SELECT e.derivation AS id, count(*)::int AS n FROM derivation_dependency e WHERE e.dependency = ANY($1::uuid[]) GROUP BY e.derivation ORDER BY e.derivation",
         params = [DerivationIds(64)];

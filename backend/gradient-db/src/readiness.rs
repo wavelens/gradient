@@ -313,9 +313,9 @@ crate::sql_lazy! {
     PROMOTE_CLOSURE_QUERY = || PROMOTE_CLOSURE.as_str(),
         params = [EvaluationId],
         tier = Walk,
-        budget = crate::sql::Budget::walk().buffers(1_400_000)
+        budget = crate::sql::Budget::walk().buffers(900_000)
             .because("the scope is an evaluation's whole dependency closure, and the \
-                      walk that names it reads ~8 buffers per node it visits"),
+                      walk that names it reads ~5 buffers per node it visits"),
         flags = [Walk];
 }
 
