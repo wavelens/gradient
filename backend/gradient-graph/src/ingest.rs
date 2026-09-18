@@ -34,27 +34,31 @@ const BATCH_SIZE: usize = 1000;
 gradient_db::sql! {
     /// Insert or complete the record of every derivation the worker walked. The
     /// conflict update runs only for a row that is not yet walked, so RETURNING
-    /// yields exactly the derivations this batch flipped.
+    /// yields exactly the derivations this batch flipped. The record lands with
+    /// its distinct input count as `unwalked_inputs`, so a non-leaf never reads
+    /// complete between this write and the seed below it.
     WALKED_UPSERT = r#"
 INSERT INTO derivation
-    (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, created_at)
+    (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, unwalked_inputs, created_at)
 SELECT d.id, d.hash, d.name, d.architecture, NULLIF(d.pname, ''), d.prefer_local_build,
-       d.is_fixed_output, d.allow_substitutes, true, $9
-FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bool[], $7::bool[], $8::bool[])
-     AS d(id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes)
+       d.is_fixed_output, d.allow_substitutes, true, d.unwalked_inputs, $10
+FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bool[], $7::bool[], $8::bool[], $9::int[])
+     AS d(id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, unwalked_inputs)
 ON CONFLICT (hash, name) DO UPDATE SET
     architecture = EXCLUDED.architecture,
     pname = EXCLUDED.pname,
     prefer_local_build = EXCLUDED.prefer_local_build,
     is_fixed_output = EXCLUDED.is_fixed_output,
     allow_substitutes = EXCLUDED.allow_substitutes,
-    walked = true
+    walked = true,
+    unwalked_inputs = EXCLUDED.unwalked_inputs
 WHERE NOT derivation.walked
 RETURNING hash
 "#,
         params = [
             NewUuids(64), DerivationHashes(64), Texts("hello", 64), Texts("x86_64-linux", 64),
-            Texts("hello-1.0", 64), Bools(false, 64), Bools(false, 64), Bools(true, 64), Now,
+            Texts("hello-1.0", 64), Bools(false, 64), Bools(false, 64), Bools(true, 64), Ints(0, 64),
+            Now,
         ];
 
     /// A row for every dependency the batch names, so its edge can land now. A
@@ -143,6 +147,7 @@ impl BatchWriter<'_> {
         let mut prefer_local: Vec<bool> = Vec::new();
         let mut fixed_output: Vec<bool> = Vec::new();
         let mut allow_substitutes: Vec<bool> = Vec::new();
+        let mut input_counts: Vec<i32> = Vec::new();
         for d in derivations {
             let (hash, name) = drv_hash_name(&d.drv_path).ok_or_else(|| {
                 anyhow!(
@@ -162,6 +167,7 @@ impl BatchWriter<'_> {
             prefer_local.push(d.prefer_local_build);
             fixed_output.push(d.is_fixed_output);
             allow_substitutes.push(d.allow_substitutes);
+            input_counts.push(d.dependencies.iter().collect::<HashSet<_>>().len() as i32);
         }
 
         if hashes.is_empty() {
@@ -179,6 +185,7 @@ impl BatchWriter<'_> {
                 prefer_local.into(),
                 fixed_output.into(),
                 allow_substitutes.into(),
+                input_counts.into(),
                 Value::ChronoDateTime(Some(gradient_types::now())),
             ]))
             .await
@@ -372,6 +379,40 @@ impl BatchWriter<'_> {
         grown.dedup();
 
         Ok(grown)
+    }
+
+    /// The subtree bit the walk prunes on, settled on `derivation` rows before any
+    /// anchor is locked: the class order is derivation first.
+    ///
+    /// The rows this batch flipped to walked are named as such: they were incomplete
+    /// before it whatever they read now, since the upsert above wrote `walked` one
+    /// statement ago, and a freshly walked leaf that reads complete on both sides of
+    /// the seed still owes its dependents a count-down.
+    async fn record_walk_completeness(
+        &self,
+        resolved: &Resolved,
+        newly_walked: &HashSet<String>,
+        grew: &[DerivationId],
+    ) -> Result<()> {
+        let walked: Vec<DerivationId> = newly_walked
+            .iter()
+            .filter_map(|h| resolved.by_hash.get(h).copied())
+            .collect();
+        if walked.is_empty() && grew.is_empty() {
+            return Ok(());
+        }
+
+        let txn = self
+            .db()
+            .begin()
+            .await
+            .context("begin the walk completeness transaction")?;
+        gradient_db::seed_walk_completeness(&txn, &walked, grew)
+            .await
+            .context("seed unwalked_inputs")?;
+        txn.commit()
+            .await
+            .context("commit the walk completeness transaction")
     }
 
     async fn set_anchor_limits(
@@ -995,6 +1036,9 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
         let resolved = writer.resolve_ids(&batch.derivations).await?;
         let ids = &resolved.by_path;
         let grew = writer.insert_records(&batch.derivations, ids).await?;
+        writer
+            .record_walk_completeness(&resolved, &newly_walked, &grew)
+            .await?;
         writer.persist_input_sources(&batch.derivations, ids).await;
         writer.persist_upstream_hits(&batch.upstream_hits).await;
         let newly_substitutable = writer
@@ -1194,6 +1238,18 @@ mod tests {
         ])
     }
 
+    fn completeness_row(
+        derivation: DerivationId,
+        was_complete: bool,
+        complete: bool,
+    ) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("id".to_owned(), Value::from(derivation.into_inner())),
+            ("was_complete".to_owned(), Value::from(was_complete)),
+            ("complete".to_owned(), Value::from(complete)),
+        ])
+    }
+
     fn ok(n: u64) -> MockExecResult {
         MockExecResult {
             last_insert_id: 0,
@@ -1227,6 +1283,8 @@ mod tests {
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
@@ -1254,8 +1312,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            17,
-            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, and the raised, locked demand recompute: {log:?}"
+            19,
+            "evaluation, walked, stubs, resolve, edges, walk lock, walk seed, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, and the raised, locked demand recompute: {log:?}"
         );
         let walked = log
             .iter()
@@ -1299,6 +1357,82 @@ mod tests {
         );
     }
 
+    /// The subtree bit is settled on `derivation` rows, right after the edges land
+    /// and before any anchor is locked: an abandoned walk then leaves its parents
+    /// incomplete, and a concurrent walk that asks `prunable` in between never
+    /// prunes at a parent whose inputs are still stubs.
+    #[tokio::test]
+    async fn a_walk_settles_the_subtree_bit_before_it_touches_an_anchor() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 6])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        drop(ctx);
+
+        let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let upsert = log
+            .iter()
+            .position(|s| s.sql.contains("INSERT INTO derivation\n"))
+            .expect("the walked upsert runs");
+        assert!(
+            log[upsert]
+                .sql
+                .contains("unwalked_inputs = EXCLUDED.unwalked_inputs"),
+            "the record lands with its input count: {}",
+            log[upsert].sql
+        );
+        assert!(
+            format!("{:?}", log[upsert].values).contains("Int(Some(1))"),
+            "A names one input: {:?}",
+            log[upsert].values
+        );
+        let seed = log
+            .iter()
+            .position(|s| {
+                s.sql
+                    .contains("UPDATE derivation d SET unwalked_inputs = x.n")
+            })
+            .expect("the subtree seed runs");
+        let edges = log
+            .iter()
+            .position(|s| s.sql.contains("INSERT INTO derivation_dependency"))
+            .expect("the edge insert runs");
+        let anchor_lock = log
+            .iter()
+            .position(|s| s.sql.contains("FROM derivation_build") && s.sql.contains("FOR UPDATE"))
+            .expect("the readiness pass locks its anchors");
+        assert!(
+            edges < seed && seed < anchor_lock,
+            "edges, then the seed, then anchors: {log:?}"
+        );
+    }
+
     /// Edges are global, so a batch that grew one must bump every evaluation that
     /// already holds the derivation. The edge insert returns one row per landed
     /// edge, so a derivation with many new inputs is named many times; binding
@@ -1315,6 +1449,8 @@ mod tests {
             .append_query_results([vec![a.clone(), b.clone()]])
             // the edge insert names the same derivation once per landed edge
             .append_query_results([vec![drv_row(a.id), drv_row(a.id)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
@@ -1395,6 +1531,8 @@ mod tests {
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
@@ -1469,6 +1607,8 @@ mod tests {
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
@@ -1651,6 +1791,8 @@ mod tests {
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
