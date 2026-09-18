@@ -127,10 +127,11 @@ struct JobUpdaterIo<'a> {
 
 impl RelayIo for JobUpdaterIo<'_> {
     async fn pull(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
-        self.updater
-            .query_cache(paths, QueryMode::Pull)
-            .await
-            .with_context(|| format!("CacheQuery Pull (substitute) for {}", self.drv_path))
+        let mut found = Vec::new();
+        for path in paths {
+            found.extend(self.updater.query_upstream(path).await?);
+        }
+        Ok(found)
     }
 
     async fn push_targets(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {

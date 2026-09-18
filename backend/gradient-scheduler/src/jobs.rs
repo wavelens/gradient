@@ -1138,7 +1138,7 @@ impl JobTracker {
 mod tests {
     use super::*;
     use gradient_types::proto::{
-        BuildJob, BuildSpec, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
+        BuildJob, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
     };
 
     // `dispatched_job.job_id` stores this key, and the abandoned-job sweep
@@ -1265,7 +1265,7 @@ mod tests {
                 builds: vec![BuildSpec {
                     build_id: derivation_build.to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
-                    external_cached: false,
+                    kind: BuildSpecKind::Build,
                     is_fixed_output: false,
                     outputs: vec![],
                     timeout_secs: None,

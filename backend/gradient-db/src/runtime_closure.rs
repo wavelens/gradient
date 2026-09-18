@@ -121,10 +121,10 @@ crate::sql! {
 /// [`references_for_hash`] for many referrers at once, grouped by referrer and
 /// kept in stored order within each group.
 ///
-/// Answering a `Pull` cache query one path at a time is what made a widened
-/// `PullClosure` miss its deadline: the widened set reaches
-/// `CACHE_QUERY_MAX_PATHS`, so a per-path lookup is up to a thousand sequential
-/// round trips before the first byte of the reply.
+/// Answering a `Pull` cache query one path at a time is what made a full-width
+/// query miss its deadline: a reply reaches `CACHE_QUERY_MAX_PATHS`, so a
+/// per-path lookup is up to a thousand sequential round trips before the first
+/// byte of the reply.
 pub async fn references_for_hashes<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
@@ -193,54 +193,6 @@ where
     Ok(reached)
 }
 
-fn runtime_closure_cached_paths_sql() -> String {
-    format!(
-        "{} SELECT '/nix/store/' || cp.hash || '-' || cp.package AS reference \
-         FROM cached_path cp JOIN refs r ON cp.hash = r.hash \
-         WHERE cp.file_hash IS NOT NULL AND cp.hash <> ALL($1::text[]) \
-         LIMIT $2",
-        crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
-    )
-}
-
-crate::sql_fn! {
-    RUNTIME_CLOSURE_CACHED_PATHS = runtime_closure_cached_paths_sql,
-        params = [CachedPathHashes(64), Int(100)],
-        tier = Walk,
-        flags = [Walk];
-}
-
-/// Store paths in the reference closure of `seed_hashes` that this cache can
-/// actually serve, excluding the seeds themselves and capped at `limit`.
-///
-/// Answers "what else will the caller need, and can we hand it over now" in one
-/// statement, so a worker learns a whole closure per round trip instead of one
-/// hop at a time. Only backed rows come back, so a caller may treat every
-/// returned path as serveable. The walk dedupes on `hash` alone: adding depth to
-/// the key would let a diamond re-enter the frontier and never terminate.
-pub async fn runtime_closure_cached_paths<C>(
-    db: &C,
-    seed_hashes: &[String],
-    limit: u64,
-) -> Result<Vec<String>, DbErr>
-where
-    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
-{
-    if seed_hashes.is_empty() || limit == 0 {
-        return Ok(vec![]);
-    }
-
-    let walk = crate::graph_sql::begin_walk(db).await?;
-    let reached = ReferenceToken::find_by_statement(
-        RUNTIME_CLOSURE_CACHED_PATHS.bind([seed_hashes.to_vec().into(), (limit as i64).into()]),
-    )
-    .all(&walk)
-    .await?;
-    walk.commit().await?;
-
-    Ok(reached.into_iter().map(|r| r.reference).collect())
-}
-
 /// Total NAR size of the runtime closure seeded at `seed_hashes`.
 pub async fn runtime_closure_size<C>(db: &C, seed_hashes: &[String]) -> Result<i64, DbErr>
 where
@@ -274,25 +226,6 @@ mod tests {
         assert_eq!(runtime_closure_size(&db, &[]).await.unwrap(), 0);
     }
 
-    /// Both degenerate inputs must short-circuit before issuing SQL: an
-    /// unseeded MockDatabase errors on any query, so reaching one fails here.
-    #[tokio::test]
-    async fn closure_expansion_skips_the_query_when_there_is_nothing_to_ask() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        assert!(
-            runtime_closure_cached_paths(&db, &[], 100)
-                .await
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            runtime_closure_cached_paths(&db, &["abc".to_string()], 0)
-                .await
-                .unwrap()
-                .is_empty()
-        );
-    }
-
     /// The `cached_path_reference` closure is the widest read in the system, so
     /// it runs inside the raised-`work_mem` transaction instead of on the bare
     /// pool where `SET LOCAL` would be ignored.
@@ -306,7 +239,7 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         assert!(
-            runtime_closure_cached_paths(&db, &["abc".to_string()], 10)
+            runtime_closure_reachable(&db, &["abc".to_string()])
                 .await
                 .expect("the walk runs")
                 .is_empty()

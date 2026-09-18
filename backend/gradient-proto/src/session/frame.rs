@@ -1101,6 +1101,7 @@ mod tests {
             paths: paths.clone(),
             mode: gradient_types::proto::QueryMode::Push,
             nar_sizes: vec![u64::MAX; paths.len()],
+            external: false,
         };
 
         let cached: Vec<CachedPath> = paths

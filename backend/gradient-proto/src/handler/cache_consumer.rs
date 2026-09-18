@@ -73,6 +73,8 @@ pub(crate) async fn pull_paths(
         paths: paths.to_vec(),
         mode: QueryMode::Pull,
         nar_sizes: Vec::new(),
+        // The server as a peer's client wants that peer's own cache.
+        external: false,
     };
     if socket.send_client_msg(&query).await.is_err() {
         return vec![];

@@ -17,7 +17,8 @@ use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use crate::dispatch_mode::{BuildDispatchMode, decide_dispatch_mode};
+use crate::dispatch_mode::decide_build_spec_kind;
+use gradient_types::proto::BuildSpecKind;
 
 /// Pre-loaded derivation and feature data for a set of pending anchors.
 ///
@@ -109,9 +110,9 @@ impl BuildabilityChecker {
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 return false;
             };
-            match decide_dispatch_mode(a.substitutable) {
-                BuildDispatchMode::SubstituteBuiltin => true,
-                BuildDispatchMode::RealArch => {
+            match decide_build_spec_kind(a.substitutable) {
+                BuildSpecKind::Substitute => true,
+                BuildSpecKind::Build => {
                     let required: Vec<&str> = self.required_features_for(&a.derivation);
                     worker_caps.iter().any(|(arch, feats)| {
                         let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
@@ -150,10 +151,7 @@ impl BuildabilityChecker {
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
         for a in anchors {
-            if matches!(
-                decide_dispatch_mode(a.substitutable),
-                BuildDispatchMode::SubstituteBuiltin
-            ) {
+            if decide_build_spec_kind(a.substitutable) == BuildSpecKind::Substitute {
                 continue;
             }
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {

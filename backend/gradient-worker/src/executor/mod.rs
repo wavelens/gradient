@@ -22,7 +22,7 @@ pub mod timeline;
 use std::sync::Arc;
 
 use anyhow::Result;
-use gradient_proto::messages::{BuildJob, FlakeJob, FlakeStep};
+use gradient_proto::messages::{BuildJob, BuildSpecKind, FlakeJob, FlakeStep};
 use tokio::sync::watch;
 use tracing::instrument;
 
@@ -439,7 +439,7 @@ impl JobExecutor {
             // would show the build hanging in `Queued` forever.
             updater.report_building(build_task.build_id.clone()).await?;
 
-            if build_task.external_cached {
+            if build_task.kind == BuildSpecKind::Substitute {
                 // Relay the outputs and their runtime closure from upstream;
                 // nothing enters the local store.
                 let _relay = updater.phase(JobPhase::SubstituteRelay);

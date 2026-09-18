@@ -262,6 +262,10 @@ pub enum ClientMessage {
         /// `u64::MAX` when unknown, so the server can route small NARs over the
         /// stream. Empty in every other mode.
         nar_sizes: Vec<u64>,
+        /// The server may consult its upstreams for the one path named. Every other
+        /// query answers from our cache alone: a build's inputs are here or it fails
+        /// `InputsUnavailable`, and putting them here is a Substitute's job.
+        external: bool,
     },
 
     /// Surface an infrastructure-level message tied to the active job's

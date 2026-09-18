@@ -62,6 +62,8 @@ pub struct RecordingJobReporter {
     /// this to simulate derivations already recorded on the server, causing
     /// the BFS to prune those subtrees.
     pub known_drv_paths: Vec<String>,
+    /// Path to transfer URL for `query_upstream`: what an upstream serves.
+    pub upstream: std::collections::HashMap<String, String>,
 }
 
 impl RecordingJobReporter {
@@ -79,6 +81,12 @@ impl RecordingJobReporter {
     /// already known, causing the BFS to prune those subtrees.
     pub fn with_known_drv_paths(mut self, paths: Vec<String>) -> Self {
         self.known_drv_paths = paths;
+        self
+    }
+
+    /// Configure a path an upstream serves, with the URL `query_upstream` hands back.
+    pub fn with_upstream(mut self, path: &str, url: &str) -> Self {
+        self.upstream.insert(path.to_owned(), url.to_owned());
         self
     }
 
@@ -129,6 +137,22 @@ impl RecordingJobReporter {
 
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
+    async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>> {
+        Ok(self.upstream.get(&path).map(|url| CachedPath {
+            path: path.clone(),
+            cached: true,
+            file_size: None,
+            nar_size: None,
+            url: Some(url.clone()),
+            nar_hash: None,
+            file_hash: None,
+            references: None,
+            signatures: None,
+            deriver: None,
+            ca: None,
+        }))
+    }
+
     async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
         let known_set: std::collections::HashSet<&str> =
             self.known_drv_paths.iter().map(|s| s.as_str()).collect();

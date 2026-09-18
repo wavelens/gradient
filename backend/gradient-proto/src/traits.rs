@@ -60,6 +60,10 @@ pub trait JobReporter: Send {
     async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode)
     -> Result<Vec<CachedPath>>;
 
+    /// One path, and the server may ask its upstreams for it: the only query that
+    /// ever leaves our cache. `None` when nothing serves it.
+    async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>>;
+
     /// Query the server for which of the given `.drv` paths are already in its
     /// derivation table for the owning project.
     ///
