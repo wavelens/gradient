@@ -31,8 +31,10 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
         CREATE TABLE derivation (id TEXT, name TEXT, walked INTEGER,
             unwalked_inputs INTEGER);
         CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER,
-            substitutable INTEGER, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER);
-        CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT);
+            substitutable INTEGER, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER,
+            missing_runtime_deps INTEGER);
+        CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT,
+            kind INTEGER);
         CREATE TABLE build_job (id TEXT, evaluation TEXT, derivation TEXT,
             derivation_build TEXT);
         CREATE TABLE build_attempt (id TEXT, outcome INTEGER, reason INTEGER,
@@ -65,36 +67,36 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
     # have every visible gate open; only b5 is substitutable, so only b5's `.drv`
     # gate is knowable from the report. b7 is a relay nothing demands: the one gate
     # that used to be missing from the export entirely.
-    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 0, 1, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 0, 0, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 0, 2, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 0, 0, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b5', 'd5', 1, 1, 1, 0, 1)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 0, 1, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 0, 0, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 0, 2, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 0, 0, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b5', 'd5', 1, 1, 1, 0, 1, 0)")
     # b6 is the dependency boundary: exported so b1's readiness can be read, but not
     # this evaluation's work, so it has no build_job row.
-    conn.execute("INSERT INTO derivation_build VALUES ('b6', 'd6', 0, 0, 0, 0, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b7', 'd7', 0, 1, 0, 0, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b6', 'd6', 0, 0, 0, 0, 0, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b7', 'd7', 0, 1, 0, 0, 0, 0)")
     # A stub d1 names but no walk ever read: `walked` is false and its subtree is
     # not recorded. d9 is the other half, a walked parent still counting inputs it
     # only named, which is what an abandoned walk leaves above the stubs.
     conn.execute("INSERT INTO derivation VALUES ('d8', 'openssl-3.6.3', 0, 0)")
     conn.execute("INSERT INTO derivation VALUES ('d9', 'curl-8.21.0', 1, 2)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b8', 'd8', 0, 0, 0, 1, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b9', 'd9', 0, 0, 0, 1, 1)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b8', 'd8', 0, 0, 0, 1, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b9', 'd9', 0, 0, 0, 1, 1, 0)")
     for anchor, drv in (("b1", "d1"), ("b2", "d2"), ("b3", "d3"), ("b4", "d4"),
                         ("b5", "d5"), ("b7", "d7")):
         conn.execute(
             "INSERT INTO build_job VALUES (?, ?, ?, ?)", (f"j-{anchor}", EVAL_ID, drv, anchor)
         )
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd2', 'd3', 'd1')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd3', 'd3', 'd2')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd4', 'd1', 'd6')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd6', 'd1', 'd8')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd7', 'd1', 'd9')")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd2', 'd3', 'd1', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd3', 'd3', 'd2', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd4', 'd1', 'd6', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd6', 'd1', 'd8', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd7', 'd1', 'd9', 0)")
     # An edge whose far end the file does not carry. A closed export has none;
     # an older report is full of them and must not read as a clean graph.
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd5', 'd3', 'd-elsewhere')")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd5', 'd3', 'd-elsewhere', 0)")
     conn.execute(
         "INSERT INTO build_attempt VALUES ('a1', 3, 8, 'input prefetch failed', "
         "'2026-08-31T23:47:30', '2026-08-31T23:47:50')"

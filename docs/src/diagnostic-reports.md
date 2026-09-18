@@ -90,16 +90,17 @@ for it - a distinction the whole diagnosis of an unwhole closure rests on.
 | Table | Carries |
 | --- | --- |
 | `derivation`, `derivation_build`, `derivation_output` | the evaluation's derivations **and their direct dependencies** |
-| `derivation_dependency` | the evaluation's own edges, both ends exported |
+| `derivation_dependency` | the evaluation's own edges with their `kind`, both ends exported |
 | `cached_path` | those derivations' output hashes **and every path they reference** |
 | `cached_path_reference` | those output hashes as referrers, every referenced path exported |
 | `build_job` | the evaluation's jobs **and every job an exported attempt was made under** |
 
 One hop is the whole requirement, not an arbitrary cut. `unready_deps` counts one
-per edge and reads a dependency's own anchor, outputs and cached paths; a
+per build edge and reads a dependency's own anchor, outputs and cached paths; a
 dependency's *own* dependencies are already summarised in its stored
-`unready_deps`. The same holds for `missing_references` over
-`cached_path_reference`. So the file is a boundary, not a closure, and a
+`unready_deps`. `missing_runtime_deps` is the same count over the runtime edges
+(`derivation_dependency.kind IN (1, 2)`), and the same holds for
+`missing_references` over `cached_path_reference`. So the file is a boundary, not a closure, and a
 dependency row in it is evidence about this evaluation's work rather than work of
 its own - it has no `build_job` row, which is how `why-stuck` tells the two apart.
 
