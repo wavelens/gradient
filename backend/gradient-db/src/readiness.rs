@@ -838,16 +838,11 @@ pub async fn unpromote_ungated<C: ConnectionTrait>(
     ))
 }
 
-crate::sql! {
-    UNWALK_DERIVATIONS = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
-        params = [DerivationIds(64)];
-}
-
 /// Drop the record of `derivations` and close the gates that read `walked`, so the
 /// next evaluation walks them again: the un-promoted anchors come back as transitions
 /// for the caller to fan out with [`crate::status::emit_transition_effects`].
 ///
-/// The UPDATE runs first, because it locks `derivation` rows before [`lock_anchors`]
+/// The un-walk runs first, because it locks `derivation` rows before [`lock_anchors`]
 /// and [`unpromote_ungated`] reach `derivation_build` - the class order ingest
 /// (`upsert_walked`, then the anchor locks) and the GC's orphan reclaim both take. The
 /// anchor pass that follows acquires the un-promoted rows in `derivation` order instead
@@ -861,8 +856,7 @@ pub async fn unwalk_derivations(
     }
 
     let txn = ctx.worker_db.begin().await?;
-    txn.execute_raw(UNWALK_DERIVATIONS.bind([ids(derivations)]))
-        .await?;
+    crate::walk_completeness::unwalk(&txn, derivations).await?;
     let _anchors = lock_anchors(&txn, derivations).await?;
     let changes = unpromote_ungated(&txn, derivations).await?;
     txn.commit().await?;
@@ -1536,5 +1530,39 @@ mod tests {
             sql.contains("RETURNING db.derivation, db.demanded"),
             "{sql}"
         );
+    }
+    /// The un-walk selects what was complete, drops the record, and only then locks
+    /// anchors: derivation rows first, as every writer of them does.
+    #[tokio::test]
+    async fn an_unwalk_moves_the_counter_before_it_reaches_the_anchors() {
+        let gone = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([(
+                "id".to_owned(),
+                Value::from(gone.into_inner()),
+            )])]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+
+        unwalk_derivations(&ctx, &[gone]).await.unwrap();
+        drop(ctx);
+
+        let log = crate::pool::raw_statements(pool.into_transaction_log());
+        let at = |needle: &str| {
+            log.iter()
+                .position(|s| s.sql.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} must run: {log:?}"))
+        };
+        let complete = at("AND walked AND unwalked_inputs = 0 ORDER BY id FOR UPDATE");
+        let unwalk = at("UPDATE derivation SET walked = false");
+        let anchors = at("FROM derivation_build");
+        assert!(complete < unwalk && unwalk < anchors, "{log:?}");
     }
 }
