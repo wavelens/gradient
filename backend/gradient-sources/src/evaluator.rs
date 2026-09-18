@@ -6,8 +6,8 @@
 
 //! Trait abstraction over the Nix derivation evaluator.
 //!
-//! Production impl lives in the `builder` crate (`WorkerPoolResolver`) and
-//! drives a pool of long-lived eval-worker subprocesses, each hosting one
+//! Production impl lives in the `gradient-worker` crate (`WorkerPoolResolver`)
+//! and drives a pool of long-lived eval-worker subprocesses, each hosting one
 //! persistent embedded Nix C API evaluator. Tests in any crate can substitute
 //! the in-memory `FakeDerivationResolver` from `test-support`.
 
@@ -30,7 +30,7 @@ pub struct FlakeDiscovery {
 /// Evaluates flake-based Nix derivations. All methods are async; production
 /// impls run their work inside `tokio::task::spawn_blocking` to keep the
 /// embedded Nix C API off Tokio worker threads (Boehm GC vs. signal-blocked
-/// workers - see `builder::evaluator::nix_eval`).
+/// workers - see `gradient_worker::nix::eval_worker::run_eval_worker`).
 #[async_trait]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     /// Discover all attribute paths matching `wildcards` in the given flake.

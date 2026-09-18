@@ -246,7 +246,7 @@ async fn run_input_update(
     ssh_key: Option<&str>,
     updater: &mut dyn JobReporter,
 ) -> Result<()> {
-    use gradient_flake_lock::PatchGenerator as _;
+    use gradient_sources::flake_lock::PatchGenerator as _;
 
     if spec.discover_only {
         let lock_path = std::path::Path::new(checkout).join("flake.lock");
@@ -272,11 +272,12 @@ async fn run_input_update(
         return updater.report_input_expansion(matched).await;
     }
 
-    let resolver =
-        gradient_flake_lock::HttpRevisionResolver::new(crate::http::download_client().clone())
-            .with_ssh_key(ssh_key.map(str::to_owned));
-    let generator = gradient_flake_lock::FlakeLockGenerator::new(resolver);
-    let tracked: Vec<gradient_flake_lock::InputName> =
+    let resolver = gradient_sources::flake_lock::HttpRevisionResolver::new(
+        crate::http::download_client().clone(),
+    )
+    .with_ssh_key(ssh_key.map(str::to_owned));
+    let generator = gradient_sources::flake_lock::FlakeLockGenerator::new(resolver);
+    let tracked: Vec<gradient_sources::flake_lock::InputName> =
         spec.inputs.iter().cloned().map(Into::into).collect();
 
     let Some(patch) = generator

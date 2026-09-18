@@ -20,17 +20,28 @@ workspace = true
 [dependencies]
 gradient-types = { workspace = true }
 gradient-db    = { workspace = true }
-gradient-nix   = { workspace = true }
+gradient-util  = { workspace = true }
 
 anyhow      = { workspace = true }
 async-trait = { workspace = true }
 base64      = { workspace = true }
 bytes       = { workspace = true }
 chrono      = { workspace = true }
+flate2      = { workspace = true }
+futures     = { workspace = true }
 git2        = { workspace = true }
 git-url-parse = { workspace = true }
+harmonia-file-nar     = { workspace = true }
+harmonia-store-path   = { workspace = true }
+harmonia-store-remote = { workspace = true }
+harmonia-utils-hash   = { workspace = true }
 hex         = { workspace = true }
+reqwest     = { workspace = true }
 sea-orm     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+sha2        = { workspace = true }
+tar         = { workspace = true }
 tempfile    = { workspace = true }
 thiserror   = { workspace = true }
 tokio       = { workspace = true, features = ["rt", "macros", "sync", "process", "fs", "io-util", "time"] }
@@ -40,3 +51,6 @@ url         = { workspace = true }
 crypter         = { workspace = true }
 ed25519-compact = { workspace = true }
 ssh-key         = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }

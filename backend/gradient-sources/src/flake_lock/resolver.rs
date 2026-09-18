@@ -8,15 +8,15 @@
 //!
 //! [`HttpRevisionResolver`] resolves github/gitlab over each forge's HTTP API
 //! and plain `git` via libgit2, recomputing `narHash` natively (see
-//! [`crate::narhash`]). Unsupported fetcher types fail explicitly so a bad input
+//! [`super::narhash`]). Unsupported fetcher types fail explicitly so a bad input
 //! never produces a half-baked lock.
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::lock::LockedRef;
-use crate::narhash::{nar_hash_of_dir, tarball_source_nar_hash};
+use super::lock::LockedRef;
+use super::narhash::{nar_hash_of_dir, tarball_source_nar_hash};
 
 const USER_AGENT: &str = "gradient-flake-lock";
 const GITHUB_API: &str = "https://api.github.com";
@@ -223,7 +223,7 @@ fn git_checkout(
 ) -> Result<(String, i64, tempfile::TempDir)> {
     let tmp = tempfile::tempdir().context("creating git temp dir")?;
     let repo = git2::build::RepoBuilder::new()
-        .fetch_options(gradient_sources::fetch_options_with_ssh(ssh_key))
+        .fetch_options(crate::fetch_options_with_ssh(ssh_key))
         .clone(url, tmp.path())
         .with_context(|| format!("cloning {url}"))?;
 

@@ -7,7 +7,7 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use gradient_db::Derivation;
-use gradient_nix::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
+use gradient_sources::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use std::collections::HashMap;
 use std::sync::Mutex;
 

@@ -27,18 +27,3 @@ pub(super) fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), Sou
 pub(super) fn git_transport_url(url: &str) -> &str {
     url.strip_prefix("git+").unwrap_or(url)
 }
-
-/// Parses a nix flake URL of the form `git+<scheme>://host/repo?rev=<hash>` into
-/// `(git_url, rev)`.  The `git+` prefix is stripped so the returned URL is
-/// suitable for direct use with libgit2.
-pub(super) fn parse_nix_git_url(nix_url: &str) -> Result<(String, String), SourceError> {
-    let url = git_transport_url(nix_url);
-    let (base_url, query) = url.split_once('?').ok_or(SourceError::UrlParsing)?;
-    let rev = query
-        .split('&')
-        .find_map(|p| p.strip_prefix("rev="))
-        .ok_or(SourceError::MissingHash)?
-        .to_string();
-
-    Ok((base_url.to_string(), rev))
-}

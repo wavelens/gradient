@@ -11,10 +11,19 @@ use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::HashFormat as _;
 use std::collections::HashMap;
 
-use crate::path_utils::{nix_store_path, strip_store_prefix};
-use gradient_sources::get_hash_from_path;
+use crate::get_hash_from_path;
+use crate::store::{nix_store_path, strip_store_prefix};
 
 pub use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
+
+/// A Nix daemon client over any transport. Generic over read/write halves.
+pub type GenericDaemonClient<R, W> = harmonia_store_remote::DaemonClient<R, W>;
+
+/// A Nix daemon client over a Unix socket (the local daemon).
+pub type LocalDaemonClient = harmonia_store_remote::DaemonClient<
+    tokio::net::unix::OwnedReadHalf,
+    tokio::net::unix::OwnedWriteHalf,
+>;
 
 // ── Nix store helper functions ────────────────────────────────────────────────
 
