@@ -51,6 +51,16 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
 
     sync_reference_index(db, sp.hash(), &c.references).await?;
 
+    // The NAR is where a built output's runtime references are learned, so the
+    // graph edges they name are written from the same report the index is.
+    let referenced = gradient_db::producers_of_tokens(txn, &c.references).await?;
+    if !referenced.is_empty() {
+        let producers = gradient_db::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
+        for producer in &producers {
+            gradient_db::insert_runtime_edges(txn, *producer, &referenced).await?;
+        }
+    }
+
     // The seed reports the state; this commit's own row read holds the other end
     // of the flip, so only a real transition is rippled - never an already-whole
     // re-push (which would decrement every referrer a second time).
@@ -434,6 +444,11 @@ mod tests {
         }
     }
 
+    /// One row of a producer lookup, which projects the derivation alone.
+    fn producer_row() -> BTreeMap<String, Value> {
+        BTreeMap::from([("derivation".to_owned(), Value::from(Uuid::now_v7()))])
+    }
+
     /// The seed's reply: whether the path is whole after the recount.
     fn seed_reply(whole: bool) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([("whole".to_owned(), Value::from(whole))])]
@@ -539,13 +554,19 @@ mod tests {
     }
 
     /// An existing whole row re-pushed with `references`, seeded back to whole so
-    /// no ripple runs: the reference index is the only thing under test.
+    /// no ripple runs: the reference index is the only thing under test. A report
+    /// that names references draws the runtime-edge producer lookup as well, which
+    /// answers with none so no edge is written.
     async fn recommit_log(references: Vec<String>) -> Vec<String> {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([
-                vec![returned_cached_path(HASH)],
-                vec![returned_cached_path(HASH)],
-            ])
+        let mut mock = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([
+            vec![returned_cached_path(HASH)],
+            vec![returned_cached_path(HASH)],
+        ]);
+        if !references.is_empty() {
+            mock = mock.append_query_results([Vec::<BTreeMap<String, Value>>::new()]);
+        }
+
+        let db = mock
             .append_query_results([seed_reply(true)])
             .append_exec_results([exec(0), exec(1), exec(1)])
             .into_connection();
@@ -642,6 +663,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(true)])
             .append_query_results([referrer_counts(DEP_HASH, 1)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -672,6 +694,36 @@ mod tests {
             .position(|s| s.contains("is_cached"))
             .expect("outputs are marked");
         assert!(seed < ripple && ripple < marks, "{log:?}");
+    }
+
+    /// The NAR is where a built output's runtime references are learned: every
+    /// reference with a producer becomes a runtime edge from the path's producer.
+    #[tokio::test]
+    async fn a_commit_writes_the_runtime_edges_its_references_name() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([vec![producer_row()]])
+            .append_query_results([vec![producer_row()]])
+            .append_query_results([seed_reply(false)])
+            .append_exec_results([exec(0), exec(1), exec(1), exec(0)])
+            .into_connection();
+
+        let log = commit_and_log(
+            db,
+            &NarCommit {
+                references: vec![format!("{DEP_HASH}-dep")],
+                ..commit_for(SP)
+            },
+        )
+        .await;
+
+        assert!(
+            log.iter()
+                .any(|s| s
+                    .contains("INSERT INTO derivation_dependency (derivation, dependency, kind)")),
+            "{log:?}"
+        );
     }
 
     /// A path that just became whole advances the anchor side in the SAME
@@ -800,6 +852,7 @@ mod tests {
                 vec![returned_cached_path(HASH)],
                 vec![returned_cached_path(HASH)],
             ])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
             .append_query_results([referrer_counts(DEP_HASH, 1)])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])

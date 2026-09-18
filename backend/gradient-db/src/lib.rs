@@ -41,6 +41,7 @@ pub mod recovery;
 pub mod retention;
 pub mod rollup;
 pub mod runtime_closure;
+pub mod runtime_edges;
 pub mod sql;
 pub mod state_machine;
 pub mod status;
@@ -116,6 +117,7 @@ pub use self::readiness::{
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;
+pub use self::runtime_edges::{insert_runtime_edges, producers_of_tokens};
 pub use self::status::*;
 pub use self::task_board::*;
 pub use self::walk_completeness::{recount_walk_completeness, seed_walk_completeness, unwalk};
