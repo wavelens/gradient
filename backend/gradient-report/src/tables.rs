@@ -296,9 +296,9 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation",
-            "CREATE TABLE derivation (id TEXT, created_at TEXT, architecture TEXT, hash TEXT, name TEXT, pname TEXT, prefer_local_build INTEGER, allow_substitutes INTEGER, closure_size INTEGER, is_fixed_output INTEGER, walked INTEGER)",
+            "CREATE TABLE derivation (id TEXT, created_at TEXT, architecture TEXT, hash TEXT, name TEXT, pname TEXT, prefer_local_build INTEGER, allow_substitutes INTEGER, closure_size INTEGER, is_fixed_output INTEGER, walked INTEGER, unwalked_inputs INTEGER)",
             concat!(
-                "SELECT d.id::text, d.created_at::text, d.architecture::text, d.hash::text, d.name::text, d.pname::text, d.prefer_local_build::int::text, d.allow_substitutes::int::text, d.closure_size::text, d.is_fixed_output::int::text, d.walked::int::text FROM derivation d WHERE d.id IN (",
+                "SELECT d.id::text, d.created_at::text, d.architecture::text, d.hash::text, d.name::text, d.pname::text, d.prefer_local_build::int::text, d.allow_substitutes::int::text, d.closure_size::text, d.is_fixed_output::int::text, d.walked::int::text, d.unwalked_inputs::text FROM derivation d WHERE d.id IN (",
                 derivation_scope!(),
                 ")"
             ),
@@ -314,7 +314,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "allow_substitutes",
                 "closure_size",
                 "is_fixed_output",
-                "walked"
+                "walked",
+                "unwalked_inputs"
             ]
         ),
         spec!(

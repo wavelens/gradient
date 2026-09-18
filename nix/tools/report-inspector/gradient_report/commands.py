@@ -213,8 +213,8 @@ def why_stuck(conn: sqlite3.Connection) -> str:
         # drops an edge whose far end the file does not carry, which turns "this
         # export is too narrow to answer you" into a count with nothing under it.
         for dep in conn.execute(
-            "SELECT dd.dependency AS id, d.id AS derivation_row, d.name, "
-            "       b.derivation AS anchor_row, b.status, b.fetchable "
+            "SELECT dd.dependency AS id, d.id AS derivation_row, d.name, d.walked, "
+            "       d.unwalked_inputs, b.derivation AS anchor_row, b.status, b.fetchable "
             "FROM derivation_dependency dd "
             "LEFT JOIN derivation d ON d.id = dd.dependency "
             "LEFT JOIN derivation_build b ON b.derivation = dd.dependency "
@@ -225,6 +225,12 @@ def why_stuck(conn: sqlite3.Connection) -> str:
             label = dep["name"] or dep["id"]
             if dep["derivation_row"] is None and dep["anchor_row"] is None:
                 out.append(f"    dep {label} not in this report")
+            elif dep["derivation_row"] is not None and not dep["walked"]:
+                out.append(f"    dep {label} is a stub: never walked")
+            elif dep["unwalked_inputs"]:
+                out.append(
+                    f"    dep {label} walked over {dep['unwalked_inputs']} unwalked inputs"
+                )
             elif dep["anchor_row"] is None:
                 out.append(f"    dep {label} no anchor row")
             else:
