@@ -164,32 +164,25 @@ pub fn reference_closure_cte_body(name: &str, seed_select: &str) -> String {
     )
 }
 
-/// The build target `{alias}`'s own `.drv` is whole: its NAR is stored and every
-/// reference counted by `cached_path.missing_references` resolves. A `.drv` is an
-/// ordinary compressed-NAR store path, so this is the authoritative "the worker
-/// can fetch and import the whole input-`.drv` closure" signal - computed over the
-/// actual `.drv` NAR references, not the eval-time build graph. It is a term of
-/// [`gates_predicate`], so a build-graph mirror of it would only diverge from the
-/// NAR ground truth when eval pruning leaves a dependency unwalked, and dead-zone
-/// a build whose `.drv` closure is in fact fully cached.
-pub fn drv_whole_predicate(alias: &str) -> String {
+/// The build target `{alias}`'s own `.drv` NAR is in our cache. Its closure is
+/// trusted: the evaluation pushed it before it reported the derivation, so this is
+/// the "the worker can fetch and import the input-`.drv` closure" signal. The exact
+/// negation of [`drv_nar_absent_predicate`], which is what condemns an evaluation.
+pub fn drv_present_predicate(alias: &str) -> String {
     format!(
-        r#"EXISTS (
-        SELECT 1 FROM derivation d
-        JOIN cached_path cp ON cp.hash = d.hash
-        WHERE d.id = {alias}.derivation AND {whole})"#,
-        whole = crate::nar_closure::whole_predicate("cp"),
+        "EXISTS (SELECT 1 FROM derivation d JOIN cached_path cp ON cp.hash = d.hash \
+         WHERE d.id = {alias}.derivation AND cp.file_hash IS NOT NULL)"
     )
 }
 
 /// The build target `{alias}`'s own `.drv` NAR is not in our cache at all: no
 /// `cached_path` row, or a row with no backing NAR. This is the only `.drv`
 /// state a fresh evaluation repairs - it re-materialises and re-uploads the
-/// `.drv`. Deliberately narrower than
-/// `NOT drv_whole_predicate`, which is also true for a `.drv` that is present
-/// and merely misses a reference; re-evaluating cannot fetch that reference, so
-/// conflating the two burned an evaluation per stall and then failed it as
-/// unrecoverable with the `.drv` cached the whole time.
+/// `.drv`. The exact negation of [`drv_present_predicate`]: a `.drv` that is
+/// present but whose closure has a hole is deliberately NOT this, because
+/// re-evaluating cannot fetch that hole, and conflating the two burned an
+/// evaluation per stall and then failed it as unrecoverable with the `.drv`
+/// cached the whole time.
 pub fn drv_nar_absent_predicate(alias: &str) -> String {
     format!(
         r#"NOT EXISTS (
@@ -282,14 +275,37 @@ pub fn unrelayed_predicate(derivation: &str) -> String {
 /// provide: the unbacked-output dead zone, measured on a live cluster.
 pub fn fetchable_predicate(alias: &str) -> String {
     format!(
-        r#"({alias}.status IN ({terminal_success})
-    AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = {alias}.derivation)
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation_output o
-        LEFT JOIN cached_path cp ON cp.hash = o.hash
-        WHERE o.derivation = {alias}.derivation AND NOT {whole}))"#,
+        "({alias}.status IN ({terminal_success}) AND {whole})",
         terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
-        whole = crate::nar_closure::whole_predicate("cp"),
+        whole = anchor_whole_predicate(alias),
+    )
+}
+
+/// Every output of `{alias}` has its NAR in our cache.
+///
+/// The `EXISTS` is load-bearing and not a tautology. The `NOT EXISTS` under it is
+/// vacuously true for an anchor with NO output rows, so without the guard a
+/// terminal-success anchor whose outputs were never recorded reads as present,
+/// stops counting toward its dependents' `unready_deps`, and those dependents are
+/// promoted and dispatched against an input nothing can provide: the
+/// unbacked-output dead zone, measured on a live cluster.
+pub fn present_predicate(alias: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = {alias}.derivation) \
+         AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash \
+                         WHERE o.derivation = {alias}.derivation AND cp.file_hash IS NULL))"
+    )
+}
+
+/// Present, and every runtime edge leads to a whole anchor: the whole runtime
+/// closure of `{alias}`'s outputs is in our cache. The counter is moved by
+/// [`crate::runtime_readiness`], never derived here, for the reason `unready_deps`
+/// is: wholeness is transitive and a per-row predicate that looks one hop cannot
+/// carry it.
+pub fn anchor_whole_predicate(alias: &str) -> String {
+    format!(
+        "({alias}.missing_runtime_deps = 0 AND {present})",
+        present = present_predicate(alias),
     )
 }
 
@@ -318,9 +334,9 @@ pub fn gates_predicate(alias: &str) -> String {
     AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = {alias}.derivation)
     AND {alias}.demanded
     AND ({alias}.substitutable
-         OR ({alias}.unready_deps = 0 AND {drv_whole})))"#,
+         OR ({alias}.unready_deps = 0 AND {drv_present})))"#,
         walked = walked_predicate(alias),
-        drv_whole = drv_whole_predicate(alias),
+        drv_present = drv_present_predicate(alias),
     )
 }
 
@@ -637,20 +653,41 @@ mod tests {
         );
     }
 
-    /// A `.drv` is an ordinary NAR store path, so the authoritative "the worker
-    /// can import the whole input-`.drv` closure" signal is the `.drv` row's own
-    /// reference counter (computed over real NAR references), not an
-    /// eval-build-graph mirror of it that diverges when pruning leaves a
-    /// dependency unwalked. The predicate must key on that.
+    /// The gate needs the `.drv` PRESENT, not whole. A `.drv` closure is trusted:
+    /// the evaluation pushes it before it reports the derivation, and the one
+    /// `.drv` state a fresh evaluation repairs is an absent NAR, which is why the
+    /// gate and [`drv_nar_absent_predicate`] are exact negations of each other.
     #[test]
-    fn drv_whole_predicate_reads_the_reference_counter() {
-        let p = norm(&drv_whole_predicate("db"));
+    fn the_gate_needs_the_drv_present_not_whole() {
+        let g = norm(&gates_predicate("db"));
         assert!(
-            p.contains("JOIN cached_path cp ON cp.hash = d.hash")
-                && p.contains("d.id = db.derivation")
-                && p.contains("cp.file_hash IS NOT NULL")
-                && p.contains("cp.missing_references = 0"),
-            "must assert the build target's own .drv row is whole: {p}"
+            g.contains("cp.file_hash IS NOT NULL") && !g.contains("missing_references"),
+            "{g}"
+        );
+        assert_eq!(
+            norm(&drv_present_predicate("db")),
+            norm(&drv_nar_absent_predicate("db")).trim_start_matches("NOT "),
+            "the two must stay exact negations"
+        );
+    }
+
+    /// Wholeness moved from the path to the anchor: present, with no runtime edge
+    /// into something that is not whole itself. `fetchable` is its projection onto
+    /// a terminal-success status and reads no path counter at all.
+    #[test]
+    fn whole_is_present_with_no_missing_runtime_dep_and_fetchable_reads_it() {
+        assert_eq!(
+            norm(&anchor_whole_predicate("db")),
+            "(db.missing_runtime_deps = 0 AND (EXISTS (SELECT 1 FROM derivation_output o2 \
+             WHERE o2.derivation = db.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o \
+             LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = db.derivation \
+             AND cp.file_hash IS NULL)))"
+        );
+        let f = norm(&fetchable_predicate("db"));
+        assert!(f.contains("db.missing_runtime_deps = 0"), "{f}");
+        assert!(
+            !f.contains("missing_references"),
+            "the path counter is no longer read: {f}"
         );
     }
 
@@ -661,10 +698,7 @@ mod tests {
     fn fetchable_is_terminal_success_with_whole_outputs_in_our_own_cache() {
         let p = norm(&fetchable_predicate("db"));
         assert!(p.starts_with("(db.status IN (3, 7)"), "{p}");
-        assert!(
-            p.contains("NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)"),
-            "{p}"
-        );
+        assert!(p.contains("cp.file_hash IS NULL"), "{p}");
         assert!(
             !p.contains("substitutable"),
             "an upstream copy is not our cache: {p}"
@@ -684,7 +718,7 @@ mod tests {
         let p = norm(&fetchable_predicate("db"));
         assert!(
             p.contains(
-                "AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) AND NOT EXISTS"
+                "EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) AND NOT EXISTS"
             ),
             "the output guard must precede the NOT EXISTS: {p}"
         );

@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
 use gradient_db::graph_sql::{ClosureDirection, dependency_closure_cte_body};
-use gradient_db::{DbContext, retire_paths};
+use gradient_db::{DbContext, retire_outputs};
 use gradient_types::ids::{BuildAttemptId, DerivationId, EvaluationId};
 use gradient_types::*;
 use ractor::ActorRef;
@@ -267,7 +267,7 @@ async fn retire_stale_paths(
         return Ok(GcReport::default());
     }
 
-    // `retire_paths` takes a transaction because the locks it opens with must
+    // `retire_outputs` takes a transaction because the locks it opens with must
     // still be held when its DELETE runs. Inside the actor that is a savepoint:
     // Postgres keeps a subtransaction's locks until the outer commit, so the
     // release below never drops one early.
@@ -275,7 +275,7 @@ async fn retire_stale_paths(
         .begin()
         .await
         .context("GC: failed to open the retire savepoint")?;
-    let retired = retire_paths(&savepoint, &still_stale)
+    let retired = retire_outputs(&savepoint, &still_stale)
         .await
         .context("GC: failed to retire the stale paths")?;
     savepoint

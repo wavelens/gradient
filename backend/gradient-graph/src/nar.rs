@@ -47,16 +47,18 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         cached_path,
         created,
         was_whole,
+        was_backed,
     } = upsert_cached_path(db, sp.hash(), sp.name(), c).await?;
 
     sync_reference_index(db, sp.hash(), &c.references).await?;
+
+    let producers = gradient_db::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
 
     // The NAR is where a built output's runtime references are learned, so the
     // graph edges they name are written from the same report the index is, and what
     // demand those edges carry is recomputed from the anchor they hang off.
     let referenced = gradient_db::producers_of_tokens(txn, &c.references).await?;
     if !referenced.is_empty() {
-        let producers = gradient_db::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
         for producer in &producers {
             gradient_db::insert_runtime_edges(txn, *producer, &referenced).await?;
         }
@@ -67,20 +69,37 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         gradient_db::emit_transition_effects(ctx, &changes).await;
     }
 
-    // The seed reports the state; this commit's own row read holds the other end
-    // of the flip, so only a real transition is rippled - never an already-whole
-    // re-push (which would decrement every referrer a second time).
+    // Wholeness is counted on the anchor, and the seed needs the endpoint this
+    // commit destroyed: a path that had no NAR before is what makes its producers
+    // present, and the row already says so by the time the seed reads it. A re-push
+    // of a backed path changed no presence, so it is only recounted.
+    let (freshly_present, recounted): (&[DerivationId], &[DerivationId]) = if was_backed {
+        (&[], &producers)
+    } else {
+        (&producers, &[])
+    };
+    let seeded = gradient_db::seed_runtime_deps(txn, freshly_present, recounted).await?;
+    let owners = if was_backed {
+        Vec::new()
+    } else {
+        gradient_db::derivations_with_hashes(txn, &[sp.hash().to_owned()]).await?
+    };
+    advance_anchors(ctx, txn, &seeded.whole, &owners).await?;
+    if !seeded.unwhole.is_empty() {
+        warn!(store_path = %c.store_path, unwhole = seeded.unwhole.len(), "commit added unwhole references");
+        retract_anchors(ctx, txn, &seeded.unwhole).await?;
+    }
+
+    // The path counter is the reader that has not moved yet; it converges on its
+    // own and nothing reads it for a gate any more.
     let whole = gradient_db::seed_references(&lock).await?;
     match (was_whole, whole) {
         (false, true) => {
             let moved = gradient_db::ripple_whole(db, vec![sp.hash().to_owned()]).await?;
             trace!(store_path = %c.store_path, whole = moved.len(), "reference closure ripple");
-            advance_anchors(ctx, txn, &moved).await?;
         }
         (true, false) => {
-            let moved = gradient_db::ripple_unwhole(db, vec![sp.hash().to_owned()]).await?;
-            warn!(store_path = %c.store_path, unwhole = moved.len(), "commit added unwhole references");
-            retract_anchors(ctx, txn, &moved).await?;
+            gradient_db::ripple_unwhole(db, vec![sp.hash().to_owned()]).await?;
         }
         _ => {}
     }
@@ -103,9 +122,9 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     })
 }
 
-/// The anchor side of a forward wholeness flip: the derivations whose outputs
-/// `whole` now covers can serve them, and the derivations whose own `.drv` is in
-/// `whole` are importable, so their gates may have opened.
+/// The anchor side of a forward wholeness flip: the anchors in `whole` can serve
+/// their outputs, and the `owners` of a `.drv` this commit made present are
+/// importable, so their gates may have opened.
 ///
 /// One ordered lock over both sets, on the commit's own transaction: the mark is a
 /// bound and not a claim, so an anchor whose predicate does not hold is passed over,
@@ -113,31 +132,28 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
 async fn advance_anchors(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
-    whole: &[String],
+    whole: &[DerivationId],
+    owners: &[DerivationId],
 ) -> anyhow::Result<()> {
-    let producers = gradient_db::producers_of_hashes(txn, whole).await?;
-    let owners = gradient_db::derivations_with_hashes(txn, whole).await?;
-    let lock = gradient_db::lock_anchors(txn, &union(&producers, &owners)).await?;
+    let lock = gradient_db::lock_anchors(txn, &union(whole, owners)).await?;
     let mut changes = gradient_db::became_fetchable(&lock).await?;
-    changes.extend(gradient_db::promote(txn, &owners).await?);
+    changes.extend(gradient_db::promote(txn, owners).await?);
     gradient_db::emit_transition_effects(ctx, &changes).await;
 
     Ok(())
 }
 
-/// The symmetric loss. A commit that reports a reference we do not have takes paths
-/// OUT of wholeness, and an anchor left fetchable against one of them dispatches a
-/// build whose input nothing can provide - the forward-only half of this pair is the
-/// dead zone this project has paid for repeatedly.
+/// The symmetric loss. A commit that reports a reference we do not have takes
+/// anchors OUT of wholeness, and one left fetchable against such an anchor
+/// dispatches a build whose input nothing can provide - the forward-only half of
+/// this pair is the dead zone this project has paid for repeatedly.
 async fn retract_anchors(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
-    unwhole: &[String],
+    unwhole: &[DerivationId],
 ) -> anyhow::Result<()> {
-    let producers = gradient_db::producers_of_hashes(txn, unwhole).await?;
-    let lock = gradient_db::lock_anchors(txn, &producers).await?;
-    let mut changes = gradient_db::lost_fetchability(&lock).await?;
-    changes.extend(gradient_db::unpromote_drv_owners(txn, unwhole).await?);
+    let lock = gradient_db::lock_anchors(txn, unwhole).await?;
+    let changes = gradient_db::lost_fetchability(&lock).await?;
     gradient_db::emit_transition_effects(ctx, &changes).await;
 
     Ok(())
@@ -183,6 +199,9 @@ struct Upserted {
     cached_path: CachedPathId,
     created: bool,
     was_whole: bool,
+    /// The row had a NAR before this commit. False is what makes the path's
+    /// producers freshly present, which no statement after the write can recover.
+    was_backed: bool,
 }
 
 /// Insert or refresh the row under its `FOR UPDATE` lock. A duplicate-key error
@@ -205,6 +224,7 @@ async fn upsert_cached_path(
         Some(row) => {
             let id = row.id;
             let was_whole = row.is_whole();
+            let was_backed = row.is_fully_cached();
             let file_hash = normalize_nar_hash(&c.file_hash);
             // Different bytes under the same store path: the recorded build-id
             // members no longer describe the NAR, so re-open it to the indexer.
@@ -235,6 +255,7 @@ async fn upsert_cached_path(
                 cached_path: id,
                 created: false,
                 was_whole,
+                was_backed,
             })
         }
         None => {
@@ -259,6 +280,7 @@ async fn upsert_cached_path(
                 cached_path: row.id,
                 created: true,
                 was_whole: false,
+                was_backed: false,
             })
         }
     }
@@ -492,11 +514,7 @@ mod tests {
     /// `{:?}`, which escapes the quotes sea-orm puts around every identifier, so
     /// an assertion on a generated statement reads the raw `sql` instead.
     fn raw_statements(db: WorkerDb) -> Vec<Statement> {
-        db.into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().to_vec())
-            .filter(|s| !matches!(s.sql.trim().to_uppercase().as_str(), "BEGIN" | "COMMIT"))
-            .collect()
+        gradient_db::pool::raw_statements(db.into_transaction_log())
     }
 
     /// The value a generated statement binds to `column`, through the placeholder
@@ -572,10 +590,12 @@ mod tests {
     /// that names references draws the runtime-edge producer lookup as well, which
     /// answers with none so no edge is written.
     async fn recommit_log(references: Vec<String>) -> Vec<String> {
-        let mut mock = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([
-            vec![returned_cached_path(HASH)],
-            vec![returned_cached_path(HASH)],
-        ]);
+        let mut mock = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([
+                vec![returned_cached_path(HASH)],
+                vec![returned_cached_path(HASH)],
+            ])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()]);
         if !references.is_empty() {
             mock = mock.append_query_results([Vec::<BTreeMap<String, Value>>::new()]);
         }
@@ -605,6 +625,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
             .append_query_results([vec![project_cache_row()]])
             .append_exec_results([exec(0), exec(0), exec(1), exec(1)])
@@ -631,6 +653,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
             .append_exec_results([exec(0), exec(0), exec(0)])
             .into_connection();
@@ -657,6 +681,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
             .append_exec_results([exec(0), exec(0), exec(0)])
             .into_connection();
@@ -678,10 +704,10 @@ mod tests {
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(true)])
             .append_query_results([referrer_counts(DEP_HASH, 1)])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results([exec(0), exec(1), exec(0)])
             .into_connection();
@@ -724,8 +750,18 @@ mod tests {
             .append_query_results([vec![producer_row()]])
             .append_query_results([vec![demand_row()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
-            .append_exec_results([exec(0), exec(1), exec(1), exec(0), exec(1), exec(0)])
+            .append_exec_results([
+                exec(0),
+                exec(1),
+                exec(1),
+                exec(0),
+                exec(1),
+                exec(1),
+                exec(0),
+            ])
             .into_connection();
 
         let log = commit_and_log(
@@ -753,45 +789,54 @@ mod tests {
         );
     }
 
-    /// A path that just became whole advances the anchor side in the SAME
-    /// transaction as the reference ripple: the derivations whose outputs it backs
-    /// are offered to the fetchable mark, and the derivations whose own `.drv` it
-    /// is are offered to promotion. Without this the counters only move on the next
-    /// sweep, and a dependent waits a sweep interval for an input it already has.
+    /// A NAR that makes its producer present advances the anchor side in the SAME
+    /// transaction: the producer's counter is seeded, what became whole is offered
+    /// to the fetchable mark, and the derivation whose own `.drv` this is is offered
+    /// to promotion. Without this the counters only move on the next sweep, and a
+    /// dependent waits a sweep interval for an input it already has.
     #[tokio::test]
     async fn a_whole_commit_advances_the_anchors_behind_the_paths_it_completed() {
+        let producer = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
-            .append_query_results([seed_reply(true)])
-            .append_query_results([referrer_counts(DEP_HASH, 1)])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer),
+            )])]])
+            .append_query_results([vec![BTreeMap::from([
+                ("derivation".to_owned(), Value::from(producer)),
+                ("was_whole".to_owned(), Value::from(false)),
+                ("whole".to_owned(), Value::from(true)),
+            ])]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![BTreeMap::from([(
+                "id".to_owned(),
+                Value::from(Uuid::now_v7()),
+            )])]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results([exec(0), exec(1), exec(0)])
+            .append_query_results([seed_reply(false)])
+            .append_exec_results([exec(0), exec(1), exec(1), exec(1), exec(0)])
             .into_connection();
 
         let log = commit_and_log(db, &commit_for(SP)).await;
 
-        let ripple = log
+        let seed = log
             .iter()
-            .position(|s| s.contains("missing_references - c.n"))
-            .expect("ripple runs");
-        let producers = log
+            .position(|s| s.contains("SET missing_runtime_deps = x.n"))
+            .expect("the producer's counter is seeded");
+        let mark = log
             .iter()
-            .position(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)"))
-            .expect("the producers of the completed paths are resolved");
-        let owners = log
+            .position(|s| s.contains("SET fetchable = true"))
+            .expect("what became whole is offered to the mark");
+        let promote = log
             .iter()
-            .position(|s| s.contains("FROM derivation d WHERE d.hash = ANY($1)"))
-            .expect("the owners of the completed .drv paths are resolved");
+            .position(|s| s.contains("SET status = 1"))
+            .expect("the owner of the .drv is offered to promotion");
         assert!(
-            ripple < producers && producers < owners,
-            "the anchor side follows the ripple that produced its set: {log:?}"
-        );
-        assert!(
-            log[producers].contains(HASH),
-            "the anchor side reads the paths the ripple moved: {log:?}"
+            seed < mark && mark < promote,
+            "the anchor side follows the seed that produced its set: {log:?}"
         );
     }
 
@@ -868,24 +913,43 @@ mod tests {
         );
     }
 
-    /// A commit that adds a reference to a path we do not have takes the row out
-    /// of wholeness, so the loss ripples backward: nothing else reports it, and a
-    /// referrer left counting one missing reference too few would claim a closure
-    /// with a hole in it.
+    /// A commit that names a reference whose producer is not whole takes its OWN
+    /// producer out of wholeness: the new runtime edge is a hole, the seed reports
+    /// the loss, and every anchor left fetchable against it dispatches a build whose
+    /// input nothing can provide. The forward-only half of this pair is the dead
+    /// zone this project has paid for repeatedly.
     #[tokio::test]
     async fn a_commit_that_loses_wholeness_ripples_backward() {
+        let producer = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([
                 vec![returned_cached_path(HASH)],
                 vec![returned_cached_path(HASH)],
             ])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer),
+            )])]])
+            .append_query_results([vec![producer_row()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([seed_reply(false)])
-            .append_query_results([referrer_counts(DEP_HASH, 1)])
+            .append_query_results([vec![BTreeMap::from([
+                ("derivation".to_owned(), Value::from(producer)),
+                ("was_whole".to_owned(), Value::from(true)),
+                ("whole".to_owned(), Value::from(false)),
+            ])]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results([exec(0), exec(1), exec(1)])
+            .append_query_results([seed_reply(true)])
+            .append_exec_results([
+                exec(0),
+                exec(1),
+                exec(1),
+                exec(0),
+                exec(1),
+                exec(1),
+                exec(1),
+                exec(1),
+            ])
             .into_connection();
 
         let log = commit_and_log(
@@ -898,21 +962,14 @@ mod tests {
         .await;
 
         assert!(
-            log.iter().any(|s| s.contains("missing_references + c.n")),
-            "losing wholeness must ripple backward: {log:?}"
-        );
-        assert!(
-            !log.iter().any(|s| s.contains("missing_references - c.n")),
-            "{log:?}"
-        );
-        assert!(
             log.iter()
-                .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
-            "the producers of the paths that stopped being whole must be resolved: {log:?}"
+                .any(|s| s
+                    .contains("INSERT INTO derivation_dependency (derivation, dependency, kind)")),
+            "the hole is recorded as a runtime edge: {log:?}"
         );
         assert!(
-            log.iter().any(|s| s.contains("d.hash = ANY($1::text[])")),
-            "the owner of a .drv that stopped being whole must leave the queue: {log:?}"
+            log.iter().any(|s| s.contains("SET fetchable = false")),
+            "an anchor that stopped being whole must stop being fetchable: {log:?}"
         );
     }
 
@@ -999,6 +1056,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
             .append_exec_results([exec(0), exec(0), exec(2)])
             .into_connection();
@@ -1016,6 +1075,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(false)])
             .append_exec_results([exec(0), exec(0), exec(0)])
             .into_connection();
@@ -1050,6 +1111,7 @@ mod tests {
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![existing.clone()], vec![existing]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([seed_reply(true)])
             .append_exec_results([exec(0), exec(1), exec(1)])
             .into_connection();

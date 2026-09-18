@@ -36,6 +36,9 @@ pub struct ConsistencyReport {
     pub counter_drift: i64,
     /// Walked derivations whose `unwalked_inputs` disagreed with the stubs below them.
     pub walk_drift: i64,
+    /// Anchors whose `missing_runtime_deps` disagreed with their runtime edges.
+    /// Also the column's backfill: the migration deliberately carries none.
+    pub runtime_drift: i64,
     /// Anchors whose `demanded` disagreed with the walk from the entry points.
     pub demand_drift: i64,
     /// Promotable anchors found unpromoted, queued by this pass.
@@ -75,6 +78,7 @@ impl ConsistencyReport {
     pub fn total(&self) -> i64 {
         self.counter_drift
             + self.walk_drift
+            + self.runtime_drift
             + self.demand_drift
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
@@ -166,6 +170,11 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     // read complete until this runs, and the prune trusts the column.
     let walk_drift = crate::walk_completeness::recount_walk_completeness(db).await? as i64;
 
+    // Wholeness before the readiness repair that reads it, for the reason the NAR
+    // repair runs before both: a drifted counter would otherwise teach `fetchable`
+    // a value this very pass corrects.
+    let runtime_drift = crate::runtime_readiness::recount_missing_runtime_deps(db).await? as i64;
+
     // Before the readiness repair, so the queue settle that follows reads a
     // corrected column rather than promoting against a stale demand.
     let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
@@ -219,6 +228,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     Ok(ConsistencyReport {
         counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
         walk_drift,
+        runtime_drift,
         demand_drift,
         unpromoted_ready: repaired.promoted.len() as i64,
         adopted,
@@ -264,7 +274,7 @@ mod tests {
                 "hash".to_owned(),
                 Value::from("h".to_owned()),
             )])]])
-            .append_exec_results([exec(0), exec(2), exec(0), exec(7)])
+            .append_exec_results([exec(0), exec(2), exec(0), exec(7), exec(0), exec(6)])
             .append_query_results([n()])
             .append_exec_results([exec(0)])
             .append_query_results([drifted])
@@ -325,6 +335,10 @@ mod tests {
         assert_eq!(
             report.walk_drift, 7,
             "the walk recount runs before the demand recount"
+        );
+        assert_eq!(
+            report.runtime_drift, 6,
+            "the anchor wholeness recount runs before the readiness repair that reads it"
         );
         assert_eq!(report.adopted, 0);
 
@@ -423,6 +437,7 @@ mod tests {
         let r = ConsistencyReport {
             counter_drift: 1,
             walk_drift: 9,
+            runtime_drift: 10,
             demand_drift: 8,
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
@@ -433,7 +448,7 @@ mod tests {
             repair_scope: 2000,
             adopted: 2,
         };
-        assert_eq!(r.total(), 45);
+        assert_eq!(r.total(), 55);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }

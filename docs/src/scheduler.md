@@ -73,19 +73,21 @@ next flush fails the same way.
 
 #### Promotion
 
-Readiness is two maintained columns on the anchor. `fetchable` says a dependent
-can get this anchor's outputs **from our own cache**: the anchor succeeded and
-every output is whole here (`cached_path.missing_references = 0`). An upstream
-copy does not count - a dependent of an unrelayed substitutable anchor waits for
-the relay - so a build pulls every input out of our cache and the relay is on the
-critical path once instead of every dependent re-fetching upstream itself.
-`unready_deps` is how many of the anchor's direct dependencies are not fetchable.
-Neither is ever derived by a sweep: the event that changes fetchability writes
-the flip with a `RETURNING` that names exactly the anchors that changed, and
-their direct dependents' counter moves from that set in one statement
-(`gradient_db::readiness`). Fetchability of a dependent does not depend on its
-own dependencies, so nothing recurses over `derivation_dependency`; the only
-recursion left is the reference ripple on the NAR side.
+Readiness is three maintained columns on the anchor, one per edge kind plus the
+flag they feed. An anchor is **whole** when every output's NAR is in our cache and
+`missing_runtime_deps = 0`, that counter being how many of its runtime edges lead
+to something that is not whole itself. `fetchable` says a dependent can get this
+anchor's outputs **from our own cache**: the anchor succeeded and is whole. An
+upstream copy does not count - a dependent of an unrelayed substitutable anchor
+waits for the relay - so a build pulls every input out of our cache and the relay
+is on the critical path once instead of every dependent re-fetching upstream
+itself. `unready_deps` is how many of the anchor's direct build dependencies are
+not fetchable. None is ever derived by a sweep: the event that changes wholeness
+or fetchability writes the flip with a `RETURNING` that names exactly the anchors
+that changed, and their dependents' counter moves from that set in one statement
+(`gradient_db::readiness` and `gradient_db::runtime_readiness`). Wholeness is
+transitive, so it ripples level by level; fetchability of a dependent does not
+depend on its own dependencies, so `unready_deps` moves one hop and stops.
 
 An anchor is promoted `Created` to `Queued` when its derivation is walked, some
 evaluation wants it (a `build_job`), and something still demands it, and then one
