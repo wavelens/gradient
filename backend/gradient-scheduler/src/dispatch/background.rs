@@ -59,6 +59,8 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
     if report.total() > 0 {
         warn!(
             counter_drift = report.counter_drift,
+            walk_drift = report.walk_drift,
+            demand_drift = report.demand_drift,
             unpromoted_ready = report.unpromoted_ready,
             adopted = report.adopted,
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,
