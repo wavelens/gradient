@@ -472,11 +472,18 @@ pub fn pending_closure_cte(name: &str, seed_select: &str) -> String {
 }
 
 /// `WITH RECURSIVE demanded(derivation) AS (...)`: from `seed_select`, every anchor
-/// something still wants in our cache. Two arms over the two edge kinds. Anything
-/// wanted wants what its outputs reference at run time, so a demanded anchor named
-/// by a `build_job` steps over its runtime edges whatever it is. Only something
-/// that will be built wants its inputs, so a demanded builder steps over its build
-/// edges; a relay is reached and never stepped through that way. A terminal anchor
+/// something still wants in our cache. Two arms over the two edge kinds, and a relay
+/// is stepped through by neither: it is reached, and what lies below it is its own to
+/// deliver.
+///
+/// Something that will be BUILT here wants both sides. Its inputs must be in our
+/// cache to build it, which is the build arm, and its outputs' runtime references
+/// must be in our cache to serve it, which is the runtime arm. A relay wants neither:
+/// it fetches finished bytes and mirrors the whole closure with them, so every member
+/// lands present without an anchor of its own ever being queued, and wholeness reads
+/// presence and not demand. Demanding them anyway put a second relay job on every
+/// member that happened to be walked - busybox's own source tarball, relayed beside
+/// the output that already carried it, which is the traffic #593 exists to remove. A terminal anchor
 /// stops the walk because what is below a finished build is served from its
 /// outputs. The one definition of demand; every recompute steps with it.
 /// `region_select` bounds both arms, applied inside the probe so a region-scoped
@@ -505,7 +512,9 @@ pub fn demand_closure_cte(seed_select: &str, region_select: &str) -> String {
             "s.next",
             &format!(
                 "{runtime} UNION {build}",
-                runtime = arm("WHERE e.derivation = c.derivation AND e.kind IN (1, 2)".to_owned()),
+                runtime = arm("WHERE e.derivation = c.derivation AND e.kind IN (1, 2) \
+                     AND NOT p.substitutable"
+                    .to_owned()),
                 build = arm(format!(
                     "JOIN derivation w ON w.id = p.derivation \
                      WHERE e.derivation = c.derivation AND e.kind IN (0, 2) AND {builder}",
@@ -1078,19 +1087,22 @@ mod tests {
         );
     }
 
-    /// Only the build arm waits for the probe's answer. What an anchor's outputs
-    /// reference at run time is wanted whether it is relayed or built, and a relay
-    /// that waited for its own answer before demanding its references would never
-    /// mirror a closure.
+    /// Neither arm steps through a relay. The build arm stops because a relay is not
+    /// a builder; the runtime arm stops because the relay mirrors its own closure, so
+    /// a member queued on its own is a second fetch of bytes already on the way.
     #[test]
-    fn only_the_build_arm_waits_for_the_probe() {
+    fn neither_arm_steps_through_a_relay() {
         let cte = norm(&demand_closure_cte(
             "SELECT derivation FROM entry_point",
             "",
         ));
         assert!(
-            cte.contains("AND e.kind IN (1, 2) AND EXISTS (SELECT 1 FROM build_job"),
-            "the runtime arm reads nothing about the anchor but its name: {cte}"
+            cte.contains("AND e.kind IN (1, 2) AND NOT p.substitutable"),
+            "the runtime arm must stop at a relay: {cte}"
+        );
+        assert!(
+            cte.contains(&norm(&builder_predicate("p", "w"))),
+            "the build arm must stop at one too: {cte}"
         );
     }
 
