@@ -644,7 +644,7 @@ impl BatchWriter<'_> {
         newly_walked: &HashSet<String>,
         grew: &[DerivationId],
         entry_points: &[DerivationId],
-    ) -> Result<()> {
+    ) -> Result<Vec<DerivationId>> {
         let mut to_seed: Vec<DerivationId> = newly_walked
             .iter()
             .filter_map(|h| resolved.by_hash.get(h).copied())
@@ -663,7 +663,7 @@ impl BatchWriter<'_> {
         locked.sort_unstable();
         locked.dedup();
         if locked.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let txn = self
@@ -693,9 +693,7 @@ impl BatchWriter<'_> {
             .context("commit the readiness transaction")?;
         let net = gradient_db::collapse_transitions(changes);
         gradient_db::emit_transition_effects(self.ctx, &net).await;
-        self.move_batch_demand(&to_seed, entry_points).await?;
-
-        Ok(())
+        self.move_batch_demand(&to_seed, entry_points).await
     }
 
     /// Settle the demand a batch moves without moving any anchor's status, so the
@@ -707,7 +705,7 @@ impl BatchWriter<'_> {
         &self,
         builders: &[DerivationId],
         entry_points: &[DerivationId],
-    ) -> Result<()> {
+    ) -> Result<Vec<DerivationId>> {
         let db = self.db();
         let mut roots = builders.to_vec();
         roots.extend_from_slice(entry_points);
@@ -715,10 +713,12 @@ impl BatchWriter<'_> {
         roots.dedup();
 
         let mut changes = Vec::new();
+        let mut gained_demand = Vec::new();
         for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
             let moved = gradient_db::recompute_demand(db, chunk)
                 .await
                 .context("recompute what this batch demands")?;
+            gained_demand.extend_from_slice(&moved.gained);
             for gained in moved.gained.chunks(gradient_db::IN_CHUNK_SIZE) {
                 changes.extend(
                     gradient_db::promote(db, gained)
@@ -736,7 +736,7 @@ impl BatchWriter<'_> {
         }
         gradient_db::emit_transition_effects(self.ctx, &changes).await;
 
-        Ok(())
+        Ok(gained_demand)
     }
 
     /// Persist each derivation's `inputSrcs`: build-time source paths (e.g.
@@ -963,7 +963,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             }
             None => Vec::new(),
         };
-        writer
+        report.gained_demand = writer
             .advance_readiness(batch, &resolved, &newly_walked, &grew, &report.entry_points)
             .await?;
 
@@ -1191,6 +1191,8 @@ pub(crate) async fn after_commit(
         }
     }
 
+    ctx.probe_requests.send(report.gained_demand.clone());
+
     let _ = ctx.board_events.send(BoardEvent::EvaluationProgress {
         task: batch.task.map(|t| t.into_inner()),
         evaluation_id: report.evaluation.into_inner(),
@@ -1231,6 +1233,46 @@ mod tests {
     use gradient_entity::evaluation::EvaluationStatus;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement, Value};
     use std::collections::BTreeMap;
+
+    /// A fresh evaluation's demand is established by the ingest walk, not by a
+    /// status transition, so `emit_transition_effects` sees nothing left to gain
+    /// and reports an empty set. The batch's own gained set is the only one the
+    /// probe can learn from, and it is handed over after the commit: the probe
+    /// reads the rows on its own connection, and an anchor it plans nothing for
+    /// is still remembered as asked.
+    #[tokio::test]
+    async fn what_the_batch_demands_reaches_the_upstream_probe() {
+        let gained = DerivationId::now_v7();
+        let (ctx, _pool, mut probes) =
+            crate::test_ctx::ctx_with_probes(MockDatabase::new(DatabaseBackend::Postgres).into_connection())
+                .await;
+        let actor = crate::Graph::new()
+            .spawn(ctx.clone(), None, None)
+            .await
+            .expect("the graph actor starts");
+
+        after_commit(
+            &ctx,
+            &actor,
+            &IngestBatch {
+                evaluation: EvaluationId::now_v7(),
+                ..Default::default()
+            },
+            &IngestReport {
+                gained_demand: vec![gained],
+                ..Default::default()
+            },
+        )
+        .await;
+
+        assert_eq!(
+            probes
+                .try_recv()
+                .expect("the batch's gained demand reaches the probe"),
+            vec![gained],
+        );
+        actor.stop_and_wait(None, None).await.unwrap();
+    }
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv";

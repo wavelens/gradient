@@ -56,6 +56,11 @@ pub struct IngestReport {
     /// Derivations whose full record this batch put in.
     pub walked: usize,
     pub entry_points: Vec<DerivationId>,
+    /// Anchors this batch turned demand on for, for the upstream probe. Carried
+    /// to the commit rather than sent from the walk: the probe reads the rows on
+    /// its own connection, and an uncommitted anchor plans to nothing and is then
+    /// remembered as asked.
+    pub gained_demand: Vec<DerivationId>,
 }
 
 /// Which caches get a `cached_path_signature` placeholder for a committed path.
