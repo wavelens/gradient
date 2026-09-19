@@ -152,6 +152,7 @@ mod tests {
             BuildStatus::Aborted,
             BuildStatus::DependencyFailed,
             BuildStatus::Substituted,
+            BuildStatus::Skipped,
         ] {
             assert_eq!(status.for_api(), status);
         }
@@ -189,10 +190,11 @@ mod tests {
             (BuildStatus::Substituted, 7),
             (BuildStatus::FailedTransient, 8),
             (BuildStatus::FailedTimeout, 9),
+            (BuildStatus::Skipped, 10),
         ] {
             assert_eq!(i32::from(status), n);
         }
-        assert_eq!(BuildStatus::iter().count(), 10);
+        assert_eq!(BuildStatus::iter().count(), 11);
     }
 
     #[test]
