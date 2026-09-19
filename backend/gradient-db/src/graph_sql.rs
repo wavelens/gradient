@@ -202,14 +202,35 @@ pub const BUILDER_STATUSES: [BuildStatus; 4] = [
     BuildStatus::FailedTransient,
 ];
 
+/// The statuses whose demand can still move, which is every builder status plus
+/// `Skipped`: a builder whose demand went away and becomes one again the moment a
+/// walk reaches it. A terminal anchor keeps what it carried and is named as a root
+/// when a requeue thaws it; `Skipped` has no such event, it is thawed BY demand
+/// returning. Leaving it out of the walks that write the column made it absorbing -
+/// the thaw reads `demanded`, the region could not reach the row to set it, and the
+/// table-wide backstop refused to rewrite it, so a subtree skipped in the window
+/// between a name and its probe answer never came back.
+pub const DEMANDABLE_STATUSES: [BuildStatus; 5] = [
+    BuildStatus::Created,
+    BuildStatus::Queued,
+    BuildStatus::Building,
+    BuildStatus::FailedTransient,
+    BuildStatus::Skipped,
+];
+
 /// Anchor `status`/`demanded` is work its evaluation is still waiting for: what
 /// nothing demands is never promoted, so an evaluation that counts it as pending
 /// waits forever (#666). Every terminal status is settled by definition, and an
 /// anchor the dispatcher can still pick up - or already has - is work in flight
 /// whatever demand says now: dispatch reads the status rather than the gate, and
 /// a running build is deliberately left to finish.
+///
+/// The set is [`DEMANDABLE_STATUSES`], so a demanded `Skipped` anchor blocks and an
+/// undemanded one does not, which is the whole meaning of the status. Demand is
+/// written before the thaw that follows it, and an evaluation settled in that gap
+/// is settled over work it still owes.
 pub fn blocks_evaluation(status: BuildStatus, demanded: bool) -> bool {
-    if !BUILDER_STATUSES.contains(&status) {
+    if !DEMANDABLE_STATUSES.contains(&status) {
         return false;
     }
 
@@ -222,7 +243,7 @@ pub fn blocks_evaluation(status: BuildStatus, demanded: bool) -> bool {
 pub fn blocks_evaluation_predicate(alias: &str) -> String {
     format!(
         "({alias}.status IN ({pending}) AND ({alias}.demanded OR {alias}.status IN ({in_flight})))",
-        pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+        pending = crate::status_sql::build_in(&DEMANDABLE_STATUSES),
         in_flight = crate::status_sql::build_in(&[BuildStatus::Queued, BuildStatus::Building]),
     )
 }
@@ -444,6 +465,10 @@ pub fn kept_hashes_cte_body(reachable: &str, runtime: &str) -> String {
 /// either way, because what is below a finished build is served from its outputs
 /// and what is below a failed one is the requeue's to thaw first. This is what
 /// names a pruned subtree for the evaluations that build against it.
+///
+/// Membership is [`DEMANDABLE_STATUSES`] and not [`BUILDER_STATUSES`]: a `Skipped`
+/// anchor is reached and named, so demand can be written back onto it, and it is
+/// not a builder, so the walk stops there rather than stepping over its inputs.
 pub fn pending_closure_cte(name: &str, seed_select: &str) -> String {
     let arm = |restrict: &str| {
         format!(
@@ -453,7 +478,7 @@ pub fn pending_closure_cte(name: &str, seed_select: &str) -> String {
              JOIN derivation w ON w.id = dep.derivation \
              WHERE e.derivation = c.derivation AND {restrict} AND dep.status IN ({pending})",
             builder = builder_predicate("dep", "w"),
-            pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+            pending = crate::status_sql::build_in(&DEMANDABLE_STATUSES),
         )
     };
 
@@ -583,12 +608,18 @@ mod tests {
                 "{status:?} is handed out on its status alone, demand or not"
             );
         }
-        for status in [Created, FailedTransient] {
+        for status in [Created, FailedTransient, Skipped] {
             assert!(
                 !blocks_evaluation(status, false),
                 "{status:?} with nothing demanding it is work that never happens"
             );
         }
+        assert!(
+            blocks_evaluation(Skipped, true),
+            "a skipped anchor demand has come back to is owed work: the demand is \
+             written before the thaw, and an evaluation settled in that gap is \
+             settled over a subtree it is about to queue"
+        );
         for status in [Completed, Substituted, FailedPermanent, DependencyFailed] {
             assert!(!blocks_evaluation(status, true), "{status:?} is settled");
         }
@@ -607,7 +638,7 @@ mod tests {
             sql,
             format!(
                 "(db.status IN ({pending}) AND (db.demanded OR db.status IN ({in_flight})))",
-                pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+                pending = crate::status_sql::build_in(&DEMANDABLE_STATUSES),
                 in_flight = crate::status_sql::build_in(&[Queued, Building]),
             ),
             "the predicate is the Rust rule written out; changing one without the \
@@ -782,16 +813,42 @@ mod tests {
         );
     }
 
-    /// `Skipped` is settled work: no gate acts on it, no walk steps through it and
-    /// no evaluation waits for it. It is in none of the three sets that decide any
-    /// of those, and the thaw back to `Created` is what re-opens all three at once.
+    /// `Skipped` is settled work: no gate acts on it, no walk steps THROUGH it and
+    /// no evaluation waits for it. It is in none of the sets that decide any of
+    /// those, and the thaw back to `Created` is what re-opens them at once. Being
+    /// REACHED is the one thing it must still be, because demand returning is its
+    /// thaw and a walk that cannot reach the row cannot write the column.
     #[test]
     fn skipped_is_neither_a_builder_nor_pending_nor_terminal() {
+        assert!(DEMANDABLE_STATUSES.contains(&BuildStatus::Skipped));
         assert!(!BUILDER_STATUSES.contains(&BuildStatus::Skipped));
         assert!(!BuildStatus::PENDING.contains(&BuildStatus::Skipped));
         assert!(!BuildStatus::TERMINAL_SUCCESS.contains(&BuildStatus::Skipped));
         assert!(!BuildStatus::FAILURE.contains(&BuildStatus::Skipped));
         assert!(!BuildStatus::REQUEUEABLE.contains(&BuildStatus::Skipped));
+    }
+
+    /// The region of a bounded recompute has to contain the rows it may rewrite.
+    /// A `Skipped` anchor is exactly the row whose demand is about to change - a
+    /// parent that has just become a builder demands it again - and leaving it out
+    /// of the walk made the status absorbing: unreachable, so never gained, so
+    /// never thawed, with the whole subtree below it stranded.
+    #[test]
+    fn the_region_walk_reaches_a_skipped_anchor_so_demand_can_return() {
+        let cte = pending_closure_cte("region", "SELECT $1::uuid, $2::uuid, true");
+        let skipped = crate::status_sql::build_in(&[BuildStatus::Skipped]);
+        assert_eq!(
+            cte.matches(&format!("dep.status IN (0, 1, 2, 8, {skipped})"))
+                .count(),
+            2,
+            "both arms must reach a skipped anchor: {cte}"
+        );
+        assert!(
+            !cte.contains(&format!(
+                "NOT dep.substitutable AND dep.status IN (0, 1, 2, 8, {skipped})"
+            )),
+            "reached is not stepped through: a skipped anchor is no builder: {cte}"
+        );
     }
 
     /// The demand arm reads a DEPENDENT's status, which is only safe while both
@@ -1027,7 +1084,7 @@ mod tests {
         assert!(
             cte.contains(
                 "WHERE e.derivation = c.derivation AND c.builder AND e.kind IN (0, 2) \
-                 AND dep.status IN (0, 1, 2, 8) OFFSET 0) s"
+                 AND dep.status IN (0, 1, 2, 8, 10) OFFSET 0) s"
             ),
             "{cte}"
         );
