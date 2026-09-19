@@ -1743,7 +1743,10 @@ mod tests {
         // nothing fails until a member of a relayed closure is queued on its own.
         assert!(
             walk.contains(
-                "e.kind IN (1, 2) OFFSET 0) pe                  JOIN derivation_build p ON p.derivation = pe.parent                  WHERE p.demanded AND p.derivation NOT IN (SELECT derivation FROM region)                  AND NOT p.substitutable"
+                "e.kind IN (1, 2) OFFSET 0) pe JOIN derivation_build p \
+                 ON p.derivation = pe.parent WHERE p.demanded \
+                 AND p.derivation NOT IN (SELECT derivation FROM region) \
+                 AND NOT p.substitutable"
             ),
             "the seed's runtime parent must stop at a relay like the walk's arm: {walk}"
         );
