@@ -176,18 +176,13 @@ pub fn drv_present_predicate(alias: &str) -> String {
 /// The build target `{alias}`'s own `.drv` NAR is not in our cache at all: no
 /// `cached_path` row, or a row with no backing NAR. This is the only `.drv`
 /// state a fresh evaluation repairs - it re-materialises and re-uploads the
-/// `.drv`. The exact negation of [`drv_present_predicate`]: a `.drv` that is
-/// present but whose closure has a hole is deliberately NOT this, because
-/// re-evaluating cannot fetch that hole, and conflating the two burned an
-/// evaluation per stall and then failed it as unrecoverable with the `.drv`
-/// cached the whole time.
+/// `.drv`. Negated from [`drv_present_predicate`] rather than restated, so the
+/// two cannot drift: a `.drv` that is present but whose closure has a hole is
+/// deliberately NOT this, because re-evaluating cannot fetch that hole, and
+/// conflating the two burned an evaluation per stall and then failed it as
+/// unrecoverable with the `.drv` cached the whole time.
 pub fn drv_nar_absent_predicate(alias: &str) -> String {
-    format!(
-        r#"NOT EXISTS (
-        SELECT 1 FROM derivation d
-        JOIN cached_path cp ON cp.hash = d.hash
-        WHERE d.id = {alias}.derivation AND cp.file_hash IS NOT NULL)"#
-    )
+    format!("NOT {}", drv_present_predicate(alias))
 }
 
 /// The anchor `{alias}`'s derivation has its full record in. Promotion and
