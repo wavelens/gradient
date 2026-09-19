@@ -29,9 +29,22 @@
 //!
 //! The mirror precondition holds for the seed's recount: a seeded row that loses
 //! completeness is not rippled back, so only a caller whose rows cannot lose it may
-//! seed. Ingest is such a caller, since a derivation's edges all land in the batch
-//! that walks it; [`unwalk`] is the up-ripple for the one event that does take
+//! seed. Ingest is such a caller, since a derivation's BUILD edges all land in the
+//! batch that walks it; [`unwalk`] is the up-ripple for the one event that does take
 //! completeness away.
+//!
+//! # Build edges only
+//!
+//! Every read here is `kind IN (0, 2)`, because the walk follows `inputDrvs` and a
+//! runtime edge is not a walk input. This column was written when the edge table
+//! held build edges alone, and the one-graph migration put runtime edges beside
+//! them: those land from a narinfo or from a finished build, long after the batch
+//! that walked the parent and with no seed of their own. Counting them broke the
+//! precondition above in the direction the module cannot survive - a complete parent
+//! silently gained an incomplete input, then the down-ripple that input eventually
+//! fired decremented a counter that had never counted it, and a counter driven below
+//! zero never reads `= 0` again, so `known::prunable` stops pruning that subtree for
+//! good.
 
 use std::collections::BTreeMap;
 
@@ -48,10 +61,12 @@ pub(crate) const RECOUNT_WALK_COMPLETENESS_SQL: &str = r#"
 WITH RECURSIVE incomplete(id) AS (
     SELECT id FROM derivation WHERE NOT walked
     UNION
-    SELECT e.derivation FROM derivation_dependency e JOIN incomplete i ON i.id = e.dependency),
+    SELECT e.derivation FROM derivation_dependency e JOIN incomplete i ON i.id = e.dependency
+     WHERE e.kind IN (0, 2)),
 counts AS (
     SELECT e.derivation AS id, count(*)::int AS n FROM derivation_dependency e
-    JOIN incomplete i ON i.id = e.dependency GROUP BY e.derivation)
+    JOIN incomplete i ON i.id = e.dependency
+    WHERE e.kind IN (0, 2) GROUP BY e.derivation)
 UPDATE derivation d SET unwalked_inputs = coalesce(c.n, 0)
 FROM derivation w LEFT JOIN counts c ON c.id = w.id
 WHERE d.id = w.id AND w.walked AND w.unwalked_inputs <> coalesce(c.n, 0)
@@ -74,7 +89,7 @@ FROM (SELECT s.id,
              (d0.walked AND d0.unwalked_inputs = 0 AND NOT s.fresh) AS was_complete,
              (SELECT count(*) FROM derivation_dependency e
                 JOIN derivation dep ON dep.id = e.dependency
-               WHERE e.derivation = s.id
+               WHERE e.derivation = s.id AND e.kind IN (0, 2)
                  AND NOT (dep.walked AND dep.unwalked_inputs = 0))::int AS n
       FROM unnest($1::uuid[], $2::bool[]) AS s(id, fresh)
       JOIN derivation d0 ON d0.id = s.id) x
@@ -84,7 +99,7 @@ RETURNING d.id, x.was_complete, (d.walked AND d.unwalked_inputs = 0) AS complete
         params = [DerivationIds(64), Bools(false, 64)],
         tier = Bulk;
 
-    DEPENDENT_COUNTS = "SELECT e.derivation AS id, count(*)::int AS n FROM derivation_dependency e WHERE e.dependency = ANY($1::uuid[]) GROUP BY e.derivation ORDER BY e.derivation",
+    DEPENDENT_COUNTS = "SELECT e.derivation AS id, count(*)::int AS n FROM derivation_dependency e WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) GROUP BY e.derivation ORDER BY e.derivation",
         params = [DerivationIds(64)];
 
     COUNT_DOWN_UNWALKED = r#"
@@ -245,6 +260,32 @@ where
 mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+
+    /// The walk follows `inputDrvs`, so every edge this module counts must be a
+    /// build edge. A runtime edge lands from a narinfo or a finished build, with no
+    /// seed of its own, and one counted by a ripple but never by a seed drives the
+    /// counter below zero for good. Asserted per statement rather than per module so
+    /// a new read cannot be added without one.
+    #[test]
+    fn every_edge_this_module_counts_is_a_build_edge() {
+        let statements =
+            crate::sql::registry().filter(|q| q.file.ends_with("walk_completeness.rs"));
+        let mut edges = 0;
+        for query in statements {
+            let sql = query.text();
+            assert_eq!(
+                sql.matches("derivation_dependency").count(),
+                sql.matches("kind IN (0, 2)").count(),
+                "{} reads an edge with no build-edge filter: {sql}",
+                query.name
+            );
+            edges += sql.matches("derivation_dependency").count();
+        }
+        assert!(
+            edges > 0,
+            "the registry did not reach this module's statements"
+        );
+    }
 
     fn id_row(id: DerivationId, flags: &[(&str, bool)]) -> BTreeMap<String, Value> {
         let mut row = BTreeMap::from([("id".to_owned(), Value::from(id.into_inner()))]);

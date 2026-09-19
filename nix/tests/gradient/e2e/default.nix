@@ -951,8 +951,17 @@ in {
           "WHERE NOT d.walked;"
       ))
       assert unwalked_deps == 0, f"{unwalked_deps} of {edges} dependency edges point at a stub"
-      incomplete = int(sql("SELECT count(*) FROM derivation WHERE walked AND unwalked_inputs <> 0;"))
-      assert incomplete == 0, f"{incomplete} walked derivations still count an unwalked input after a complete walk"
+      # The value, not just the count: a NEGATIVE counter is a ripple that moved a
+      # row no seed had counted, and it never reads `= 0` again, so the prune stops
+      # for good. A positive one is a seed that missed a count-down.
+      incomplete = sql(
+          "SELECT d.name || ' unwalked_inputs=' || d.unwalked_inputs::text"
+          " FROM derivation d WHERE d.walked AND d.unwalked_inputs <> 0"
+          " ORDER BY d.unwalked_inputs, d.name LIMIT 20;"
+      )
+      assert not incomplete, (
+          f"walked derivations still count an unwalked input after a complete walk:\n{incomplete}"
+      )
       assert_no_server_error(server.succeed("journalctl -u gradient-server --no-pager"))
 
       # ── Phase 5b: the graph walks stay fenced and agree with the old shape ─
