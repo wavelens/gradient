@@ -46,6 +46,10 @@ const PROBE_BATCH: usize = 256;
 /// arrived. Only ever reached on an idle tick, and a healthy server answers it
 /// with no rows.
 const PROBE_SWEEP: Duration = Duration::from_secs(60);
+/// How long one pass will keep following the closure down before it hands what is
+/// left back to the next tick. Half of [`PROBE_BUDGET`], so the round that carries
+/// the pass over it still has the other half to finish in.
+const PROBE_DESCENT: Duration = Duration::from_secs(60);
 
 /// The probe as a supervised child of the scheduler. The inbox and the memory
 /// outlive a restart, so a crash loses at most the round it was in.
@@ -67,23 +71,44 @@ pub fn child_spec(state: &Arc<ServerState>) -> ChildSpec {
     })
 }
 
-/// One round: take what gained demand since the last tick, drop what was asked for
-/// recently, and ask the upstreams of the project each anchor's evaluation belongs
-/// to. The hits go back to the graph actor, and then the whole round is recorded as
-/// answered, which is what lets demand descend past a miss; the recompute that
-/// follows reports the next level through the same channel.
+/// One pass: take what gained demand since the last tick and follow the closure
+/// down, a round per level, until it stops or the pass has had its share of the
+/// supervision budget.
+///
+/// The descent is a loop rather than a round a tick because a round's answer
+/// demands the next level and hands it straight back: stopping at one would hold
+/// every build below it for a tick a level, and a bootstrap chain is dozens of
+/// levels deep. It is bounded rather than unbounded because a pass past
+/// [`PROBE_BUDGET`] is a supervision failure, and what a bounded pass leaves is
+/// picked up by the next tick from the same channel.
 async fn probe_pass(
     state: &Arc<ServerState>,
     inbox: &Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>,
     seen: &Mutex<HashMap<DerivationId, Instant>>,
     swept: &Mutex<Instant>,
 ) -> Result<()> {
+    let started = Instant::now();
     let mut requested = drain_requests(inbox).await;
     if requested.is_empty() && sweep_due(swept).await {
         requested.extend(unanswered_demand(state).await?);
     }
 
-    let anchors = fresh(requested, seen).await;
+    while !requested.is_empty() {
+        probe_round(state, fresh(requested, seen).await).await?;
+        if started.elapsed() > PROBE_DESCENT {
+            break;
+        }
+
+        requested = drain_requests(inbox).await;
+    }
+
+    Ok(())
+}
+
+/// Ask for one level and record its answer: the hits go to the graph actor, then
+/// the whole level is marked answered, which is what lets demand descend past a
+/// miss. The recompute that follows reports the next level through the channel.
+async fn probe_round(state: &Arc<ServerState>, anchors: Vec<DerivationId>) -> Result<()> {
     if anchors.is_empty() {
         return Ok(());
     }
@@ -109,7 +134,7 @@ async fn probe_pass(
         }
     }
 
-    // Last, and for the whole round including what was never asked: an anchor with
+    // Last, and for the whole level including what was never asked: an anchor with
     // no output left to ask about has its answer too, and demand stops at an
     // unanswered anchor.
     state
@@ -346,6 +371,23 @@ mod tests {
     async fn the_sweep_runs_at_most_once_an_interval() {
         let swept = Mutex::new(Instant::now());
         assert!(!sweep_due(&swept).await, "a fresh mark is not due");
+    }
+
+    /// The pass follows the closure down in a loop, so an empty channel must end it
+    /// rather than spin it: this runs every second for the life of the server, and
+    /// the mock answers no statement, so any read at all fails here.
+    #[tokio::test]
+    async fn an_idle_pass_reads_nothing() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+
+        probe_pass(
+            &state,
+            &Mutex::new(None),
+            &Mutex::new(HashMap::new()),
+            &Mutex::new(Instant::now()),
+        )
+        .await
+        .expect("an idle tick is a no-op");
     }
 
     /// An anchor no evaluation names has no project, so it has no upstreams to ask:

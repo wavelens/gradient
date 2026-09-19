@@ -707,6 +707,9 @@ Without it, the walk read "no upstream answer yet" as "will be built" and queued
 the build closure of every output an upstream serves; the relay that followed
 withdrew the demand, but a job already handed to a worker cannot be recalled, and
 a source it cannot fetch fails the evaluation that no longer needed it.
+A round's answer demands the next level and hands it straight back, so one pass
+follows the closure down rather than descending a level a tick, and stops after
+half the supervision budget with whatever is left going to the next tick.
 The request channel is in memory, so the loop also sweeps for demanded anchors
 that are still unprobed once a minute on an idle tick: a process that stops
 between the commit and the send would otherwise leave a stall nothing recovers
