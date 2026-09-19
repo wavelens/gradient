@@ -1562,6 +1562,7 @@ in {
               f'{CURL} -sf -H "Authorization: Bearer {token}" '
               f'{API}/tasks/project/task | {JQ} -rj ".message.last_evaluation // empty"'
           ).strip()
+          status3 = ""
           if candidate and candidate not in (eval_id, eval2_id):
               status3 = server.succeed(
                   f'{CURL} -sf -H "Authorization: Bearer {token}" '
@@ -1573,7 +1574,31 @@ in {
               if status3 == "Failed":
                   j = server.succeed("journalctl -u gradient-server --no-pager --since='-600s' -n 300")
                   raise Exception(f"the re-evaluation failed:\n{j[-3000:]}")
-      assert eval3_id, "the re-evaluation did not complete after 900 s"
+          if attempt % 3 == 0:
+              print(f"  [{attempt:>2}/90] re-eval candidate={candidate or 'none'} "
+                    f"status={status3 or '-'}")
+      if not eval3_id:
+          # An ACTIVE `last_evaluation` blocks every later trigger for good -
+          # `update_check` skips while it is - so a re-evaluation that never starts
+          # and one that never finishes read the same from here. The evaluations and
+          # the trigger's own decisions are what tell them apart.
+          evals = sql(
+              "SELECT e.id::text || ' status=' || e.status::text"
+              " || ' created=' || e.created_at::text"
+              " FROM evaluation e ORDER BY e.created_at DESC LIMIT 10;"
+          )
+          decided = server.succeed(
+              "journalctl -u gradient-server --no-pager --since='-900s' -n 8000"
+              " | grep -E 'skipping|update needed|Force evaluation|trigger created' "
+              " | tail -n 15"
+          )
+          raise Exception(
+              f"the re-evaluation did not complete after 900 s. "
+              f"task.last_evaluation={candidate or 'none'}, "
+              f"eval1={eval_id}, eval2={eval2_id}\n"
+              f"evaluations, newest first:\n{evals}\n"
+              f"what the trigger decided:\n{decided}"
+          )
 
       # Polled, not sampled. The producer has no `build_job` of its own in an
       # evaluation that re-ingests nothing, so it is reached only through the eval
