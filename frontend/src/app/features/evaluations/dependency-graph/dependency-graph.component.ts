@@ -609,6 +609,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       case 'Aborted':           return '#6b7280';
       case 'DependencyFailed':  return '#6b7280';
       case 'Created':           return '#6b7280';
+      case 'Skipped':           return '#abb0b4';
       default:                  return '#abb0b4';
     }
   }
@@ -622,6 +623,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     { label: 'Failed', tone: 'danger' },
     { label: 'Aborted', tone: 'idle' },
     { label: 'Dependency Failed', tone: 'idle' },
+    { label: 'Skipped', tone: 'idle' },
   ];
 
   statusSeverity(status: string): BadgeSeverity {
@@ -641,7 +643,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       case 'FailedTransient':
       case 'FailedTimeout':     return 'status-danger';
       case 'Aborted':
-      case 'DependencyFailed':  return 'status-neutral';
+      case 'DependencyFailed':
+      case 'Skipped':           return 'status-neutral';
       case 'Building':
       case 'Queued':            return 'status-running';
       default:                  return '';

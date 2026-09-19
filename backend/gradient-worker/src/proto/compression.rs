@@ -122,56 +122,10 @@ pub(crate) fn decompress_reader<R: std::io::Read>(reader: R, kind: Compression) 
     Ok(out)
 }
 
-/// zstd window size produced by compression level 6 (`windowLog` 21 = 2 MiB).
-/// An upstream zstd NAR with a window at least this large is relayed verbatim;
-/// a smaller window (levels 1-2) is recompressed at level 6 before storing.
-pub(crate) const LEVEL6_WINDOW_BYTES: u64 = 2 * 1024 * 1024;
-
-/// Read the `Window_Size` encoded in a zstd frame header (RFC 8878 §3.1.1.1).
-/// Returns `None` when `frame` isn't a zstd frame or its header is truncated.
-/// For single-segment frames (no `Window_Descriptor`) the window equals the
-/// `Frame_Content_Size`.
-pub(crate) fn zstd_window_size(frame: &[u8]) -> Option<u64> {
-    if frame.len() < 5 || frame[0..4] != [0x28, 0xB5, 0x2F, 0xFD] {
-        return None;
-    }
-
-    let descriptor = frame[4];
-    let fcs_flag = (descriptor >> 6) as usize;
-    let single_segment = descriptor & 0x20 != 0;
-    let dict_id_flag = (descriptor & 0x03) as usize;
-
-    if !single_segment {
-        let wd = *frame.get(5)?;
-        let exponent = u32::from(wd >> 3);
-        let mantissa = u64::from(wd & 0x7);
-        let window_base = 1u64.checked_shl(10 + exponent)?;
-
-        return Some(window_base + (window_base / 8) * mantissa);
-    }
-
-    // Single-segment: Window_Size == Frame_Content_Size, located after the
-    // optional Dictionary_ID. FCS_flag 0 is a single byte in this mode.
-    let dict_size = [0usize, 1, 2, 4][dict_id_flag];
-    let fcs_size = [1usize, 2, 4, 8][fcs_flag];
-    let start = 5 + dict_size;
-    let bytes = frame.get(start..start + fcs_size)?;
-
-    let mut fcs = bytes
-        .iter()
-        .enumerate()
-        .fold(0u64, |acc, (i, b)| acc | (u64::from(*b) << (8 * i)));
-    if fcs_flag == 1 {
-        fcs += 256;
-    }
-
-    Some(fcs)
-}
-
 /// Extract the single regular-file payload from a NAR. `.drv` files are
 /// stored as exactly that, so this is enough to recover the .drv bytes
 /// without writing them to disk first.
-async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
+pub(crate) async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
     use futures::StreamExt as _;
     use harmonia_file_nar::{NarEvent, parse_nar};
     use tokio::io::AsyncReadExt as _;
@@ -507,47 +461,6 @@ mod tests {
         let compressed = encoder.finish().unwrap();
         let out = decompress(&compressed, Compression::Bzip2).unwrap();
         assert_eq!(out, payload);
-    }
-
-    /// Build a minimal multi-segment zstd frame header (magic + descriptor +
-    /// `Window_Descriptor`) encoding `window_log` with the given `mantissa`.
-    fn zstd_header(window_log: u8, mantissa: u8) -> Vec<u8> {
-        let wd = ((window_log - 10) << 3) | (mantissa & 0x7);
-        vec![0x28, 0xB5, 0x2F, 0xFD, 0x00, wd]
-    }
-
-    #[test]
-    fn zstd_window_size_decodes_window_descriptor() {
-        // windowLog 21 (level 6) == exactly 2 MiB.
-        assert_eq!(zstd_window_size(&zstd_header(21, 0)), Some(2 * 1024 * 1024));
-        // windowLog 20 (level 2) is below the threshold.
-        assert_eq!(zstd_window_size(&zstd_header(20, 0)), Some(1024 * 1024));
-        // Mantissa adds windowBase/8 per unit.
-        assert_eq!(
-            zstd_window_size(&zstd_header(21, 4)),
-            Some(2 * 1024 * 1024 + (2 * 1024 * 1024 / 8) * 4)
-        );
-    }
-
-    #[test]
-    fn zstd_window_size_rejects_non_zstd_and_truncated() {
-        assert_eq!(zstd_window_size(b"not a zstd frame at all"), None);
-        assert_eq!(zstd_window_size(&[0x28, 0xB5, 0x2F, 0xFD]), None); // no descriptor
-        assert_eq!(zstd_window_size(&[0x28, 0xB5, 0x2F, 0xFD, 0x00]), None); // no window byte
-    }
-
-    #[test]
-    fn zstd_window_size_matches_level6_threshold() {
-        // A real level-6 frame over >2 MiB of data carries a >= 2 MiB window;
-        // a level-1 frame over the same data stays below it. This anchors the
-        // LEVEL6_WINDOW_BYTES assumption end-to-end.
-        let data: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
-
-        let level6 = zstd::encode_all(std::io::Cursor::new(&data), 6).unwrap();
-        assert!(zstd_window_size(&level6).unwrap() >= LEVEL6_WINDOW_BYTES);
-
-        let level1 = zstd::encode_all(std::io::Cursor::new(&data), 1).unwrap();
-        assert!(zstd_window_size(&level1).unwrap() < LEVEL6_WINDOW_BYTES);
     }
 
     #[test]

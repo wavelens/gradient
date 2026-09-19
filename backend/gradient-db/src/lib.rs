@@ -26,7 +26,6 @@ pub mod drv_output_spec;
 pub mod eval_watchdog;
 pub mod gc;
 pub mod graph_sql;
-pub mod nar_closure;
 pub mod outbox;
 pub mod permissions;
 pub mod pool;
@@ -41,11 +40,14 @@ pub mod recovery;
 pub mod retention;
 pub mod rollup;
 pub mod runtime_closure;
+pub mod runtime_edges;
+pub mod runtime_readiness;
 pub mod sql;
 pub mod state_machine;
 pub mod status;
 pub mod status_sql;
 pub mod task_board;
+pub mod walk_completeness;
 
 #[cfg(test)]
 pub(crate) mod test_ctx;
@@ -67,7 +69,7 @@ pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;
 pub use self::connection::*;
 pub use self::consistency::{ConsistencyReport, graph_consistency_report};
-pub use self::context::DbContext;
+pub use self::context::{DbContext, ProbeRequests};
 pub use self::debug_info::{
     DebugInfoTarget, carries_debug_info, index_cached_path, lookup_for_cache, pending_debug_index,
 };
@@ -86,10 +88,6 @@ pub use self::gc::*;
 pub use self::graph_sql::{
     ClosureDirection, begin_walk, dependency_closure_cte, eval_closure_cte,
     reachable_derivations_cte,
-};
-pub use self::nar_closure::{
-    PathLock, ReferenceLock, lock_paths, lock_reference_endpoints, retire_paths,
-    retire_paths_where, ripple_unwhole, ripple_whole, seed_references,
 };
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_cache::project_has_writable_cache;
@@ -110,10 +108,18 @@ pub use self::reachability::{
 pub use self::readiness::{
     AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,
     lost_fetchability, promote, promote_closure, recompute_demand, recount_demanded,
-    repair_pending, seed_unready_deps, unpromote_drv_owners, unpromote_ungated, unwalk_derivations,
+    repair_pending, seed_unready_deps, settle_demand, settle_skipped, skip_undemanded,
+    thaw_skipped, unpromote_drv_owners, unpromote_ungated, unwalk_derivations,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;
+pub use self::runtime_edges::{insert_runtime_edges, producers_of_tokens};
+pub use self::runtime_readiness::{
+    Seeded, lock_cached_paths, recount_missing_runtime_deps, retire_outputs,
+    ripple_anchors_unwhole, ripple_anchors_whole, seed_runtime_deps, whole_among,
+    whole_output_hashes,
+};
 pub use self::status::*;
 pub use self::task_board::*;
+pub use self::walk_completeness::{recount_walk_completeness, seed_walk_completeness, unwalk};

@@ -16,7 +16,7 @@
 //! [`crate::graph_sql::fetchable_predicate`] is the one definition of the flag and
 //! [`crate::graph_sql::gates_predicate`] the one definition of the gate.
 //!
-//! Like `cached_path.missing_references`, this counter is MOVED and not derived, so
+//! Like `derivation_build.missing_runtime_deps`, this counter is MOVED and not derived, so
 //! every ripple must be driven by a TRANSITION and never by a state: rippling from a
 //! row that did not just flip, or rippling one frontier twice, moves a dependent past
 //! zero, and a negative counter never satisfies `= 0` again. [`became_fetchable`] and
@@ -93,7 +93,7 @@
 //! ripple writes the same dependent, so whichever of the two commits second wins and
 //! the next sweep converges. Closing it would need the lock to cover the transitive
 //! read set, which is the unchunked pass this shape exists to avoid.
-//! `nar_closure::repair_counters_for` carries the identical residual for the same
+//! the wholeness recount carries the identical residual for the same
 //! reason.
 //!
 //! Repaired: both columns, over the pending anchors and their direct dependencies as
@@ -123,7 +123,7 @@
 //!
 //! `unready_deps` carries no `CHECK (unready_deps >= 0)` and must not get one: a ripple
 //! legitimately passes through intermediate values inside its own transaction, so the
-//! constraint would abort correct work. `cached_path.missing_references` omits it for
+//! constraint would abort correct work. `missing_runtime_deps` omits it for
 //! the same reason.
 //!
 //! # What this module deliberately leaves to its callers
@@ -157,7 +157,7 @@ use crate::status::TransitionChange;
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_types::{DerivationId, EvaluationId};
-use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait, Value};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait, Value};
 use std::sync::LazyLock;
 
 /// The value `unready_deps` holds for anchor `{alias}`: its direct dependencies whose
@@ -313,9 +313,9 @@ crate::sql_lazy! {
     PROMOTE_CLOSURE_QUERY = || PROMOTE_CLOSURE.as_str(),
         params = [EvaluationId],
         tier = Walk,
-        budget = crate::sql::Budget::walk().buffers(1_400_000)
+        budget = crate::sql::Budget::walk().buffers(900_000)
             .because("the scope is an evaluation's whole dependency closure, and the \
-                      walk that names it reads ~8 buffers per node it visits"),
+                      walk that names it reads ~5 buffers per node it visits"),
         flags = [Walk];
 }
 
@@ -445,7 +445,7 @@ crate::sql! {
 /// leaves nothing to retry around. What the proof does NOT cover is the ripple's own
 /// write set, the flipped anchors' dependents, which no ordered lock names; the module
 /// doc says why that is sound and what it costs. The caveat on
-/// [`crate::nar_closure::ReferenceLock`] applies here too: the proof says the write
+/// The caveat on every lock proof applies here too: it says the write
 /// follows the lock, not that no read preceded it.
 #[must_use = "a lock proves nothing unless a write runs on it"]
 pub struct AnchorLock<'txn> {
@@ -604,39 +604,111 @@ pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCh
         .collect())
 }
 
-/// One absolute recompute of `demanded` over `region`, from `seed`. Absolute rather
-/// than incremental for the reason [`seed_unready_deps`] is: an adjustment cannot
-/// express "this anchor keeps its demand through a different parent", and an anchor
-/// that keeps it re-demands everything below it, which the walk's downward step
-/// computes for free. It returns each row it changed WITH its new value, so one
-/// statement serves a gain and a loss and no caller has to know which it caused.
-pub(crate) fn demand_recompute_sql(region: &str, seed: &str, bound: &str) -> String {
-    format!(
-        "{cte} \
-         UPDATE derivation_build db \
-         SET demanded = (db.derivation IN (SELECT derivation FROM demanded)), \
-             updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE {region}db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
-         RETURNING db.derivation, db.demanded",
-        cte = crate::graph_sql::demand_closure_cte(seed, bound),
-    )
+crate::sql! {
+    /// A `Created` anchor nothing demands and no entry point names: a build-time
+    /// dependency of something we relay, which will never be built and is not
+    /// waiting for anything either. `Skipped` is what settles it on the board.
+    ///
+    /// Bounded by the ids the demand move reports, so the sweep's table-wide form
+    /// below is the only pass that reads the whole table.
+    SKIP_UNDEMANDED = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.derivation = ANY($1::uuid[]) AND db.status = 0 AND NOT db.demanded \
+           AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
+         RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
+        params = [DerivationIds(64)];
+
+    /// The mirror: demand came back, so the anchor is pending work again. It goes
+    /// to `Created` and not to `Queued` - the promote that follows reads the gates.
+    THAW_SKIPPED = "UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.derivation = ANY($1::uuid[]) AND db.status = 10 AND db.demanded \
+         RETURNING db.derivation, 10 AS from_status, 0 AS to_status",
+        params = [DerivationIds(64)];
+
+    /// [`SKIP_UNDEMANDED`] over the whole table: the sweep's backstop for a lost
+    /// move, and the backfill for every anchor that was already settled when the
+    /// status existed.
+    SKIP_UNDEMANDED_ALL = "UPDATE derivation_build db SET status = 10, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.status = 0 AND NOT db.demanded \
+           AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation) \
+         RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
+        params = [],
+        tier = Sweep;
+
+    THAW_SKIPPED_ALL = "UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.status = 10 AND db.demanded \
+         RETURNING db.derivation, 10 AS from_status, 0 AS to_status",
+        params = [],
+        tier = Sweep;
+}
+
+/// Settle every `Created` anchor among `candidates` that nothing demands.
+pub async fn skip_undemanded<C: ConnectionTrait>(
+    db: &C,
+    candidates: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(returned_transitions(
+        db.query_all_raw(SKIP_UNDEMANDED.bind([ids(candidates)]))
+            .await?,
+    ))
+}
+
+/// Wake every `Skipped` anchor among `candidates` that something wants again.
+pub async fn thaw_skipped<C: ConnectionTrait>(
+    db: &C,
+    candidates: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(returned_transitions(
+        db.query_all_raw(THAW_SKIPPED.bind([ids(candidates)]))
+            .await?,
+    ))
+}
+
+/// The sweep's table-wide pair, run after the demand recount so both read a
+/// corrected column. Returns every row either moved.
+pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
+    let mut changes = returned_transitions(db.query_all_raw(THAW_SKIPPED_ALL.stmt()).await?);
+    changes.extend(returned_transitions(
+        db.query_all_raw(SKIP_UNDEMANDED_ALL.stmt()).await?,
+    ));
+
+    Ok(changes)
 }
 
 /// Table-wide, seeded from every entry point: the backstop for a lost recompute and
 /// the backfill the migration deliberately does not carry.
 ///
+/// Absolute rather than incremental for the reason [`seed_unready_deps`] is: an
+/// adjustment cannot express "this anchor keeps its demand through a different
+/// parent", and an anchor that keeps it re-demands everything below it, which the
+/// walk's downward step computes for free. It returns each row it changed WITH its
+/// new value, so one statement serves a gain and a loss and no caller has to know
+/// which it caused.
+///
 /// Only anchors in a builder status are rewritten, because they are the only ones a
 /// gate reads the column on. A terminal anchor keeps whatever it carried when it was
 /// pending, and the recompute that thaws it names it as a root, so the value it reads
-/// on the way back into the queue is computed and never inherited.
+/// on the way back into the queue is computed and never inherited. The scope is the
+/// whole pending table by design, so the scan the planner answers it with is the
+/// right plan and the tier says so.
 pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> = LazyLock::new(|| {
-    demand_recompute_sql(
-        &format!(
-            "db.status IN ({pending}) AND ",
-            pending = status_sql::build_in(&crate::graph_sql::BUILDER_STATUSES),
-        ),
-        "SELECT derivation FROM entry_point",
-        "",
+    format!(
+        "{cte} \
+         UPDATE derivation_build db \
+         SET demanded = (db.derivation IN (SELECT derivation FROM demanded)), \
+             updated_at = (now() AT TIME ZONE 'UTC') \
+         WHERE db.status IN ({pending}) \
+           AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
+         RETURNING db.derivation, db.demanded",
+        cte = crate::graph_sql::demand_closure_cte("SELECT derivation FROM entry_point", ""),
+        pending = status_sql::build_in(&crate::graph_sql::BUILDER_STATUSES),
     )
 });
 
@@ -681,29 +753,44 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
     // region member. Unfenced, the planner hoists the whole EXISTS out and answers
     // it standalone - a sequential scan of every anchor filtered on `demanded`,
     // which reads the graph to find the parents of a region of a few dozen.
+    // One lookup per edge kind, each demanding what its own arm of the walk would:
+    // a parent over a runtime edge needs only to be demanded and named, a parent
+    // over a build edge has to be a builder as well.
+    let parent = |kind: &str, join: &str, restrict: &str| {
+        format!(
+            "EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent FROM derivation_dependency e \
+                                    WHERE e.dependency = r.derivation AND e.kind IN ({kind}) \
+                                    OFFSET 0) pe \
+                     JOIN derivation_build p ON p.derivation = pe.parent {join} \
+                     WHERE p.demanded \
+                       AND p.derivation NOT IN (SELECT derivation FROM region){restrict} \
+                       AND EXISTS (SELECT 1 FROM build_job bj \
+                                   WHERE bj.derivation = p.derivation))"
+        )
+    };
     let seed = format!(
         "SELECT r.derivation FROM region r \
          WHERE EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) \
-            OR EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent FROM derivation_dependency e \
-                                      WHERE e.dependency = r.derivation OFFSET 0) pe \
-                       JOIN derivation_build p ON p.derivation = pe.parent \
-                       JOIN derivation w ON w.id = p.derivation \
-                       WHERE p.demanded \
-                         AND p.derivation NOT IN (SELECT derivation FROM region) \
-                         AND ({builder}) \
-                         AND EXISTS (SELECT 1 FROM build_job bj \
-                                     WHERE bj.derivation = p.derivation))",
-        builder = crate::graph_sql::builder_predicate("p", "w"),
+            OR {runtime} \
+            OR {build}",
+        runtime = parent("1, 2", "", ""),
+        build = parent(
+            "0, 2",
+            "JOIN derivation w ON w.id = p.derivation",
+            &format!(
+                " AND ({builder})",
+                builder = crate::graph_sql::builder_predicate("p", "w")
+            ),
+        ),
     );
-    let body = demand_recompute_sql(
-        "db.derivation IN (SELECT derivation FROM region) AND ",
-        &seed,
-        "e.dependency IN (SELECT derivation FROM region)",
-    );
+    let closure = crate::graph_sql::demand_closure_cte(&seed, "SELECT derivation FROM region");
 
     format!(
-        "{region}, {rest}",
-        rest = body.trim_start_matches("WITH RECURSIVE "),
+        "{region}, {rest} \
+         SELECT DISTINCT r.derivation, \
+                (r.derivation IN (SELECT derivation FROM demanded)) AS demanded \
+         FROM region r ORDER BY r.derivation",
+        rest = closure.trim_start_matches("WITH RECURSIVE "),
     )
 });
 
@@ -714,6 +801,53 @@ crate::sql_lazy! {
         flags = [Walk];
 }
 
+crate::sql! {
+    /// Apply what [`RECOMPUTE_DEMAND`] read, as values rather than as a membership
+    /// test. `WHERE db.derivation IN (SELECT derivation FROM region)` is a predicate
+    /// the planner may answer by reading every anchor and filtering, and it does: a
+    /// recursive CTE carries no row estimate worth believing, so a region of a few
+    /// dozen loses to a sequential scan of the whole table. A bound array estimates
+    /// small, drives a nested loop over the unique index, and takes its row locks in
+    /// the derivation order the walk sorted them into.
+    WRITE_DEMAND = r#"
+UPDATE derivation_build db
+SET demanded = x.demanded, updated_at = (now() AT TIME ZONE 'UTC')
+FROM unnest($1::uuid[], $2::bool[]) AS x(derivation, demanded)
+WHERE db.derivation = x.derivation AND db.demanded <> x.demanded
+RETURNING db.derivation, db.demanded
+"#,
+        params = [DerivationIds(64), Bools(false, 64)];
+}
+
+/// Write the region's recomputed demand and return the rows that disagreed, which is
+/// what [`recompute_demand`] reports as gained and lost. An empty region writes
+/// nothing rather than binding two empty arrays.
+async fn write_demand(
+    txn: &DatabaseTransaction,
+    region: &[QueryResult],
+) -> Result<Vec<QueryResult>, DbErr> {
+    let mut derivations: Vec<uuid::Uuid> = Vec::with_capacity(region.len());
+    let mut demanded: Vec<bool> = Vec::with_capacity(region.len());
+    for row in region {
+        let (Ok(derivation), Ok(want)) = (
+            row.try_get::<uuid::Uuid>("", "derivation"),
+            row.try_get::<bool>("", "demanded"),
+        ) else {
+            continue;
+        };
+
+        derivations.push(derivation);
+        demanded.push(want);
+    }
+
+    if derivations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    txn.query_all_raw(WRITE_DEMAND.bind([derivations.into(), demanded.into()]))
+        .await
+}
+
 /// Recompute demand over `roots` and the pending closure below them, after an event
 /// that changed whether they carry it.
 ///
@@ -721,6 +855,13 @@ crate::sql_lazy! {
 /// stored value is as stale as its subtree's. Runs under [`lock_anchors`] on the
 /// roots; two recomputes over overlapping regions can still interleave, and the
 /// sweep's table-wide recount is the backstop that notices.
+///
+/// Two statements in one transaction: [`RECOMPUTE_DEMAND`] walks and answers, and
+/// [`WRITE_DEMAND`] writes the answer it was handed. Naming the region inside the
+/// write instead costs a sequential scan of every anchor, for the reason written on
+/// that statement. The split widens the window between reading the graph and writing
+/// what it implied to a statement boundary; only the roots are locked either way, so
+/// the backstop is the same one, and the write still skips a row that already agrees.
 pub async fn recompute_demand<C>(db: &C, roots: &[DerivationId]) -> Result<DemandMoved, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -731,9 +872,10 @@ where
 
     let txn = crate::graph_sql::begin_walk(db).await?;
     let _lock = lock_anchors(&txn, roots).await?;
-    let rows = txn
+    let region = txn
         .query_all_raw(RECOMPUTE_DEMAND.bind([ids(roots)]))
         .await?;
+    let rows = write_demand(&txn, &region).await?;
     txn.commit().await?;
 
     let mut moved = DemandMoved::default();
@@ -753,6 +895,31 @@ where
     }
 
     Ok(moved)
+}
+
+/// Settle the queue against what a [`recompute_demand`] moved: thaw and queue what
+/// gained demand, release and skip what lost it.
+///
+/// Order is load-bearing on both sides. A thaw has to precede the promote or the
+/// gate reads a `Skipped` row and passes it over; the skip has to follow the
+/// un-promote or it would try to settle a row still `Queued`. One owner, because a
+/// caller that got the order wrong would leave an anchor `Skipped` that something
+/// had started wanting again, and nothing else ever looks at it.
+pub async fn settle_demand<C: ConnectionTrait>(
+    db: &C,
+    moved: &DemandMoved,
+) -> Result<Vec<TransitionChange>, DbErr> {
+    let mut changes = Vec::new();
+    for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(thaw_skipped(db, gained).await?);
+        changes.extend(promote(db, gained).await?);
+    }
+    for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(unpromote_ungated(db, lost).await?);
+        changes.extend(skip_undemanded(db, lost).await?);
+    }
+
+    Ok(changes)
 }
 
 /// Queue every `Created` candidate whose gates hold. The gate is embedded, so a
@@ -838,16 +1005,11 @@ pub async fn unpromote_ungated<C: ConnectionTrait>(
     ))
 }
 
-crate::sql! {
-    UNWALK_DERIVATIONS = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
-        params = [DerivationIds(64)];
-}
-
 /// Drop the record of `derivations` and close the gates that read `walked`, so the
 /// next evaluation walks them again: the un-promoted anchors come back as transitions
 /// for the caller to fan out with [`crate::status::emit_transition_effects`].
 ///
-/// The UPDATE runs first, because it locks `derivation` rows before [`lock_anchors`]
+/// The un-walk runs first, because it locks `derivation` rows before [`lock_anchors`]
 /// and [`unpromote_ungated`] reach `derivation_build` - the class order ingest
 /// (`upsert_walked`, then the anchor locks) and the GC's orphan reclaim both take. The
 /// anchor pass that follows acquires the un-promoted rows in `derivation` order instead
@@ -861,8 +1023,7 @@ pub async fn unwalk_derivations(
     }
 
     let txn = ctx.worker_db.begin().await?;
-    txn.execute_raw(UNWALK_DERIVATIONS.bind([ids(derivations)]))
-        .await?;
+    crate::walk_completeness::unwalk(&txn, derivations).await?;
     let _anchors = lock_anchors(&txn, derivations).await?;
     let changes = unpromote_ungated(&txn, derivations).await?;
     txn.commit().await?;
@@ -1468,6 +1629,32 @@ mod tests {
         );
     }
 
+    /// `Skipped` is the projection of "Created, and nothing wants it". An entry
+    /// point is demand by definition, so a named root can never be settled by it,
+    /// and the thaw goes back to `Created` rather than to the queue: the promote
+    /// that follows is what reads the gates.
+    #[test]
+    fn skip_moves_only_a_created_undemanded_anchor_no_entry_point_names() {
+        let sql = SKIP_UNDEMANDED.text();
+        assert!(sql.contains("SET status = 10"), "{sql}");
+        assert!(
+            sql.contains("AND db.status = 0 AND NOT db.demanded"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(
+                "NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = db.derivation)"
+            ),
+            "{sql}"
+        );
+
+        let thaw = THAW_SKIPPED.text();
+        assert!(
+            thaw.contains("SET status = 0") && thaw.contains("AND db.status = 10 AND db.demanded"),
+            "{thaw}"
+        );
+    }
+
     /// The recompute is absolute and writes only the rows that disagree, so its
     /// row count IS the drift and a healthy fleet writes nothing. It returns the
     /// new value per row, because one statement serves both directions: what it
@@ -1493,12 +1680,12 @@ mod tests {
         );
     }
 
-    /// One statement, both directions, over a region that INCLUDES the roots. A
-    /// thawed anchor's own demand is as stale as anything below it - its value was
-    /// last written when it was terminal - so a recompute that only walked downward
-    /// would relay busybox again the moment a retire reset it (#666). The seed comes
-    /// from outside the region, because a member kept by an outside builder
-    /// re-demands its own subtree.
+    /// Both directions, over a region that INCLUDES the roots. A thawed anchor's own
+    /// demand is as stale as anything below it - its value was last written when it
+    /// was terminal - so a recompute that only walked downward would relay busybox
+    /// again the moment a retire reset it (#666). The seed comes from outside the
+    /// region, because a member kept by an outside builder re-demands its own
+    /// subtree. The walk answers and the write is handed what it answered.
     #[tokio::test]
     async fn the_bounded_recompute_covers_its_roots_and_seeds_from_outside() {
         let root = DerivationId::now_v7();
@@ -1506,6 +1693,7 @@ mod tests {
         let off = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_exec_results([exec(0), exec(1)])
+            .append_query_results([vec![demand_row(on, true), demand_row(off, false)]])
             .append_query_results([vec![demand_row(on, true), demand_row(off, false)]])
             .into_connection();
 
@@ -1519,22 +1707,54 @@ mod tests {
                 && log[1].contains("ORDER BY derivation FOR UPDATE"),
             "the walk its plan gate measures is raised and its roots locked: {log:?}"
         );
-        let sql = norm(&log[2]);
+        let walk = norm(&log[2]);
         assert!(
-            sql.contains("region(evaluation, derivation, builder) AS"),
-            "{sql}"
+            walk.contains("region(evaluation, derivation, builder) AS"),
+            "{walk}"
         );
         assert!(
-            sql.contains("db.derivation IN (SELECT derivation FROM region)"),
-            "the write must be bounded to the region: {sql}"
+            walk.contains("p.derivation NOT IN (SELECT derivation FROM region)"),
+            "the seed must come from demanders OUTSIDE the region: {walk}"
         );
         assert!(
-            sql.contains("p.derivation NOT IN (SELECT derivation FROM region)"),
-            "the seed must come from demanders OUTSIDE the region: {sql}"
+            walk.contains("FROM region r ORDER BY r.derivation"),
+            "the write takes its locks in the order the walk sorted: {walk}"
         );
+        let write = norm(&log[3]);
         assert!(
-            sql.contains("RETURNING db.derivation, db.demanded"),
-            "{sql}"
+            write.contains("FROM unnest($1::uuid[], $2::bool[]) AS x(derivation, demanded)")
+                && write.contains("RETURNING db.derivation, db.demanded"),
+            "the region reaches the write as values, not as a subquery: {write}"
         );
+    }
+    /// The un-walk selects what was complete, drops the record, and only then locks
+    /// anchors: derivation rows first, as every writer of them does.
+    #[tokio::test]
+    async fn an_unwalk_moves_the_counter_before_it_reaches_the_anchors() {
+        let gone = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(1), exec(0)])
+            .append_query_results([vec![BTreeMap::from([(
+                "id".to_owned(),
+                Value::from(gone.into_inner()),
+            )])]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+
+        unwalk_derivations(&ctx, &[gone]).await.unwrap();
+        drop(ctx);
+
+        let log = crate::pool::raw_statements(pool.into_transaction_log());
+        let at = |needle: &str| {
+            log.iter()
+                .position(|s| s.sql.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} must run: {log:?}"))
+        };
+        let complete = at("AND walked AND unwalked_inputs = 0 ORDER BY id FOR UPDATE");
+        let unwalk = at("UPDATE derivation SET walked = false");
+        let anchors = at("FROM derivation_build");
+        assert!(complete < unwalk && unwalk < anchors, "{log:?}");
     }
 }

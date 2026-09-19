@@ -78,7 +78,8 @@ fn ci_reports(status: BuildStatus) -> bool {
 }
 
 /// Fan out the consequences of `changes`: everything [`announce`] does, then the
-/// demand its direct inputs gained or lost, whose own moves are announced in turn.
+/// demand its direct inputs gained or lost, whose own moves are announced in turn,
+/// and the probe request for what gained it.
 ///
 /// That second round cannot need a third. It only ever moves rows between
 /// `Created` and `Queued`, both of which are in [`BUILDER_STATUSES`], so no row it
@@ -94,7 +95,12 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
     }
 
     announce(ctx, changes).await;
-    let (regated, undemanded) = move_demand(ctx, changes).await;
+    let Moved {
+        regated,
+        undemanded,
+        gained,
+    } = move_demand(ctx, changes).await;
+    ctx.probe_requests.send(gained);
     if !regated.is_empty() {
         announce(ctx, &regated).await;
     }
@@ -134,13 +140,9 @@ fn demand_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
 /// An anchor already `Building` keeps building: [`crate::readiness::unpromote_ungated`]
 /// moves only `Queued` rows. The bytes a running build produces are cached and useful,
 /// while an abort throws the work away and complicates attempt attribution.
-async fn move_demand(
-    ctx: &DbContext,
-    changes: &[TransitionChange],
-) -> (Vec<TransitionChange>, Vec<DerivationId>) {
+async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
     let db = &ctx.worker_db;
-    let mut regated = Vec::new();
-    let mut undemanded = Vec::new();
+    let mut moved_out = Moved::default();
     for chunk in demand_moves(changes).chunks(crate::IN_CHUNK_SIZE) {
         let moved = match crate::readiness::recompute_demand(db, chunk).await {
             Ok(moved) => moved,
@@ -150,22 +152,25 @@ async fn move_demand(
             }
         };
 
-        for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
-            match crate::readiness::promote(db, gained).await {
-                Ok(changes) => regated.extend(changes),
-                Err(e) => error!(error = %e, "failed to queue what an anchor demands"),
-            }
+        match crate::readiness::settle_demand(db, &moved).await {
+            Ok(changes) => moved_out.regated.extend(changes),
+            Err(e) => error!(error = %e, "failed to settle the queue against a demand move"),
         }
-        for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
-            match crate::readiness::unpromote_ungated(db, lost).await {
-                Ok(changes) => regated.extend(changes),
-                Err(e) => error!(error = %e, "failed to release undemanded anchors"),
-            }
-        }
-        undemanded.extend(moved.lost);
+        moved_out.gained.extend(moved.gained);
+        moved_out.undemanded.extend(moved.lost);
     }
 
-    (regated, undemanded)
+    moved_out
+}
+
+/// What a demand move owes its caller: the regated anchors to announce, the ones
+/// that lost demand for the evaluation finalize, and the ones that gained it for
+/// the upstream probe.
+#[derive(Debug, Default)]
+struct Moved {
+    regated: Vec<TransitionChange>,
+    undemanded: Vec<DerivationId>,
+    gained: Vec<DerivationId>,
 }
 
 /// The graph version that invalidates the per-entry-point histogram cache, board
@@ -546,6 +551,60 @@ mod tests {
         );
     }
 
+    /// An anchor gains demand exactly when something starts wanting its outputs in
+    /// our cache, which is also exactly when it is worth asking an upstream for
+    /// them. The probe runs off the graph's path, so the gained set is handed to it
+    /// here; without that nothing probes at all once ingest stops doing it.
+    #[tokio::test]
+    async fn what_gains_demand_is_handed_to_the_upstream_probe() {
+        let crossed = DerivationId::now_v7();
+        let gained = DerivationId::now_v7();
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_exec_results([
+                sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                },
+                sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+            ])
+            .append_query_results(std::iter::repeat_n(
+                vec![std::collections::BTreeMap::from([
+                    (
+                        "derivation".to_owned(),
+                        sea_orm::Value::from(gained.into_inner()),
+                    ),
+                    ("demanded".to_owned(), sea_orm::Value::from(true)),
+                ])],
+                2,
+            ))
+            .append_query_results([
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
+            ])
+            .into_connection();
+        let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(db).await;
+
+        let moved = move_demand(
+            &ctx,
+            &[TransitionChange {
+                derivation: crossed,
+                from: BuildStatus::Created,
+                to: BuildStatus::Completed,
+            }],
+        )
+        .await;
+        ctx.probe_requests.send(moved.gained);
+        crate::test_ctx::settle(ctx).await;
+
+        assert_eq!(
+            probes.try_recv().expect("the gained set reaches the probe"),
+            vec![gained]
+        );
+    }
+
     /// An anchor crossing the boundary recomputes its whole pending closure, not one
     /// hop: the source FODs under a relayed anchor were built because a one-hop
     /// re-gate never reached them (#666).
@@ -564,20 +623,24 @@ mod tests {
                     rows_affected: 1,
                 },
             ])
-            .append_query_results([vec![std::collections::BTreeMap::from([
-                (
-                    "derivation".to_owned(),
-                    sea_orm::Value::from(lost.into_inner()),
-                ),
-                ("demanded".to_owned(), sea_orm::Value::from(false)),
-            ])]])
+            .append_query_results(std::iter::repeat_n(
+                vec![std::collections::BTreeMap::from([
+                    (
+                        "derivation".to_owned(),
+                        sea_orm::Value::from(lost.into_inner()),
+                    ),
+                    ("demanded".to_owned(), sea_orm::Value::from(false)),
+                ])],
+                2,
+            ))
             .append_query_results([
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
                 Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new(),
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
 
-        let (_, undemanded) = move_demand(
+        let moved = move_demand(
             &ctx,
             &[TransitionChange {
                 derivation: crossed,
@@ -589,7 +652,7 @@ mod tests {
         drop(ctx);
 
         assert_eq!(
-            undemanded,
+            moved.undemanded,
             vec![lost],
             "what lost its demand is reported, so the evaluations waiting on it can settle"
         );

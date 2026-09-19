@@ -34,8 +34,16 @@ pub struct ConsistencyReport {
     /// `fetchable` and `unready_deps` rows rewritten over the pending anchors
     /// and their direct dependencies.
     pub counter_drift: i64,
+    /// Walked derivations whose `unwalked_inputs` disagreed with the stubs below them.
+    pub walk_drift: i64,
+    /// Anchors whose `missing_runtime_deps` disagreed with their runtime edges.
+    /// Also the column's backfill: the migration deliberately carries none.
+    pub runtime_drift: i64,
     /// Anchors whose `demanded` disagreed with the walk from the entry points.
     pub demand_drift: i64,
+    /// Anchors this pass settled to `Skipped` or thawed back out of it. The
+    /// backstop for a lost move, and the backfill of the status itself.
+    pub skipped_moves: i64,
     /// Promotable anchors found unpromoted, queued by this pass.
     pub unpromoted_ready: i64,
     /// `build_job` rows this pass inserted for pending anchors a live evaluation
@@ -48,44 +56,28 @@ pub struct ConsistencyReport {
     pub unbacked_trusted_outputs: i64,
     /// `Building` evaluations with zero non-terminal anchors left.
     pub wedged_building_evals: i64,
-    /// `cached_path` rows whose reference counter this pass had to repair.
-    pub nar_counter_drift: i64,
-    /// `cached_path` rows whose counter sits below zero: a ripple that ran twice.
-    /// No gate can read such a row as whole again, and only a repair pass over a
-    /// path a pending anchor gates on rescues one, so a persistent count here is
-    /// the one state the counter's design calls unrecoverable.
-    pub negative_reference_counters: i64,
-    /// How many paths the NAR repair visited this pass. A measurement, not a
-    /// violation: it is the size of an unbounded select, reported so the cost of
-    /// the recurring scans this pass adds is visible before they are bounded.
-    pub gating_paths: i64,
-    /// How many anchors the readiness repair locked and recounted. Fewer rows
-    /// than [`Self::gating_paths`] but the costlier scan: each is taken
-    /// `FOR UPDATE`, twice, against rows every live graph writer also locks.
+    /// How many anchors the readiness repair locked and recounted. A measurement,
+    /// not a violation: each is taken `FOR UPDATE`, twice, against rows every live
+    /// graph writer also locks, so the cost is worth seeing on a clean pass too.
     pub repair_scope: i64,
 }
 
 impl ConsistencyReport {
-    /// Every dimension that warrants a look, summed. `nar_counter_drift` counts
-    /// rows this pass already repaired rather than rows still wrong, so a
-    /// non-zero total can be a successful self-repair; the two scope sizes are
-    /// measurements and are deliberately not summed.
+    /// Every dimension that warrants a look, summed. The drift counts are rows
+    /// this pass already repaired rather than rows still wrong, so a non-zero
+    /// total can be a successful self-repair; `repair_scope` is a measurement and
+    /// is deliberately not summed.
     pub fn total(&self) -> i64 {
         self.counter_drift
+            + self.walk_drift
+            + self.runtime_drift
             + self.demand_drift
+            + self.skipped_moves
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
-            + self.nar_counter_drift
-            + self.negative_reference_counters
             + self.adopted
     }
-}
-
-crate::sql! {
-    NEGATIVE_REFERENCE_COUNTERS = "SELECT count(*) AS n FROM cached_path WHERE missing_references < 0",
-        params = [],
-        tier = Sweep;
 }
 
 fn unbacked_trusted_output_count_sql() -> String {
@@ -125,12 +117,6 @@ crate::sql_fn! {
         tier = Sweep;
 }
 
-crate::sql_fn! {
-    GATING_PATHS = crate::nar_closure::gating_paths,
-        params = [],
-        tier = Sweep;
-}
-
 async fn count<C: ConnectionTrait>(db: &C, stmt: Statement) -> Result<i64, DbErr> {
     let row = db.query_one_raw(stmt).await?;
     Ok(row
@@ -138,30 +124,29 @@ async fn count<C: ConnectionTrait>(db: &C, stmt: Statement) -> Result<i64, DbErr
         .unwrap_or(0))
 }
 
-/// Repair the NAR reference counter over the paths the pending anchors gate on
-/// and the readiness counters over the anchors themselves, then count the
-/// violations no counter can repair. The NAR repair runs first because the
-/// readiness recount reads wholeness, so a drifted path would otherwise teach the
-/// anchors a count this very pass fixes.
-///
-/// The negative-counter count is table-wide on purpose: the repair is bounded to
-/// the gating paths, so drift outside them is invisible to `nar_counter_drift` by
-/// construction. `gating_paths` reports the size of that bounded set.
+/// Recount every maintained column in the order the next one reads it - the walk's
+/// subtree bit, anchor wholeness, demand, then the readiness pair - and count the
+/// violations no recount can repair. Each recount is absolute and table-wide, so
+/// the row count it rewrote IS the drift, and a healthy fleet writes nothing.
 pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
     let db = &ctx.worker_db;
 
-    let gating = db
-        .query_all_raw(GATING_PATHS.stmt())
-        .await?
-        .into_iter()
-        .map(|r| r.try_get::<String>("", "hash"))
-        .collect::<Result<Vec<_>, _>>()?;
-    let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
-    let negative_reference_counters = count(db, NEGATIVE_REFERENCE_COUNTERS.stmt()).await?;
+    // The walk's own bit before the demand it gates: an abandoned walk's parents
+    // read complete until this runs, and the prune trusts the column.
+    let walk_drift = crate::walk_completeness::recount_walk_completeness(db).await? as i64;
+
+    // Wholeness before the readiness repair that reads it: a drifted counter would
+    // otherwise teach `fetchable` a value this very pass corrects.
+    let runtime_drift = crate::runtime_readiness::recount_missing_runtime_deps(db).await? as i64;
 
     // Before the readiness repair, so the queue settle that follows reads a
     // corrected column rather than promoting against a stale demand.
     let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
+
+    // Both directions read the column the recount above just corrected: what
+    // nothing wants any more settles, what something wants again wakes.
+    let settled = crate::readiness::settle_skipped(db).await?;
+    crate::status::emit_transition_effects(ctx, &settled).await;
 
     let repaired = crate::readiness::repair_pending(db).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
@@ -211,14 +196,14 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
 
     Ok(ConsistencyReport {
         counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
+        walk_drift,
+        runtime_drift,
         demand_drift,
+        skipped_moves: settled.len() as i64,
         unpromoted_ready: repaired.promoted.len() as i64,
         adopted,
         unbacked_trusted_outputs,
         wedged_building_evals,
-        nar_counter_drift,
-        negative_reference_counters,
-        gating_paths: gating.len() as i64,
         repair_scope: repaired.scope as i64,
     })
 }
@@ -236,10 +221,9 @@ mod tests {
         }
     }
 
-    /// The sweep's statement script: the gating select, the NAR repair, the demand
-    /// recount under its walk raise, the readiness repair, the queue settle, the
-    /// naming probe (and the walk it guards when `hole` is set), then the two
-    /// read-only alarms.
+    /// The sweep's statement script: the walk, wholeness and demand recounts under
+    /// their own raises, the readiness repair, the queue settle, the naming probe
+    /// (and the walk it guards when `hole` is set), then the two read-only alarms.
     fn scripted(hole: bool) -> sea_orm::DatabaseConnection {
         let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
         let empty = Vec::<BTreeMap<String, Value>>::new();
@@ -252,14 +236,9 @@ mod tests {
             })
             .collect();
         let mut db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![BTreeMap::from([(
-                "hash".to_owned(),
-                Value::from("h".to_owned()),
-            )])]])
-            .append_exec_results([exec(0), exec(2)])
-            .append_query_results([n()])
-            .append_exec_results([exec(0)])
+            .append_exec_results([exec(0), exec(7), exec(0), exec(6), exec(0)])
             .append_query_results([drifted])
+            .append_query_results([empty.clone(), empty.clone()])
             .append_query_results([vec![BTreeMap::from([(
                 "derivation".to_owned(),
                 Value::from(uuid::Uuid::now_v7()),
@@ -298,11 +277,6 @@ mod tests {
         drop(ctx);
 
         assert_eq!(
-            report.nar_counter_drift, 2,
-            "the repaired paths are reported"
-        );
-        assert_eq!(report.gating_paths, 1, "the NAR repair's scope is measured");
-        assert_eq!(
             report.counter_drift, 8,
             "both readiness recounts are reported, not one of them"
         );
@@ -314,54 +288,63 @@ mod tests {
             report.demand_drift, 4,
             "every anchor the recount rewrote is reported"
         );
+        assert_eq!(
+            report.walk_drift, 7,
+            "the walk recount runs before the demand recount"
+        );
+        assert_eq!(
+            report.runtime_drift, 6,
+            "the anchor wholeness recount runs before the readiness repair that reads it"
+        );
         assert_eq!(report.adopted, 0);
 
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log[0].contains("SELECT d.hash FROM derivation d")
-                && log[0].contains("JOIN derivation_dependency e ON e.dependency = o.derivation"),
-            "the gating select comes first: {log:?}"
+            log[0].contains("SET LOCAL work_mem")
+                && log[1].contains("SET unwalked_inputs = coalesce(c.n, 0)"),
+            "the walk recount runs under its own raise, first of all: {log:?}"
         );
         assert!(
-            log[1].contains("FOR UPDATE")
-                && log[2].contains("UPDATE cached_path cp SET missing_references"),
-            "the NAR repair locks, recounts, and runs before anything reads wholeness: {log:?}"
-        );
-        assert!(
-            log[3].contains("missing_references < 0"),
-            "a counter below zero is unrecoverable, so it must be counted: {log:?}"
+            log[2].contains("SET LOCAL work_mem")
+                && log[3].contains("SET missing_runtime_deps = coalesce(c.n, 0)"),
+            "wholeness is recounted before anything that reads it: {log:?}"
         );
         assert!(
             log[4].contains("SET LOCAL work_mem") && log[5].contains("SET demanded ="),
             "the table-wide demand walk runs under its own raise: {log:?}"
         );
         assert!(
-            log[6].contains("SELECT q.derivation FROM derivation_build q"),
+            log[6].contains("db.status = 10 AND db.demanded")
+                && log[7].contains("db.status = 0 AND NOT db.demanded"),
+            "both Skipped directions read the demand this pass corrected: {log:?}"
+        );
+        assert!(
+            log[8].contains("SELECT q.derivation FROM derivation_build q"),
             "the demand recount precedes the readiness repair, so the settle below it reads a corrected column: {log:?}"
         );
         assert!(
-            log[7].contains("FOR UPDATE") && log[8].contains("SET fetchable"),
+            log[9].contains("FOR UPDATE") && log[10].contains("SET fetchable"),
             "the fetchable recount runs under its own ordered lock: {log:?}"
         );
         assert!(
-            log[9].contains("FOR UPDATE") && log[10].contains("SET unready_deps"),
+            log[11].contains("FOR UPDATE") && log[12].contains("SET unready_deps"),
             "and the counter recount after it, in a second locked pass: {log:?}"
         );
         assert!(
-            log[11].contains("SET status = 0") && log[12].contains("SET status = 1"),
+            log[13].contains("SET status = 0") && log[14].contains("SET status = 1"),
             "the queue is settled against the repaired counters: {log:?}"
         );
         assert!(
-            log[13].contains(
+            log[15].contains(
                 "NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
             ),
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[14].contains("SELECT DISTINCT o.hash") && log[15].contains("FROM evaluation ev"),
+            log[16].contains("SELECT DISTINCT o.hash") && log[17].contains("FROM evaluation ev"),
             "the read-only alarms come last: {log:?}"
         );
-        assert_eq!(log.len(), 16, "{log:?}");
+        assert_eq!(log.len(), 18, "{log:?}");
     }
 
     /// A pending anchor nobody names below a live evaluation's builder is the one
@@ -377,45 +360,45 @@ mod tests {
         assert_eq!(report.adopted, 1);
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log[13].contains("LIMIT 1")
-                && log[14].contains("SET LOCAL work_mem")
-                && log[15].contains("INSERT INTO build_job"),
+            log[15].contains("LIMIT 1")
+                && log[16].contains("SET LOCAL work_mem")
+                && log[17].contains("INSERT INTO build_job"),
             "the probe guards the walk that names: {log:?}"
         );
         assert!(
-            log[16].contains("SET LOCAL work_mem")
-                && log[17].contains("ORDER BY derivation FOR UPDATE")
-                && log[18].contains("SET demanded ="),
+            log[18].contains("SET LOCAL work_mem")
+                && log[19].contains("ORDER BY derivation FOR UPDATE")
+                && log[20].contains("FROM region r ORDER BY r.derivation"),
             "a name gives the closure below it demand, in this pass and not the next: {log:?}"
         );
         assert!(
-            log[19].contains("SET status = 1")
-                && log[20].contains("graph_version = e.graph_version + 1"),
+            log[21].contains("SET status = 1")
+                && log[22].contains("graph_version = e.graph_version + 1"),
             "then queue what was named and bump: {log:?}"
         );
         assert!(
-            log[21].contains("SELECT DISTINCT o.hash") && log[22].contains("FROM evaluation ev"),
+            log[23].contains("SELECT DISTINCT o.hash") && log[24].contains("FROM evaluation ev"),
             "the read-only alarms still come last: {log:?}"
         );
     }
 
     /// Every violation counts toward the warning, and the one measurement does
-    /// not: `gating_paths` is how much work the repair did, not something wrong.
+    /// not: `repair_scope` is how much work the repair did, not something wrong.
     #[test]
     fn total_sums_every_dimension() {
         let r = ConsistencyReport {
             counter_drift: 1,
+            walk_drift: 9,
+            runtime_drift: 10,
             demand_drift: 8,
+            skipped_moves: 11,
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
-            nar_counter_drift: 6,
-            negative_reference_counters: 7,
-            gating_paths: 1000,
             repair_scope: 2000,
             adopted: 2,
         };
-        assert_eq!(r.total(), 36);
+        assert_eq!(r.total(), 53);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }

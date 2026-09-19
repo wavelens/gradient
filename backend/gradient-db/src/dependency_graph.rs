@@ -185,6 +185,7 @@ mod tests {
         gradient_entity::derivation_dependency::Model {
             derivation,
             dependency: derivation,
+            ..Default::default()
         }
     }
 

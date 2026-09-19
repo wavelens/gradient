@@ -26,13 +26,15 @@ sharing is implicit in the global derivation graph.
 #### The graph actor
 
 Every write to the anchors, edges, outputs, input sources, build jobs,
-attempts and the cache index (`cached_path`, `cached_path_reference`) is a
+attempts and the cache index (`cached_path`) is a
 message to one actor, `graph`, under the root of the supervision tree. One
 message is one transaction:
 
 | message | what it writes |
 |---|---|
-| `Ingest` | one worker batch: derivations, outputs, input sources, upstream hits, anchors, build jobs, features, messages, entry points, and the edges that resolve so far |
+| `Ingest` | one worker batch: derivations, outputs, input sources, anchors, build jobs, features, messages, entry points, and the edges that resolve so far |
+| `UpstreamHits` | what the probe found: the narinfo, the runtime edges it names, the relay flag and the demand all of it moves |
+| `UpstreamProbed` | the anchors a probe round answered for, hit or miss, and the demand a miss opens below them |
 | `KnownDerivations` | nothing; a read answered after every batch queued before it |
 | `CommitNar` | the `cached_path` row, its references, signature placeholders and the outputs it backs |
 | `Transition` | an anchor or evaluation state change: build started, output, completed, failed, dispatched, orphaned, ready, a reconcile scope, an abort |
@@ -46,10 +48,11 @@ reply (ten minutes), which is the backpressure that stops a worker's reader
 instead of dropping its batch; the actor's own work is bounded at 120 s per
 transaction, past which it rolls back and the caller sees an error.
 
-The facts a batch needs from outside the graph are established by the
-scheduler before the message is sent: which derivations are already whole in
-the cache and which an upstream serves (the narinfo probe). They are keyed by
-drv path and output hash; ids are assigned inside the transaction.
+The one fact a batch needs from outside the graph is established by the
+scheduler before the message is sent: which derivations are already whole in our
+own cache. What an upstream serves is not asked here - that is the probe's, and it
+runs for the anchors demand turns on. The fact is keyed by drv path; ids are
+assigned inside the transaction.
 
 Merging graphs from concurrent workers. Two evaluations of overlapping graphs
 converge on one `derivation` row per hash because the existence check and the
@@ -62,9 +65,9 @@ worker that died mid-walk cannot merge late batches into the re-dispatched walk
 once it has completed. Two walks of the *same* evaluation are told apart by the
 dispatch id the scheduler mints at assignment: the worker echoes it on every
 report, and a report naming a dispatch its session did not hand out is dropped.
-The one fact a batch writes globally is `substitutable`, only ever set, never
-cleared, and only on an anchor that has not yet succeeded, so one evaluation's
-upstream probe can add a substitution for another walk but never take one away.
+`substitutable` is global, only ever set, never cleared, and only on an anchor
+that has not yet succeeded, so one project's probe can add a substitution for
+another walk but never take one away. A batch never writes it.
 
 Nothing is deferred between messages, so a restart leaves no pending graph
 state: a batch's stubs, records, edges, anchors and jobs are one transaction
@@ -73,19 +76,21 @@ next flush fails the same way.
 
 #### Promotion
 
-Readiness is two maintained columns on the anchor. `fetchable` says a dependent
-can get this anchor's outputs **from our own cache**: the anchor succeeded and
-every output is whole here (`cached_path.missing_references = 0`). An upstream
-copy does not count - a dependent of an unrelayed substitutable anchor waits for
-the relay - so a build pulls every input out of our cache and the relay is on the
-critical path once instead of every dependent re-fetching upstream itself.
-`unready_deps` is how many of the anchor's direct dependencies are not fetchable.
-Neither is ever derived by a sweep: the event that changes fetchability writes
-the flip with a `RETURNING` that names exactly the anchors that changed, and
-their direct dependents' counter moves from that set in one statement
-(`gradient_db::readiness`). Fetchability of a dependent does not depend on its
-own dependencies, so nothing recurses over `derivation_dependency`; the only
-recursion left is the reference ripple on the NAR side.
+Readiness is three maintained columns on the anchor, one per edge kind plus the
+flag they feed. An anchor is **whole** when every output's NAR is in our cache and
+`missing_runtime_deps = 0`, that counter being how many of its runtime edges lead
+to something that is not whole itself. `fetchable` says a dependent can get this
+anchor's outputs **from our own cache**: the anchor succeeded and is whole. An
+upstream copy does not count - a dependent of an unrelayed substitutable anchor
+waits for the relay - so a build pulls every input out of our cache and the relay
+is on the critical path once instead of every dependent re-fetching upstream
+itself. `unready_deps` is how many of the anchor's direct build dependencies are
+not fetchable. None is ever derived by a sweep: the event that changes wholeness
+or fetchability writes the flip with a `RETURNING` that names exactly the anchors
+that changed, and their dependents' counter moves from that set in one statement
+(`gradient_db::readiness` and `gradient_db::runtime_readiness`). Wholeness is
+transitive, so it ripples level by level; fetchability of a dependent does not
+depend on its own dependencies, so `unready_deps` moves one hop and stops.
 
 An anchor is promoted `Created` to `Queued` when its derivation is walked, some
 evaluation wants it (a `build_job`), and something still demands it, and then one
@@ -97,23 +102,40 @@ its `.drv` NAR arriving, an upstream hit, a thaw at stream completion.
 
 Demand is what keeps the fleet from relaying half of nixpkgs, and from building the
 input closure of everything it relays. An anchor is demanded when an entry point of
-a retained evaluation names it, or a dependent that will itself be built (walked,
-not substitutable, pending, with a `build_job`) lists it as an input and is itself
-demanded. That last clause is a fixpoint, so demand is a column,
-`derivation_build.demanded`, and not a subquery: it flows DOWN from the entry
-points while readiness flows UP from the leaves, and a per-row predicate that looks
-one hop cannot carry the downward direction. It used to look one hop, which is why
-a relayed anchor's whole source closure was still built.
+a retained evaluation names it, or a demanded, named dependent reaches it over one
+of the two edge kinds. Anything wanted wants what its outputs reference at run
+time, so a demanded anchor steps over its runtime edges whatever it is; only
+something that will itself be built wants its inputs, so the build edges are
+stepped only out of a builder (walked, not substitutable, pending). That is a
+fixpoint, so demand is a column, `derivation_build.demanded`, and not a subquery:
+it flows DOWN from the entry points while readiness flows UP from the leaves, and a
+per-row predicate that looks one hop cannot carry the downward direction. It used
+to look one hop, which is why a relayed anchor's whole source closure was still
+built.
 
 `readiness::recompute_demand` rewrites the column absolutely over the anchors an
-event changed and the pending closure below them. The walk steps out of named
-builders only: a relay is reached and never stepped through, because it fetches
-finished bytes and needs nothing below it. The region includes the anchors it was
-given, because a thaw makes one a builder again and its own stored value is as
-stale as its subtree's. One statement serves both directions and returns each row
-with its new value, so the caller queues what gained demand and releases what lost
-it. An anchor already `Building` is left to finish: the bytes it produces are
-cached and useful, while an abort throws the work away.
+event changed and the pending closure below them. Both arms are bounded by the
+region, and a relay is reached over a build edge and never stepped through that
+way, because it fetches finished bytes and needs nothing below it. The region
+includes the anchors it was given, because a thaw makes one a builder again and its
+own stored value is as stale as its subtree's. The walk answers and a second statement in the same
+transaction writes what it answered, as a bound array rather than as a subquery the
+write names: a recursive CTE carries no row estimate the planner believes, so a
+region of a few dozen anchors loses to a sequential scan of the whole table. The
+write returns each row with its new value, so the caller queues what gained demand
+and releases what lost it. An anchor already `Building` is left to finish: the bytes
+it produces are cached and useful, while an abort throws the work away.
+
+A `Created` anchor that nothing demands and no entry point names reads **`Skipped`**
+on the board. It is the status projection of exactly that condition, written on the
+lost side of every demand recompute after the un-promote and taken back on the
+gained side before the promote, so a build-time dependency of something we relay
+says what it is instead of sitting at `Created` forever. `Skipped` is settled work:
+no gate acts on it, no walk steps through it, and no evaluation waits for it. It
+thaws to `Created`, never straight to the queue, because it has passed no gate; the
+promote that follows the thaw is what reads them. The consistency sweep runs both
+directions table-wide after its demand recount and reports what moved as
+`skipped_moves`, which is also the status's own backfill.
 
 What nothing demands is never promoted and never built, so it is settled work and
 not pending work. Both readers of "is this evaluation still waiting" -
@@ -190,8 +212,19 @@ stub is never promoted, dispatched or pruned: its subtree is not recorded, and
 treating it as dependency-free would dispatch a build without its inputs. The
 bit is content-addressed - edges never change once written - so a later requeue
 keeps the derivation promotable without re-evaluation, and a counter seeded over
-a partial edge set can never be read as zero. Exactly one event clears it
-again.
+a partial edge set can never be read as zero.
+
+That is one batch's claim about one row. The walk prunes on a second bit,
+`unwalked_inputs = 0`: the number of direct inputs whose subtree is not recorded,
+written with the record as its input count, recounted once the edges land, and
+counted down by a ripple as inputs complete. A walk abandoned between batches
+leaves `walked` parents above inputs it only named; without the counter every
+later walk pruned at those parents and the stubs stayed stubs. The sweep recounts
+the column table-wide (`walk_drift`).
+
+Two events clear the record again: the derivation GC below, and the missing-input
+self-heal; both take the dependents of what was complete out of completeness with
+it.
 
 The one event that can invalidate the bit is the derivation GC deleting a
 derivation another one still depends on: the FK cascade drops the edge and
@@ -282,9 +315,10 @@ per-evaluation sweeps and the GC keep-set.
 
 A consistency sweep (`graph_consistency_report`, interval
 `GRADIENT_GRAPH_CONSISTENCY_INTERVAL`, default 300s) is the only backstop for the
-counters, because both of them are moved rather than derived and nothing else
-would ever notice a lost move. It repairs `cached_path.missing_references` over
-the paths the pending anchors gate on, then recomputes `fetchable` and
+counters, because every one of them is moved rather than derived and nothing else
+would ever notice a lost move. It recounts `derivation.unwalked_inputs`,
+`derivation_build.missing_runtime_deps` and `demanded` table-wide, in the order the
+next one reads the last, then recomputes `fetchable` and
 `unready_deps` over the pending anchors and their direct dependencies, writes
 what differs, settles the queue against the gates in both directions, names for
 the live evaluations the pending anchors they reach through builders that nobody
@@ -293,6 +327,9 @@ what it repaired next to the two read-only alarms: terminal-success producers
 with an unbacked output, and `Building` evaluations with no non-terminal anchor
 left. The NAR repair runs first because the readiness recount reads wholeness,
 so a drifted path would otherwise teach the anchors a count this very pass fixes.
+It also recounts `derivation.unwalked_inputs` table-wide and reports what
+disagreed as `walk_drift`; the `unwalked_inputs` recount runs first, since the
+walk's prune reads it and the demand recount reads what the walk recorded.
 
 Each chunk of either repair is its own transaction that takes the same ordered
 `FOR UPDATE` pass a retire takes and only then recounts, so the recount's
@@ -401,11 +438,12 @@ without this gate a build dispatched mid-push fails terminal `InputsUnavailable`
 on a missing `.drv` (its own or a dependency's), the dominant failure of large
 NixOS system-closure derivations.
 
-That gate is one integer on the `.drv`'s own `cached_path` row, not a mirror of it
-on the anchor. A `.drv` is an ordinary store path whose references are exactly its
-input `.drv`s and its `inputSrcs`, so `missing_references = 0` on a backed `.drv`
-row already means the whole importable closure is there, input sources included -
-which is why nothing gates on `derivation_input_source` any more. A build-graph
+That gate is the presence of the `.drv`'s own `cached_path` row, not a mirror of
+its closure on the anchor. A `.drv` closure is trusted: the evaluation pushes it
+before it reports the derivation, and the one `.drv` state a fresh evaluation
+repairs is an absent NAR - which is why nothing gates on
+`derivation_input_source` any more, and why the gate and the "unproducible `.drv`"
+block are exact negations of each other. A build-graph
 mirror of the same fact could only diverge from the NAR ground truth when eval
 pruning leaves a dependency unwalked, and would then dead-zone a build whose
 `.drv` closure is in fact fully cached. A substitutable anchor substitutes its
@@ -520,10 +558,10 @@ report, and it is read as one.
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to a later sweep: every pass that deletes `cached_path` rows
 (orphan-derivation GC, zombie purge, stale-path eviction, path invalidation) goes through
-`nar_closure::retire_paths`, which in the **same transaction** raises the
-`missing_references` counter of every referrer that trusted the deleted rows and
-moves the anchor side of every hash it deleted, every hash that stopped being
-whole, and every hash the caller asked it to retire: those producers lose
+`runtime_readiness::retire_outputs`, which in the **same transaction** raises the
+`missing_runtime_deps` counter of every anchor that trusted the deleted rows and
+moves the readiness side of the producers of what it deleted and of everything
+that stopped being whole with them: those anchors lose
 `fetchable` and their dependents' `unready_deps` rises, and the owner of a `.drv`
 that is gone leaves the queue. One statement in that pass is deliberately narrower.
 A terminal-success producer becomes a fresh build intent (recounted before it
@@ -592,12 +630,13 @@ evaluations (set-null'd onto the anchor), the same pass also deletes the
 but the log objects live outside the database, so they are reclaimed by hand like
 the NARs. `pass_logs` in the deep GC is the backstop for any log object left behind.
 
-The same reachability is the cache's keep-set. A cached path is live while the NAR
-reference closure of a reachable derivation's outputs or `.drv` contains it; the
-eviction pass (`evict_stale_cached_paths`, every cache-maintenance tick) removes
-every path outside that set whose last fetch or commit is older than `cacheTtlHours`,
-retiring the row through `retire_paths` so the closure counters and any producer's
-`fetchable` follow. Derivation rows outside the reachable set are collected
+The same reachability is the cache's keep-set, walked one relation down. A cached
+path is live while it is an output of something the runtime edges reach out of a
+reachable derivation, or the `.drv` or an `inputSrc` of a reachable derivation
+itself; the eviction pass (`evict_stale_cached_paths`, every cache-maintenance
+tick) removes every path outside that set whose last fetch or commit is older than
+`cacheTtlHours`, retiring the row through `retire_outputs` so the anchor's
+wholeness and any producer's `fetchable` follow. Derivation rows outside the reachable set are collected
 separately after `keepOrphanDerivationsHours`; nothing else reclaims a NAR.
 
 The keep-set is built from committed DB rows, so it cannot reference a NAR that is
@@ -650,36 +689,68 @@ narinfo endpoint, so a dead upstream is learned about once.
 
 A derivation is just another build that can be substituted when its output is
 available on a cache, exactly like any other - fixed-output derivations are not
-special-cased. At eval time `resolve_anchors` runs a project-scoped lookup
-(`compute_upstream_substitutable`): for every derivation not already in the
-gradient cache it probes each output's `.narinfo` across the project's configured
-upstream caches. A derivation is marked substitutable only when *every* one of
-its outputs is cached somewhere (the gradient cache or an upstream); otherwise it
-is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
+special-cased.
+
+An output is probed when its anchor gains demand, never when its batch lands. The
+`upstream-probe` loop takes the gained sets the ingest commit and the transition
+emitter hand it, a fresh evaluation's demand coming from the walk and a later move
+from a status change, drops what it asked for in the last five minutes, skips
+every output already cached anywhere, and asks each output's `.narinfo` across
+the upstreams of the project whose evaluation names the anchor. A hit makes the
+anchor a relay and demands what its narinfo references; a miss leaves it a
+builder and demands its build inputs.
+
+Demand waits for that answer. `derivation_build.probed` is set for the whole
+round once its hits are applied, and an anchor that is not yet probed is not a
+builder, so nothing below it is demanded and nothing below it is dispatched.
+Without it, the walk read "no upstream answer yet" as "will be built" and queued
+the build closure of every output an upstream serves; the relay that followed
+withdrew the demand, but a job already handed to a worker cannot be recalled, and
+a source it cannot fetch fails the evaluation that no longer needed it.
+A round's answer demands the next level and hands it straight back, so one pass
+follows the closure down rather than descending a level a tick, and stops after
+half the supervision budget with whatever is left going to the next tick.
+The request channel is in memory, so the loop also sweeps for demanded anchors
+that are still unprobed once a minute on an idle tick: a process that stops
+between the commit and the send would otherwise leave a stall nothing recovers
+from.
+
+Either answer moves demand, and what that turns on comes back to the loop as the
+next round, so the rounds are the demand fixpoint and an evaluation probes what
+something wants rather than every output it walked. A derivation is marked
+substitutable only when *every* one of its outputs is served; otherwise it is
+built. The resolved upstream NAR URL plus narinfo metadata is persisted once
 onto `derivation_output` (`external_url`, `nar_hash`, `file_size`,
 `references_list`, `deriver`), so the narinfo lookup runs only once.
 
-A substitutable anchor dispatches as a relay job on any worker once something
-demands it (see [Promotion](#promotion)). The dispatch carries the derivation's
-output `(name, store_path)` pairs in the `BuildSpec` so the worker fetches the
-outputs directly and never touches the `.drv`: a substitution needs only the
-output NAR plus its runtime closure, never the `.drv`'s build-time
+The loop runs off every graph path on purpose: probing is HTTP, and a network
+round trip inside the graph actor's transaction would hold the single writer to
+the graph for its duration.
+
+A substitutable anchor dispatches as a `BuildSpecKind::Substitute` job on any
+worker once something demands it (see [Promotion](#promotion)). The dispatch
+carries the derivation's output `(name, store_path)` pairs in the `BuildSpec` so
+the worker fetches the outputs directly and never touches the `.drv`: a
+substitution needs only the output NAR, never the `.drv`'s build-time
 `input_sources` (binary caches do not serve those, so importing the `.drv` would
-fail with a spurious `SubstituteUnavailable`). The worker walks the upstream
-references breadth-first from the outputs and pushes every member our cache
-lacks - relaying each NAR verbatim when it is already zstd-compressed at our
-2 MiB level-6 window, else recompressing - so the outputs land whole
-(`missing_references = 0`) and the binary-cache invariant holds for substituted
-anchors exactly as for built ones. Relaying the outputs alone is what used to
-break it: the closure members below a pruned node have no anchor of their own, so
-nothing ever fetched them and every dependent's build fell back to the upstream.
-`use_substitutes` stays off in the daemon - substitution always goes through
+fail with a spurious `SubstituteUnavailable`). It is one path per output and
+nothing below it: the worker asks the server for that one upstream narinfo
+(`CacheQuery { external: true }`), downloads the NAR, verifies it against the
+declared `nar_hash`, and hands the raw bytes to the same push every other kind
+ends in. No closure is walked on the worker; what the NAR references is the
+server's to demand, and the producers of those references are anchors of their
+own. `use_substitutes` stays off in the daemon - substitution always goes through
 gradient, never the worker's own nix config. Existing build-once anchors a prior
 eval left not-yet-succeeded are flipped substitutable when an upstream is newly
 found, so a previously-failed fetcher substitutes instead of rebuilding; the
 anchors that flipped stop being builders, so what they demanded is released.
 
-A `SubstituteUnavailable` miss re-queues the relay penalty-free. At
+A `builtin` fixed-output derivation nothing serves is downloaded by any worker
+without nix: the URL, the hash check and the one-file NAR are the worker's, and it
+takes the same push. `builtin:buildenv` and the rest of the `builtin` builders are
+not fixed-output, so they stay builds the daemon runs.
+
+A `SubstituteUnavailable` miss re-queues the substitute penalty-free. At
 `substituteMissEscalationThreshold` misses within one evaluation the graph actor
 exhausts the substitution instead: `substitutable` is cleared, the outputs forget
 their upstream columns, and the anchor goes back to `Created` to be built through
@@ -736,10 +807,13 @@ A stub is never pruned: `walked = false` means the subtree was never recorded.
 #### The cache closure invariant
 
 The cache holds a binary-cache invariant: *if an output is in our cache, its
-entire runtime closure is too*. A build (and a substitution, which fetches the
-output's closure locally first) pushes the **full runtime closure** of its
-outputs, not just the output paths; already-cached members are skipped, so only
-paths the cache is actually missing upload. Each upload's bytes are written to
+entire runtime closure is too*. A job pushes its own outputs and nothing below
+them; what keeps the invariant is that everything below is already there by the
+time the push runs. A build's runtime references are a subset of the build
+closure the dispatch gate made whole in our cache before the job was offered, and
+a substitute's references are producers the server demands as anchors of their
+own. Already-cached outputs are skipped, so only paths the cache is actually
+missing upload. Each upload's bytes are written to
 storage by a tracked task per NAR, and its metadata is committed by the graph
 actor's `CommitNar` message; the per-connection commit semaphore that used to
 serialise two commits per session is gone, because the actor already serialises
@@ -770,17 +844,17 @@ both scans off the full anchor table: the dispatch queue matches `status = Queue
 in `updated_at` order, and the table-wide promote matches
 `status = Created AND (unready_deps = 0 OR substitutable)`.
 
-The NAR side of that invariant is a counter, not a flag.
-`cached_path.missing_references` is the number of a path's references (self
-excluded) whose row is absent, unbacked or itself not whole; a backed row with
-`missing_references = 0` is *whole*, and `gradient_db::nar_closure::whole_predicate`
-is the one definition every gate reads. The graph actor seeds the counter when it
-commits a NAR, from the references the worker reported, and when that flips the path
-to whole it decrements every referrer, then every referrer of the referrers that
-just reached zero, one statement per level. Deleting a row (`retire_paths`: the
-orphan GC, the zombie purge, the stale-path eviction, every demote) runs the same ripple in
-reverse from the rows that were whole, and moves the anchor side of what those rows
-backed in the same transaction. Every ripple is driven by a **transition**, never by a
+The cache side of that invariant is a counter, not a flag.
+`derivation_build.missing_runtime_deps` is the number of an anchor's runtime edges
+whose dependency is not whole; an anchor whose every output has a NAR here and
+whose counter reads zero is *whole*, and `graph_sql::anchor_whole_predicate` is
+the one definition every gate reads. The graph actor seeds the counter when it
+commits a NAR, over the runtime edges that NAR's references named, and when that
+flips the anchor to whole it decrements every runtime dependent, then every
+dependent of the ones that just reached zero, one statement per level. Deleting a
+row (`retire_outputs`: the orphan GC, the zombie purge, the stale-path eviction,
+every demote) runs the same ripple in reverse from the anchors that were whole,
+and moves the readiness side in the same transaction. Every ripple is driven by a **transition**, never by a
 state: rippling from a row that did not just flip moves its referrers past zero, and
 a negative counter never satisfies `= 0` again.
 
@@ -848,13 +922,12 @@ object and rebuilds the producer with consistent metadata. Verify-on-read makes
 the cache self-correcting regardless of how a desync arose. The same premise
 governs a path's **reference set**: an input-addressed path rebuilt
 non-deterministically keeps its hash while its closure moves, so the commit
-rewrites `cached_path_reference` to exactly the set the worker reported instead
-of adding to it: one statement that prunes the edges the report no longer carries
-and re-positions the survivors, since dropping one reference shifts every later
-one and `position` is what the narinfo `References:` line and the signature
-fingerprint are reconstructed from. An edge an add-only write left behind would
-stay counted in `missing_references` forever, and the consistency sweep's repair
-recomputes from that same table, so it could never disagree with the stale row.
+rewrites `cached_path.references` to exactly the ordered line the worker reported
+instead of appending to it, which is what the narinfo `References:` line and the
+signature fingerprint are reconstructed from verbatim. The runtime EDGES the line
+names are add-only on the graph, because an edge is a fact about the derivation
+rather than about one build of it; a stale one only holds its anchor unwhole until
+the sweep's recount reads the same relation and agrees.
 
 An **orphan producer** is the third case: the missing leaf has a producing
 derivation, but that producer has no `build_job` (it was pruned out of the build

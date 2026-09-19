@@ -149,16 +149,19 @@ pub enum BarSegment {
     Aborted,
 }
 
-pub fn bar_segment(status: BuildStatus) -> BarSegment {
+/// `None` for `Skipped`: a build-time dependency nothing needs is neither pending
+/// work nor a result, so drawing it would make a task read as unfinished forever.
+pub fn bar_segment(status: BuildStatus) -> Option<BarSegment> {
     use BuildStatus::*;
-    match status {
+    Some(match status {
         Completed => BarSegment::Completed,
         FailedPermanent | FailedTimeout | DependencyFailed => BarSegment::Failed,
         Building => BarSegment::Building,
         Queued | Created | FailedTransient => BarSegment::Queued,
         Substituted => BarSegment::Substituted,
         Aborted => BarSegment::Aborted,
-    }
+        Skipped => return None,
+    })
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, Copy)]
@@ -174,12 +177,13 @@ pub struct BuildStatusCounts {
 impl BuildStatusCounts {
     pub fn add(&mut self, status: BuildStatus, n: i64) {
         match bar_segment(status) {
-            BarSegment::Completed => self.completed += n,
-            BarSegment::Failed => self.failed += n,
-            BarSegment::Building => self.building += n,
-            BarSegment::Queued => self.queued += n,
-            BarSegment::Substituted => self.substituted += n,
-            BarSegment::Aborted => self.aborted += n,
+            Some(BarSegment::Completed) => self.completed += n,
+            Some(BarSegment::Failed) => self.failed += n,
+            Some(BarSegment::Building) => self.building += n,
+            Some(BarSegment::Queued) => self.queued += n,
+            Some(BarSegment::Substituted) => self.substituted += n,
+            Some(BarSegment::Aborted) => self.aborted += n,
+            None => {}
         }
     }
 
@@ -203,16 +207,21 @@ mod rollup_tests {
     #[test]
     fn segment_mapping_matches_spec() {
         use BuildStatus::*;
-        assert_eq!(bar_segment(Completed), BarSegment::Completed);
+        assert_eq!(bar_segment(Completed), Some(BarSegment::Completed));
         for s in [FailedPermanent, FailedTimeout, DependencyFailed] {
-            assert_eq!(bar_segment(s), BarSegment::Failed);
+            assert_eq!(bar_segment(s), Some(BarSegment::Failed));
         }
-        assert_eq!(bar_segment(Building), BarSegment::Building);
+        assert_eq!(bar_segment(Building), Some(BarSegment::Building));
         for s in [Queued, Created, FailedTransient] {
-            assert_eq!(bar_segment(s), BarSegment::Queued);
+            assert_eq!(bar_segment(s), Some(BarSegment::Queued));
         }
-        assert_eq!(bar_segment(Substituted), BarSegment::Substituted);
-        assert_eq!(bar_segment(Aborted), BarSegment::Aborted);
+        assert_eq!(bar_segment(Substituted), Some(BarSegment::Substituted));
+        assert_eq!(bar_segment(Aborted), Some(BarSegment::Aborted));
+        assert_eq!(
+            bar_segment(Skipped),
+            None,
+            "settled work with no result is not a segment, or the bar never fills"
+        );
     }
 
     #[test]

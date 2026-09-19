@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
 use gradient_db::graph_sql::{ClosureDirection, dependency_closure_cte_body};
-use gradient_db::{DbContext, retire_paths};
+use gradient_db::{DbContext, retire_outputs};
 use gradient_types::ids::{BuildAttemptId, DerivationId, EvaluationId};
 use gradient_types::*;
 use ractor::ActorRef;
@@ -60,18 +60,19 @@ fn delete_derivations_sql() -> String {
 fn stale_after_scan_sql() -> String {
     format!(
         "WITH RECURSIVE {fresh}, \
-         roots(hash) AS ( \
-             SELECT o.hash FROM derivation_output o JOIN fresh f ON f.derivation = o.derivation \
-             UNION SELECT d.hash FROM derivation d JOIN fresh f ON f.derivation = d.id \
-             UNION SELECT hash FROM derivation WHERE created_at >= $2 \
-             UNION SELECT hash FROM derivation_output WHERE created_at >= $2 \
-             UNION SELECT r.reference_hash FROM cached_path_reference r \
-                   JOIN cached_path cp ON cp.hash = r.referrer WHERE cp.created_at >= $2), \
-         {live} \
+         roots(derivation) AS ( \
+             SELECT derivation FROM fresh \
+             UNION SELECT id FROM derivation WHERE created_at >= $2 \
+             UNION SELECT derivation FROM derivation_output WHERE created_at >= $2), \
+         {runtime}, {live} \
          SELECT u.h AS hash FROM unnest($1::text[]) AS u(h) \
          WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = u.h)",
         fresh = fresh_cte(),
-        live = gradient_db::graph_sql::reference_closure_cte_body("live", "SELECT hash FROM roots"),
+        runtime = gradient_db::graph_sql::runtime_closure_cte_body(
+            "runtime",
+            "SELECT derivation FROM roots",
+        ),
+        live = gradient_db::graph_sql::kept_hashes_cte_body("roots", "runtime"),
     )
 }
 
@@ -102,10 +103,6 @@ gradient_db::sql! {
     /// dependent that survives has silently lost part of its record.
     GC_CANDIDATE_DEPENDENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
              WHERE e.dependency = ANY($1)",
-        params = [DerivationIds(64)],
-        tier = Sweep;
-
-    GC_UNWALK_SURVIVORS = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
         params = [DerivationIds(64)],
         tier = Sweep;
 
@@ -220,9 +217,13 @@ async fn delete_derivations(
     // dependent a concurrent eval already re-walked keeps its place in the queue.
     let survivors: Vec<DerivationId> = orphaned_survivors(&dependents, &deleted);
     if !survivors.is_empty() {
-        db.execute_raw(GC_UNWALK_SURVIVORS.bind([ids(&survivors)]))
+        let txn = db.begin().await.context("GC: begin the survivor un-walk")?;
+        gradient_db::unwalk(&txn, &survivors)
             .await
             .context("GC: failed to re-walk the survivors of a deleted dependency")?;
+        txn.commit()
+            .await
+            .context("GC: commit the survivor un-walk")?;
         let changes = gradient_db::unpromote_ungated(db, &survivors)
             .await
             .context("GC: failed to settle the survivors of a deleted dependency")?;
@@ -267,7 +268,7 @@ async fn retire_stale_paths(
         return Ok(GcReport::default());
     }
 
-    // `retire_paths` takes a transaction because the locks it opens with must
+    // `retire_outputs` takes a transaction because the locks it opens with must
     // still be held when its DELETE runs. Inside the actor that is a savepoint:
     // Postgres keeps a subtransaction's locks until the outer commit, so the
     // release below never drops one early.
@@ -275,7 +276,7 @@ async fn retire_stale_paths(
         .begin()
         .await
         .context("GC: failed to open the retire savepoint")?;
-    let retired = retire_paths(&savepoint, &still_stale)
+    let retired = retire_outputs(&savepoint, &still_stale)
         .await
         .context("GC: failed to retire the stale paths")?;
     savepoint
@@ -493,18 +494,16 @@ mod tests {
         assert!(report.retired.is_empty());
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         let sql = norm(&log[0]);
+        assert!(sql.contains("e.kind IN (1, 2)"), "{sql}");
         assert!(
-            sql.contains(
-                "SELECT r.reference_hash FROM cached_path_reference r JOIN cached_path cp ON cp.hash = r.referrer WHERE cp.created_at >= $2"
-            ),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("UNION SELECT hash FROM derivation WHERE created_at >= $2")
-                && sql.contains("UNION SELECT hash FROM derivation_output WHERE created_at >= $2"),
+            sql.contains("UNION SELECT id FROM derivation WHERE created_at >= $2")
+                && sql.contains(
+                    "UNION SELECT derivation FROM derivation_output WHERE created_at >= $2"
+                ),
             "{sql}"
         );
         assert!(sql.contains("live(hash) AS ("), "{sql}");
+        assert!(!sql.contains("cached_path_reference"), "{sql}");
     }
 
     /// Nothing is asked of the database for an empty chunk.

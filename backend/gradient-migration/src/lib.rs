@@ -62,6 +62,10 @@ mod m20260917_000002_outbox;
 mod m20260917_000003_open_work_indexes;
 mod m20260918_000000_gc_freshness_indexes;
 mod m20260918_000001_dispatch_window_columns;
+mod m20260918_000002_derivation_unwalked_inputs;
+mod m20260919_000000_one_graph;
+mod m20260919_000001_drop_cached_path_reference;
+mod m20260919_000002_derivation_build_probed;
 
 pub struct Migrator;
 
@@ -120,6 +124,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20260917_000003_open_work_indexes::Migration),
             Box::new(m20260918_000000_gc_freshness_indexes::Migration),
             Box::new(m20260918_000001_dispatch_window_columns::Migration),
+            Box::new(m20260918_000002_derivation_unwalked_inputs::Migration),
+            Box::new(m20260919_000000_one_graph::Migration),
+            Box::new(m20260919_000001_drop_cached_path_reference::Migration),
+            Box::new(m20260919_000002_derivation_build_probed::Migration),
         ]
     }
 }

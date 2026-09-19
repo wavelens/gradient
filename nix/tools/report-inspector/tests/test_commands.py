@@ -28,10 +28,13 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
         CREATE TABLE evaluation (id TEXT, status INTEGER, created_at TEXT,
             fetch_started_at TEXT, eval_flake_started_at TEXT, eval_drv_started_at TEXT,
             building_started_at TEXT, finished_at TEXT);
-        CREATE TABLE derivation (id TEXT, name TEXT, walked INTEGER);
+        CREATE TABLE derivation (id TEXT, name TEXT, walked INTEGER,
+            unwalked_inputs INTEGER);
         CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER,
-            substitutable INTEGER, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER);
-        CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT);
+            substitutable INTEGER, probed INTEGER, fetchable INTEGER, unready_deps INTEGER,
+            demanded INTEGER, missing_runtime_deps INTEGER);
+        CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT,
+            kind INTEGER);
         CREATE TABLE build_job (id TEXT, evaluation TEXT, derivation TEXT,
             derivation_build TEXT);
         CREATE TABLE build_attempt (id TEXT, outcome INTEGER, reason INTEGER,
@@ -52,39 +55,52 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
         " '2026-08-31T23:48:08', '2026-08-31T23:48:08', NULL, NULL)",
         (EVAL_ID,),
     )
-    conn.execute("INSERT INTO derivation VALUES ('d1', 'vendor-registry', 0)")
-    conn.execute("INSERT INTO derivation VALUES ('d2', 'cargo-package-clap_complete-4.6.9', 1)")
-    conn.execute("INSERT INTO derivation VALUES ('d3', 'nixos-system-builder-1', 1)")
-    conn.execute("INSERT INTO derivation VALUES ('d4', 'openssl-3.7.2', 1)")
-    conn.execute("INSERT INTO derivation VALUES ('d5', 'zlib-1.3.2', 1)")
-    conn.execute("INSERT INTO derivation VALUES ('d6', 'boundary-dep', 1)")
-    conn.execute("INSERT INTO derivation VALUES ('d7', 'libidn2-2.3.8', 1)")
+    conn.execute("INSERT INTO derivation VALUES ('d1', 'vendor-registry', 0, 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d2', 'cargo-package-clap_complete-4.6.9', 1, 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d3', 'nixos-system-builder-1', 1, 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d4', 'openssl-3.7.2', 1, 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d5', 'zlib-1.3.2', 1, 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d6', 'boundary-dep', 1, 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d7', 'libidn2-2.3.8', 1, 0)")
     # b1 is blocked on both gates the report carries, b3 only on the count, so the
     # two are proven separately and neither is named while it is open. b4 and b5 both
     # have every visible gate open; only b5 is substitutable, so only b5's `.drv`
     # gate is knowable from the report. b7 is a relay nothing demands: the one gate
     # that used to be missing from the export entirely.
-    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 0, 1, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 0, 0, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 0, 2, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 0, 0, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b5', 'd5', 1, 1, 1, 0, 1)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 1, 0, 1, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 1, 0, 0, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 1, 0, 2, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 1, 0, 0, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b5', 'd5', 1, 1, 1, 1, 0, 1, 0)")
     # b6 is the dependency boundary: exported so b1's readiness can be read, but not
     # this evaluation's work, so it has no build_job row.
-    conn.execute("INSERT INTO derivation_build VALUES ('b6', 'd6', 0, 0, 0, 0, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b7', 'd7', 0, 1, 0, 0, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b6', 'd6', 0, 0, 1, 0, 0, 0, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b7', 'd7', 0, 1, 1, 1, 0, 0, 0)")
+    # d10 is demanded with every visible gate open, but the probe has not answered
+    # for it: nothing below it is demanded yet, and the columns above cannot say so.
+    conn.execute("INSERT INTO derivation VALUES ('d10', 'gzip-1.14', 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b10', 'd10', 0, 0, 0, 0, 0, 1, 0)")
+    # A stub d1 names but no walk ever read: `walked` is false and its subtree is
+    # not recorded. d9 is the other half, a walked parent still counting inputs it
+    # only named, which is what an abandoned walk leaves above the stubs.
+    conn.execute("INSERT INTO derivation VALUES ('d8', 'openssl-3.6.3', 0, 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d9', 'curl-8.21.0', 1, 2)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b8', 'd8', 0, 0, 1, 0, 1, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b9', 'd9', 0, 0, 1, 0, 1, 1, 0)")
     for anchor, drv in (("b1", "d1"), ("b2", "d2"), ("b3", "d3"), ("b4", "d4"),
-                        ("b5", "d5"), ("b7", "d7")):
+                        ("b5", "d5"), ("b7", "d7"), ("b10", "d10")):
         conn.execute(
             "INSERT INTO build_job VALUES (?, ?, ?, ?)", (f"j-{anchor}", EVAL_ID, drv, anchor)
         )
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd2', 'd3', 'd1')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd3', 'd3', 'd2')")
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd4', 'd1', 'd6')")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd2', 'd3', 'd1', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd3', 'd3', 'd2', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd4', 'd1', 'd6', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd6', 'd1', 'd8', 0)")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd7', 'd1', 'd9', 0)")
     # An edge whose far end the file does not carry. A closed export has none;
     # an older report is full of them and must not read as a clean graph.
-    conn.execute("INSERT INTO derivation_dependency VALUES ('dd5', 'd3', 'd-elsewhere')")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd5', 'd3', 'd-elsewhere', 0)")
     conn.execute(
         "INSERT INTO build_attempt VALUES ('a1', 3, 8, 'input prefetch failed', "
         "'2026-08-31T23:47:30', '2026-08-31T23:47:50')"
@@ -203,6 +219,17 @@ def test_why_stuck_names_the_demand_gate(report):
     assert "every gate open" not in undemanded
 
 
+def test_why_stuck_names_an_anchor_the_probe_has_not_answered(report):
+    """Demand stops at an unprobed anchor, so its inputs read as undemanded with
+    no reason of their own. The probe's answer is the reason, and it is the one
+    the other gate columns cannot carry."""
+    lines = commands.why_stuck(report).splitlines()
+    unprobed = next(line for line in lines if line.startswith("gzip-1.14"))
+
+    assert "probed" in unprobed
+    assert "every gate open" not in unprobed
+
+
 def test_why_stuck_reports_only_the_anchors_this_evaluation_drove(report):
     """The dependency boundary is in the file so readiness can be read off it,
     not because the evaluation is waiting on it as work of its own."""
@@ -210,6 +237,20 @@ def test_why_stuck_reports_only_the_anchors_this_evaluation_drove(report):
 
     assert not any(line.startswith("boundary-dep") for line in lines)
     assert "    dep boundary-dep status Created not fetchable" in lines
+
+
+def test_why_stuck_names_a_stub_dependency(report):
+    """A dependency a walk named but never read is the shape the prune bit used to
+    hide: the anchor counts it unready and nothing in the file said why."""
+    lines = commands.why_stuck(report).splitlines()
+
+    assert "    dep openssl-3.6.3 is a stub: never walked" in lines
+
+
+def test_why_stuck_names_an_incomplete_subtree(report):
+    lines = commands.why_stuck(report).splitlines()
+
+    assert "    dep curl-8.21.0 walked over 2 unwalked inputs" in lines
 
 
 def test_why_stuck_says_when_a_dependency_is_not_in_the_report(report):

@@ -140,7 +140,7 @@ async fn narinfo_served_from_db_inner() {
     //   1. EDerivationOutput::find (by hash)   → drv_output_row
     //   2. ECachedPath::find (by hash)         → cached_path_row
     //   3. ECachedPathSignature::find          → cached_path_sig_row
-    //   4. references_for_hash (cached_path_reference) → no references
+    //   4. references_for_hash (cached_path.references) -> no references
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
@@ -178,6 +178,7 @@ async fn narinfo_served_from_db_inner() {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
 
@@ -324,6 +325,7 @@ async fn narinfo_unsigned_inner() {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
 

@@ -29,7 +29,8 @@ impl std::error::Error for InvalidBuildTransition {}
 /// Validates and enforces [`BuildStatus`] state transitions.
 ///
 /// ```text
-/// Created          to  Queued
+/// Created          to  Queued | Skipped
+/// Skipped          to  Created
 /// Queued           to  Building | Created
 /// Building         to  Queued
 /// FailedTransient  to  Queued
@@ -70,6 +71,13 @@ impl BuildStateMachine {
 
         match (from, to) {
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
+
+            // Demand settles work without finishing it: a build-time dependency
+            // of a relay is not pending, and it is not done either. It thaws the
+            // moment something wants it again, and never queues from here - the
+            // thaw is what re-opens the gate.
+            (BuildStatus::Created, BuildStatus::Skipped) => Ok(to),
+            (BuildStatus::Skipped, BuildStatus::Created) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Building) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Created) => Ok(to),
 
@@ -112,6 +120,19 @@ mod tests {
     #[test]
     fn build_sm_created_to_queued() {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Queued).is_ok());
+    }
+
+    /// Demand settles work without finishing it, and brings it back the same way.
+    /// The thaw goes to `Created`, never straight to the queue: a `Skipped` anchor
+    /// has passed no gate, and letting it queue would dispatch against inputs
+    /// nothing has demanded yet.
+    #[test]
+    fn build_sm_skipped_is_entered_and_left_through_created_only() {
+        assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Skipped).is_ok());
+        assert!(BuildStateMachine::validate(BuildStatus::Skipped, BuildStatus::Created).is_ok());
+        assert!(BuildStateMachine::validate(BuildStatus::Skipped, BuildStatus::Queued).is_err());
+        assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Skipped).is_err());
+        assert!(!BuildStateMachine::is_terminal(&BuildStatus::Skipped));
     }
 
     #[test]

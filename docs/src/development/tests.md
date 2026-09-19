@@ -82,7 +82,10 @@ entry's statement list with a synthetic `BEGIN`/`COMMIT` (and `SAVEPOINT` for a
 nested one). Formatting entries lets a `contains` straddle two statements, and
 counting them shifts every index by one. `gradient_db::pool::statements(log)`
 flattens the log to one string per statement with the transaction control
-removed; use it instead of mapping `into_transaction_log()` by hand.
+removed; use it instead of mapping `into_transaction_log()` by hand. Those
+strings are `Debug`, which escapes every `"` sea-orm writes around an
+identifier, so an assertion that reads a quoted column or one bound value takes
+`raw_statements(log)` instead and matches `s.sql` / `s.values`.
 
 **A spawned task races the result buffer.** The buffer is ordered and shared, so
 a handler that spawns database work pops results out from under the request path.
@@ -93,8 +96,8 @@ filesystem or the network is behind a trait; implement the trait in
 `test-support/src/fakes/` and record the calls. Recording fakes
 (`RecordingJobReporter`, `RecordingWebhookClient`) let a test assert on the
 sequence of effects rather than on internal state. When the trait exists only to
-lift one algorithm out of its I/O (`RelayIo` under the worker's closure relay),
-the fake stays in that module's own `tests`: it is a fixture for one walk, not a
+lift one algorithm out of its I/O (`UpstreamIo` under the worker's substitute),
+the fake stays in that module's own `tests`: it is a fixture for one fetch, not a
 double anything else will reuse.
 
 **An actor with side effects is tested behind small traits.** `gradient-effects`

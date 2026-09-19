@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(m.seq_scans.len(), 1);
         assert_eq!(m.seq_scans[0].relation, "derivation_build");
         assert_eq!(m.seq_scans[0].removed, 412_816);
-        assert_eq!(m.seq_scans[0].read, 412_817);
+        assert_eq!(m.seq_scans[0].read, 825_696);
         assert_eq!(m.worst_filtered, ("derivation_build".to_string(), 412_816));
     }
 

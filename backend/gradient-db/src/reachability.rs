@@ -33,6 +33,10 @@ use std::sync::LazyLock;
 /// thousands of anchors, and the answer is almost always "yes" off the first
 /// blocking row it reaches. Reading the set instead moved tens of millions of
 /// rows a minute into the process to compute one bool.
+///
+/// The exception is the call that answers "no", which is the evaluation's last:
+/// nothing blocks, so every anchor it names is read. That is the working set it
+/// was handed, once per evaluation, which is what `Bulk` is for.
 static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT EXISTS (SELECT 1 FROM build_job bj \
@@ -44,7 +48,8 @@ static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
 
 crate::sql_lazy! {
     EVAL_BLOCKED = || EVAL_BLOCKED_SQL.as_str(),
-        params = [EvaluationId];
+        params = [EvaluationId],
+        tier = Bulk;
 }
 
 /// Whether any anchor the evaluation names failed terminally: what decides
@@ -510,7 +515,7 @@ mod tests {
         assert!(
             sql.contains(&format!(
                 "WHERE EXISTS (SELECT 1 FROM evaluation ev WHERE ev.id = bj.evaluation \
-                 AND ev.status IN ({})) AND w.walked AND NOT db.substitutable",
+                 AND ev.status IN ({})) AND w.walked AND db.probed AND NOT db.substitutable",
                 status_sql::eval_in(&EvaluationStatus::ACTIVE)
             )),
             "{sql}"
@@ -600,7 +605,8 @@ mod tests {
             frontier.contains(
                 "JOIN build_job pj ON pj.derivation = p.derivation \
                  JOIN evaluation ev ON ev.id = pj.evaluation \
-                 WHERE e.dependency = db.derivation AND w.walked AND NOT p.substitutable \
+                 WHERE e.dependency = db.derivation \
+                 AND w.walked AND p.probed AND NOT p.substitutable \
                  AND p.status IN (0, 1, 2, 8) AND ev.status IN ("
             ),
             "{frontier}"

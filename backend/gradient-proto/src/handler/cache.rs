@@ -136,11 +136,10 @@ async fn ensure_push_signatures(
 /// Every `Pull` answer's metadata, loaded in a fixed number of queries rather
 /// than per path.
 ///
-/// `PullClosure` widens one requested path to its whole reference closure, up to
-/// `CACHE_QUERY_MAX_PATHS`, so anything done per path here is done up to a
-/// thousand times before the reply is written. Fetching the row, its references
-/// and its signatures individually put ~4000 sequential round trips in front of
-/// a 75 s deadline, which is what made small `PullClosure` queries time out.
+/// A reply carries up to `CACHE_QUERY_MAX_PATHS` paths, so anything done per path
+/// here is done up to a thousand times before the reply is written. Fetching the
+/// row, its references and its signatures individually put ~4000 sequential round
+/// trips in front of a 75 s deadline, which is what made large queries time out.
 #[derive(Default)]
 struct PullMetadata {
     references: HashMap<String, Vec<String>>,
@@ -268,6 +267,22 @@ pub(crate) fn push_transport(nar_size: u64, small_nar_bytes: u64, presigner: boo
     }
 }
 
+/// Whether a query may leave our cache. Only a caller that said `external` ever
+/// does: a build's inputs are here or the build fails, and putting them here is a
+/// Substitute's job, so a Pull without the flag is answered from our rows alone.
+pub(crate) fn may_consult_upstreams(
+    mode: gradient_types::proto::QueryMode,
+    external: bool,
+) -> bool {
+    external && !matches!(mode, gradient_types::proto::QueryMode::Push)
+}
+
+/// An external query names exactly one path: the probe is per path and the caller
+/// is asking about one output.
+pub(crate) fn external_arity_ok(external: bool, paths: usize) -> bool {
+    !external || paths == 1
+}
+
 /// Download transport for a cached path: relay unless the store can presign,
 /// the object is confirmed there, and it is over the threshold.
 pub(crate) fn pull_transport(
@@ -318,7 +333,7 @@ async fn build_cached_entry(
     }
 
     let (url, fields) = match mode {
-        QueryMode::Pull | QueryMode::PullClosure => {
+        QueryMode::Pull => {
             let confirmed = row.is_none_or(|r| r.confirmed);
             let size = file_size.unwrap_or(0).max(0) as u64;
             let transport = pull_transport(
@@ -578,60 +593,23 @@ async fn extend_with_gradient_proto_results(
     }
 }
 
-/// Keep every seed's answer whatever it says, and every bonus entry the cache
-/// can actually serve. A caller reads an uncached entry as "a path I asked for
-/// is missing" and fails the build on it, so an unserveable path it never asked
-/// about must never reach it.
-fn drop_unserveable_bonus(
-    seeds: &[String],
-    mut entries: Vec<gradient_types::proto::CachedPath>,
-) -> Vec<gradient_types::proto::CachedPath> {
-    let seeds: std::collections::HashSet<&str> = seeds.iter().map(String::as_str).collect();
-    entries.retain(|cp| cp.cached || seeds.contains(cp.path.as_str()));
-    entries
-}
-
-/// `paths` plus the serveable members of their runtime-reference closure, held
-/// under the per-reply path cap so the widened reply still fits one frame. With
-/// no room left the seeds come back unchanged and the caller keeps walking.
-async fn expand_pull_closure(state: &ServerState, paths: &[String]) -> Result<Vec<String>, DbErr> {
-    let budget = crate::messages::CACHE_QUERY_MAX_PATHS.saturating_sub(paths.len());
-    if budget == 0 {
-        return Ok(paths.to_vec());
-    }
-
-    let hashes: Vec<String> = paths
-        .iter()
-        .filter_map(|p| {
-            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
-            let hash = base.split('-').next()?;
-            (hash.len() == 32).then(|| hash.to_string())
-        })
-        .collect();
-
-    let mut widened = paths.to_vec();
-    widened.extend(
-        gradient_db::runtime_closure_cached_paths(&state.cache_db, &hashes, budget as u64).await?,
-    );
-
-    Ok(widened)
-}
-
 /// Check which store paths are available - in the local Gradient cache or upstream.
 ///
 /// Behaviour depends on `mode`:
 /// - `Normal` - return only locally-cached paths; probe upstream for misses.
 /// - `Pull`   - same as Normal but cached paths include a presigned S3 GET URL.
-/// - `PullClosure` - `Pull`, widened with the serveable members of each queried
-///   path's reference closure so one round trip answers for a whole closure.
 /// - `Push`   - return **all** queried paths with `cached` set; skip upstream.
 ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
+///
+/// `external` is what lets the answer leave our cache at all; see
+/// [`may_consult_upstreams`].
 async fn query(
     state: &ServerState,
     project_id: Option<ProjectId>,
     paths: &[String],
     nar_sizes: &[u64],
     mode: gradient_types::proto::QueryMode,
+    external: bool,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
     use gradient_types::proto::QueryMode;
 
@@ -643,14 +621,10 @@ async fn query(
         )));
     }
 
-    // Widen the answer with everything else the caller needs from the same
-    // closure, then drop any bonus entry the cache cannot serve - so an uncached
-    // entry still means "the path you asked for is missing", which callers treat
-    // as fatal.
-    if matches!(mode, QueryMode::PullClosure) {
-        let widened = expand_pull_closure(state, paths).await?;
-        let out = Box::pin(query(state, project_id, &widened, &[], QueryMode::Pull)).await?;
-        return Ok(drop_unserveable_bonus(paths, out));
+    if !external_arity_ok(external, paths.len()) {
+        return Err(DbErr::Custom(
+            "an external CacheQuery names exactly one path".to_owned(),
+        ));
     }
 
     let hash_path_pairs: Vec<(&str, &str)> = paths
@@ -703,9 +677,7 @@ async fn query(
         .map(|r| (r.hash.as_str(), r))
         .collect();
     let meta = match mode {
-        QueryMode::Pull | QueryMode::PullClosure => {
-            PullMetadata::load(state, &cached_path_rows).await?
-        }
+        QueryMode::Pull => PullMetadata::load(state, &cached_path_rows).await?,
         _ => PullMetadata::default(),
     };
 
@@ -721,7 +693,7 @@ async fn query(
                     path,
                     file_size,
                     nar_size,
-                    mode.clone(),
+                    mode,
                     expire,
                     rows_by_hash.get(hash).copied(),
                     &meta,
@@ -734,7 +706,9 @@ async fn query(
         }
     }
 
-    if matches!(mode, QueryMode::Push) {
+    // Everything below leaves our cache, and the answer is complete without it: the
+    // caller reads any path this reply does not serve as one we do not have.
+    if !may_consult_upstreams(mode, external) {
         return Ok(result);
     }
 
@@ -762,39 +736,7 @@ async fn query(
         extend_with_gradient_proto_results(state, oid, &uncached_pairs, &mut result).await;
     }
 
-    if matches!(mode, QueryMode::Pull) {
-        let returned: std::collections::HashSet<String> =
-            result.iter().map(|cp| cp.path.clone()).collect();
-        let missing: Vec<gradient_types::proto::CachedPath> = hash_path_pairs
-            .iter()
-            .filter(|(_, p)| !returned.contains(*p))
-            .map(|(_, p)| build_uncached_pull_entry(p))
-            .collect();
-        result.extend(missing);
-    }
-
     Ok(result)
-}
-
-/// Pull-mode response for a path the server cannot serve (neither in the
-/// local cache nor in any configured upstream). Carries `cached: false` and
-/// no metadata so the worker's prefetch hard-fail can distinguish "server has
-/// nothing for this path" from "this path was never queried".
-fn build_uncached_pull_entry(path: &str) -> gradient_types::proto::CachedPath {
-    use gradient_types::proto::CachedPath;
-    CachedPath {
-        path: path.to_string(),
-        cached: false,
-        file_size: None,
-        nar_size: None,
-        url: None,
-        nar_hash: None,
-        file_hash: None,
-        references: None,
-        signatures: None,
-        deriver: None,
-        ca: None,
-    }
 }
 
 /// Return the subset of `hashes` that have a `cached_path_signature` row for
@@ -905,7 +847,7 @@ pub(super) async fn query_for_cache(
         .map(|r| (r.hash.as_str(), r))
         .collect();
     let meta = match mode {
-        QueryMode::Pull | QueryMode::PullClosure => PullMetadata::load(state, &cached_path_rows)
+        QueryMode::Pull => PullMetadata::load(state, &cached_path_rows)
             .await
             .unwrap_or_default(),
         _ => PullMetadata::default(),
@@ -926,7 +868,7 @@ pub(super) async fn query_for_cache(
                     path,
                     file_size,
                     nar_size,
-                    mode.clone(),
+                    mode,
                     expire,
                     rows_by_hash.get(hash).copied(),
                     &meta,
@@ -934,16 +876,6 @@ pub(super) async fn query_for_cache(
                 .await,
             );
         }
-    }
-
-    if matches!(mode, QueryMode::Pull) {
-        let returned: HashSet<String> = result.iter().map(|cp| cp.path.clone()).collect();
-        let missing: Vec<gradient_types::proto::CachedPath> = hash_path_pairs
-            .iter()
-            .filter(|(_, p)| !returned.contains(*p))
-            .map(|(_, p)| build_uncached_pull_entry(p))
-            .collect();
-        result.extend(missing);
     }
 
     result
@@ -972,8 +904,9 @@ pub(super) async fn handle_cache_query(
     paths: &[String],
     nar_sizes: &[u64],
     mode: gradient_types::proto::QueryMode,
+    external: bool,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
-    query(state, project_id, paths, nar_sizes, mode).await
+    query(state, project_id, paths, nar_sizes, mode, external).await
 }
 
 fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
@@ -1053,7 +986,7 @@ mod tests {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Push)
+            query(&state, None, &paths, &[], QueryMode::Push, false)
                 .await
                 .is_err(),
             "a Push query must carry one size per path"
@@ -1086,7 +1019,7 @@ mod tests {
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-large".to_string(),
         ];
         let sizes = [1024, 8 * 1024 * 1024];
-        let result = query(&state, None, &paths, &sizes, QueryMode::Push)
+        let result = query(&state, None, &paths, &sizes, QueryMode::Push, false)
             .await
             .unwrap();
         let has_url: HashMap<&str, bool> = result
@@ -1118,70 +1051,46 @@ mod tests {
         let state = Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Pull)
+            query(&state, None, &paths, &[], QueryMode::Pull, false)
                 .await
                 .is_err(),
             "DB error must propagate as Err, not a confident uncached result"
         );
     }
 
-    fn entry(path: &str, cached: bool) -> gradient_types::proto::CachedPath {
-        gradient_types::proto::CachedPath {
-            path: path.to_owned(),
-            cached,
-            file_size: None,
-            nar_size: None,
-            url: None,
-            nar_hash: None,
-            file_hash: None,
-            references: None,
-            signatures: None,
-            deriver: None,
-            ca: None,
-        }
+    #[test]
+    fn only_an_external_pull_or_normal_query_leaves_our_cache() {
+        assert!(may_consult_upstreams(QueryMode::Pull, true));
+        assert!(may_consult_upstreams(QueryMode::Normal, true));
+        assert!(!may_consult_upstreams(QueryMode::Push, true));
+        assert!(!may_consult_upstreams(QueryMode::Pull, false));
+        assert!(!may_consult_upstreams(QueryMode::Normal, false));
     }
 
-    /// The whole safety property of `PullClosure`: widening the answer must not
-    /// invent a missing input. A worker fails the build on any uncached entry,
-    /// so only a seed may come back uncached.
     #[test]
-    fn a_widened_reply_never_reports_an_unasked_path_as_missing() {
-        let seeds = vec!["/nix/store/seed-a".to_string()];
-        let kept = drop_unserveable_bonus(
-            &seeds,
-            vec![
-                entry("/nix/store/seed-a", false),
-                entry("/nix/store/bonus-served", true),
-                entry("/nix/store/bonus-unserveable", false),
-            ],
-        );
-
-        let paths: Vec<&str> = kept.iter().map(|c| c.path.as_str()).collect();
-        assert_eq!(
-            paths,
-            ["/nix/store/seed-a", "/nix/store/bonus-served"],
-            "an uncached bonus entry must be dropped, an uncached seed kept"
-        );
+    fn an_external_query_names_exactly_one_path() {
+        assert!(external_arity_ok(false, 0) && external_arity_ok(false, 200));
+        assert!(external_arity_ok(true, 1));
+        assert!(!external_arity_ok(true, 0) && !external_arity_ok(true, 2));
     }
 
-    /// The widened path list is what bounds the reply, so it may never exceed
-    /// the same cap a plain query is chunked to.
-    #[test]
-    fn closure_expansion_stays_within_the_single_frame_path_cap() {
-        use crate::messages::CACHE_QUERY_MAX_PATHS;
-        for seeds in [
-            0usize,
-            1,
-            CACHE_QUERY_MAX_PATHS - 1,
-            CACHE_QUERY_MAX_PATHS,
-            CACHE_QUERY_MAX_PATHS + 1,
-        ] {
-            let budget = CACHE_QUERY_MAX_PATHS.saturating_sub(seeds);
-            assert!(
-                seeds.min(CACHE_QUERY_MAX_PATHS) + budget <= CACHE_QUERY_MAX_PATHS,
-                "seeds {seeds} plus budget {budget} overruns the cap"
-            );
-        }
+    /// The handler, not only the predicate: two external paths are refused before
+    /// any row is read, so a `CacheError` reaches the worker and it retries as
+    /// transient instead of reading the paths as absent.
+    #[tokio::test]
+    async fn the_handler_refuses_a_two_path_external_query() {
+        let state = make_state();
+        let err = handle_cache_query(
+            &state,
+            None,
+            &["/nix/store/a-a".to_owned(), "/nix/store/b-b".to_owned()],
+            &[],
+            QueryMode::Pull,
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("exactly one path"), "{err}");
     }
 
     #[tokio::test]
@@ -1189,19 +1098,19 @@ mod tests {
         let state = make_state();
 
         assert!(
-            query(&state, None, &[], &[], QueryMode::Normal)
+            query(&state, None, &[], &[], QueryMode::Normal, false)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &[], &[], QueryMode::Push)
+            query(&state, None, &[], &[], QueryMode::Push, false)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &[], &[], QueryMode::Pull)
+            query(&state, None, &[], &[], QueryMode::Pull, false)
                 .await
                 .unwrap()
                 .is_empty()
@@ -1217,19 +1126,19 @@ mod tests {
             "/nix/store/short-name".to_string(),
         ];
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Normal)
+            query(&state, None, &paths, &[], QueryMode::Normal, false)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push)
+            query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push, false)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert!(
-            query(&state, None, &paths, &[], QueryMode::Pull)
+            query(&state, None, &paths, &[], QueryMode::Pull, false)
                 .await
                 .unwrap()
                 .is_empty()
@@ -1240,7 +1149,7 @@ mod tests {
     async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
-        let result = query(&state, None, &paths, &[], QueryMode::Normal)
+        let result = query(&state, None, &paths, &[], QueryMode::Normal, false)
             .await
             .unwrap();
         assert!(
@@ -1249,45 +1158,25 @@ mod tests {
         );
     }
 
+    /// A Pull answers from our rows alone and returns only what it can serve. The
+    /// caller reads every path it asked about and did not get back as one we do not
+    /// have, so an entry that carries nothing has nothing to say.
     #[tokio::test]
-    async fn cache_query_pull_uncached_returns_entries_with_cached_false() {
-        // Pull mode must surface every queried path, even ones the server cannot
-        // serve. Without an explicit `cached: false` entry the worker has no way
-        // to distinguish "server omitted this path" from "this path was never
-        // queried", so its closure-walk hard-fail is bypassed and the build
-        // proceeds to import a dependent path with an unsatisfiable reference,
-        // surfacing as a confusing `daemon add_to_store_nar … path '…' is not
-        // valid` error instead of the intended `not available in the gradient
-        // cache` message.
+    async fn cache_query_pull_returns_only_what_it_can_serve() {
         let state = make_state();
         let paths = vec![
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, &[], QueryMode::Pull)
+
+        let result = query(&state, None, &paths, &[], QueryMode::Pull, false)
             .await
             .unwrap();
-        assert_eq!(result.len(), 2, "Pull must return all queried paths");
-        for cp in &result {
-            assert!(!cp.cached, "uncached path: {}", cp.path);
-            assert!(cp.url.is_none(), "Pull-uncached carries no URL");
-            assert!(cp.nar_hash.is_none(), "Pull-uncached carries no nar_hash");
-            assert!(
-                cp.references.is_none(),
-                "Pull-uncached carries no references"
-            );
-            assert!(
-                cp.signatures.is_none(),
-                "Pull-uncached carries no signatures"
-            );
-            assert!(cp.deriver.is_none(), "Pull-uncached carries no deriver");
-            assert!(cp.ca.is_none(), "Pull-uncached carries no ca");
-            assert!(cp.file_size.is_none(), "Pull-uncached carries no file_size");
-            assert!(cp.nar_size.is_none(), "Pull-uncached carries no nar_size");
-        }
-        let returned: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
-        assert!(returned.contains(&paths[0].as_str()));
-        assert!(returned.contains(&paths[1].as_str()));
+
+        assert!(
+            result.is_empty(),
+            "an unserveable path is an omission, not an empty entry: {result:?}"
+        );
     }
 
     #[tokio::test]
@@ -1297,7 +1186,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push)
+        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push, false)
             .await
             .unwrap();
         assert_eq!(result.len(), 2, "Push should return all queried paths");
@@ -1333,7 +1222,9 @@ mod tests {
             } else {
                 &[]
             };
-            let result = query(&state, None, &paths, sizes, mode).await.unwrap();
+            let result = query(&state, None, &paths, sizes, mode, false)
+                .await
+                .unwrap();
             assert!(result.is_empty(), "33-char hash must be filtered out");
         }
     }
@@ -1345,7 +1236,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
         ];
-        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push)
+        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push, false)
             .await
             .unwrap();
         for cp in &result {

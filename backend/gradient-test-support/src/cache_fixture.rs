@@ -120,7 +120,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         .append_query_results([vec![drv_output_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
-        // references_for_hash (cached_path_reference): this fixture has none.
+        // references_for_hash (cached_path.references): this fixture has none.
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
 
@@ -152,6 +152,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -207,6 +208,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -267,6 +269,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });
@@ -386,6 +389,7 @@ fn make_state(
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -472,6 +476,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -543,6 +548,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
+        probe_requests: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });
@@ -621,7 +627,7 @@ pub async fn public_cache_with_one_nar() -> Arc<ServerState> {
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![cached_path_row_fixture()]])
         .append_query_results([vec![cached_path_sig_row_fixture()]])
-        // references_for_hash (cached_path_reference): this fixture has none.
+        // references_for_hash (cached_path.references): this fixture has none.
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
     make_state(db, Arc::new(NoopLogStorage))

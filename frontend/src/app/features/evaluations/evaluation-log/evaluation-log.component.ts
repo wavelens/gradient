@@ -302,6 +302,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     { key: 'aborted', label: 'Aborted', members: ['aborted'] },
     { key: 'queued', label: 'Queued', members: ['queued'] },
     { key: 'completed', label: 'Completed', members: ['completed', 'substituted'] },
+    { key: 'skipped', label: 'Skipped', members: ['skipped'] },
   ];
 
   /// `visibleBuilds` bucketed into the status sections above (only non-empty
@@ -349,6 +350,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       case 'FailedTimeout': return 'failed';
       case 'DependencyFailed': return 'dependencyfailed';
       case 'Aborted': return 'aborted';
+      case 'Skipped': return 'skipped';
       default: return (status ?? '').toLowerCase();
     }
   }

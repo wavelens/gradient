@@ -4,25 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum BuildDispatchMode {
-    RealArch,
-    SubstituteBuiltin,
-}
+use gradient_types::proto::BuildSpecKind;
 
-/// A relay runs on any worker, since it only moves bytes between two caches;
-/// everything else needs a worker of its own architecture.
+/// A substitute or a download runs on any worker, since neither needs a nix store;
+/// a build needs a worker of its own architecture. A `builtin` derivation is nix's
+/// own builder: fixed-output ones are `builtin:fetchurl`, which a worker executes
+/// itself; the rest (`builtin:buildenv`) stay builds the daemon runs.
 ///
-/// Whether an anchor is still worth relaying is not decided here. A spent miss
+/// Whether an anchor is still worth substituting is not decided here. A spent miss
 /// budget clears `substitutable` in the graph actor, on the failure that spends it,
-/// so this reads the flag and nothing else - the dispatcher used to escalate a
-/// still-substitutable anchor to a real build and then stall it forever when no
-/// worker for its architecture was connected.
-pub(crate) fn decide_dispatch_mode(substitutable: bool) -> BuildDispatchMode {
+/// so this reads the flag and nothing else.
+pub(crate) fn decide_build_spec_kind(
+    substitutable: bool,
+    architecture: &str,
+    is_fixed_output: bool,
+) -> BuildSpecKind {
     if substitutable {
-        BuildDispatchMode::SubstituteBuiltin
+        BuildSpecKind::Substitute
+    } else if architecture == gradient_types::BUILTIN_ARCH && is_fixed_output {
+        BuildSpecKind::Download
     } else {
-        BuildDispatchMode::RealArch
+        BuildSpecKind::Build
     }
 }
 
@@ -31,11 +33,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn substitutable_is_a_builtin_relay_and_everything_else_needs_its_arch() {
+    fn substitutable_is_a_substitute_and_everything_else_builds_on_its_arch() {
         assert_eq!(
-            decide_dispatch_mode(true),
-            BuildDispatchMode::SubstituteBuiltin
+            decide_build_spec_kind(true, "x86_64-linux", false),
+            BuildSpecKind::Substitute
         );
-        assert_eq!(decide_dispatch_mode(false), BuildDispatchMode::RealArch);
+        assert_eq!(
+            decide_build_spec_kind(false, "x86_64-linux", false),
+            BuildSpecKind::Build
+        );
+    }
+
+    #[test]
+    fn a_builtin_fixed_output_downloads_and_a_builtin_buildenv_builds() {
+        assert_eq!(
+            decide_build_spec_kind(true, "builtin", true),
+            BuildSpecKind::Substitute
+        );
+        assert_eq!(
+            decide_build_spec_kind(false, "builtin", true),
+            BuildSpecKind::Download
+        );
+        assert_eq!(
+            decide_build_spec_kind(false, "builtin", false),
+            BuildSpecKind::Build
+        );
+        assert_eq!(
+            decide_build_spec_kind(false, "x86_64-linux", true),
+            BuildSpecKind::Build
+        );
     }
 }

@@ -613,23 +613,26 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 | Mode | Use case | Server returns |
 |------|----------|----------------|
 | `Normal` | Is this path already in the cache? | Only cached paths (`cached: true`). A local hit answers presence alone, with no URL and no import metadata; an upstream hit carries that upstream's NAR URL and the narinfo fields behind it, since that is all the server has to offer for it. |
-| `Pull` | Build: fetch required store paths | **All** queried paths. Cached paths carry full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL for a confirmed object over `smallNarBytes`, else `url: None`: the worker pulls over `NarRequest` and the server answers from its hot RAM cache, its staged file or storage. Uncached paths carry `path` + `cached: false` only, signaling "the server has nothing to offer for this path" - neither in the local cache nor in any configured upstream. Lets the worker hard-fail before importing a dependent with an unsatisfiable reference. |
+| `Pull` | Build: fetch required store paths | The queried paths the cache can serve, each with full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL for a confirmed object over `smallNarBytes`, else `url: None`: the worker pulls over `NarRequest` and the server answers from its hot RAM cache, its staged file or storage. A path the reply omits is one the server has nothing to offer for; the worker hard-fails on it before importing a dependent with an unsatisfiable reference. |
 | `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` - a presigned S3 PUT URL when the store can presign and the reported `nar_sizes[i]` is over `smallNarBytes`; otherwise `None` and the worker relays over `NarPush`. No other metadata, no upstream lookup. |
-| `PullClosure` | Build: fetch a required path and everything it references | `Pull`, widened with the serveable members of each queried path's runtime-reference closure. The server walks `cached_path_reference` itself, so one round trip answers for a whole closure instead of one hop per round trip. A bonus member is only ever included when the cache can serve it, so an uncached entry still means "a path you asked for is missing". The widened list stays under `CACHE_QUERY_MAX_PATHS`, so the reply still fits one frame; anything that does not fit is simply left for the caller's next query. |
+
+Only a query with `external: true` may be answered from an upstream, and it names exactly one path. Every other query answers from our cache alone: a build's inputs are here or it fails `InputsUnavailable`, and putting them here is a Substitute's job.
 
 ```rust
 // Worker → Server
 CacheQuery {
     job_id: String,
+    query_id: String,                   // echoed in CacheStatus / CacheError
     paths: Vec<String>,                 // store paths to query
     mode: QueryMode,                    // default: Normal
+    nar_sizes: Vec<u64>,                // Push: uncompressed NAR size per path, u64::MAX when unknown
+    external: bool,                     // may the server consult its upstreams? then exactly one path
 }
 
 enum QueryMode {
     Normal,       // return only cached paths - a local hit is presence only, an upstream hit carries its URL
     Pull,         // return cached paths with full import metadata + presigned GET URL
     Push,         // return all paths with path + cached; uncached also gets presigned PUT URL (S3)
-    PullClosure,  // Pull, widened with each path's serveable reference closure
 }
 
 // Server → Worker
@@ -652,24 +655,22 @@ CachedPath {
     deriver: Option<String>,            // full /nix/store/*.drv that produced this path
     ca: Option<String>,                 // content-address (e.g. fixed:r:sha256:...)
 }
-
-CacheQuery {
-    nar_sizes: Vec<u64>,                // Push: uncompressed NAR size per path, u64::MAX when unknown
-}
 ```
 
 **Field population by mode:**
 
 - `Normal` - `path`, `cached` only (and `cached` is always `true`, since uncached paths are omitted).
 - `Pull` + `cached: true` - every field populated from `cached_path` / `cached_path_signature`; `url` is a presigned S3 GET for S3-backed stores or `None` for local (use `NarRequest`). Upstream hits populate the same fields from the sig-verified upstream narinfo.
-- `Pull` + `cached: false` - `path` + `cached` only, no metadata, no `url`. The server emits this for every queried path it cannot satisfy (neither in the local cache nor in any configured upstream) so the worker can detect "this path is genuinely unavailable" rather than mistaking server omission for "this path was never asked about". Without it, the closure walk treats unanswered references as already-present-locally, then fails opaquely deep inside `add_to_store_nar` when a dependent path is imported with an unsatisfiable reference.
+- `Pull` + omitted - the reply is authoritative over what was asked, so a queried path it does not answer with something serveable is one the server cannot satisfy. The worker diffs the reply against the set it queried and fails `InputsUnavailable` on the difference, rather than treating an unanswered reference as already-present-locally and failing opaquely deep inside `add_to_store_nar` when a dependent path is imported. This covers a path the server drops before it reads a row (a hash component that is not 32 characters) as well as one it simply has nothing for.
 - `Push` + `cached: true` - only `path` + `cached`; worker skips the path.
 - `Push` + `cached: false` - `path`, `cached`, and `url` (presigned S3 PUT when the store can presign and the NAR is over `smallNarBytes`; otherwise `None` and the worker relays over `NarPush`). No other metadata. No upstream lookup in Push mode.
 - A Push query whose `nar_sizes` length differs from `paths` is answered with `CacheError`.
+- Without `external: true` no mode reaches an upstream at all; `Pull` then answers from our rows alone, and the paths it leaves out are the ones we cannot serve.
+- `external: true` - one path; the reply may carry an upstream `url`, `nar_hash`, `references`, `deriver` and `ca` when no row of ours serves it. A query that names any other number of paths is answered with `CacheError`.
 
 **"Cached" requires fully-stored bytes.** A `cached_path` row only counts as `cached: true` when its `file_hash IS NOT NULL` (`is_fully_cached()`). Placeholder rows for in-flight or aborted uploads are excluded from `CacheStatus` so the worker never receives "yes, fetch via `NarRequest`" for a path the server can't actually serve.
 
-**Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a worker-side deadline (`CACHE_QUERY_TIMEOUT`, 75 s), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline.
+**Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a worker-side deadline (`CACHE_QUERY_TIMEOUT`, 75 s), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (which probes upstream narinfo inline only when `external`), `QueryKnownDerivations`, and `WorkerMetrics`; Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline.
 
 **Pipelined chunks.** A worker keeps up to `CACHE_QUERY_WINDOW` (4) chunks of a `CacheQuery` or `QueryKnownDerivations` in flight and concatenates the answers in request order; replies correlate by `query_id`, so completion order is free. One chunk at a time was the pre-`query_id` rule from when both peers could wedge mid-write; the per-chunk bound, not serialisation, is what keeps the socket drainable.
 
@@ -704,7 +705,7 @@ sequenceDiagram
 
 The server checks its local NAR store first. For paths not found locally it serves the upstream availability already persisted on `derivation_output.external_url` at eval time, and only then fetches `.narinfo` live from the upstream external caches configured for the project (the project's `project_cache` rows, their `cache`, and each cache's `cache_upstream` entries). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
-An entry with `cached: true` is serveable regardless of `url`. In `Normal` mode a `url` only ever names an upstream - a local hit answers presence alone - and the worker downloads that NAR directly from the URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
+An entry with `cached: true` is serveable regardless of `url`. In `Normal` mode a `url` only ever names an upstream - a local hit answers presence alone - and the worker downloads that NAR directly from the URL. Whatever the upstream's compression, the payload is decompressed, verified against the upstream `nar_hash`, and recompressed at our level before it enters our cache: the metadata the server stores is this side's, never the upstream's word for it.
 
 ### Cache population
 
@@ -715,7 +716,7 @@ The flow for getting any store path (fetched flake input, evaluated `.drv`, or b
  1. **Worker produces** the path locally (fetch, eval, or build).
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
  3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, and `deriver` (the full `.drv` path, when the daemon knows one). `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) - for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
- 4. **Server commits atomically on `NarUploaded`**: in local mode it pops the buffered `NarPush` chunks, validates the buffer length against the reported `file_size`, writes the compressed bytes to `nar_storage` in a tracked task per upload, and **only then** asks the graph actor to record `cached_path` metadata with its `CommitNar` message (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one). The per-connection commit semaphore is gone: the actor already serialises every write to the index. If the size check fails or `nar_storage.put` errors, the server stops the worker and marks the build `FailedTransient` so the dispatcher re-queues it (bounded by the attempt cap); the WebSocket connection is left intact so the worker's other in-flight jobs continue. No `cached_path` row ever claims bytes that aren't actually stored. In S3 mode there are no buffered chunks; the worker uploaded directly to object storage and `NarUploaded` only records metadata. No local re-packing, re-compression, or re-hashing ever happens. On the local backend the staged file is renamed into `nars/` and the row is committed with `confirmed = true`. On S3 it is renamed into `nar-staged/`, the row is committed with `confirmed = false`, and the `nar-uploader` child streams it to the bucket and confirms the row afterwards; the path is signed, dispatchable and servable from the moment of the commit. A relayed NAR at or under `smallNarBytes` also enters the server's hot RAM cache from the bytes its staging task retained, and the commit invalidates the cache entry for any other NAR. A presigned upload is unchanged and is born confirmed after its HEAD check.
+ 4. **Server commits atomically on `NarUploaded`**: in local mode it pops the buffered `NarPush` chunks, validates the buffer length against the reported `file_size`, writes the compressed bytes to `nar_storage` in a tracked task per upload, and **only then** asks the graph actor to record `cached_path` metadata with its `CommitNar` message (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one). The commit is also where a built output's runtime edges are learned: every reference whose hash has a producing derivation becomes a `derivation_dependency` row of kind `Runtime` from the committed path's own producer, and the anchor's `missing_runtime_deps` is seeded from them. The per-connection commit semaphore is gone: the actor already serialises every write to the index. If the size check fails or `nar_storage.put` errors, the server stops the worker and marks the build `FailedTransient` so the dispatcher re-queues it (bounded by the attempt cap); the WebSocket connection is left intact so the worker's other in-flight jobs continue. No `cached_path` row ever claims bytes that aren't actually stored. In S3 mode there are no buffered chunks; the worker uploaded directly to object storage and `NarUploaded` only records metadata. No local re-packing, re-compression, or re-hashing ever happens. On the local backend the staged file is renamed into `nars/` and the row is committed with `confirmed = true`. On S3 it is renamed into `nar-staged/`, the row is committed with `confirmed = false`, and the `nar-uploader` child streams it to the bucket and confirms the row afterwards; the path is signed, dispatchable and servable from the moment of the commit. A relayed NAR at or under `smallNarBytes` also enters the server's hot RAM cache from the bytes its staging task retained, and the commit invalidates the cache entry for any other NAR. A presigned upload is unchanged and is born confirmed after its HEAD check.
  5. **Signing** happens on arrival. `mark_nar_stored` inserts one `cached_path_signature` row per project-cache with `signature = NULL`, then wakes the signature sweep (`state.sign_signal`). The sweep (`cache::cacher::sign_sweep`) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature - reusing one signer per cache per pass, and re-arming itself while a full batch remains. The periodic tick is now an hourly fallback (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`, default 3600) covering subscription placeholders and the `cache_derivation` backfill. Paths whose every producing task has `sign_cache = false` are skipped, except the reserved `build-request` task, which is always signed so `gradient build` outputs stay substitutable. New project ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the project owns, back-filled by the same sweep.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
@@ -761,13 +762,13 @@ sequenceDiagram
 
 #### BFS Subtree Pruning
 
-Before enqueuing each wave of input-derivation paths, the worker sends `QueryKnownDerivations` with all newly-discovered `.drv` paths in that wave. The server returns the subset it already has in its `derivation` table for the owning project. The worker:
+Before enqueuing each wave of input-derivation paths, the worker sends `QueryKnownDerivations` with all newly-discovered `.drv` paths in that wave. The server returns the subset it has recorded to the leaves: `walked AND unwalked_inputs = 0`. The worker:
 
  1. Pre-marks all new dep paths as visited (prevents double-enqueuing).
  2. Enqueues **unknown** paths for further BFS traversal.
  3. For **known** paths, nothing: the path stays in its parent's `dependencies`, and the server records a stub row, the edge and this evaluation's `build_job` from that name. The subtree is never walked twice.
 
-This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same project. The server answers `KnownDerivations` from the graph actor, after every evaluation batch queued before the query, so a subtree is never reported known while its edges are still unwritten.
+This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same project. The server answers `KnownDerivations` from the graph actor, after every evaluation batch queued before the query, so a subtree is never reported known while its edges are still unwritten. The second bit is what makes the answer safe against a walk that was abandoned mid-way: the parents that walk wrote read incomplete until their own inputs are recorded, so this walk descends into the stubs it left rather than pruning above them.
 
 ```mermaid
 sequenceDiagram
@@ -809,15 +810,34 @@ BuildJob {
 BuildSpec {
     build_id: Uuid,                     // DB build row ID
     drv_path: String,                   // /nix/store/xxx.drv
+    kind: BuildSpecKind,                // how the outputs are produced
+    is_fixed_output: bool,              // content-addressed derivation
+    outputs: Vec<DerivationOutput>,     // this derivation's own (name, path), on every kind
+    timeout_secs: Option<u64>,          // wall-clock limit; None = no limit
+    max_silent_secs: Option<u64>,       // silent limit; None = no limit
 }
 ```
+
+| Kind | What the worker does | Where it runs |
+|------|----------------------|---------------|
+| `Build` | Prefetch the inputs, run the builder through the daemon. | A worker of the derivation's architecture. |
+| `Substitute` | Fetch each output's NAR from an upstream cache and repack it. No nix store, no dependency, nothing below an output. | Any worker. |
+| `Download` | Execute `builtin:fetchurl` directly: fetch the URL, verify the fixed output hash, pack the result as a one-file NAR. No nix store, no dependency. | Any worker. |
+
+Both fetching kinds ask the local store first. An output already on disk is
+already realised: it is packed from there and reported as substituted, and no
+upstream or URL is contacted for it. The ask is best-effort, because a worker
+without nix is exactly what these two kinds are for - a store that cannot answer
+is read as "not here", and every path is fetched as before.
+
+Every kind ends in the same push: the outputs it produced, and only those.
 
 The worker always zstd-compresses before upload - that's invariant.
 
 | Step | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
 | **Build** | `build` | `builds` + `required_paths` - full chain with pre-computed closure | Per-build `BuildOutput` via `JobUpdate` |
-| **Compress + Upload** | `build` | (implicit) | the worker sends `CacheQuery { mode: Push }` for the realised outputs and uploads each uncached one via presigned S3 PUT (straight to object storage) or chunked `NarPush` (local stores), followed by `NarUploaded`. A failed upload fails the build transiently so the server re-queues it; on S3 the server never relays the bytes. |
+| **Compress + Upload** | `build` | (implicit) | the worker sends `CacheQuery { mode: Push }` for the outputs the job produced, and only those, and uploads each uncached one via presigned S3 PUT (straight to object storage) or chunked `NarPush` (local stores), followed by `NarUploaded`. A failed upload fails the build transiently so the server re-queues it; on S3 the server never relays the bytes. |
 
 **NAR transfer flow:**
 
@@ -968,7 +988,7 @@ enum ClientMessage {
     },
 }
 
-enum QueryMode { Normal, Pull, Push, PullClosure }  // default: Normal
+enum QueryMode { Normal, Pull, Push }  // default: Normal
 enum EvalMessageLevel { Error, Warning, Notice }
 ```
 
@@ -1035,11 +1055,11 @@ milliseconds from job acceptance, never from the enclosing span.
 | `known_derivations_wait` | waiting on `QueryKnownDerivations` |
 | `drv_closure_push` | pushing a batch's `.drv` runtime closure |
 | `prefetch` | importing a build's cache-resident inputs |
-| `substitute_relay` | relaying an `external_cached` output |
-| `substitute_fetch` | downloading one upstream NAR, nested under `substitute_relay` |
+| `substitute_fetch` | downloading one upstream NAR per output of a Substitute |
+| `download` | executing one `builtin:fetchurl` |
 | `build` | one derivation build |
-| `compress` | the post-build compress and push loop, and a relayed NAR's recompress |
-| `nar_push` | one output NAR upload, nested under `compress` or `substitute_relay` |
+| `compress` | the push every job kind ends in: the outputs it produced, and only those |
+| `nar_push` | one output NAR upload, nested under `compress` |
 | `cache_query_wait` | waiting for a `CacheStatus` or `CacheError` reply |
 
 The server writes one `dispatched_job_phase` row per span, derives the eval
@@ -1121,7 +1141,7 @@ The worker captures `BuildMetrics` best-effort from each build's cgroup (require
 
 Two transports, chosen by the server based on `NarStore` configuration and advertised per path in `CacheQuery` replies (`CachedPath.url`). Both support **batched transfers** - the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
 
-Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (pack a store path on the fly, or relay pre-compressed substitute bytes) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over 512 KiB `NarPush` chunks, `BULK_CHUNK_SIZE`, with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks both the length and the SHA-256 its staging task reports against the `file_size` and `file_hash` in the message, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
+Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (`Path`: pack a store path on the fly; `Raw`: an uncompressed NAR already in memory, compressed and hashed here) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over 512 KiB `NarPush` chunks, `BULK_CHUNK_SIZE`, with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks both the length and the SHA-256 its staging task reports against the `file_size` and `file_hash` in the message, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
 
 A job uploads up to four paths at once, which hides the per-path resume round trip that dominated eval pushes of many small `.drv` and source paths; four concurrent streams also count four times against the session's `max_nar_buffer_bytes` staging budget, which a sequential loop never approached. A NAR above 8 MiB is compressed with a multithreaded zstd encoder bounded to four threads, smaller ones single-threaded, and the push resume token carries that thread count because the two encoders do not produce identical bytes. Pulled chunks are staged by a per-transfer task on the worker as well; the importer decompresses straight from the staged file, so the compressed NAR never sits in memory.
 
@@ -1530,7 +1550,7 @@ decommission a worker it does not own.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `12`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `14`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
@@ -1546,6 +1566,11 @@ decommission a worker it does not own.
  - v12 reads rkyv archives unaligned and in place, gave `QueryKnownDerivations` a
    `query_id` that `KnownDerivations` echoes, and made bulk chunks 512 KiB with a
    byte-capped bulk write batch.
+ - v13 put `nar_sizes` on a Push `CacheQuery`, so the server relays NARs at or
+   under `smallNarBytes` and pulls small or unconfirmed ones over the stream.
+ - v14 replaced `BuildSpec.external_cached` with `BuildSpec.kind`
+   (`BuildSpecKind`), added `CacheQuery.external`, and removed
+   `QueryMode::PullClosure`.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---

@@ -34,27 +34,31 @@ const BATCH_SIZE: usize = 1000;
 gradient_db::sql! {
     /// Insert or complete the record of every derivation the worker walked. The
     /// conflict update runs only for a row that is not yet walked, so RETURNING
-    /// yields exactly the derivations this batch flipped.
+    /// yields exactly the derivations this batch flipped. The record lands with
+    /// its distinct input count as `unwalked_inputs`, so a non-leaf never reads
+    /// complete between this write and the seed below it.
     WALKED_UPSERT = r#"
 INSERT INTO derivation
-    (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, created_at)
+    (id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, walked, unwalked_inputs, created_at)
 SELECT d.id, d.hash, d.name, d.architecture, NULLIF(d.pname, ''), d.prefer_local_build,
-       d.is_fixed_output, d.allow_substitutes, true, $9
-FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bool[], $7::bool[], $8::bool[])
-     AS d(id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes)
+       d.is_fixed_output, d.allow_substitutes, true, d.unwalked_inputs, $10
+FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bool[], $7::bool[], $8::bool[], $9::int[])
+     AS d(id, hash, name, architecture, pname, prefer_local_build, is_fixed_output, allow_substitutes, unwalked_inputs)
 ON CONFLICT (hash, name) DO UPDATE SET
     architecture = EXCLUDED.architecture,
     pname = EXCLUDED.pname,
     prefer_local_build = EXCLUDED.prefer_local_build,
     is_fixed_output = EXCLUDED.is_fixed_output,
     allow_substitutes = EXCLUDED.allow_substitutes,
-    walked = true
+    walked = true,
+    unwalked_inputs = EXCLUDED.unwalked_inputs
 WHERE NOT derivation.walked
 RETURNING hash
 "#,
         params = [
             NewUuids(64), DerivationHashes(64), Texts("hello", 64), Texts("x86_64-linux", 64),
-            Texts("hello-1.0", 64), Bools(false, 64), Bools(false, 64), Bools(true, 64), Now,
+            Texts("hello-1.0", 64), Bools(false, 64), Bools(false, 64), Bools(true, 64), Ints(0, 64),
+            Now,
         ];
 
     /// A row for every dependency the batch names, so its edge can land now. A
@@ -91,6 +95,15 @@ WHERE db.derivation = l.derivation
       IS DISTINCT FROM (NULLIF(l.timeout_secs, 0), NULLIF(l.max_silent_secs, 0))
 "#,
         params = [DerivationIds(64), Ints(3600, 64), Ints(600, 64)];
+
+    /// The upstream probe has answered for these anchors. `RETURNING` names the
+    /// ones it changed, which is what the demand recompute has to run for.
+    MARK_PROBED = r#"
+UPDATE derivation_build SET probed = true, updated_at = (now() AT TIME ZONE 'UTC')
+WHERE derivation = ANY($1::uuid[]) AND NOT probed
+RETURNING derivation
+"#,
+        params = [DerivationIds(64)];
 }
 
 gradient_db::sql_fn! {
@@ -143,6 +156,7 @@ impl BatchWriter<'_> {
         let mut prefer_local: Vec<bool> = Vec::new();
         let mut fixed_output: Vec<bool> = Vec::new();
         let mut allow_substitutes: Vec<bool> = Vec::new();
+        let mut input_counts: Vec<i32> = Vec::new();
         for d in derivations {
             let (hash, name) = drv_hash_name(&d.drv_path).ok_or_else(|| {
                 anyhow!(
@@ -162,6 +176,7 @@ impl BatchWriter<'_> {
             prefer_local.push(d.prefer_local_build);
             fixed_output.push(d.is_fixed_output);
             allow_substitutes.push(d.allow_substitutes);
+            input_counts.push(d.dependencies.iter().collect::<HashSet<_>>().len() as i32);
         }
 
         if hashes.is_empty() {
@@ -179,6 +194,7 @@ impl BatchWriter<'_> {
                 prefer_local.into(),
                 fixed_output.into(),
                 allow_substitutes.into(),
+                input_counts.into(),
                 Value::ChronoDateTime(Some(gradient_types::now())),
             ]))
             .await
@@ -374,6 +390,40 @@ impl BatchWriter<'_> {
         Ok(grown)
     }
 
+    /// The subtree bit the walk prunes on, settled on `derivation` rows before any
+    /// anchor is locked: the class order is derivation first.
+    ///
+    /// The rows this batch flipped to walked are named as such: they were incomplete
+    /// before it whatever they read now, since the upsert above wrote `walked` one
+    /// statement ago, and a freshly walked leaf that reads complete on both sides of
+    /// the seed still owes its dependents a count-down.
+    async fn record_walk_completeness(
+        &self,
+        resolved: &Resolved,
+        newly_walked: &HashSet<String>,
+        grew: &[DerivationId],
+    ) -> Result<()> {
+        let walked: Vec<DerivationId> = newly_walked
+            .iter()
+            .filter_map(|h| resolved.by_hash.get(h).copied())
+            .collect();
+        if walked.is_empty() && grew.is_empty() {
+            return Ok(());
+        }
+
+        let txn = self
+            .db()
+            .begin()
+            .await
+            .context("begin the walk completeness transaction")?;
+        gradient_db::seed_walk_completeness(&txn, &walked, grew)
+            .await
+            .context("seed unwalked_inputs")?;
+        txn.commit()
+            .await
+            .context("commit the walk completeness transaction")
+    }
+
     async fn set_anchor_limits(
         &self,
         limits: &HashMap<DerivationId, (Option<i64>, Option<i64>)>,
@@ -411,7 +461,7 @@ impl BatchWriter<'_> {
         ids: &HashMap<String, DerivationId>,
         derivations: &[DiscoveredDerivation],
         batch: &IngestBatch,
-    ) -> Result<Vec<DerivationId>> {
+    ) -> Result<()> {
         let now = gradient_types::now();
         let all_ids: Vec<DerivationId> = ids
             .values()
@@ -421,11 +471,6 @@ impl BatchWriter<'_> {
             .collect();
         let truly: HashSet<DerivationId> = batch
             .truly_substituted
-            .iter()
-            .filter_map(|p| ids.get(p).copied())
-            .collect();
-        let upstream: HashSet<DerivationId> = batch
-            .upstream_substitutable
             .iter()
             .filter_map(|p| ids.get(p).copied())
             .collect();
@@ -459,7 +504,11 @@ impl BatchWriter<'_> {
                     id: DerivationBuildId::now_v7(),
                     derivation: drv_id,
                     status,
-                    substitutable: upstream.contains(&drv_id),
+                    // A batch claims nothing about upstreams any more: the probe
+                    // runs once the anchor is demanded and flips both of these
+                    // itself, and demand stops here until it has.
+                    substitutable: false,
+                    probed: false,
                     substituted: status == BuildStatus::Substituted,
                     // `..Default::default()` sends every column, so the database
                     // default never reaches a new row: this batch's recompute is
@@ -542,8 +591,6 @@ impl BatchWriter<'_> {
             }
         }
 
-        let newly_substitutable = self.flip_substitutable(&upstream).await?;
-
         if !truly.is_empty() {
             let truly_ids: Vec<DerivationId> = truly.iter().copied().collect();
             let changes = gradient_db::substitute_created_anchors(db, &truly_ids)
@@ -552,36 +599,7 @@ impl BatchWriter<'_> {
             gradient_db::emit_transition_effects(self.ctx, &changes).await;
         }
 
-        Ok(newly_substitutable)
-    }
-
-    /// Set `substitutable` on the anchors an upstream now serves, returning the ones
-    /// that were not already flagged. Those stop being builders, so whatever they
-    /// listed as an input has just lost a demander, and nothing about that is a
-    /// status transition the emitter could notice.
-    ///
-    /// A terminal-success anchor is left alone: its outputs are already ours, and
-    /// flipping it would send it back through a relay for bytes we hold.
-    async fn flip_substitutable(
-        &self,
-        upstream: &HashSet<DerivationId>,
-    ) -> Result<Vec<DerivationId>> {
-        if upstream.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let ids: Vec<uuid::Uuid> = upstream.iter().map(|d| d.into_inner()).collect();
-        let rows = self
-            .db()
-            .query_all_raw(FLIP_SUBSTITUTABLE.bind([ids.into()]))
-            .await
-            .context("flag anchors substitutable from upstream")?;
-
-        Ok(rows
-            .iter()
-            .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
-            .map(DerivationId::new)
-            .collect())
+        Ok(())
     }
 
     /// Move the readiness counters this batch changed, in one transaction under one
@@ -636,9 +654,8 @@ impl BatchWriter<'_> {
         resolved: &Resolved,
         newly_walked: &HashSet<String>,
         grew: &[DerivationId],
-        newly_substitutable: &[DerivationId],
         entry_points: &[DerivationId],
-    ) -> Result<()> {
+    ) -> Result<Vec<DerivationId>> {
         let mut to_seed: Vec<DerivationId> = newly_walked
             .iter()
             .filter_map(|h| resolved.by_hash.get(h).copied())
@@ -652,13 +669,12 @@ impl BatchWriter<'_> {
             batch
                 .truly_substituted
                 .iter()
-                .chain(batch.upstream_substitutable.iter())
                 .filter_map(|p| resolved.by_path.get(p).copied()),
         );
         locked.sort_unstable();
         locked.dedup();
         if locked.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let txn = self
@@ -688,10 +704,7 @@ impl BatchWriter<'_> {
             .context("commit the readiness transaction")?;
         let net = gradient_db::collapse_transitions(changes);
         gradient_db::emit_transition_effects(self.ctx, &net).await;
-        self.move_batch_demand(&to_seed, newly_substitutable, entry_points)
-            .await?;
-
-        Ok(())
+        self.move_batch_demand(&to_seed, entry_points).await
     }
 
     /// Settle the demand a batch moves without moving any anchor's status, so the
@@ -702,21 +715,21 @@ impl BatchWriter<'_> {
     async fn move_batch_demand(
         &self,
         builders: &[DerivationId],
-        newly_substitutable: &[DerivationId],
         entry_points: &[DerivationId],
-    ) -> Result<()> {
+    ) -> Result<Vec<DerivationId>> {
         let db = self.db();
         let mut roots = builders.to_vec();
-        roots.extend_from_slice(newly_substitutable);
         roots.extend_from_slice(entry_points);
         roots.sort_unstable();
         roots.dedup();
 
         let mut changes = Vec::new();
+        let mut gained_demand = Vec::new();
         for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
             let moved = gradient_db::recompute_demand(db, chunk)
                 .await
                 .context("recompute what this batch demands")?;
+            gained_demand.extend_from_slice(&moved.gained);
             for gained in moved.gained.chunks(gradient_db::IN_CHUNK_SIZE) {
                 changes.extend(
                     gradient_db::promote(db, gained)
@@ -734,7 +747,7 @@ impl BatchWriter<'_> {
         }
         gradient_db::emit_transition_effects(self.ctx, &changes).await;
 
-        Ok(())
+        Ok(gained_demand)
     }
 
     /// Persist each derivation's `inputSrcs`: build-time source paths (e.g.
@@ -795,57 +808,6 @@ impl BatchWriter<'_> {
                 && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
                 error!(error = %e, "failed to insert derivation input sources");
-            }
-        }
-    }
-
-    /// Persist the scheduler's narinfo hits onto every `derivation_output` row
-    /// sharing the hash, so the lookup runs once and the worker downloads
-    /// straight from that upstream URL.
-    async fn persist_upstream_hits(&self, hits: &HashMap<String, UpstreamHit>) {
-        if hits.is_empty() {
-            return;
-        }
-
-        let hashes: Vec<String> = hits.keys().cloned().collect();
-        let db = &self.ctx.worker_db;
-        let outputs = match gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
-            EDerivationOutput::find()
-                .filter(CDerivationOutput::Hash.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        {
-            Ok(outputs) => outputs,
-            Err(e) => {
-                error!(error = %e, "failed to load outputs for upstream hits");
-                return;
-            }
-        };
-
-        for o in outputs.iter().filter(|o| !o.is_cached_anywhere()) {
-            let Some(hit) = hits.get(&o.hash) else {
-                continue;
-            };
-
-            let mut am = o.clone().into_active_model();
-            am.external_url = Set(hit.url.clone());
-            am.nar_hash = Set(hit.nar_hash.clone());
-            am.file_hash = Set(hit.file_hash.clone());
-            am.file_size = Set(hit.file_size);
-            am.references = Set(hit.references.clone());
-            am.deriver = Set(hit.deriver.clone());
-            if o.nar_size.is_none() {
-                am.nar_size = Set(hit.nar_size);
-            }
-
-            if o.ca.is_none() {
-                am.ca = Set(hit.ca.clone());
-            }
-
-            if let Err(e) = am.update(db).await {
-                error!(hash = %o.hash, error = %e, "failed to persist upstream availability");
             }
         }
     }
@@ -995,9 +957,11 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
         let resolved = writer.resolve_ids(&batch.derivations).await?;
         let ids = &resolved.by_path;
         let grew = writer.insert_records(&batch.derivations, ids).await?;
+        writer
+            .record_walk_completeness(&resolved, &newly_walked, &grew)
+            .await?;
         writer.persist_input_sources(&batch.derivations, ids).await;
-        writer.persist_upstream_hits(&batch.upstream_hits).await;
-        let newly_substitutable = writer
+        writer
             .resolve_anchors(ids, &batch.derivations, batch)
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
@@ -1010,15 +974,8 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             }
             None => Vec::new(),
         };
-        writer
-            .advance_readiness(
-                batch,
-                &resolved,
-                &newly_walked,
-                &grew,
-                &newly_substitutable,
-                &report.entry_points,
-            )
+        report.gained_demand = writer
+            .advance_readiness(batch, &resolved, &newly_walked, &grew, &report.entry_points)
             .await?;
 
         gradient_db::bump_graph_version(writer.db(), &[evaluation_id])
@@ -1041,6 +998,227 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
         .record_eval_messages(&batch.warnings, &batch.errors)
         .await;
     Ok(report)
+}
+
+/// Set `substitutable` on the anchors an upstream now serves, returning the ones
+/// that were not already flagged. Those stop being builders, so whatever they
+/// listed as an input has just lost a demander, and nothing about that is a status
+/// transition the emitter could notice.
+///
+/// A terminal-success anchor is left alone: its outputs are already ours, and
+/// flipping it would send it back through a relay for bytes we hold.
+async fn flip_substitutable<C: ConnectionTrait>(
+    db: &C,
+    upstream: &[DerivationId],
+) -> Result<Vec<DerivationId>> {
+    if upstream.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ids: Vec<uuid::Uuid> = upstream.iter().map(|d| d.into_inner()).collect();
+    let rows = db
+        .query_all_raw(FLIP_SUBSTITUTABLE.bind([ids.into()]))
+        .await
+        .context("flag anchors substitutable from upstream")?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+        .map(DerivationId::new)
+        .collect())
+}
+
+/// Apply what the upstream probe found: the narinfo onto every `derivation_output`
+/// sharing the hash, the runtime edges its references name, `substitutable` on the
+/// anchors whose every output is served, the wholeness those new edges change, and
+/// the demand all of that moves.
+///
+/// This is the round: the demand this recompute turns on is handed back to the
+/// probe by the transition emitter, so the next level of the closure is asked for
+/// next. Nothing here reaches the network - the probe already ran.
+pub(crate) async fn apply_upstream_hits(
+    ctx: &DbContext,
+    hits: &HashMap<String, UpstreamHit>,
+) -> Result<Vec<DerivationId>> {
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let db = &ctx.worker_db;
+    let txn = db.as_transaction().context(
+        "UpstreamHits must run inside a transaction: the wholeness seed takes anchor locks",
+    )?;
+
+    let hashes: Vec<String> = hits.keys().cloned().collect();
+    let hit_rows = gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Hash.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("load the outputs an upstream hit names")?;
+
+    let mut touched: Vec<DerivationId> = hit_rows.iter().map(|o| o.derivation).collect();
+    touched.sort_unstable();
+    touched.dedup();
+    if touched.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    persist_narinfo(db, &hit_rows, hits).await?;
+
+    // A hit is only a relay when EVERY output of the anchor is served: an output
+    // whose bytes nobody has would otherwise fail the substitution and escalate
+    // into a build whose inputs were never produced.
+    let outputs = gradient_db::fetch_in_chunks(&touched, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("load every output of the anchors an upstream hit names")?;
+    let mut by_anchor: HashMap<DerivationId, Vec<bool>> = HashMap::new();
+    for o in &outputs {
+        by_anchor
+            .entry(o.derivation)
+            .or_default()
+            .push(hits.contains_key(&o.hash) || o.is_cached_anywhere());
+    }
+
+    let served: Vec<DerivationId> = touched
+        .iter()
+        .copied()
+        .filter(|d| {
+            by_anchor
+                .get(d)
+                .is_some_and(|outs| !outs.is_empty() && outs.iter().all(|served| *served))
+        })
+        .collect();
+    let newly_substitutable = flip_substitutable(db, &served).await?;
+
+    let seeded = gradient_db::seed_runtime_deps(txn, &[], &touched).await?;
+    if !seeded.whole.is_empty() {
+        let lock = gradient_db::lock_anchors(txn, &seeded.whole).await?;
+        let changes = gradient_db::became_fetchable(&lock).await?;
+        gradient_db::emit_transition_effects(ctx, &changes).await;
+    }
+
+    let mut roots = touched;
+    roots.extend_from_slice(&newly_substitutable);
+    roots.sort_unstable();
+    roots.dedup();
+
+    let mut changes = Vec::new();
+    let mut gained_demand = Vec::new();
+    for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let moved = gradient_db::recompute_demand(db, chunk)
+            .await
+            .context("recompute what an upstream hit demands")?;
+        changes.extend(gradient_db::settle_demand(db, &moved).await?);
+        gained_demand.extend_from_slice(&moved.gained);
+    }
+    gradient_db::emit_transition_effects(ctx, &changes).await;
+
+    Ok(gained_demand)
+}
+
+/// Record that the upstream probe has answered for `anchors`, hit or miss, and move
+/// the demand the answer opens: a miss makes the anchor a builder, and only a
+/// builder demands its build inputs.
+///
+/// Runs after the round's hits, so an anchor an upstream serves is already a relay
+/// when its answer lands and nothing below it is ever asked for. What the recompute
+/// demands is RETURNED, not sent: it is handed to the probe once this transaction
+/// commits, and the transition emitter would not report it at all, because a miss
+/// moves no status and its own recompute keys on one.
+pub(crate) async fn mark_probed(
+    ctx: &DbContext,
+    anchors: &[DerivationId],
+) -> Result<Vec<DerivationId>> {
+    if anchors.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let db = &ctx.worker_db;
+    let mut answered: Vec<DerivationId> = Vec::new();
+    for chunk in anchors.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        let rows = db
+            .query_all_raw(MARK_PROBED.bind([ids.into()]))
+            .await
+            .context("record the anchors the upstream probe answered for")?;
+        answered.extend(
+            rows.iter()
+                .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+                .map(DerivationId::new),
+        );
+    }
+
+    let mut changes = Vec::new();
+    let mut gained_demand = Vec::new();
+    for chunk in answered.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let moved = gradient_db::recompute_demand(db, chunk)
+            .await
+            .context("recompute what an answered anchor demands")?;
+        changes.extend(gradient_db::settle_demand(db, &moved).await?);
+        gained_demand.extend_from_slice(&moved.gained);
+    }
+    gradient_db::emit_transition_effects(ctx, &changes).await;
+
+    Ok(gained_demand)
+}
+
+/// Persist each hit onto the outputs sharing its hash and write the runtime edges
+/// its `References:` line names. An output already cached anywhere is left alone:
+/// what we hold beats what an upstream offers.
+async fn persist_narinfo(
+    db: &WorkerDb,
+    rows: &[MDerivationOutput],
+    hits: &HashMap<String, UpstreamHit>,
+) -> Result<()> {
+    let mut learned: Vec<(DerivationId, Vec<String>)> = Vec::new();
+    for o in rows.iter().filter(|o| !o.is_cached_anywhere()) {
+        let Some(hit) = hits.get(&o.hash) else {
+            continue;
+        };
+
+        if let Some(references) = hit.references.as_deref() {
+            let tokens: Vec<String> = references.split_whitespace().map(str::to_owned).collect();
+            if !tokens.is_empty() {
+                learned.push((o.derivation, tokens));
+            }
+        }
+
+        let mut am = o.clone().into_active_model();
+        am.external_url = Set(hit.url.clone());
+        am.nar_hash = Set(hit.nar_hash.clone());
+        am.file_hash = Set(hit.file_hash.clone());
+        am.file_size = Set(hit.file_size);
+        am.references = Set(hit.references.clone());
+        am.deriver = Set(hit.deriver.clone());
+        if o.nar_size.is_none() {
+            am.nar_size = Set(hit.nar_size);
+        }
+
+        if o.ca.is_none() {
+            am.ca = Set(hit.ca.clone());
+        }
+
+        if let Err(e) = am.update(db).await {
+            error!(hash = %o.hash, error = %e, "failed to persist upstream availability");
+        }
+    }
+
+    // A narinfo is the other place runtime references are learned, so the edges
+    // they name are written from the hit that carried them.
+    for (derivation, tokens) in &learned {
+        let producers = gradient_db::producers_of_tokens(db, tokens).await?;
+        gradient_db::insert_runtime_edges(db, *derivation, &producers).await?;
+    }
+
+    Ok(())
 }
 
 /// What a landed batch triggers outside its transaction: forge checks for the
@@ -1070,6 +1248,8 @@ pub(crate) async fn after_commit(
             });
         }
     }
+
+    ctx.probe_requests.send(report.gained_demand.clone());
 
     let _ = ctx.board_events.send(BoardEvent::EvaluationProgress {
         task: batch.task.map(|t| t.into_inner()),
@@ -1111,6 +1291,47 @@ mod tests {
     use gradient_entity::evaluation::EvaluationStatus;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement, Value};
     use std::collections::BTreeMap;
+
+    /// A fresh evaluation's demand is established by the ingest walk, not by a
+    /// status transition, so `emit_transition_effects` sees nothing left to gain
+    /// and reports an empty set. The batch's own gained set is the only one the
+    /// probe can learn from, and it is handed over after the commit: the probe
+    /// reads the rows on its own connection, and an anchor it plans nothing for
+    /// is still remembered as asked.
+    #[tokio::test]
+    async fn what_the_batch_demands_reaches_the_upstream_probe() {
+        let gained = DerivationId::now_v7();
+        let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(
+            MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        )
+        .await;
+        let actor = crate::Graph::new()
+            .spawn(ctx.clone(), None, None)
+            .await
+            .expect("the graph actor starts");
+
+        after_commit(
+            &ctx,
+            &actor,
+            &IngestBatch {
+                evaluation: EvaluationId::now_v7(),
+                ..Default::default()
+            },
+            &IngestReport {
+                gained_demand: vec![gained],
+                ..Default::default()
+            },
+        )
+        .await;
+
+        assert_eq!(
+            probes
+                .try_recv()
+                .expect("the batch's gained demand reaches the probe"),
+            vec![gained],
+        );
+        actor.stop_and_wait(None, None).await.unwrap();
+    }
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv";
@@ -1194,6 +1415,18 @@ mod tests {
         ])
     }
 
+    fn completeness_row(
+        derivation: DerivationId,
+        was_complete: bool,
+        complete: bool,
+    ) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("id".to_owned(), Value::from(derivation.into_inner())),
+            ("was_complete".to_owned(), Value::from(was_complete)),
+            ("complete".to_owned(), Value::from(complete)),
+        ])
+    }
+
     fn ok(n: u64) -> MockExecResult {
         MockExecResult {
             last_insert_id: 0,
@@ -1227,6 +1460,8 @@ mod tests {
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
@@ -1254,8 +1489,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            17,
-            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, and the raised, locked demand recompute: {log:?}"
+            19,
+            "evaluation, walked, stubs, resolve, edges, walk lock, walk seed, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, and the raised, locked demand recompute: {log:?}"
         );
         let walked = log
             .iter()
@@ -1299,6 +1534,245 @@ mod tests {
         );
     }
 
+    /// A narinfo names the references of a path we do not have yet, so the hit is
+    /// the second place a runtime edge is learned: every reference with a producer
+    /// becomes one from the output's own derivation, the anchor whose every output
+    /// is served becomes a relay, and the demand all of that moves is recomputed
+    /// before the reply. The probe's next round starts from what that turns on.
+    #[tokio::test]
+    async fn an_upstream_hit_writes_the_runtime_edges_its_narinfo_names() {
+        let derivation = DerivationId::now_v7();
+        let out = MDerivationOutput {
+            id: gradient_types::ids::DerivationOutputId::now_v7(),
+            derivation,
+            hash: "cccccccccccccccccccccccccccccccc".to_owned(),
+            ..Default::default()
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![out.clone()]])
+            .append_query_results([vec![out.clone()]])
+            .append_query_results([vec![drv_row(DerivationId::now_v7())]])
+            .append_query_results([vec![out]])
+            .append_query_results([vec![drv_row(derivation)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 4])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let tx = std::sync::Arc::new(ctx.worker_db.begin().await.expect("begin"));
+        let scoped = ctx.in_transaction(std::sync::Arc::clone(&tx));
+        apply_upstream_hits(
+            &scoped,
+            &HashMap::from([(
+                "cccccccccccccccccccccccccccccccc".to_owned(),
+                UpstreamHit {
+                    references: Some("dddddddddddddddddddddddddddddddd-dep".to_owned()),
+                    ..Default::default()
+                },
+            )]),
+        )
+        .await
+        .expect("the hit applies");
+        drop(scoped);
+        std::sync::Arc::try_unwrap(tx)
+            .expect("no handle outlives the call")
+            .commit()
+            .await
+            .expect("commit");
+        drop(ctx);
+
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        for fragment in [
+            "INSERT INTO derivation_dependency (derivation, dependency, kind)",
+            "SET substitutable = true",
+            "SET missing_runtime_deps = x.n",
+            "region(evaluation, derivation, builder) AS",
+        ] {
+            assert!(
+                log.iter().any(|s| s.contains(fragment)),
+                "{fragment} never ran: {log:?}"
+            );
+        }
+    }
+
+    /// A miss changes no status, so nothing else would ever recompute what the
+    /// answer opened: the anchor is a builder from this statement on, and its build
+    /// inputs are demanded by the recompute that follows it. The gained set is
+    /// returned rather than sent from here, so the probe asks for it once the
+    /// transaction that demanded it has landed.
+    #[tokio::test]
+    async fn answering_an_anchor_demands_what_it_will_be_built_from() {
+        let anchor = DerivationId::now_v7();
+        let input = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![drv_row(anchor)]])
+            .append_query_results([vec![demand_row(input, true)]])
+            .append_query_results([vec![demand_row(input, true)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 4])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let gained = mark_probed(&ctx, &[anchor]).await.expect("the round lands");
+        assert_eq!(gained, vec![input], "the input the miss demands");
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        for fragment in [
+            "SET probed = true",
+            "region(evaluation, derivation, builder) AS",
+        ] {
+            assert!(
+                log.iter().any(|s| s.contains(fragment)),
+                "{fragment} never ran: {log:?}"
+            );
+        }
+    }
+
+    /// The probe reports the same anchor from several directions and re-asks one
+    /// every five minutes. An answer that changed nothing must cost the one write
+    /// and stop: the recompute below it is a graph walk.
+    #[tokio::test]
+    async fn an_anchor_already_answered_costs_one_statement() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        assert!(
+            mark_probed(&ctx, &[DerivationId::now_v7()])
+                .await
+                .expect("the round lands")
+                .is_empty()
+        );
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        assert_eq!(log.len(), 1, "one write and nothing else: {log:?}");
+    }
+
+    /// Ingest claims nothing about upstreams any more. A batch that flipped one on
+    /// its own would relay an anchor nothing demands, which is the traffic lazy
+    /// probing exists to stop.
+    #[tokio::test]
+    async fn a_batch_flips_nothing_substitutable_on_its_own() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 6])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        assert!(
+            !log.iter().any(|s| s.contains("SET substitutable = true")),
+            "{log:?}"
+        );
+    }
+
+    /// The subtree bit is settled on `derivation` rows, right after the edges land
+    /// and before any anchor is locked: an abandoned walk then leaves its parents
+    /// incomplete, and a concurrent walk that asks `prunable` in between never
+    /// prunes at a parent whose inputs are still stubs.
+    #[tokio::test]
+    async fn a_walk_settles_the_subtree_bit_before_it_touches_an_anchor() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 6])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        drop(ctx);
+
+        let log = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let upsert = log
+            .iter()
+            .position(|s| s.sql.contains("INSERT INTO derivation\n"))
+            .expect("the walked upsert runs");
+        assert!(
+            log[upsert]
+                .sql
+                .contains("unwalked_inputs = EXCLUDED.unwalked_inputs"),
+            "the record lands with its input count: {}",
+            log[upsert].sql
+        );
+        assert!(
+            format!("{:?}", log[upsert].values).contains("Int(Some(1))"),
+            "A names one input: {:?}",
+            log[upsert].values
+        );
+        let seed = log
+            .iter()
+            .position(|s| {
+                s.sql
+                    .contains("UPDATE derivation d SET unwalked_inputs = x.n")
+            })
+            .expect("the subtree seed runs");
+        let edges = log
+            .iter()
+            .position(|s| s.sql.contains("INSERT INTO derivation_dependency"))
+            .expect("the edge insert runs");
+        let anchor_lock = log
+            .iter()
+            .position(|s| s.sql.contains("FROM derivation_build") && s.sql.contains("FOR UPDATE"))
+            .expect("the readiness pass locks its anchors");
+        assert!(
+            edges < seed && seed < anchor_lock,
+            "edges, then the seed, then anchors: {log:?}"
+        );
+    }
+
     /// Edges are global, so a batch that grew one must bump every evaluation that
     /// already holds the derivation. The edge insert returns one row per landed
     /// edge, so a derivation with many new inputs is named many times; binding
@@ -1315,6 +1789,8 @@ mod tests {
             .append_query_results([vec![a.clone(), b.clone()]])
             // the edge insert names the same derivation once per landed edge
             .append_query_results([vec![drv_row(a.id), drv_row(a.id)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
@@ -1395,6 +1871,8 @@ mod tests {
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
@@ -1469,14 +1947,16 @@ mod tests {
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // what the recompute gave demand to, then the relay it queues
-            .append_query_results([vec![demand_row(b.id, true)]])
+            // what the recompute walk found and then wrote, then the relay it queues
+            .append_query_results([vec![demand_row(b.id, true)], vec![demand_row(b.id, true)]])
             .append_query_results([vec![drv_row(b.id)]])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();
@@ -1495,10 +1975,14 @@ mod tests {
 
         drop(ctx);
         let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let walk = log
+            .iter()
+            .position(|s| s.contains("FROM region r ORDER BY r.derivation"))
+            .expect("the batch recomputes what it demands");
         let demand = log
             .iter()
             .position(|s| s.contains("SET demanded ="))
-            .expect("the batch recomputes what it demands");
+            .expect("the batch writes what the recompute answered");
         let seed = log
             .iter()
             .position(|s| s.contains("SET unready_deps = (SELECT count(*)"))
@@ -1512,11 +1996,11 @@ mod tests {
             .expect("the demanded relay is promoted");
 
         assert!(
-            seed < demand && demand < promote,
+            seed < walk && walk < demand && demand < promote,
             "demand settles after the counters, and its promote reads the settled gate: {log:?}"
         );
         assert!(
-            log[demand].contains("demanded(derivation) AS"),
+            log[walk].contains("demanded(derivation) AS"),
             "the recompute is the closure walk, not one hop: {log:?}"
         );
         assert!(
@@ -1651,6 +2135,8 @@ mod tests {
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])

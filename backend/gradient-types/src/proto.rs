@@ -133,28 +133,30 @@ pub struct BuildJob {
     pub builds: Vec<BuildSpec>,
 }
 
+/// How a worker produces the bytes of one derivation's outputs. Every kind ends
+/// the same way: the outputs, and only the outputs, are compressed and pushed.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum BuildSpecKind {
+    /// Run the builder on a worker of the derivation's architecture, inputs prefetched.
+    #[default]
+    Build,
+    /// Fetch each output's NAR from an upstream cache and repack it. No nix store,
+    /// no dependency, any worker.
+    Substitute,
+    /// A `builtin:fetchurl` derivation: fetch the URL, verify the fixed output
+    /// hash, pack the result. No nix store, no dependency, any worker.
+    Download,
+}
+
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildSpec {
     pub build_id: String,
     pub drv_path: String,
-    /// When `true` the build's outputs are known to be available from an
-    /// upstream cache (cache.nixos.org etc.) but are not yet in the
-    /// gradient cache. Worker behavior changes: instead of running
-    /// `nix build`, the worker re-queries the cache (`CacheQuery Pull`)
-    /// to get the upstream URL for each output, downloads the NAR,
-    /// recompresses to zstd, and pushes via `NarUploaded`. No daemon
-    /// build invocation, no input prefetch.
-    pub external_cached: bool,
-    /// Fixed-output (content-addressed) derivation. Carried for worker-side
-    /// scoring; substitution itself is attempted for every build regardless.
+    pub kind: BuildSpecKind,
     pub is_fixed_output: bool,
-    /// Output `(name, store_path)` pairs, populated only for `external_cached`
-    /// substitutions. The worker fetches these outputs directly instead of the
-    /// `.drv`: a substitution needs only the output NAR plus its runtime
-    /// closure, never the `.drv`'s build-time `input_sources` (which binary
-    /// caches do not serve, so importing the `.drv` would spuriously fail with
-    /// `SubstituteUnavailable`). Empty for normal builds.
+    /// `(name, path)` of this derivation's outputs, on every kind.
     pub outputs: Vec<DerivationOutput>,
     /// Wall-clock limit in seconds for this build; `None` = no limit.
     pub timeout_secs: Option<u64>,
@@ -284,16 +286,16 @@ pub enum EvalCachePushMode {
 ///
 /// Controls what the server returns in [`CacheStatus`] beyond the basic
 /// cached/uncached flag.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum QueryMode {
     /// Return only paths that are already in the cache (`cached: true`).
     /// No presigned URLs are generated. This is the default.
     #[default]
     Normal,
-    /// Return cached paths with a presigned S3 GET URL in `url`.
+    /// Cached paths with transfer URLs and metadata. With `CacheQuery.external`
+    /// the server may also answer from an upstream, for the one path named.
     /// When `url` is `None`, the worker should download via `NarRequest`.
-    /// Used by build workers to fetch required store paths.
     Pull,
     /// Return **all** queried paths.  Uncached paths include a presigned S3
     /// PUT URL in `url` so the worker can upload directly to S3.
@@ -301,13 +303,6 @@ pub enum QueryMode {
     /// `NarPush`.  Cached paths have `cached: true` and no URL (skip them).
     /// Used after `FetchFlake` to push fetched inputs to the server cache.
     Push,
-    /// Like [`QueryMode::Pull`], but the server also expands each queried path's
-    /// runtime-reference closure and answers for its members in the same reply,
-    /// up to the shared per-reply path bound. Bonus members are only ever
-    /// included when they are cached and serveable, so a caller may treat any
-    /// uncached entry as one it asked for. Lets a worker learn a whole closure
-    /// in one round trip instead of one hop at a time.
-    PullClosure,
 }
 
 /// A store path entry returned in [`CacheStatus`].
@@ -533,8 +528,8 @@ pub enum JobPhase {
     KnownDerivationsWait,
     DrvClosurePush,
     Prefetch,
-    SubstituteRelay,
     SubstituteFetch,
+    Download,
     Build,
     Compress,
     NarPush,
@@ -554,8 +549,8 @@ impl JobPhase {
             Self::KnownDerivationsWait => "known_derivations_wait",
             Self::DrvClosurePush => "drv_closure_push",
             Self::Prefetch => "prefetch",
-            Self::SubstituteRelay => "substitute_relay",
             Self::SubstituteFetch => "substitute_fetch",
+            Self::Download => "download",
             Self::Build => "build",
             Self::Compress => "compress",
             Self::NarPush => "nar_push",
@@ -564,7 +559,8 @@ impl JobPhase {
     }
 
     /// Wire/DB discriminant, written out so reordering the enum cannot silently
-    /// re-label historical rows.
+    /// re-label historical rows. 9 is retired (`substitute_relay`) and must stay
+    /// unused; a historical span carrying it renders as `unknown_9`.
     pub const fn as_i16(self) -> i16 {
         match self {
             Self::Fetch => 0,
@@ -576,12 +572,12 @@ impl JobPhase {
             Self::KnownDerivationsWait => 6,
             Self::DrvClosurePush => 7,
             Self::Prefetch => 8,
-            Self::SubstituteRelay => 9,
             Self::Build => 10,
             Self::Compress => 11,
             Self::NarPush => 12,
             Self::CacheQueryWait => 13,
             Self::SubstituteFetch => 14,
+            Self::Download => 15,
         }
     }
 
@@ -596,12 +592,12 @@ impl JobPhase {
             6 => Self::KnownDerivationsWait,
             7 => Self::DrvClosurePush,
             8 => Self::Prefetch,
-            9 => Self::SubstituteRelay,
             10 => Self::Build,
             11 => Self::Compress,
             12 => Self::NarPush,
             13 => Self::CacheQueryWait,
             14 => Self::SubstituteFetch,
+            15 => Self::Download,
             _ => return None,
         })
     }

@@ -31,6 +31,7 @@ BUILD_STATUS = {
     7: "Substituted",
     8: "FailedTransient",
     9: "FailedTimeout",
+    10: "Skipped",
 }
 
 ATTEMPT_REASON = {
@@ -58,7 +59,9 @@ NON_TERMINAL_BUILD_STATUS = (0, 1, 2, 8)
 # `demanded` sits OUTSIDE that arm, so a relay that passes every other gate is still
 # never promoted while it is false. The last gate, a `build_job` referencing the
 # derivation, is open for every anchor this walk visits: it selects them by one.
-GATE_COLUMNS = ("d.walked", "db.unready_deps", "db.substitutable", "db.demanded")
+# `probed` gates no anchor of its own: it is why the ones BELOW it are undemanded,
+# which is the one reading of a false `demanded` the columns above cannot explain.
+GATE_COLUMNS = ("d.walked", "db.unready_deps", "db.substitutable", "db.demanded", "db.probed")
 
 
 def _lines(rows: list[str]) -> str:
@@ -192,6 +195,8 @@ def why_stuck(conn: sqlite3.Connection) -> str:
             blocked.append("walked")
         if not a["demanded"]:
             blocked.append("demanded")
+        if not a["probed"]:
+            blocked.append("probed: the upstream probe has not answered, so nothing below is demanded")
         if a["unready_deps"]:
             blocked.append(f"unready_deps = {a['unready_deps']}")
 
@@ -213,8 +218,8 @@ def why_stuck(conn: sqlite3.Connection) -> str:
         # drops an edge whose far end the file does not carry, which turns "this
         # export is too narrow to answer you" into a count with nothing under it.
         for dep in conn.execute(
-            "SELECT dd.dependency AS id, d.id AS derivation_row, d.name, "
-            "       b.derivation AS anchor_row, b.status, b.fetchable "
+            "SELECT dd.dependency AS id, d.id AS derivation_row, d.name, d.walked, "
+            "       d.unwalked_inputs, b.derivation AS anchor_row, b.status, b.fetchable "
             "FROM derivation_dependency dd "
             "LEFT JOIN derivation d ON d.id = dd.dependency "
             "LEFT JOIN derivation_build b ON b.derivation = dd.dependency "
@@ -225,6 +230,12 @@ def why_stuck(conn: sqlite3.Connection) -> str:
             label = dep["name"] or dep["id"]
             if dep["derivation_row"] is None and dep["anchor_row"] is None:
                 out.append(f"    dep {label} not in this report")
+            elif dep["derivation_row"] is not None and not dep["walked"]:
+                out.append(f"    dep {label} is a stub: never walked")
+            elif dep["unwalked_inputs"]:
+                out.append(
+                    f"    dep {label} walked over {dep['unwalked_inputs']} unwalked inputs"
+                )
             elif dep["anchor_row"] is None:
                 out.append(f"    dep {label} no anchor row")
             else:

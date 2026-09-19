@@ -18,7 +18,9 @@ root
 ├── scheduler                            supervisor node
 │   ├── scheduler-core                   actor: WorkerPool + JobTracker behind messages
 │   ├── trigger-dispatch, eval-dispatch  periodic passes (5s)
-│   └── build-dispatch                   actor: 5s tick plus coalesced kicks
+│   ├── build-dispatch                   actor: 5s tick plus coalesced kicks
+│   └── upstream-probe                   periodic pass (1s): asks the upstreams
+│                                        for what just gained demand
 ├── sessions                             supervisor: one actor per worker connection
 ├── worker-sample, instance-metrics      periodic passes
 ├── worker-liveness, graph-consistency   periodic passes, absent when disabled
@@ -49,8 +51,8 @@ jobs it still runs.
 
 The graph actor (`gradient-graph`) owns the graph: every write to `derivation`,
 `derivation_build`, `derivation_dependency`, `derivation_output`,
-`derivation_input_source`, `build_job`, `build_attempt`, `cached_path` and
-`cached_path_reference` that a request path makes goes through it, one message at a
+`derivation_input_source`, `build_job`, `build_attempt` and `cached_path` that a
+request path makes goes through it, one message at a
 time. Sessions, the scheduler, the web handlers and the
 cache sweeps reach it through `state.graph`: an evaluation batch, a NAR commit,
 an anchor transition, a requeue or a demotion is one message and one
@@ -79,17 +81,15 @@ then the staged file, then storage.
 
 The maintenance deletions are the exception that matters for the cache index. TTL
 eviction, the zombie purge and the orphan GC retire `cached_path` rows in their own
-transactions, so `cached_path.missing_references` - the reference counter every
-dispatch gate reads - is moved inside the actor's transaction on a
-commit and inside the deletion's own transaction on a retire. The consistency sweep's
-bounded repair is a fourth writer, also outside the actor. Nothing serialises them
-against a commit but row locks: a commit takes `FOR SHARE` on its reference endpoints,
-both retires `FOR UPDATE` on the rows they delete and the repair `FOR UPDATE` on the
-chunk it recounts, each in one hash-ordered statement before it decides anything, so
-a retire and a commit cannot disagree about an edge and a repair cannot overwrite a
-commit's seed. The ripples themselves lock in plan order, so a commit racing a bulk retire
-can deadlock; that is detected and retried, and preferred to a row left whole with a
-reference that is not (`gradient_db::nar_closure`).
+transactions, so `derivation_build.missing_runtime_deps` - the wholeness counter
+every dispatch gate reads through `fetchable` - is moved inside the actor's
+transaction on a commit and inside the deletion's own transaction on a retire.
+Nothing serialises them against a commit but row locks: a commit takes `FOR UPDATE`
+on the row whose presence it is about to change, and a retire takes it on the rows
+it deletes, in one hash-ordered statement before either decides anything, and both
+take the anchor locks after that pass and never before. So a retire and a commit
+cannot disagree about a presence endpoint, and the class order keeps the two out of
+an ABBA cycle (`gradient_db::runtime_readiness`).
 
 A child that panics or exits unexpectedly is respawned
 after an exponential backoff (1s doubling to 60s, reset after five healthy

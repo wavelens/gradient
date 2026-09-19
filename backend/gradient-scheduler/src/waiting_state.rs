@@ -514,7 +514,6 @@ gradient_db::sql_fn! {
 }
 
 fn unproducible_drv_block_sql() -> String {
-    let drv_whole = gradient_db::graph_sql::drv_whole_predicate("db");
     let drv_nar_absent = gradient_db::graph_sql::drv_nar_absent_predicate("db");
     let walked = gradient_db::graph_sql::walked_predicate("db");
     format!(
@@ -528,7 +527,6 @@ fn unproducible_drv_block_sql() -> String {
               AND db.demanded
               AND {walked}
               AND NOT db.substitutable
-              AND NOT {drv_whole}
               AND {drv_nar_absent}
               AND db.unready_deps = 0
         ) AS blocked
@@ -714,11 +712,10 @@ mod tests {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
-            sql.contains(&format!(
-                "NOT {}",
-                norm(gradient_db::graph_sql::drv_whole_predicate("db"))
-            )),
-            "must require the .drv not to be whole, through the shared predicate: {sql}"
+            sql.contains(&norm(gradient_db::graph_sql::drv_nar_absent_predicate(
+                "db"
+            ))),
+            "must require the .drv's own NAR to be absent, through the shared predicate: {sql}"
         );
         assert!(
             sql.contains("db.unready_deps = 0"),

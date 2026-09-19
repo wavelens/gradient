@@ -263,11 +263,11 @@ crate::sql! {
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
 /// retires the `cached_path` row itself
-/// ([`crate::nar_closure::retire_paths`]: the row goes, its
+/// ([`crate::runtime_readiness::retire_outputs`]: the row goes, its
 /// `cached_path_signature` rows cascade, the `derivation_output` FK is
-/// `ON DELETE SET NULL`, and every referrer's reference counter, gate flag and
-/// anchor moves back), and removes the NAR object from storage so the row and the
-/// object stay in step. The derivation
+/// `ON DELETE SET NULL`, and every anchor that trusted it loses wholeness,
+/// `fetchable` and its queue place), and removes the NAR object from storage so the
+/// row and the object stay in step. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
 /// producing derivations for logging. A producerless input (`.drv`/source) is
 /// only purged when its NAR is genuinely gone: a still-present one is preserved
@@ -337,7 +337,7 @@ pub async fn demote_cached_output(
     // anchor's `substitutable` so the retire's `fetchable` mark sees the truth. The
     // next eval re-marks it substitutable if it is genuinely still on an upstream.
     let txn = db.begin().await?;
-    let _paths = crate::nar_closure::lock_paths(&txn, &[hash.to_owned()]).await?;
+    crate::runtime_readiness::lock_cached_paths(&txn, &[hash.to_owned()]).await?;
     let _anchors = crate::readiness::lock_anchors(&txn, &producers).await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
@@ -345,7 +345,7 @@ pub async fn demote_cached_output(
             .await?;
     }
 
-    let mut retired = crate::nar_closure::retire_paths(&txn, &[hash.to_owned()]).await?;
+    let mut retired = crate::runtime_readiness::retire_outputs(&txn, &[hash.to_owned()]).await?;
     retired
         .transitions
         .extend(crate::readiness::unpromote_ungated(&txn, &producers).await?);
@@ -377,8 +377,8 @@ pub async fn demote_cached_output(
 /// the `.drv`-importable term of [`crate::graph_sql::gates_predicate`], a permanent
 /// dead zone, since a genuinely missing input `.drv`/source is re-supplied only by
 /// a full re-eval. The transitive completeness invariant is handled by the reverse
-/// ripple inside [`crate::nar_closure::retire_paths`], which raises the referrers'
-/// counters and leaves their healthy NARs in place. Returns the producers reset to
+/// ripple inside [`crate::runtime_readiness::retire_outputs`], which raises the
+/// referrers' counters and leaves their healthy NARs in place. Returns the producers reset to
 /// `Created`.
 pub async fn demote_referrers_of(
     ctx: &crate::DbContext,
@@ -462,7 +462,7 @@ pub async fn demote_output_only_cached_deps(
 /// recorded until that job's commits have settled, an eval marks an anchor
 /// substituted only when EVERY output is already whole here, and every pass that
 /// deletes a `cached_path` row resets the producers it unbacked in the deleting
-/// transaction (`nar_closure::retire_paths`). So a non-zero count is a bug in one of
+/// transaction (`runtime_readiness::retire_outputs`). So a non-zero count is a bug in one of
 /// those, and the consistency report is where it surfaces
 /// ([`crate::consistency::ConsistencyReport::unbacked_trusted_outputs`]) - a repair
 /// that rebuilds on its own would only hide it again, and one that failed the
@@ -488,10 +488,11 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
 }
 
 crate::sql! {
-    OUTPUT_REFERRERS_SELECT = "SELECT DISTINCT r.referrer \
-     FROM cached_path_reference r \
-     WHERE r.reference_hash = $1 \
-       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)",
+    OUTPUT_REFERRERS_SELECT = "SELECT DISTINCT o.hash AS referrer \
+     FROM derivation_dependency e \
+     JOIN derivation_output o ON o.derivation = e.derivation \
+     WHERE e.kind IN (1, 2) \
+       AND e.dependency IN (SELECT p.derivation FROM derivation_output p WHERE p.hash = $1)",
         params = [CachedPathHash];
 }
 
@@ -620,35 +621,42 @@ mod tests {
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
         let (tmp, file) = present_nar(hash);
 
+        let producer = DerivationId::now_v7();
         let output = gradient_entity::derivation_output::Model {
             id: DerivationOutputId::now_v7(),
-            derivation: DerivationId::now_v7(),
+            derivation: producer,
             hash: hash.to_string(),
             ..Default::default()
         };
+        let producer_row =
+            BTreeMap::from([("derivation".to_owned(), Value::from(producer.into_inner()))]);
+        let deleted = BTreeMap::from([("hash".to_owned(), Value::from(hash.to_owned()))]);
+        let none = Vec::<BTreeMap<String, Value>>::new();
 
         // Find the output, RETURNING the demoted row, take both lock classes in
-        // order, drop its producer's upstream trust, retire the `cached_path` row
-        // (no reverse ripple: it was not whole), clear `is_cached` and run the
-        // readiness pass; then the object is removed.
-        let retired = BTreeMap::from([
-            ("hash".to_owned(), Value::from(hash.to_owned())),
-            ("was_whole".to_owned(), Value::from(false)),
-        ]);
+        // order and drop its producer's upstream trust; then the retire resolves the
+        // producers of the hash, reads which of them were whole before it takes the
+        // path away, deletes the row, clears `is_cached`, marks (nothing flips, so
+        // nothing ripples), resets the producer left with nothing to serve and
+        // un-promotes; last the raised, locked recompute of what it now demands.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
-            .append_query_results([vec![retired]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([
+                vec![producer_row],
+                none.clone(),
+                vec![deleted],
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none,
+            ])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                7
+                8
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -660,17 +668,16 @@ mod tests {
         drop(ctx);
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log.iter()
-                .any(|s| s.contains("DELETE FROM cached_path") && s.contains("was_whole")),
+            log.iter().any(|s| s.contains("DELETE FROM cached_path")),
             "the row must be retired, so the counters it backed move with it: {log:?}"
         );
         assert_eq!(
             log.len(),
-            15,
-            "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
-             is_cached, producers of the union, producers of what is gone, owners, \
-             un-promote, and the raised, locked recompute of what the producers now \
-             demand: {log:?}"
+            18,
+            "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
+             producers of the hash, the wholeness they had, delete, is_cached, anchor \
+             lock, mark, reset, owners, un-promote, and the raised, locked recompute \
+             of what the producers now demand: {log:?}"
         );
         let paths = log
             .iter()
@@ -684,10 +691,22 @@ mod tests {
             .iter()
             .position(|s| s.contains("SET substitutable = false"))
             .expect("the upstream trust is dropped");
+        let whole = log
+            .iter()
+            .position(|s| s.contains("ORDER BY db.derivation FOR UPDATE"))
+            .expect("the wholeness the producers had is read");
         let retire = log
             .iter()
             .position(|s| s.contains("DELETE FROM cached_path"))
             .expect("the row is retired");
+        let mark = log
+            .iter()
+            .position(|s| s.contains("SET fetchable = false"))
+            .expect("the producers are offered to the mark");
+        let reset = log
+            .iter()
+            .position(|s| s.contains("substituted = false, attempt = 0"))
+            .expect("the producer with nothing left to serve is reset");
         assert!(
             paths < trust,
             "this is the one path that writes derivation_build before a retire, so it takes the cached_path lock first or it deadlocks against a concurrent eviction: {log:?}"
@@ -702,11 +721,15 @@ mod tests {
             trust < retire,
             "the retire decides fetchability, so the stale offer must be gone first: {log:?}"
         );
-        let terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS);
         assert!(
-            !log.iter()
-                .any(|s| s.contains(&format!("status IN ({terminal_success})"))),
-            "the producer reset belongs to the retire, which decides it from the flag it just wrote: {log:?}"
+            whole < retire,
+            "which producers were whole is the one endpoint the delete destroys, so it \
+             is read under the lock before it: {log:?}"
+        );
+        assert!(
+            mark < reset,
+            "the producer reset belongs to the retire, which decides it from the \
+             `fetchable` flag the mark has just written: {log:?}"
         );
     }
 
@@ -733,17 +756,24 @@ mod tests {
         let drv_row =
             BTreeMap::from([("derivation".to_owned(), Value::from(producer.into_inner()))]);
 
+        let none = Vec::<BTreeMap<String, Value>>::new();
+
+        // The retire resolves the producers of the hash, finds none of them whole and
+        // nothing to delete, then marks, ripples, resets and un-promotes on the
+        // producers alone.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([vec![drv_row.clone()]])
-            .append_query_results([vec![drv_row.clone()]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([vec![drv_row]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([
+                vec![drv_row.clone()],
+                none.clone(),
+                none.clone(),
+                vec![drv_row],
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none,
+            ])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
@@ -761,10 +791,10 @@ mod tests {
         assert_eq!(
             log.len(),
             18,
-            "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
-             producers of the union, anchor lock, mark, ripple, producers of what is \
-             gone, reset, owners, un-promote, and the raised, locked recompute of what \
-             the producers now demand: {log:?}"
+            "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
+             producers of the hash, the wholeness they had, the delete that finds \
+             nothing, anchor lock, mark, ripple, reset, owners, un-promote, and the \
+             raised, locked recompute of what the producers now demand: {log:?}"
         );
         assert!(
             !log.iter()
@@ -898,12 +928,12 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert!(
-            sql.contains("FROM cached_path_reference r") && sql.contains("r.reference_hash = $1"),
-            "must resolve referrers of the missing hash: {sql}"
+            sql.contains("FROM derivation_dependency e") && sql.contains("e.kind IN (1, 2)"),
+            "must resolve the runtime referrers of the missing hash: {sql}"
         );
         assert!(
-            sql.contains("EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)"),
-            "must require the referrer to be a producing output, excluding .drv/source: {sql}"
+            sql.contains("JOIN derivation_output o ON o.derivation = e.derivation"),
+            "must project a producing output, which excludes every .drv and source: {sql}"
         );
     }
 

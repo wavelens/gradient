@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::dispatch_mode::{BuildDispatchMode, decide_dispatch_mode};
+use crate::dispatch_mode::decide_build_spec_kind;
 use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::{RequeueScope, Transition};
@@ -23,7 +23,9 @@ use tracing::{debug, error, warn};
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::jobs::PendingBuildJob;
-use gradient_types::proto::{BuildJob, BuildSpec, CacheInfo, DerivationOutput, RequiredPath};
+use gradient_types::proto::{
+    BuildJob, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, RequiredPath,
+};
 
 use super::{DISPATCH_BUDGET, DISPATCH_TICK};
 
@@ -186,8 +188,8 @@ struct BuildDispatchMaps {
     /// live in the `.drv` file and are not stored in the scheduler DB.
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
     /// derivation_id → this derivation's own output `(name, store_path)` pairs,
-    /// sent in the `external_cached` `BuildSpec` so the worker substitutes the
-    /// outputs without fetching the `.drv`.
+    /// sent on every `BuildSpec` so a Substitute fetches the outputs without
+    /// fetching the `.drv`.
     self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
     /// derivation_id -> transitive closure size (bytes), from
     /// `derivation.closure_size` or computed here when it is NULL.
@@ -439,9 +441,8 @@ impl BuildDispatchMaps {
             direct_inputs.insert(*drv_id, paths);
         }
 
-        // This derivation's own outputs, for the external_cached BuildSpec: the
-        // worker substitutes these output paths directly without fetching the
-        // .drv (whose build-time input_sources binary caches do not serve).
+        // This derivation's own outputs, on every BuildSpec: a Substitute fetches
+        // exactly these and never the `.drv`.
         let mut self_outputs: HashMap<DerivationId, Vec<DerivationOutput>> = HashMap::new();
         for o in gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivationOutput::find()
@@ -513,8 +514,12 @@ impl BuildDispatchMaps {
             return DispatchOutcome::Skip("could not resolve project_id for anchor");
         };
 
-        let mode = decide_dispatch_mode(anchor.substitutable);
-        let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, project_id, mode);
+        let kind = decide_build_spec_kind(
+            anchor.substitutable,
+            &derivation.architecture,
+            derivation.is_fixed_output,
+        );
+        let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, project_id, kind);
         DispatchOutcome::Dispatch(job_id, Box::new(pending))
     }
 
@@ -525,26 +530,25 @@ impl BuildDispatchMaps {
         derivation: &MDerivation,
         eval_id: EvaluationId,
         project_id: ProjectId,
-        mode: BuildDispatchMode,
+        kind: BuildSpecKind,
     ) -> (String, PendingBuildJob) {
         let job_id = crate::jobs::build_job_key(anchor.id);
-        let substitute = mode == BuildDispatchMode::SubstituteBuiltin;
+        let substitute = kind == BuildSpecKind::Substitute;
+        // Neither a Substitute nor a Download needs a nix store, so neither needs a
+        // worker of the derivation's architecture, its features, or its inputs.
+        let anywhere = kind != BuildSpecKind::Build;
         // The worker round-trips this anchor uuid as the opaque BuildSpec.build_id.
-        let outputs = if substitute {
-            self.self_outputs
-                .get(&anchor.derivation)
-                .cloned()
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
         let build_job = BuildJob {
             builds: vec![BuildSpec {
                 build_id: anchor.id.to_string(),
                 drv_path: derivation.store_path(),
-                external_cached: substitute,
+                kind,
                 is_fixed_output: derivation.is_fixed_output,
-                outputs,
+                outputs: self
+                    .self_outputs
+                    .get(&anchor.derivation)
+                    .cloned()
+                    .unwrap_or_default(),
                 timeout_secs: resolve_limit(anchor.timeout_secs, self.config.default_timeout_secs),
                 max_silent_secs: resolve_limit(
                     anchor.max_silent_secs,
@@ -552,7 +556,7 @@ impl BuildDispatchMaps {
                 ),
             }],
         };
-        let (architecture, required_features) = if substitute {
+        let (architecture, required_features) = if anywhere {
             (gradient_types::BUILTIN_ARCH.to_string(), Vec::new())
         } else {
             (
@@ -561,11 +565,11 @@ impl BuildDispatchMaps {
             )
         };
 
-        // A substitute job downloads its outputs straight from upstream, so it
-        // neither prefetches build-dependency inputs nor is worth scoring: leaving
-        // required_paths empty stops the worker pulling deps and makes every
+        // A substitute or a download produces its outputs without the local store,
+        // so it neither prefetches build-dependency inputs nor is worth scoring:
+        // leaving required_paths empty stops the worker pulling deps and makes every
         // worker's score the same assumed zero (#456).
-        let required_paths = if substitute {
+        let required_paths = if anywhere {
             Vec::new()
         } else {
             self.direct_inputs

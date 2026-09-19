@@ -47,8 +47,9 @@ pub enum BuildStatus {
     Aborted = 5,
     #[sea_orm(num_value = 6)]
     DependencyFailed = 6,
-    /// The derivation was already present in the Nix store at evaluation
-    /// time; no actual work was performed in this evaluation.
+    /// Terminal success without a build: the outputs were already valid in the
+    /// store, or a relay fetched them off an upstream. Equivalent to `Completed`
+    /// at every gate; the two differ only in what they say happened.
     #[sea_orm(num_value = 7)]
     Substituted = 7,
     /// Non-terminal failure: an infrastructure error (OOM, disk full, network
@@ -59,6 +60,10 @@ pub enum BuildStatus {
     /// Terminal failure: the build exceeded its wall-clock or silent timeout.
     #[sea_orm(num_value = 9)]
     FailedTimeout = 9,
+    /// A build-time dependency nothing needs: not demanded, named by no entry
+    /// point, never built or substituted. Thaws to `Created` when demand returns.
+    #[sea_orm(num_value = 10)]
+    Skipped = 10,
 }
 
 impl BuildStatus {
@@ -148,6 +153,7 @@ mod tests {
             BuildStatus::Aborted,
             BuildStatus::DependencyFailed,
             BuildStatus::Substituted,
+            BuildStatus::Skipped,
         ] {
             assert_eq!(status.for_api(), status);
         }
@@ -185,10 +191,11 @@ mod tests {
             (BuildStatus::Substituted, 7),
             (BuildStatus::FailedTransient, 8),
             (BuildStatus::FailedTimeout, 9),
+            (BuildStatus::Skipped, 10),
         ] {
             assert_eq!(i32::from(status), n);
         }
-        assert_eq!(BuildStatus::iter().count(), 10);
+        assert_eq!(BuildStatus::iter().count(), 11);
     }
 
     #[test]

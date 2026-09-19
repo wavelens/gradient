@@ -18,7 +18,10 @@ use rusqlite::Connection;
 /// that does not reach it makes it refuse every report this writes - which it
 /// did, sitting on 10 against an exporter writing 11. `report-inspector`'s
 /// derivation reads both constants and fails evaluation when they disagree.
-pub const SCHEMA_VERSION: i64 = 12;
+///
+/// 16 carries derivation_build.probed: without it a bundle cannot say whether
+/// demand stopped at an anchor because the upstream probe had not answered yet.
+pub const SCHEMA_VERSION: i64 = 16;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
