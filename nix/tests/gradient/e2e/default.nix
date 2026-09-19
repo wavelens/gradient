@@ -411,6 +411,42 @@ in {
               f" ORDER BY 1;"
           )
 
+      def assert_no_server_error(j):
+          """The lines a healthy run never writes, named rather than counted. A bare
+          `needle in j` says a pool timed out somewhere in the last 900 s, which
+          names neither the pool, the module nor how often; the slowest statements
+          below name what was holding the connections."""
+          hits = {}
+          for needle in ("pool timed out", "graph call timed out", "graph actor unreachable",
+                         "ingest transaction failed", "dropped as stale"):
+              lines = [line[-300:] for line in j.splitlines() if needle in line]
+              if lines:
+                  hits[needle] = lines
+          if not hits:
+              return
+
+          report = "\n\n".join(
+              f"{needle!r}, {len(lines)} lines:\n" + "\n".join(lines[:6])
+              for needle, lines in hits.items()
+          )
+          refused = server.succeed(
+              "journalctl --no-pager | grep -c 'too many clients already' || true"
+          ).strip()
+          sql("CREATE EXTENSION IF NOT EXISTS pg_stat_statements;")
+          slowest = sql(
+              "SELECT round(s.max_exec_time::numeric, 0) || ' ms max, ' || s.calls || ' calls: '"
+              "    || regexp_replace(substring(s.query, 1, 160), '[[:space:]]+', ' ', 'g')"
+              " FROM pg_stat_statements s JOIN pg_roles r ON r.oid = s.userid"
+              " WHERE r.rolname <> 'postgres'"
+              " ORDER BY s.max_exec_time DESC LIMIT 10;"
+          )
+          raise Exception(
+              f"the server log carries what a healthy run does not:\n{report}\n\n"
+              f"postgres refused a connection {refused} times, so a pool timeout above "
+              f"is a busy pool and not a cluster at its ceiling\n\n"
+              f"the server's slowest single executions:\n{slowest}"
+          )
+
       def assert_no_server_panic(since_seconds=45):
           """Fail fast if gradient-server panicked since `since_seconds` ago."""
           j = server.succeed(
@@ -879,10 +915,7 @@ in {
       assert unwalked_deps == 0, f"{unwalked_deps} of {edges} dependency edges point at a stub"
       incomplete = int(sql("SELECT count(*) FROM derivation WHERE walked AND unwalked_inputs <> 0;"))
       assert incomplete == 0, f"{incomplete} walked derivations still count an unwalked input after a complete walk"
-      j = server.succeed("journalctl -u gradient-server --no-pager")
-      for needle in ("pool timed out", "graph call timed out", "graph actor unreachable",
-                     "ingest transaction failed", "dropped as stale"):
-          assert needle not in j, f"server log contains {needle!r}"
+      assert_no_server_error(server.succeed("journalctl -u gradient-server --no-pager"))
 
       # ── Phase 5b: the graph walks stay fenced and agree with the old shape ─
       # The recursive walks are generated in `graph_sql.rs` as a LATERAL probe
