@@ -47,8 +47,9 @@ pub enum BuildStatus {
     Aborted = 5,
     #[sea_orm(num_value = 6)]
     DependencyFailed = 6,
-    /// The derivation was already present in the Nix store at evaluation
-    /// time; no actual work was performed in this evaluation.
+    /// Terminal success without a build: the outputs were already valid in the
+    /// store, or a relay fetched them off an upstream. Equivalent to `Completed`
+    /// at every gate; the two differ only in what they say happened.
     #[sea_orm(num_value = 7)]
     Substituted = 7,
     /// Non-terminal failure: an infrastructure error (OOM, disk full, network

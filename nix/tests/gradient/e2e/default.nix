@@ -1995,7 +1995,10 @@ in {
       assert anchor_of(busywrap).startswith("3 0"), (
           f"busywrap must be built here, not relayed: {anchor_of(busywrap)}"
       )
-      assert anchor_of(busybox) == "3 1 1", (
+      # `7`, not `3`: a relay ran no build, so the worker reports it substituted
+      # and the anchor settles `Substituted`. Built here reads `3`, which is what
+      # busywrap is asserted on one line above - the pair is the whole point.
+      assert anchor_of(busybox) == "7 1 1", (
           f"busybox must be relayed exactly once off the upstream: {anchor_of(busybox)}"
       )
       # The whole of decision 3: the relay walked the upstream references and
@@ -2047,7 +2050,7 @@ in {
       server.succeed(f"{GIT} -C /var/lib/git/test commit --allow-empty -m 'busywrap again'")
       server.succeed("chown git:git -R /var/lib/git/test")
       eval5_id = wait_for_new_eval({eval_id, eval2_id, eval3_id, eval4_id})
-      assert anchor_of(busybox) == "3 1 1", (
+      assert anchor_of(busybox) == "7 1 1", (
           f"the second evaluation re-relayed a whole anchor: {anchor_of(busybox)}"
       )
 
