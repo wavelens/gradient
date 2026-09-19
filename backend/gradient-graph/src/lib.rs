@@ -246,7 +246,9 @@ pub(crate) mod test_ctx {
         tokio::sync::mpsc::UnboundedReceiver<Vec<gradient_types::DerivationId>>,
     ) {
         let probe_requests = gradient_db::ProbeRequests::channel();
-        let probes = probe_requests.take_inbox().expect("a fresh channel has one");
+        let probes = probe_requests
+            .take_inbox()
+            .expect("a fresh channel has one");
         let (ctx, pool) = ctx(db).await;
         (
             DbContext {
