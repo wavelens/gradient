@@ -691,11 +691,13 @@ available on a cache, exactly like any other - fixed-output derivations are not
 special-cased.
 
 An output is probed when its anchor gains demand, never when its batch lands. The
-`upstream-probe` loop takes the gained set the transition emitter hands it, drops
-what it asked for in the last five minutes, skips every output already cached
-anywhere, and asks each output's `.narinfo` across the upstreams of the project
-whose evaluation names the anchor. A hit makes the anchor a relay and demands what
-its narinfo references; a miss leaves it a builder and demands its build inputs.
+`upstream-probe` loop takes the gained sets the ingest commit and the transition
+emitter hand it, a fresh evaluation's demand coming from the walk and a later move
+from a status change, drops what it asked for in the last five minutes, skips
+every output already cached anywhere, and asks each output's `.narinfo` across
+the upstreams of the project whose evaluation names the anchor. A hit makes the
+anchor a relay and demands what its narinfo references; a miss leaves it a
+builder and demands its build inputs.
 Either answer moves demand, and what that turns on comes back to the loop as the
 next round, so the rounds are the demand fixpoint and an evaluation probes what
 something wants rather than every output it walked. A derivation is marked

@@ -77,15 +77,16 @@ async fn probe_pass(
     for (evaluation, targets) in plan_probes(state, &anchors).await? {
         for chunk in targets.chunks(PROBE_BATCH) {
             let hits = crate::eval::probe_outputs(state, &evaluation, chunk.to_vec()).await;
-            if hits.is_empty() {
-                continue;
-            }
-
+            // Logged before the miss returns: a round that asks and finds nothing is
+            // the only evidence that the demand ever reached this loop at all.
             debug!(
                 hits = hits.len(),
                 asked = chunk.len(),
                 "upstream probe round"
             );
+            if hits.is_empty() {
+                continue;
+            }
             state
                 .graph
                 .upstream_hits(hits)

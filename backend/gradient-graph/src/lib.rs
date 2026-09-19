@@ -236,6 +236,28 @@ pub(crate) mod test_ctx {
     use gradient_util::shutdown::Shutdown;
     use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 
+    /// [`ctx`] with the probe channel's receiving end, for a test whose subject is
+    /// what ingest hands the upstream probe.
+    pub(crate) async fn ctx_with_probes(
+        db: DatabaseConnection,
+    ) -> (
+        DbContext,
+        WorkerDb,
+        tokio::sync::mpsc::UnboundedReceiver<Vec<gradient_types::DerivationId>>,
+    ) {
+        let probe_requests = gradient_db::ProbeRequests::channel();
+        let probes = probe_requests.take_inbox().expect("a fresh channel has one");
+        let (ctx, pool) = ctx(db).await;
+        (
+            DbContext {
+                probe_requests,
+                ..ctx
+            },
+            pool,
+            probes,
+        )
+    }
+
     /// A context over `db`, plus the pool handle its transaction log is read from.
     pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
         let dir = std::env::temp_dir().join(format!("gradient-graph-{}", uuid::Uuid::now_v7()));
