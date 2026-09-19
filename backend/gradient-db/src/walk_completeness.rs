@@ -27,6 +27,14 @@
 //! therefore names which rows it just walked: those were incomplete before the batch
 //! by definition, whatever the row says now.
 //!
+//! That definition binds BOTH sides of the seed. A batch carries fifty derivations
+//! and the BFS puts a parent in the same one as its inputs, so the parent's own
+//! count reads those inputs after the upsert has already written them complete.
+//! Counting them as they read drops an input that then flips and ripples a
+//! count-down for it regardless, and the parent lands one below the truth for every
+//! input it shared its batch with - `bash` at -5, and a counter below zero never
+//! reads `= 0` again. So `fresh` overrides the dependency side too.
+//!
 //! The mirror precondition holds for the seed's recount: a seeded row that loses
 //! completeness is not rippled back, so only a caller whose rows cannot lose it may
 //! seed. Ingest is such a caller, since a derivation's BUILD edges all land in the
@@ -80,6 +88,13 @@ crate::sql! {
     /// `fresh` names a row this batch walked, which was incomplete before it
     /// whatever the pre-image says, so the caller ripples exactly what flipped.
     ///
+    /// `fresh` is read on BOTH sides, and it has to be. A batch carries fifty
+    /// derivations and the BFS puts parents and their inputs in the same one; the
+    /// upsert writes a leaf's `unwalked_inputs = 0` one statement earlier, so
+    /// without the override on the dependency side a parent's count silently drops
+    /// an input that then flips and ripples a count-down for it anyway, and the
+    /// parent lands one below the truth per input it shared its batch with.
+    ///
     /// `Bulk` for the reason the readiness seed it mirrors is: a batch that reads
     /// the inputs of every value it was handed costs more than one row lookup per
     /// value, which is all the hot tier's ceiling allows for.
@@ -89,8 +104,11 @@ FROM (SELECT s.id,
              (d0.walked AND d0.unwalked_inputs = 0 AND NOT s.fresh) AS was_complete,
              (SELECT count(*) FROM derivation_dependency e
                 JOIN derivation dep ON dep.id = e.dependency
+                LEFT JOIN unnest($1::uuid[], $2::bool[]) AS f(id, fresh)
+                  ON f.id = e.dependency
                WHERE e.derivation = s.id AND e.kind IN (0, 2)
-                 AND NOT (dep.walked AND dep.unwalked_inputs = 0))::int AS n
+                 AND NOT (dep.walked AND dep.unwalked_inputs = 0
+                          AND NOT coalesce(f.fresh, false)))::int AS n
       FROM unnest($1::uuid[], $2::bool[]) AS s(id, fresh)
       JOIN derivation d0 ON d0.id = s.id) x
 WHERE d.id = x.id
@@ -266,6 +284,24 @@ mod tests {
     /// seed of its own, and one counted by a ripple but never by a seed drives the
     /// counter below zero for good. Asserted per statement rather than per module so
     /// a new read cannot be added without one.
+    /// The seed reads `fresh` on both sides. A parent seeded in the same batch as
+    /// its input reads that input complete, because the upsert wrote it one
+    /// statement earlier; counting it as it reads loses a count the ripple then
+    /// takes anyway, and the counter goes below zero for good.
+    #[test]
+    fn a_fresh_input_is_counted_as_incomplete_by_its_parent() {
+        let sql = SEED_UNWALKED_INPUTS.text();
+        assert!(
+            sql.contains("LEFT JOIN unnest($1::uuid[], $2::bool[]) AS f(id, fresh)")
+                && sql.contains("ON f.id = e.dependency"),
+            "the count must read the batch's fresh set on the dependency side: {sql}"
+        );
+        assert!(
+            sql.contains("AND NOT coalesce(f.fresh, false)"),
+            "a fresh input must read incomplete however the row reads now: {sql}"
+        );
+    }
+
     #[test]
     fn every_edge_this_module_counts_is_a_build_edge() {
         let statements =
