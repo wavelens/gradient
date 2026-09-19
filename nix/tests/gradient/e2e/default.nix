@@ -1045,7 +1045,10 @@ in {
       print(f"Output path:      {store_path}")
 
       # Every edge a batch declares lands in the batch's own transaction, so the
-      # graph must record exactly the input drvs the `.drv` itself declares.
+      # graph must record exactly the input drvs the `.drv` itself declares. Only
+      # the BUILD edges: since #671 the same relation carries the runtime graph,
+      # whose edges are learned from the NAR and reach producers that are not
+      # direct inputs at all (hello references glibc, which stdenv brings in).
       drv_hash = store_path_drv.split("/")[-1].split("-")[0]
       declared = int(builder.succeed(
           f"{NIX} derivation show {store_path_drv} --extra-experimental-features nix-command "
@@ -1053,7 +1056,7 @@ in {
       ).strip())
       recorded = int(sql(
           f"SELECT count(*) FROM derivation_dependency e JOIN derivation d ON d.id = e.derivation "
-          f"WHERE d.hash = '{drv_hash}';"
+          f"WHERE d.hash = '{drv_hash}' AND e.kind IN (0, 2);"
       ))
       assert declared > 0, f"{store_path_drv} declares no input drv; the check would pass on nothing"
       assert declared == recorded, f"hello declares {declared} input drvs, the graph records {recorded}"
