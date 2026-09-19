@@ -621,35 +621,42 @@ mod tests {
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
         let (tmp, file) = present_nar(hash);
 
+        let producer = DerivationId::now_v7();
         let output = gradient_entity::derivation_output::Model {
             id: DerivationOutputId::now_v7(),
-            derivation: DerivationId::now_v7(),
+            derivation: producer,
             hash: hash.to_string(),
             ..Default::default()
         };
+        let producer_row =
+            BTreeMap::from([("derivation".to_owned(), Value::from(producer.into_inner()))]);
+        let deleted = BTreeMap::from([("hash".to_owned(), Value::from(hash.to_owned()))]);
+        let none = Vec::<BTreeMap<String, Value>>::new();
 
         // Find the output, RETURNING the demoted row, take both lock classes in
-        // order, drop its producer's upstream trust, retire the `cached_path` row
-        // (no reverse ripple: it was not whole), clear `is_cached` and run the
-        // readiness pass; then the object is removed.
-        let retired = BTreeMap::from([
-            ("hash".to_owned(), Value::from(hash.to_owned())),
-            ("was_whole".to_owned(), Value::from(false)),
-        ]);
+        // order and drop its producer's upstream trust; then the retire resolves the
+        // producers of the hash, reads which of them were whole before it takes the
+        // path away, deletes the row, clears `is_cached`, marks (nothing flips, so
+        // nothing ripples), resets the producer left with nothing to serve and
+        // un-promotes; last the raised, locked recompute of what it now demands.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
-            .append_query_results([vec![retired]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([
+                vec![producer_row],
+                none.clone(),
+                vec![deleted],
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none,
+            ])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                7
+                8
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -661,17 +668,16 @@ mod tests {
         drop(ctx);
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
-            log.iter()
-                .any(|s| s.contains("DELETE FROM cached_path") && s.contains("was_whole")),
+            log.iter().any(|s| s.contains("DELETE FROM cached_path")),
             "the row must be retired, so the counters it backed move with it: {log:?}"
         );
         assert_eq!(
             log.len(),
-            15,
-            "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
-             is_cached, producers of the union, producers of what is gone, owners, \
-             un-promote, and the raised, locked recompute of what the producers now \
-             demand: {log:?}"
+            18,
+            "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
+             producers of the hash, the wholeness they had, delete, is_cached, anchor \
+             lock, mark, reset, owners, un-promote, and the raised, locked recompute \
+             of what the producers now demand: {log:?}"
         );
         let paths = log
             .iter()
@@ -685,10 +691,22 @@ mod tests {
             .iter()
             .position(|s| s.contains("SET substitutable = false"))
             .expect("the upstream trust is dropped");
+        let whole = log
+            .iter()
+            .position(|s| s.contains("ORDER BY db.derivation FOR UPDATE"))
+            .expect("the wholeness the producers had is read");
         let retire = log
             .iter()
             .position(|s| s.contains("DELETE FROM cached_path"))
             .expect("the row is retired");
+        let mark = log
+            .iter()
+            .position(|s| s.contains("SET fetchable = false"))
+            .expect("the producers are offered to the mark");
+        let reset = log
+            .iter()
+            .position(|s| s.contains("substituted = false, attempt = 0"))
+            .expect("the producer with nothing left to serve is reset");
         assert!(
             paths < trust,
             "this is the one path that writes derivation_build before a retire, so it takes the cached_path lock first or it deadlocks against a concurrent eviction: {log:?}"
@@ -703,11 +721,15 @@ mod tests {
             trust < retire,
             "the retire decides fetchability, so the stale offer must be gone first: {log:?}"
         );
-        let terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS);
         assert!(
-            !log.iter()
-                .any(|s| s.contains(&format!("status IN ({terminal_success})"))),
-            "the producer reset belongs to the retire, which decides it from the flag it just wrote: {log:?}"
+            whole < retire,
+            "which producers were whole is the one endpoint the delete destroys, so it \
+             is read under the lock before it: {log:?}"
+        );
+        assert!(
+            mark < reset,
+            "the producer reset belongs to the retire, which decides it from the \
+             `fetchable` flag the mark has just written: {log:?}"
         );
     }
 
@@ -734,17 +756,24 @@ mod tests {
         let drv_row =
             BTreeMap::from([("derivation".to_owned(), Value::from(producer.into_inner()))]);
 
+        let none = Vec::<BTreeMap<String, Value>>::new();
+
+        // The retire resolves the producers of the hash, finds none of them whole and
+        // nothing to delete, then marks, ripples, resets and un-promotes on the
+        // producers alone.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([vec![drv_row.clone()]])
-            .append_query_results([vec![drv_row.clone()]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([vec![drv_row]])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([
+                vec![drv_row.clone()],
+                none.clone(),
+                none.clone(),
+                vec![drv_row],
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none.clone(),
+                none,
+            ])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
@@ -762,10 +791,10 @@ mod tests {
         assert_eq!(
             log.len(),
             18,
-            "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
-             producers of the union, anchor lock, mark, ripple, producers of what is \
-             gone, reset, owners, un-promote, and the raised, locked recompute of what \
-             the producers now demand: {log:?}"
+            "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
+             producers of the hash, the wholeness they had, the delete that finds \
+             nothing, anchor lock, mark, ripple, reset, owners, un-promote, and the \
+             raised, locked recompute of what the producers now demand: {log:?}"
         );
         assert!(
             !log.iter()
