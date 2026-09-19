@@ -152,28 +152,9 @@ async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
             }
         };
 
-        // Order is load-bearing on both sides. A thaw has to precede the promote
-        // or the gate reads a `Skipped` row and passes it over; the skip has to
-        // follow the un-promote or it would try to settle a row still `Queued`.
-        for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
-            match crate::readiness::thaw_skipped(db, gained).await {
-                Ok(changes) => moved_out.regated.extend(changes),
-                Err(e) => error!(error = %e, "failed to thaw what an anchor demands again"),
-            }
-            match crate::readiness::promote(db, gained).await {
-                Ok(changes) => moved_out.regated.extend(changes),
-                Err(e) => error!(error = %e, "failed to queue what an anchor demands"),
-            }
-        }
-        for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
-            match crate::readiness::unpromote_ungated(db, lost).await {
-                Ok(changes) => moved_out.regated.extend(changes),
-                Err(e) => error!(error = %e, "failed to release undemanded anchors"),
-            }
-            match crate::readiness::skip_undemanded(db, lost).await {
-                Ok(changes) => moved_out.regated.extend(changes),
-                Err(e) => error!(error = %e, "failed to settle undemanded anchors"),
-            }
+        match crate::readiness::settle_demand(db, &moved).await {
+            Ok(changes) => moved_out.regated.extend(changes),
+            Err(e) => error!(error = %e, "failed to settle the queue against a demand move"),
         }
         moved_out.gained.extend(moved.gained);
         moved_out.undemanded.extend(moved.lost);

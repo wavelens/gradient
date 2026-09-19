@@ -34,6 +34,7 @@ message is one transaction:
 |---|---|
 | `Ingest` | one worker batch: derivations, outputs, input sources, anchors, build jobs, features, messages, entry points, and the edges that resolve so far |
 | `UpstreamHits` | what the probe found: the narinfo, the runtime edges it names, the relay flag and the demand all of it moves |
+| `UpstreamProbed` | the anchors a probe round answered for, hit or miss, and the demand a miss opens below them |
 | `KnownDerivations` | nothing; a read answered after every batch queued before it |
 | `CommitNar` | the `cached_path` row, its references, signature placeholders and the outputs it backs |
 | `Transition` | an anchor or evaluation state change: build started, output, completed, failed, dispatched, orphaned, ready, a reconcile scope, an abort |
@@ -698,6 +699,19 @@ every output already cached anywhere, and asks each output's `.narinfo` across
 the upstreams of the project whose evaluation names the anchor. A hit makes the
 anchor a relay and demands what its narinfo references; a miss leaves it a
 builder and demands its build inputs.
+
+Demand waits for that answer. `derivation_build.probed` is set for the whole
+round once its hits are applied, and an anchor that is not yet probed is not a
+builder, so nothing below it is demanded and nothing below it is dispatched.
+Without it, the walk read "no upstream answer yet" as "will be built" and queued
+the build closure of every output an upstream serves; the relay that followed
+withdrew the demand, but a job already handed to a worker cannot be recalled, and
+a source it cannot fetch fails the evaluation that no longer needed it.
+The request channel is in memory, so the loop also sweeps for demanded anchors
+that are still unprobed once a minute on an idle tick: a process that stops
+between the commit and the send would otherwise leave a stall nothing recovers
+from.
+
 Either answer moves demand, and what that turns on comes back to the loop as the
 next round, so the rounds are the demand fixpoint and an evaluation probes what
 something wants rather than every output it walked. A derivation is marked

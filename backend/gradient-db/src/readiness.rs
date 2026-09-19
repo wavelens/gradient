@@ -897,6 +897,31 @@ where
     Ok(moved)
 }
 
+/// Settle the queue against what a [`recompute_demand`] moved: thaw and queue what
+/// gained demand, release and skip what lost it.
+///
+/// Order is load-bearing on both sides. A thaw has to precede the promote or the
+/// gate reads a `Skipped` row and passes it over; the skip has to follow the
+/// un-promote or it would try to settle a row still `Queued`. One owner, because a
+/// caller that got the order wrong would leave an anchor `Skipped` that something
+/// had started wanting again, and nothing else ever looks at it.
+pub async fn settle_demand<C: ConnectionTrait>(
+    db: &C,
+    moved: &DemandMoved,
+) -> Result<Vec<TransitionChange>, DbErr> {
+    let mut changes = Vec::new();
+    for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(thaw_skipped(db, gained).await?);
+        changes.extend(promote(db, gained).await?);
+    }
+    for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
+        changes.extend(unpromote_ungated(db, lost).await?);
+        changes.extend(skip_undemanded(db, lost).await?);
+    }
+
+    Ok(changes)
+}
+
 /// Queue every `Created` candidate whose gates hold. The gate is embedded, so a
 /// candidate list is a bound and never a claim: passing a row that is not yet ready
 /// moves nothing.

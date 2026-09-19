@@ -26,7 +26,7 @@ use gradient_core::ServerState;
 use gradient_entity::StorePath;
 use gradient_types::*;
 use gradient_util::supervision::ChildSpec;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::debug;
@@ -42,18 +42,25 @@ const PROBE_MEMORY: Duration = Duration::from_secs(300);
 /// is about the round trip's tail latency rather than about memory.
 const PROBE_BATCH: usize = 256;
 
+/// How often the recovery sweep asks the database for demand whose request never
+/// arrived. Only ever reached on an idle tick, and a healthy server answers it
+/// with no rows.
+const PROBE_SWEEP: Duration = Duration::from_secs(60);
+
 /// The probe as a supervised child of the scheduler. The inbox and the memory
 /// outlive a restart, so a crash loses at most the round it was in.
 pub fn child_spec(state: &Arc<ServerState>) -> ChildSpec {
     let inbox = Arc::new(Mutex::new(state.probe_requests.take_inbox()));
     let seen: Arc<Mutex<HashMap<DerivationId, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+    let swept = Arc::new(Mutex::new(Instant::now()));
     let state = Arc::clone(state);
     ChildSpec::periodic(HEALTH_NAME, PROBE_TICK, PROBE_BUDGET, move || {
         let state = Arc::clone(&state);
         let inbox = Arc::clone(&inbox);
         let seen = Arc::clone(&seen);
+        let swept = Arc::clone(&swept);
         async move {
-            probe_pass(&state, &inbox, &seen)
+            probe_pass(&state, &inbox, &seen, &swept)
                 .await
                 .map_err(|e| gradient_util::supervision::PassError::from(e.to_string()))
         }
@@ -62,14 +69,21 @@ pub fn child_spec(state: &Arc<ServerState>) -> ChildSpec {
 
 /// One round: take what gained demand since the last tick, drop what was asked for
 /// recently, and ask the upstreams of the project each anchor's evaluation belongs
-/// to. The hits go back to the graph actor, whose own recompute reports the next
-/// round through the same channel.
+/// to. The hits go back to the graph actor, and then the whole round is recorded as
+/// answered, which is what lets demand descend past a miss; the recompute that
+/// follows reports the next level through the same channel.
 async fn probe_pass(
     state: &Arc<ServerState>,
     inbox: &Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>,
     seen: &Mutex<HashMap<DerivationId, Instant>>,
+    swept: &Mutex<Instant>,
 ) -> Result<()> {
-    let anchors = fresh_anchors(inbox, seen).await;
+    let mut requested = drain_requests(inbox).await;
+    if requested.is_empty() && sweep_due(swept).await {
+        requested.extend(unanswered_demand(state).await?);
+    }
+
+    let anchors = fresh(requested, seen).await;
     if anchors.is_empty() {
         return Ok(());
     }
@@ -95,22 +109,68 @@ async fn probe_pass(
         }
     }
 
-    Ok(())
+    // Last, and for the whole round including what was never asked: an anchor with
+    // no output left to ask about has its answer too, and demand stops at an
+    // unanswered anchor.
+    state
+        .graph
+        .upstream_probed(anchors)
+        .await
+        .context("record the anchors this round answered for")
 }
 
-/// Drain the channel and return the anchors not asked for inside [`PROBE_MEMORY`],
-/// recording them as asked. Expiry is folded into the same pass, so the memory is
-/// bounded by what gained demand in the last five minutes.
-async fn fresh_anchors(
+/// Everything the channel holds: the anchors some commit reported as newly
+/// demanded.
+async fn drain_requests(
     inbox: &Mutex<Option<UnboundedReceiver<Vec<DerivationId>>>>,
-    seen: &Mutex<HashMap<DerivationId, Instant>>,
-) -> Vec<DerivationId> {
+) -> HashSet<DerivationId> {
     let mut requested: HashSet<DerivationId> = HashSet::new();
     if let Some(rx) = inbox.lock().await.as_mut() {
         while let Ok(batch) = rx.try_recv() {
             requested.extend(batch);
         }
     }
+
+    requested
+}
+
+/// Whether the recovery sweep is due, taking the slot if it is.
+async fn sweep_due(swept: &Mutex<Instant>) -> bool {
+    let mut last = swept.lock().await;
+    if last.elapsed() < PROBE_SWEEP {
+        return false;
+    }
+    *last = Instant::now();
+
+    true
+}
+
+/// Demand whose request never reached this loop. The channel is in memory, so a
+/// process that stops between the commit and the send leaves anchors nothing will
+/// ever ask about - and demand stops at an unanswered one, so nothing below them
+/// would ever be built again. Read on an idle tick and at most once a
+/// [`PROBE_SWEEP`]; the two columns are the partial index's, so a healthy server's
+/// empty answer is free.
+async fn unanswered_demand(state: &Arc<ServerState>) -> Result<Vec<DerivationId>> {
+    Ok(EDerivationBuild::find()
+        .filter(CDerivationBuild::Probed.eq(false))
+        .filter(CDerivationBuild::Demanded.eq(true))
+        .limit(PROBE_BATCH as u64)
+        .all(&state.worker_db)
+        .await
+        .context("find demand the upstream probe was never asked about")?
+        .into_iter()
+        .map(|a| a.derivation)
+        .collect())
+}
+
+/// The anchors of `requested` not asked for inside [`PROBE_MEMORY`], recorded as
+/// asked. Expiry is folded into the same pass, so the memory is bounded by what
+/// gained demand in the last five minutes.
+async fn fresh(
+    requested: HashSet<DerivationId>,
+    seen: &Mutex<HashMap<DerivationId, Instant>>,
+) -> Vec<DerivationId> {
     if requested.is_empty() {
         return Vec::new();
     }
@@ -254,6 +314,38 @@ mod tests {
             vec!["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
             "an output already in our cache must not be asked for"
         );
+    }
+
+    /// The request channel is in memory, so a process that stops between the commit
+    /// and the send leaves demand nothing will ever ask about - and demand stops at
+    /// an anchor the probe has not answered, so every build below it would stall
+    /// for good. The sweep is the only reader that finds those.
+    #[tokio::test]
+    async fn the_sweep_finds_demand_whose_request_was_lost() {
+        let derivation = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![MDerivationBuild {
+                id: gradient_types::ids::DerivationBuildId::now_v7(),
+                derivation,
+                demanded: true,
+                ..Default::default()
+            }]])
+            .into_connection();
+
+        assert_eq!(
+            unanswered_demand(&test_state(db))
+                .await
+                .expect("the sweep reads"),
+            vec![derivation]
+        );
+    }
+
+    /// The sweep is a database read on a loop that ticks every second. It is the
+    /// backstop for a lost request, not the way a round normally starts.
+    #[tokio::test]
+    async fn the_sweep_runs_at_most_once_an_interval() {
+        let swept = Mutex::new(Instant::now());
+        assert!(!sweep_due(&swept).await, "a fresh mark is not due");
     }
 
     /// An anchor no evaluation names has no project, so it has no upstreams to ask:

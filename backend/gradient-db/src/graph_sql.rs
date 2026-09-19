@@ -228,12 +228,22 @@ pub fn blocks_evaluation_predicate(alias: &str) -> String {
 }
 
 /// Anchor `{anchor}` (its `derivation` row aliased `{walked}`) is a builder:
-/// recorded, not a relay, and in a status an evaluation will still have built.
-/// The one definition of what demands its inputs and of what the adoption walk
-/// steps through, so the two can never disagree.
+/// recorded, answered by the upstream probe, not a relay, and in a status an
+/// evaluation will still have built. The one definition of what demands its
+/// inputs and of what the adoption walk steps through, so the two can never
+/// disagree.
+///
+/// `probed` is what makes "not a relay" a fact rather than a guess. The probe is
+/// network and runs off every graph path, so an anchor is unprobed for as long as
+/// a round takes; reading that as "will be built" demanded the build closure of
+/// every output an upstream serves, and the dispatcher hands those out inside the
+/// window. The relay that follows withdraws the demand, but a job already handed
+/// to a worker runs to its end, and an input that cannot be fetched fails the
+/// evaluation that no longer needed it.
 pub fn builder_predicate(anchor: &str, walked: &str) -> String {
     format!(
-        "{walked}.walked AND NOT {anchor}.substitutable AND {anchor}.status IN ({pending})",
+        "{walked}.walked AND {anchor}.probed AND NOT {anchor}.substitutable \
+         AND {anchor}.status IN ({pending})",
         pending = crate::status_sql::build_in(&BUILDER_STATUSES),
     )
 }
@@ -953,13 +963,14 @@ mod tests {
 
     /// Demand and adoption read one definition of a builder, so an anchor an
     /// evaluation adopts is one whose gate demands its inputs, never the other
-    /// way round.
+    /// way round. An unprobed anchor is neither: until the probe answers, nothing
+    /// below it is work, because a relay would make all of it pointless.
     #[test]
     fn demand_and_adoption_share_one_definition_of_a_builder() {
         let builder = norm(&builder_predicate("p", "w"));
         assert_eq!(
             builder,
-            "w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"
+            "w.walked AND p.probed AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"
         );
         assert!(
             norm(&pending_closure_cte(
@@ -990,7 +1001,8 @@ mod tests {
         assert!(
             cte.contains(
                 "SELECT e.dependency AS next, \
-                 (w.walked AND NOT dep.substitutable AND dep.status IN (0, 1, 2, 8)) AS builder"
+                 (w.walked AND dep.probed AND NOT dep.substitutable \
+                  AND dep.status IN (0, 1, 2, 8)) AS builder"
             ),
             "{cte}"
         );
@@ -1050,9 +1062,26 @@ mod tests {
         );
         assert!(
             cte.contains(
-                "WHERE e.derivation = c.derivation AND e.kind IN (0, 2) AND w.walked AND NOT p.substitutable"
+                "WHERE e.derivation = c.derivation AND e.kind IN (0, 2) \
+                 AND w.walked AND p.probed AND NOT p.substitutable"
             ),
             "{cte}"
+        );
+    }
+
+    /// Only the build arm waits for the probe's answer. What an anchor's outputs
+    /// reference at run time is wanted whether it is relayed or built, and a relay
+    /// that waited for its own answer before demanding its references would never
+    /// mirror a closure.
+    #[test]
+    fn only_the_build_arm_waits_for_the_probe() {
+        let cte = norm(&demand_closure_cte(
+            "SELECT derivation FROM entry_point",
+            "",
+        ));
+        assert!(
+            cte.contains("AND e.kind IN (1, 2) AND EXISTS (SELECT 1 FROM build_job"),
+            "the runtime arm reads nothing about the anchor but its name: {cte}"
         );
     }
 

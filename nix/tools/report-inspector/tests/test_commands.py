@@ -31,8 +31,8 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
         CREATE TABLE derivation (id TEXT, name TEXT, walked INTEGER,
             unwalked_inputs INTEGER);
         CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER,
-            substitutable INTEGER, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER,
-            missing_runtime_deps INTEGER);
+            substitutable INTEGER, probed INTEGER, fetchable INTEGER, unready_deps INTEGER,
+            demanded INTEGER, missing_runtime_deps INTEGER);
         CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT,
             kind INTEGER);
         CREATE TABLE build_job (id TEXT, evaluation TEXT, derivation TEXT,
@@ -67,24 +67,28 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
     # have every visible gate open; only b5 is substitutable, so only b5's `.drv`
     # gate is knowable from the report. b7 is a relay nothing demands: the one gate
     # that used to be missing from the export entirely.
-    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 0, 1, 1, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 0, 0, 1, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 0, 2, 1, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 0, 0, 1, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b5', 'd5', 1, 1, 1, 0, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 1, 0, 1, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 1, 0, 0, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 1, 0, 2, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 1, 0, 0, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b5', 'd5', 1, 1, 1, 1, 0, 1, 0)")
     # b6 is the dependency boundary: exported so b1's readiness can be read, but not
     # this evaluation's work, so it has no build_job row.
-    conn.execute("INSERT INTO derivation_build VALUES ('b6', 'd6', 0, 0, 0, 0, 0, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b7', 'd7', 0, 1, 0, 0, 0, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b6', 'd6', 0, 0, 1, 0, 0, 0, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b7', 'd7', 0, 1, 1, 1, 0, 0, 0)")
+    # d10 is demanded with every visible gate open, but the probe has not answered
+    # for it: nothing below it is demanded yet, and the columns above cannot say so.
+    conn.execute("INSERT INTO derivation VALUES ('d10', 'gzip-1.14', 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b10', 'd10', 0, 0, 0, 0, 0, 1, 0)")
     # A stub d1 names but no walk ever read: `walked` is false and its subtree is
     # not recorded. d9 is the other half, a walked parent still counting inputs it
     # only named, which is what an abandoned walk leaves above the stubs.
     conn.execute("INSERT INTO derivation VALUES ('d8', 'openssl-3.6.3', 0, 0)")
     conn.execute("INSERT INTO derivation VALUES ('d9', 'curl-8.21.0', 1, 2)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b8', 'd8', 0, 0, 0, 1, 1, 0)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b9', 'd9', 0, 0, 0, 1, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b8', 'd8', 0, 0, 1, 0, 1, 1, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b9', 'd9', 0, 0, 1, 0, 1, 1, 0)")
     for anchor, drv in (("b1", "d1"), ("b2", "d2"), ("b3", "d3"), ("b4", "d4"),
-                        ("b5", "d5"), ("b7", "d7")):
+                        ("b5", "d5"), ("b7", "d7"), ("b10", "d10")):
         conn.execute(
             "INSERT INTO build_job VALUES (?, ?, ?, ?)", (f"j-{anchor}", EVAL_ID, drv, anchor)
         )
@@ -213,6 +217,17 @@ def test_why_stuck_names_the_demand_gate(report):
 
     assert "demanded" in undemanded
     assert "every gate open" not in undemanded
+
+
+def test_why_stuck_names_an_anchor_the_probe_has_not_answered(report):
+    """Demand stops at an unprobed anchor, so its inputs read as undemanded with
+    no reason of their own. The probe's answer is the reason, and it is the one
+    the other gate columns cannot carry."""
+    lines = commands.why_stuck(report).splitlines()
+    unprobed = next(line for line in lines if line.startswith("gzip-1.14"))
+
+    assert "probed" in unprobed
+    assert "every gate open" not in unprobed
 
 
 def test_why_stuck_reports_only_the_anchors_this_evaluation_drove(report):

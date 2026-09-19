@@ -23,6 +23,7 @@ mod transition;
 use std::sync::Arc;
 
 use gradient_db::DbContext;
+use gradient_types::DerivationId;
 use gradient_util::supervision::{ChildCtx, ChildSpec, SupervisorHealth};
 use ractor::rpc::CallResult;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
@@ -150,6 +151,19 @@ impl Graph {
             return Ok(());
         }
         self.call(|reply| GraphMsg::UpstreamHits(hits, reply)).await
+    }
+
+    /// Record that the probe has answered for these anchors, hit or miss, and move
+    /// the demand the answer opens. Sent once the round's hits are applied: an
+    /// anchor an upstream serves must be a relay before it is answered, or the gap
+    /// between the two demands the build closure the relay makes pointless.
+    pub async fn upstream_probed(&self, anchors: Vec<DerivationId>) -> anyhow::Result<()> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(());
+        }
+        self.call(|reply| GraphMsg::UpstreamProbed(anchors, reply))
+            .await
     }
 
     /// Record a NAR already in storage: the `cached_path` row, its references,
