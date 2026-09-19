@@ -754,12 +754,9 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
     // region member. Unfenced, the planner hoists the whole EXISTS out and answers
     // it standalone - a sequential scan of every anchor filtered on `demanded`,
     // which reads the graph to find the parents of a region of a few dozen.
-    // One lookup per edge kind, each demanding what its own arm of the walk would,
-    // and a relay demands neither: over a build edge the parent has to be a builder,
-    // over a runtime edge it has to not be a relay, because a relay mirrors its own
-    // closure. Drifting from the walk here does not under-demand, it OVER-demands -
-    // the seed put busybox's source back every time a NAR commit recomputed around
-    // it, thirty seconds after the walk had correctly let it go.
+    // One lookup per edge kind, each demanding what its own arm of the walk would:
+    // a parent over a runtime edge needs only to be demanded and named, a parent
+    // over a build edge has to be a builder as well.
     let parent = |kind: &str, join: &str, restrict: &str| {
         format!(
             "EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent FROM derivation_dependency e \
@@ -777,7 +774,7 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
          WHERE EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) \
             OR {runtime} \
             OR {build}",
-        runtime = parent("1, 2", "", " AND NOT p.substitutable"),
+        runtime = parent("1, 2", "", ""),
         build = parent(
             "0, 2",
             "JOIN derivation w ON w.id = p.derivation",
@@ -1738,17 +1735,18 @@ mod tests {
             walk.contains("p.derivation NOT IN (SELECT derivation FROM region)"),
             "the seed must come from demanders OUTSIDE the region: {walk}"
         );
-        // The seed is a second expression of the walk's own arms, and a relay
-        // demands neither. Drift here over-demands rather than under-demands, so
-        // nothing fails until a member of a relayed closure is queued on its own.
+        // The seed is a second expression of the walk's own arms, so it stops
+        // where they stop and nowhere else. A relay's runtime references are
+        // demanded here too: the worker fetches an output and nothing below it,
+        // and each producer of what the NAR names is relayed on its own.
         assert!(
             walk.contains(
                 "e.kind IN (1, 2) OFFSET 0) pe JOIN derivation_build p \
                  ON p.derivation = pe.parent WHERE p.demanded \
                  AND p.derivation NOT IN (SELECT derivation FROM region) \
-                 AND NOT p.substitutable"
+                 AND EXISTS (SELECT 1 FROM build_job"
             ),
-            "the seed's runtime parent must stop at a relay like the walk's arm: {walk}"
+            "the seed's runtime parent reads nothing about the parent but its name: {walk}"
         );
         assert!(
             walk.contains("FROM region r ORDER BY r.derivation"),
