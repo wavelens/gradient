@@ -411,6 +411,36 @@ in {
               f" ORDER BY 1;"
           )
 
+      def unready_reasons(evaluation):
+          """Why each blocking anchor of `evaluation` still counts an unready
+          dependency, named on both sides. `unready_deps` is a number; a hang needs
+          the edge it stands for and the dependency's own status, wholeness and
+          presence, which is what stops it being fetchable."""
+          present = (
+              "NOT EXISTS (SELECT 1 FROM derivation_output o"
+              "            LEFT JOIN cached_path cp"
+              "              ON cp.hash = o.hash AND cp.file_hash IS NOT NULL"
+              "            WHERE o.derivation = dep.derivation AND cp.hash IS NULL)"
+          )
+          fetchable = f"dep.status IN (3, 7) AND dep.missing_runtime_deps = 0 AND {present}"
+          return sql(
+              f"SELECT d.name || ' [' || db.status::text || ']  needs  ' || dn.name"
+              f"    || ' [' || coalesce(dep.status::text, 'no anchor')"
+              f"    || ' kind=' || e.kind::text"
+              f"    || ' whole=' || coalesce((dep.missing_runtime_deps = 0)::int::text, '-')"
+              f"    || ' present=' || coalesce(({present})::int::text, '-') || ']'"
+              f" FROM derivation_build db"
+              f" JOIN derivation d ON d.id = db.derivation"
+              f" JOIN build_job bj ON bj.derivation_build = db.id"
+              f" JOIN derivation_dependency e ON e.derivation = db.derivation"
+              f" JOIN derivation dn ON dn.id = e.dependency"
+              f" LEFT JOIN derivation_build dep ON dep.derivation = e.dependency"
+              f" WHERE bj.evaluation = '{evaluation}'"
+              f"   AND db.status IN (0, 1, 2, 8) AND (db.demanded OR db.status IN (1, 2))"
+              f"   AND (dep.derivation IS NULL OR NOT ({fetchable}))"
+              f" ORDER BY 1 LIMIT 40;"
+          )
+
       def assert_no_server_error(j):
           """The lines a healthy run never writes, named rather than counted. A bare
           `needle in j` says a pool timed out somewhere in the last 900 s, which
@@ -646,8 +676,10 @@ in {
       # was launched with (no internet in the VM).
       server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
       server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
-      nixpkgs_hash = server.succeed(f"{NIX} hash path ${self.inputs.nixpkgs} --extra-experimental-features nix-command").strip()
-      server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
+      # The lock's narHash is the input's own, substituted rather than recomputed:
+      # `nix hash path` reads all of nixpkgs, and that I/O storm starved Postgres
+      # for a minute, long enough for every pool in the server to time out.
+      server.succeed("sed -i 's#\\[hash\\]#${self.inputs.nixpkgs.narHash}#g' /var/lib/git/test/flake.lock")
 
       server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock")
       server.succeed(f"{GIT} -C /var/lib/git/test commit -m 'Initial commit'")
@@ -1895,6 +1927,7 @@ in {
 
       def wait_for_new_eval(known, timeout=900):
           """The id of the next evaluation to reach a terminal status."""
+          candidate = ""
           for _ in range(timeout // 10):
               server.sleep(10)
               candidate = server.succeed(
@@ -1912,7 +1945,21 @@ in {
               if status in ("Failed", "Aborted"):
                   j = server.succeed("journalctl -u gradient-server --no-pager --since='-600s' -n 300")
                   raise Exception(f"evaluation {candidate} ended {status}:\n{j[-3000:]}")
-          raise Exception(f"no new evaluation completed within {timeout} s")
+          blocked = blocking_anchors(candidate) if candidate else "(no candidate)"
+          edges = unready_reasons(candidate) if candidate else ""
+          failed = sql(
+              f"SELECT d.name || ' ' || db.status::text FROM derivation_build db"
+              f" JOIN derivation d ON d.id = db.derivation"
+              f" JOIN build_job bj ON bj.derivation_build = db.id"
+              f" WHERE bj.evaluation = '{candidate}' AND db.status IN (4, 6, 9)"
+              f" ORDER BY 1 LIMIT 40;"
+          ) if candidate else ""
+          raise Exception(
+              f"no new evaluation completed within {timeout} s. candidate={candidate or 'none'}\n"
+              f"what it still waits on, by gate:\n{blocked}\n"
+              f"the edges those anchors count as unready:\n{edges}\n"
+              f"terminal failures in the same evaluation:\n{failed}"
+          )
 
       # busywrap links a binary out of busybox, so it needs busybox's output in
       # our cache before it can be built.
