@@ -38,8 +38,11 @@ impl ProbeRequests {
         }
     }
 
-    /// Hand the probe loop what just gained demand. Never blocks and never fails:
-    /// a dead loop is a fleet that probes nothing, not one that stops promoting.
+    /// Hand the probe loop what just gained demand. Never blocks and never fails,
+    /// but it is not optional: demand stops at an anchor the probe has not answered
+    /// for, so a loop that never runs is a fleet that promotes nothing below an
+    /// entry point. The loop sweeps for demand whose request was lost; a loop that
+    /// is down is the supervisor's, and reports itself through health.
     pub fn send(&self, derivations: Vec<DerivationId>) {
         if derivations.is_empty() {
             return;

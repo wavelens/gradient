@@ -59,7 +59,9 @@ NON_TERMINAL_BUILD_STATUS = (0, 1, 2, 8)
 # `demanded` sits OUTSIDE that arm, so a relay that passes every other gate is still
 # never promoted while it is false. The last gate, a `build_job` referencing the
 # derivation, is open for every anchor this walk visits: it selects them by one.
-GATE_COLUMNS = ("d.walked", "db.unready_deps", "db.substitutable", "db.demanded")
+# `probed` gates no anchor of its own: it is why the ones BELOW it are undemanded,
+# which is the one reading of a false `demanded` the columns above cannot explain.
+GATE_COLUMNS = ("d.walked", "db.unready_deps", "db.substitutable", "db.demanded", "db.probed")
 
 
 def _lines(rows: list[str]) -> str:
@@ -193,6 +195,8 @@ def why_stuck(conn: sqlite3.Connection) -> str:
             blocked.append("walked")
         if not a["demanded"]:
             blocked.append("demanded")
+        if not a["probed"]:
+            blocked.append("probed: the upstream probe has not answered, so nothing below is demanded")
         if a["unready_deps"]:
             blocked.append(f"unready_deps = {a['unready_deps']}")
 

@@ -385,16 +385,19 @@ in {
           """The anchors keeping `evaluation` in its build phase, bucketed by the
           terms of `gates_predicate`. A `Created` row's `fetchable` is false by
           definition, so a status histogram carries no information about WHY one
-          is not queued; these six booleans do."""
+          is not queued; these booleans do. `probed` is not a gate on the row it
+          is printed for: it is why the rows BELOW it are missing from this list,
+          which is the one shape the others cannot show."""
           return sql(
               f"SELECT status::text || ' walked=' || walked::int::text"
               f"  || ' drv=' || drv::int::text"
               f"  || ' substitutable=' || substitutable::int::text"
+              f"  || ' probed=' || probed::int::text"
               f"  || ' deps_ready=' || deps_ready::int::text"
               f"  || ' present=' || present::int::text"
               f"  || ' whole=' || whole::int::text"
               f"  || ' count=' || count(*)::text"
-              f" FROM (SELECT db.status, w.walked, db.substitutable,"
+              f" FROM (SELECT db.status, w.walked, db.substitutable, db.probed,"
               f"              EXISTS (SELECT 1 FROM cached_path cp"
               f"                      WHERE cp.hash = w.hash AND cp.file_hash IS NOT NULL) AS drv,"
               f"              db.unready_deps = 0 AS deps_ready,"
@@ -410,7 +413,7 @@ in {
               f"       WHERE bj.evaluation = '{evaluation}'"
               f"         AND db.status IN (0, 1, 2, 8)"
               f"         AND (db.demanded OR db.status IN (1, 2))) g"
-              f" GROUP BY status, walked, drv, substitutable, deps_ready, present, whole"
+              f" GROUP BY status, walked, drv, substitutable, probed, deps_ready, present, whole"
               f" ORDER BY 1;"
           )
 

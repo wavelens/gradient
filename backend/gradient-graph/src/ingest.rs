@@ -95,6 +95,15 @@ WHERE db.derivation = l.derivation
       IS DISTINCT FROM (NULLIF(l.timeout_secs, 0), NULLIF(l.max_silent_secs, 0))
 "#,
         params = [DerivationIds(64), Ints(3600, 64), Ints(600, 64)];
+
+    /// The upstream probe has answered for these anchors. `RETURNING` names the
+    /// ones it changed, which is what the demand recompute has to run for.
+    MARK_PROBED = r#"
+UPDATE derivation_build SET probed = true, updated_at = (now() AT TIME ZONE 'UTC')
+WHERE derivation = ANY($1::uuid[]) AND NOT probed
+RETURNING derivation
+"#,
+        params = [DerivationIds(64)];
 }
 
 gradient_db::sql_fn! {
@@ -496,8 +505,10 @@ impl BatchWriter<'_> {
                     derivation: drv_id,
                     status,
                     // A batch claims nothing about upstreams any more: the probe
-                    // runs once the anchor is demanded and flips this itself.
+                    // runs once the anchor is demanded and flips both of these
+                    // itself, and demand stops here until it has.
                     substitutable: false,
+                    probed: false,
                     substituted: status == BuildStatus::Substituted,
                     // `..Default::default()` sends every column, so the database
                     // default never reaches a new row: this batch's recompute is
@@ -1028,9 +1039,9 @@ async fn flip_substitutable<C: ConnectionTrait>(
 pub(crate) async fn apply_upstream_hits(
     ctx: &DbContext,
     hits: &HashMap<String, UpstreamHit>,
-) -> Result<()> {
+) -> Result<Vec<DerivationId>> {
     if hits.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let db = &ctx.worker_db;
@@ -1052,7 +1063,7 @@ pub(crate) async fn apply_upstream_hits(
     touched.sort_unstable();
     touched.dedup();
     if touched.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     persist_narinfo(db, &hit_rows, hits).await?;
@@ -1100,16 +1111,62 @@ pub(crate) async fn apply_upstream_hits(
     roots.dedup();
 
     let mut changes = Vec::new();
+    let mut gained_demand = Vec::new();
     for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
         let moved = gradient_db::recompute_demand(db, chunk)
             .await
             .context("recompute what an upstream hit demands")?;
-        changes.extend(gradient_db::promote(db, &moved.gained).await?);
-        changes.extend(gradient_db::unpromote_ungated(db, &moved.lost).await?);
+        changes.extend(gradient_db::settle_demand(db, &moved).await?);
+        gained_demand.extend_from_slice(&moved.gained);
     }
     gradient_db::emit_transition_effects(ctx, &changes).await;
 
-    Ok(())
+    Ok(gained_demand)
+}
+
+/// Record that the upstream probe has answered for `anchors`, hit or miss, and move
+/// the demand the answer opens: a miss makes the anchor a builder, and only a
+/// builder demands its build inputs.
+///
+/// Runs after the round's hits, so an anchor an upstream serves is already a relay
+/// when its answer lands and nothing below it is ever asked for. The demand this
+/// turns on goes back to the probe through the transition emitter, which is how the
+/// closure descends one level per round.
+pub(crate) async fn mark_probed(
+    ctx: &DbContext,
+    anchors: &[DerivationId],
+) -> Result<Vec<DerivationId>> {
+    if anchors.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let db = &ctx.worker_db;
+    let mut answered: Vec<DerivationId> = Vec::new();
+    for chunk in anchors.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
+        let rows = db
+            .query_all_raw(MARK_PROBED.bind([ids.into()]))
+            .await
+            .context("record the anchors the upstream probe answered for")?;
+        answered.extend(
+            rows.iter()
+                .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+                .map(DerivationId::new),
+        );
+    }
+
+    let mut changes = Vec::new();
+    let mut gained_demand = Vec::new();
+    for chunk in answered.chunks(gradient_db::IN_CHUNK_SIZE) {
+        let moved = gradient_db::recompute_demand(db, chunk)
+            .await
+            .context("recompute what an answered anchor demands")?;
+        changes.extend(gradient_db::settle_demand(db, &moved).await?);
+        gained_demand.extend_from_slice(&moved.gained);
+    }
+    gradient_db::emit_transition_effects(ctx, &changes).await;
+
+    Ok(gained_demand)
 }
 
 /// Persist each hit onto the outputs sharing its hash and write the runtime edges
@@ -1536,6 +1593,63 @@ mod tests {
                 "{fragment} never ran: {log:?}"
             );
         }
+    }
+
+    /// A miss changes no status, so nothing else would ever recompute what the
+    /// answer opened: the anchor is a builder from this statement on, and its build
+    /// inputs are demanded by the recompute that follows it. The gained set is
+    /// returned rather than sent from here, so the probe asks for it once the
+    /// transaction that demanded it has landed.
+    #[tokio::test]
+    async fn answering_an_anchor_demands_what_it_will_be_built_from() {
+        let anchor = DerivationId::now_v7();
+        let input = DerivationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![drv_row(anchor)]])
+            .append_query_results([vec![demand_row(input, true)]])
+            .append_query_results([vec![demand_row(input, true)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 4])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let gained = mark_probed(&ctx, &[anchor]).await.expect("the round lands");
+        assert_eq!(gained, vec![input], "the input the miss demands");
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        for fragment in [
+            "SET probed = true",
+            "region(evaluation, derivation, builder) AS",
+        ] {
+            assert!(
+                log.iter().any(|s| s.contains(fragment)),
+                "{fragment} never ran: {log:?}"
+            );
+        }
+    }
+
+    /// The probe reports the same anchor from several directions and re-asks one
+    /// every five minutes. An answer that changed nothing must cost the one write
+    /// and stop: the recompute below it is a graph walk.
+    #[tokio::test]
+    async fn an_anchor_already_answered_costs_one_statement() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        assert!(
+            mark_probed(&ctx, &[DerivationId::now_v7()])
+                .await
+                .expect("the round lands")
+                .is_empty()
+        );
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        assert_eq!(log.len(), 1, "one write and nothing else: {log:?}");
     }
 
     /// Ingest claims nothing about upstreams any more. A batch that flipped one on

@@ -26,6 +26,11 @@ pub struct Model {
     pub derivation: DerivationId,
     pub status: BuildStatus,
     pub substitutable: bool,
+    /// The upstream probe has answered for this anchor, hit or miss. Until it
+    /// has, demand stops here: descending into the build inputs of an output an
+    /// upstream serves dispatches a closure the relay then makes pointless, and
+    /// a job already handed to a worker cannot be recalled.
+    pub probed: bool,
     pub substituted: bool,
     /// Dependents can get this anchor's outputs: substitutable, or terminal
     /// success with every output whole in our cache. Flipped by the event that

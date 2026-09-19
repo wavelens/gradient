@@ -263,9 +263,9 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_build",
-            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER, missing_runtime_deps INTEGER)",
+            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, probed INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER, missing_runtime_deps INTEGER)",
             concat!(
-                "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text, db.demanded::int::text, db.missing_runtime_deps::text FROM derivation_build db WHERE db.derivation IN (",
+                "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.probed::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text, db.demanded::int::text, db.missing_runtime_deps::text FROM derivation_build db WHERE db.derivation IN (",
                 derivation_scope!(),
                 ")"
             ),
@@ -275,6 +275,7 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "derivation",
                 "status",
                 "substitutable",
+                "probed",
                 "substituted",
                 "attempt",
                 "timeout_secs",
@@ -769,6 +770,17 @@ mod tests {
         assert!(spec.columns.contains(&"demanded"), "{:?}", spec.columns);
         assert!(spec.ddl.contains("demanded INTEGER"), "{}", spec.ddl);
         assert!(spec.sql.contains("db.demanded::int::text"), "{}", spec.sql);
+    }
+
+    /// Demand stops at an anchor the upstream probe has not answered for, so its
+    /// inputs read as undemanded with no reason of their own. `probed` is that
+    /// reason, and nothing else in the export carries it.
+    #[test]
+    fn an_anchor_exports_whether_the_probe_answered() {
+        let spec = spec_named("derivation_build");
+        assert!(spec.columns.contains(&"probed"), "{:?}", spec.columns);
+        assert!(spec.ddl.contains("probed INTEGER"), "{}", spec.ddl);
+        assert!(spec.sql.contains("db.probed::int::text"), "{}", spec.sql);
     }
 
     #[test]

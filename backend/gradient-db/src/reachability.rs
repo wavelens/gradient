@@ -515,7 +515,7 @@ mod tests {
         assert!(
             sql.contains(&format!(
                 "WHERE EXISTS (SELECT 1 FROM evaluation ev WHERE ev.id = bj.evaluation \
-                 AND ev.status IN ({})) AND w.walked AND NOT db.substitutable",
+                 AND ev.status IN ({})) AND w.walked AND db.probed AND NOT db.substitutable",
                 status_sql::eval_in(&EvaluationStatus::ACTIVE)
             )),
             "{sql}"
@@ -605,7 +605,8 @@ mod tests {
             frontier.contains(
                 "JOIN build_job pj ON pj.derivation = p.derivation \
                  JOIN evaluation ev ON ev.id = pj.evaluation \
-                 WHERE e.dependency = db.derivation AND w.walked AND NOT p.substitutable \
+                 WHERE e.dependency = db.derivation \
+                 AND w.walked AND p.probed AND NOT p.substitutable \
                  AND p.status IN (0, 1, 2, 8) AND ev.status IN ("
             ),
             "{frontier}"

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
 use gradient_db::DbContext;
+use gradient_types::DerivationId;
 use gradient_util::supervision::SupervisorHealth;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use sea_orm::TransactionTrait;
@@ -48,6 +49,7 @@ pub enum GraphMsg {
         reply: Reply<Vec<String>>,
     },
     UpstreamHits(HashMap<String, UpstreamHit>, Reply<()>),
+    UpstreamProbed(Vec<DerivationId>, Reply<()>),
     CommitNar(NarCommit, Reply<NarCommitted>),
     ConfirmNar(NarConfirm, Reply<bool>),
     Transition(Transition, Reply<TransitionReport>),
@@ -142,7 +144,16 @@ impl Actor for GraphActor {
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
-                let _ = reply.send(result);
+                let _ = reply.send(ask_probe(st, result));
+            }
+            GraphMsg::UpstreamProbed(anchors, reply) => {
+                flush(&myself, st).await;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+                    ingest::mark_probed(scoped, &anchors).await
+                })
+                .await;
+                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                let _ = reply.send(ask_probe(st, result));
             }
             GraphMsg::CommitNar(commit, reply) => {
                 flush(&myself, st).await;
@@ -206,6 +217,14 @@ impl Actor for GraphActor {
 
         Ok(())
     }
+}
+
+/// Hand a committed round's gained demand to the upstream probe, and turn the
+/// result into the caller's. Post-commit on purpose: the probe reads the rows on
+/// its own connection, and an anchor asked for before its transaction lands plans
+/// to nothing and is then remembered as asked for five minutes.
+fn ask_probe(st: &GraphState, result: anyhow::Result<Vec<DerivationId>>) -> anyhow::Result<()> {
+    result.map(|gained| st.ctx.probe_requests.send(gained))
 }
 
 /// Write every queued batch in one transaction, a savepoint each, then reply
