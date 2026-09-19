@@ -378,6 +378,39 @@ in {
               f'{CURL} -sf -H "Authorization: Bearer {token}" "{API}/{path}"'
           )
 
+      def blocking_anchors(evaluation):
+          """The anchors keeping `evaluation` in its build phase, bucketed by the
+          terms of `gates_predicate`. A `Created` row's `fetchable` is false by
+          definition, so a status histogram carries no information about WHY one
+          is not queued; these six booleans do."""
+          return sql(
+              f"SELECT status::text || ' walked=' || walked::int::text"
+              f"  || ' drv=' || drv::int::text"
+              f"  || ' substitutable=' || substitutable::int::text"
+              f"  || ' deps_ready=' || deps_ready::int::text"
+              f"  || ' present=' || present::int::text"
+              f"  || ' whole=' || whole::int::text"
+              f"  || ' count=' || count(*)::text"
+              f" FROM (SELECT db.status, w.walked, db.substitutable,"
+              f"              EXISTS (SELECT 1 FROM cached_path cp"
+              f"                      WHERE cp.hash = w.hash AND cp.file_hash IS NOT NULL) AS drv,"
+              f"              db.unready_deps = 0 AS deps_ready,"
+              f"              db.missing_runtime_deps = 0 AS whole,"
+              f"              NOT EXISTS (SELECT 1 FROM derivation_output o"
+              f"                          LEFT JOIN cached_path cp"
+              f"                            ON cp.hash = o.hash AND cp.file_hash IS NOT NULL"
+              f"                          WHERE o.derivation = db.derivation"
+              f"                            AND cp.hash IS NULL) AS present"
+              f"       FROM derivation_build db"
+              f"       JOIN derivation w ON w.id = db.derivation"
+              f"       JOIN build_job bj ON bj.derivation_build = db.id"
+              f"       WHERE bj.evaluation = '{evaluation}'"
+              f"         AND db.status IN (0, 1, 2, 8)"
+              f"         AND (db.demanded OR db.status IN (1, 2))) g"
+              f" GROUP BY status, walked, drv, substitutable, deps_ready, present, whole"
+              f" ORDER BY 1;"
+          )
+
       def assert_no_server_panic(since_seconds=45):
           """Fail fast if gradient-server panicked since `since_seconds` ago."""
           j = server.succeed(
@@ -707,33 +740,7 @@ in {
               f" WHERE bj.evaluation = '{eval_id}'"
               f" GROUP BY db.status, db.fetchable, db.demanded, db.unready_deps ORDER BY 1;"
           )
-          gates = sql(
-              f"SELECT status::text || ' walked=' || walked::int::text"
-              f"  || ' drv=' || drv::int::text"
-              f"  || ' substitutable=' || substitutable::int::text"
-              f"  || ' deps_ready=' || deps_ready::int::text"
-              f"  || ' present=' || present::int::text"
-              f"  || ' whole=' || whole::int::text"
-              f"  || ' count=' || count(*)::text"
-              f" FROM (SELECT db.status, w.walked, db.substitutable,"
-              f"              EXISTS (SELECT 1 FROM cached_path cp"
-              f"                      WHERE cp.hash = w.hash AND cp.file_hash IS NOT NULL) AS drv,"
-              f"              db.unready_deps = 0 AS deps_ready,"
-              f"              db.missing_runtime_deps = 0 AS whole,"
-              f"              NOT EXISTS (SELECT 1 FROM derivation_output o"
-              f"                          LEFT JOIN cached_path cp"
-              f"                            ON cp.hash = o.hash AND cp.file_hash IS NOT NULL"
-              f"                          WHERE o.derivation = db.derivation"
-              f"                            AND cp.hash IS NULL) AS present"
-              f"       FROM derivation_build db"
-              f"       JOIN derivation w ON w.id = db.derivation"
-              f"       JOIN build_job bj ON bj.derivation_build = db.id"
-              f"       WHERE bj.evaluation = '{eval_id}'"
-              f"         AND db.status IN (0, 1, 2, 8)"
-              f"         AND (db.demanded OR db.status IN (1, 2))) g"
-              f" GROUP BY status, walked, drv, substitutable, deps_ready, present, whole"
-              f" ORDER BY 1;"
-          )
+          gates = blocking_anchors(eval_id)
           # The journal tail was 80 lines of which 60 were `check_task_updates`,
           # whose task Model prints 1.5 KB per line, so the polling and GC chatter
           # goes. A stall is usually a worker that left or an evaluation whose
@@ -1592,11 +1599,13 @@ in {
               " | grep -E 'skipping|update needed|Force evaluation|trigger created' "
               " | tail -n 15"
           )
+          blocked = blocking_anchors(candidate) if candidate else "(no candidate)"
           raise Exception(
               f"the re-evaluation did not complete after 900 s. "
               f"task.last_evaluation={candidate or 'none'}, "
               f"eval1={eval_id}, eval2={eval2_id}\n"
               f"evaluations, newest first:\n{evals}\n"
+              f"what it still waits on, by gate:\n{blocked}\n"
               f"what the trigger decided:\n{decided}"
           )
 
