@@ -32,7 +32,10 @@
         "@wheel"
       ];
 
-      max-jobs = lib.mkForce 8;
+      # One job per core. At 8 the builder kernel-panicked on OOM mid-run
+      # (`compulsory panic_on_oom`) with 2048 MB and four cores, and the
+      # oversubscription bought nothing: the cores were already the limit.
+      max-jobs = lib.mkForce 4;
     };
 
     # Pre-seed a deterministic worker UUID so the server state config
