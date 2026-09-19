@@ -679,9 +679,14 @@ in {
 
       if not completed:
           # A stall is an anchor that never went terminal, so the anchor states are the
-          # diagnosis and the journal is the supporting evidence. The old dump was the
-          # last 2000 characters of a DEBUG journal, which is six lines of HTTP request
-          # logging and names nothing.
+          # diagnosis and the journal is the supporting evidence. The histogram gives
+          # the shape; the gate buckets name which of `gates_predicate`'s terms is
+          # false for the anchors the evaluation is still waiting on, which is the one
+          # thing the shape cannot tell apart.
+          eval_state = sql(
+              f"SELECT status::text || ' since ' || updated_at::text"
+              f" FROM evaluation WHERE id = '{eval_id}';"
+          )
           anchors = sql(
               f"SELECT db.status::text || ' fetchable=' || db.fetchable::int::text"
               f"  || ' demanded=' || db.demanded::int::text"
@@ -691,16 +696,71 @@ in {
               f" WHERE bj.evaluation = '{eval_id}'"
               f" GROUP BY db.status, db.fetchable, db.demanded, db.unready_deps ORDER BY 1;"
           )
+          gates = sql(
+              f"SELECT status::text || ' walked=' || walked::int::text"
+              f"  || ' drv=' || drv::int::text"
+              f"  || ' substitutable=' || substitutable::int::text"
+              f"  || ' deps_ready=' || deps_ready::int::text"
+              f"  || ' present=' || present::int::text"
+              f"  || ' whole=' || whole::int::text"
+              f"  || ' count=' || count(*)::text"
+              f" FROM (SELECT db.status, w.walked, db.substitutable,"
+              f"              EXISTS (SELECT 1 FROM cached_path cp"
+              f"                      WHERE cp.hash = w.hash AND cp.file_hash IS NOT NULL) AS drv,"
+              f"              db.unready_deps = 0 AS deps_ready,"
+              f"              db.missing_runtime_deps = 0 AS whole,"
+              f"              NOT EXISTS (SELECT 1 FROM derivation_output o"
+              f"                          LEFT JOIN cached_path cp"
+              f"                            ON cp.hash = o.hash AND cp.file_hash IS NOT NULL"
+              f"                          WHERE o.derivation = db.derivation"
+              f"                            AND cp.hash IS NULL) AS present"
+              f"       FROM derivation_build db"
+              f"       JOIN derivation w ON w.id = db.derivation"
+              f"       JOIN build_job bj ON bj.derivation_build = db.id"
+              f"       WHERE bj.evaluation = '{eval_id}'"
+              f"         AND db.status IN (0, 1, 2, 8)"
+              f"         AND (db.demanded OR db.status IN (1, 2))) g"
+              f" GROUP BY status, walked, drv, substitutable, deps_ready, present, whole"
+              f" ORDER BY 1;"
+          )
+          # The journal tail was 80 lines of which 60 were `check_task_updates`,
+          # whose task Model prints 1.5 KB per line, so the polling and GC chatter
+          # goes. A stall is usually a worker that left or an evaluation whose
+          # worker did, and both are minutes old by the time the deadline fires -
+          # hence the session events over the whole window, and both workers' own
+          # journals, which the server's says nothing about.
+          noise = (
+              "gradient_web: (request started|response generated"
+              "|sending chunk|stream closed)"
+              "|gradient_sources::git::(update_check|commit_info|pktline)"
+              "|gradient_cache::cacher: (Cache cleanup|Evaluation GC|Derivation GC)"
+              "|handler::dispatch: WorkerMetrics"
+          )
           j = server.succeed(
-              "journalctl -u gradient-server --no-pager --since='-900s' -n 4000"
-              " | grep -vE 'gradient_web: (request started|response generated"
-              "|sending chunk|stream closed)'"
-              " | tail -n 80"
+              f"journalctl -u gradient-server --no-pager --since='-900s' -n 8000"
+              f" | grep -vE '{noise}' | tail -n 60"
+          )
+          fleet = server.succeed(
+              "journalctl -u gradient-server --no-pager --since='-900s' -n 8000"
+              " | grep -E 'handshake complete|duplicate connection|worker silent"
+              "|unregister|job accepted|job rejected|abandoned|not streaming'"
+              " | tail -n 40"
+          )
+          workers = "".join(
+              f"\n{name}:\n"
+              + node.succeed(
+                  "journalctl -u gradient-worker --no-pager --since='-300s' -n 400"
+                  " | tail -n 40"
+              )
+              for name, node in (("builder", builder), ("builder2", builder2))
           )
           raise Exception(
-              f"Evaluation did not complete after 900 s.\n"
+              f"Evaluation did not complete after 900 s. Evaluation is {eval_state}.\n"
               f"anchors of this evaluation:\n{anchors}\n"
-              f"server log, HTTP request noise removed:\n{j}"
+              f"what the evaluation still waits on, by gate:\n{gates}\n"
+              f"fleet events over the window:\n{fleet}\n"
+              f"worker journals:{workers}\n"
+              f"server log, polling and GC noise removed:\n{j}"
           )
 
       # ── Phase 5b: the worker committed a non-empty eval cache to disk ─────
