@@ -1129,9 +1129,10 @@ pub(crate) async fn apply_upstream_hits(
 /// builder demands its build inputs.
 ///
 /// Runs after the round's hits, so an anchor an upstream serves is already a relay
-/// when its answer lands and nothing below it is ever asked for. The demand this
-/// turns on goes back to the probe through the transition emitter, which is how the
-/// closure descends one level per round.
+/// when its answer lands and nothing below it is ever asked for. What the recompute
+/// demands is RETURNED, not sent: it is handed to the probe once this transaction
+/// commits, and the transition emitter would not report it at all, because a miss
+/// moves no status and its own recompute keys on one.
 pub(crate) async fn mark_probed(
     ctx: &DbContext,
     anchors: &[DerivationId],
