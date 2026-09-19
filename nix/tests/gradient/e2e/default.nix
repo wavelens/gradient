@@ -675,7 +675,18 @@ in {
                   f'{API}/evals/{eval_id}/builds | '
                   f'{JQ} -c ".message | {{total, by_status: ([.builds[].status] | group_by(.) | map({{key: .[0], value: length}}) | from_entries)}}"'
               ).strip()
-              print(f"  [{attempt:>2}/90] eval={eval_detail} builds={builds_summary}")
+              # A stalled run reads the same on the eval and the builds whether the
+              # graph is wedged or the fleet has left, and those want opposite fixes.
+              fleet = server.succeed(
+                  f'{CURL} -sf -H "Authorization: Bearer {token}" '
+                  f'{API}/board/health | '
+                  f'{JQ} -c ".message | {{workers: .workers_connected, sessions: .proto_sessions, '
+                  f'pending: .jobs_pending, active: .jobs_active}}"'
+              ).strip()
+              print(
+                  f"  [{attempt:>2}/90] eval={eval_detail} builds={builds_summary} "
+                  f"fleet={fleet}"
+              )
 
       if not completed:
           # A stall is an anchor that never went terminal, so the anchor states are the
