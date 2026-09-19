@@ -326,6 +326,15 @@ pub fn anchor_whole_predicate(alias: &str) -> String {
 /// closure was built (#666). It also takes a correlated three-table subquery off
 /// every promote, un-promote and sweep row.
 ///
+/// `probed` is on the build arm for the reason it is on [`builder_predicate`], one level
+/// up: an anchor reached over a RUNTIME edge is demanded whether or not anything will
+/// build it, so it never passes through that predicate and arrives here unanswered. A
+/// source FOD under a relayed output is exactly that shape, and the dispatch loop
+/// beats the probe tick: busybox's tarball was queued 60 ms after the round that
+/// would have asked for it, built, and failed offline on an upstream that was
+/// serving it. The relay arm needs no such term, since nothing is substitutable
+/// until the probe says so.
+///
 /// It must stay free of any reference to `{alias}`'s OWN `status`, which is why that
 /// term lives in [`promotable_predicate`] instead. `m20260908_000002` and
 /// `m20260909_000001` run a demote and a promote in sequence in one transaction and
@@ -337,7 +346,7 @@ pub fn gates_predicate(alias: &str) -> String {
     AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = {alias}.derivation)
     AND {alias}.demanded
     AND ({alias}.substitutable
-         OR ({alias}.unready_deps = 0 AND {drv_present})))"#,
+         OR ({alias}.probed AND {alias}.unready_deps = 0 AND {drv_present})))"#,
         walked = walked_predicate(alias),
         drv_present = drv_present_predicate(alias),
     )
@@ -797,7 +806,7 @@ mod tests {
         let g = norm(&gates_predicate("db"));
         assert!(
             g.contains(
-                "AND db.demanded AND (db.substitutable OR (db.unready_deps = 0 AND EXISTS ("
+                "AND db.demanded AND (db.substitutable OR (db.probed AND db.unready_deps = 0 AND EXISTS ("
             ),
             "demand is common to both arms, the split is on substitutable alone: {g}"
         );
