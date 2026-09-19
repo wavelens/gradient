@@ -1243,9 +1243,10 @@ mod tests {
     #[tokio::test]
     async fn what_the_batch_demands_reaches_the_upstream_probe() {
         let gained = DerivationId::now_v7();
-        let (ctx, _pool, mut probes) =
-            crate::test_ctx::ctx_with_probes(MockDatabase::new(DatabaseBackend::Postgres).into_connection())
-                .await;
+        let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(
+            MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        )
+        .await;
         let actor = crate::Graph::new()
             .spawn(ctx.clone(), None, None)
             .await
