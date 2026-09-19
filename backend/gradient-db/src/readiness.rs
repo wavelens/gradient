@@ -692,12 +692,13 @@ pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<Transition
 /// new value, so one statement serves a gain and a loss and no caller has to know
 /// which it caused.
 ///
-/// Only anchors in a builder status are rewritten, because they are the only ones a
-/// gate reads the column on. A terminal anchor keeps whatever it carried when it was
-/// pending, and the recompute that thaws it names it as a root, so the value it reads
-/// on the way back into the queue is computed and never inherited. The scope is the
-/// whole pending table by design, so the scan the planner answers it with is the
-/// right plan and the tier says so.
+/// Only anchors whose demand can still move are rewritten. A terminal anchor keeps
+/// whatever it carried when it was pending, and the recompute that thaws it names it
+/// as a root, so the value it reads on the way back into the queue is computed and
+/// never inherited. `Skipped` has no such event - demand returning IS its thaw - so
+/// it is in the set this writes; leaving it out is what made the status absorbing.
+/// The scope is the whole pending table by design, so the scan the planner answers
+/// it with is the right plan and the tier says so.
 pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "{cte} \
@@ -708,7 +709,7 @@ pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> = LazyLock::new(|| {
            AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
          RETURNING db.derivation, db.demanded",
         cte = crate::graph_sql::demand_closure_cte("SELECT derivation FROM entry_point", ""),
-        pending = status_sql::build_in(&crate::graph_sql::BUILDER_STATUSES),
+        pending = status_sql::build_in(&crate::graph_sql::DEMANDABLE_STATUSES),
     )
 });
 
@@ -1680,6 +1681,24 @@ mod tests {
         assert!(
             sql.contains("RETURNING db.derivation, db.demanded"),
             "the caller settles the queue from the new value: {sql}"
+        );
+    }
+
+    /// The backstop is the last writer that can un-strand a skipped subtree, so it
+    /// has to be allowed to write the column on one. Restricted to the builder
+    /// statuses it read the walk's correct answer and then declined to apply it,
+    /// which is why the sweep reported `demand_drift=0` over four hundred anchors
+    /// it had itself skipped a pass earlier.
+    #[test]
+    fn the_backstop_rewrites_a_skipped_anchor() {
+        let sql = norm(RECOUNT_DEMANDED_SQL.as_str());
+        assert!(
+            sql.contains(&format!(
+                "WHERE db.status IN ({demandable})",
+                demandable = status_sql::build_in(&crate::graph_sql::DEMANDABLE_STATUSES),
+            )),
+            "a skipped anchor is thawed BY demand returning, so the write must \
+             reach it: {sql}"
         );
     }
 
