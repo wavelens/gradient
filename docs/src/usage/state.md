@@ -337,7 +337,7 @@ Without this, startup fails with
 | `display_name` | `<name>` | Display name |
 | `description` | `null` | Optional description |
 | `active` | `true` | Set false to disable serving without deleting |
-| `priority` | `10` | Higher wins when multiple caches contain the same path |
+| `priority` | `10` | Lower wins when multiple caches contain the same path |
 | `local_priority` | `null` | Alternate priority returned in `nix-cache-info` for clients whose IP matches `services.gradient.settings.localIps`. Null or 0 disables the override. |
 | `max_storage_gb` | `0` | Max storage for this cache in GB. When all writable caches for a project have less than 10 MiB headroom, new evaluations park in `Waiting`. 0 = unlimited. |
 | `signing_key_file` | - | Path to the (de-prefixed) base64 Ed25519 signing key (required) |
