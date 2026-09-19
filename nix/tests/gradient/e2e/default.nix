@@ -2001,10 +2001,10 @@ in {
       assert anchor_of(busybox) == "7 1 1", (
           f"busybox must be relayed exactly once off the upstream: {anchor_of(busybox)}"
       )
-      # The whole of decision 3: the relay walked the upstream references and
-      # pushed every member we lacked, so the output is whole and its dependents
-      # can be built entirely out of our cache. Relaying the output alone leaves
-      # this above zero.
+      # The whole of decision 3: the worker fetches an output and nothing below
+      # it, so the server demands the producers of what the NAR references and
+      # each is relayed on its own. That is what makes the output whole and its
+      # dependents buildable entirely out of our cache.
       assert output_missing(busybox) == "0", (
           f"busybox's relayed output is missing closure members: {output_missing(busybox)}"
       )
@@ -2022,23 +2022,25 @@ in {
       assert relayed_inputs_built == "0", (
           f"a relayed anchor's inputs were built anyway: {relayed_inputs_built} attempts"
       )
-      # The source is the input the relay exists to avoid, and the row `LIKE
-      # 'busybox%'` used to resolve to. Its STATUS is not the invariant: the relay
-      # mirrors busybox's whole closure, `separateDebugInfo` puts the source inside
-      # it, and the next evaluation to name a path we now hold moves that anchor to
-      # `Substituted` without dispatching anything. Never dispatched is the invariant.
-      sources, dispatched, statuses = sql(
+      # The source is the input the relay exists to avoid BUILDING. Dispatched is
+      # not the invariant: `separateDebugInfo` puts the source inside busybox's
+      # runtime closure, so the walk demands it over a `Both` edge and it is
+      # relayed off the same upstream - which is the only way busybox ever reads
+      # whole. Never BUILT is the invariant, and a relay is not a build: it
+      # settles `Substituted` off bytes we already have a URL for, while a build
+      # of this FOD would reach a network the VM does not have.
+      sources, built, statuses = sql(
           f"SELECT count(*)::text || ' ' || count(*) FILTER ("
-          f"  WHERE db.status IN (1, 2) OR EXISTS ("
-          f"    SELECT 1 FROM build_attempt a WHERE a.derivation_build = db.id))::text "
+          f"  WHERE db.status = 3 OR (NOT (db.substitutable OR db.substituted) AND EXISTS ("
+          f"    SELECT 1 FROM build_attempt a WHERE a.derivation_build = db.id)))::text "
           f"|| ' ' || coalesce(string_agg(DISTINCT db.status::text, ','), '-') "
           f"FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
           f"JOIN derivation_dependency e ON e.dependency = d.id AND e.derivation = '{busybox}' "
           f"WHERE d.name LIKE '%.tar%';"
       ).split()
-      assert int(sources) >= 1 and dispatched == "0", (
-          f"busybox's source is wanted by nobody, so nothing may queue or build it: "
-          f"{sources} sources, {dispatched} dispatched, status {statuses}"
+      assert int(sources) >= 1 and built == "0", (
+          f"busybox's source may be relayed, never built: "
+          f"{sources} sources, {built} built, status {statuses}"
       )
       assert runtime_drift() == 0, "wholeness disagrees with its recompute after the relay"
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the relay"
