@@ -143,7 +143,7 @@ pub async fn run_upload_pass(
             }
         }
 
-        report.orphans_removed = remove_orphans(staged, &unconfirmed, ORPHAN_MIN_AGE).await?;
+        report.orphans_removed = sweep_orphans(state, staged, &unconfirmed, ORPHAN_MIN_AGE).await?;
     }
 
     Ok(report)
@@ -218,21 +218,55 @@ async fn reconcile_absent(
     }
 }
 
-/// Remove staged files that no unconfirmed row names and that are older than
-/// `min_age`. Returns how many were removed.
-pub async fn remove_orphans(
+/// Delete the staged files nothing is waiting for.
+///
+/// `page` is the work list this pass read, which [`UPLOAD_SCAN_LIMIT`] caps: a
+/// staged file it does not name is only a *candidate*, and the table gets the
+/// final word. Treating the page as the whole truth made a backlog deeper than
+/// the page delete the files it had yet to upload, so those rows reached their
+/// upload grace with neither a staged file nor an object and demoted - the
+/// producer rebuilt, staged again, and was deleted again on the next pass.
+async fn sweep_orphans(
+    state: &Arc<ServerState>,
     staged: &StagedNars,
-    unconfirmed: &HashSet<String>,
+    page: &HashSet<String>,
     min_age: Duration,
 ) -> anyhow::Result<u64> {
-    let cutoff = std::time::SystemTime::now() - min_age;
-    let mut removed = 0;
-    for (hash, modified) in staged.list().await? {
-        if unconfirmed.contains(&hash) || modified > cutoff {
-            continue;
-        }
+    let candidates = orphan_candidates(staged, page, min_age).await?;
+    let wanted = gradient_db::unconfirmed_hashes_among(&state.worker_db, &candidates)
+        .await
+        .context("resolve orphan candidates against the cache index")?;
 
-        staged.remove(&hash).await?;
+    remove_orphans(staged, &candidates, &wanted).await
+}
+
+/// Staged hashes the work list does not name and that are older than `min_age`,
+/// so a commit whose row is not written yet cannot own them.
+async fn orphan_candidates(
+    staged: &StagedNars,
+    page: &HashSet<String>,
+    min_age: Duration,
+) -> anyhow::Result<Vec<String>> {
+    let cutoff = std::time::SystemTime::now() - min_age;
+
+    Ok(staged
+        .list()
+        .await?
+        .into_iter()
+        .filter(|(hash, modified)| !page.contains(hash) && *modified <= cutoff)
+        .map(|(hash, _)| hash)
+        .collect())
+}
+
+/// Remove every candidate no unconfirmed row still wants. Returns how many went.
+pub async fn remove_orphans(
+    staged: &StagedNars,
+    candidates: &[String],
+    wanted: &HashSet<String>,
+) -> anyhow::Result<u64> {
+    let mut removed = 0;
+    for hash in candidates.iter().filter(|h| !wanted.contains(*h)) {
+        staged.remove(hash).await?;
         removed += 1;
     }
 
@@ -364,6 +398,7 @@ mod tests {
     use gradient_entity::cached_path::Model as MCachedPath;
     use gradient_storage::{NarStore, StagedNars};
     use sea_orm::{DatabaseBackend, MockDatabase};
+    use std::collections::BTreeMap;
     use std::path::Path;
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -508,6 +543,38 @@ mod tests {
         );
     }
 
+    /// The pass reads one page of the table, so a staged file the page does not
+    /// name may still be wanted. Deleting on the page alone made a backlog deeper
+    /// than [`UPLOAD_SCAN_LIMIT`] delete the files it had yet to upload, and those
+    /// rows demoted at their grace with no object anywhere: 18,780 NARs on one
+    /// instance, and every dependent build failing on an input nothing could serve.
+    #[tokio::test]
+    async fn a_staged_file_beyond_the_page_is_kept_because_the_table_still_wants_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        // The sweep asks the table one question: which candidates it still wants.
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([(
+                "hash".to_owned(),
+                sea_orm::Value::from(B),
+            )])]])
+            .into_connection();
+        let state = test_server_state(store(tmp.path()), db, |_| {});
+        stage(&state, A, b"an orphan nothing names").await;
+        stage(&state, B, b"beyond the page").await;
+        let staged = state.nar_storage.staged().unwrap();
+
+        let removed = sweep_orphans(&state, staged, &HashSet::new(), Duration::ZERO)
+            .await
+            .unwrap();
+
+        assert_eq!(removed, 1, "only the hash the table disowns");
+        assert!(
+            staged.exists(B).await,
+            "the row beyond the page still wants its file"
+        );
+        assert!(!staged.exists(A).await, "the real orphan is gone");
+    }
+
     #[tokio::test]
     async fn an_orphan_staged_file_is_removed_once_it_is_old_enough() {
         let tmp = tempfile::tempdir().unwrap();
@@ -515,15 +582,19 @@ mod tests {
         stage(&state, A, b"orphan").await;
         let staged = state.nar_storage.staged().unwrap();
 
-        let kept = remove_orphans(staged, &HashSet::new(), Duration::from_secs(3600))
+        let fresh = orphan_candidates(staged, &HashSet::new(), Duration::from_secs(3600))
             .await
             .unwrap();
-        assert_eq!(
-            kept, 0,
+        assert!(
+            fresh.is_empty(),
             "a fresh file may belong to a commit still in flight"
         );
 
-        let removed = remove_orphans(staged, &HashSet::new(), Duration::ZERO)
+        let candidates = orphan_candidates(staged, &HashSet::new(), Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(candidates, vec![A.to_owned()]);
+        let removed = remove_orphans(staged, &candidates, &HashSet::new())
             .await
             .unwrap();
         assert_eq!(removed, 1);

@@ -141,12 +141,49 @@ impl Sink {
     }
 }
 
+/// Why a NAR transfer ended without bytes.
+///
+/// The server distinguishes the two on the wire and the worker must keep them
+/// apart: they differ in whether retrying can ever succeed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferFailure {
+    /// `NarUnavailable`: the cache holds no object for this path. Only a rebuild
+    /// changes that, so the attempt is reported as a missing input rather than
+    /// spent - and spent again - on a transport retry that cannot help.
+    Unavailable(String),
+    /// `NarAbort`, a staging error or a dropped stream: the same request may
+    /// well succeed on the next attempt.
+    Transient(String),
+}
+
+/// The cache cannot serve `store_path`. Carried as a typed error so the prefetch
+/// turns it into [`MissingInputs`](crate::proto::prefetch::MissingInputs) and the
+/// server demotes the path and re-queues its producer, instead of the build
+/// burning its attempt budget on a NAR no retry will produce.
+#[derive(Debug)]
+pub struct NarUnavailable {
+    pub store_path: String,
+    pub reason: String,
+}
+
+impl std::fmt::Display for NarUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the cache cannot serve {}: {}",
+            self.store_path, self.reason
+        )
+    }
+}
+
+impl std::error::Error for NarUnavailable {}
+
 #[derive(Default)]
 struct Inner {
     /// Live transfers: the channel feeding each one's staging task.
     streams: HashMap<Key, mpsc::Sender<Frame<ServerMessage>>>,
     /// Outstanding pull waiters; resolved on `is_final` or on failure.
-    waiters: HashMap<Key, oneshot::Sender<Result<NarPayload, String>>>,
+    waiters: HashMap<Key, oneshot::Sender<Result<NarPayload, TransferFailure>>>,
     /// Outstanding push-resume gates; resolved on `NarPushResume`.
     push_waiters: HashMap<Key, oneshot::Sender<u64>>,
 }
@@ -169,7 +206,7 @@ pub struct NarReceiver {
 pub struct PendingNar {
     job_id: String,
     store_path: String,
-    rx: oneshot::Receiver<Result<NarPayload, String>>,
+    rx: oneshot::Receiver<Result<NarPayload, TransferFailure>>,
 }
 
 impl PendingNar {
@@ -248,7 +285,7 @@ impl Stager {
     /// Resolve the waiter for `key`. A payload nobody is waiting for is
     /// unlinked here: nothing else knows the claim's name, so the alternative
     /// is a file only the 24 h sweep can find.
-    async fn deliver(&self, key: &Key, result: Result<NarPayload, String>) {
+    async fn deliver(&self, key: &Key, result: Result<NarPayload, TransferFailure>) {
         let undelivered = match self.inner.upgrade() {
             None => Some(result),
             Some(inner) => {
@@ -283,7 +320,8 @@ impl Stager {
         {
             warn!(job_id = %spec.key.0, store_path = %spec.key.1, error = %e, "could not discard a failed NAR partial");
         }
-        self.deliver(&spec.key, Err(reason)).await;
+        self.deliver(&spec.key, Err(TransferFailure::Transient(reason)))
+            .await;
     }
 
     /// Open the sink a staging task writes into. `Resume::Staged` continues
@@ -458,7 +496,10 @@ impl NarReceiver {
         let key = (job_id.clone(), store_path.clone());
         match tokio::time::timeout(TRANSFER_TIMEOUT, rx).await {
             Ok(Ok(Ok(payload))) => Ok(payload),
-            Ok(Ok(Err(reason))) => Err(anyhow::anyhow!(
+            Ok(Ok(Err(TransferFailure::Unavailable(reason)))) => {
+                Err(anyhow::Error::new(NarUnavailable { store_path, reason }))
+            }
+            Ok(Ok(Err(TransferFailure::Transient(reason)))) => Err(anyhow::anyhow!(
                 "NAR transfer for {} failed: {}",
                 store_path,
                 reason
@@ -567,7 +608,12 @@ impl NarReceiver {
                 Ok(sink) => stage_pull(stager, spec, sink, rx).await,
                 Err(e) => {
                     stager
-                        .deliver(&spec.key, Err(format!("could not stage NAR: {e}")))
+                        .deliver(
+                            &spec.key,
+                            Err(TransferFailure::Transient(format!(
+                                "could not stage NAR: {e}"
+                            ))),
+                        )
                         .await;
                 }
             }
@@ -575,16 +621,20 @@ impl NarReceiver {
         tx
     }
 
-    /// Resolve the waiter for `(job_id, store_path)` with an error. Called for
-    /// both `NarUnavailable` and `NarAbort`. Any on-disk partial is kept so a
-    /// later request can resume from where it stopped.
-    pub fn fail(&self, job_id: &str, store_path: &str, reason: String) {
+    /// Resolve the waiter for `(job_id, store_path)` with a failure. Called for
+    /// both `NarUnavailable` and `NarAbort`, which `failure` keeps apart. Any
+    /// on-disk partial is kept so a later request can resume from where it
+    /// stopped.
+    pub fn fail(&self, job_id: &str, store_path: &str, failure: TransferFailure) {
         let key = (job_id.to_owned(), store_path.to_owned());
+        let reason = match &failure {
+            TransferFailure::Unavailable(r) | TransferFailure::Transient(r) => r.clone(),
+        };
         let mut g = self.inner.lock();
         g.streams.remove(&key);
         match g.waiters.remove(&key) {
             Some(tx) => {
-                if tx.send(Err(reason)).is_err() {
+                if tx.send(Err(failure)).is_err() {
                     debug!(%job_id, %store_path, "NAR failure waiter went away before delivery");
                 }
             }
@@ -791,9 +841,49 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
-        r.fail("j", "/nix/store/x", "not in nar_storage".into());
+        r.fail(
+            "j",
+            "/nix/store/x",
+            TransferFailure::Transient("not in nar_storage".into()),
+        );
         let err = task.await.unwrap().unwrap_err().to_string();
         assert!(err.contains("not in nar_storage"), "got: {err}");
+    }
+
+    /// An unavailable NAR and an aborted transfer used to arrive as the same
+    /// bare string, so a path the cache could not serve was reported
+    /// `Transient`: no `missing_paths` for the server to demote, and a retry
+    /// that fails in milliseconds, spending the whole attempt budget in seconds.
+    #[tokio::test]
+    async fn an_unavailable_nar_is_typed_apart_from_an_aborted_transfer() {
+        let r = NarReceiver::new();
+        let gone = r.register("j", "/nix/store/gone");
+        let dropped = r.register("j", "/nix/store/dropped");
+
+        r.fail(
+            "j",
+            "/nix/store/gone",
+            TransferFailure::Unavailable("NAR not found in cache".into()),
+        );
+        r.fail(
+            "j",
+            "/nix/store/dropped",
+            TransferFailure::Transient("NarAbort".into()),
+        );
+
+        let gone = r.await_pending(gone).await.unwrap_err();
+        assert_eq!(
+            gone.downcast_ref::<NarUnavailable>().map(|u| &u.store_path),
+            Some(&"/nix/store/gone".to_owned()),
+        );
+        assert!(
+            r.await_pending(dropped)
+                .await
+                .unwrap_err()
+                .downcast_ref::<NarUnavailable>()
+                .is_none(),
+            "an abort stays a transport failure"
+        );
     }
 
     #[tokio::test]
@@ -802,7 +892,11 @@ mod tests {
         let p1 = r.register("job", "/nix/store/a");
         let p2 = r.register("job", "/nix/store/b");
 
-        r.fail("job", "/nix/store/a", "missing".into());
+        r.fail(
+            "job",
+            "/nix/store/a",
+            TransferFailure::Transient("missing".into()),
+        );
         final_chunk(&r, "job", "/nix/store/b", b"hello").await;
 
         let r1 = r.await_pending(p1).await;
@@ -827,7 +921,7 @@ mod tests {
         r1.accept_chunk("j", &path, frame("j", &path, 3, b"def", false))
             .await;
         // Connection drops mid-transfer.
-        r1.fail("j", &path, "NarAbort".into());
+        r1.fail("j", &path, TransferFailure::Transient("NarAbort".into()));
         settle(&r1).await;
 
         let (staged, token) = r1.resumable("j", &path).await;

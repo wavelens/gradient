@@ -20,6 +20,17 @@ use gradient_types::TaskTriggerId;
 /// over time so they don't all hit the upstream at the same moment.
 const POLLING_JITTER_PCT: u32 = 10;
 
+/// How long one trigger may spend resolving its repository's HEAD before the
+/// pass gives up on it and moves to the next.
+///
+/// The resolution is a network round-trip to a forge, and the pass walks the
+/// triggers in one sequence under a shared budget: unbounded, a single
+/// unreachable remote consumes the whole budget, the pass is cancelled before it
+/// reaches `update_last_fired`, and every trigger behind that one stops firing
+/// for good. Bounding it here plus the ordering in [`dispatch_once`] means a
+/// stuck remote costs one slot per pass and nothing else.
+const HEAD_RESOLVE_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// `true` if a polling trigger with the given `interval_secs` should fire
 /// at `now`, given that it last fired at `last_fired_at`. A trigger that has
 /// never fired (`None`) is always due.
@@ -96,7 +107,9 @@ use gradient_graph::Transition;
 use gradient_sources::{check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
-use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder,
+};
 use tracing::{debug, error, info, warn};
 
 use super::Scheduler;
@@ -106,6 +119,8 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
     let now = gradient_types::now();
 
+    // Least-recently-fired first, so a trigger a slow remote cost a slot last pass
+    // is served before the one that cost it.
     let triggers = ept::Entity::find()
         .filter(ept::Column::Active.eq(true))
         .filter(
@@ -113,6 +128,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                 .add(ept::Column::TriggerType.eq(i16::from(TriggerType::Polling)))
                 .add(ept::Column::TriggerType.eq(i16::from(TriggerType::Time))),
         )
+        .order_by_asc(ept::Column::LastFiredAt)
         .all(&state.worker_db)
         .await?;
     if triggers.is_empty() {
@@ -170,19 +186,22 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
 
         // Resolve current HEAD. Polling reports whether it advanced; time
         // triggers fire on whatever HEAD currently is.
-        let (has_update, commit_hash) =
-            match check_task_updates(&state.db(), task, branch_for_check.as_deref()).await {
-                Ok(v) => v,
-                Err(e) => {
-                    warn!(error = %e, task = %task.name, "trigger commit resolution failed");
-                    // Update on error too, otherwise transient failures retry every 5s.
-                    update_last_fired(state, &trig, now).await;
-                    continue;
-                }
-            };
+        let sources = state.db();
+        let resolve = check_task_updates(&sources, task, branch_for_check.as_deref());
+        let (has_update, commit_hash) = match resolve_head(resolve, &task.name).await {
+            Some(v) => v,
+            None => {
+                // Update on a failure too, otherwise it retries every 5s - and on a
+                // timeout it is what lets the next pass reach the triggers behind it.
+                update_last_fired(state, &trig, now).await;
+                continue;
+            }
+        };
 
-        let (msg, _email, author) = get_commit_info(&state.db(), task, &commit_hash)
+        let info = get_commit_info(&sources, task, &commit_hash);
+        let (msg, _email, author) = tokio::time::timeout(HEAD_RESOLVE_BUDGET, info)
             .await
+            .unwrap_or_else(|_| Ok((String::new(), None, String::new())))
             .unwrap_or_else(|_| (String::new(), None, String::new()));
 
         // Bump tracked flake inputs (OpenPr action) on every due trigger fire,
@@ -257,6 +276,27 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Await one trigger's HEAD resolution under [`HEAD_RESOLVE_BUDGET`]. `None` on
+/// either a failure or the timeout: both mean this trigger produced no commit to
+/// evaluate, and both must leave the pass free to serve the next one.
+async fn resolve_head<F, T, E>(resolve: F, task: &str) -> Option<T>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(HEAD_RESOLVE_BUDGET, resolve).await {
+        Ok(Ok(v)) => Some(v),
+        Ok(Err(e)) => {
+            warn!(error = %e, %task, "trigger commit resolution failed");
+            None
+        }
+        Err(_) => {
+            warn!(%task, budget_secs = HEAD_RESOLVE_BUDGET.as_secs(), "trigger commit resolution timed out");
+            None
+        }
+    }
+}
+
 /// Abort the anchors a hard-aborted evaluation alone still needed; the graph
 /// actor owns that write, and the caller cancels the in-memory jobs.
 async fn abort_eval_anchors(
@@ -295,6 +335,21 @@ mod tests {
 
     fn tid() -> TaskTriggerId {
         TaskTriggerId::now_v7()
+    }
+
+    /// One unreachable remote used to consume the whole 120 s pass budget: the
+    /// pass was cancelled before `update_last_fired`, so every trigger behind it
+    /// stopped firing - seven days of frozen `last_fired_at` on a live instance.
+    #[tokio::test(start_paused = true)]
+    async fn a_hanging_remote_gives_up_its_slot_instead_of_the_pass() {
+        let hang = std::future::pending::<Result<(bool, Vec<u8>), std::io::Error>>();
+        assert!(
+            resolve_head(hang, "never-answers").await.is_none(),
+            "the pass moves on to the next trigger"
+        );
+
+        let ok = std::future::ready(Ok::<_, std::io::Error>((true, vec![1u8])));
+        assert_eq!(resolve_head(ok, "answers").await, Some((true, vec![1u8])));
     }
 
     #[test]

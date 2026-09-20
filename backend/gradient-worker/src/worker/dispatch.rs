@@ -339,18 +339,26 @@ impl DispatchState {
                 self.nar_recv
                     .resolve_push(&job_id, &store_path, received_bytes);
             }
+            // The two differ in whether a retry can ever succeed: an
+            // unavailable NAR needs its producer rebuilt, an abort needs only
+            // another request.
             ServerMessage::NarUnavailable {
                 job_id,
                 store_path,
                 reason,
+            } => {
+                warn!(%job_id, %store_path, %reason, "the cache cannot serve this NAR");
+                let failure = crate::proto::nar_recv::TransferFailure::Unavailable(reason);
+                self.nar_recv.fail(&job_id, &store_path, failure);
             }
-            | ServerMessage::NarAbort {
+            ServerMessage::NarAbort {
                 job_id,
                 store_path,
                 reason,
             } => {
-                warn!(%job_id, %store_path, %reason, "server cannot deliver NAR");
-                self.nar_recv.fail(&job_id, &store_path, reason);
+                warn!(%job_id, %store_path, %reason, "server aborted a NAR transfer");
+                let failure = crate::proto::nar_recv::TransferFailure::Transient(reason);
+                self.nar_recv.fail(&job_id, &store_path, failure);
             }
             ServerMessage::RequestAllScores => {
                 self.on_request_all_scores().await;

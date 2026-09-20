@@ -562,6 +562,31 @@ pub async fn unconfirmed_cached_paths<C: ConnectionTrait>(
         .collect())
 }
 
+/// Which of `hashes` the table still has an unconfirmed row for.
+///
+/// [`unconfirmed_cached_paths`] hands out one page, so a staged file the page
+/// does not name is not evidence that nothing is waiting for it: the orphan
+/// sweep asks this before deleting, or a backlog deeper than the page deletes
+/// the very files it has yet to upload.
+pub async fn unconfirmed_hashes_among<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<std::collections::HashSet<String>, sea_orm::DbErr> {
+    let found = crate::fetch_in_chunks(hashes, |chunk| async move {
+        ECachedPath::find()
+            .select_only()
+            .column(CCachedPath::Hash)
+            .filter(CCachedPath::Confirmed.eq(false))
+            .filter(CCachedPath::Hash.is_in(chunk))
+            .into_tuple::<String>()
+            .all(db)
+            .await
+    })
+    .await?;
+
+    Ok(found.into_iter().collect())
+}
+
 pub async fn unconfirmed_cached_path_count<C: ConnectionTrait>(
     db: &C,
 ) -> Result<u64, sea_orm::DbErr> {

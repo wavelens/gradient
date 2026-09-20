@@ -29,7 +29,8 @@ use crate::connection::ProtoWriter;
 use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
-use crate::proto::nar_recv::{NarPayload, NarReceiver};
+use crate::proto::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
+use crate::proto::prefetch::MissingInputs;
 use gradient_proto::traits::JobReporter;
 
 /// A pending `CacheQuery`: its reply channel plus the owning `job_id` so a
@@ -473,16 +474,28 @@ impl JobUpdater {
 
         let results = join_all(waits).await;
         let mut out = Vec::with_capacity(results.len());
+        let mut unavailable = Vec::new();
         let mut first_err: Option<anyhow::Error> = None;
         for (path, res) in results {
             match res {
                 Ok(payload) => out.push((path, payload)),
                 Err(e) => {
+                    if e.downcast_ref::<NarUnavailable>().is_some() {
+                        unavailable.push(path);
+                    }
                     if first_err.is_none() {
                         first_err = Some(e);
                     }
                 }
             }
+        }
+        // A path the cache cannot serve is a missing input, not a transport
+        // failure: reported as one, the server demotes it and re-queues its
+        // producer, where a transient error only spends another attempt against
+        // a NAR no retry can produce. The whole batch is reported, so one round
+        // trip heals every hole it found.
+        if !unavailable.is_empty() {
+            return Err(anyhow::Error::new(MissingInputs(unavailable)));
         }
         if let Some(e) = first_err {
             return Err(e);
