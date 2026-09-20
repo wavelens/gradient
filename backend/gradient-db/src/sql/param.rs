@@ -12,6 +12,12 @@
 pub enum Param {
     DerivationId,
     DerivationIds(usize),
+    /// Derivations the orphan collector could actually be handed: no `build_job`
+    /// and no `entry_point` names them. Those two are the only references to
+    /// `derivation` that do not cascade, and they are also the keep-set's seeds,
+    /// so a real candidate has neither. A plain `DerivationIds` draw hits the
+    /// restrict and the delete comes back unmeasured instead of measured.
+    OrphanDerivationIds(usize),
     DerivationHash,
     DerivationHashes(usize),
     CachedPathId,

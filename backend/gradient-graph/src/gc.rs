@@ -78,7 +78,7 @@ fn stale_after_scan_sql() -> String {
 
 gradient_db::sql_fn! {
     GC_DELETE_DERIVATIONS = delete_derivations_sql,
-        params = [DerivationIds(64), Now],
+        params = [OrphanDerivationIds(64), Now],
         tier = Walk,
         flags = [Walk];
 

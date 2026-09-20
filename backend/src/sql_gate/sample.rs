@@ -28,6 +28,13 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
         Param::DerivationIds(_) => {
             "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation LIMIT $1) s"
         }
+        Param::OrphanDerivationIds(_) => {
+            "SELECT array_agg(id) AS v FROM (\
+                 SELECT d.id FROM derivation d \
+                 WHERE NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = d.id) \
+                   AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = d.id) \
+                 LIMIT $1) s"
+        }
         Param::DerivationHash => "SELECT hash AS v FROM derivation LIMIT 1",
         Param::DerivationHashes(_) => {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM derivation LIMIT $1) s"
@@ -88,6 +95,7 @@ fn shape(param: &Param) -> Option<Shape> {
         | Param::TaskActionId
         | Param::IntegrationId => Shape::Uuid,
         Param::DerivationIds(n)
+        | Param::OrphanDerivationIds(n)
         | Param::AnchorIds(n)
         | Param::EvaluationIds(n)
         | Param::EntryPointIds(n) => Shape::Uuids(*n),
@@ -192,6 +200,7 @@ mod tests {
         for param in [
             Param::DerivationId,
             Param::DerivationIds(4),
+            Param::OrphanDerivationIds(4),
             Param::DerivationHash,
             Param::DerivationHashes(4),
             Param::CachedPathId,
