@@ -13,7 +13,8 @@
 //! not a missing index. A plan that aggregates reads many rows to return one by
 //! definition, a statement that returned nothing has no denominator, and a batch
 //! is judged against the values it was handed. What such a statement cost is
-//! still bounded, by buffers.
+//! still bounded, by buffers. An override is judged the same way: a plan that
+//! scanned nothing never reached it, so it cannot be the evidence that it is stale.
 
 use std::collections::HashMap;
 
@@ -120,7 +121,8 @@ pub fn check(
         }
     }
 
-    if budget.reason.is_some() && measured.buffers * 2 < budget.buffers {
+    if budget.reason.is_some() && measured.rows_scanned > 0 && measured.buffers * 2 < budget.buffers
+    {
         out.push(Violation {
             rule: "stale_override",
             detail: format!(
@@ -335,5 +337,20 @@ mod tests {
         let v = check(&m, &budget, &rows(&[]));
         assert_eq!(v[0].rule, "stale_override");
         assert!(!v[0].fatal);
+    }
+
+    #[test]
+    fn a_plan_that_scanned_nothing_is_no_evidence_against_an_override() {
+        let budget = Budget::walk()
+            .buffers(900_000)
+            .because("an eval's whole closure");
+        let m = Measured {
+            buffers: 1,
+            rows_out: 0,
+            rows_scanned: 0,
+            ..clean()
+        };
+
+        assert!(check(&m, &budget, &rows(&[])).is_empty());
     }
 }

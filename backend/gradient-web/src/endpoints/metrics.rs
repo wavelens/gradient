@@ -425,42 +425,31 @@ fn register_labelled_gauge(registry: &Registry, name: &str, help: &str, values: 
 }
 
 // Status sets and label names come from the enums (decoded in Rust below), so a
-// new or renumbered variant can never silently vanish from a series.
+// new or renumbered variant can never silently vanish from a series. The histogram
+// is one pass per table and the terminal set only picks the series a bucket lands
+// in: a WHERE per series read the same table twice, each time dropping most of it.
 fn observations_sql() -> String {
     let build_terminal: Vec<BuildStatus> = BuildStatus::iter()
         .filter(|s| {
             s.is_terminal_success() || s.is_terminal_failure() || *s == BuildStatus::Aborted
         })
         .collect();
-    let build_live: Vec<BuildStatus> = BuildStatus::iter()
-        .filter(|s| !build_terminal.contains(s))
-        .collect();
     format!(
         r#"
-        SELECT 'build_total'::text AS kind, status::int AS status, COUNT(*)::bigint AS value
+        SELECT CASE WHEN status IN ({build_terminal}) THEN 'build_total'
+                    ELSE 'build_in_state' END::text AS kind,
+               status::int AS status,
+               COUNT(*)::bigint AS value
         FROM derivation_build
-        WHERE status IN ({build_terminal})
         GROUP BY status
 
         UNION ALL
 
-        SELECT 'build_in_state'::text, status::int, COUNT(*)::bigint
-        FROM derivation_build
-        WHERE status IN ({build_live})
-        GROUP BY status
-
-        UNION ALL
-
-        SELECT 'evaluation_total'::text, status::int, COUNT(*)::bigint
+        SELECT CASE WHEN status IN ({eval_terminal}) THEN 'evaluation_total'
+                    ELSE 'evaluation_in_state' END::text,
+               status::int,
+               COUNT(*)::bigint
         FROM evaluation
-        WHERE status IN ({eval_terminal})
-        GROUP BY status
-
-        UNION ALL
-
-        SELECT 'evaluation_in_state'::text, status::int, COUNT(*)::bigint
-        FROM evaluation
-        WHERE status IN ({eval_active})
         GROUP BY status
 
         UNION ALL
@@ -491,9 +480,7 @@ fn observations_sql() -> String {
         FROM cache_metric
     "#,
         build_terminal = gradient_db::status_sql::build_in(&build_terminal),
-        build_live = gradient_db::status_sql::build_in(&build_live),
         eval_terminal = gradient_db::status_sql::eval_in(&EvaluationStatus::TERMINAL),
-        eval_active = gradient_db::status_sql::eval_in(&EvaluationStatus::ACTIVE),
     )
 }
 
