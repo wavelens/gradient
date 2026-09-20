@@ -20,6 +20,7 @@
   cacheSigningKey = pkgs.writeText "cache-signing-key" "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
 in {
   name = "development-frontend";
+  globalTimeout = 604800;
   testScript = { nodes, ... }: ''
     start_all()
     server.wait_for_unit("gradient-server.service")
@@ -109,9 +110,9 @@ in {
         enable = true;
         reverseProxy.nginx.enable = true;
         useTls = false;
+        localWorker = false;
         configurePostgres = true;
         domain = "gradient.local";
-        # The frontend is served by `pnpm run serve` on the host; the VM only provides the API.
         frontend.enable = false;
         proto.public = true;
         jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
@@ -161,6 +162,7 @@ in {
             worker_id = "a0000000-0000-0000-0000-000000000001";
             projects = [ "testproject" ];
             token_file = toString workerToken;
+            base_worker = false;
             display_name = "Dev Worker";
             created_by = "admin";
           };
