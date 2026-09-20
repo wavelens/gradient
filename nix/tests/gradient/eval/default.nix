@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ self, pkgs, ... }: {
+{ pkgs, ... }: {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-eval";
     globalTimeout = 1800;
