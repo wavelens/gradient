@@ -79,6 +79,13 @@ size, confirm; neither and older than the upload grace, demote. Served NARs
 resolve through `NarStore::open`: a hits-per-byte RAM cache for small objects,
 then the staged file, then storage.
 
+Each pass reads one capped page of the unconfirmed rows, so its orphan sweep
+cannot treat that page as the whole queue: a staged file the page does not name
+is a candidate, and the table decides. A backlog deeper than the page otherwise
+deletes the files it has yet to upload, and those rows reach the grace with
+neither a file nor an object and demote - the producer rebuilds, stages, and is
+deleted again on the next pass.
+
 The maintenance deletions are the exception that matters for the cache index. TTL
 eviction, the zombie purge and the orphan GC retire `cached_path` rows in their own
 transactions, so `derivation_build.missing_runtime_deps` - the wholeness counter

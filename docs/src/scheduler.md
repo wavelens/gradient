@@ -144,7 +144,16 @@ not pending work. Both readers of "is this evaluation still waiting" -
 demands it, and always counts one that is `Queued` or `Building`, because the
 dispatcher hands out work on the status alone. An evaluation that counted the rest
 would wait forever, because the event it waits for is the one that is never
-coming. A demand loss settles work without moving any status, so the emitter asks
+coming.
+
+Once nothing blocks it, the verdict is `Failed` when any anchor it names sits in
+`BuildStatus::REQUEUEABLE` and `Completed` otherwise - what a fresh evaluation
+would thaw is exactly what this one did not get built. `Aborted` belongs in that
+set even though it never cascades: `derivation_build` is global, so an anchor a
+previous evaluation hard-aborted is already terminal when the next one names it,
+and an abort blocks nothing. Reading only the cascading failures reported
+`Completed` for an evaluation whose every anchor was aborted - a green check for
+a commit on which nothing was built. A demand loss settles work without moving any status, so the emitter asks
 the evaluations that name what lost it whether they are done; no anchor of theirs
 need have transitioned at all.
 

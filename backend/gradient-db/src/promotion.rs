@@ -328,16 +328,27 @@ fn deterministic_build_failure(alias: &str) -> String {
 /// loops the fleet. Build-once success states (`Completed`/`Substituted`) are
 /// never touched. Returns the thaws it made, so the caller can feed
 /// [`crate::status::emit_transition_effects`].
-pub async fn requeue_failed_anchors<C: ConnectionTrait>(
+///
+/// Like its neighbours here it is a `Walk`: the plan gate proves it with the
+/// `work_mem` [`crate::graph_sql::begin_walk`] sets, so it has to run inside
+/// one. On a plain connection it plans against the default instead, and a thaw
+/// that then exceeds its budget heals nothing and says nothing - reconcile logs
+/// the error and goes on to finalize over anchors it never re-queued.
+pub async fn requeue_failed_anchors<C>(
     db: &C,
     derivations: &[DerivationId],
-) -> Result<Vec<TransitionChange>, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let mut changes = Vec::new();
     for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        let rows = db
+        let walk = crate::graph_sql::begin_walk(db).await?;
+        let rows = walk
             .query_all_raw(REQUEUE_FAILED_ANCHORS.bind([ids.into()]))
             .await?;
+        walk.commit().await?;
         changes.extend(returned_transitions(rows));
     }
 
@@ -416,15 +427,20 @@ crate::sql_fn! {
 /// [`deterministic_build_failure`] are excluded, as in [`requeue_failed_anchors`].
 /// Returns the thaws it made, so the caller can feed
 /// [`crate::status::emit_transition_effects`].
-pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
+pub async fn requeue_failed_closure_for_eval<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
-) -> Result<Vec<TransitionChange>, DbErr> {
-    let rows = db
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk
         .query_all_raw(
             REQUEUE_FAILED_CLOSURE_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),
         )
         .await?;
+    walk.commit().await?;
 
     Ok(returned_transitions(rows))
 }
@@ -469,15 +485,20 @@ crate::sql_fn! {
 /// the changes it made, so the caller can advance the dependents of what it just
 /// settled; an anchor already terminal-success is left alone, since it has nothing
 /// left for this statement to write.
-pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
+pub async fn reconcile_cached_anchors_for_eval<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
-) -> Result<Vec<TransitionChange>, DbErr> {
-    let rows = db
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk
         .query_all_raw(
             RECONCILE_CACHED_ANCHORS_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),
         )
         .await?;
+    walk.commit().await?;
 
     Ok(returned_transitions(rows))
 }

@@ -616,7 +616,7 @@ services.gradient.state.tasks.my-task = {
 
 ### Trigger types
 
-- **polling** - periodically check the git repository for new commits. `interval_secs` minimum 10, default 300. Each cycle is jittered by up to 10% of `interval_secs` (deterministic per trigger and cycle) so that triggers created together don't pile onto the same upstream tick. **branch** (optional) - track a specific branch; leave unset to follow the remote HEAD (the repo's default branch).
+- **polling** - periodically check the git repository for new commits. `interval_secs` minimum 10, default 300. Each cycle is jittered by up to 10% of `interval_secs` (deterministic per trigger and cycle) so that triggers created together don't pile onto the same upstream tick. **branch** (optional) - track a specific branch; leave unset to follow the remote HEAD (the repo's default branch). One pass serves the due triggers least-recently-fired first and gives each 30s to resolve its repository's HEAD; a remote that is slow or unreachable costs its own slot and records a fire, so the triggers behind it are served on the next pass rather than starved behind it.
 - **reporter_push** - fires on forge push events. Filters: `branches`, `tags` (glob patterns; empty = match all), `releases_only` (only fires on explicit forge release events).
 - **reporter_pull_request** - fires on PR/MR events. Filters: `branches`, `actions` (default: opened/synchronize/reopened).
 - **time** - fires on a six-field cron schedule (UTC). Re-evaluates the task HEAD even if the commit hasn't changed.

@@ -58,7 +58,7 @@ pub use self::cache_storage::{
     MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, UnconfirmedPath, cache_used_bytes,
     demote_cached_output, demote_output_only_cached_deps, demote_referrers_of,
     diagnose_missing_input, instance_used_bytes, project_caches_all_full, project_writable_caches,
-    unconfirmed_cached_path_count, unconfirmed_cached_paths,
+    unconfirmed_cached_path_count, unconfirmed_cached_paths, unconfirmed_hashes_among,
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_project,
