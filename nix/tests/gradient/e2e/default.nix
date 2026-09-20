@@ -2185,11 +2185,19 @@ in {
       # task2's CURRENT evaluation is the one still building against the subtree.
       # Not `eval2_id`: every push in the phases above re-evaluates both tasks and
       # `keep_evaluations` is 1, so task2's first evaluation and its names are long
-      # deleted by here - which is the very state this phase is about.
-      task2_eval = sql(
+      # deleted by here - which is the very state this phase is about. Nothing above
+      # waits on task2's side of a push, and phase 10g made two commits its own 10 s
+      # poll picks up, so its newest evaluation is still walking as often as not:
+      # wait for the batch that names the builder before reading the id.
+      newest_task2 = (
           "SELECT e.id FROM evaluation e JOIN task t ON t.id = e.task "
-          "WHERE t.name = 'task2' ORDER BY e.created_at DESC LIMIT 1;"
+          "WHERE t.name = 'task2' ORDER BY e.created_at DESC LIMIT 1"
       )
+      poll(f"SELECT count(*) FROM build_job bj WHERE bj.derivation = '{hello_drv}' "
+           f"AND bj.evaluation = ({newest_task2});",
+           "1", "task2's newest evaluation never named the builder the adoption walks out of",
+           timeout=420)
+      task2_eval = sql(f"{newest_task2};")
       assert task2_eval, "task2 has no evaluation left to build against the subtree"
       sql(f"UPDATE evaluation SET status = 3, "
           f"building_started_at = (now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC') "
