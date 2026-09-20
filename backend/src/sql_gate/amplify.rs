@@ -218,6 +218,13 @@ pub async fn run(db: &DatabaseConnection, scale: u32) -> Result<()> {
     Ok(())
 }
 
+/// A column name as an identifier. The list comes from `information_schema` in
+/// the database's own case, so quoting is always safe and is the only thing that
+/// lets a reserved word be a column: `cached_path.references` is one.
+fn quoted(column: &str) -> String {
+    format!("\"{}\"", column.replace('"', "\"\""))
+}
+
 /// One clone pass over `table`: every column is copied verbatim unless the
 /// rewrite list gives it a new value. The column list comes from the database,
 /// so a schema change cannot leave a stale one behind, and the pass needs no
@@ -227,16 +234,17 @@ pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -
     let exprs: Vec<String> = columns
         .iter()
         .map(|column| {
+            let q = quoted(column);
             match rewrite
                 .iter()
                 .find(|(name, _)| name == column)
                 .map(|(_, r)| r)
             {
-                Some(Rewrite::Remap) => format!("md5(t.{column}::text || g.i::text)::uuid"),
-                Some(Rewrite::Rehash) => format!("substr(md5(t.{column} || g.i::text), 1, 32)"),
-                Some(Rewrite::Mark) => format!("'amp' || g.i::text || '-' || t.{column}"),
+                Some(Rewrite::Remap) => format!("md5(t.{q}::text || g.i::text)::uuid"),
+                Some(Rewrite::Rehash) => format!("substr(md5(t.{q} || g.i::text), 1, 32)"),
+                Some(Rewrite::Mark) => format!("'amp' || g.i::text || '-' || t.{q}"),
                 Some(Rewrite::Expr(sql)) => (*sql).to_string(),
-                None => format!("t.{column}"),
+                None => format!("t.{q}"),
             }
         })
         .collect();
@@ -244,7 +252,11 @@ pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -
     format!(
         "INSERT INTO {table} ({}) SELECT {} FROM {table} t, generate_series(1, $1) g(i) \
          ON CONFLICT DO NOTHING",
-        columns.join(", "),
+        columns
+            .iter()
+            .map(|c| quoted(c))
+            .collect::<Vec<_>>()
+            .join(", "),
         exprs.join(", "),
     )
 }
@@ -324,24 +336,42 @@ mod tests {
         );
 
         assert!(
-            sql.starts_with("INSERT INTO derivation (id, hash, name)"),
+            sql.starts_with("INSERT INTO derivation (\"id\", \"hash\", \"name\")"),
             "{sql}"
         );
-        assert!(sql.contains("md5(t.id::text || g.i::text)::uuid"), "{sql}");
         assert!(
-            sql.contains("substr(md5(t.hash || g.i::text), 1, 32)"),
+            sql.contains("md5(t.\"id\"::text || g.i::text)::uuid"),
             "{sql}"
         );
-        assert!(sql.contains("'amp' || g.i::text || '-' || t.name"), "{sql}");
+        assert!(
+            sql.contains("substr(md5(t.\"hash\" || g.i::text), 1, 32)"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("'amp' || g.i::text || '-' || t.\"name\""),
+            "{sql}"
+        );
         assert!(sql.contains("generate_series(1, $1) g(i)"), "{sql}");
         assert!(sql.ends_with("ON CONFLICT DO NOTHING"), "{sql}");
+    }
+
+    /// `cached_path.references` is a reserved word, so the gate could not amplify
+    /// the table at all until every identifier was quoted.
+    #[test]
+    fn a_reserved_word_is_a_usable_column_name() {
+        let sql = clone_sql("cached_path", &["references".to_string()], &[]);
+        assert!(
+            sql.starts_with("INSERT INTO cached_path (\"references\")")
+                && sql.contains("t.\"references\""),
+            "{sql}"
+        );
     }
 
     #[test]
     fn an_unrewritten_column_is_copied_verbatim() {
         let columns = ["id".to_string(), "created_at".to_string()];
         let sql = clone_sql("derivation", &columns, &[("id", Rewrite::Remap)]);
-        assert!(sql.contains("t.created_at"), "{sql}");
+        assert!(sql.contains("t.\"created_at\""), "{sql}");
     }
 
     /// A foreign key and the primary key it points at are rewritten by the same
@@ -355,9 +385,12 @@ mod tests {
             &[("derivation", Rewrite::Remap)],
         );
 
-        assert!(key.contains("md5(t.id::text || g.i::text)::uuid"), "{key}");
         assert!(
-            fk.contains("md5(t.derivation::text || g.i::text)::uuid"),
+            key.contains("md5(t.\"id\"::text || g.i::text)::uuid"),
+            "{key}"
+        );
+        assert!(
+            fk.contains("md5(t.\"derivation\"::text || g.i::text)::uuid"),
             "{fk}"
         );
     }
