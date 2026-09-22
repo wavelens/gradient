@@ -65,7 +65,7 @@
 //!
 //! # What the repair covers, exactly
 //!
-//! [`repair_pending`] materialises its scope and then chunks it: per chunk, one
+//! [`readiness_scope`] materialises the scope once and the two repairs chunk it: per chunk, one
 //! transaction takes [`lock_anchors`] and recounts only the rows that chunk names. The
 //! lock is load-bearing, not hygiene. An UNLOCKED absolute recount reads its new value
 //! from the statement's snapshot while its compare-and-swap reads the stored one from
@@ -97,19 +97,19 @@
 //! reason.
 //!
 //! Repaired: both columns, over the pending anchors and their direct dependencies as
-//! of the scope select. Written: `unready_deps` for every dependent of a flipped
-//! anchor at ANY status and for every anchor a caller seeds, `fetchable` for every
-//! anchor a caller flips. The repaired set is therefore NARROWER than the written set,
-//! and these populations have no backstop at all:
+//! of the scope select, plus `fetchable` wherever the stored flag contradicts a column
+//! the row carries: `true` with a runtime hole counted, or terminal success without
+//! the flag. The wholeness recount is table-wide and flips nothing, so without those
+//! two a counter it raises two hops below anything pending left the flag `true` for
+//! good, and a stale `true` is a settled anchor to every walk: 19 such rows stood
+//! between 47 builders and the paths retention had taken. Written: `unready_deps` for
+//! every dependent of a flipped anchor at ANY status and for every anchor a caller
+//! seeds. What still has no backstop is `unready_deps` on a `Building`,
+//! `FailedTransient` or terminal row that no pending anchor depends on: both ripples
+//! write it and no recount visits it, and a requeue thaws it back to `Created`, where
+//! the very next promote pass can read the drifted value.
 //!
-//! - `unready_deps` on a `Building`, `FailedTransient` or terminal row that no pending
-//!   anchor depends on. Both ripples write it and no recount visits it. A requeue thaws
-//!   it back to `Created`, where the very next promote pass can read the drifted value:
-//!   too high stalls the anchor, too low dispatches it against a missing input.
-//! - `fetchable` on an anchor that no pending anchor depends on, outside the scope by
-//!   construction.
-//!
-//! The second was worse than it reads, and is why [`seed_unready_deps`] EVALUATES
+//! A stale flag was worse than it reads, and is why [`seed_unready_deps`] EVALUATES
 //! [`crate::graph_sql::fetchable_predicate`] on the dependencies it counts instead of
 //! reading their `fetchable` column. The seed runs inside the ingest transaction the
 //! moment a dependent's edges land, so it is the first reader of a dependency's
@@ -141,7 +141,7 @@
 //! [`recompute_demand`] reports lost. `substitutable` being cleared on a `Queued` anchor is the
 //! one with no entry point here, because it both unfetches the anchor and fails the
 //! anchor's own gate: the caller that clears it owes that anchor a re-check of its own
-//! gate, and until it does, [`repair_pending`]'s un-promote pass settles it one sweep
+//! gate, and until it does, [`repair_readiness`]'s un-promote pass settles it one sweep
 //! later.
 //!
 //! `m20260908_000002` carries a frozen copy of
@@ -294,7 +294,7 @@ crate::sql_lazy! {
 ///
 /// It is still the sweep's, not the queue's: the selective term is the gate's
 /// `build_job` EXISTS, so the planner rightly drives from the jobs and reaches the
-/// anchors through that index rather than scanning it. [`repair_pending`] is the
+/// anchors through that index rather than scanning it. [`repair_readiness`] is the
 /// only caller and it runs table-wide by design.
 static PROMOTE_ANY: LazyLock<String> =
     LazyLock::new(|| promote_sql("(db.unready_deps = 0 OR db.substitutable) AND "));
@@ -378,18 +378,28 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-/// The pending anchors and their direct dependencies: every row whose `fetchable` a
-/// gate can read this pass, one edge deep. [`pending_scope`] materialises it, so the
-/// lock and the recounts name one frozen list rather than a subquery each statement
-/// re-evaluates against its own snapshot.
+/// The pending anchors and their direct dependencies, every row whose `fetchable` a
+/// gate can read this pass, and every row whose stored flag contradicts a column it
+/// carries, which no pending anchor need be near. [`readiness_scope`] materialises
+/// it, so the lock and the recounts name one frozen list rather than a subquery each
+/// statement re-evaluates against its own snapshot. The two contradiction arms are
+/// partial-index scans: `idx-derivation_build-fetchable-unwhole` and
+/// `idx-derivation_build-open`.
 fn repair_scope() -> String {
     let pending = status_sql::build_in(&BuildStatus::PENDING);
+    let terminal_success = status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS);
     format!(
         "SELECT q.derivation FROM derivation_build q WHERE q.status IN ({pending}) \
        UNION \
          SELECT e.dependency FROM derivation_dependency e \
          JOIN derivation_build q ON q.derivation = e.derivation \
-         WHERE q.status IN ({pending})"
+         WHERE q.status IN ({pending}) \
+       UNION \
+         SELECT q.derivation FROM derivation_build q \
+         WHERE q.fetchable AND q.missing_runtime_deps > 0 \
+       UNION \
+         SELECT q.derivation FROM derivation_build q \
+         WHERE q.status IN ({terminal_success}) AND NOT q.fetchable"
     )
 }
 
@@ -1054,24 +1064,20 @@ pub async fn unwalk_derivations(
     Ok(changes)
 }
 
-/// What the consistency sweep repaired.
+/// What the readiness half of the consistency sweep repaired.
 #[derive(Debug, Default)]
 pub struct Repaired {
-    pub fetchable: u64,
     pub unready_deps: u64,
     pub promoted: Vec<TransitionChange>,
     pub unpromoted: Vec<TransitionChange>,
-    /// How many anchors the recount locked, twice over. A measurement, not a
-    /// violation: the scope select is unbounded and each chunk takes `FOR UPDATE`
-    /// on rows every live graph writer also locks, so the cost this pass imposes
-    /// on ingest is worth seeing before it is bounded.
-    pub scope: usize,
 }
 
-/// Materialise [`repair_scope`] once, so every chunk the repair locks and recounts
-/// comes from one snapshot instead of a subquery each statement re-evaluates against
-/// its own.
-async fn pending_scope<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationId>, DbErr> {
+/// Materialise [`repair_scope`] once, so every chunk the two repairs lock and
+/// recount comes from one snapshot instead of a subquery each statement re-evaluates
+/// against its own. Its length is the sweep's `repair_scope`: a measurement, not a
+/// violation, since the select is unbounded and each chunk takes `FOR UPDATE` on rows
+/// every live graph writer also locks.
+pub async fn readiness_scope<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationId>, DbErr> {
     db.query_all_raw(REPAIR_SCOPE_QUERY.stmt())
         .await?
         .into_iter()
@@ -1104,33 +1110,22 @@ async fn recount(lock: &AnchorLock<'_>, query: &crate::sql::Query) -> Result<u64
         .rows_affected())
 }
 
-/// Recompute both columns over the pending anchors and their direct dependencies,
-/// write only what differs, and settle the queue against the gates.
+/// Recompute `fetchable` over `scope` and write only what differs. One transaction
+/// per chunk, each taking [`lock_anchors`] before it recounts, so no recount writes a
+/// row it did not lock and a cancelled sweep loses one chunk rather than every repair.
 ///
-/// One transaction per chunk, each taking [`lock_anchors`] before it recounts, so no
-/// recount writes a row it did not lock and a cancelled sweep loses one chunk rather
-/// than every repair. `fetchable` is recounted over EVERY chunk before the first
-/// counter recount runs, because a counter computed from a stale `fetchable = true` is
-/// too low and promotes. The module doc has the measured failure behind both.
-///
+/// It runs to the end of the scope before [`repair_readiness`] starts, and before the
+/// sweep's demand recount: a counter computed from a stale `fetchable = true` is too
+/// low and promotes, and a walk that reads one stops at a settled anchor that is not.
 /// The compare-and-swap on the pre-image (`db.fetchable = x.old AND x.old <> x.f`)
 /// stays. Under the lock it compares the row to itself, but a future caller that loses
 /// the lock degrades to a skipped row rather than to an unconditional overwrite of a
 /// value nothing else re-derives, and `old <> new` is the drift filter behind the
-/// returned counts.
-///
-/// The queue settles after the chunks, on the caller's handle. Both statements re-check
-/// the target row's own `status` and `unready_deps`, which EvalPlanQual does
-/// re-evaluate, so they are exactly as safe as the live promotion path and no safer:
-/// the gate's three `EXISTS` subqueries are not re-evaluated, so a promote can still
-/// fire on a `.drv` retired during a lock wait. The un-promote runs first, and the two
-/// cannot both move a row because [`crate::graph_sql::gates_predicate`] never reads
-/// `status`.
-pub async fn repair_pending<C>(db: &C) -> Result<Repaired, DbErr>
+/// returned count.
+pub async fn repair_fetchable<C>(db: &C, scope: &[DerivationId]) -> Result<u64, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
-    let scope = pending_scope(db).await?;
     let mut fetchable = 0u64;
     for chunk in scope.chunks(crate::IN_CHUNK_SIZE) {
         let txn = db.begin().await?;
@@ -1139,6 +1134,21 @@ where
         txn.commit().await?;
     }
 
+    Ok(fetchable)
+}
+
+/// Recompute `unready_deps` over `scope`, chunked and locked as [`repair_fetchable`]
+/// is, then settle the queue against the gates on the caller's handle. Both settling
+/// statements re-check the target row's own `status` and `unready_deps`, which
+/// EvalPlanQual does re-evaluate, so they are exactly as safe as the live promotion
+/// path and no safer: the gate's three `EXISTS` subqueries are not re-evaluated, so a
+/// promote can still fire on a `.drv` retired during a lock wait. The un-promote runs
+/// first, and the two cannot both move a row because
+/// [`crate::graph_sql::gates_predicate`] never reads `status`.
+pub async fn repair_readiness<C>(db: &C, scope: &[DerivationId]) -> Result<Repaired, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let mut unready_deps = 0u64;
     for chunk in scope.chunks(crate::IN_CHUNK_SIZE) {
         let txn = db.begin().await?;
@@ -1155,11 +1165,9 @@ where
     );
 
     Ok(Repaired {
-        fetchable,
         unready_deps,
         promoted,
         unpromoted,
-        scope: scope.len(),
     })
 }
 
@@ -1555,12 +1563,15 @@ mod tests {
         );
     }
 
-    /// The scope is the pending anchors and one edge past them, and it is SELECTed once
-    /// rather than left as a subquery: an inline scope is re-evaluated per statement, so
-    /// a row entering it after the lock would be written unlocked, which is the very ABA
-    /// the lock exists to stop.
+    /// The scope is the pending anchors and one edge past them, plus every row whose
+    /// flag contradicts a column it carries, and it is SELECTed once rather than left
+    /// as a subquery: an inline scope is re-evaluated per statement, so a row entering
+    /// it after the lock would be written unlocked, which is the very ABA the lock
+    /// exists to stop. The contradiction arms are what the wholeness recount leaves
+    /// behind two hops below anything pending, and both are column-only tests so a
+    /// partial index answers each.
     #[test]
-    fn the_scope_reaches_one_edge_past_the_pending_anchors() {
+    fn the_scope_reaches_one_edge_past_the_pending_anchors_and_every_contradicting_flag() {
         let sql = norm(&repair_scope());
         assert_eq!(sql.matches("q.status IN (0, 1)").count(), 2, "{sql}");
         assert!(
@@ -1570,6 +1581,18 @@ mod tests {
         assert!(
             sql.starts_with("SELECT q.derivation"),
             "the UNION names the first arm's column: {sql}"
+        );
+        assert!(
+            sql.contains("WHERE q.fetchable AND q.missing_runtime_deps > 0"),
+            "a fetchable anchor with a runtime hole counted is a lie every walk trusts: {sql}"
+        );
+        assert!(
+            sql.contains("WHERE q.status IN (3, 7) AND NOT q.fetchable"),
+            "a terminal-success anchor without the flag may be whole again: {sql}"
+        );
+        assert!(
+            !sql.contains("derivation_output"),
+            "the scope reads columns only; the recount evaluates the predicate: {sql}"
         );
     }
 
@@ -1587,9 +1610,11 @@ mod tests {
             .append_query_results([vec![drv(promoted)]])
             .into_connection();
 
-        let repaired = repair_pending(&db).await.unwrap();
+        let scope = readiness_scope(&db).await.unwrap();
+        let fetchable = repair_fetchable(&db, &scope).await.unwrap();
+        let repaired = repair_readiness(&db, &scope).await.unwrap();
 
-        assert_eq!((repaired.fetchable, repaired.unready_deps), (2, 3));
+        assert_eq!((fetchable, repaired.unready_deps), (2, 3));
         assert_eq!(repaired.unpromoted.len(), 1);
         assert_eq!(repaired.unpromoted[0].derivation, demoted);
         assert_eq!(repaired.promoted.len(), 1);
@@ -1624,7 +1649,9 @@ mod tests {
 
     /// Every chunk's `fetchable` recount lands before the first counter recount: a
     /// counter computed from a `fetchable = true` a later chunk was about to correct
-    /// comes out too LOW, and too low promotes and dispatches.
+    /// comes out too LOW, and too low promotes and dispatches. The two are separate
+    /// passes over one frozen scope so the sweep can put its demand recount between
+    /// them.
     #[tokio::test]
     async fn the_repair_finishes_fetchable_everywhere_before_it_recounts_a_counter() {
         let scope: Vec<BTreeMap<String, Value>> = (0..crate::IN_CHUNK_SIZE + 1)
@@ -1637,10 +1664,12 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
-        let repaired = repair_pending(&db).await.unwrap();
+        let scope = readiness_scope(&db).await.unwrap();
+        let fetchable = repair_fetchable(&db, &scope).await.unwrap();
+        let repaired = repair_readiness(&db, &scope).await.unwrap();
 
         assert_eq!(
-            (repaired.fetchable, repaired.unready_deps),
+            (fetchable, repaired.unready_deps),
             (2, 2),
             "one row per chunk per pass"
         );
