@@ -790,7 +790,7 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
                  JOIN derivation pw ON pw.id = p.derivation \
                  WHERE p.demanded AND {open} \
                    AND p.derivation NOT IN (SELECT derivation FROM region) \
-                   AND ({builder} OR pe.kind IN (1, 2)))",
+                   AND (({builder}) OR pe.kind IN (1, 2)))",
         open = open_predicate("p"),
         builder = builder_predicate("p", "pw"),
     );

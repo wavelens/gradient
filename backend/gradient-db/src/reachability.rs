@@ -380,7 +380,7 @@ static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
          JOIN build_job pj ON pj.derivation = p.derivation \
          JOIN evaluation ev ON ev.id = pj.evaluation \
          WHERE e.dependency = db.derivation AND {open} \
-           AND ({builder} OR e.kind IN (1, 2)) AND ev.status IN ({live})) AND ",
+           AND (({builder}) OR e.kind IN (1, 2)) AND ev.status IN ({live})) AND ",
         open = open_predicate("p"),
         builder = builder_predicate("p", "w"),
         live = status_sql::eval_in(&EvaluationStatus::ACTIVE),
