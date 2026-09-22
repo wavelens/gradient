@@ -20,12 +20,14 @@ use sea_orm::{
 
 /// Creates a new evaluation that re-runs the previous evaluation's entry points.
 ///
-/// Builds are no longer pre-created per eval: the global `derivation_build`
-/// anchors carry build state, and the new eval re-resolves them when it runs.
-/// The initial status is derived from the previous entry-point anchors: if every
-/// one is already terminal-success (`Completed`/`Substituted`) there is nothing
-/// to rebuild and the eval starts `Completed`; otherwise it starts `Building`
-/// and the scheduler's `check_evaluation_done` closes it out.
+/// The global `derivation_build` anchors carry build state, and a restart never
+/// walks, so the new evaluation takes the previous one's names over as its own:
+/// that is what the graph heal seeds its thaw from and what every reader of "does
+/// some evaluation still want this" reads. The initial status is derived from the
+/// previous entry-point anchors: if every one is already terminal-success
+/// (`Completed`/`Substituted`) there is nothing to rebuild and the eval starts
+/// `Completed`; otherwise it starts `Building`, named, and the caller runs the
+/// `Eval` heal over it, which thaws the failed closure and promotes it.
 pub async fn trigger_restart_builds<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
@@ -59,6 +61,9 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     snapshot_flake_input_overrides(db, task.id, new_eval.id).await?;
 
     entry_points::copy_entry_points(db, &prev_entry_points, new_eval_id, now).await?;
+    if initial_status == EvaluationStatus::Building {
+        gradient_db::inherit_names(db, prev_eval.id, new_eval_id).await?;
+    }
 
     let mut atask: ATask = task.clone().into();
     atask.last_evaluation = Set(Some(new_eval_id));

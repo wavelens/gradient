@@ -210,6 +210,33 @@ pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
 crate::sql! {
     PRODUCERS_OF_HASHES = "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
         params = [CachedPathHashes(64)];
+
+    /// A restart re-runs the previous evaluation's graph without walking it, so it
+    /// takes the previous names over as its own: every reader of "does some
+    /// evaluation still want this", and the thaw's seed, is a `build_job` row.
+    INHERIT_NAMES = "INSERT INTO build_job \
+         (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) \
+         SELECT uuidv7(), $2, bj.derivation, bj.derivation_build, 0, '{}'::jsonb, \
+         (now() AT TIME ZONE 'UTC') \
+         FROM build_job bj WHERE bj.evaluation = $1 \
+         ON CONFLICT (evaluation, derivation) DO NOTHING",
+        params = [EvaluationId, EvaluationId],
+        tier = Bulk;
+}
+
+/// Name for `to` everything `from` names. Returns how many names it took over.
+pub async fn inherit_names<C: ConnectionTrait>(
+    db: &C,
+    from: EvaluationId,
+    to: EvaluationId,
+) -> Result<u64, DbErr> {
+    Ok(db
+        .execute_raw(INHERIT_NAMES.bind([
+            Value::Uuid(Some(from.into_inner())),
+            Value::Uuid(Some(to.into_inner())),
+        ]))
+        .await?
+        .rows_affected())
 }
 
 /// The derivations whose outputs carry any of `hashes`: the anchors a store
@@ -550,7 +577,7 @@ mod tests {
         assert!(
             sql.contains(&format!(
                 "WHERE EXISTS (SELECT 1 FROM evaluation ev WHERE ev.id = bj.evaluation \
-                 AND ev.status IN ({})) AND (NOT db.fetchable AND db.status NOT IN (4, 5, 6, 9))",
+                 AND ev.status IN ({})) AND (NOT db.fetchable AND db.status NOT IN (4, 6, 9))",
                 status_sql::eval_in(&EvaluationStatus::ACTIVE)
             )),
             "{sql}"
@@ -627,7 +654,7 @@ mod tests {
             let sql = norm(sql);
             assert!(
                 sql.contains(
-                    "(NOT db.fetchable AND db.status NOT IN (4, 5, 6, 9)) AND NOT EXISTS \
+                    "(NOT db.fetchable AND db.status NOT IN (4, 6, 9)) AND NOT EXISTS \
                      (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
                 ),
                 "{sql}"
@@ -644,7 +671,7 @@ mod tests {
                 "JOIN build_job pj ON pj.derivation = p.derivation \
                  JOIN evaluation ev ON ev.id = pj.evaluation \
                  WHERE e.dependency = db.derivation \
-                 AND (NOT p.fetchable AND p.status NOT IN (4, 5, 6, 9)) \
+                 AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND ((w.walked AND p.probed AND NOT p.substitutable \
                  AND p.status IN (0, 1, 2, 8)) OR e.kind IN (1, 2)) AND ev.status IN ("
             ),

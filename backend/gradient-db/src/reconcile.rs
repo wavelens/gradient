@@ -22,15 +22,15 @@ use tracing::{debug, error};
 /// What slice of the graph to heal.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ReconcileScope {
-    /// An evaluation just flushed its graph: thaw the terminal-failed anchors in
-    /// its closure, settle the anchors whose outputs are already whole, fail the
-    /// dependents of a deterministic failure, name the pending anchors it reaches
-    /// for the evaluation, promote the closure.
+    /// A fresh intent: an evaluation just flushed its graph, or a restart took the
+    /// previous evaluation's names over. Thaw every failed anchor in its closure, a
+    /// reproducible builder exit included, settle the anchors whose outputs are
+    /// already whole, fail the dependents of a failure that stays, name the open
+    /// anchors it reaches, promote the closure.
     Eval(EvaluationId),
-    /// A wedged evaluation. The same steps: what used to set this scope apart was
-    /// an unbacked-output demote, and the state it repaired is now prevented at the
-    /// source rather than swept for. The scope stays as the provenance a pass is
-    /// logged with - why it ran, which is not recoverable from what it did.
+    /// A wedged evaluation healing itself: the same steps, except that the thaw
+    /// leaves a reproducible failure and the subtree it poisons alone, since the
+    /// intent that already failed on it is the one asking again.
     Unstick(EvaluationId),
 }
 
@@ -71,14 +71,12 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     let evaluation = scope.evaluation();
     let mut report = ReconcileReport::default();
 
-    match crate::promotion::requeue_failed_closure_for_eval(db, evaluation).await {
+    match crate::promotion::requeue_failed_closure(db, scope).await {
         Ok(changes) => {
             report.thawed = changes.len() as u64;
             emit_transition_effects(ctx, &changes).await;
         }
-        Err(e) => {
-            error!(error = %e, %evaluation, "reconcile: requeue_failed_closure_for_eval failed")
-        }
+        Err(e) => error!(error = %e, %evaluation, "reconcile: requeue_failed_closure failed"),
     }
 
     // Cache presence is the ground truth for "is this built": anchors whose
@@ -235,10 +233,47 @@ mod tests {
             "adopt, recompute what a name gave demand to, bump, then promote: {log:?}"
         );
         assert!(
-            log[..adopt]
-                .iter()
-                .any(|s| s.contains("deterministic_blocked")),
-            "the thaw runs before the adoption: {log:?}"
+            log[..adopt].iter().any(|s| {
+                s.contains("db.status IN (4, 5, 6, 9)") && !s.contains("deterministic_blocked")
+            }),
+            "a fresh intent's thaw runs before the adoption and blocks nothing: {log:?}"
+        );
+    }
+
+    /// An unstick is the same intent asking again, so its thaw keeps a reproducible
+    /// failure and the subtree it poisons out; otherwise a permanent failure inside
+    /// a runtime closure is rebuilt on every sweep.
+    #[tokio::test]
+    async fn an_unstick_keeps_a_reproducible_failure_out_of_its_thaw() {
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use std::collections::BTreeMap;
+
+        let eval = EvaluationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new();
+        let exec = |rows_affected| MockExecResult {
+            last_insert_id: 0,
+            rows_affected,
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0), exec(0), exec(0), exec(0)])
+            .append_query_results([empty.clone(), empty.clone(), empty.clone(), empty.clone()])
+            .append_exec_results([exec(0)])
+            .append_query_results([empty])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        let report = reconcile_build_graph(&ctx, ReconcileScope::Unstick(eval)).await;
+        drop(ctx);
+
+        assert!(report.is_noop());
+        let log = crate::pool::statements(pool.into_transaction_log());
+        let thaw = log
+            .iter()
+            .find(|s| s.contains("db.status IN (4, 5, 6, 9)"))
+            .expect("the unstick thaws");
+        assert!(
+            thaw.contains("NOT IN (SELECT derivation FROM deterministic_blocked)"),
+            "{thaw}"
         );
     }
 }

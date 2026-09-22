@@ -2179,7 +2179,9 @@ paths:
                   enum: [restart_failed]
                   description: >-
                     Skip fetch and evaluation and re-queue the failed builds of
-                    the most recent evaluation. Omit for a normal evaluation.
+                    the most recent evaluation, a reproducible failure included:
+                    a failure is valid for the evaluation that recorded it. Omit
+                    for a normal evaluation.
                 commit:
                   type: string
                   pattern: '^[0-9a-fA-F]{40}$'

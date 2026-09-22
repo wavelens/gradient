@@ -19,6 +19,7 @@ use crate::graph_sql::{
     ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte_body,
     eval_closure_cte, eval_closure_cte_body, unrelayed_predicate,
 };
+use crate::reconcile::ReconcileScope;
 use crate::status::TransitionChange;
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
@@ -412,52 +413,53 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// Re-queue terminal-failed anchors across the full build-dependency **closure**
-/// of an evaluation's anchors, not just the derivations its walk re-reported.
-/// `requeue_failed_anchors` only thaws the eval's own derivations; a transitive
-/// dependency a prior eval left terminal-failed - and which this eval pruned or
-/// never re-walked (so it has no `build_job` here) - stays failed forever and
-/// blocks its dependents with no dispatch (hence no failure) to trigger any
-/// reactive heal. Walks `derivation_dependency` down from the eval's anchors and
-/// resets every `FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`
-/// node to `Created`; the reconciler then names the thawed closure for this
-/// evaluation (`reachability::adopt_pending_closure`), because a thawed anchor
-/// this evaluation pruned may have no `build_job` left at all, and promotes it so
-/// the failed subtree rebuilds bottom-up. Anchors with a
-/// [`deterministic_build_failure`] are excluded, as in [`requeue_failed_anchors`].
-/// Returns the thaws it made, so the caller can feed
-/// [`crate::status::emit_transition_effects`].
-pub async fn requeue_failed_closure_for_eval<C>(
+/// Re-queue terminal-failed anchors across the full dependency **closure** of an
+/// evaluation's names, not just the derivations its walk re-reported: a transitive
+/// dependency a prior evaluation left terminal-failed, which this one pruned or
+/// never re-walked, would otherwise stay failed forever and block its dependents
+/// with no dispatch to trigger any reactive heal. Walks `derivation_dependency`
+/// down from the names over every edge kind and resets each `REQUEUEABLE` anchor
+/// to `Created`; the reconciler then names the thawed closure and promotes it so
+/// the failed subtree rebuilds bottom-up.
+///
+/// A failure is valid for the evaluation that recorded it. A fresh evaluation
+/// ([`ReconcileScope::Eval`]) is a new intent and thaws every failure in its
+/// closure, a reproducible builder exit included: one rebuild per evaluation, and
+/// same-commit polling is deduplicated before an evaluation exists. An evaluation
+/// healing itself ([`ReconcileScope::Unstick`]) is the same intent again, so there
+/// the [`deterministic_build_failure`] subtree stays out, or the unstick would
+/// rebuild a permanent failure every sweep. Returns the thaws it made, so the
+/// caller can feed [`crate::status::emit_transition_effects`].
+pub async fn requeue_failed_closure<C>(
     db: &C,
-    evaluation: gradient_types::EvaluationId,
+    scope: ReconcileScope,
 ) -> Result<Vec<TransitionChange>, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
+    let query = match scope {
+        ReconcileScope::Eval(_) => &REQUEUE_FAILED_CLOSURE_FRESH,
+        ReconcileScope::Unstick(_) => &REQUEUE_FAILED_CLOSURE_BLOCKED,
+    };
     let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
-        .query_all_raw(
-            REQUEUE_FAILED_CLOSURE_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),
-        )
+        .query_all_raw(query.bind([Value::Uuid(Some(scope.evaluation().into_inner()))]))
         .await?;
     walk.commit().await?;
 
     Ok(returned_transitions(rows))
 }
 
-fn requeue_failed_closure_for_eval_sql() -> String {
-    let ctes = requeue_ctes("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1");
+fn requeue_closure_update(blocked: &str) -> String {
     format!(
         r#"
-        {ctes}
         UPDATE derivation_build db
         SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
         FROM derivation_build old
         WHERE old.id = db.id
           AND db.derivation IN (SELECT derivation FROM closure)
-          AND db.status IN ({requeueable})
-          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
+          AND db.status IN ({requeueable}){blocked}
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         created = status_sql::build(BuildStatus::Created),
@@ -465,8 +467,27 @@ fn requeue_failed_closure_for_eval_sql() -> String {
     )
 }
 
+fn requeue_failed_closure_fresh_sql() -> String {
+    format!("{}\n{}", eval_closure_cte(), requeue_closure_update(""))
+}
+
+fn requeue_failed_closure_blocked_sql() -> String {
+    format!(
+        "{}\n{}",
+        requeue_ctes("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1"),
+        requeue_closure_update(
+            "\n          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)"
+        ),
+    )
+}
+
 crate::sql_fn! {
-    REQUEUE_FAILED_CLOSURE_FOR_EVAL = requeue_failed_closure_for_eval_sql,
+    REQUEUE_FAILED_CLOSURE_FRESH = requeue_failed_closure_fresh_sql,
+        params = [EvaluationId],
+        tier = Walk,
+        flags = [Walk];
+
+    REQUEUE_FAILED_CLOSURE_BLOCKED = requeue_failed_closure_blocked_sql,
         params = [EvaluationId],
         tier = Walk,
         flags = [Walk];
@@ -577,19 +598,44 @@ mod tests {
         }
     }
 
-    /// A thaw must exclude not just a derivation's own reproducible failure but
-    /// the whole subtree a deterministic failure poisons: a `DependencyFailed`
-    /// dependent never ran a build of its own, so keying the exclusion on the
-    /// anchor's own attempts alone re-thaws it forever (the demote<->thaw
-    /// oscillation that hangs the eval). Pin that both requeue SQLs build the
-    /// closure + `deterministic_blocked` walk and exclude that set (no live DB).
+    /// A fresh evaluation is a new intent: its thaw takes every requeueable anchor
+    /// in its closure, a reproducible builder exit included, because a failure is
+    /// valid for the evaluation that recorded it and nothing else. Blocked, a
+    /// restarted evaluation re-failed on the spot without a single build.
+    #[test]
+    fn a_fresh_evaluation_thaws_every_failure_in_its_closure() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = norm(requeue_failed_closure_fresh_sql());
+        assert!(
+            sql.starts_with("WITH RECURSIVE closure(derivation) AS"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "db.status IN ({}) RETURNING",
+                status_sql::build_in(&BuildStatus::REQUEUEABLE)
+            )),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains("deterministic_blocked") && !sql.contains("build_attempt"),
+            "a reproducible failure is retried once per evaluation: {sql}"
+        );
+    }
+
+    /// The other two thaws are the same intent again, and must exclude not just a
+    /// derivation's own reproducible failure but the whole subtree a deterministic
+    /// failure poisons: a `DependencyFailed` dependent never ran a build of its own,
+    /// so keying the exclusion on the anchor's own attempts alone re-thaws it
+    /// forever (the demote<->thaw oscillation that hangs the eval). Pin that both
+    /// build the closure + `deterministic_blocked` walk and exclude that set.
     #[test]
     fn requeue_excludes_the_deterministic_blocked_subtree() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let deterministic = norm(deterministic_build_failure("dbf"));
         for sql in [
             norm(requeue_failed_anchors_sql()),
-            norm(requeue_failed_closure_for_eval_sql()),
+            norm(requeue_failed_closure_blocked_sql()),
         ] {
             assert!(
                 sql.contains("deterministic_blocked(derivation) AS"),
@@ -638,7 +684,7 @@ mod tests {
             norm(cascade_dependency_failed_sql()),
             norm(dependency_failed_reconcile_sql()),
             norm(requeue_failed_anchors_sql()),
-            norm(requeue_failed_closure_for_eval_sql()),
+            norm(requeue_failed_closure_blocked_sql()),
         ] {
             assert!(sql.contains(&fence), "upward walk crosses a relay: {sql}");
         }
