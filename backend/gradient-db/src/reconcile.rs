@@ -181,7 +181,8 @@ mod tests {
             rows_affected,
         };
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // the thaw and the cache reconcile move nothing
+            // the thaw and the cache reconcile each open a walk and move nothing
+            .append_exec_results([exec(0), exec(0)])
             .append_query_results([empty.clone(), empty.clone()])
             // the dependency-failed sweep opens a walk and moves nothing
             .append_exec_results([exec(0)])
