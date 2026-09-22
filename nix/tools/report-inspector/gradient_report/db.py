@@ -44,8 +44,10 @@ def open_report(path: str | Path) -> sqlite3.Connection:
         direction = "newer" if version > SUPPORTED_SCHEMA else "older"
         raise UnsupportedSchema(
             f"report schema {version} is {direction} than the one this inspector "
-            f"reads ({SUPPORTED_SCHEMA}); use the gradient-report of the report's "
-            f"own version"
+            f"reads ({SUPPORTED_SCHEMA}); the schema moves on its own, so nothing "
+            f"the report names identifies the inspector that reads it - build one "
+            f"from the source revision that wrote the report: "
+            f"nix build .#gradient-report"
         )
 
     return conn

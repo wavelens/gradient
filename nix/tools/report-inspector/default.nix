@@ -41,6 +41,12 @@ python3Packages.buildPythonApplication {
   # whatever machine a maintainer opens the report on.
   dependencies = [ ];
 
+  # setuptools' console script only appends its own site-packages, so an ambient
+  # PYTHONPATH naming another build of this package wins the import and answers
+  # for a schema this one does not read. The devShell exports exactly that, so a
+  # shell entered before a bump hijacks every later build, `nix run` included.
+  makeWrapperArgs = [ "--unset PYTHONPATH" ];
+
   nativeCheckInputs = [ python3Packages.pytestCheckHook ];
 
   meta = {

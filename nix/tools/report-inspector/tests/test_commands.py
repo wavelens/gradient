@@ -152,6 +152,20 @@ def test_refuses_a_report_older_than_the_schema_it_reads(tmp_path):
         open_report(path)
 
 
+# The schema moved 12 -> 16 inside release 1.3.0, so a refusal that sends the
+# reader to "the report's own version" names a build they already have.
+def test_refusal_names_both_schemas_and_how_to_build_the_right_inspector(tmp_path):
+    path = tmp_path / "future.db"
+    build_report(path, schema_version=SUPPORTED_SCHEMA + 4)
+    with pytest.raises(UnsupportedSchema) as raised:
+        open_report(path)
+    message = str(raised.value)
+    assert str(SUPPORTED_SCHEMA + 4) in message
+    assert str(SUPPORTED_SCHEMA) in message
+    assert "nix build .#gradient-report" in message
+    assert "version" not in message.replace("gradient-report", "")
+
+
 def test_rejects_a_file_that_is_not_a_report(tmp_path):
     path = tmp_path / "random.db"
     sqlite3.connect(path).execute("CREATE TABLE t (x INTEGER)")
