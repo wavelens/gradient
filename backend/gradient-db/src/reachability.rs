@@ -11,11 +11,11 @@
 //! set) reads the row rather than walking the graph. A walk names what it
 //! recorded plus the direct inputs of that, so the interior of a pruned subtree
 //! is named by the evaluation that walked it and by nobody else; adoption is what
-//! keeps the rows true when that evaluation is deleted, or a thaw or a reset
-//! leaves a pending anchor unnamed, while another evaluation still builds
-//! against the subtree.
+//! keeps the rows true when that evaluation is deleted, or a thaw, a reset or a
+//! retire leaves an open anchor unnamed, while another evaluation still waits on
+//! the subtree.
 
-use crate::graph_sql::{BUILDER_STATUSES, builder_predicate, pending_closure_cte};
+use crate::graph_sql::{builder_predicate, open_closure_cte, open_predicate};
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -299,15 +299,16 @@ impl Adopted {
     }
 }
 
-/// The named builders the walk starts from: one row per `build_job` on a walked,
-/// non-substitutable anchor in a builder status, `builder` true.
-fn named_builders(scope: &str) -> String {
+/// The walk's seeds: one row per `build_job` on an open anchor, carrying the
+/// builder bit of the row it stands on.
+fn named_open(scope: &str) -> String {
     format!(
-        "SELECT bj.evaluation, bj.derivation, true FROM build_job bj \
+        "SELECT bj.evaluation, bj.derivation, ({builder}) FROM build_job bj \
          JOIN derivation_build db ON db.derivation = bj.derivation \
          JOIN derivation w ON w.id = db.derivation \
-         WHERE {scope} AND {builder}",
+         WHERE {scope} AND {open}",
         builder = builder_predicate("db", "w"),
+        open = open_predicate("db"),
     )
 }
 
@@ -320,13 +321,13 @@ fn adopt_sql(seed_select: &str) -> String {
          FROM pending p JOIN derivation_build db ON db.derivation = p.derivation \
          ON CONFLICT (evaluation, derivation) DO NOTHING \
          RETURNING evaluation, derivation",
-        cte = pending_closure_cte("pending", seed_select),
+        cte = open_closure_cte("pending", seed_select),
     )
 }
 
 /// Every live evaluation names what it reaches: the GC and the sweep run this.
 static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
-    adopt_sql(&named_builders(&format!(
+    adopt_sql(&named_open(&format!(
         "EXISTS (SELECT 1 FROM evaluation ev WHERE ev.id = bj.evaluation AND ev.status IN ({live}))",
         live = status_sql::eval_in(&EvaluationStatus::ACTIVE),
     )))
@@ -335,7 +336,7 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
 /// One evaluation names what it reaches: the graph reconciler runs this for the
 /// evaluation it heals, whatever its status.
 static ADOPT_EVAL: LazyLock<String> =
-    LazyLock::new(|| adopt_sql(&named_builders("bj.evaluation = $1")));
+    LazyLock::new(|| adopt_sql(&named_open("bj.evaluation = $1")));
 
 crate::sql_lazy! {
     ADOPT_LIVE_QUERY = || ADOPT_LIVE.as_str(),
@@ -353,9 +354,9 @@ crate::sql_lazy! {
 
 fn pending_orphans_sql(scope: &str) -> String {
     format!(
-        "SELECT 1 FROM derivation_build db WHERE {scope}db.status IN ({pending}) \
+        "SELECT 1 FROM derivation_build db WHERE {scope}{open} \
          AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1",
-        pending = status_sql::build_in(&BUILDER_STATUSES),
+        open = open_predicate("db"),
     )
 }
 
@@ -367,10 +368,10 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-/// The frontier every naming hole has: a pending anchor nobody names, one edge
-/// below a builder a live evaluation names. Asked on every sweep, and the walk
-/// runs only when the answer is yes; a settled server has no frontier, so the
-/// answer costs a pass over the anchors that are still open.
+/// The frontier every naming hole has: an open anchor nobody names, one edge the
+/// walk would take below an open anchor a live evaluation names. Asked on every
+/// sweep, and the walk runs only when the answer is yes; a settled server has no
+/// frontier, so the answer costs a pass over the anchors that are still open.
 static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
     pending_orphans_sql(&format!(
         "EXISTS (SELECT 1 FROM derivation_dependency e \
@@ -378,7 +379,9 @@ static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
          JOIN derivation w ON w.id = p.derivation \
          JOIN build_job pj ON pj.derivation = p.derivation \
          JOIN evaluation ev ON ev.id = pj.evaluation \
-         WHERE e.dependency = db.derivation AND {builder} AND ev.status IN ({live})) AND ",
+         WHERE e.dependency = db.derivation AND {open} \
+           AND ({builder} OR e.kind IN (1, 2)) AND ev.status IN ({live})) AND ",
+        open = open_predicate("p"),
         builder = builder_predicate("p", "w"),
         live = status_sql::eval_in(&EvaluationStatus::ACTIVE),
     ))
@@ -390,9 +393,9 @@ crate::sql_lazy! {
         tier = Sweep;
 }
 
-/// Whether any of `derivations` is in a builder status with no `build_job` left:
-/// what the per-task GC asks about the names it just cascaded away, before it
-/// pays for the walk.
+/// Whether any of `derivations` is open with no `build_job` left: what the
+/// per-task GC asks about the names it just cascaded away, before it pays for
+/// the walk.
 pub async fn pending_orphans_among<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -408,7 +411,7 @@ pub async fn pending_orphans_among<C: ConnectionTrait>(
         .is_some())
 }
 
-/// Whether some live evaluation reaches a pending anchor nobody names: the
+/// Whether some live evaluation reaches an open anchor nobody names: the
 /// consistency sweep's guard on the walk.
 pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     Ok(db
@@ -417,11 +420,10 @@ pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool,
         .is_some())
 }
 
-/// Name, for every live evaluation, each anchor in a builder status it reaches
-/// from its own `build_job` rows walking dependencies through builders, and
-/// return the rows that were missing. One statement under the walk's own
-/// transaction; a concurrent ingest naming the same pair is absorbed by the
-/// conflict clause.
+/// Name, for every live evaluation, each open anchor it reaches from the open
+/// anchors it already names, and return the rows that were missing. One statement
+/// under the walk's own transaction; a concurrent ingest naming the same pair is
+/// absorbed by the conflict clause.
 pub async fn adopt_pending_closures<C>(db: &C) -> Result<Adopted, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
@@ -514,12 +516,13 @@ mod tests {
         ])
     }
 
-    /// Adoption is one statement under the walk's own transaction: the live
-    /// evaluations' pending closures, walked through builders, inserted as the
-    /// names they lack and returned as such. The seed is what a live evaluation
-    /// NAMES, not what it walked, so a pruned root seeds the walk like any other.
+    /// Adoption is one statement under the walk's own transaction: the open
+    /// closure below every open anchor a live evaluation names, inserted as the
+    /// names it lacks and returned as such. The seed is what a live evaluation
+    /// NAMES and is still open, so a pruned root and an unwhole `Completed` input
+    /// seed the walk like a builder does.
     #[tokio::test]
-    async fn adoption_names_what_a_live_evaluation_reaches_through_builders() {
+    async fn adoption_names_every_open_anchor_a_live_evaluation_reaches() {
         let e = EvaluationId::now_v7();
         let d = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -539,14 +542,15 @@ mod tests {
         assert!(
             sql.contains(
                 "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
-                 (SELECT bj.evaluation, bj.derivation, true FROM build_job bj"
+                 (SELECT bj.evaluation, bj.derivation, (w.walked AND db.probed \
+                 AND NOT db.substitutable AND db.status IN (0, 1, 2, 8)) FROM build_job bj"
             ),
             "{sql}"
         );
         assert!(
             sql.contains(&format!(
                 "WHERE EXISTS (SELECT 1 FROM evaluation ev WHERE ev.id = bj.evaluation \
-                 AND ev.status IN ({})) AND w.walked AND db.probed AND NOT db.substitutable",
+                 AND ev.status IN ({})) AND (NOT db.fetchable AND db.status NOT IN (4, 5, 6, 9))",
                 status_sql::eval_in(&EvaluationStatus::ACTIVE)
             )),
             "{sql}"
@@ -587,7 +591,8 @@ mod tests {
         assert!(
             sql.contains(
                 "FROM build_job bj JOIN derivation_build db ON db.derivation = bj.derivation \
-                 JOIN derivation w ON w.id = db.derivation WHERE bj.evaluation = $1 AND w.walked"
+                 JOIN derivation w ON w.id = db.derivation WHERE bj.evaluation = $1 \
+                 AND (NOT db.fetchable"
             ),
             "{sql}"
         );
@@ -595,8 +600,10 @@ mod tests {
     }
 
     /// The GC's question is bounded to the names it cascaded away and reads one
-    /// row at most; the sweep's is the frontier every naming hole has: a pending
-    /// anchor nobody names, one edge below a builder a live evaluation names.
+    /// row at most; the sweep's is the frontier every naming hole has: an open
+    /// anchor nobody names, one edge the walk would take below an open anchor a
+    /// live evaluation names. The 22 unwhole `Completed` anchors of the wedge were
+    /// exactly that and matched neither probe while both asked for a status.
     #[tokio::test]
     async fn the_orphan_probes_read_one_row_and_bind_their_scope() {
         let d = DerivationId::now_v7();
@@ -620,7 +627,7 @@ mod tests {
             let sql = norm(sql);
             assert!(
                 sql.contains(
-                    "db.status IN (0, 1, 2, 8) AND NOT EXISTS \
+                    "(NOT db.fetchable AND db.status NOT IN (4, 5, 6, 9)) AND NOT EXISTS \
                      (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) LIMIT 1"
                 ),
                 "{sql}"
@@ -637,8 +644,9 @@ mod tests {
                 "JOIN build_job pj ON pj.derivation = p.derivation \
                  JOIN evaluation ev ON ev.id = pj.evaluation \
                  WHERE e.dependency = db.derivation \
-                 AND w.walked AND p.probed AND NOT p.substitutable \
-                 AND p.status IN (0, 1, 2, 8) AND ev.status IN ("
+                 AND (NOT p.fetchable AND p.status NOT IN (4, 5, 6, 9)) \
+                 AND ((w.walked AND p.probed AND NOT p.substitutable \
+                 AND p.status IN (0, 1, 2, 8)) OR e.kind IN (1, 2)) AND ev.status IN ("
             ),
             "{frontier}"
         );

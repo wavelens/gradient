@@ -1366,24 +1366,31 @@ in {
               f"WHERE d.hash = '{drv}';"
           ).split()
 
-      # The third counter (#666). Demand is reachability from the entry points
-      # through named builders, so the recompute is a walk and not a per-row
-      # subquery. A relay is reached and never stepped through, which is the whole
-      # reason a relayed subtree stops being built. Pending anchors only: they are
-      # the ones a gate reads the column on, and a terminal anchor keeps whatever it
-      # carried until the recompute that thaws it names it as a root.
+      # The third counter (#666). Demand is reachability from the open entry points
+      # through open anchors, so the recompute is a walk and not a per-row subquery:
+      # a builder steps over every edge, anything else over its runtime edges, and
+      # an anchor is reached while it is open (not fetchable, not the requeue's). A
+      # relay is reached and never stepped through on a build edge, which is the
+      # whole reason a relayed subtree stops being built; a `Completed` anchor with
+      # a hole in its closure is open, which is how the hole is reached. Open
+      # anchors only: a settled one keeps whatever it carried and nothing reads it.
       def demand_drift():
+          def is_open(a):
+              return f"NOT {a}.fetchable AND {a}.status NOT IN (4, 5, 6, 9)"
+          def is_builder(a):
+              return f"w.walked AND {a}.probed AND NOT {a}.substitutable AND {a}.status IN (0, 1, 2, 8)"
           return int(sql(
-              "WITH RECURSIVE demanded(derivation) AS ("
-              "  SELECT derivation FROM entry_point "
+              "WITH RECURSIVE demanded(derivation, builder) AS ("
+              f"  SELECT db.derivation, ({is_builder('db')}) FROM entry_point ep "
+              "  JOIN derivation_build db ON db.derivation = ep.derivation "
+              f"  JOIN derivation w ON w.id = db.derivation WHERE {is_open('db')} "
               "  UNION "
-              "  SELECT e.dependency FROM demanded c "
+              f"  SELECT e.dependency, ({is_builder('dep')}) FROM demanded c "
               "  JOIN derivation_dependency e ON e.derivation = c.derivation "
-              "  JOIN derivation_build p ON p.derivation = c.derivation "
-              "  JOIN derivation w ON w.id = p.derivation "
-              "  WHERE w.walked AND NOT p.substitutable AND p.status IN (0, 1, 2, 8) "
-              "    AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = p.derivation)) "
-              "SELECT count(*) FROM derivation_build db WHERE db.status IN (0, 1, 2, 8) "
+              "  JOIN derivation_build dep ON dep.derivation = e.dependency "
+              "  JOIN derivation w ON w.id = dep.derivation "
+              f"  WHERE (c.builder OR e.kind IN (1, 2)) AND {is_open('dep')}) "
+              f"SELECT count(*) FROM derivation_build db WHERE {is_open('db')} "
               "AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded));"
           ))
 

@@ -66,6 +66,7 @@ mod m20260918_000002_derivation_unwalked_inputs;
 mod m20260919_000000_one_graph;
 mod m20260919_000001_drop_cached_path_reference;
 mod m20260919_000002_derivation_build_probed;
+mod m20260922_000000_derivation_build_open;
 
 pub struct Migrator;
 
@@ -128,6 +129,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260919_000000_one_graph::Migration),
             Box::new(m20260919_000001_drop_cached_path_reference::Migration),
             Box::new(m20260919_000002_derivation_build_probed::Migration),
+            Box::new(m20260922_000000_derivation_build_open::Migration),
         ]
     }
 }

@@ -407,7 +407,10 @@ pub struct Retired {
 /// that merely lost wholeness still has its own output, so it needs `fetchable` to
 /// drop and nothing else, and the arrival of the missing path marks it fetchable
 /// again through a terminal status a reset would have taken away. Resetting the
-/// closure instead re-queued 107 derivations from deleting one NAR.
+/// closure instead re-queued 107 derivations from deleting one NAR. The mark itself
+/// re-opens the walk below what it flipped, which is how the missing path is asked
+/// for: dropping the flag and asking for nothing left 47 builders waiting behind 22
+/// unwhole `Completed` anchors nobody named.
 pub async fn retire_outputs(
     txn: &DatabaseTransaction,
     hashes: &[String],
