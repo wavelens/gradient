@@ -2000,7 +2000,7 @@ mod tests {
             "demand settles after the counters, and its promote reads the settled gate: {log:?}"
         );
         assert!(
-            log[walk].contains("demanded(derivation) AS"),
+            log[walk].contains("demanded(evaluation, derivation, builder) AS"),
             "the recompute is the closure walk, not one hop: {log:?}"
         );
         assert!(
