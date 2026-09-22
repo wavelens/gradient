@@ -324,9 +324,10 @@ async fn restart_with_all_cached_inserts_completed_eval() {
 }
 
 /// When at least one entry-point anchor is not terminal-success, the new eval
-/// must start in `Building` so the dispatcher re-resolves and re-runs it.
+/// must start in `Building` and named: it takes the previous evaluation's names
+/// over, since it never walks, and the heal's thaw is seeded from them.
 #[tokio::test]
-async fn restart_with_one_failed_inserts_building_eval() {
+async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() {
     let task = make_task();
     let prev_eval_id = EvaluationId::now_v7();
     let prev_eval = make_eval(prev_eval_id, EvaluationStatus::Failed);
@@ -358,6 +359,10 @@ async fn restart_with_one_failed_inserts_building_eval() {
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_a)]])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_b)]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 2,
+        }])
         .append_query_results([vec![task.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -368,6 +373,12 @@ async fn restart_with_one_failed_inserts_building_eval() {
     let result = trigger_restart_builds(&db, &task).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Building);
+    let log = gradient_db::pool::statements(db.into_transaction_log());
+    assert!(
+        log.iter().any(|s| s.contains("INSERT INTO build_job")
+            && s.contains("FROM build_job bj WHERE bj.evaluation = $1")),
+        "the restart takes the previous evaluation's names over: {log:?}"
+    );
 }
 
 fn open_pr_action(task_id: TaskId) -> MTaskAction {

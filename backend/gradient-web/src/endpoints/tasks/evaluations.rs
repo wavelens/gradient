@@ -218,6 +218,17 @@ pub async fn post_task_evaluate(
                 }
                 gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
             })?;
+        if eval.status == EvaluationStatus::Building {
+            state
+                .graph
+                .transition(gradient_graph::Transition::Reconcile {
+                    scope: gradient_db::ReconcileScope::Eval(eval.id),
+                })
+                .await
+                .map_err(|e| {
+                    WebError::internal(format!("the restart's heal did not reach the graph: {e}"))
+                })?;
+        }
 
         return Ok(ok_json(eval.id.to_string()));
     }
