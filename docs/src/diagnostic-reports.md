@@ -254,5 +254,17 @@ vendor-registry: Queued, waiting on walked, unready_deps = 1
 The inspector reads exactly one report schema version and refuses every other,
 rather than answering from whichever columns still happen to line up. The export
 has both added and dropped columns over its life, so this cuts both ways: a
-refusal means the report is newer than the tool (upgrade the tool) or older than
-it (use the gradient-report of the report's own version). The message says which.
+refusal means the report is newer than the tool, or older than it. The message
+says which, and names both schemas.
+
+The schema moves on its own, not with the release - it went 12 to 16 inside
+1.3.0 - so neither the report's `gradient_version` nor the inspector's own
+version tells you which build reads which report. Build the inspector from the
+source revision that wrote the report:
+
+```sh
+nix build .#gradient-report
+```
+
+A `nix develop` shell entered before a schema bump is the usual cause: it keeps
+the inspector it was instantiated with until you re-enter it.
