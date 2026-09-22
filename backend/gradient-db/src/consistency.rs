@@ -125,9 +125,10 @@ async fn count<C: ConnectionTrait>(db: &C, stmt: Statement) -> Result<i64, DbErr
 }
 
 /// Recount every maintained column in the order the next one reads it - the walk's
-/// subtree bit, anchor wholeness, demand, then the readiness pair - and count the
-/// violations no recount can repair. Each recount is absolute and table-wide, so
-/// the row count it rewrote IS the drift, and a healthy fleet writes nothing.
+/// subtree bit, anchor wholeness, the flag, demand, then the counter and the queue -
+/// and count the violations no recount can repair. Each recount is absolute and
+/// table-wide, so the row count it rewrote IS the drift, and a healthy fleet writes
+/// nothing.
 pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
     let db = &ctx.worker_db;
 
@@ -135,12 +136,15 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     // read complete until this runs, and the prune trusts the column.
     let walk_drift = crate::walk_completeness::recount_walk_completeness(db).await? as i64;
 
-    // Wholeness before the readiness repair that reads it: a drifted counter would
-    // otherwise teach `fetchable` a value this very pass corrects.
+    // Wholeness before the flag that reads it, and the flag before the demand walk
+    // that reads it: a stale `fetchable = true` is a settled anchor to every walk,
+    // and one that sits two hops below anything pending is nobody else's to repair.
     let runtime_drift = crate::runtime_readiness::recount_missing_runtime_deps(db).await? as i64;
+    let scope = crate::readiness::readiness_scope(db).await?;
+    let fetchable = crate::readiness::repair_fetchable(db, &scope).await?;
 
-    // Before the readiness repair, so the queue settle that follows reads a
-    // corrected column rather than promoting against a stale demand.
+    // Before the queue settles, so it reads a corrected column rather than
+    // promoting against a stale demand.
     let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
 
     // Both directions read the column the recount above just corrected: what
@@ -148,7 +152,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     let settled = crate::readiness::settle_skipped(db).await?;
     crate::status::emit_transition_effects(ctx, &settled).await;
 
-    let repaired = crate::readiness::repair_pending(db).await?;
+    let repaired = crate::readiness::repair_readiness(db, &scope).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
     // the board at the status the earlier statement wrote.
     crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await;
@@ -195,7 +199,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     let wedged_building_evals = count(db, WEDGED_BUILDING_EVALS.stmt()).await?;
 
     Ok(ConsistencyReport {
-        counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
+        counter_drift: (fetchable + repaired.unready_deps) as i64,
         walk_drift,
         runtime_drift,
         demand_drift,
@@ -204,7 +208,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         adopted,
         unbacked_trusted_outputs,
         wedged_building_evals,
-        repair_scope: repaired.scope as i64,
+        repair_scope: scope.len() as i64,
     })
 }
 
@@ -221,9 +225,11 @@ mod tests {
         }
     }
 
-    /// The sweep's statement script: the walk, wholeness and demand recounts under
-    /// their own raises, the readiness repair, the queue settle, the naming probe
-    /// (and the walk it guards when `hole` is set), then the two read-only alarms.
+    /// The sweep's statement script: the walk and wholeness recounts under their
+    /// own raises, the scope select and the flag repair, the demand recount under
+    /// its raise, the queue settle in both directions, the counter repair and the
+    /// queue, the naming probe (and the walk it guards when `hole` is set), then
+    /// the two read-only alarms.
     fn scripted(hole: bool) -> sea_orm::DatabaseConnection {
         let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
         let empty = Vec::<BTreeMap<String, Value>>::new();
@@ -236,14 +242,15 @@ mod tests {
             })
             .collect();
         let mut db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(0), exec(7), exec(0), exec(6), exec(0)])
-            .append_query_results([drifted])
-            .append_query_results([empty.clone(), empty.clone()])
+            .append_exec_results([exec(0), exec(7), exec(0), exec(6)])
             .append_query_results([vec![BTreeMap::from([(
                 "derivation".to_owned(),
                 Value::from(uuid::Uuid::now_v7()),
             )])]])
-            .append_exec_results([exec(0), exec(3), exec(0), exec(5)])
+            .append_exec_results([exec(0), exec(3), exec(0)])
+            .append_query_results([drifted])
+            .append_query_results([empty.clone(), empty.clone()])
+            .append_exec_results([exec(0), exec(5)])
             .append_query_results([empty.clone(), empty.clone()]);
         db = if hole {
             db.append_query_results([vec![BTreeMap::from([(
@@ -310,29 +317,32 @@ mod tests {
             "wholeness is recounted before anything that reads it: {log:?}"
         );
         assert!(
-            log[4].contains("SET LOCAL work_mem") && log[5].contains("SET demanded ="),
-            "the table-wide demand walk runs under its own raise: {log:?}"
+            log[4].contains("SELECT q.derivation FROM derivation_build q")
+                && log[4].contains("q.fetchable AND q.missing_runtime_deps > 0"),
+            "the repair scope is read once, contradicting flags included: {log:?}"
         );
         assert!(
-            log[6].contains("db.status = 10 AND db.demanded")
-                && log[7].contains("db.status = 0 AND NOT db.demanded"),
+            log[5].contains("FOR UPDATE") && log[6].contains("SET fetchable"),
+            "the flag is repaired under its own ordered lock, before the demand walk \
+             that stops at a fetchable anchor: {log:?}"
+        );
+        assert!(
+            log[7].contains("SET LOCAL work_mem") && log[8].contains("SET demanded ="),
+            "the table-wide demand walk runs under its own raise, on a repaired flag: {log:?}"
+        );
+        assert!(
+            log[9].contains("db.status = 10 AND db.demanded")
+                && log[10].contains("db.status = 0 AND NOT db.demanded"),
             "both Skipped directions read the demand this pass corrected: {log:?}"
         );
         assert!(
-            log[8].contains("SELECT q.derivation FROM derivation_build q"),
-            "the demand recount precedes the readiness repair, so the settle below it reads a corrected column: {log:?}"
-        );
-        assert!(
-            log[9].contains("FOR UPDATE") && log[10].contains("SET fetchable"),
-            "the fetchable recount runs under its own ordered lock: {log:?}"
-        );
-        assert!(
             log[11].contains("FOR UPDATE") && log[12].contains("SET unready_deps"),
-            "and the counter recount after it, in a second locked pass: {log:?}"
+            "the counter recount follows the demand recount, in a second locked pass \
+             over the same scope: {log:?}"
         );
         assert!(
             log[13].contains("SET status = 0") && log[14].contains("SET status = 1"),
-            "the queue is settled against the repaired counters: {log:?}"
+            "the queue is settled against the repaired counters and the corrected demand: {log:?}"
         );
         assert!(
             log[15].contains(

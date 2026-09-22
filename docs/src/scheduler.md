@@ -184,7 +184,7 @@ The dispatcher does not re-derive the gates - it reads the status - so `Queued`
 carries the claim that they held. That rests on one rule, which every writer of
 `Queued` obeys in one of two ways: embed `graph_sql::promotable_predicate` in
 the write, or settle the rows it just wrote with `readiness::unpromote_ungated`
-in the same call. `readiness::repair_pending` is the backstop for a counter that
+in the same call. `readiness::repair_readiness` is the backstop for a counter that
 drifted under a lost move, and the only one.
 
 When a gate regresses (an output retired, a producer demoted, a dependency
@@ -334,20 +334,24 @@ per-evaluation sweeps and the GC keep-set.
 A consistency sweep (`graph_consistency_report`, interval
 `GRADIENT_GRAPH_CONSISTENCY_INTERVAL`, default 300s) is the only backstop for the
 counters, because every one of them is moved rather than derived and nothing else
-would ever notice a lost move. It recounts `derivation.unwalked_inputs`,
-`derivation_build.missing_runtime_deps` and `demanded` table-wide, in the order the
-next one reads the last, then recomputes `fetchable` and
-`unready_deps` over the pending anchors and their direct dependencies, writes
-what differs, settles the queue against the gates in both directions, names for
-the live evaluations the pending anchors they reach through builders that nobody
-names any more (`adopted`, a repair like the drift counts), and logs
-what it repaired next to the two read-only alarms: terminal-success producers
-with an unbacked output, and `Building` evaluations with no non-terminal anchor
-left. The NAR repair runs first because the readiness recount reads wholeness,
-so a drifted path would otherwise teach the anchors a count this very pass fixes.
-It also recounts `derivation.unwalked_inputs` table-wide and reports what
-disagreed as `walk_drift`; the `unwalked_inputs` recount runs first, since the
-walk's prune reads it and the demand recount reads what the walk recorded.
+would ever notice a lost move. It recounts `derivation.unwalked_inputs` and
+`derivation_build.missing_runtime_deps` table-wide, recomputes `fetchable` over
+the pending anchors, their direct dependencies and every row whose flag
+contradicts a column it carries (fetchable with a runtime hole counted, or
+terminal success without the flag), recounts `demanded` table-wide, then
+recomputes `unready_deps` over the same scope, writes what differs, settles the
+queue against the gates in both directions, names for the live evaluations the
+open anchors they reach that nobody names any more (`adopted`, a repair like the
+drift counts), and logs what it repaired next to the two read-only alarms:
+terminal-success producers with an unbacked output, and `Building` evaluations
+with no non-terminal anchor left. The order is the order each column is read:
+the walk's bit before the demand walk that prunes on it, wholeness before the
+flag that reads it, the flag before the demand walk that stops at a fetchable
+anchor, and demand before the queue settle that promotes on it. The wholeness
+recount is table-wide and flips nothing, which is why the flag repair reaches
+past the pending anchors: a counter it raised two hops down left the flag `true`
+for good, and 19 such rows once stood between 47 builders and the paths
+retention had taken.
 
 Each chunk of either repair is its own transaction that takes the same ordered
 `FOR UPDATE` pass a retire takes and only then recounts, so the recount's
