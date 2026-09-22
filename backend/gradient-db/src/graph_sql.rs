@@ -203,15 +203,16 @@ pub const BUILDER_STATUSES: [BuildStatus; 4] = [
 ];
 
 /// The statuses at which demand decides whether an evaluation still waits: every
-/// builder status plus `Skipped`, which is thawed BY demand returning. What a walk
-/// reaches is not this set but [`open_predicate`], which a terminal anchor satisfies
-/// too while it cannot be fetched.
-pub const DEMANDABLE_STATUSES: [BuildStatus; 5] = [
+/// builder status plus `Skipped` and `Aborted`, which are thawed BY demand
+/// returning. What a walk reaches is not this set but [`open_predicate`], which a
+/// terminal-success anchor satisfies too while it cannot be fetched.
+pub const DEMANDABLE_STATUSES: [BuildStatus; 6] = [
     BuildStatus::Created,
     BuildStatus::Queued,
     BuildStatus::Building,
     BuildStatus::FailedTransient,
     BuildStatus::Skipped,
+    BuildStatus::Aborted,
 ];
 
 /// Anchor `status`/`demanded` is work its evaluation is still waiting for: what
@@ -266,15 +267,16 @@ pub fn builder_predicate(anchor: &str, walked: &str) -> String {
 }
 
 /// Anchor `{alias}` is open: a dependent cannot fetch it from our cache and no
-/// requeue is owed first. Every walk reaches open anchors and stops at the rest,
-/// because what is below a fetchable anchor is served from our cache and what is
-/// below a failed one is the requeue's to thaw. A terminal-success anchor whose
-/// outputs are gone or whose closure has a hole is open, and that is the only way
-/// the hole below it is reached at all.
+/// verdict stands against it. Every walk reaches open anchors and stops at the
+/// rest, because what is below a fetchable anchor is served from our cache and
+/// what is below a terminal failure is the requeue's to thaw. A terminal-success
+/// anchor whose outputs are gone or whose closure has a hole is open, and that is
+/// the only way the hole below it is reached at all; so is an aborted one, since
+/// an abort is not a verdict and a live want is what thaws it.
 pub fn open_predicate(alias: &str) -> String {
     format!(
-        "(NOT {alias}.fetchable AND {alias}.status NOT IN ({requeueable}))",
-        requeueable = crate::status_sql::build_in(&BuildStatus::REQUEUEABLE),
+        "(NOT {alias}.fetchable AND {alias}.status NOT IN ({failed}))",
+        failed = crate::status_sql::build_in(&BuildStatus::TERMINAL_FAILURE),
     )
 }
 
@@ -567,7 +569,7 @@ mod tests {
                 "{status:?} is handed out on its status alone, demand or not"
             );
         }
-        for status in [Created, FailedTransient, Skipped] {
+        for status in [Created, FailedTransient, Skipped, Aborted] {
             assert!(
                 !blocks_evaluation(status, false),
                 "{status:?} with nothing demanding it is work that never happens"
@@ -972,31 +974,44 @@ mod tests {
         assert!(!cte.contains("cached_path_reference"), "{cte}");
     }
 
-    /// Open is the one reach condition of every walk: not fetchable, and not the
-    /// requeue's to thaw. It reads two columns and no subquery, so a walk pays one
-    /// row lookup per reached anchor, and a terminal-success anchor whose closure
-    /// has a hole satisfies it like a builder does.
+    /// Open is the one reach condition of every walk: not fetchable, and no verdict
+    /// against it. It reads two columns and no subquery, so a walk pays one row
+    /// lookup per reached anchor; a terminal-success anchor whose closure has a
+    /// hole satisfies it like a builder does, and so does an aborted one.
     #[test]
-    fn open_is_not_fetchable_and_not_the_requeues() {
+    fn open_is_not_fetchable_and_not_a_terminal_failure() {
         assert_eq!(
             norm(&open_predicate("db")),
             format!(
                 "(NOT db.fetchable AND db.status NOT IN ({}))",
-                crate::status_sql::build_in(&BuildStatus::REQUEUEABLE)
+                crate::status_sql::build_in(&BuildStatus::TERMINAL_FAILURE)
             )
         );
         for status in DEMANDABLE_STATUSES {
             assert!(
-                !BuildStatus::REQUEUEABLE.contains(&status),
+                !BuildStatus::TERMINAL_FAILURE.contains(&status),
                 "{status:?} is open while it is not fetchable"
             );
         }
         for status in BuildStatus::TERMINAL_SUCCESS {
             assert!(
-                !BuildStatus::REQUEUEABLE.contains(&status),
+                !BuildStatus::TERMINAL_FAILURE.contains(&status),
                 "{status:?} is open while it is not fetchable: its closure has a hole"
             );
         }
+    }
+
+    /// An abort is not a verdict. It stays in `REQUEUEABLE`, because an evaluation
+    /// whose anchor sat aborted did not get it built, and it is demandable, because
+    /// demand returning is what thaws it: twelve aborted anchors inside a runtime
+    /// closure were the wall behind 47 builders, and no requeue ever revisited them.
+    #[test]
+    fn an_aborted_anchor_is_open_and_thawed_by_demand() {
+        assert!(DEMANDABLE_STATUSES.contains(&BuildStatus::Aborted));
+        assert!(BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted));
+        assert!(!BuildStatus::TERMINAL_FAILURE.contains(&BuildStatus::Aborted));
+        assert!(blocks_evaluation(BuildStatus::Aborted, true));
+        assert!(!blocks_evaluation(BuildStatus::Aborted, false));
     }
 
     /// The walk carries the evaluation it walks for and the builder bit of the row

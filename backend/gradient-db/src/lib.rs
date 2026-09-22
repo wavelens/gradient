@@ -109,7 +109,7 @@ pub use self::readiness::{
     AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,
     lost_fetchability, promote, promote_closure, readiness_scope, recompute_demand,
     recount_demanded, repair_fetchable, repair_readiness, seed_unready_deps, settle_demand,
-    settle_skipped, skip_undemanded, thaw_skipped, unpromote_drv_owners, unpromote_ungated,
+    settle_skipped, skip_undemanded, thaw_demanded, unpromote_drv_owners, unpromote_ungated,
     unwalk_derivations,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};

@@ -641,11 +641,13 @@ crate::sql! {
          RETURNING db.derivation, 0 AS from_status, 10 AS to_status",
         params = [DerivationIds(64)];
 
-    /// The mirror: demand came back, so the anchor is pending work again. It goes
-    /// to `Created` and not to `Queued` - the promote that follows reads the gates.
-    THAW_SKIPPED = "UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE db.derivation = ANY($1::uuid[]) AND db.status = 10 AND db.demanded \
-         RETURNING db.derivation, 10 AS from_status, 0 AS to_status",
+    /// The mirror, for `Skipped` and `Aborted` alike: demand came back, so the
+    /// anchor is pending work again. It goes to `Created` and not to `Queued`, the
+    /// promote that follows reads the gates, and an abort's attempts are no verdict.
+    THAW_DEMANDED = "UPDATE derivation_build db SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
+         FROM derivation_build old \
+         WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) AND db.status IN (5, 10) AND db.demanded \
+         RETURNING db.derivation, old.status AS from_status, 0 AS to_status",
         params = [DerivationIds(64)];
 
     /// [`SKIP_UNDEMANDED`] over the whole table: the sweep's backstop for a lost
@@ -658,9 +660,10 @@ crate::sql! {
         params = [],
         tier = Sweep;
 
-    THAW_SKIPPED_ALL = "UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE db.status = 10 AND db.demanded \
-         RETURNING db.derivation, 10 AS from_status, 0 AS to_status",
+    THAW_DEMANDED_ALL = "UPDATE derivation_build db SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
+         FROM derivation_build old \
+         WHERE old.id = db.id AND db.status IN (5, 10) AND db.demanded \
+         RETURNING db.derivation, old.status AS from_status, 0 AS to_status",
         params = [],
         tier = Sweep;
 }
@@ -680,8 +683,9 @@ pub async fn skip_undemanded<C: ConnectionTrait>(
     ))
 }
 
-/// Wake every `Skipped` anchor among `candidates` that something wants again.
-pub async fn thaw_skipped<C: ConnectionTrait>(
+/// Wake every `Skipped` or `Aborted` anchor among `candidates` that something
+/// wants again.
+pub async fn thaw_demanded<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
 ) -> Result<Vec<TransitionChange>, DbErr> {
@@ -690,7 +694,7 @@ pub async fn thaw_skipped<C: ConnectionTrait>(
     }
 
     Ok(returned_transitions(
-        db.query_all_raw(THAW_SKIPPED.bind([ids(candidates)]))
+        db.query_all_raw(THAW_DEMANDED.bind([ids(candidates)]))
             .await?,
     ))
 }
@@ -698,7 +702,7 @@ pub async fn thaw_skipped<C: ConnectionTrait>(
 /// The sweep's table-wide pair, run after the demand recount so both read a
 /// corrected column. Returns every row either moved.
 pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
-    let mut changes = returned_transitions(db.query_all_raw(THAW_SKIPPED_ALL.stmt()).await?);
+    let mut changes = returned_transitions(db.query_all_raw(THAW_DEMANDED_ALL.stmt()).await?);
     changes.extend(returned_transitions(
         db.query_all_raw(SKIP_UNDEMANDED_ALL.stmt()).await?,
     ));
@@ -944,7 +948,7 @@ pub async fn settle_demand<C: ConnectionTrait>(
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let mut changes = Vec::new();
     for gained in moved.gained.chunks(crate::IN_CHUNK_SIZE) {
-        changes.extend(thaw_skipped(db, gained).await?);
+        changes.extend(thaw_demanded(db, gained).await?);
         changes.extend(promote(db, gained).await?);
     }
     for lost in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
@@ -1713,10 +1717,12 @@ mod tests {
             "{sql}"
         );
 
-        let thaw = THAW_SKIPPED.text();
+        let thaw = THAW_DEMANDED.text();
         assert!(
-            thaw.contains("SET status = 0") && thaw.contains("AND db.status = 10 AND db.demanded"),
-            "{thaw}"
+            thaw.contains("SET status = 0, attempt = 0")
+                && thaw.contains("AND db.status IN (5, 10) AND db.demanded")
+                && thaw.contains("old.status AS from_status"),
+            "an aborted anchor is thawed by the same want, with its attempts forgiven: {thaw}"
         );
     }
 
@@ -1815,7 +1821,7 @@ mod tests {
                 "WHERE e.dependency = r.derivation OFFSET 0) pe \
                  JOIN derivation_build p ON p.derivation = pe.parent \
                  JOIN derivation pw ON pw.id = p.derivation \
-                 WHERE p.demanded AND (NOT p.fetchable AND p.status NOT IN (4, 5, 6, 9)) \
+                 WHERE p.demanded AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND p.derivation NOT IN (SELECT derivation FROM region) \
                  AND ((pw.walked AND p.probed AND NOT p.substitutable \
                  AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2)))"
@@ -1826,7 +1832,7 @@ mod tests {
             walk.contains(
                 "FROM region r JOIN derivation_build rb ON rb.derivation = r.derivation \
                  JOIN derivation w ON w.id = rb.derivation \
-                 WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 5, 6, 9)) \
+                 WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) \
                  AND (EXISTS (SELECT 1 FROM entry_point ep"
             ),
             "a settled root seeds nothing, and a seed carries its own builder bit: {walk}"

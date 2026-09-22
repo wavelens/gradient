@@ -68,6 +68,7 @@ mod m20260919_000001_drop_cached_path_reference;
 mod m20260919_000002_derivation_build_probed;
 mod m20260922_000000_derivation_build_open;
 mod m20260923_000000_derivation_build_fetchable_unwhole;
+mod m20260923_000001_derivation_build_open_aborted;
 
 pub struct Migrator;
 
@@ -132,6 +133,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260919_000002_derivation_build_probed::Migration),
             Box::new(m20260922_000000_derivation_build_open::Migration),
             Box::new(m20260923_000000_derivation_build_fetchable_unwhole::Migration),
+            Box::new(m20260923_000001_derivation_build_open_aborted::Migration),
         ]
     }
 }

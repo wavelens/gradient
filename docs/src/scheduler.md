@@ -102,9 +102,10 @@ its `.drv` NAR arriving, an upstream hit, a thaw at stream completion.
 
 Demand is what keeps the fleet from relaying half of nixpkgs, and from building the
 input closure of everything it relays. An anchor is **open** while a dependent
-cannot fetch it from our cache and no requeue is owed first: not `fetchable`, and
-not in `BuildStatus::REQUEUEABLE`. Every builder is open, so is `Skipped`, and so
-is a `Completed` anchor whose outputs are gone or whose closure has a hole. Demand
+cannot fetch it from our cache and no verdict stands against it: not `fetchable`,
+and not in `BuildStatus::TERMINAL_FAILURE`. Every builder is open, so are
+`Skipped` and `Aborted`, and so is a `Completed` anchor whose outputs are gone or
+whose closure has a hole. Demand
 and naming are two projections of one walk over open anchors
 (`graph_sql::open_closure_cte_body`): an anchor is demanded when an open entry
 point of a retained evaluation names it, or a demanded open anchor reaches it.
@@ -112,7 +113,7 @@ Anything wanted wants what its outputs reference at run time, so every member st
 over its runtime edges; only something that will itself be built wants its inputs,
 so a builder (walked, probed, not substitutable, pending) steps over every edge. A
 fetchable anchor ends the walk, since what is below it is served from our cache,
-and so does a failed one, which is the requeue's to thaw. That is a fixpoint, so
+and so does a terminal failure, which is the requeue's to thaw. That is a fixpoint, so
 demand is a column, `derivation_build.demanded`, and not a subquery: it flows DOWN
 from the entry points while readiness flows UP from the leaves, and a per-row
 predicate that looks one hop cannot carry the downward direction. It used to look
@@ -140,9 +141,12 @@ on the board. It is the status projection of exactly that condition, written on 
 lost side of every demand recompute after the un-promote and taken back on the
 gained side before the promote, so a build-time dependency of something we relay
 says what it is instead of sitting at `Created` forever. `Skipped` is settled work:
-no gate acts on it, no walk steps through it, and no evaluation waits for it. It
-thaws to `Created`, never straight to the queue, because it has passed no gate; the
-promote that follows the thaw is what reads them. The consistency sweep runs both
+no gate acts on it, no walk steps through it on a build edge, and no evaluation
+waits for it. It thaws to `Created`, never straight to the queue, because it has
+passed no gate; the promote that follows the thaw is what reads them. `Aborted`
+thaws the same way: an abort is not a verdict, so an aborted anchor a live
+evaluation reaches is demanded and thawed, with its attempts forgiven, instead of
+waiting for a requeue that may never walk to it. The consistency sweep runs both
 directions table-wide after its demand recount and reports what moved as
 `skipped_moves`, which is also the status's own backfill.
 
@@ -280,15 +284,22 @@ Both run through one orchestrator,
 `gradient_db::reconcile_build_graph(ctx, scope)`, which owns the canonical step
 ordering, and both scopes name an evaluation, so every statement it issues is
 bounded to that evaluation's dependency closure: `Eval(id)` when an evaluation
-finishes flushing its graph, and `Unstick(id)` when a Building evaluation is
-graph-stuck. Each thaws the terminal-failed anchors in the closure, settles the
-anchors whose outputs are already whole (cache presence is the ground truth for
-"built") and advances their dependents' counters, fails the dependents of a
-deterministic failure, names for the evaluation every pending anchor it
-reaches through builders (`reachability::adopt_pending_closure`), and
-promotes the closure; `Unstick` also demotes a
-trusted producer whose output is gone. No step here iterates to convergence.
-Every future dead-zone fix has exactly one place to live.
+finishes flushing its graph or a restart takes the previous evaluation's names
+over, and `Unstick(id)` when a Building evaluation is graph-stuck. Each thaws
+the terminal-failed anchors in the closure, settles the anchors whose outputs
+are already whole (cache presence is the ground truth for "built") and advances
+their dependents' counters, fails the dependents of a failure that stays, names
+for the evaluation every open anchor it reaches
+(`reachability::adopt_pending_closure`), and promotes the closure. The two
+differ in one thing: a failure is valid for the evaluation that recorded it, so
+`Eval` thaws every failure in the closure, a reproducible builder exit included
+(one rebuild per evaluation; same-commit polling is deduplicated before an
+evaluation exists), while `Unstick` is the same evaluation asking again and
+leaves a reproducible failure and the subtree it poisons alone, or it would
+rebuild a permanent failure every sweep. A `restart_failed` evaluation never
+walks, so it inherits the previous evaluation's `build_job` rows and runs the
+`Eval` heal from the endpoint. No step here iterates to convergence. Every
+future dead-zone fix has exactly one place to live.
 
 The consequences of moving an anchor are equally centralized. Bulk sweeps
 return the typed `(derivation, from, to)` transitions they made, and both

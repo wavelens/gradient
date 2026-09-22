@@ -331,7 +331,7 @@ mod tests {
             "the table-wide demand walk runs under its own raise, on a repaired flag: {log:?}"
         );
         assert!(
-            log[9].contains("db.status = 10 AND db.demanded")
+            log[9].contains("db.status IN (5, 10) AND db.demanded")
                 && log[10].contains("db.status = 0 AND NOT db.demanded"),
             "both Skipped directions read the demand this pass corrected: {log:?}"
         );

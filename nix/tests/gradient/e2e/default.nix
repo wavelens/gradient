@@ -1376,7 +1376,7 @@ in {
       # anchors only: a settled one keeps whatever it carried and nothing reads it.
       def demand_drift():
           def is_open(a):
-              return f"NOT {a}.fetchable AND {a}.status NOT IN (4, 5, 6, 9)"
+              return f"NOT {a}.fetchable AND {a}.status NOT IN (4, 6, 9)"
           def is_builder(a):
               return f"w.walked AND {a}.probed AND NOT {a}.substitutable AND {a}.status IN (0, 1, 2, 8)"
           return int(sql(
