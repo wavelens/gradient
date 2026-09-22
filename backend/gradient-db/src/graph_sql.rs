@@ -202,14 +202,10 @@ pub const BUILDER_STATUSES: [BuildStatus; 4] = [
     BuildStatus::FailedTransient,
 ];
 
-/// The statuses whose demand can still move, which is every builder status plus
-/// `Skipped`: a builder whose demand went away and becomes one again the moment a
-/// walk reaches it. A terminal anchor keeps what it carried and is named as a root
-/// when a requeue thaws it; `Skipped` has no such event, it is thawed BY demand
-/// returning. Leaving it out of the walks that write the column made it absorbing -
-/// the thaw reads `demanded`, the region could not reach the row to set it, and the
-/// table-wide backstop refused to rewrite it, so a subtree skipped in the window
-/// between a name and its probe answer never came back.
+/// The statuses at which demand decides whether an evaluation still waits: every
+/// builder status plus `Skipped`, which is thawed BY demand returning. What a walk
+/// reaches is not this set but [`open_predicate`], which a terminal anchor satisfies
+/// too while it cannot be fetched.
 pub const DEMANDABLE_STATUSES: [BuildStatus; 5] = [
     BuildStatus::Created,
     BuildStatus::Queued,
@@ -266,6 +262,19 @@ pub fn builder_predicate(anchor: &str, walked: &str) -> String {
         "{walked}.walked AND {anchor}.probed AND NOT {anchor}.substitutable \
          AND {anchor}.status IN ({pending})",
         pending = crate::status_sql::build_in(&BUILDER_STATUSES),
+    )
+}
+
+/// Anchor `{alias}` is open: a dependent cannot fetch it from our cache and no
+/// requeue is owed first. Every walk reaches open anchors and stops at the rest,
+/// because what is below a fetchable anchor is served from our cache and what is
+/// below a failed one is the requeue's to thaw. A terminal-success anchor whose
+/// outputs are gone or whose closure has a hole is open, and that is the only way
+/// the hole below it is reached at all.
+pub fn open_predicate(alias: &str) -> String {
+    format!(
+        "(NOT {alias}.fetchable AND {alias}.status NOT IN ({requeueable}))",
+        requeueable = crate::status_sql::build_in(&BuildStatus::REQUEUEABLE),
     )
 }
 
@@ -455,89 +464,48 @@ pub fn kept_hashes_cte_body(reachable: &str, runtime: &str) -> String {
     )
 }
 
-/// `WITH RECURSIVE pending(evaluation, derivation, builder) AS (...)`: from the
-/// `(evaluation, derivation, builder)` rows of `seed_select`, every anchor in a
-/// builder status that the evaluation reaches walking dependencies. Two arms over
-/// the two edge kinds, mirroring [`demand_closure_cte`]: every member steps over
-/// its runtime edges, because whatever wants an anchor wants what its outputs
-/// reference, and only a builder steps over its build edges, since a relay fetches
-/// finished bytes and waits on nothing below it. A terminal anchor stops the walk
-/// either way, because what is below a finished build is served from its outputs
-/// and what is below a failed one is the requeue's to thaw first. This is what
-/// names a pruned subtree for the evaluations that build against it.
-///
-/// Membership is [`DEMANDABLE_STATUSES`] and not [`BUILDER_STATUSES`]: a `Skipped`
-/// anchor is reached and named, so demand can be written back onto it, and it is
-/// not a builder, so the walk stops there rather than stepping over its inputs.
-pub fn pending_closure_cte(name: &str, seed_select: &str) -> String {
-    let arm = |restrict: &str| {
-        format!(
-            "SELECT e.dependency AS next, ({builder}) AS builder \
-             FROM derivation_dependency e \
-             JOIN derivation_build dep ON dep.derivation = e.dependency \
-             JOIN derivation w ON w.id = dep.derivation \
-             WHERE e.derivation = c.derivation AND {restrict} AND dep.status IN ({pending})",
-            builder = builder_predicate("dep", "w"),
-            pending = crate::status_sql::build_in(&DEMANDABLE_STATUSES),
-        )
-    };
-
+/// `WITH RECURSIVE {name}(evaluation, derivation, builder) AS (...)`, see
+/// [`open_closure_cte_body`].
+pub fn open_closure_cte(name: &str, seed_select: &str) -> String {
     format!(
-        "WITH RECURSIVE {name}(evaluation, derivation, builder) AS ({seed_select} UNION {})",
+        "WITH RECURSIVE {}",
+        open_closure_cte_body(name, seed_select, "")
+    )
+}
+
+/// The one walk that demand and naming are both projections of: from the
+/// `(evaluation, derivation, builder)` rows of `seed_select`, every open anchor the
+/// seeds still want. A member steps over its runtime edges, because whatever wants
+/// an anchor wants what its outputs reference; a builder steps over every edge,
+/// because it will be built and needs its inputs; and only an open anchor is
+/// reached, so a fetchable input and a failed one both end the walk. A relay is
+/// reached and never stepped through on a build edge, which is what keeps a relayed
+/// subtree from being built. There is no name guard: a name is what adoption writes
+/// for what this reaches, and demand is what the recount writes for it. `bound` is
+/// an extra predicate over the edge alias `e`, applied inside the probe so a
+/// region-scoped walk prunes at the index lookup.
+pub fn open_closure_cte_body(name: &str, seed_select: &str, bound: &str) -> String {
+    let restrict = if bound.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {bound}")
+    };
+    format!(
+        "{name}(evaluation, derivation, builder) AS ({seed_select} UNION {})",
         lateral_step(
             name,
             "c.evaluation, s.next, s.builder",
             &format!(
-                "{runtime} UNION {build}",
-                runtime = arm("e.kind IN (1, 2)"),
-                build = arm("c.builder AND e.kind IN (0, 2)"),
+                "SELECT e.dependency AS next, ({builder}) AS builder \
+                 FROM derivation_dependency e \
+                 JOIN derivation_build dep ON dep.derivation = e.dependency \
+                 JOIN derivation w ON w.id = dep.derivation \
+                 WHERE e.derivation = c.derivation AND (c.builder OR e.kind IN (1, 2)) \
+                   AND {open}{restrict}",
+                builder = builder_predicate("dep", "w"),
+                open = open_predicate("dep"),
             ),
         )
-    )
-}
-
-/// `WITH RECURSIVE demanded(derivation) AS (...)`: from `seed_select`, every anchor
-/// something still wants in our cache. Two arms over the two edge kinds. Anything
-/// wanted wants what its outputs reference at run time, so a demanded anchor named
-/// by a `build_job` steps over its runtime edges whatever it is. Only something
-/// that will be built wants its inputs, so a demanded builder steps over its build
-/// edges; a relay is reached and never stepped through that way. A terminal anchor
-/// stops the walk because what is below a finished build is served from its
-/// outputs. The one definition of demand; every recompute steps with it.
-/// `region_select` bounds both arms, applied inside the probe so a region-scoped
-/// recompute prunes at the index lookup instead of walking the live graph and
-/// discarding it.
-pub fn demand_closure_cte(seed_select: &str, region_select: &str) -> String {
-    let bound = if region_select.is_empty() {
-        String::new()
-    } else {
-        format!(" AND e.dependency IN ({region_select})")
-    };
-    let arm = |restrict: String| {
-        format!(
-            "SELECT e.dependency AS next FROM derivation_dependency e \
-             JOIN derivation_build p ON p.derivation = c.derivation \
-             {restrict} \
-               AND EXISTS (SELECT 1 FROM build_job bj \
-                           WHERE bj.derivation = p.derivation){bound}"
-        )
-    };
-
-    format!(
-        "WITH RECURSIVE demanded(derivation) AS ({seed_select} UNION {})",
-        lateral_step(
-            "demanded",
-            "s.next",
-            &format!(
-                "{runtime} UNION {build}",
-                runtime = arm("WHERE e.derivation = c.derivation AND e.kind IN (1, 2)".to_owned()),
-                build = arm(format!(
-                    "JOIN derivation w ON w.id = p.derivation \
-                     WHERE e.derivation = c.derivation AND e.kind IN (0, 2) AND {builder}",
-                    builder = builder_predicate("p", "w"),
-                )),
-            ),
-        ),
     )
 }
 
@@ -819,29 +787,6 @@ mod tests {
         assert!(!BuildStatus::REQUEUEABLE.contains(&BuildStatus::Skipped));
     }
 
-    /// The region of a bounded recompute has to contain the rows it may rewrite.
-    /// A `Skipped` anchor is exactly the row whose demand is about to change - a
-    /// parent that has just become a builder demands it again - and leaving it out
-    /// of the walk made the status absorbing: unreachable, so never gained, so
-    /// never thawed, with the whole subtree below it stranded.
-    #[test]
-    fn the_region_walk_reaches_a_skipped_anchor_so_demand_can_return() {
-        let cte = pending_closure_cte("region", "SELECT $1::uuid, $2::uuid, true");
-        let skipped = crate::status_sql::build_in(&[BuildStatus::Skipped]);
-        assert_eq!(
-            cte.matches(&format!("dep.status IN (0, 1, 2, 8, {skipped})"))
-                .count(),
-            2,
-            "both arms must reach a skipped anchor: {cte}"
-        );
-        assert!(
-            !cte.contains(&format!(
-                "NOT dep.substitutable AND dep.status IN (0, 1, 2, 8, {skipped})"
-            )),
-            "reached is not stepped through: a skipped anchor is no builder: {cte}"
-        );
-    }
-
     /// The demand arm reads a DEPENDENT's status, which is only safe while both
     /// promotion moves stay inside the set it tests: a demote-then-promote pair in
     /// one transaction would otherwise change what the second statement's gate
@@ -952,7 +897,7 @@ mod tests {
                 ClosureDirection::Dependents,
             )),
             norm(&runtime_closure_cte("refs", "SELECT $1::uuid")),
-            norm(&pending_closure_cte(
+            norm(&open_closure_cte(
                 "pending",
                 "SELECT $1::uuid, $2::uuid, true",
             )),
@@ -1027,32 +972,40 @@ mod tests {
         assert!(!cte.contains("cached_path_reference"), "{cte}");
     }
 
-    /// Demand and adoption read one definition of a builder, so an anchor an
-    /// evaluation adopts is one whose gate demands its inputs, never the other
-    /// way round. An unprobed anchor is neither: until the probe answers, nothing
-    /// below it is work, because a relay would make all of it pointless.
+    /// Open is the one reach condition of every walk: not fetchable, and not the
+    /// requeue's to thaw. It reads two columns and no subquery, so a walk pays one
+    /// row lookup per reached anchor, and a terminal-success anchor whose closure
+    /// has a hole satisfies it like a builder does.
     #[test]
-    fn demand_and_adoption_share_one_definition_of_a_builder() {
-        let builder = norm(&builder_predicate("p", "w"));
+    fn open_is_not_fetchable_and_not_the_requeues() {
         assert_eq!(
-            builder,
-            "w.walked AND p.probed AND NOT p.substitutable AND p.status IN (0, 1, 2, 8)"
+            norm(&open_predicate("db")),
+            format!(
+                "(NOT db.fetchable AND db.status NOT IN ({}))",
+                crate::status_sql::build_in(&BuildStatus::REQUEUEABLE)
+            )
         );
-        assert!(
-            norm(&pending_closure_cte(
-                "pending",
-                "SELECT $1::uuid, $2::uuid, true"
-            ))
-            .contains(&norm(&builder_predicate("dep", "w")))
-        );
+        for status in DEMANDABLE_STATUSES {
+            assert!(
+                !BuildStatus::REQUEUEABLE.contains(&status),
+                "{status:?} is open while it is not fetchable"
+            );
+        }
+        for status in BuildStatus::TERMINAL_SUCCESS {
+            assert!(
+                !BuildStatus::REQUEUEABLE.contains(&status),
+                "{status:?} is open while it is not fetchable: its closure has a hole"
+            );
+        }
     }
 
-    /// The adoption walk carries the evaluation it walks for, steps only out of a
-    /// builder, and only into anchors an evaluation will still have built: a relay
-    /// or a terminal anchor is reached and never expanded.
+    /// The walk carries the evaluation it walks for and the builder bit of the row
+    /// it stands on, reaches open anchors only, and steps out of a member over its
+    /// runtime edges and out of a builder over every edge. One probe per member,
+    /// so the two edge kinds are one index range scan and not two.
     #[test]
-    fn the_pending_closure_walks_dependencies_through_builders_only() {
-        let cte = norm(&pending_closure_cte(
+    fn the_walk_reaches_open_anchors_and_steps_every_edge_out_of_a_builder() {
+        let cte = norm(&open_closure_cte(
             "pending",
             "SELECT $1::uuid, $2::uuid, true",
         ));
@@ -1065,118 +1018,68 @@ mod tests {
             "{cte}"
         );
         assert!(
-            cte.contains(
-                "SELECT e.dependency AS next, \
-                 (w.walked AND dep.probed AND NOT dep.substitutable \
-                  AND dep.status IN (0, 1, 2, 8)) AS builder"
-            ),
+            cte.contains(&format!(
+                "SELECT e.dependency AS next, ({}) AS builder",
+                norm(&builder_predicate("dep", "w"))
+            )),
             "{cte}"
         );
         assert!(
-            cte.contains(
-                "WHERE e.derivation = c.derivation AND c.builder AND e.kind IN (0, 2) \
-                 AND dep.status IN (0, 1, 2, 8, 10) OFFSET 0) s"
-            ),
+            cte.contains(&format!(
+                "WHERE e.derivation = c.derivation AND (c.builder OR e.kind IN (1, 2)) \
+                 AND {} OFFSET 0) s",
+                norm(&open_predicate("dep"))
+            )),
             "{cte}"
+        );
+        assert_eq!(cte.matches("LATERAL (").count(), 1, "one probe: {cte}");
+    }
+
+    /// The wedge this walk replaces two walks for: 47 builders waited on 22
+    /// `Completed` anchors with a hole in their closure, and the hole was never
+    /// reached because one walk stepped only out of a NAMED member and the other
+    /// reached only a builder STATUS. Neither guard may come back.
+    #[test]
+    fn an_unwhole_terminal_anchor_is_reached_and_stepped_through() {
+        let cte = norm(&open_closure_cte(
+            "pending",
+            "SELECT $1::uuid, $2::uuid, true",
+        ));
+        assert!(
+            !cte.contains("build_job"),
+            "a name is what adoption writes for what the walk reaches: {cte}"
+        );
+        assert!(
+            cte.contains(&format!("AND {} OFFSET 0) s", norm(&open_predicate("dep")))),
+            "reach is open, never a status list: {cte}"
+        );
+        assert!(
+            !cte.contains("AND dep.status IN (0, 1, 2, 8, 10)"),
+            "the old reach set must not come back: {cte}"
         );
     }
 
-    /// Demand flows DOWN from the entry points through named builders, which is
-    /// the arm the one-hop predicate it replaced could not carry: `Created` counts
-    /// as a builder, so without the recursion the first undemanded builder
-    /// re-demands everything below it (#666). A relay is reached and never stepped
-    /// through, and that single fact is what stops a relayed subtree being built.
+    /// A bounded walk applies its restriction inside the fenced probe, after the
+    /// edge kind and the reach test, so a region-scoped recompute prunes at the
+    /// index lookup instead of walking the live graph and discarding it.
     #[test]
-    fn the_build_arm_steps_only_out_of_named_builders() {
-        let sql = norm(&demand_closure_cte(
-            "SELECT derivation FROM entry_point",
-            "",
+    fn a_bound_prunes_inside_the_probe() {
+        let cte = norm(&open_closure_cte_body(
+            "demanded",
+            "SELECT NULL::uuid, r.derivation, r.builder FROM region r",
+            "e.dependency IN (SELECT derivation FROM region)",
         ));
         assert!(
-            sql.starts_with(
-                "WITH RECURSIVE demanded(derivation) AS (SELECT derivation FROM entry_point UNION"
-            ),
-            "{sql}"
-        );
-        assert!(sql.contains(&norm(&builder_predicate("p", "w"))), "{sql}");
-        assert!(
-            sql.contains("SELECT e.dependency AS next FROM derivation_dependency e"),
-            "the step must project the dependency, not the dependent: {sql}"
-        );
-        assert!(
-            sql.contains("FROM build_job bj WHERE bj.derivation = p.derivation"),
-            "an unnamed builder demands nothing: {sql}"
-        );
-        assert!(
-            sql.contains("OFFSET 0"),
-            "the lateral fence must survive: {sql}"
-        );
-    }
-
-    /// Two arms, one definition: a demanded anchor named by a build_job demands the
-    /// producers over its runtime edges; only a demanded builder demands over its
-    /// build edges. A relay's build inputs are never reached.
-    #[test]
-    fn demand_steps_over_runtime_edges_from_any_anchor_and_build_edges_from_builders() {
-        let cte = norm(&demand_closure_cte(
-            "SELECT derivation FROM entry_point",
-            "",
-        ));
-        assert!(
-            cte.contains("WHERE e.derivation = c.derivation AND e.kind IN (1, 2)"),
+            cte.contains(&format!(
+                "AND {} AND e.dependency IN (SELECT derivation FROM region) OFFSET 0) s",
+                norm(&open_predicate("dep"))
+            )),
             "{cte}"
         );
         assert!(
-            cte.contains(
-                "WHERE e.derivation = c.derivation AND e.kind IN (0, 2) \
-                 AND w.walked AND p.probed AND NOT p.substitutable"
-            ),
-            "{cte}"
-        );
-    }
-
-    /// Only the build arm waits for the probe's answer. What an anchor's outputs
-    /// reference at run time is wanted whether it is relayed or built, and a relay
-    /// that waited for its own answer before demanding its references would never
-    /// mirror a closure.
-    #[test]
-    fn only_the_build_arm_waits_for_the_probe() {
-        let cte = norm(&demand_closure_cte(
-            "SELECT derivation FROM entry_point",
-            "",
-        ));
-        assert!(
-            cte.contains("AND e.kind IN (1, 2) AND EXISTS (SELECT 1 FROM build_job"),
-            "the runtime arm reads nothing about the anchor but its name: {cte}"
-        );
-    }
-
-    #[test]
-    fn a_region_bounds_both_arms_of_the_demand_walk() {
-        let cte = norm(&demand_closure_cte(
-            "SELECT derivation FROM roots",
-            "SELECT derivation FROM region",
-        ));
-        assert_eq!(
-            cte.matches("AND e.dependency IN (SELECT derivation FROM region)")
-                .count(),
-            2,
-            "{cte}"
-        );
-    }
-
-    /// A region is every anchor whose demand an event can have moved, so it steps
-    /// over the runtime edges of every member and over the build edges of the ones
-    /// that are builders.
-    #[test]
-    fn the_region_steps_over_runtime_edges_out_of_every_pending_member() {
-        let cte = norm(&pending_closure_cte(
-            "region",
-            "SELECT NULL::uuid, unnest($1::uuid[]), true",
-        ));
-        assert!(
-            cte.contains("e.kind IN (1, 2)") && cte.contains("c.builder AND e.kind IN (0, 2)"),
-            "{cte}"
+            norm(&open_closure_cte_body("x", "SELECT 1", ""))
+                .contains(&format!("AND {} OFFSET 0) s", norm(&open_predicate("dep")))),
+            "an empty bound is the unrestricted walk"
         );
     }
 }

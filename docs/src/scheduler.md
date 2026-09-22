@@ -101,24 +101,33 @@ the anchors they touched: a batch that walked it, a dependency becoming fetchabl
 its `.drv` NAR arriving, an upstream hit, a thaw at stream completion.
 
 Demand is what keeps the fleet from relaying half of nixpkgs, and from building the
-input closure of everything it relays. An anchor is demanded when an entry point of
-a retained evaluation names it, or a demanded, named dependent reaches it over one
-of the two edge kinds. Anything wanted wants what its outputs reference at run
-time, so a demanded anchor steps over its runtime edges whatever it is; only
-something that will itself be built wants its inputs, so the build edges are
-stepped only out of a builder (walked, not substitutable, pending). That is a
-fixpoint, so demand is a column, `derivation_build.demanded`, and not a subquery:
-it flows DOWN from the entry points while readiness flows UP from the leaves, and a
-per-row predicate that looks one hop cannot carry the downward direction. It used
-to look one hop, which is why a relayed anchor's whole source closure was still
-built.
+input closure of everything it relays. An anchor is **open** while a dependent
+cannot fetch it from our cache and no requeue is owed first: not `fetchable`, and
+not in `BuildStatus::REQUEUEABLE`. Every builder is open, so is `Skipped`, and so
+is a `Completed` anchor whose outputs are gone or whose closure has a hole. Demand
+and naming are two projections of one walk over open anchors
+(`graph_sql::open_closure_cte_body`): an anchor is demanded when an open entry
+point of a retained evaluation names it, or a demanded open anchor reaches it.
+Anything wanted wants what its outputs reference at run time, so every member steps
+over its runtime edges; only something that will itself be built wants its inputs,
+so a builder (walked, probed, not substitutable, pending) steps over every edge. A
+fetchable anchor ends the walk, since what is below it is served from our cache,
+and so does a failed one, which is the requeue's to thaw. That is a fixpoint, so
+demand is a column, `derivation_build.demanded`, and not a subquery: it flows DOWN
+from the entry points while readiness flows UP from the leaves, and a per-row
+predicate that looks one hop cannot carry the downward direction. It used to look
+one hop, which is why a relayed anchor's whole source closure was still built; and
+the walk used to step out of a member only while a `build_job` named it, which is
+how 47 builders waited behind 22 unwhole `Completed` anchors nobody named.
 
 `readiness::recompute_demand` rewrites the column absolutely over the anchors an
-event changed and the pending closure below them. Both arms are bounded by the
-region, and a relay is reached over a build edge and never stepped through that
-way, because it fetches finished bytes and needs nothing below it. The region
-includes the anchors it was given, because a thaw makes one a builder again and its
-own stored value is as stale as its subtree's. The walk answers and a second statement in the same
+event changed and the open closure below them. The walk is bounded by the region,
+and a relay is reached over a build edge and never stepped through that way,
+because it fetches finished bytes and needs nothing below it. The region includes
+the anchors it was given, because a thaw makes one a builder again and its own
+stored value is as stale as its subtree's. An anchor that loses `fetchable` is open
+again, so `readiness::lost_fetchability` recomputes from what it flipped: that is
+how the hole below an unwhole `Completed` anchor is asked for at all. The walk answers and a second statement in the same
 transaction writes what it answered, as a bound array rather than as a subquery the
 write names: a recursive CTE carries no row estimate the planner believes, so a
 region of a few dozen anchors loses to a sequential scan of the whole table. The
@@ -200,17 +209,17 @@ interior's names cascade away with it and every reader of the row - the gate,
 the dispatch select, the dispatcher's driving evaluation, eval-done, the
 abort's shared set - loses the subtree at once (#663). The GC therefore hands
 the names over before it settles the queue: `reachability::adopt_pending_closures`
-walks from every `build_job` of a live evaluation on a builder (walked, not
-substitutable, in a builder status) down through builders into every anchor
-still in a builder status, and inserts the `(evaluation, derivation)` rows that
-are missing. A relay is reached and never walked through, since nothing below
-it is waited on, and a terminal anchor stops the walk the same way. The walk
-is bounded by pending work, never by closure size, and runs only when a name
-the deletion cascaded belonged to a pending anchor. The graph reconciler runs
-the same walk for the one evaluation it heals, because a thaw or a reset inside
-a pruned closure leaves a pending anchor unnamed the same way, and the
-consistency sweep is the backstop, walking only when a pending anchor nobody
-names sits one edge below a builder a live evaluation names.
+runs the demand walk from every `build_job` of a live evaluation on an open
+anchor into every open anchor it reaches, and inserts the `(evaluation,
+derivation)` rows that are missing. A relay is reached and never walked through
+on a build edge, since nothing below it is built, and a fetchable or failed
+anchor stops the walk. The walk is bounded by open work, never by closure size,
+and runs only when a name the deletion cascaded belonged to an open anchor. The
+graph reconciler runs the same walk for the one evaluation it heals, because a
+thaw or a reset inside a pruned closure leaves an open anchor unnamed the same
+way, and the consistency sweep is the backstop, walking only when an open anchor
+nobody names sits one edge the walk would take below an open anchor a live
+evaluation names.
 
 `derivation.walked` is what makes the counters safe on a graph that is still
 being written. A batch names its dependencies by path, and the graph actor
@@ -580,7 +589,10 @@ wholeness still has its own output in the cache, so it needs `fetchable` to drop
 until the missing path returns and nothing more; the forward ripple marks it
 fetchable again then, which needs the terminal status a reset would have removed.
 Resetting the referrer closure instead rebuilds artifacts that never went missing:
-one deleted NAR re-queued 107 derivations and dispatched 139 builds in 30 s.
+one deleted NAR re-queued 107 derivations and dispatched 139 builds in 30 s. The
+flag's loss does re-open the walk below the referrer, so the missing path's
+producer is demanded and named again; a retire that dropped the flag and asked for
+nothing left 47 builders behind 22 such referrers.
 So there is no window in which the gate trusts an artifact GC just removed. None of
 that reads the counter, so binding it to what MOVED would leave two rows behind: a
 `.drv` deleted while it was not whole, and a hash with no `cached_path` row at all,

@@ -784,8 +784,8 @@ mod tests {
         let none = Vec::<BTreeMap<String, Value>>::new();
 
         // The retire resolves the producers of the hash, finds none of them whole and
-        // nothing to delete, then marks, ripples, resets and un-promotes on the
-        // producers alone.
+        // nothing to delete, then marks, ripples, re-opens the walk below what the
+        // mark flipped, resets and un-promotes on the producers alone.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
@@ -797,6 +797,7 @@ mod tests {
                 none.clone(),
                 none.clone(),
                 none.clone(),
+                none.clone(),
                 none,
             ])
             .append_exec_results(vec![
@@ -804,7 +805,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                7
+                9
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -815,11 +816,12 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            18,
+            21,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
              producers of the hash, the wholeness they had, the delete that finds \
-             nothing, anchor lock, mark, ripple, reset, owners, un-promote, and the \
-             raised, locked recompute of what the producers now demand: {log:?}"
+             nothing, anchor lock, mark, ripple, the raised, locked recompute below \
+             what the mark flipped, reset, owners, un-promote, and the raised, locked \
+             recompute of what the producers now demand: {log:?}"
         );
         assert!(
             !log.iter()

@@ -131,7 +131,10 @@
 //! A flip re-checks exactly one of the gate's four inputs. An anchor's own queue
 //! membership is not a function of its own `fetchable`, so neither flip touches it:
 //! [`lost_fetchability`] moves the DEPENDENTS of the anchors it flipped and never the
-//! anchors themselves. The other three inputs each need their own call. A finished walk
+//! anchors themselves. What it does re-open is the walk BELOW them: an anchor that
+//! stopped being fetchable is open, what its outputs reference is wanted again, and
+//! nothing else would ask, so it recomputes demand from the flipped rows. The other
+//! three inputs each need their own call. A finished walk
 //! setting `walked` is [`promote_closure`]; a `build_job` appearing, a `.drv` becoming
 //! whole and demand arriving are [`promote`]; a `.drv` ceasing to be whole is
 //! [`unpromote_drv_owners`]; demand going away is [`unpromote_ungated`] over what
@@ -150,7 +153,8 @@
 //! That agreement is verified once, by review, at the commit that introduces both.
 
 use crate::graph_sql::{
-    eval_closure_cte, fetchable_predicate, gates_predicate, promotable_predicate,
+    builder_predicate, eval_closure_cte, fetchable_predicate, gates_predicate, open_predicate,
+    promotable_predicate,
 };
 use crate::promotion::{returned_derivations, returned_transitions, transitions_from};
 use crate::status::TransitionChange;
@@ -585,8 +589,14 @@ where
 
 /// Flip the locked anchors to not fetchable where the predicate no longer holds,
 /// increment their direct dependents' counters, and pull the queued dependents back to
-/// `Created`. The returned transitions are `Queued` to `Created`; a dependent that was
-/// `Created`, `Building` or terminal only counts up.
+/// `Created`; a dependent that was `Created`, `Building` or terminal only counts up.
+///
+/// An anchor that stops being fetchable is open again, so the walk below it is
+/// re-opened here too: demand is recomputed from the flipped anchors and the queue
+/// settled against it, in the flip's own transaction. A `Completed` anchor whose
+/// closure just lost a path is the only way the hole below it is reached, and a
+/// retire that dropped the flag and asked for nothing left 47 builders waiting
+/// behind 22 such anchors.
 pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionChange>, DbErr> {
     let flipped = mark(lock, false).await?;
     if flipped.is_empty() {
@@ -597,11 +607,15 @@ pub async fn lost_fetchability(lock: &AnchorLock<'_>) -> Result<Vec<TransitionCh
         .txn
         .query_all_raw(RIPPLE_UP_QUERY.bind([ids(&flipped)]))
         .await?;
-
-    Ok(returned_transitions(rows)
+    let mut changes: Vec<TransitionChange> = returned_transitions(rows)
         .into_iter()
         .filter(|c| c.from != c.to)
-        .collect())
+        .collect();
+
+    let moved = recompute_demand(lock.txn, &flipped).await?;
+    changes.extend(settle_demand(lock.txn, &moved).await?);
+
+    Ok(changes)
 }
 
 crate::sql! {
@@ -692,26 +706,38 @@ pub async fn settle_skipped<C: ConnectionTrait>(db: &C) -> Result<Vec<Transition
 /// new value, so one statement serves a gain and a loss and no caller has to know
 /// which it caused.
 ///
-/// Only anchors whose demand can still move are rewritten. A terminal anchor keeps
-/// whatever it carried when it was pending, and the recompute that thaws it names it
-/// as a root, so the value it reads on the way back into the queue is computed and
-/// never inherited. `Skipped` has no such event - demand returning IS its thaw - so
-/// it is in the set this writes; leaving it out is what made the status absorbing.
-/// The scope is the whole pending table by design, so the scan the planner answers
-/// it with is the right plan and the tier says so.
+/// Every open anchor is rewritten and nothing else. A settled anchor keeps whatever
+/// it carried, nothing reads it there, and the event that opens it again recomputes
+/// it as a root. A `Completed` anchor whose closure has a hole is open, and its
+/// value is what the bounded recompute below it reads to seed the hole. The scope is
+/// the whole open table by design, so the scan the planner answers it with is the
+/// right plan and the tier says so.
 pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "{cte} \
+        "WITH RECURSIVE {cte} \
          UPDATE derivation_build db \
          SET demanded = (db.derivation IN (SELECT derivation FROM demanded)), \
              updated_at = (now() AT TIME ZONE 'UTC') \
-         WHERE db.status IN ({pending}) \
+         WHERE {open} \
            AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
          RETURNING db.derivation, db.demanded",
-        cte = crate::graph_sql::demand_closure_cte("SELECT derivation FROM entry_point", ""),
-        pending = status_sql::build_in(&crate::graph_sql::DEMANDABLE_STATUSES),
+        cte = crate::graph_sql::open_closure_cte_body("demanded", &open_entry_points(), ""),
+        open = open_predicate("db"),
     )
 });
+
+/// The roots of demand: every open anchor an entry point of a retained evaluation
+/// names, with its builder bit. A fetchable entry point seeds nothing, since what is
+/// below it is served from our cache.
+fn open_entry_points() -> String {
+    format!(
+        "SELECT NULL::uuid, db.derivation, ({builder}) FROM entry_point ep \
+         JOIN derivation_build db ON db.derivation = ep.derivation \
+         JOIN derivation w ON w.id = db.derivation WHERE {open}",
+        builder = builder_predicate("db", "w"),
+        open = open_predicate("db"),
+    )
+}
 
 crate::sql_lazy! {
     RECOUNT_DEMANDED = || RECOUNT_DEMANDED_SQL.as_str(),
@@ -746,52 +772,48 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
     // The roots enter the region as builders so the walk steps out of them once even
     // where they have just stopped being one; everything below is stepped through
     // only while it is.
-    let region = crate::graph_sql::pending_closure_cte(
+    let region = crate::graph_sql::open_closure_cte_body(
         "region",
         "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
+        "",
     );
     // The parent lookup is fenced with `OFFSET 0` so it stays correlated to the
     // region member. Unfenced, the planner hoists the whole EXISTS out and answers
     // it standalone - a sequential scan of every anchor filtered on `demanded`,
-    // which reads the graph to find the parents of a region of a few dozen.
-    // One lookup per edge kind, each demanding what its own arm of the walk would:
-    // a parent over a runtime edge needs only to be demanded and named, a parent
-    // over a build edge has to be a builder as well.
-    let parent = |kind: &str, join: &str, restrict: &str| {
-        format!(
-            "EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent FROM derivation_dependency e \
-                                    WHERE e.dependency = r.derivation AND e.kind IN ({kind}) \
-                                    OFFSET 0) pe \
-                     JOIN derivation_build p ON p.derivation = pe.parent {join} \
-                     WHERE p.demanded \
-                       AND p.derivation NOT IN (SELECT derivation FROM region){restrict} \
-                       AND EXISTS (SELECT 1 FROM build_job bj \
-                                   WHERE bj.derivation = p.derivation))"
-        )
-    };
-    let seed = format!(
-        "SELECT r.derivation FROM region r \
-         WHERE EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) \
-            OR {runtime} \
-            OR {build}",
-        runtime = parent("1, 2", "", ""),
-        build = parent(
-            "0, 2",
-            "JOIN derivation w ON w.id = p.derivation",
-            &format!(
-                " AND ({builder})",
-                builder = crate::graph_sql::builder_predicate("p", "w")
-            ),
-        ),
+    // which reads the graph to find the parents of a region of a few dozen. It
+    // demands what the walk's own step would: an open, demanded parent outside the
+    // region, over a runtime edge from anything and over any edge from a builder.
+    let parent = format!(
+        "EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent, e.kind FROM derivation_dependency e \
+                                WHERE e.dependency = r.derivation OFFSET 0) pe \
+                 JOIN derivation_build p ON p.derivation = pe.parent \
+                 JOIN derivation pw ON pw.id = p.derivation \
+                 WHERE p.demanded AND {open} \
+                   AND p.derivation NOT IN (SELECT derivation FROM region) \
+                   AND ({builder} OR pe.kind IN (1, 2)))",
+        open = open_predicate("p"),
+        builder = builder_predicate("p", "pw"),
     );
-    let closure = crate::graph_sql::demand_closure_cte(&seed, "SELECT derivation FROM region");
+    let seed = format!(
+        "SELECT NULL::uuid, r.derivation, ({builder}) FROM region r \
+         JOIN derivation_build rb ON rb.derivation = r.derivation \
+         JOIN derivation w ON w.id = rb.derivation \
+         WHERE {open} \
+           AND (EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) OR {parent})",
+        builder = builder_predicate("rb", "w"),
+        open = open_predicate("rb"),
+    );
+    let demanded = crate::graph_sql::open_closure_cte_body(
+        "demanded",
+        &seed,
+        "e.dependency IN (SELECT derivation FROM region)",
+    );
 
     format!(
-        "{region}, {rest} \
+        "WITH RECURSIVE {region}, {demanded} \
          SELECT DISTINCT r.derivation, \
                 (r.derivation IN (SELECT derivation FROM demanded)) AS demanded \
          FROM region r ORDER BY r.derivation",
-        rest = closure.trim_start_matches("WITH RECURSIVE "),
     )
 });
 
@@ -1365,16 +1387,19 @@ mod tests {
     }
 
     /// Losing fetchability increments every direct dependent and pulls the queued ones
-    /// back to Created; a Created or Building dependent only counts up.
+    /// back to Created; a Created or Building dependent only counts up. Then the walk
+    /// below the flipped anchor is re-opened: the demand recompute runs from exactly
+    /// the rows the mark returned, under its own raise, in the flip's transaction.
     #[tokio::test]
-    async fn lost_fetchability_unpromotes_queued_dependents() {
+    async fn lost_fetchability_unpromotes_queued_dependents_and_reopens_the_walk_below() {
         let x = DerivationId::now_v7();
         let d1 = DerivationId::now_v7();
         let d2 = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(1)])
+            .append_exec_results([exec(1), exec(0), exec(0)])
             .append_query_results([vec![drv(x)]])
             .append_query_results([vec![transition_row(d1, 1, 0), transition_row(d2, 0, 0)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -1390,10 +1415,20 @@ mod tests {
         );
 
         let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 3, "lock, mark, ripple: {log:?}");
+        assert_eq!(
+            log.len(),
+            6,
+            "lock, mark, ripple, then the raised, locked recompute below the flip: {log:?}"
+        );
         assert!(
             log[1].contains("SET fetchable = false") && log[1].contains("db.fetchable AND NOT"),
             "{log:?}"
+        );
+        assert!(
+            log[3].contains("SET LOCAL work_mem")
+                && log[4].contains(&x.to_string())
+                && log[5].contains("region(evaluation, derivation, builder)"),
+            "the recompute is rooted at the anchor the mark flipped: {log:?}"
         );
         assert!(
             log[2].contains("unready_deps + c.n")
@@ -1664,7 +1699,7 @@ mod tests {
     fn the_demand_recompute_writes_only_disagreeing_rows() {
         let sql = norm(RECOUNT_DEMANDED_SQL.as_str());
         assert!(
-            sql.contains("WITH RECURSIVE demanded(derivation) AS"),
+            sql.contains("WITH RECURSIVE demanded(evaluation, derivation, builder) AS"),
             "{sql}"
         );
         assert!(
@@ -1681,21 +1716,27 @@ mod tests {
         );
     }
 
-    /// The backstop is the last writer that can un-strand a skipped subtree, so it
-    /// has to be allowed to write the column on one. Restricted to the builder
-    /// statuses it read the walk's correct answer and then declined to apply it,
-    /// which is why the sweep reported `demand_drift=0` over four hundred anchors
-    /// it had itself skipped a pass earlier.
+    /// The backstop is the last writer that can un-strand a subtree, so it writes
+    /// every open anchor: a `Skipped` one, which demand returning thaws, and a
+    /// `Completed` one with a hole in its closure, whose value seeds the bounded
+    /// recompute below it. Restricted to a status list it read the walk's correct
+    /// answer and then declined to apply it, twice over.
     #[test]
-    fn the_backstop_rewrites_a_skipped_anchor() {
+    fn the_backstop_rewrites_every_open_anchor() {
         let sql = norm(RECOUNT_DEMANDED_SQL.as_str());
         assert!(
             sql.contains(&format!(
-                "WHERE db.status IN ({demandable})",
-                demandable = status_sql::build_in(&crate::graph_sql::DEMANDABLE_STATUSES),
+                "WHERE {} AND db.demanded <>",
+                norm(&open_predicate("db"))
             )),
-            "a skipped anchor is thawed BY demand returning, so the write must \
-             reach it: {sql}"
+            "{sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "JOIN derivation w ON w.id = db.derivation WHERE {} UNION",
+                norm(&open_predicate("db"))
+            )),
+            "a fetchable entry point seeds nothing: {sql}"
         );
     }
 
@@ -1703,7 +1744,7 @@ mod tests {
     /// demand is as stale as anything below it - its value was last written when it
     /// was terminal - so a recompute that only walked downward would relay busybox
     /// again the moment a retire reset it (#666). The seed comes from outside the
-    /// region, because a member kept by an outside builder re-demands its own
+    /// region, because a member kept by an outside demander re-demands its own
     /// subtree. The walk answers and the write is handed what it answered.
     #[tokio::test]
     async fn the_bounded_recompute_covers_its_roots_and_seeds_from_outside() {
@@ -1735,18 +1776,35 @@ mod tests {
             walk.contains("p.derivation NOT IN (SELECT derivation FROM region)"),
             "the seed must come from demanders OUTSIDE the region: {walk}"
         );
-        // The seed is a second expression of the walk's own arms, so it stops
-        // where they stop and nowhere else. A relay's runtime references are
-        // demanded here too: the worker fetches an output and nothing below it,
-        // and each producer of what the NAR names is relayed on its own.
+        // The seed is a second expression of the walk's own step, so it stops
+        // where the walk stops and nowhere else: an open, demanded parent, over a
+        // runtime edge from anything and over any edge from a builder. A relay's
+        // runtime references are demanded here too, and so are the references of
+        // a `Completed` anchor whose closure has a hole.
         assert!(
             walk.contains(
-                "e.kind IN (1, 2) OFFSET 0) pe JOIN derivation_build p \
-                 ON p.derivation = pe.parent WHERE p.demanded \
+                "WHERE e.dependency = r.derivation OFFSET 0) pe \
+                 JOIN derivation_build p ON p.derivation = pe.parent \
+                 JOIN derivation pw ON pw.id = p.derivation \
+                 WHERE p.demanded AND (NOT p.fetchable AND p.status NOT IN (4, 5, 6, 9)) \
                  AND p.derivation NOT IN (SELECT derivation FROM region) \
-                 AND EXISTS (SELECT 1 FROM build_job"
+                 AND ((pw.walked AND p.probed AND NOT p.substitutable \
+                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2)))"
             ),
-            "the seed's runtime parent reads nothing about the parent but its name: {walk}"
+            "{walk}"
+        );
+        assert!(
+            walk.contains(
+                "FROM region r JOIN derivation_build rb ON rb.derivation = r.derivation \
+                 JOIN derivation w ON w.id = rb.derivation \
+                 WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 5, 6, 9)) \
+                 AND (EXISTS (SELECT 1 FROM entry_point ep"
+            ),
+            "a settled root seeds nothing, and a seed carries its own builder bit: {walk}"
+        );
+        assert!(
+            !walk.contains("build_job"),
+            "a name is what adoption writes for what the walk reaches: {walk}"
         );
         assert!(
             walk.contains("FROM region r ORDER BY r.derivation"),
