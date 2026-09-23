@@ -163,6 +163,14 @@ so the phase fails if the two ever agree. Bound every wait and dump
 path (a leaked one wedges the phases after it), and lock only synthetic rows the
 rest of the test never reads.
 
+When the interleaving needs rows no fixture offers, give the phase its own schema:
+`CREATE TABLE <schema>.<t> (LIKE public.<t> INCLUDING DEFAULTS INCLUDING INDEXES)`
+copies the columns and indexes without the foreign keys, and
+`SET search_path = <schema>, public` then runs the real statements against rows
+the phase owns entirely. Take those statements from `gradient-sql-gate --print
+<NAME>` with their placeholders bound as literals rather than pasting them into
+the test: a pasted copy keeps passing after the code it copied has changed.
+
 **CLI tests drive the real binary.** `assert_cmd` runs `gradient` with `HOME`
 and `XDG_CONFIG_HOME` pointed at a `TempDir` holding a seeded `config.toml`, and
 `wiremock` stands in for the server. That covers argument parsing, config

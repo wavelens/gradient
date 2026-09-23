@@ -815,6 +815,234 @@ in {
       echo "claimrace_b $(grep INSERT $D/b.out)"
       """
 
+      # Phase 10k's two-session interleaving of a seed with a flip (#643). It runs the
+      # registry's own statements, printed by `gradient-sql-gate --print`, on rows it
+      # owns in a scratch schema whose tables copy the real ones without foreign keys,
+      # and after each arm the table-wide recount must find nothing to correct. The
+      # unguarded arm is the contrast: the same interleaving under the flip's lock
+      # alone must drift, or the shared keys are no longer what keeps the count right.
+      LOCK_GUARD_SH = r"""
+      set -u
+      D=/tmp/lockguard
+      APID=""
+      BPID=""
+      P=00000000-0000-4000-8000-00000000000a
+      DEP=00000000-0000-4000-8000-00000000000b
+      Q=00000000-0000-4000-8000-00000000000c
+
+      pg() { eval "$LG_PSQL"; }
+
+      cleanup() {
+        exec 3>&- 2>/dev/null
+        exec 4>&- 2>/dev/null
+        if [ -n "$APID" ]; then kill $APID 2>/dev/null || true; fi
+        if [ -n "$BPID" ]; then kill $BPID 2>/dev/null || true; fi
+        mkdir -p $D
+        printf '%s\n' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name LIKE 'lockguard_%';" | pg >/dev/null 2>&1 || true
+        rm -rf $D
+      }
+      trap cleanup EXIT INT TERM
+
+      q() { printf '%s\n' "SET search_path = lockguard, public;" "$1" | pg | grep -v '^SET$'; }
+
+      fail() {
+        echo "LOCKGUARD: $1"
+        echo "--- session a ---"; cat $D/a.out || true
+        echo "--- session b ---"; cat $D/b.out || true
+        q "SELECT pid, application_name, state, wait_event_type, wait_event, left(query, 90) FROM pg_stat_activity WHERE application_name LIKE 'lockguard_%' ORDER BY pid"
+        exit 1
+      }
+
+      wait_state() {
+        i=0
+        while [ $i -lt 60 ]; do
+          if [ "$(q "SELECT count(*) FROM pg_stat_activity WHERE $1")" = "1" ]; then
+            return 0
+          fi
+          i=$((i + 1))
+          sleep 1
+        done
+        fail "timeout: $2"
+      }
+
+      stmt() { $LG_GATE --print "$1"; }
+
+      # The registry's text with its placeholders bound to literals: the phase runs the
+      # statements the server runs, not a copy of them.
+      bind() {
+        s="$1"
+        s="''${s//\$1/$2}"
+        if [ $# -ge 3 ]; then s="''${s//\$2/$3}"; fi
+        printf '%s;' "$s"
+      }
+
+      LOCK_ANCHORS=$(stmt LOCK_ANCHORS) || exit 1
+      LOCK_SEED=$(stmt LOCK_SEED_ANCHORS) || exit 1
+      WHOLE_AMONG=$(stmt WHOLE_AMONG) || exit 1
+      SEED=$(stmt SEED_MISSING_RUNTIME_DEPS) || exit 1
+      DEPENDENTS=$(stmt RUNTIME_DEPENDENT_COUNTS) || exit 1
+      COUNT_DOWN=$(stmt COUNT_DOWN_RUNTIME) || exit 1
+      COUNT_UP=$(stmt COUNT_UP_RUNTIME) || exit 1
+      RECOUNT=$(stmt RECOUNT_MISSING_RUNTIME_DEPS) || exit 1
+
+      send_a() { printf '%s\n' "$1" >&3; }
+      send_b() { printf '%s\n' "$1" >&4; }
+      idle_tx() { wait_state "application_name = 'lockguard_$1' AND state = 'idle in transaction'" "$2"; }
+      idle() { wait_state "application_name = 'lockguard_$1' AND state = 'idle'" "$2"; }
+      blocked() { wait_state "application_name = 'lockguard_$1' AND wait_event_type = 'Lock'" "$2"; }
+
+      # P, D and Q each have one output. P's and Q's are in the cache; D's is when
+      # `$1` says so. No edges: each arm adds the ones it races on.
+      reset() {
+        q "TRUNCATE derivation_build, derivation_dependency, derivation_output, cached_path;
+           INSERT INTO derivation_build (id, derivation, created_at, updated_at)
+             SELECT uuidv7(), d, now(), now() FROM unnest(ARRAY['$P', '$DEP', '$Q']::uuid[]) d;
+           INSERT INTO derivation_output (id, derivation, name, hash, package, created_at)
+             VALUES (uuidv7(), '$P', 'out', 'lgp', 'p', now()),
+                    (uuidv7(), '$DEP', 'out', 'lgd', 'd', now()),
+                    (uuidv7(), '$Q', 'out', 'lgq', 'q', now());
+           INSERT INTO cached_path (id, hash, package, file_hash, created_at)
+             VALUES (uuidv7(), 'lgp', 'p', 'sha256:p', now()), (uuidv7(), 'lgq', 'q', 'sha256:q', now());" >/dev/null
+        if [ "$1" = present ]; then
+          q "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());" >/dev/null
+        fi
+        : > $D/a.out
+        : > $D/b.out
+      }
+
+      recount() {
+        n=$(printf '%s\n' "SET search_path = lockguard, public;" "$RECOUNT;" | pg | grep '^UPDATE' | awk '{print $2}')
+        if grep -q ERROR $D/a.out $D/b.out; then fail "$1: a session reported an error"; fi
+        echo "lockguard $1: recount wrote $n"
+      }
+
+      rm -rf $D
+      mkdir -p $D
+      q "DROP SCHEMA IF EXISTS lockguard CASCADE; CREATE SCHEMA lockguard;
+         CREATE TABLE lockguard.derivation_build (LIKE public.derivation_build INCLUDING DEFAULTS INCLUDING INDEXES);
+         CREATE TABLE lockguard.derivation_dependency (LIKE public.derivation_dependency INCLUDING DEFAULTS INCLUDING INDEXES);
+         CREATE TABLE lockguard.derivation_output (LIKE public.derivation_output INCLUDING DEFAULTS INCLUDING INDEXES);
+         CREATE TABLE lockguard.cached_path (LIKE public.cached_path INCLUDING DEFAULTS INCLUDING INDEXES);" >/dev/null
+      mkfifo $D/a.in
+      mkfifo $D/b.in
+      reset absent
+      pg < $D/a.in >> $D/a.out 2>&1 &
+      APID=$!
+      pg < $D/b.in >> $D/b.out 2>&1 &
+      BPID=$!
+      exec 3> $D/a.in
+      exec 4> $D/b.in
+      send_a "SET application_name = 'lockguard_a'; SET search_path = lockguard, public;"
+      send_b "SET application_name = 'lockguard_b'; SET search_path = lockguard, public;"
+
+      # 1. The flip holds D first. The seed of P waits on D's key, so it counts D after
+      # the flip committed and the ripple, which could not see P's edge, owes P nothing.
+      send_b "BEGIN;"
+      send_b "$(bind "$LOCK_ANCHORS" "'{$DEP}'")"
+      send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
+      idle_tx b "flip-first: the flip never held D"
+      send_a "BEGIN;"
+      send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
+      send_a "$(bind "$LOCK_SEED" "'{$P}'")"
+      blocked a "flip-first: the seed of P did not wait on D's key"
+      send_b "$(bind "$SEED" "'{$DEP}'" "'{t}'")"
+      send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
+      send_b "COMMIT;"
+      idle b "flip-first: the flip never committed"
+      idle_tx a "flip-first: the seed never resumed"
+      send_a "$(bind "$SEED" "'{$P}'" "'{f}'")"
+      send_a "COMMIT;"
+      idle a "flip-first: the seed never committed"
+      recount flip-first
+
+      # The same interleaving under the flip's own lock, which names no dependency: the
+      # seed does not wait, counts D as a hole, and nothing ever counts it down. The
+      # contrast is the assertion that the shared keys are what makes arm 1 right.
+      reset absent
+      send_b "BEGIN;"
+      send_b "$(bind "$LOCK_ANCHORS" "'{$DEP}'")"
+      send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
+      idle_tx b "unguarded: the flip never held D"
+      send_a "BEGIN;"
+      send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
+      send_a "$(bind "$LOCK_ANCHORS" "'{$P}'")"
+      send_a "$(bind "$SEED" "'{$P}'" "'{f}'")"
+      idle_tx a "unguarded: the seed blocked without the shared keys"
+      send_b "$(bind "$SEED" "'{$DEP}'" "'{t}'")"
+      send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
+      send_b "COMMIT;"
+      idle b "unguarded: the flip never committed"
+      send_a "COMMIT;"
+      idle a "unguarded: the seed never committed"
+      recount unguarded
+
+      # 2. The seed holds D's key first. The flip waits for it, then its ripple sees P's
+      # committed edge and counts P down.
+      reset absent
+      send_a "BEGIN;"
+      send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
+      send_a "$(bind "$LOCK_SEED" "'{$P}'")"
+      send_a "$(bind "$SEED" "'{$P}'" "'{f}'")"
+      idle_tx a "seed-first: the seed never held D's key"
+      send_b "BEGIN;"
+      send_b "$(bind "$LOCK_ANCHORS" "'{$DEP}'")"
+      blocked b "seed-first: the flip did not wait on the seed"
+      send_a "COMMIT;"
+      idle a "seed-first: the seed never committed"
+      idle_tx b "seed-first: the flip never resumed"
+      send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
+      send_b "$(bind "$SEED" "'{$DEP}'" "'{t}'")"
+      send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
+      send_b "$(bind "$COUNT_DOWN" "'{$P}'" "'{1}'")"
+      send_b "COMMIT;"
+      idle b "seed-first: the flip never committed"
+      grep -q "^$P|1$" $D/b.out || fail "seed-first: the ripple did not see P's edge"
+      recount seed-first
+
+      # 3. A retire of D against a seed of a second referrer Q: the retire's read of D's
+      # wholeness waits for Q's seed, and its count-up then reaches both referrers.
+      reset present
+      q "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);" >/dev/null
+      send_a "BEGIN;"
+      send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$Q', '$DEP', 1);"
+      send_a "$(bind "$LOCK_SEED" "'{$Q}'")"
+      send_a "$(bind "$SEED" "'{$Q}'" "'{f}'")"
+      idle_tx a "unwhole: the seed of Q never held D's key"
+      send_b "BEGIN;"
+      send_b "$(bind "$WHOLE_AMONG" "'{$DEP}'")"
+      blocked b "unwhole: the retire did not wait on the seed"
+      send_a "COMMIT;"
+      idle a "unwhole: the seed never committed"
+      idle_tx b "unwhole: the retire never resumed"
+      send_b "DELETE FROM cached_path WHERE hash = 'lgd';"
+      send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
+      send_b "$(bind "$COUNT_UP" "'{$P,$Q}'" "'{1,1}'")"
+      send_b "COMMIT;"
+      idle b "unwhole: the retire never committed"
+      grep -q "^$Q|1$" $D/b.out || fail "unwhole: the ripple did not see Q's edge"
+      recount unwhole
+
+      # 4. Two seeds sharing D hold its key shared, and neither waits for the other.
+      reset present
+      send_a "BEGIN;"
+      send_a "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);"
+      send_a "$(bind "$LOCK_SEED" "'{$P}'")"
+      idle_tx a "shared: the first seed never held D's key"
+      send_b "BEGIN;"
+      send_b "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$Q', '$DEP', 1);"
+      send_b "$(bind "$LOCK_SEED" "'{$Q}'")"
+      idle_tx b "shared: the second seed waited on the first"
+      send_a "$(bind "$SEED" "'{$P}'" "'{f}'")"
+      send_b "$(bind "$SEED" "'{$Q}'" "'{f}'")"
+      send_a "COMMIT;"
+      send_b "COMMIT;"
+      idle a "shared: the first seed never committed"
+      idle b "shared: the second seed never committed"
+      recount shared
+
+      q "DROP SCHEMA lockguard CASCADE;" >/dev/null
+      """
+
       start_all()
 
       # ── Phase 1: services come up and the worker authenticates ────────────
@@ -2584,6 +2812,22 @@ in {
       assert "claimrace_a INSERT 0 1" in out, f"the first claim did not win: {out}"
       assert "claimrace_b INSERT 0 0" in out, f"the second claim inserted a duplicate: {out}"
       assert open_rows == "1", f"{open_rows} open rows for one job key"
+
+      # ── Phase 10k: a seed and a flip see each other (#643) ────────────────
+      # A seed counts its dependencies under shared advisory keys, a flip holds its
+      # anchor's key exclusively, so whichever runs second reads the other's rows.
+      banner("Phase 10k: a seed and a flip see each other through the anchor keys (#643)")
+      server.succeed(f"cat > /tmp/lockguard.sh <<'LOCKGUARD'\n{LOCK_GUARD_SH}\nLOCKGUARD")
+      out = server.succeed(
+          "LG_PSQL='su postgres -c \"psql -X -At -d gradient\"' "
+          "LG_GATE=${pkgs.gradient.gate}/bin/gradient-sql-gate bash /tmp/lockguard.sh 2>&1"
+      )
+      print(out)
+      for arm in ("flip-first", "seed-first", "unwhole", "shared"):
+          assert f"lockguard {arm}: recount wrote 0" in out, f"arm {arm} drifted:\n{out}"
+      assert "lockguard unguarded: recount wrote 1" in out, (
+          f"the unguarded arm did not drift, so the keys are not what the others prove:\n{out}"
+      )
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")

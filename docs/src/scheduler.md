@@ -74,6 +74,20 @@ state: a batch's stubs, records, edges, anchors and jobs are one transaction
 that either lands whole or fails to its caller, and a batch still queued for the
 next flush fails the same way.
 
+The counters stay right without the actor's serialisation, which is what lets a
+second writer (another instance, or a pool of commit writers) share them. Every
+counter a seed writes absolutely, `missing_runtime_deps` and `unready_deps`, is
+counted over the anchor's dependencies while their advisory keys are held shared;
+every flip of an anchor's wholeness or fetchability holds that anchor's key
+exclusively before its ripple reads the edges into it. Whichever of a seed and a
+concurrent flip comes second waits for the first to commit and reads its rows, so
+the ripple sees the seed's new edge or the seed sees the flip. Shared keys never
+wait on each other, so the hundreds of thousands of `.drv` NARs that reference
+`source-stdenv.sh` queue on nothing. A deadlock between two ripples is retried.
+`demanded` is the exception: a demand recompute locks only its roots, and the
+sweep's `recount_demanded` corrects a lost one, which at worst leaves an anchor
+`Skipped` until the next sweep.
+
 #### Promotion
 
 Readiness is three maintained columns on the anchor, one per edge kind plus the

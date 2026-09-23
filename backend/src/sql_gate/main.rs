@@ -40,6 +40,10 @@ struct Cli {
     /// Print the registry and exit, without touching a database.
     #[arg(long)]
     list: bool,
+    /// Print one registered statement's text and exit, for a test that has to run
+    /// the exact SQL the server runs.
+    #[arg(long, value_name = "NAME")]
+    print: Option<String>,
     /// Divides the amplification targets; 1 is the full production shape.
     #[arg(long, default_value_t = 1)]
     scale: u32,
@@ -66,6 +70,14 @@ async fn main() -> Result<()> {
 
     if cli.list {
         list();
+        return Ok(());
+    }
+
+    if let Some(name) = &cli.print {
+        println!(
+            "{}",
+            statement_text(name).context("no registered statement by that name")?
+        );
         return Ok(());
     }
 
@@ -99,6 +111,12 @@ fn missing_crates() -> Vec<&'static str> {
         .collect()
 }
 
+fn statement_text(name: &str) -> Option<String> {
+    registry()
+        .find(|query| query.name == name)
+        .map(|query| query.text().into_owned())
+}
+
 fn list() {
     let mut queries: Vec<_> = registry().collect();
     queries.sort_by_key(|query| (query.file, query.line));
@@ -115,4 +133,19 @@ fn list() {
     }
 
     println!("{} registered statements", queries.len());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::statement_text;
+
+    #[test]
+    fn print_answers_a_registered_name_with_its_text_and_nothing_else() {
+        for (_, link) in super::LINKED {
+            link();
+        }
+        let text = statement_text("LOCK_SEED_ANCHORS").expect("registered");
+        assert!(text.contains("pg_advisory_xact_lock_shared"), "{text}");
+        assert!(statement_text("NO_SUCH_STATEMENT").is_none());
+    }
 }
