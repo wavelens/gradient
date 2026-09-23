@@ -8,63 +8,50 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { DashboardComponent } from './dashboard.component';
-import { ProjectsService } from '@core/services/projects.service';
-import { CachesService } from '@core/services/caches.service';
-import { Cache, Project } from '@core/models';
+import { DashboardService } from '@core/services/dashboard.service';
+import { StarsService } from '@core/services/stars.service';
+import { CommandPaletteService } from '@shared/chrome/command-palette/command-palette.service';
 
-const PROJECT = {
-  id: 'p1',
-  name: 'acme',
-  display_name: 'Acme',
-  description: 'Ships things',
-  public: false,
-  hide_build_requests: false,
-  managed: false,
-  role: 'Admin',
-} as Project;
-
-const CACHE = {
-  id: 'c1',
-  name: 'shared',
-  display_name: 'Shared',
-  description: 'The shared cache',
-  active: true,
-  priority: 30,
-  local_priority: null,
-  max_storage_gb: 10,
-  public: false,
-  managed: false,
-  can_edit: true,
-} as Cache;
-
-function render(): HTMLElement {
+function render(rail: { projects: unknown[]; caches: unknown[]; operations: boolean }) {
   TestBed.configureTestingModule({
     imports: [DashboardComponent],
     providers: [
       provideRouter([]),
-      { provide: ProjectsService, useValue: { getProjects: () => of({ items: [PROJECT] }) } },
-      { provide: CachesService, useValue: { getCaches: () => of({ items: [CACHE] }) } },
+      { provide: StarsService, useValue: { set: () => of(true) } },
+      { provide: DashboardService, useValue: {
+        rail: () => of(rail),
+        stats: () => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { online: 0, busy_pct: 0 }, queue_wait_p50_ms: 0 }),
+        tasks: () => of({ counts: { all: 0, failing: 0, worse: 0, starred: 0 }, total: 0, tasks: [] }),
+        activity: () => of({ days: [] }),
+      } },
     ],
   });
-  const fixture = TestBed.createComponent(DashboardComponent);
-  fixture.detectChanges();
-  return fixture.nativeElement as HTMLElement;
+  const f = TestBed.createComponent(DashboardComponent);
+  f.detectChanges();
+  f.detectChanges();
+  return f.nativeElement as HTMLElement;
 }
 
 describe('DashboardComponent', () => {
-  it('navigates from every card, index counts included', () => {
-    const links = Array.from(render().querySelectorAll('gr-nav-card a')).map((a) =>
-      a.getAttribute('href'),
-    );
-    expect(links).toEqual(['/projects', '/caches', '/project/acme', '/caches/shared']);
+  it('routes a new user to the first steps only', () => {
+    const root = render({ projects: [], caches: [], operations: false });
+    expect(root.querySelector('app-dashboard-start')).not.toBeNull();
+    expect(root.querySelector('app-dashboard-task-table')).toBeNull();
+    expect(root.querySelector('app-dashboard-stats')).toBeNull();
+    expect(root.querySelector('app-dashboard-rail')?.classList).toContain('hidden');
   });
 
-  it('puts the entity state on the card meta line rather than in its own box', () => {
-    const root = render();
-    expect(root.querySelector('.card')).toBeNull();
-    const meta = Array.from(root.querySelectorAll('.nav-card__meta')).map((m) =>
-      m.textContent?.replace(/\s+/g, ' ').trim(),
-    );
-    expect(meta).toEqual(['', '', 'Admin', 'Active Priority 30']);
+  it('shows the router blocks once the user has something', () => {
+    const root = render({ projects: [{ name: 'p', display_name: 'P', starred: false, tier: 'member', status: null, task_count: 1 }], caches: [], operations: false });
+    for (const sel of ['app-dashboard-stats', 'app-dashboard-task-table', 'app-dashboard-activity', 'app-dashboard-rail', '.palette-trigger']) {
+      expect(root.querySelector(sel)).not.toBeNull();
+    }
+    expect(root.querySelector('app-dashboard-start')).toBeNull();
+  });
+
+  it('opens the command palette from the search field', () => {
+    const root = render({ projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }], operations: false });
+    (root.querySelector('.palette-trigger') as HTMLElement).click();
+    expect(TestBed.inject(CommandPaletteService).isOpen()).toBe(true);
   });
 });

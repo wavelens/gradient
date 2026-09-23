@@ -4,75 +4,32 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
-import { forkJoin } from 'rxjs';
-import { ProjectsService } from '@core/services/projects.service';
-import { CachesService } from '@core/services/caches.service';
-import {
-  BadgeComponent,
-  CardGridComponent,
-  EmptyStateComponent,
-  LoadingSpinnerComponent,
-  NavCardComponent,
-  PageLayoutComponent,
-} from '@shared/ui';
-import { Project, Cache } from '@core/models';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { PageLayoutComponent } from '@shared/ui';
+import { CommandPaletteService } from '@shared/chrome/command-palette/command-palette.service';
+import { DashboardStatsComponent } from './stats/dashboard-stats.component';
+import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.component';
+import { DashboardActivityComponent } from './activity/dashboard-activity.component';
+import { DashboardRailComponent } from './rail/dashboard-rail.component';
+import { DashboardStartComponent } from './start/dashboard-start.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
   imports: [
-    CommonModule,
-    RouterModule,
-    LoadingSpinnerComponent,
-    EmptyStateComponent,
-    CardGridComponent,
-    NavCardComponent,
     PageLayoutComponent,
-    BadgeComponent,
+    DashboardStatsComponent,
+    DashboardTaskTableComponent,
+    DashboardActivityComponent,
+    DashboardRailComponent,
+    DashboardStartComponent,
   ],
   templateUrl: './dashboard.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dashboard.component.scss',
 })
-export class DashboardComponent implements OnInit {
-  private projectsService = inject(ProjectsService);
-  private cachesService = inject(CachesService);
-
-  loading = signal(true);
-  projects = signal<Project[]>([]);
-  caches = signal<Cache[]>([]);
-
-  ngOnInit(): void {
-    this.loadDashboardData();
-  }
-
-  private loadDashboardData(): void {
-    this.loading.set(true);
-
-    forkJoin({
-      projects: this.projectsService.getProjects(),
-      caches: this.cachesService.getCaches(),
-    }).subscribe({
-      next: ({ projects, caches }) => {
-        this.projects.set(projects.items);
-        this.caches.set(caches.items);
-        this.loading.set(false);
-      },
-      error: (error) => {
-        console.error('Failed to load dashboard data:', error);
-        this.loading.set(false);
-      },
-    });
-  }
-
-  get recentProjects() {
-    return this.projects().slice(0, 5);
-  }
-
-  get recentCaches() {
-    return this.caches().slice(0, 5);
-  }
+export class DashboardComponent {
+  palette = inject(CommandPaletteService);
+  // null until the rail answers; the rail alone decides between first steps and the router blocks.
+  newUser = signal<boolean | null>(null);
 }

@@ -4,83 +4,21 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Dashboard" subtitle="Welcome back! Here's an overview of your Gradient workspace.">
-  @if (loading()) {
-    <gr-loading-spinner message="Loading dashboard..." />
-  } @else {
-    <!-- Stats Overview -->
-    <gr-card-grid class="dashboard-stats" min="250px">
-      <gr-nav-card icon="corporate_fare" title="{{ projects().length }}" description="Projects" [link]="['/projects']" />
-      <gr-nav-card icon="inventory_2" title="{{ caches().length }}" description="Caches" [link]="['/caches']" />
-    </gr-card-grid>
-
-    <!-- Recent Projects -->
-    <div class="dashboard-section">
-      <div class="section-header">
-        <h2>Projects</h2>
-        <a routerLink="/projects" class="view-all">View all →</a>
-      </div>
-
-      @if (projects().length > 0) {
-        <div class="card-list">
-          @for (project of recentProjects; track project.id) {
-            <gr-nav-card
-              icon="corporate_fare"
-              [title]="project.display_name || project.name"
-              [description]="project.description || 'No description'"
-              [link]="['/project', project.name]"
-            >
-              <div slot="meta">
-                @if (project.role) {
-                  <gr-badge>{{ project.role }}</gr-badge>
-                }
-              </div>
-            </gr-nav-card>
-          }
-        </div>
-      } @else {
-        <gr-empty-state
-          icon="corporate_fare"
-          title="No projects yet"
-          message="Create your first project to get started with Gradient"
-          actionLabel="Create Project"
-          (actionClick)="$any(null)"
-        />
+<gr-page-layout title="Dashboard" maxWidth="1240px">
+  <div class="layout" [class.layout--start]="newUser()">
+    <div class="main">
+      @if (newUser()) {
+        <app-dashboard-start />
+      } @else if (newUser() === false) {
+        <app-dashboard-stats />
+        <button type="button" class="palette-trigger" (click)="palette.open()">
+          <span>Jump to project, task, cache, commit, or paste a store path / hash</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <app-dashboard-task-table />
+        <app-dashboard-activity />
       }
     </div>
-
-    <!-- Recent Caches -->
-    <div class="dashboard-section">
-      <div class="section-header">
-        <h2>Caches</h2>
-        <a routerLink="/caches" class="view-all">View all →</a>
-      </div>
-
-      @if (caches().length > 0) {
-        <div class="card-list">
-          @for (cache of recentCaches; track cache.id) {
-            <gr-nav-card
-              icon="inventory_2"
-              [title]="cache.display_name || cache.name"
-              [description]="cache.description || 'No description'"
-              [link]="['/caches', cache.name]"
-            >
-              <div slot="meta">
-                <gr-badge [severity]="cache.active ? 'success' : 'danger'">
-                  {{ cache.active ? 'Active' : 'Inactive' }}
-                </gr-badge>
-                <span>Priority {{ cache.priority }}</span>
-              </div>
-            </gr-nav-card>
-          }
-        </div>
-      } @else {
-        <gr-empty-state
-          icon="inventory_2"
-          title="No caches yet"
-          message="Create a cache to store and share your Nix builds"
-        />
-      }
-    </div>
-  }
+    <app-dashboard-rail [class.hidden]="newUser()" (empty)="newUser.set($event)" />
+  </div>
 </gr-page-layout>
