@@ -42,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--random-durations", action="store_true", help="drop recorded durations, draw them from the timing"
     )
     spec.add_argument(
+        "--allow-failed", action="store_true", help="accept a Failed evaluation; its failed builds replay as failures"
+    )
+    spec.add_argument("--anonymize", action="store_true", help="name nodes n0, n1, ... instead of package names")
+    spec.add_argument(
         "--workers", default="", help="comma-separated workers the fixture runs on; they start with the cached paths"
     )
 
@@ -79,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
                     max_size=args.max_size,
                     random_durations=args.random_durations,
                     workers=[w for w in args.workers.split(",") if w],
+                    allow_failed=args.allow_failed,
+                    anonymize=args.anonymize,
                 )
             except store_spec.NotCompleted as e:
                 print(f"error: {e}", file=sys.stderr)

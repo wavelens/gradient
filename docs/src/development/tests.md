@@ -227,8 +227,10 @@ and `daemon-unittest`.
   the critical path and the overhead factor to `latency.jsonl` in the test's
   output.
 - **Replaying production.** `gradient-report <report.db> store-spec -o spec.nix`
-  turns a completed evaluation's report into a store spec with its edges,
-  references, sizes and (scaled) build durations.
+  turns a finished evaluation's report into a store spec with its edges,
+  references, sizes and (scaled) build durations. What was substituted or
+  already built before the run starts cached; `--allow-failed` replays failed
+  builds as failures, `--anonymize` replaces package names with `n0`, `n1`, ...
 
 ## Conventions
 

@@ -21,7 +21,16 @@ def path(name: str) -> str:
     return f"/nix/store/{HASH[name]}-{name}"
 
 
-def graph_db(file, *, eval_status: int = 5, collision: bool = False, cyclic: bool = False) -> None:
+def graph_db(
+    file,
+    *,
+    eval_status: int = 5,
+    collision: bool = False,
+    cyclic: bool = False,
+    statuses: dict | None = None,
+    jobs: str = "abc",
+    names: dict | None = None,
+) -> None:
     conn = sqlite3.connect(file)
     conn.executescript(
         """
@@ -38,19 +47,23 @@ def graph_db(file, *, eval_status: int = 5, collision: bool = False, cyclic: boo
         CREATE TABLE build_attempt (id TEXT, derivation_build TEXT, substitute INTEGER,
             build_started_at TEXT, build_finished_at TEXT);
         CREATE TABLE entry_point (id TEXT, derivation TEXT);
+        CREATE TABLE build_job (id TEXT, evaluation TEXT, derivation TEXT, derivation_build TEXT);
         """
     )
     conn.execute("INSERT INTO report_meta VALUES (?)", (SUPPORTED_SCHEMA,))
     conn.execute("INSERT INTO evaluation VALUES ('e', ?)", (eval_status,))
-    names = {"a": "source", "b": "source" if collision else "lib", "c": "app"}
+    names = names or {"a": "source", "b": "source" if collision else "lib", "c": "app"}
+    statuses = {"a": 3, "b": 3, "c": 3} | (statuses or {})
     for node in "abc":
         conn.execute(
             "INSERT INTO derivation VALUES (?, 'x86_64-linux', ?, ?, 0, 1, 0)",
             (f"d{node}", f"{node}drv{'0' * 28}", names[node]),
         )
         conn.execute(
-            "INSERT INTO derivation_build VALUES (?, ?, 3)", (f"b{node}", f"d{node}")
+            "INSERT INTO derivation_build VALUES (?, ?, ?)", (f"b{node}", f"d{node}", statuses[node])
         )
+        if node in jobs:
+            conn.execute("INSERT INTO build_job VALUES (?, 'e', ?, ?)", (f"j{node}", f"d{node}", f"b{node}"))
         conn.execute(
             "INSERT INTO build_attempt VALUES (?, ?, 0, '2026-09-01 10:00:00', '2026-09-01 10:00:02')",
             (f"a{node}", f"b{node}"),
@@ -171,3 +184,43 @@ def test_cli_writes_the_file(tmp_path):
     out = tmp_path / "store-spec.nix"
     assert main([str(tmp_path / "r.db"), "store-spec", "-o", str(out), "--name", "replay"]) == 0
     assert 'name = "replay";' in out.read_text()
+
+
+def test_substituted_and_previously_built_nodes_are_cached(tmp_path):
+    spec = spec_of(report(tmp_path, statuses={"a": 7}, jobs="c"))
+    d = spec["derivations"]
+    assert d["source"]["present"]["cache"] is True
+    assert d["lib"]["present"]["cache"] is True
+    assert d["app"]["present"]["cache"] is False
+    assert d["app"]["build"]["durationMs"] == 2000
+
+
+def test_is_cached_after_the_run_does_not_make_a_built_node_present(tmp_path):
+    file = tmp_path / "r.db"
+    graph_db(file)
+    with sqlite3.connect(file) as conn:
+        conn.execute("UPDATE derivation_output SET is_cached = 1")
+    spec = spec_of(open_report(file))
+    assert not any(n["present"]["cache"] for k, n in spec["derivations"].items() if not k.startswith("x-"))
+
+
+def test_failed_evaluation_needs_allow_failed_and_replays_the_failure(tmp_path):
+    conn = report(tmp_path, eval_status=6, statuses={"b": 4, "c": 6})
+    with pytest.raises(NotCompleted):
+        spec_of(conn)
+    d = spec_of(conn, allow_failed=True)["derivations"]
+    assert d["lib"]["build"]["outcome"] == "fail"
+    assert d["lib"]["build"]["failStatus"] == "PermanentFailure"
+    assert "outcome" not in d["app"]["build"]
+
+
+def test_keys_never_contain_dots(tmp_path):
+    spec = spec_of(report(tmp_path, names={"a": "python3.14-x", "b": "lib", "c": "app"}))
+    assert "python3_14-x" in spec["derivations"]
+    assert spec["derivations"]["lib"]["outputs"]["out"]["references"] == ["python3_14-x.out"]
+
+
+def test_anonymize_hides_names(tmp_path):
+    spec = spec_of(report(tmp_path, names={"a": "secret-host", "b": "lib", "c": "app"}), anonymize=True)
+    assert "secret" not in render_nix(spec)
+    assert sorted(spec["derivations"]) == ["n0", "n1", "n2", "n3"]

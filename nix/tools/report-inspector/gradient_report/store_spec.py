@@ -16,6 +16,11 @@ from .commands import BUILD_STATUS, EVALUATION_STATUS
 BUILDTIME = 0
 BUILD_COMPLETED = next(k for k, v in BUILD_STATUS.items() if v == "Completed")
 LEAF_SIZE = 64
+FAIL_STATUS = {
+    "FailedPermanent": "PermanentFailure",
+    "FailedTransient": "TransientFailure",
+    "FailedTimeout": "TimedOut",
+}
 
 
 class NotCompleted(Exception):
@@ -26,11 +31,12 @@ def warn(message: str) -> None:
     print(f"store-spec: {message}", file=sys.stderr)
 
 
-def check_completed(conn: sqlite3.Connection) -> None:
+def check_finished(conn: sqlite3.Connection, allow_failed: bool) -> None:
     row = conn.execute("SELECT status FROM evaluation").fetchone()
     status = EVALUATION_STATUS.get(int(row[0])) if row else None
-    if status != "Completed":
-        raise NotCompleted(f"evaluation status is {status or 'missing'}, not Completed")
+    accepted = {"Completed", "Failed"} if allow_failed else {"Completed"}
+    if status not in accepted:
+        raise NotCompleted(f"evaluation status is {status or 'missing'}, not {' or '.join(sorted(accepted))}")
 
     truncated = conn.execute(
         """SELECT "table" FROM report_manifest
@@ -40,11 +46,14 @@ def check_completed(conn: sqlite3.Connection) -> None:
         raise NotCompleted(f"report truncated: {[t[0] for t in truncated]}")
 
 
-def node_keys(rows) -> dict[str, str]:
+def node_keys(rows, anonymize: bool) -> dict[str, str]:
+    if anonymize:
+        ordered = sorted(rows, key=lambda r: r[2] or r[0])
+        return {drv_id: f"n{i}" for i, (drv_id, _, _) in enumerate(ordered)}
     keys: dict[str, str] = {}
     taken: set[str] = set()
     for drv_id, name, drv_hash in rows:
-        base = re.sub(r"[^A-Za-z0-9_.+-]", "-", name or "drv")
+        base = re.sub(r"[^A-Za-z0-9_+-]", "-", (name or "drv").replace(".", "_"))
         key = base if base not in taken else f"{base}-{(drv_hash or drv_id)[:8]}"
         taken.add(key)
         keys[drv_id] = key
@@ -92,16 +101,17 @@ def new_node(key: str, *, fixed_output=False, prefer_local=False, allow_subst=Tr
 
 
 class Graph:
-    def __init__(self, nodes: dict, path_owner: dict, max_size: int):
+    def __init__(self, nodes: dict, path_owner: dict, max_size: int, anonymize: bool):
         self.nodes = nodes
         self.path_owner = path_owner
         self.leaf_size = min(LEAF_SIZE, max_size)
+        self.anonymize = anonymize
 
     def owner_of(self, store_path: str) -> tuple[str, str]:
         ref_hash = store_path.rsplit("/", 1)[-1].split("-", 1)[0]
         if ref_hash in self.path_owner:
             return self.path_owner[ref_hash]
-        key = f"x-{ref_hash[:12]}"
+        key = f"n{len(self.nodes)}" if self.anonymize else f"x-{ref_hash[:12]}"
         if key not in self.nodes:
             leaf = new_node(key)
             leaf["outputs"]["out"] = {"size": self.leaf_size, "references": []}
@@ -135,24 +145,46 @@ class Graph:
                         pending.append(target["name"])
 
 
-def from_report(conn, *, name, time_scale, max_size, random_durations, workers) -> dict:
-    check_completed(conn)
+def build_statuses(conn: sqlite3.Connection) -> dict[str, str]:
+    rows = conn.execute("SELECT derivation, status FROM derivation_build")
+    return {drv: BUILD_STATUS.get(int(status), "Unknown") for drv, status in rows}
+
+
+def built_here(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute("SELECT derivation FROM build_job WHERE evaluation = (SELECT id FROM evaluation)")
+    return {r[0] for r in rows}
+
+
+def replay_build(node: dict, status: str, ran: bool, ms: float | None, time_scale: float) -> None:
+    if status == "Substituted" or (status == "Completed" and not ran):
+        node["present"]["cache"] = True
+    elif status in FAIL_STATUS:
+        node["build"].update(outcome="fail", failStatus=FAIL_STATUS[status])
+    elif ms is not None:
+        node["build"]["durationMs"] = int(ms * time_scale)
+
+
+def from_report(
+    conn, *, name, time_scale, max_size, random_durations, workers, allow_failed=False, anonymize=False
+) -> dict:
+    check_finished(conn, allow_failed)
     rows = conn.execute(
         """SELECT id, name, hash, is_fixed_output, prefer_local_build, allow_substitutes
            FROM derivation"""
     ).fetchall()
-    keys = node_keys([(r[0], r[1], r[2]) for r in rows])
+    keys = node_keys([(r[0], r[1], r[2]) for r in rows], anonymize)
+    statuses, ran = build_statuses(conn), built_here(conn)
     nodes = {}
     for drv_id, _, _, fod, local, subst in rows:
         node = new_node(keys[drv_id], fixed_output=bool(fod), prefer_local=bool(local), allow_subst=bool(subst))
         ms = None if random_durations else duration_ms(conn, drv_id)
-        node["build"]["durationMs"] = None if ms is None else int(ms * time_scale)
+        replay_build(node, statuses.get(drv_id, "Unknown"), drv_id in ran, ms, time_scale)
         nodes[keys[drv_id]] = node
 
     outputs = conn.execute(
         "SELECT derivation, name, hash, nar_size, is_cached, references_list FROM derivation_output"
     ).fetchall()
-    graph = Graph(nodes, {o[2]: (keys[o[0]], o[1]) for o in outputs if o[0] in keys}, max_size)
+    graph = Graph(nodes, {o[2]: (keys[o[0]], o[1]) for o in outputs if o[0] in keys}, max_size, anonymize)
 
     edges = conn.execute(
         "SELECT derivation, dependency FROM derivation_dependency WHERE kind = ?", (BUILDTIME,)
@@ -165,7 +197,7 @@ def from_report(conn, *, name, time_scale, max_size, random_durations, workers) 
             continue
         nodes[keys[drv_id]]["deps"].append(keys[dep_id])
 
-    for drv_id, out_name, _, nar_size, cached, refs in outputs:
+    for drv_id, out_name, _, nar_size, _, refs in outputs:
         if drv_id not in keys:
             continue
         key = keys[drv_id]
@@ -174,9 +206,6 @@ def from_report(conn, *, name, time_scale, max_size, random_durations, workers) 
             "size": min(int(nar_size or 0), max_size),
             "references": [r for r in references if r],
         }
-        if cached:
-            nodes[key]["present"]["cache"] = True
-            nodes[key]["build"]["durationMs"] = None
 
     graph.close_cache()
     for node in nodes.values():
