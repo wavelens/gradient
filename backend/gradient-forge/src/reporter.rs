@@ -136,6 +136,8 @@ pub struct PullRequestSnapshot {
     pub head_clone_url: Option<String>,
     /// `true` when the PR head repo differs from the base repo.
     pub is_fork: bool,
+    /// PR / MR title, the evaluation's display message as on a PR webhook.
+    pub title: Option<String>,
 }
 
 /// All parameters needed to report a CI status to an external provider.
@@ -562,6 +564,8 @@ impl CiReporter for GiteaReporter {
             head: GiteaPrRef,
             #[serde(default)]
             base: Option<GiteaPrRef>,
+            #[serde(default)]
+            title: Option<String>,
         }
         #[derive(Deserialize)]
         struct GiteaPrRef {
@@ -601,6 +605,7 @@ impl CiReporter for GiteaReporter {
             head_branch,
             head_clone_url,
             is_fork,
+            title: pr.title,
         }))
     }
 
@@ -930,6 +935,8 @@ impl CiReporter for GitlabReporter {
             source_project_id: Option<u64>,
             #[serde(default)]
             target_project_id: Option<u64>,
+            #[serde(default)]
+            title: Option<String>,
         }
         let mr: MrResponse = resp
             .json()
@@ -950,6 +957,7 @@ impl CiReporter for GitlabReporter {
             head_branch: mr.source_branch,
             head_clone_url: None,
             is_fork,
+            title: mr.title,
         }))
     }
 
@@ -1416,6 +1424,8 @@ struct GithubPrResponse {
     head: GithubPrRef,
     #[serde(default)]
     base: Option<GithubPrRef>,
+    #[serde(default)]
+    title: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1454,6 +1464,7 @@ fn github_pr_response_to_snapshot(pr: GithubPrResponse) -> PullRequestSnapshot {
         head_branch: pr.head.ref_,
         head_clone_url,
         is_fork,
+        title: pr.title,
     }
 }
 
@@ -1996,6 +2007,20 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pull_request_snapshot_carries_its_title() {
+        let pr: GithubPrResponse = serde_json::from_value(serde_json::json!({
+            "title": "feat: add thing",
+            "head": { "sha": "abc", "ref": "feature" },
+        }))
+        .expect("pull request response");
+
+        assert_eq!(
+            github_pr_response_to_snapshot(pr).title.as_deref(),
+            Some("feat: add thing")
+        );
+    }
 
     fn test_client() -> reqwest::Client {
         gradient_util::http::build_client().expect("build test http client")

@@ -390,7 +390,7 @@ async fn run_fresh_evaluation(ctx: &CommentDispatch<'_>, task_ids: &[TaskId]) ->
         Some(snapshot.head_branch.as_str()),
         "synchronize",
         commit_hash,
-        None,
+        snapshot.title.clone(),
         Some(ctx.sender.to_string()),
         approval_ctx,
         snapshot.head_clone_url.clone(),
