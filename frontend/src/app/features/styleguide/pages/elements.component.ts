@@ -5,6 +5,8 @@
  */
 
 import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { of } from 'rxjs';
+import { StarsService } from '@core/services/stars.service';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -22,6 +24,7 @@ import {
   MessageBannerComponent,
   MessageService,
   MetricChartComponent,
+  StarButtonComponent,
   StatCardComponent,
   StatusIconComponent,
   TableComponent,
@@ -38,9 +41,10 @@ import type { StatusPhase } from '@shared/evaluation';
     StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent,
-    LogoComponent, StatusIconComponent,
+    LogoComponent, StarButtonComponent, StatusIconComponent,
   ],
-  providers: [MessageService],
+  // The demo star toggles locally instead of writing the viewer's real stars.
+  providers: [MessageService, { provide: StarsService, useValue: { set: () => of(true) } }],
   templateUrl: './elements.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './demo.scss',

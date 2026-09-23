@@ -40,6 +40,7 @@ export * from './row-list/row.component';
 export * from './select-button/select-button.component';
 export * from './select/select.component';
 export * from './settings-section/settings-section.component';
+export * from './star-button/star-button.component';
 export * from './stat-card/stat-card.component';
 export * from './status-icon/status-icon.component';
 export * from './tab-switch/tab-switch.component';

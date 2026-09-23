@@ -1,0 +1,23 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+:host {
+  display: inline-flex;
+}
+
+.star-button {
+  display: inline-flex;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--gr-border);
+  cursor: pointer;
+
+  &:hover,
+  &--on {
+    color: var(--gr-amber-550);
+  }
+}
