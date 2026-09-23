@@ -14,6 +14,7 @@ pub mod build_requests;
 pub mod builds;
 pub mod caches;
 pub mod commits;
+pub mod dashboard;
 pub mod evals;
 pub mod forge_hooks;
 pub mod invites;
