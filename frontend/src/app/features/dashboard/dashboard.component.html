@@ -11,10 +11,6 @@
         <app-dashboard-start />
       } @else if (newUser() === false) {
         <app-dashboard-stats />
-        <button type="button" class="palette-trigger" (click)="palette.open()">
-          <span>Jump to project, task, cache, commit, or paste a store path / hash</span>
-          <kbd>/</kbd>
-        </button>
         <app-dashboard-task-table />
         <app-dashboard-activity />
       } @else {

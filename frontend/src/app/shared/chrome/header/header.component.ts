@@ -12,6 +12,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
+import { CommandPaletteService } from '../command-palette/command-palette.service';
 import { ConfigService } from '@core/services/config.service';
 
 @Component({
@@ -24,6 +25,7 @@ import { ConfigService } from '@core/services/config.service';
 })
 export class HeaderComponent {
   authService = inject(AuthService);
+  protected palette = inject(CommandPaletteService);
   protected router = inject(Router);
   private config = inject(ConfigService);
 

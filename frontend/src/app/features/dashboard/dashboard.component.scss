@@ -30,43 +30,6 @@
   min-width: 0;
 }
 
-.palette-trigger {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  background: none;
-  color: var(--gr-text-muted);
-  font: inherit;
-  text-align: left;
-  cursor: text;
-  transition: border-color $transition-fast;
-
-  &:hover {
-    border-color: var(--gr-border);
-  }
-
-  span {
-    overflow: hidden;
-    min-width: 0;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  kbd {
-    flex: none;
-    margin-left: auto;
-    padding: 1px 6px;
-    border: 1px solid var(--gr-border-subtle);
-    border-radius: $border-radius-sm;
-    font-family: inherit;
-    font-size: $font-size-xs;
-  }
-}
 
 .hidden {
   display: none;

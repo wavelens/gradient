@@ -10,7 +10,6 @@ import { NEVER, Observable, of } from 'rxjs';
 import { DashboardComponent } from './dashboard.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
-import { CommandPaletteService } from '@shared/chrome/command-palette/command-palette.service';
 
 type RailStub = { projects: unknown[]; caches: unknown[] };
 
@@ -45,16 +44,10 @@ describe('DashboardComponent', () => {
 
   it('shows the router blocks once the user has something', () => {
     const root = render({ projects: [{ name: 'p', display_name: 'P', starred: false, tier: 'member', status: null, task_count: 1 }], caches: [] });
-    for (const sel of ['app-dashboard-stats', 'app-dashboard-task-table', 'app-dashboard-activity', 'app-dashboard-rail', '.palette-trigger']) {
+    for (const sel of ['app-dashboard-stats', 'app-dashboard-task-table', 'app-dashboard-activity', 'app-dashboard-rail']) {
       expect(root.querySelector(sel)).not.toBeNull();
     }
     expect(root.querySelector('app-dashboard-start')).toBeNull();
-  });
-
-  it('opens the command palette from the search field', () => {
-    const root = render({ projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }] });
-    (root.querySelector('.palette-trigger') as HTMLElement).click();
-    expect(TestBed.inject(CommandPaletteService).isOpen()).toBe(true);
   });
 
   it('shows a loading line until the rail answers', () => {
@@ -62,10 +55,5 @@ describe('DashboardComponent', () => {
     expect(root.querySelector('gr-loading-spinner')).not.toBeNull();
     expect(root.querySelector('app-dashboard-stats')).toBeNull();
     expect(root.querySelector('app-dashboard-start')).toBeNull();
-  });
-
-  it('labels the palette shortcut', () => {
-    const user = { projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }] };
-    expect(render(user).querySelector('.palette-trigger kbd')!.textContent).toBe('/');
   });
 });

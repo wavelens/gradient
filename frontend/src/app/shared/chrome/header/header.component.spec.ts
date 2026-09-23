@@ -12,8 +12,9 @@ import { signal } from '@angular/core';
 import { HeaderComponent } from './header.component';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { CommandPaletteService } from '../command-palette/command-palette.service';
 
-function setup(registrationDisabled: boolean): ComponentFixture<HeaderComponent> {
+function setup(registrationDisabled: boolean, signedIn = false): ComponentFixture<HeaderComponent> {
   TestBed.configureTestingModule({
     imports: [HeaderComponent],
     providers: [
@@ -24,7 +25,7 @@ function setup(registrationDisabled: boolean): ComponentFixture<HeaderComponent>
         provide: AuthService,
         useValue: {
           user: signal(null),
-          isAuthenticated: () => false,
+          isAuthenticated: () => signedIn,
           logout: () => ({ subscribe: () => undefined }),
         },
       },
@@ -51,5 +52,17 @@ describe('HeaderComponent - registration visibility', () => {
   it('hides the Register link when registration is disabled', () => {
     const fixture = setup(true);
     expect(registerLink(fixture.nativeElement)).toBeNull();
+  });
+});
+
+describe('HeaderComponent - search', () => {
+  it('opens the command palette from the header search field', () => {
+    const root = setup(false, true).nativeElement as HTMLElement;
+    (root.querySelector('.search-trigger') as HTMLElement).click();
+    expect(TestBed.inject(CommandPaletteService).isOpen()).toBe(true);
+  });
+
+  it('shows no search field to a guest', () => {
+    expect((setup(false).nativeElement as HTMLElement).querySelector('.search-trigger')).toBeNull();
   });
 });

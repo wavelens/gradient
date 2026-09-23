@@ -11,7 +11,6 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 ## Page
 
 - **Stats**: CPU time, builds, cache size, workers busy and queue wait across your projects and public projects (all projects for superusers).
-- **Search**: opens the [command palette](#command-palette).
 - **Filter**: All, Failing, Starred, each with its count over all of your tasks. The selected filter is kept in the URL (`?filter=`).
     - Failing: the latest evaluation failed or has failing entry points.
 - **Task list**: the top 10 tasks. "Show all" lists every task, 25 per page. Each row shows `project / task` with the latest commit and its age, the last evaluations, and labelled values for entry points ok/total, the change in failing entry points against the previous evaluation and speed. Narrow screens drop the values.
@@ -44,7 +43,7 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 
 ## Command palette
 
-- Open it with `/` on any page outside a text field, or through the search field on the dashboard.
+- Open it with `/` on any page outside a text field, or through the search field in the header.
 - Move through the results with the arrow keys or Ctrl+J / Ctrl+K, open one with Enter, close with Escape.
 - It finds:
     - projects, tasks and caches by name (case-insensitive substring, starred first)

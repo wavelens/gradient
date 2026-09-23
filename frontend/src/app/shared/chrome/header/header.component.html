@@ -29,6 +29,14 @@
       </a>
     </nav>
 
+    @if (authService.isAuthenticated()) {
+      <button type="button" class="search-trigger" aria-label="Search" (click)="palette.open()">
+        <gr-icon name="search" size="sm" />
+        <span>Search</span>
+        <kbd>/</kbd>
+      </button>
+    }
+
     @if (authService.user(); as user) {
       <div class="header-user">
         <span class="user-name">{{ user.name }}</span>
