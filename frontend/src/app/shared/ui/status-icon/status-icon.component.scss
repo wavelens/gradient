@@ -1,0 +1,84 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+:host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  vertical-align: middle;
+  color: var(--phase-color);
+}
+
+:host([data-phase='queued']),
+:host([data-phase='running']) { --phase-color: var(--gr-status-info); }
+:host([data-phase='waiting']) { --phase-color: var(--gr-status-warning); }
+:host([data-phase='success']) { --phase-color: var(--gr-status-success); }
+:host([data-phase='failure']) { --phase-color: var(--gr-status-danger); }
+:host([data-phase='aborted']) { --phase-color: var(--gr-text-secondary); }
+
+svg { overflow: visible; }
+:host(.gr-status-icon--sm) svg { width: 16px; height: 16px; }
+:host(.gr-status-icon--md) svg { width: 20px; height: 20px; }
+
+svg * {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.spin,
+.body { transform-origin: 12px 12px; }
+
+.ring { stroke-dasharray: 100 0; }
+:host([data-phase='queued']) .ring { stroke-dasharray: 5 7.5; }
+:host([data-phase='running']) .ring { stroke-dasharray: 28 72; }
+:host([data-phase='waiting']) .ring,
+:host([data-phase='aborted']) .ring { opacity: 0.55; }
+
+.glyph { stroke-dasharray: 1; stroke-dashoffset: 1; opacity: 0; }
+:host([data-phase='success']) .check,
+:host([data-phase='failure']) .cross,
+:host([data-phase='aborted']) .slash,
+:host([data-phase='waiting']) .bar { stroke-dashoffset: 0; opacity: 1; }
+
+:host([data-phase='waiting']) .pause { animation: status-pulse 1.6s ease-in-out 600ms infinite; }
+
+:host([data-animate]) {
+  transition: color 200ms;
+
+  .ring { transition: stroke-dasharray 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms; }
+  .glyph { transition: stroke-dashoffset 120ms ease-in, opacity 120ms; }
+}
+
+:host([data-animate][data-phase='success']) .check,
+:host([data-animate][data-phase='failure']) .cross,
+:host([data-animate][data-phase='aborted']) .slash,
+:host([data-animate][data-phase='waiting']) .bar {
+  transition: stroke-dashoffset 220ms cubic-bezier(0.3, 0, 0.2, 1) 260ms, opacity 1ms 260ms;
+}
+
+:host([data-animate][data-phase='failure']) .cross.second,
+:host([data-animate][data-phase='waiting']) .bar.second { transition-delay: 340ms; }
+
+:host([data-animate][data-phase='success']) .body { animation: status-pop 260ms ease-out 480ms; }
+:host([data-animate][data-phase='failure']) .body { animation: status-shake 320ms ease-in-out 500ms; }
+
+@keyframes status-pop { 50% { transform: scale(1.14); } }
+@keyframes status-shake {
+  20%, 60% { transform: translateX(-1.5px); }
+  40%, 80% { transform: translateX(1.5px); }
+}
+@keyframes status-pulse { 50% { opacity: 0.35; } }
+
+@media (prefers-reduced-motion: reduce) {
+  :host,
+  svg * { transition: none !important; animation: none !important; }
+}

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -23,9 +23,11 @@ import {
   MessageService,
   MetricChartComponent,
   StatCardComponent,
+  StatusIconComponent,
   TableComponent,
   ToastComponent,
 } from '@shared/ui';
+import type { StatusPhase } from '@shared/evaluation';
 
 @Component({
   selector: 'app-sg-elements',
@@ -36,7 +38,7 @@ import {
     StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
     MetricChartComponent, ToastComponent, ButtonComponent,
     CardGridComponent,
-    LogoComponent,
+    LogoComponent, StatusIconComponent,
   ],
   providers: [MessageService],
   templateUrl: './elements.component.html',
@@ -50,6 +52,8 @@ export class ElementsComponent {
     'Queued', 'Fetching', 'EvaluatingFlake', 'EvaluatingDerivation',
     'Building', 'Waiting', 'Completed', 'Failed', 'Aborted',
   ] as const;
+  statusPhases: StatusPhase[] = ['queued', 'waiting', 'running', 'success', 'failure', 'aborted'];
+  statusPhase = signal<StatusPhase>('queued');
   chartSeries = [{ name: 'Completed', data: [12, 18, 9, 24, 21] }];
   chartCategories = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 

@@ -88,6 +88,16 @@
   <gr-eval-status-badge [status]="status" />
 }
 
+<h2>Status icon</h2>
+<p>One SVG per icon that morphs between phases. The first render is static; reduced motion switches instantly.</p>
+<gr-status-icon [phase]="statusPhase()" size="sm" />
+<gr-status-icon [phase]="statusPhase()" />
+@for (phase of statusPhases; track phase) {
+  <button grButton size="small" [label]="phase"
+          [severity]="phase === statusPhase() ? 'primary' : 'secondary'"
+          (click)="statusPhase.set(phase)"></button>
+}
+
 <h2>Charts</h2>
 <gr-metric-chart title="Throughput" type="line" [series]="chartSeries" [categories]="chartCategories" />
 
