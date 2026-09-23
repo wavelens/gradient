@@ -1,0 +1,115 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: $z-modal;
+  background: rgb(0 0 0 / 0.55);
+  animation: gr-overlay-fade $transition-base both;
+}
+
+.palette {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  z-index: $z-modal;
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - #{$spacing-xl}));
+  max-height: 70vh;
+  translate: -50% 0;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  color: var(--gr-text-primary);
+  box-shadow: var(--gr-shadow-modal);
+  overflow: hidden;
+  animation: gr-dialog-enter $transition-base both;
+}
+
+.palette__field {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 0 $spacing-md;
+  border-bottom: 1px solid var(--gr-border-subtle);
+  color: var(--gr-text-muted);
+}
+
+.palette__input {
+  flex: 1;
+  min-width: 0;
+  padding: $spacing-md 0;
+  background: none;
+  border: 0;
+  color: var(--gr-text-primary);
+  font: inherit;
+  outline: none;
+
+  &::placeholder { color: var(--gr-text-muted); }
+}
+
+.palette__results {
+  flex: 1;
+  margin: 0;
+  padding: $spacing-xs;
+  list-style: none;
+  overflow-y: auto;
+
+  &:empty { display: none; }
+}
+
+.palette__hit {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm;
+  border-radius: $border-radius-sm;
+  cursor: pointer;
+
+  &--active { background: var(--gr-surface-hover); }
+}
+
+.palette__kind,
+.palette__sublabel {
+  color: var(--gr-text-secondary);
+  font-size: $font-size-xs;
+}
+
+.palette__label {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__sublabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__star { color: var(--gr-amber-550); }
+
+.palette__note {
+  margin: 0;
+  padding: $spacing-md;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+
+  &--error { color: var(--gr-status-danger-text); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette,
+  .palette-backdrop { animation: none; }
+}

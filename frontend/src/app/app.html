@@ -6,6 +6,10 @@
 
 <app-header />
 
+@if (authService.isAuthenticated()) {
+  <app-command-palette />
+}
+
 <router-outlet />
 
 @if (showFooter()) {

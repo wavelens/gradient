@@ -10,12 +10,13 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
 import { HeaderComponent } from '@shared/chrome/header/header.component';
 import { FooterComponent } from '@shared/chrome/footer/footer.component';
+import { CommandPaletteComponent } from '@shared/chrome/command-palette/command-palette.component';
 import { AuthService } from '@core/services/auth.service';
 import { ThemeService } from '@core/services/theme.service';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, HeaderComponent, FooterComponent],
+  imports: [RouterOutlet, HeaderComponent, FooterComponent, CommandPaletteComponent],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.scss'

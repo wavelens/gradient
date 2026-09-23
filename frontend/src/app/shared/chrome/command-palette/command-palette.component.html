@@ -1,0 +1,60 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+@if (palette.isOpen()) {
+  <div class="palette-backdrop" (click)="palette.close()"></div>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Search">
+    <div class="palette__field">
+      <gr-icon name="search" size="sm" />
+      <input
+        #query
+        class="palette__input"
+        type="text"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-controls="palette-results"
+        [attr.aria-expanded]="result().hits.length > 0"
+        [attr.aria-activedescendant]="result().hits.length ? 'palette-hit-' + active() : null"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="Jump to a project, task, cache or commit, or paste a store path"
+        (input)="onInput($any($event.target).value)"
+        (keydown)="onKey($event)"
+      />
+    </div>
+
+    @if (result().failed) {
+      <p class="palette__note palette__note--error" role="alert">Search failed. Try again.</p>
+    }
+
+    <ul id="palette-results" class="palette__results" role="listbox" aria-label="Results">
+      @for (hit of result().hits; track hit.route; let i = $index) {
+        <li
+          [id]="'palette-hit-' + i"
+          class="palette__hit"
+          role="option"
+          [attr.aria-selected]="i === active()"
+          [class.palette__hit--active]="i === active()"
+          (mouseenter)="active.set(i)"
+          (click)="go(hit)"
+        >
+          <span class="palette__kind">{{ kindLabel[hit.kind] }}</span>
+          <span class="palette__label">
+            @if (hit.starred) {
+              <gr-icon class="palette__star" name="star" size="sm" />
+            }
+            {{ hit.label }}
+          </span>
+          <span class="palette__sublabel">{{ hit.sublabel }}</span>
+        </li>
+      }
+    </ul>
+
+    @if (!result().failed && !result().hits.length) {
+      <p class="palette__note">{{ result().query ? 'No results' : 'No starred items yet' }}</p>
+    }
+  </div>
+}
