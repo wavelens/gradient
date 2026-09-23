@@ -46,10 +46,13 @@ code {
   font-size: $font-size-sm;
 }
 
-// Overscroll shows the root background: header color above, footer color below.
+// Overscroll paints the root color: the header's near the top, the footer's near the bottom.
 html {
-  min-height: 100vh;
-  background: linear-gradient(to bottom, var(--gr-surface-sunken) 50%, var(--gr-surface-base) 50%);
+  background-color: var(--gr-surface-sunken);
+
+  &.overscroll-bottom {
+    background-color: var(--gr-surface-base);
+  }
 }
 
 body {

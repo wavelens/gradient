@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, DestroyRef, inject, computed, ChangeDetectionStrategy } from '@angular/core';
 import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
@@ -13,6 +13,7 @@ import { FooterComponent } from '@shared/chrome/footer/footer.component';
 import { CommandPaletteComponent } from '@shared/chrome/command-palette/command-palette.component';
 import { AuthService } from '@core/services/auth.service';
 import { ThemeService } from '@core/services/theme.service';
+import { followOverscroll } from '@core/overscroll/overscroll';
 
 @Component({
   selector: 'app-root',
@@ -25,6 +26,10 @@ export class App {
   authService = inject(AuthService);
   private router = inject(Router);
   private theme = inject(ThemeService);
+
+  constructor() {
+    inject(DestroyRef).onDestroy(followOverscroll(window));
+  }
 
   private routeData = toSignal(
     this.router.events.pipe(
