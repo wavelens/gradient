@@ -10,7 +10,7 @@ use crate::metrics_scope::MetricsScope;
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::dashboard::{Totals, cache_size, scoped_totals};
+use gradient_db::dashboard::{cache_size, scoped_totals};
 use gradient_scheduler::Scheduler;
 use gradient_types::*;
 use serde::Serialize;
@@ -68,10 +68,7 @@ pub async fn get_stats(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<DashboardStats>>> {
     let scope = MetricsScope::resolve(&state.web_db, &Some(user.clone())).await?;
-    let totals = match scope.project_in_list().as_deref() {
-        Some("") => Totals::default(),
-        filter => scoped_totals(&state.web_db, filter).await?,
-    };
+    let totals = scoped_totals(&state.web_db, scope.project_in_list().as_deref()).await?;
     Ok(ok_json(DashboardStats {
         cpu_time_ms: totals.cpu_time_ms,
         cpu_time_ms_7d: totals.cpu_time_ms_7d,

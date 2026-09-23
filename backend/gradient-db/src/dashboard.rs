@@ -459,10 +459,17 @@ crate::sql! {
         tier = Bulk;
 }
 
+fn no_projects(filter: Option<&str>) -> bool {
+    filter.is_some_and(str::is_empty)
+}
+
 pub async fn scoped_totals<C: ConnectionTrait>(
     db: &C,
     filter: Option<&str>,
 ) -> Result<Totals, DbErr> {
+    if no_projects(filter) {
+        return Ok(Totals::default());
+    }
     let Some(r) = db
         .query_one_raw(TOTALS.bind_built(totals_sql(filter), []))
         .await?
@@ -504,6 +511,9 @@ pub async fn activity<C: ConnectionTrait>(
     db: &C,
     filter: Option<&str>,
 ) -> Result<Vec<ActivityDay>, DbErr> {
+    if no_projects(filter) {
+        return Ok(Vec::new());
+    }
     db.query_all_raw(ACTIVITY.bind_built(activity_sql(filter), []))
         .await?
         .iter()
@@ -843,8 +853,21 @@ pub async fn search_names<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
     #[test]
     fn ilike_wildcards_in_the_query_match_literally() {
         assert_eq!(ilike_contains(r"50%_a\b"), r"%50\%\_a\\b%");
+    }
+
+    #[tokio::test]
+    async fn an_empty_project_scope_skips_the_queries() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        assert_eq!(
+            scoped_totals(&db, Some("")).await.unwrap(),
+            Totals::default()
+        );
+        assert!(activity(&db, Some("")).await.unwrap().is_empty());
+        assert!(db.into_transaction_log().is_empty());
     }
 }
