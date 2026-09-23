@@ -170,6 +170,35 @@ a commit on which nothing was built. A demand loss settles work without moving a
 the evaluations that name what lost it whether they are done; no anchor of theirs
 need have transitioned at all.
 
+#### Evaluation counters
+
+Neither reader counts anchors. Each evaluation carries five counters over the
+anchors its `build_job` rows name:
+
+- `named_anchors` - every named anchor
+- `active_anchors` - `graph_sql::blocks_evaluation`
+- `failed_anchors` - `BuildStatus::REQUEUEABLE`
+- `queued_anchors`, `building_anchors` - `Queued`, `Building`
+
+They move by triggers, so every writer of `derivation_build.status` or
+`demanded` and every `build_job` insert or delete moves them, raw SQL or ORM:
+
+- The triggers append signed rows to `evaluation_anchor_delta` and never lock the
+  `evaluation` row: no hot row, and no lock taken behind the anchor locks.
+- A `build_job` insert or delete takes its anchors `FOR SHARE` in `derivation`
+  order before it reads them, so a naming and a transition on one anchor always
+  see each other, in either commit order (e2e phase 10i).
+- The membership is the SQL function `evaluation_anchor_counts`; a unit test
+  holds its body to `graph_sql`, so a predicate change needs a migration.
+- Every dispatch tick folds the ledger into the columns in one
+  `DELETE ... RETURNING` statement under an advisory lock; an instance that
+  finds the lock taken skips, since the holder folds the same rows.
+- `eval_counters` reads the columns plus the evaluation's unfolded rows, so
+  `check_evaluation_done` is one read per terminal transition however large the
+  evaluation is.
+- The consistency sweep recounts every in-flight evaluation, clearing its ledger
+  in the snapshot that counted, and reports `eval_counter_drift`.
+
 Every transition that carries an anchor into or out of the builder statuses
 (`Created`, `Queued`, `Building`, `FailedTransient`) recomputes from it, and the
 transition-effects emitter is where that happens - the same one place the graph
@@ -355,7 +384,8 @@ queue against the gates in both directions, names for the live evaluations the
 open anchors they reach that nobody names any more (`adopted`, a repair like the
 drift counts), and logs what it repaired next to the two read-only alarms:
 terminal-success producers with an unbacked output, and `Building` evaluations
-with no non-terminal anchor left. The order is the order each column is read:
+whose counters say nothing blocks them. The evaluation counters are recounted
+between the two, so that alarm reads corrected values. The order is the order each column is read:
 the walk's bit before the demand walk that prunes on it, wholeness before the
 flag that reads it, the flag before the demand walk that stops at a fetchable
 anchor, and demand before the queue settle that promotes on it. The wholeness
@@ -1059,7 +1089,11 @@ cannot make progress, auto-unparking once the blocker clears:
   unmet `(architecture, required_features)` combinations when no connected
   worker can satisfy any pending build. Pending means what still blocks the
   evaluation, so an anchor nothing demands is not in the set, and an evaluation
-  with nothing left in it is finalized here rather than parked.
+  with nothing left in it is finalized here rather than parked. The counters
+  decide "named nothing", "nothing blocks" and "a build is running" without
+  reading an anchor; only otherwise are the pending anchors' systems read, and
+  that assessment is reused while the evaluation's counters and the pool are
+  unchanged, for at most 60 s (a relay flip moves no counter).
 - **Graph stuck** - the pool *can* build every pending anchor (so the `workers`
   reason would carry an empty `unmet` set) yet none is dispatchable: nothing in
   the pending set passes the dispatch gate and no in-flight build is left to fire
