@@ -108,6 +108,8 @@ tags:
     description: Authentication - login, register, OAuth/OIDC
   - name: user
     description: Current user profile, API keys, and settings
+  - name: dashboard
+    description: Personal dashboard - the viewer's task table
   - name: projects
     description: Project management, members, SSH keys, cache subscriptions
   - name: tasks
@@ -1197,6 +1199,185 @@ paths:
                   - id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
                     username: alice
                     name: Alice Example
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard/tasks:
+    get:
+      tags: [dashboard]
+      summary: Ranked task table of the current user
+      description: |-
+        Tasks of the viewer's projects plus starred tasks of public projects, PR-triggered evaluations excluded.
+        Ranked by tier (`starred_active`, `active`, `starred`, `member`), then newest latest evaluation first.
+        Active means a non-PR evaluation in the last 14 days. `counts` always covers every task; `total` is the number of tasks matching `filter`.
+      operationId: getDashboardTasks
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, failing, worse, starred]
+            default: all
+          description: '`failing`: latest evaluation failed or has failing entry points. `worse`: `delta > 0`.'
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: 1-based page; `0` is treated as `1`, a page past the end returns no tasks.
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+            default: 10
+          description: Clamped to 1-25.
+        - name: history
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 60
+            default: 30
+          description: Number of history bars per task, clamped to 1-60.
+      responses:
+        '200':
+          description: One page of ranked tasks
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [counts, total, tasks]
+                        properties:
+                          counts:
+                            type: object
+                            required: [all, failing, worse, starred]
+                            properties:
+                              all:
+                                type: integer
+                              failing:
+                                type: integer
+                              worse:
+                                type: integer
+                              starred:
+                                type: integer
+                          total:
+                            type: integer
+                          tasks:
+                            type: array
+                            items:
+                              type: object
+                              required: [project, task, starred, tier, latest, entry_points, delta, speed_ms, reliability, evaluations_per_week, history]
+                              properties:
+                                project:
+                                  type: string
+                                task:
+                                  type: string
+                                starred:
+                                  type: boolean
+                                tier:
+                                  type: string
+                                  enum: [starred_active, active, starred, member]
+                                latest:
+                                  type: object
+                                  nullable: true
+                                  description: Latest non-PR evaluation; `null` when there is none.
+                                  required: [id, status, commit, created_at]
+                                  properties:
+                                    id:
+                                      type: string
+                                      format: uuid
+                                    status:
+                                      $ref: '#/components/schemas/EvaluationStatus'
+                                    commit:
+                                      type: string
+                                      description: Commit hash, hex.
+                                    created_at:
+                                      type: string
+                                      format: date-time
+                                entry_points:
+                                  type: object
+                                  nullable: true
+                                  description: Entry point outcomes of the latest evaluation. `FailedTransient` builds count toward `total` only.
+                                  required: [ok, failing, total]
+                                  properties:
+                                    ok:
+                                      type: integer
+                                      description: Completed or Substituted.
+                                    failing:
+                                      type: integer
+                                      description: FailedPermanent, FailedTimeout, DependencyFailed or Aborted.
+                                    total:
+                                      type: integer
+                                delta:
+                                  type: integer
+                                  nullable: true
+                                  description: Failing entry points of the latest evaluation minus those of the previous terminal one; `null` while the latest is not terminal or there is no previous.
+                                speed_ms:
+                                  type: integer
+                                  nullable: true
+                                  description: Mean duration of the last 30 terminal evaluations.
+                                reliability:
+                                  type: number
+                                  nullable: true
+                                  description: Completed / (completed + failed) over 30 days; `null` without data.
+                                evaluations_per_week:
+                                  type: number
+                                  description: Evaluations over 28 days divided by 4.
+                                history:
+                                  type: array
+                                  description: Recent non-PR evaluations up to the latest, oldest first.
+                                  items:
+                                    type: object
+                                    required: [id, status, duration_ms, created_at]
+                                    properties:
+                                      id:
+                                        type: string
+                                        format: uuid
+                                      status:
+                                        $ref: '#/components/schemas/EvaluationStatus'
+                                      duration_ms:
+                                        type: integer
+                                        nullable: true
+                                      created_at:
+                                        type: string
+                                        format: date-time
+              example:
+                error: false
+                message:
+                  counts: { all: 1, failing: 0, worse: 0, starred: 1 }
+                  total: 1
+                  tasks:
+                    - project: infra
+                      task: hosts
+                      starred: true
+                      tier: starred_active
+                      latest:
+                        id: "fe0d108b-d4b5-423e-9ba2-52a43179cf84"
+                        status: Completed
+                        commit: "[hash1]"
+                        created_at: "2026-09-23T10:00:00"
+                      entry_points: { ok: 12, failing: 0, total: 12 }
+                      delta: 0
+                      speed_ms: 540000
+                      reliability: 0.95
+                      evaluations_per_week: 6.5
+                      history:
+                        - id: "fe0d108b-d4b5-423e-9ba2-52a43179cf84"
+                          status: Completed
+                          duration_ms: 510000
+                          created_at: "2026-09-23T10:00:00"
         '401':
           $ref: '#/components/responses/Unauthorized'
 

@@ -5,3 +5,4 @@
  */
 
 pub mod rank;
+pub mod tasks;
