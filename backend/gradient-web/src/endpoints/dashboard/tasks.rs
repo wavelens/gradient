@@ -252,6 +252,7 @@ mod tests {
         assert_eq!(page.total, 1);
         assert_eq!(page.counts.starred, 1);
         assert!(page.tasks.is_empty());
+        assert_eq!(db.into_transaction_log().len(), 1);
     }
 
     #[tokio::test]

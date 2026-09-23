@@ -14,10 +14,10 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
-    StarredActive = 1,
-    Active = 2,
-    Starred = 3,
-    Member = 4,
+    StarredActive,
+    Active,
+    Starred,
+    Member,
 }
 
 impl Tier {

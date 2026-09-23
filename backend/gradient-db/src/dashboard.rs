@@ -234,7 +234,7 @@ fn history_sql() -> String {
             FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = l.task AND {NON_PR} AND e.created_at <= l.created_at \
             ORDER BY e.created_at DESC LIMIT $2) h \
-        WHERE l.id = ANY($1::uuid[]) ORDER BY l.id, h.created_at"
+        WHERE l.id = ANY($1::uuid[]) ORDER BY h.created_at"
     )
 }
 
