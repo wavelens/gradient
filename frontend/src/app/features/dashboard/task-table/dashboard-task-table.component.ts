@@ -8,6 +8,7 @@ import { DecimalPipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   Injector,
   OnInit,
@@ -15,7 +16,9 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardFilter, TasksPage } from '@core/models';
 import { ButtonComponent, StarButtonComponent } from '@shared/ui';
@@ -32,6 +35,11 @@ const FILTERS: { key: DashboardFilter; label: string }[] = [
 const HISTORY_COLUMN_PX = 210;
 const TOP = 10;
 const PAGE_SIZE = 25;
+const RESIZE_DEBOUNCE_MS = 150;
+
+function parseFilter(value: string | null): DashboardFilter {
+  return FILTERS.find((x) => x.key === value)?.key ?? 'all';
+}
 
 @Component({
   selector: 'app-dashboard-task-table',
@@ -47,6 +55,8 @@ export class DashboardTaskTableComponent implements OnInit {
   private router = inject(Router);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
   private injector = inject(Injector);
+  private destroyRef = inject(DestroyRef);
+  private requests = new Subject<void>();
 
   readonly filters = FILTERS;
   filter = signal<DashboardFilter>('all');
@@ -61,21 +71,37 @@ export class DashboardTaskTableComponent implements OnInit {
   readonly age = relativeTime;
 
   ngOnInit(): void {
-    const f = this.route.snapshot.queryParamMap.get('filter');
-    const known = FILTERS.find((x) => x.key === f);
-    if (known) this.filter.set(known.key);
-    this.load();
+    this.requests
+      .pipe(
+        switchMap(() => this.fetch()),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((d) => {
+        this.data.set(d);
+        afterNextRender(() => this.fitHistory(), { injector: this.injector });
+      });
+    this.route.queryParamMap
+      .pipe(
+        map((q) => parseFilter(q.get('filter'))),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((f) => {
+        this.filter.set(f);
+        this.page.set(1);
+        this.load();
+      });
+    this.resizes()
+      .pipe(debounceTime(RESIZE_DEBOUNCE_MS), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.fitHistory());
   }
 
   select(f: DashboardFilter): void {
-    this.filter.set(f);
-    this.page.set(1);
     this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { filter: f === 'all' ? null : f },
       queryParamsHandling: 'merge',
     });
-    this.load();
   }
 
   showAll(): void {
@@ -100,23 +126,34 @@ export class DashboardTaskTableComponent implements OnInit {
   }
 
   load(): void {
+    this.requests.next();
+  }
+
+  private fetch(): Observable<TasksPage> {
     this.failed.set(false);
     const perPage = this.expanded() ? PAGE_SIZE : TOP;
-    this.dashboard.tasks(this.filter(), this.page(), perPage, this.history()).subscribe({
-      next: (d) => {
-        this.data.set(d);
-        afterNextRender(() => this.fitHistory(), { injector: this.injector });
-      },
-      error: (e: { status?: number }) => {
+    return this.dashboard.tasks(this.filter(), this.page(), perPage, this.history()).pipe(
+      catchError((e: { status?: number }) => {
         this.hidden.set(e?.status === 403);
         this.failed.set(e?.status !== 403);
-      },
+        return EMPTY;
+      }),
+    );
+  }
+
+  private resizes(): Observable<void> {
+    return new Observable<void>((sub) => {
+      if (typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(() => sub.next());
+      observer.observe(this.host.nativeElement);
+      return () => observer.disconnect();
     });
   }
 
-  // The history column only has a width once rendered, so the first page asks for a guess and refits once.
+  // The bar strip ignores its content width, so measuring it after render or a resize settles in one step.
   private fitHistory(): void {
-    const width = this.host.nativeElement.querySelector('.history-col')?.clientWidth || HISTORY_COLUMN_PX;
+    const width = this.host.nativeElement.querySelector<HTMLElement>('.history')?.clientWidth;
+    if (!width) return;
     const fit = barsThatFit(width);
     if (fit === this.history()) return;
     this.history.set(fit);

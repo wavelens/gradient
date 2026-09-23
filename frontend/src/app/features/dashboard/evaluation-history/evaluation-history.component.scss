@@ -6,8 +6,15 @@
 
 @use '../../../styles/variables' as *;
 
+:host {
+  display: block;
+}
+
 .history {
   display: flex;
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
   align-items: flex-end;
   gap: 2px;
   height: 26px;

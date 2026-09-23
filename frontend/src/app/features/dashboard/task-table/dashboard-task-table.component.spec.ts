@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
 import { DashboardTaskTableComponent } from './dashboard-task-table.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
@@ -30,24 +30,24 @@ const PAGE: TasksPage = { counts: { all: 12, failing: 3, worse: 1, starred: 0 },
 
 function render(filter: string | null, page: () => Observable<TasksPage>) {
   const tasks = vi.fn(page);
+  const params = new BehaviorSubject(convertToParamMap(filter ? { filter } : {}));
   TestBed.configureTestingModule({
     imports: [DashboardTaskTableComponent],
     providers: [
       provideRouter([]),
       { provide: DashboardService, useValue: { tasks } },
       { provide: StarsService, useValue: { set: () => of(true) } },
-      {
-        provide: ActivatedRoute,
-        useValue: { snapshot: { queryParamMap: convertToParamMap(filter ? { filter } : {}) } },
-      },
+      { provide: ActivatedRoute, useValue: { queryParamMap: params } },
     ],
   });
   const f = TestBed.createComponent(DashboardTaskTableComponent);
   f.detectChanges();
-  return { f, tasks, root: f.nativeElement as HTMLElement };
+  return { f, tasks, params, root: f.nativeElement as HTMLElement };
 }
 
 describe('DashboardTaskTableComponent', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it('reads the chip from the url and shows every count', () => {
     const { tasks, root } = render('failing', () => of(PAGE));
     expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 30);
@@ -56,12 +56,34 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('.chip--on')?.textContent).toContain('Failing');
   });
 
-  it('writes the chip into the url and reloads with it', () => {
+  it('writes the chip into the url and leaves loading to the url', () => {
     const { tasks, root } = render(null, () => of(PAGE));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     (root.querySelectorAll('.chip')[2] as HTMLElement).click();
     expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'worse' } }));
-    expect(tasks).toHaveBeenLastCalledWith('worse', 1, 10, 30);
+    expect(tasks).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads when the filter in the url changes', () => {
+    const { f, tasks, params, root } = render(null, () => of(PAGE));
+    params.next(convertToParamMap({ filter: 'starred' }));
+    f.detectChanges();
+    expect(tasks).toHaveBeenLastCalledWith('starred', 1, 10, 30);
+    expect(root.querySelector('.chip--on')?.textContent).toContain('Starred');
+    params.next(convertToParamMap({ filter: 'starred', other: 'x' }));
+    expect(tasks).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a response that a newer filter overtook', () => {
+    const responses = [new Subject<TasksPage>(), new Subject<TasksPage>()];
+    let call = 0;
+    const { f, params, root } = render(null, () => responses[call++]);
+    params.next(convertToParamMap({ filter: 'failing' }));
+    responses[0].next({ ...PAGE, tasks: [row('stale')] });
+    responses[1].next({ ...PAGE, tasks: [row('fresh')] });
+    f.detectChanges();
+    expect(root.querySelector('tbody')?.textContent).toContain('fresh');
+    expect(root.querySelector('tbody')?.textContent).not.toContain('stale');
   });
 
   it('renders entry points, delta, speed, reliability and evaluations per week', () => {
@@ -80,13 +102,13 @@ describe('DashboardTaskTableComponent', () => {
     expect(render(null, () => of({ ...PAGE, total: 1 })).root.querySelector('.show-all')).toBeNull();
   });
 
-  it('measures the history column and asks for as many bars as fit', () => {
+  it('shrinks the history to what a narrow column fits and settles there', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(140);
     const { f, tasks } = render(null, () => of(PAGE));
     f.detectChanges();
+    f.detectChanges();
     expect(tasks).toHaveBeenCalledTimes(2);
     expect(tasks).toHaveBeenLastCalledWith('all', 1, 10, 20);
-    vi.restoreAllMocks();
   });
 
   it('shows an inline error and loads again on retry', () => {
