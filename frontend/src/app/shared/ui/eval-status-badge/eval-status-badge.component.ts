@@ -5,23 +5,17 @@
  */
 
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { IconComponent } from '../icon/icon.component';
 import { EvaluationStatus } from '@core/models/task.model';
-import { isRunningEvaluationStatus } from '@shared/evaluation';
+import { evaluationPhase } from '@shared/evaluation';
+import { StatusIconComponent } from '../status-icon/status-icon.component';
 
 @Component({
   selector: 'gr-eval-status-badge',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [StatusIconComponent],
   template: `
-    <span class="eval-status-badge" [class]="statusClass()">
-      <gr-icon
-        [name]="icon()"
-        size="sm"
-        [class.spinning]="spinning()"
-        [class.pulsing]="pulsing()"
-      />
+    <span class="eval-status-badge" [attr.data-phase]="phase()">
+      <gr-status-icon [phase]="phase()" size="sm" />
       {{ label() }}
     </span>
   `,
@@ -31,33 +25,11 @@ import { isRunningEvaluationStatus } from '@shared/evaluation';
 export class EvalStatusBadgeComponent {
   status = input.required<EvaluationStatus>();
 
-  statusClass = computed(() => {
-    switch (this.status()) {
-      case 'Completed': return 'status-success';
-      case 'Failed': return 'status-danger';
-      case 'Aborted': return 'status-secondary';
-      case 'Waiting': return 'status-warning';
-      default: return 'status-running';
-    }
-  });
-
-  icon = computed(() => {
-    switch (this.status()) {
-      case 'Completed': return 'check_circle';
-      case 'Failed': return 'error';
-      case 'Aborted': return 'cancel';
-      case 'Queued': return 'hourglass_empty';
-      case 'Waiting': return 'pause_circle';
-      default: return 'sync';
-    }
-  });
+  phase = computed(() => evaluationPhase(this.status()));
 
   label = computed(() => {
     const s = this.status();
     if (s === 'EvaluatingFlake' || s === 'EvaluatingDerivation') return 'Evaluating';
     return s;
   });
-
-  pulsing = computed(() => this.status() === 'Queued' || this.status() === 'Waiting');
-  spinning = computed(() => isRunningEvaluationStatus(this.status()) && !this.pulsing());
 }

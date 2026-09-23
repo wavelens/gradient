@@ -20,19 +20,21 @@ describe('EvalStatusBadgeComponent', () => {
     expect(fixture.nativeElement.textContent.trim()).toContain('Evaluating');
   });
 
-  it('marks completed evaluations with the success class', () => {
+  it('colors the badge and its icon by phase', () => {
     const fixture = render('Completed');
-    expect(fixture.nativeElement.querySelector('.eval-status-badge.status-success')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('.eval-status-badge[data-phase="success"]')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('gr-status-icon[data-phase="success"]')).toBeTruthy();
   });
 
-  it('spins the icon for an actively running status', () => {
-    const fixture = render('Building');
-    expect(fixture.nativeElement.querySelector('gr-icon.spinning')).toBeTruthy();
+  it('shows every active status as running', () => {
+    for (const status of ['Fetching', 'EvaluatingFlake', 'Building']) {
+      const fixture = render(status);
+      expect(fixture.nativeElement.querySelector('gr-status-icon').dataset.phase).toBe('running');
+    }
   });
 
-  it('pulses (not spins) the icon while queued', () => {
+  it('keeps queued distinct from running', () => {
     const fixture = render('Queued');
-    expect(fixture.nativeElement.querySelector('gr-icon.pulsing')).toBeTruthy();
-    expect(fixture.nativeElement.querySelector('gr-icon.spinning')).toBeNull();
+    expect(fixture.nativeElement.querySelector('gr-status-icon').dataset.phase).toBe('queued');
   });
 });
