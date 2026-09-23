@@ -52,7 +52,7 @@ svg * {
 :host([data-phase='waiting']) .pause { animation: status-pulse 1.6s ease-in-out 600ms infinite; }
 
 :host([data-animate]) {
-  transition: color 200ms;
+  svg { transition: color 200ms; }
 
   .ring { transition: stroke-dasharray 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms; }
   .glyph { transition: stroke-dashoffset 120ms ease-in, opacity 120ms; }
