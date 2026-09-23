@@ -4,5 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+export * from './permission-label';
 export * from './relative-time';
 export * from './slug';

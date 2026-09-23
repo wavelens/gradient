@@ -35,6 +35,7 @@ import {
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState, PendingInvitation } from '@core/models';
+import { permissionLabel } from '@shared/text';
 
 interface RoleFormState {
   name: string;
@@ -313,8 +314,10 @@ export class MembersRolesComponent implements OnInit {
     });
   }
 
+  readonly permissionLabel = permissionLabel;
+
   rolePermissionLabel(role: ProjectRole): string {
     if (role.permissions.length === 0) return 'No permissions';
-    return role.permissions.join(', ');
+    return role.permissions.map(permissionLabel).join(', ');
   }
 }

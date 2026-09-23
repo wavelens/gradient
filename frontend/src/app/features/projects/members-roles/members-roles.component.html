@@ -219,7 +219,7 @@
           <div class="permission-row">
             <gr-checkbox
               [inputId]="'perm-' + perm.id"
-              [label]="perm.id"
+              [label]="permissionLabel(perm.id)"
               [(ngModel)]="roleForm.permissions[perm.id]"
               [binary]="true"
             />

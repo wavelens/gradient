@@ -93,10 +93,6 @@ export class GithubAppComponent implements OnInit {
     });
   }
 
-  copy(value: string): void {
-    navigator.clipboard.writeText(value).catch(() => {});
-  }
-
   canDeactivate(): boolean {
     return !this.keysVisible() || window.confirm(this.leaveWarning);
   }

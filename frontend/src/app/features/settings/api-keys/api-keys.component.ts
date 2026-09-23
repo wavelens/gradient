@@ -34,6 +34,7 @@ import {
 } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
+import { permissionLabel } from '@shared/text';
 
 type ScopeType = 'none' | 'project' | 'cache';
 
@@ -297,13 +298,11 @@ export class ApiKeysComponent implements OnInit {
     });
   }
 
-  copyKey(): void {
-    navigator.clipboard.writeText(this.createdKeyValue());
-  }
+  readonly permissionLabel = permissionLabel;
 
   permissionTooltip(key: ApiKey): string {
     if (key.permissions.length === 0) return 'No permissions';
-    return key.permissions.join(', ');
+    return key.permissions.map(permissionLabel).join(', ');
   }
 
   scopeBadge(key: ApiKey): string {

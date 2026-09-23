@@ -31,6 +31,7 @@ import {
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { PendingInvitation } from '@core/models';
+import { permissionLabel } from '@shared/text';
 
 interface RoleFormState {
   name: string;
@@ -301,8 +302,10 @@ export class CacheMembersRolesComponent implements OnInit {
     });
   }
 
+  readonly permissionLabel = permissionLabel;
+
   rolePermissionLabel(role: CacheRole): string {
     if (role.permissions.length === 0) return 'No permissions';
-    return role.permissions.join(', ');
+    return role.permissions.map(permissionLabel).join(', ');
   }
 }
