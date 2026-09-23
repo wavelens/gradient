@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-daemon"
+description = "Nix daemon protocol server with a mock store backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_daemon"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "gradient-daemon"
+path = "src/main.rs"
+required-features = ["mock"]
+
+[lints]
+workspace = true
+
+[features]
+mock = ["dep:harmonia-store-db", "dep:harmonia-store-aterm"]
+
+[dependencies]
+anyhow                         = { workspace = true }
+async-stream                   = { workspace = true }
+bytes                          = { workspace = true }
+clap                           = { workspace = true }
+futures                        = { workspace = true }
+harmonia-daemon                = { workspace = true }
+harmonia-file-nar              = { workspace = true }
+harmonia-protocol              = { workspace = true }
+harmonia-store-aterm           = { workspace = true, optional = true }
+harmonia-store-content-address = { workspace = true }
+harmonia-store-db              = { workspace = true, optional = true }
+harmonia-store-derivation      = { workspace = true }
+harmonia-store-path            = { workspace = true }
+harmonia-store-path-info       = { workspace = true }
+harmonia-utils-hash            = { workspace = true }
+harmonia-utils-signature       = { workspace = true }
+serde                          = { workspace = true }
+serde_json                     = { workspace = true }
+thiserror                      = { workspace = true }
+tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing                        = { workspace = true }
+tracing-subscriber             = { workspace = true }
+
+[dev-dependencies]
+harmonia-store-remote = { workspace = true }
+tempfile              = { workspace = true }

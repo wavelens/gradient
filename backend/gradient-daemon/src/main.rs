@@ -72,12 +72,9 @@ async fn serve_mock(
 ) -> anyhow::Result<()> {
     let config = mock::spec::DaemonConfig::load(&spec)?;
     let backend = mock::MockBackend::new(config, root, Some(&base_db)).await?;
-    let control_backend = backend.clone();
-    let control_task =
-        tokio::spawn(async move { control::serve_control(control_backend, &control_path).await });
     tokio::select! {
-        served = server::serve(backend, &socket) => served,
-        controlled = control_task => controlled?,
+        served = server::serve(backend.clone(), &socket) => served,
+        controlled = control::serve_control(backend, &control_path) => controlled,
     }
 }
 

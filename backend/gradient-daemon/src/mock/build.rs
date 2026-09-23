@@ -24,6 +24,7 @@ use harmonia_store_path::StorePath;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{Notify, mpsc};
+use tokio::task::JoinSet;
 
 const ACTIVITY: u64 = 1;
 
@@ -36,7 +37,8 @@ pub fn build_derivation(
     drv: BasicDerivation,
 ) -> impl ResultLog<Output = DaemonResult<BuildResult>> + Send + 'static {
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let task = tokio::spawn(async move {
+    let mut task = JoinSet::new();
+    task.spawn(async move {
         let paths = vec![format!("/nix/store/{drv_path}")];
         let timer = conn
             .state
@@ -57,7 +59,11 @@ pub fn build_derivation(
             yield msg;
         }
     };
-    async move { task.await.map_err(err)? }.with_logs(logs)
+    async move {
+        let joined = task.join_next().await.expect("build task was spawned");
+        joined.map_err(err)?
+    }
+    .with_logs(logs)
 }
 
 pub fn release(state: &MockState, id: &str) {
@@ -291,15 +297,11 @@ mod tests {
     use super::*;
     use crate::mock::spec::DaemonConfig;
     use crate::mock::{MockBackend, seed_node};
-    use crate::server::{next_conn, serve_stream};
+    use crate::server::{TestClient as Client, connect_duplex};
     use harmonia_protocol::daemon::DaemonStore as _;
     use harmonia_protocol::daemon::wire::types2::BuildMode;
     use harmonia_store_derivation::derivation::DerivationOutput;
     use harmonia_store_path::StorePathSet;
-    use harmonia_store_remote::DaemonClient;
-    use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
-
-    type Client = DaemonClient<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 
     fn config() -> DaemonConfig {
         DaemonConfig::load(
@@ -308,19 +310,26 @@ mod tests {
         .expect("config")
     }
 
-    async fn setup() -> (Arc<MockBackend>, Client, tempfile::TempDir) {
+    async fn setup() -> (Arc<MockBackend>, Client, (tempfile::TempDir, JoinSet<()>)) {
         let dir = tempfile::tempdir().expect("tmp");
         let backend = MockBackend::new(config(), dir.path().to_path_buf(), None)
             .await
             .expect("backend");
-        let (client_side, server_side) = tokio::io::duplex(1 << 20);
-        serve_stream(&backend, next_conn(None), server_side);
-        let (r, w) = tokio::io::split(client_side);
-        let client = DaemonClient::builder()
-            .connect(r, w)
-            .await
-            .expect("handshake");
-        (backend, client, dir)
+        let (server, client) = connect_duplex(&backend).await;
+        (backend, client, (dir, server))
+    }
+
+    fn hang(backend: &MockBackend, id: &str) {
+        backend
+            .0
+            .overrides
+            .lock()
+            .expect("overrides")
+            .insert(id.into(), Outcome::Hang);
+    }
+
+    fn running(backend: &MockBackend) -> BTreeMap<String, u32> {
+        backend.0.running.lock().expect("running").clone()
     }
 
     async fn seed(backend: &MockBackend, id: &str) {
@@ -430,25 +439,43 @@ mod tests {
     async fn hang_waits_for_release() {
         let (backend, mut client, _dir) = setup().await;
         seed(&backend, "t/lib").await;
-        backend
-            .0
-            .overrides
-            .lock()
-            .expect("overrides")
-            .insert("t/app".into(), Outcome::Hang);
-        let handle = tokio::spawn(async move {
+        hang(&backend, "t/app");
+        let mut build = JoinSet::new();
+        build.spawn(async move {
             client
                 .build_derivation(&node_path("t/app"), &app_basic(), BuildMode::Normal)
                 .await
         });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(!handle.is_finished());
-        let running = backend.0.running.lock().expect("running").clone();
-        assert_eq!(running, BTreeMap::from([("t/app".to_owned(), 1)]));
+        assert!(build.try_join_next().is_none());
+        assert_eq!(running(&backend), BTreeMap::from([("t/app".to_owned(), 1)]));
         release(&backend.0, "t/app");
-        let result = handle.await.expect("join").expect("build");
-        assert!(result.success().is_some());
-        assert!(backend.0.running.lock().expect("running").is_empty());
+        let result = build.join_next().await.expect("spawned").expect("join");
+        assert!(result.expect("build").success().is_some());
+        assert!(running(&backend).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_dropped_connection_aborts_its_build() {
+        let (backend, mut client, _dir) = setup().await;
+        seed(&backend, "t/lib").await;
+        hang(&backend, "t/app");
+        let (drv_path, drv) = (node_path("t/app"), app_basic());
+        let build = client.build_derivation(&drv_path, &drv, BuildMode::Normal);
+        let pending = tokio::time::timeout(std::time::Duration::from_millis(100), build).await;
+        assert!(pending.is_err(), "a hanging build returned");
+        assert_eq!(running(&backend), BTreeMap::from([("t/app".to_owned(), 1)]));
+        drop(client);
+        for _ in 0..100 {
+            if running(&backend).is_empty() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!(
+            "build still running after its connection closed: {:?}",
+            running(&backend)
+        );
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@
  */
 
 use crate::backend::Backend;
-use crate::server::bind;
+use crate::server::{accept_each, bind};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -62,24 +62,21 @@ fn generic<B: Backend>(backend: &B, req: &Request) -> Option<anyhow::Result<Valu
 }
 
 pub async fn serve_control<B: Backend>(backend: Arc<B>, path: &Path) -> anyhow::Result<()> {
-    let listener = bind(path).await?;
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let backend = backend.clone();
-        tokio::spawn(async move {
-            let (read, mut write) = stream.into_split();
-            let mut lines = BufReader::new(read).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let reply = dispatch(backend.as_ref(), &line);
-                if write
-                    .write_all(format!("{reply}\n").as_bytes())
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
+    accept_each(bind(path).await?, |stream| answer(backend.clone(), stream)).await
+}
+
+async fn answer<B: Backend>(backend: Arc<B>, stream: UnixStream) {
+    let (read, mut write) = stream.into_split();
+    let mut lines = BufReader::new(read).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let reply = dispatch(backend.as_ref(), &line);
+        if write
+            .write_all(format!("{reply}\n").as_bytes())
+            .await
+            .is_err()
+        {
+            break;
+        }
     }
 }
 

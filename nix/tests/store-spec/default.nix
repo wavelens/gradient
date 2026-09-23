@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ pkgs, lib, daemon ? pkgs.gradient-daemon-mock or null }:
+{ pkgs, lib, daemon }:
 let
   inherit (lib) mapAttrs foldl' concatMap attrNames attrValues elem all recursiveUpdate splitString;
 

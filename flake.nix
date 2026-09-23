@@ -35,8 +35,6 @@
       unittest = self.packages.${system}.gradient.tests;
       cli-clippy = self.packages.${system}.gradient-cli-full.clippy;
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
-      daemon-clippy = self.packages.${system}.gradient-daemon-mock.clippy;
-      daemon-unittest = self.packages.${system}.gradient-daemon-mock.tests;
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
     };
 
@@ -45,7 +43,6 @@
       inherit gradient-report;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
-      gradient-daemon-mock = pkgs.callPackage ./nix/packages/gradient-daemon.nix { inherit craneLib; };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {
         inherit craneLib;

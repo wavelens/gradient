@@ -32,9 +32,8 @@ entry point (an HTTP route, a CLI invocation). Everything else belongs in a
 ## Running them
 
 ```sh
-cargo test --workspace --tests          # backend, from backend/
+cargo test --workspace --tests --features gradient-daemon/mock  # backend, from backend/
 cargo test --manifest-path cli/Cargo.toml --tests
-cargo test --manifest-path daemon/Cargo.toml --features mock --tests
 pnpm -C frontend exec ng test --watch=false
 nix flake check                         # every check below
 ```
@@ -198,9 +197,9 @@ rejected by CI everywhere, tests included.
 
 `gradient-scheduler` runs the real server and workers, but every worker's
 `nix-daemon` is replaced by `gradient-daemon serve --backend mock` on the stock
-socket. The daemon is its own cargo workspace under `daemon/` (harmonia's store
-DB pins a SQLite the backend lock cannot share); its checks are `daemon-clippy`
-and `daemon-unittest`.
+socket. The daemon is the `gradient-daemon` backend crate; its `mock` feature
+builds the binary into the `daemon` output of the `gradient` package, and the
+`clippy` and `unittest` checks cover it.
 
 - **Store spec.** A test declares its graph in a plain attrset (`name`,
   `derivations.<id>` with `deps`, `outputs.<o>.references` as `"<node>.<output>"`,

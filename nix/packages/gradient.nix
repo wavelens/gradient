@@ -62,6 +62,7 @@ let
     # A sandbox starts with no incremental cache to reuse, so the bookkeeping
     # is pure overhead and it fattens the target dir crane packs between layers.
     CARGO_INCREMENTAL = "0";
+    cargoExtraArgs = "--locked --features gradient-daemon/mock";
 
     nativeBuildInputs = [
       installShellFiles
@@ -104,7 +105,7 @@ let
     # Only clippy reads those and clippy reads the release layer, so here that
     # pass is six minutes for nothing. The check phase's `cargo test --no-run`
     # still brings in the dev-dependencies.
-    buildPhaseCargoCommand = "cargoWithProfile build --locked";
+    buildPhaseCargoCommand = "cargoWithProfile build $cargoExtraArgs";
   });
 in
 craneLib.buildPackage (commonArgs // {
@@ -119,17 +120,18 @@ craneLib.buildPackage (commonArgs // {
   # everything that only needs the binary.
   doCheck = false;
 
-  # The SQL plan gate the e2e VM test runs comes out of this same cargo
-  # invocation instead of a second one over the whole workspace: no code sits
-  # behind `cfg(feature = "sql-gate")`, the feature only flips optional
-  # dependencies of the root crate, and `required-features` keeps the bin out
-  # of a default build. The `gate` output keeps it out of the server's closure.
-  outputs = [ "out" "gate" ];
-  cargoExtraArgs = "--locked --features sql-gate";
+  # The SQL plan gate and the mock nix-daemon the VM tests run come out of this
+  # same cargo invocation instead of a second one over the whole workspace:
+  # both features only flip optional dependencies, and `required-features`
+  # keeps the bins out of a default build. Their own outputs keep them out of
+  # the server's closure.
+  outputs = [ "out" "gate" "daemon" ];
+  cargoExtraArgs = "--locked --features sql-gate,gradient-daemon/mock";
 
   postInstall = ''
-    mkdir -p $gate/bin
+    mkdir -p $gate/bin $daemon/bin
     mv $out/bin/gradient-sql-gate $gate/bin/
+    mv $out/bin/gradient-daemon $daemon/bin/
   '';
 
   # Reuses cargoArtifacts so clippy only recompiles workspace crates.
@@ -142,7 +144,6 @@ craneLib.buildPackage (commonArgs // {
     cargoArtifacts = testArtifacts;
     version = "1.3.0";
     CARGO_PROFILE = "test";
-    cargoExtraArgs = "--locked";
 
     nativeCheckInputs = [ git ];
     preCheck = ''
@@ -153,7 +154,7 @@ craneLib.buildPackage (commonArgs // {
     # they cost 24 s; a derivation of their own spent six minutes rebuilding
     # it to run the two that exist.
     postCheck = ''
-      cargoWithProfile test --doc --locked
+      cargoWithProfile test --doc $cargoExtraArgs
     '';
   });
 

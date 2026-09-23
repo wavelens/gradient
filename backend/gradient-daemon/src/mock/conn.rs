@@ -685,11 +685,12 @@ mod tests {
     use super::*;
     use crate::mock::MockBackend;
     use crate::mock::spec::DaemonConfig;
-    use crate::server::{next_conn, serve_stream};
-    use harmonia_store_remote::DaemonClient;
+    use crate::server::connect_duplex;
     use std::collections::BTreeSet;
 
-    async fn connect(dir: &tempfile::TempDir) -> (Arc<MockBackend>, impl DaemonStore) {
+    async fn connect(
+        dir: &tempfile::TempDir,
+    ) -> (Arc<MockBackend>, impl DaemonStore, tokio::task::JoinSet<()>) {
         let config = DaemonConfig::load(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config.json"),
         )
@@ -697,14 +698,8 @@ mod tests {
         let backend = MockBackend::new(config, dir.path().to_path_buf(), None)
             .await
             .expect("backend");
-        let (client_side, server_side) = tokio::io::duplex(1 << 20);
-        serve_stream(&backend, next_conn(None), server_side);
-        let (r, w) = tokio::io::split(client_side);
-        let client = DaemonClient::builder()
-            .connect(r, w)
-            .await
-            .expect("handshake");
-        (backend, client)
+        let (server, client) = connect_duplex(&backend).await;
+        (backend, client, server)
     }
 
     fn item(hash_char: char, name: &str, refs: &[&StorePath]) -> (ValidPathInfo, bytes::Bytes) {
@@ -723,7 +718,7 @@ mod tests {
     #[tokio::test]
     async fn add_nar_then_query() {
         let dir = tempfile::tempdir().expect("tmp");
-        let (backend, mut client) = connect(&dir).await;
+        let (backend, mut client, _server) = connect(&dir).await;
         let (info, nar) = item('1', "a", &[]);
         client
             .add_to_store_nar(&info, &nar[..], false, true)
@@ -742,7 +737,7 @@ mod tests {
     #[tokio::test]
     async fn batch_with_internal_references_registers() {
         let dir = tempfile::tempdir().expect("tmp");
-        let (backend, mut client) = connect(&dir).await;
+        let (backend, mut client, _server) = connect(&dir).await;
         let (dep, dep_nar) = item('1', "dep", &[]);
         let (top, top_nar) = item('2', "top", &[&dep.path]);
         client
@@ -759,7 +754,7 @@ mod tests {
     #[tokio::test]
     async fn add_multiple_orders_within_batch() {
         let dir = tempfile::tempdir().expect("tmp");
-        let (backend, mut client) = connect(&dir).await;
+        let (backend, mut client, _server) = connect(&dir).await;
         let (dep, dep_nar) = item('1', "dep", &[]);
         let (top, top_nar) = item('2', "top", &[&dep.path]);
         let items = futures::stream::iter([
@@ -783,7 +778,7 @@ mod tests {
     #[tokio::test]
     async fn text_ca_add_computes_nix_path() {
         let dir = tempfile::tempdir().expect("tmp");
-        let (backend, mut client) = connect(&dir).await;
+        let (backend, mut client, _server) = connect(&dir).await;
         let info = client
             .add_ca_to_store(
                 "x",
@@ -802,7 +797,7 @@ mod tests {
     #[tokio::test]
     async fn unmodeled_op_is_a_recorded_violation() {
         let dir = tempfile::tempdir().expect("tmp");
-        let (backend, mut client) = connect(&dir).await;
+        let (backend, mut client, _server) = connect(&dir).await;
         assert!(client.optimise_store().await.is_err());
         assert!(matches!(
             backend.0.journal.violations()[0],
@@ -813,7 +808,7 @@ mod tests {
     #[tokio::test]
     async fn nar_from_path_round_trips() {
         let dir = tempfile::tempdir().expect("tmp");
-        let (_, mut client) = connect(&dir).await;
+        let (_, mut client, _server) = connect(&dir).await;
         let (info, nar) = item('1', "a", &[]);
         client
             .add_to_store_nar(&info, &nar[..], false, true)

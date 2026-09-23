@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-daemon", "gradient-db", "gradient-effects", "gradient-entity", "gradient-eval", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -27,6 +27,7 @@ unwrap_used                     = "deny"
 gradient-cache        = { path = "gradient-cache" }
 gradient-ci           = { path = "gradient-ci" }
 gradient-core         = { path = "gradient-core" }
+gradient-daemon       = { path = "gradient-daemon" }
 gradient-db           = { path = "gradient-db" }
 gradient-effects      = { path = "gradient-effects" }
 gradient-entity       = { path = "gradient-entity" }
@@ -138,11 +139,15 @@ libc         = { version = "0.2", default-features = false }
 object_store = { version = "0.14", default-features = false, features = ["aws", "fs"] }
 
 # Harmonia (git deps)
+harmonia-daemon                = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-protocol              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-aterm           = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-store-content-address = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-store-derivation      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-db              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-store-path            = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-path-info       = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-store-remote          = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-utils-base-encoding   = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-utils-hash            = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
@@ -165,7 +170,7 @@ rustls        = { version = "0.23", default-features = false, features = ["std",
 rustls-native-certs = { version = "0.8", default-features = false }
 subtle        = { version = "2.6", default-features = false }
 tempfile      = { version = "3.27", default-features = false }
-rusqlite      = { version = "0.39", default-features = false, features = ["bundled"] }
+rusqlite      = { version = "0.40", default-features = false, features = ["bundled"] }
 url           = { version = "2.5", default-features = false }
 webpki-roots  = { version = "1.0", default-features = false }
 
@@ -199,6 +204,14 @@ opt-level = 2
 # against the index, then the source is replaced by the one named here. Every
 # harmonia-* crate is unpublished, so those stay plain git deps above.
 nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats" }
+# sqlx 0.9.0 caps libsqlite3-sys below 0.38, harmonia-store-db needs rusqlite 0.40 (0.38); main lifts the cap. Drop on the next sqlx release.
+sqlx             = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
+sqlx-core        = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
+sqlx-macros      = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
+sqlx-macros-core = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
+sqlx-mysql       = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
+sqlx-postgres    = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
+sqlx-sqlite      = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a329541c0ce230d8b203e0c00fc8e8ea48" }
 
 
 [package]

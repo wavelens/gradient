@@ -8,7 +8,7 @@
 let
   inherit (pkgs) lib;
 
-  daemon = self.packages.${pkgs.stdenv.hostPlatform.system}.gradient-daemon-mock;
+  daemon = self.packages.${pkgs.stdenv.hostPlatform.system}.gradient.daemon;
   storeSpec = import ../../store-spec { inherit pkgs lib daemon; };
 
   # Keyed by file: chain-4 keeps the name chain-3, so it lands in chain-3's repo with c0-c2 unchanged.

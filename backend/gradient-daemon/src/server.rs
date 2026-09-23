@@ -13,8 +13,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::UnixListener;
-use tokio::task::JoinHandle;
+use tokio::net::{UnixListener, UnixStream};
+use tokio::task::JoinSet;
 
 static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 
@@ -43,29 +43,66 @@ pub async fn bind(path: &Path) -> anyhow::Result<UnixListener> {
 pub async fn serve<B: Backend>(backend: Arc<B>, socket: &Path) -> anyhow::Result<()> {
     let listener = bind(socket).await?;
     tracing::info!(socket = %socket.display(), "listening");
-    loop {
-        let (stream, _) = listener.accept().await?;
+    accept_each(listener, |stream| {
         let uid = stream.peer_cred().ok().map(|c| c.uid());
-        serve_stream(&backend, next_conn(uid), stream);
+        serve_stream(backend.clone(), next_conn(uid), stream)
+    })
+    .await
+}
+
+pub async fn accept_each<F, Fut>(listener: UnixListener, mut serve: F) -> anyhow::Result<()>
+where
+    F: FnMut(UnixStream) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let mut connections = JoinSet::new();
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                connections.spawn(serve(accepted?.0));
+            }
+            Some(joined) = connections.join_next() => {
+                if let Err(error) = joined {
+                    tracing::warn!(%error, "connection task failed");
+                }
+            }
+        }
     }
 }
 
-pub fn serve_stream<B, S>(backend: &Arc<B>, conn: ConnInfo, stream: S) -> JoinHandle<()>
+pub async fn serve_stream<B, S>(backend: Arc<B>, conn: ConnInfo, stream: S)
 where
     B: Backend,
     S: AsyncRead + AsyncWrite + Debug + Send + 'static,
 {
     let handler = backend.handler(conn);
-    tokio::spawn(async move {
-        let (read, write) = tokio::io::split(stream);
-        let served = Builder::new()
-            .set_store_dir(StoreDir::default())
-            .serve_connection(read, write, handler)
-            .await;
-        if let Err(error) = served {
-            tracing::debug!(conn = conn.id, %error, "connection ended with error");
-        }
-    })
+    let (read, write) = tokio::io::split(stream);
+    let served = Builder::new()
+        .set_store_dir(StoreDir::default())
+        .serve_connection(read, write, handler)
+        .await;
+    if let Err(error) = served {
+        tracing::debug!(conn = conn.id, %error, "connection ended with error");
+    }
+}
+
+#[cfg(test)]
+pub type TestClient = harmonia_store_remote::DaemonClient<
+    tokio::io::ReadHalf<tokio::io::DuplexStream>,
+    tokio::io::WriteHalf<tokio::io::DuplexStream>,
+>;
+
+#[cfg(test)]
+pub async fn connect_duplex<B: Backend>(backend: &Arc<B>) -> (JoinSet<()>, TestClient) {
+    let (client_side, server_side) = tokio::io::duplex(1 << 20);
+    let mut server = JoinSet::new();
+    server.spawn(serve_stream(backend.clone(), next_conn(None), server_side));
+    let (read, write) = tokio::io::split(client_side);
+    let client = harmonia_store_remote::DaemonClient::builder()
+        .connect(read, write)
+        .await
+        .expect("handshake");
+    (server, client)
 }
 
 #[cfg(test)]
@@ -73,7 +110,7 @@ mod tests {
     use super::*;
     use crate::backend::NullHandler;
     use crate::journal::Journal;
-    use harmonia_store_remote::{DaemonClient, DaemonStore as _};
+    use harmonia_store_remote::DaemonStore as _;
 
     struct Null(Journal);
 
@@ -99,17 +136,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_handshakes_and_gets_unimplemented() {
-        let (client_side, server_side) = tokio::io::duplex(64 * 1024);
-        serve_stream(
-            &Arc::new(Null(Journal::new())),
-            next_conn(None),
-            server_side,
-        );
-        let (read, write) = tokio::io::split(client_side);
-        let mut client = DaemonClient::builder()
-            .connect(read, write)
-            .await
-            .expect("handshake");
+        let (_server, mut client) = connect_duplex(&Arc::new(Null(Journal::new()))).await;
         let path =
             harmonia_store_path::StorePath::from_base_path("00000000000000000000000000000000-x")
                 .expect("path");
