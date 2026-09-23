@@ -6,7 +6,7 @@
 
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_types::consts::NULL_TIME;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -71,6 +71,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
     wildcard_override: Option<String>,
     source_comment: Option<serde_json::Value>,
     started_by: Option<gradient_types::ids::UserId>,
+    walk_mode: WalkMode,
 ) -> Result<MEvaluation, TriggerError> {
     if !concurrent {
         ensure_no_active_evaluation(db, task.id).await?;
@@ -114,6 +115,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         concurrent,
         source_comment,
         started_by,
+        walk_mode,
         ..Default::default()
     }
     .into_active_model();

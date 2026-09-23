@@ -127,6 +127,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             ready_at: eval.updated_at,
             rescore_count: 0,
             history,
+            walk_mode: eval.walk_mode,
         };
 
         if let Err(e) = scheduler.enqueue_eval_job(job_id.clone(), pending).await {

@@ -22,7 +22,7 @@ use gradient_core::ServerState;
 use gradient_db::get_any_project_by_name;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_sources::{check_task_updates, get_commit_info, get_path_from_derivation_output};
 use gradient_storage::nar_extract::{
@@ -49,6 +49,18 @@ pub struct EvaluateRequest {
     pub commit: Option<String>,
     /// Attribute path or wildcard to evaluate instead of the task's own.
     pub attr: Option<String>,
+    pub walk: Option<WalkMode>,
+}
+
+impl EvaluateRequest {
+    fn walk_mode(&self) -> WebResult<WalkMode> {
+        match (self.mode.as_deref(), self.walk) {
+            (Some("restart_failed"), Some(_)) => Err(WebError::bad_request(
+                "`walk` has no effect on `restart_failed`, which re-queues builds without walking",
+            )),
+            (_, walk) => Ok(walk.unwrap_or_default()),
+        }
+    }
 }
 
 /// Builds one [`EvaluationSummary`] per evaluation using grouped DB rollups
@@ -209,6 +221,11 @@ pub async fn post_task_evaluate(
     .await?;
 
     let mode = body.as_ref().and_then(|b| b.mode.as_deref());
+    let walk_mode = body
+        .as_ref()
+        .map(|b| b.walk_mode())
+        .transpose()?
+        .unwrap_or_default();
 
     if mode == Some("restart_failed") {
         let eval = gradient_ci::trigger_restart_builds(&state.web_db, &task)
@@ -329,6 +346,7 @@ pub async fn post_task_evaluate(
         attr,
         None,
         Some(user.id),
+        walk_mode,
     )
     .await
     .map_err(|e| match e {
@@ -1116,6 +1134,40 @@ mod tests {
                 .count(),
             100
         );
+    }
+}
+
+#[cfg(test)]
+mod walk_mode_tests {
+    use super::EvaluateRequest;
+    use gradient_entity::evaluation::WalkMode;
+
+    fn request(body: serde_json::Value) -> EvaluateRequest {
+        serde_json::from_value(body).unwrap()
+    }
+
+    #[test]
+    fn an_omitted_walk_prunes() {
+        assert_eq!(
+            request(serde_json::json!({})).walk_mode().ok(),
+            Some(WalkMode::Pruned)
+        );
+    }
+
+    #[test]
+    fn a_full_walk_is_taken_as_asked() {
+        assert_eq!(
+            request(serde_json::json!({ "walk": "full" }))
+                .walk_mode()
+                .ok(),
+            Some(WalkMode::Full)
+        );
+    }
+
+    #[test]
+    fn a_restart_walks_nothing_so_it_refuses_a_walk() {
+        let body = request(serde_json::json!({ "mode": "restart_failed", "walk": "full" }));
+        assert!(body.walk_mode().is_err());
     }
 }
 

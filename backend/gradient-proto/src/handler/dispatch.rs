@@ -1028,16 +1028,19 @@ impl RpcContext {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let known = match self.scheduler.project_for_job(&job_id).await {
-            Some(_) => match self.state.graph.known_derivations(hashes).await {
-                Ok(known) => known,
-                Err(e) => {
-                    warn!(peer_id = %self.peer_id, %job_id, error = %e, "QueryKnownDerivations degraded; pruning nothing");
-                    vec![]
+        let known = match self.scheduler.active_job(&job_id).await {
+            Some(job) if job.prunes_walk() => {
+                match self.state.graph.known_derivations(hashes).await {
+                    Ok(known) => known,
+                    Err(e) => {
+                        warn!(peer_id = %self.peer_id, %job_id, error = %e, "QueryKnownDerivations degraded; pruning nothing");
+                        vec![]
+                    }
                 }
-            },
+            }
+            Some(_) => vec![],
             None => {
-                warn!(peer_id = %self.peer_id, %job_id, "QueryKnownDerivations: no project for job");
+                warn!(peer_id = %self.peer_id, %job_id, "QueryKnownDerivations: no active job");
                 vec![]
             }
         };
@@ -1128,6 +1131,7 @@ mod assignment_response_tests {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             history: Default::default(),
+            walk_mode: Default::default(),
         })
     }
 

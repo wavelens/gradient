@@ -63,3 +63,34 @@ describe('TasksService.downloadReport', () => {
     expect(params.get('include_instance')).toBe('false');
   });
 });
+
+describe('TasksService.startEvaluation', () => {
+  let service: TasksService;
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [TasksService, provideHttpClient(), provideHttpClientTesting()],
+    });
+    service = TestBed.inject(TasksService);
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => httpMock.verify());
+
+  function bodyFor(start: () => void): unknown {
+    start();
+    const request = httpMock.expectOne(`${environment.apiUrl}/tasks/p/t/evaluate`);
+    request.flush({ error: false, message: evaluation });
+    return request.request.body;
+  }
+
+  it('leaves the walk to the server default', () => {
+    expect(bodyFor(() => service.startEvaluation('p', 't').subscribe())).toBeFalsy();
+  });
+
+  it('asks for a full rewalk', () => {
+    expect(bodyFor(() => service.startEvaluation('p', 't', 'full').subscribe()))
+      .toEqual({ walk: 'full' });
+  });
+});

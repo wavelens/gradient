@@ -220,6 +220,23 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(menuLabels(fixture)).not.toContain('Restart failed builds');
   });
 
+  it('starts a full rewalk from the menu', () => {
+    const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed' });
+    const spy = vi.spyOn(tasksService, 'startEvaluation');
+    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Full rewalk')!.command!();
+    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'full');
+  });
+
+  it('holds the full rewalk while an evaluation runs', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Building' });
+    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Full rewalk')?.disabled).toBe(true);
+  });
+
+  it('offers no full rewalk without trigger access', () => {
+    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false }, { primaryStatus: 'Completed' });
+    expect(menuLabels(fixture)).not.toContain('Full rewalk');
+  });
+
   it('links Show job to the evaluation job on the Job Board', () => {
     const { fixture } = setup(trigger, { primary: { dispatched_job: 'job-1' } });
     const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
@@ -573,7 +590,7 @@ describe('TaskDetailComponent diagnostic report', () => {
 
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const labels = component().panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Show job', 'Metrics', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Show job', 'Metrics', 'Full rewalk', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {

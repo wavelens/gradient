@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
+use gradient_entity::evaluation::WalkMode;
 use gradient_types::ids::{
     CommitId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId, ProjectId, TaskId,
 };
@@ -41,6 +42,7 @@ pub struct PendingEvalJob {
     pub rescore_count: u32,
     /// Per-task predicted peak eval RSS, fed into `ResourceFitRule`.
     pub history: gradient_score::HistoryPrediction,
+    pub walk_mode: WalkMode,
 }
 
 impl PendingEvalJob {
@@ -183,6 +185,11 @@ impl PendingJob {
             PendingJob::Eval(j) => &j.required_paths,
             PendingJob::Build(j) => &j.required_paths,
         }
+    }
+
+    /// Whether the job's closure walk may skip a recorded subtree.
+    pub fn prunes_walk(&self) -> bool {
+        matches!(self, PendingJob::Eval(j) if j.walk_mode == WalkMode::Pruned)
     }
 
     pub fn project_id(&self) -> ProjectId {
@@ -1188,6 +1195,19 @@ mod tests {
         assert_eq!(build.job_key(), build_job_key(b.derivation_build));
     }
 
+    #[test]
+    fn only_a_pruned_evaluation_prunes_its_walk() {
+        let peer = ProjectId::now_v7();
+        let mut full = eval_job(peer);
+        if let PendingJob::Eval(e) = &mut full {
+            e.walk_mode = WalkMode::Full;
+        }
+
+        assert!(eval_job(peer).prunes_walk());
+        assert!(!full.prunes_walk());
+        assert!(!build_job(peer, vec![]).prunes_walk());
+    }
+
     fn eval_job(peer: ProjectId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
             evaluation_id: EvaluationId::now_v7(),
@@ -1211,6 +1231,7 @@ mod tests {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             history: Default::default(),
+            walk_mode: Default::default(),
         })
     }
 
@@ -1241,6 +1262,7 @@ mod tests {
             ready_at: gradient_types::now(),
             rescore_count: 0,
             history: Default::default(),
+            walk_mode: Default::default(),
         })
     }
 

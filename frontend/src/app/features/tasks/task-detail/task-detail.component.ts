@@ -17,7 +17,7 @@ import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, StatusIconComponent, TooltipDirective } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
-import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts } from '@core/models';
+import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
 import { buildDuration, buildPhase, commitLabel, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
@@ -264,10 +264,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     });
   }
 
-  startEvaluation(): void {
+  startEvaluation(walk: WalkMode = 'pruned'): void {
     this.starting.set(true);
     this.errorMessage.set(null);
-    this.tasksService.startEvaluation(this.projectName, this.taskName).subscribe({
+    this.tasksService.startEvaluation(this.projectName, this.taskName, walk).subscribe({
       next: () => this.loadTaskData(false),
       error: (error) => {
         this.errorMessage.set(error?.message || 'Failed to start evaluation.');
@@ -429,6 +429,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       ...(selected && this.canRestartFailed(selected)
         ? [{ label: 'Restart failed builds', icon: 'refresh', disabled: this.starting(),
              command: () => this.restartFailedBuilds() }]
+        : []),
+      ...(this.authService.isAuthenticated() && this.triggerAccess().canEdit
+        ? [{ label: 'Full rewalk', icon: 'account_tree',
+             disabled: this.starting() || this.evaluationInProgress(),
+             command: () => this.startEvaluation('full') }]
         : []),
       ...(this.authService.isAuthenticated()
         ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !selected,

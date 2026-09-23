@@ -14,7 +14,7 @@ mod dedup;
 mod gates;
 
 use super::trigger::{TriggerError, trigger_evaluation};
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
@@ -134,6 +134,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         input.wildcard_override,
         input.source_comment,
         None,
+        WalkMode::Pruned,
     )
     .await
     {

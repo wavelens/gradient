@@ -911,6 +911,12 @@ closure whole.
 
 A stub is never pruned: `walked = false` means the subtree was never recorded.
 
+An evaluation triggered with `walk: "full"` (`evaluation.walk_mode = 1`) opts out:
+the server answers its `QueryKnownDerivations` with nothing, so the worker walks
+and re-reports the whole closure. Ingest is idempotent, so the walk only adds
+what a record is missing: the manual recovery for a subtree a prune skipped while
+its record was incomplete.
+
 #### The cache closure invariant
 
 The cache holds a binary-cache invariant: *if an output is in our cache, its

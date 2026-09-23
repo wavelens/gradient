@@ -91,6 +91,7 @@ fn eval_job(peer: ProjectId) -> PendingEvalJob {
         ready_at: gradient_types::now(),
         rescore_count: 0,
         history: Default::default(),
+        walk_mode: Default::default(),
     }
 }
 
@@ -706,6 +707,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 ready_at: gradient_types::now(),
                 rescore_count: 0,
                 history: Default::default(),
+                walk_mode: Default::default(),
             },
         )
         .await

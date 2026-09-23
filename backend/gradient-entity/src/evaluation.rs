@@ -138,6 +138,16 @@ mod status_tests {
     }
 
     #[test]
+    fn walk_mode_numbering_and_wire_names_are_pinned() {
+        for (mode, n, wire) in [(WalkMode::Pruned, 0, "pruned"), (WalkMode::Full, 1, "full")] {
+            assert_eq!(i32::from(mode), n);
+            assert_eq!(serde_json::to_value(mode).unwrap(), wire);
+        }
+        assert_eq!(WalkMode::iter().count(), 2);
+        assert_eq!(WalkMode::default(), WalkMode::Pruned);
+    }
+
+    #[test]
     fn active_and_terminal_partition_every_status() {
         for status in EvaluationStatus::iter() {
             let active = EvaluationStatus::ACTIVE.contains(&status);
@@ -209,6 +219,33 @@ pub enum EvalCacheStatus {
     Hit = 2,
 }
 
+/// How much of the closure an evaluation re-walks. `Full` skips the prune on
+/// recorded subtrees, so a user can recover a graph whose record went wrong.
+#[repr(i32)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i32", db_type = "Integer")]
+#[serde(rename_all = "snake_case")]
+pub enum WalkMode {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    Pruned = 0,
+    #[sea_orm(num_value = 1)]
+    Full = 1,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation")]
 pub struct Model {
@@ -238,6 +275,7 @@ pub struct Model {
     pub building_started_at: Option<NaiveDateTime>,
     pub finished_at: Option<NaiveDateTime>,
     pub graph_version: i64,
+    pub walk_mode: WalkMode,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -8,7 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { HttpResponse } from '@angular/common/http';
 import { ApiService } from './api.service';
-import { Task, TaskDetail, PaginatedEntryPoints, EvaluationSummary, Paginated } from '@core/models';
+import { Task, TaskDetail, PaginatedEntryPoints, EvaluationSummary, Paginated, WalkMode } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class TasksService {
@@ -69,8 +69,9 @@ export class TasksService {
     return this.api.get<EvaluationSummary[]>(`tasks/${project}/${task}/evaluations${q}`);
   }
 
-  startEvaluation(project: string, task: string): Observable<string> {
-    return this.api.post<string>(`tasks/${project}/${task}/evaluate`);
+  startEvaluation(project: string, task: string, walk: WalkMode = 'pruned'): Observable<string> {
+    const body = walk === 'pruned' ? undefined : { walk };
+    return this.api.post<string>(`tasks/${project}/${task}/evaluate`, body);
   }
 
   restartFailedBuilds(project: string, task: string): Observable<string> {

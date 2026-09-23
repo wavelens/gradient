@@ -9,7 +9,7 @@ mod fixtures;
 use super::*;
 use fixtures::{make_anchor, make_entry_point, make_eval, make_task};
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::{self, EvaluationStatus};
+use gradient_entity::evaluation::{self, EvaluationStatus, WalkMode};
 use gradient_types::*;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
@@ -53,10 +53,69 @@ async fn trigger_creates_queued_eval() {
         None,
         None,
         None,
+        WalkMode::Pruned,
     )
     .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
+}
+
+#[tokio::test]
+async fn trigger_records_the_requested_walk_mode() {
+    let task = make_task();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<evaluation::Model>::new()])
+        .append_query_results([vec![gradient_entity::commit::Model {
+            id: CommitId::now_v7(),
+            hash: vec![0u8; 20],
+            ..Default::default()
+        }]])
+        .append_query_results([vec![make_eval(
+            EvaluationId::now_v7(),
+            EvaluationStatus::Queued,
+        )]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        .append_query_results([vec![task.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .into_connection();
+
+    trigger_evaluation(
+        &db,
+        &task,
+        vec![0u8; 20],
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+        WalkMode::Full,
+    )
+    .await
+    .unwrap();
+
+    let log = gradient_db::pool::raw_statements(db.into_transaction_log());
+    let insert = log
+        .iter()
+        .find(|s| s.sql.starts_with(r#"INSERT INTO "evaluation""#))
+        .expect("the evaluation is inserted");
+    let columns: Vec<&str> = insert.sql
+        [insert.sql.find('(').unwrap() + 1..insert.sql.find(')').unwrap()]
+        .split(", ")
+        .collect();
+    let at = columns
+        .iter()
+        .position(|c| *c == r#""walk_mode""#)
+        .expect("the insert names walk_mode");
+    assert_eq!(
+        insert.values.as_ref().unwrap().0[at],
+        sea_orm::Value::Int(Some(i32::from(WalkMode::Full)))
+    );
 }
 
 #[tokio::test]
@@ -104,6 +163,7 @@ async fn trigger_drops_dangling_last_evaluation_pointer() {
         None,
         None,
         None,
+        WalkMode::Pruned,
     )
     .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
@@ -131,6 +191,7 @@ async fn trigger_already_in_progress() {
         None,
         None,
         None,
+        WalkMode::Pruned,
     )
     .await;
     assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
@@ -163,6 +224,7 @@ async fn trigger_each_active_status_blocks() {
             None,
             None,
             None,
+            WalkMode::Pruned,
         )
         .await;
         assert!(
@@ -208,6 +270,7 @@ async fn trigger_terminal_does_not_block() {
         None,
         None,
         None,
+        WalkMode::Pruned,
     )
     .await;
     assert!(result.is_ok(), "terminal eval should not block new trigger");
@@ -252,6 +315,7 @@ async fn trigger_records_trigger_id() {
         None,
         None,
         None,
+        WalkMode::Pruned,
     )
     .await;
     assert!(result.is_ok());

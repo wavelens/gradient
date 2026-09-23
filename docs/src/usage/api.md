@@ -417,6 +417,9 @@ Response:
 The `message` is the new evaluation's UUID, so you can follow the run you just
 started with `GET /evals/{id}` or the `GET /evals/{id}/live` stream.
 
+Send `{"walk":"full"}` to walk the whole closure instead of skipping recorded
+subtrees, e.g. to recover a graph whose record went wrong.
+
 ## Example: Has this attribute at this commit been built?
 
 For pull-based deployment tools that follow a branch and need the store path for

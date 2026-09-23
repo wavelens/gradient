@@ -57,6 +57,8 @@ Exclusion patterns must be exact paths - they cannot contain `*` or `#`.
 
 Click **Start Evaluation** on the task page. Gradient clones the repo, evaluates each wildcard match, and dispatches the resulting derivations to connected workers.
 
+An evaluation skips every dependency subtree Gradient has already recorded. If a recorded graph went wrong, **Full rewalk** in the evaluation menu starts an evaluation that walks the whole closure again and fills in whatever the record is missing.
+
 The evaluation log page shows per-build status, combined ANSI build output, and an **Abort** button.
 Builds are grouped by status, and within a group listed in dependency order - the entry point first,
 then each dependency layer sorted by name - so a build appears above the builds it needs.

@@ -2650,6 +2650,15 @@ paths:
                     own, e.g. `packages.x86_64-linux.hello`. Narrowing the scope
                     is what makes a per-deployment evaluation cheap.
                   example: "packages.x86_64-linux.hello"
+                walk:
+                  type: string
+                  enum: [pruned, full]
+                  default: pruned
+                  description: >-
+                    `pruned` skips every dependency subtree whose record is
+                    complete. `full` walks the whole closure again, the manual
+                    recovery for a graph whose record went wrong. Refused with
+                    `mode: "restart_failed"`, which walks nothing.
       responses:
         '200':
           description: Evaluation UUID

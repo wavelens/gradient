@@ -151,6 +151,8 @@ export interface WorkersWaitingReason {
 
 export type EvalCapability = 'fetch' | 'eval';
 
+export type WalkMode = 'pruned' | 'full';
+
 export interface EvalWorkersWaitingReason {
   kind: 'eval_workers';
   capability: EvalCapability;
