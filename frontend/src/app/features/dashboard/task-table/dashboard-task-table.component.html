@@ -1,73 +1,62 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
 @if (!hidden()) {
-  <div class="head">
+  <section class="section">
     <h2>Tasks</h2>
-    <div class="chips" role="group" aria-label="Filter tasks">
-    @for (f of filters; track f.key) {
-      <button
-        type="button"
-        [class.on]="filter() === f.key"
-        [attr.aria-pressed]="filter() === f.key"
-        (click)="select(f.key)"
-      >
-        {{ f.label }} <b>{{ data()?.counts?.[f.key] ?? 0 }}</b>
-      </button>
-    }
-    </div>
-  </div>
+    <gr-tab-switch ariaLabel="Filter tasks" [options]="chips()" [ngModel]="filter()" (ngModelChange)="select($event)" />
 
-  @if (failed()) {
-    <p class="error">
-      Tasks unavailable.
-      <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-    </p>
-  } @else if (data(); as d) {
-    <div class="scroll">
-      <table class="ptable">
-        <thead>
-          <tr>
-            <th>Task</th>
-            <th class="history-col">Last evaluations</th>
-            <th class="num">Entry points</th>
-            <th class="num" title="Failing entry points against the previous evaluation">Change</th>
-            <th class="num">Speed</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (t of d.tasks; track t.project + '/' + t.task) {
-            <tr class="row">
-              <td>
-                <a class="name row-link" [routerLink]="['/project', t.project, 'task', t.task]" [title]="t.project + ' / ' + t.task">
-                  <span [class]="'dot dot--' + (t.latest?.status ?? 'none')"></span>
-                  <span class="project">{{ t.project }} /</span> {{ t.task }}
-                </a>
-                <div class="sub">
-                  @if (t.latest; as l) {
-                    <code>{{ l.commit.slice(0, 7) }}</code> · {{ age(l.created_at) }}
-                  } @else {
-                    No evaluations yet
-                  }
-                </div>
-              </td>
-              <td><app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" /></td>
-              <td class="num">{{ t.entry_points ? t.entry_points.ok + '/' + t.entry_points.total : '-' }}</td>
-              <td class="num">
-                <span class="delta" [class.up]="(t.delta ?? 0) > 0" [class.down]="(t.delta ?? 0) < 0">{{ delta(t.delta) }}</span>
-              </td>
-              <td class="num">{{ duration(t.speed_ms) }}</td>
-            </tr>
-          }
-        </tbody>
-      </table>
-    </div>
+    @if (failed()) {
+      <gr-message-banner type="error">
+        Tasks unavailable.
+        <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
+      </gr-message-banner>
+    } @else if (data(); as d) {
+      <gr-row-list>
+        @for (t of d.tasks; track t.project + '/' + t.task) {
+          <gr-row [link]="['/project', t.project, 'task', t.task]" [linkLabel]="t.project + ' / ' + t.task">
+            @if (t.latest; as l) {
+              <gr-status-icon size="sm" [phase]="phase(l.status)" [label]="l.status" />
+            }
+            <span class="name" [title]="t.project + ' / ' + t.task"><span class="project">{{ t.project }} /</span> {{ t.task }}</span>
+            <span slot="meta">
+              @if (t.latest; as l) {
+                <code>{{ l.commit.slice(0, 7) }}</code> · {{ age(l.created_at) }}
+              } @else {
+                No evaluations yet
+              }
+            </span>
+            <div slot="actions" class="cells">
+              <app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" />
+              <span class="value">
+                <b>{{ t.entry_points ? t.entry_points.ok + '/' + t.entry_points.total : '-' }}</b>
+                <small>entry points</small>
+              </span>
+              <span class="value" title="Failing entry points against the previous evaluation">
+                <b [class.up]="(t.delta ?? 0) > 0" [class.down]="(t.delta ?? 0) < 0">{{ delta(t.delta) }}</b>
+                <small>change</small>
+              </span>
+              <span class="value">
+                <b>{{ duration(t.speed_ms) }}</b>
+                <small>speed</small>
+              </span>
+            </div>
+          </gr-row>
+        }
+      </gr-row-list>
 
-    @if (!expanded() && d.total > d.tasks.length) {
-      <button type="button" class="show-all" (click)="showAll()">Show all {{ d.total }}</button>
-    } @else if (expanded() && pages() > 1) {
-      <nav class="pager" aria-label="Task pages">
-        <button type="button" [disabled]="page() === 1" (click)="go(page() - 1)">Previous</button>
-        <span>{{ page() }} / {{ pages() }}</span>
-        <button type="button" [disabled]="page() === pages()" (click)="go(page() + 1)">Next</button>
-      </nav>
+      @if (!expanded() && d.total > d.tasks.length) {
+        <button grButton class="show-all" severity="secondary" size="small" [label]="'Show all ' + d.total" (click)="showAll()"></button>
+      } @else if (expanded() && pages() > 1) {
+        <nav class="pager" aria-label="Task pages">
+          <button grButton severity="secondary" size="small" label="Previous" [disabled]="page() === 1" (click)="go(page() - 1)"></button>
+          <span>{{ page() }} / {{ pages() }}</span>
+          <button grButton severity="secondary" size="small" label="Next" [disabled]="page() === pages()" (click)="go(page() + 1)"></button>
+        </nav>
+      }
     }
-  }
+  </section>
 }

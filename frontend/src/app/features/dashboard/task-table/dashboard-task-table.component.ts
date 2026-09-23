@@ -12,15 +12,25 @@ import {
   Injector,
   OnInit,
   afterNextRender,
+  computed,
   inject,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
 import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardFilter, TasksPage } from '@core/models';
-import { ButtonComponent } from '@shared/ui';
+import { evaluationPhase } from '@shared/evaluation';
+import {
+  ButtonComponent,
+  MessageBannerComponent,
+  RowComponent,
+  RowListComponent,
+  StatusIconComponent,
+  TabSwitchComponent,
+} from '@shared/ui';
 import { formatDuration, relativeTime } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
 import { barsThatFit } from '../format';
@@ -43,7 +53,16 @@ function parseFilter(value: string | null): DashboardFilter {
 @Component({
   selector: 'app-dashboard-task-table',
   standalone: true,
-  imports: [RouterLink, ButtonComponent, EvaluationHistoryComponent],
+  imports: [
+    FormsModule,
+    ButtonComponent,
+    MessageBannerComponent,
+    RowComponent,
+    RowListComponent,
+    StatusIconComponent,
+    TabSwitchComponent,
+    EvaluationHistoryComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './dashboard-task-table.component.html',
   styleUrl: './dashboard-task-table.component.scss',
@@ -57,7 +76,6 @@ export class DashboardTaskTableComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private requests = new Subject<void>();
 
-  readonly filters = FILTERS;
   filter = signal<DashboardFilter>('all');
   page = signal(1);
   expanded = signal(false);
@@ -65,9 +83,13 @@ export class DashboardTaskTableComponent implements OnInit {
   data = signal<TasksPage | null>(null);
   failed = signal(false);
   hidden = signal(false);
+  chips = computed(() =>
+    FILTERS.map((f) => ({ label: `${f.label} ${this.data()?.counts?.[f.key] ?? 0}`, value: f.key })),
+  );
 
   readonly duration = formatDuration;
   readonly age = relativeTime;
+  readonly phase = evaluationPhase;
 
   ngOnInit(): void {
     this.requests

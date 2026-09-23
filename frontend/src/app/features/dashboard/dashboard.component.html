@@ -18,7 +18,7 @@
         <app-dashboard-task-table />
         <app-dashboard-activity />
       } @else {
-        <p class="loading">Loading dashboard...</p>
+        <gr-loading-spinner message="Loading dashboard..." />
       }
     </div>
     <app-dashboard-rail [class.hidden]="newUser()" (empty)="newUser.set($event)" />

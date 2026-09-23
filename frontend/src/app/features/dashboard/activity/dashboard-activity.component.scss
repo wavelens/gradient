@@ -5,19 +5,17 @@
  */
 
 @use '../../../styles/variables' as *;
-@use '../section';
-
-.head {
-  @include section.head;
-}
 
 .hint {
   color: var(--gr-text-muted);
-  font-size: $font-size-xs;
+  font-size: $font-size-sm;
 }
 
-.seg {
-  @include section.controls;
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $space-pair $spacing-md;
 }
 
 .heat {
@@ -50,13 +48,4 @@
   &--4 {
     fill: var(--heat);
   }
-}
-
-.error {
-  display: flex;
-  align-items: center;
-  gap: $space-pair;
-  margin: 0;
-  color: var(--gr-text-muted);
-  font-size: $font-size-sm;
 }

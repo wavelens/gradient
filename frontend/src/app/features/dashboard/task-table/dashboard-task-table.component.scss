@@ -5,194 +5,77 @@
  */
 
 @use '../../../styles/variables' as *;
-@use '../section';
 
-$dot-size: 8px;
-$dot-gap: 6px;
-
-.head {
-  @include section.head;
-}
-
-.chips {
-  @include section.controls;
-
-  b {
-    color: var(--gr-text-primary);
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-.scroll {
-  overflow-x: auto;
-}
-
-.ptable {
-  width: 100%;
-  border-collapse: collapse;
-
-  th {
-    padding: 0 $spacing-sm $spacing-sm 0;
-    border-bottom: 1px solid var(--gr-border-subtle);
-    color: var(--gr-text-muted);
-    font-size: $font-size-xs;
-    font-weight: 500;
-    text-align: left;
-    white-space: nowrap;
-  }
-
-  td {
-    padding: $spacing-sm $spacing-sm $spacing-sm 0;
-    border-bottom: 1px solid var(--gr-border-subtle);
-    vertical-align: middle;
-    white-space: nowrap;
-  }
-
-  abbr {
-    text-decoration: none;
-  }
-}
-
-// The task link stretches over its row; the history bars sit above it.
-.row {
-  position: relative;
-
-  &:hover td {
-    background: var(--gr-surface-hover);
-  }
-}
-
-.row-link::after {
-  position: absolute;
-  inset: 0;
-  content: '';
-}
-
-.history-col {
-  width: 40%;
-  min-width: 90px;
-}
-
-.num {
-  font-size: $font-size-sm;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-
-  .ptable & {
-    text-align: right;
-  }
+gr-row-list {
+  container-type: inline-size;
 }
 
 .name {
-  display: block;
   overflow: hidden;
-  max-width: 22rem;
-  padding: 0;
-  color: var(--gr-text-primary);
-  text-decoration: none;
+  min-width: 0;
   text-overflow: ellipsis;
-
-  &:hover {
-    background: none;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
+  white-space: nowrap;
 }
 
-.project,
-.sub {
+.project {
   color: var(--gr-text-muted);
 }
 
-.sub {
-  margin-top: 2px;
-  padding-left: $dot-size + $dot-gap;
-  font-size: $font-size-xs;
-
-  code {
-    font-family: $font-family-mono;
-  }
+code {
+  font-family: $font-family-mono;
 }
 
-.dot {
-  display: inline-block;
-  width: $dot-size;
-  height: $dot-size;
-  margin-right: $dot-gap;
-  border-radius: 50%;
-  background: var(--gr-text-muted);
-
-  &--Completed {
-    background: var(--gr-graph-success);
-  }
-
-  &--Failed,
-  &--Aborted {
-    background: var(--gr-graph-danger);
-  }
-
-  &--Queued,
-  &--Fetching,
-  &--EvaluatingFlake,
-  &--EvaluatingDerivation,
-  &--Building,
-  &--Waiting {
-    background: var(--gr-graph-running);
-  }
+// The row link sits beneath the cells, so only the history bars take the pointer.
+.cells {
+  display: grid;
+  grid-template-columns: 34cqi 5.5rem 3.5rem 5rem;
+  align-items: center;
+  gap: $spacing-md;
+  pointer-events: none;
 }
 
-.delta {
-  font-weight: 600;
+.value {
+  display: grid;
+  justify-items: end;
+  font-variant-numeric: tabular-nums;
 
-  &.up {
-    color: var(--gr-status-danger-text);
+  b {
+    color: var(--gr-text-primary);
+    font-weight: 600;
   }
 
-  &.down {
-    color: var(--gr-status-success-text);
-  }
-}
-
-.show-all,
-.pager button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--gr-accent);
-  font: inherit;
-  cursor: pointer;
-
-  &:disabled {
+  small {
     color: var(--gr-text-muted);
-    cursor: default;
+    font-size: $font-size-xs;
   }
+}
+
+.up {
+  color: var(--gr-status-danger-text);
+}
+
+.down {
+  color: var(--gr-status-success-text);
 }
 
 .show-all {
-  margin-top: $spacing-sm;
+  align-self: flex-start;
 }
 
 .pager {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  margin-top: $spacing-sm;
-  color: var(--gr-text-muted);
-  font-size: $font-size-sm;
-}
-
-.error {
-  display: flex;
-  align-items: center;
-  gap: $space-pair;
-  margin: 0;
   color: var(--gr-text-muted);
   font-size: $font-size-sm;
 }
 
 @media (max-width: $breakpoint-md) {
-  .ptable th:nth-child(n + 3),
-  .ptable td:nth-child(n + 3) {
+  .cells {
+    grid-template-columns: 22cqi;
+  }
+
+  .value {
     display: none;
   }
 }

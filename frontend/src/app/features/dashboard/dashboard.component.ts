@@ -5,6 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { CommandPaletteService } from '@shared/chrome/command-palette/command-palette.service';
 import { DashboardStatsComponent } from './stats/dashboard-stats.component';
 import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.component';
@@ -21,6 +22,7 @@ import { DashboardStartComponent } from './start/dashboard-start.component';
     DashboardActivityComponent,
     DashboardRailComponent,
     DashboardStartComponent,
+    LoadingSpinnerComponent,
   ],
   templateUrl: './dashboard.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

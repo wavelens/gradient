@@ -8,13 +8,29 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } fr
 import { RouterLink } from '@angular/router';
 import { DashboardService } from '@core/services/dashboard.service';
 import { Rail } from '@core/models';
-import { ButtonComponent, StarButtonComponent } from '@shared/ui';
+import { evaluationPhase } from '@shared/evaluation';
+import {
+  ButtonComponent,
+  MessageBannerComponent,
+  RowComponent,
+  RowListComponent,
+  StarButtonComponent,
+  StatusIconComponent,
+} from '@shared/ui';
 import { formatCount } from '@shared/text';
 
 @Component({
   selector: 'app-dashboard-rail',
   standalone: true,
-  imports: [RouterLink, ButtonComponent, StarButtonComponent],
+  imports: [
+    RouterLink,
+    ButtonComponent,
+    MessageBannerComponent,
+    RowComponent,
+    RowListComponent,
+    StarButtonComponent,
+    StatusIconComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './dashboard-rail.component.html',
   styleUrl: './dashboard-rail.component.scss',
@@ -26,11 +42,12 @@ export class DashboardRailComponent implements OnInit {
   empty = output<boolean>();
 
   readonly count = formatCount;
+  readonly phase = evaluationPhase;
   readonly operations = [
-    { label: 'Job Board', link: '/board' },
-    { label: 'Workers', link: '/board/workers' },
-    { label: 'Scheduler', link: '/board/scheduler' },
-    { label: 'Health', link: '/board/health' },
+    { label: 'Job Board', icon: 'view_kanban', link: '/board' },
+    { label: 'Workers', icon: 'dns', link: '/board/workers' },
+    { label: 'Scheduler', icon: 'schedule', link: '/board/scheduler' },
+    { label: 'Health', icon: 'monitor_heart', link: '/board/health' },
   ];
 
   ngOnInit(): void {

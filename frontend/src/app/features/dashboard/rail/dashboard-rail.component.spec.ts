@@ -62,7 +62,7 @@ describe('DashboardRailComponent', () => {
       caches: [],
       operations: false,
     });
-    const names = Array.from(root.querySelectorAll('section:first-child > ul > li > .row .n')).map((n) => n.textContent!.trim());
+    const names = Array.from(root.querySelectorAll('section:first-child .row-name > .name')).map((n) => n.textContent!.trim());
     expect(names).toEqual(['B', 'A']);
     expect(root.textContent).toContain('1 task');
     expect(root.textContent).toContain('3 tasks');
@@ -77,9 +77,9 @@ describe('DashboardRailComponent', () => {
     const rail: Rail = { projects: [], caches: [], operations: true };
     const { f, root, empty } = mount(() => (++calls === 1 ? throwError(() => ({ status: 500 })) : of(rail)));
     expect(empty).toEqual([false]);
-    (root.querySelector('.error button') as HTMLElement).click();
+    (root.querySelector('gr-message-banner button') as HTMLElement).click();
     f.detectChanges();
-    expect(root.querySelector('.error')).toBeNull();
+    expect(root.querySelector('gr-message-banner')).toBeNull();
     expect(hrefs(root)).toContain('/board/workers');
   });
 

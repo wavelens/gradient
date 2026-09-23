@@ -19,6 +19,14 @@ const STATS: DashboardStats = {
   queue_wait_p50_ms: 38_000,
 };
 
+const cards = (root: HTMLElement) =>
+  Object.fromEntries(
+    Array.from(root.querySelectorAll('gr-stat-card')).map((c) => [
+      c.querySelector('.stat-label')!.textContent!.trim(),
+      c.querySelector('.stat-value')!.textContent!.trim(),
+    ]),
+  );
+
 function render(stats: () => Observable<DashboardStats>) {
   TestBed.configureTestingModule({
     imports: [DashboardStatsComponent],
@@ -30,23 +38,24 @@ function render(stats: () => Observable<DashboardStats>) {
 }
 
 describe('DashboardStatsComponent', () => {
-  it('reads the stats line in human units', () => {
-    const text = render(() => of(STATS)).root.textContent!.replace(/\s+/g, ' ');
-    expect(text).toContain('18.4 y CPU time');
-    expect(text).toContain('1.28M builds');
-    expect(text).toContain('2.4 TiB cache size');
-    expect(text).toContain('72% workers busy');
-    expect(text).toContain('38.0 s queue wait');
+  it('reads the stats in human units, one card each', () => {
+    expect(cards(render(() => of(STATS)).root)).toEqual({
+      'CPU time': '18.4 y',
+      Builds: '1.28M',
+      'Cache size': '2.4 TiB',
+      'Workers busy': '72%',
+      'Queue wait': '38.0 s',
+    });
   });
 
   it('shows an inline error and loads again on retry', () => {
     let calls = 0;
     const { f, root } = render(() => (++calls === 1 ? throwError(() => ({ status: 500 })) : of(STATS)));
-    expect(root.querySelector('.error')).not.toBeNull();
-    (root.querySelector('.error button') as HTMLElement).click();
+    expect(root.querySelector('gr-message-banner')).not.toBeNull();
+    (root.querySelector('gr-message-banner button') as HTMLElement).click();
     f.detectChanges();
-    expect(root.querySelector('.error')).toBeNull();
-    expect(root.textContent).toContain('CPU time');
+    expect(root.querySelector('gr-message-banner')).toBeNull();
+    expect(cards(root)['CPU time']).toBe('18.4 y');
   });
 
   it('hides itself on 403', () => {
@@ -55,8 +64,6 @@ describe('DashboardStatsComponent', () => {
   });
 
   it('shows a dash for workers busy when no worker is online', () => {
-    const text = render(() => of({ ...STATS, workers: { online: 0, busy_pct: 0 } })).root.textContent!.replace(/\s+/g, ' ');
-    expect(text).toContain('- workers busy');
-    expect(text).not.toContain('0% workers busy');
+    expect(cards(render(() => of({ ...STATS, workers: { online: 0, busy_pct: 0 } })).root)['Workers busy']).toBe('-');
   });
 });

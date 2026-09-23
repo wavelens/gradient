@@ -10,12 +10,12 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 
 ## Page
 
-- **Stats line**: CPU time, builds, cache size, workers busy and queue wait across your projects and public projects (all projects for superusers).
+- **Stats**: CPU time, builds, cache size, workers busy and queue wait across your projects and public projects (all projects for superusers).
 - **Search**: opens the [command palette](#command-palette).
-- **Chips**: All, Failing, Got worse, Starred, each with its count over all of your tasks. The selected chip is kept in the URL (`?filter=`).
+- **Filter**: All, Failing, Got worse, Starred, each with its count over all of your tasks. The selected filter is kept in the URL (`?filter=`).
     - Failing: the latest evaluation failed or has failing entry points.
     - Got worse: more failing entry points than the previous evaluation.
-- **Task table**: the top 10 tasks. "Show all" lists every task, 25 per page. Each row shows `project / task` with the latest commit and its age, the last evaluations, entry points ok/total, the change in failing entry points against the previous evaluation and speed.
+- **Task list**: the top 10 tasks. "Show all" lists every task, 25 per page. Each row shows `project / task` with the latest commit and its age, the last evaluations, and labelled values for entry points ok/total, the change in failing entry points against the previous evaluation and speed. Narrow screens drop the values.
     - Bars show the last evaluations: height is the duration, color the status, hover for details. The number of bars follows the available width.
     - A row opens the task, a bar opens its evaluation.
 - **Activity**: a calendar of the last 371 days, switchable between evaluations and failures.
@@ -25,8 +25,8 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 
 ## Ranking
 
-- The task table covers the tasks of projects you are a member of, plus tasks you starred in public projects.
-- A task star ranks the task in the table, a project star ranks the project in the rail.
+- The task list covers the tasks of projects you are a member of, plus tasks you starred in public projects.
+- A task star ranks the task in the list, a project star ranks the project in the rail.
 - Active means a non-PR evaluation in the last 14 days.
 - Tiers, in order:
     1. starred and active
@@ -34,12 +34,12 @@ The dashboard routes you to what needs attention. Its sections follow your data 
     3. starred (also a starred task in a public project you are not a member of)
     4. member only
 - Within a tier the newest latest evaluation comes first.
-- Pull request evaluations are excluded from status, history bars, deltas, activity and "active". The stats line totals include PR work.
+- Pull request evaluations are excluded from status, history bars, deltas, activity and "active". The stats totals include PR work.
 
 ## Stars
 
 - Star a project, task or cache from its page header, or a project or cache from the rail.
-- Stars are personal: they only rank and filter what you see. Task stars drive the task table and the Starred chip, project and cache stars order the rail, and all of them come first in palette results.
+- Stars are personal: they only rank and filter what you see. Task stars drive the task list and the Starred filter, project and cache stars order the rail, and all of them come first in palette results.
 - Stars are shown to signed-in users only.
 - A star on something you can no longer read is dropped from every list.
 

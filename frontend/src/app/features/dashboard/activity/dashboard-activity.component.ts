@@ -7,7 +7,8 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { DashboardService } from '@core/services/dashboard.service';
 import { ActivityDay } from '@core/models';
-import { ButtonComponent, TooltipDirective } from '@shared/ui';
+import { FormsModule } from '@angular/forms';
+import { ButtonComponent, MessageBannerComponent, TabSwitchComponent, TooltipDirective } from '@shared/ui';
 
 type Mode = 'evaluations' | 'failed';
 const STEP = 13;
@@ -18,26 +19,23 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 @Component({
   selector: 'app-dashboard-activity',
   standalone: true,
-  imports: [ButtonComponent, TooltipDirective],
+  imports: [FormsModule, ButtonComponent, MessageBannerComponent, TabSwitchComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (!hidden()) {
-      <section>
-        <div class="head">
-          <h2>Activity</h2>
-          @if (days(); as d) {
+      <section class="section">
+        <h2>Activity</h2>
+        <div class="toolbar">
+          <gr-tab-switch ariaLabel="Activity measure" [options]="modes" [ngModel]="mode()" (ngModelChange)="mode.set($event)" />
+          @if (days()) {
             <span class="hint">{{ total() }} {{ mode() === 'evaluations' ? '' : 'failed ' }}evaluation{{ total() === 1 ? '' : 's' }} in the last year</span>
           }
-          <div class="seg" role="group" aria-label="Activity measure">
-            <button type="button" [class.on]="mode() === 'evaluations'" [attr.aria-pressed]="mode() === 'evaluations'" (click)="mode.set('evaluations')">Evaluations</button>
-            <button type="button" [class.on]="mode() === 'failed'" [attr.aria-pressed]="mode() === 'failed'" (click)="mode.set('failed')">Failures</button>
-          </div>
         </div>
         @if (failed()) {
-          <p class="error">
+          <gr-message-banner type="error">
             Activity unavailable.
             <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-          </p>
+          </gr-message-banner>
         } @else if (days()) {
           <svg
             role="img"
@@ -67,6 +65,10 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export class DashboardActivityComponent implements OnInit {
   private dashboard = inject(DashboardService);
   readonly STEP = STEP;
+  readonly modes: { label: string; value: Mode }[] = [
+    { label: 'Evaluations', value: 'evaluations' },
+    { label: 'Failures', value: 'failed' },
+  ];
   days = signal<ActivityDay[] | null>(null);
   mode = signal<Mode>('evaluations');
   failed = signal(false);

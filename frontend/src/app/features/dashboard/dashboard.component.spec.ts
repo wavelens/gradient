@@ -59,7 +59,7 @@ describe('DashboardComponent', () => {
 
   it('shows a loading line until the rail answers', () => {
     const root = render(NEVER);
-    expect(root.querySelector('.loading')).not.toBeNull();
+    expect(root.querySelector('gr-loading-spinner')).not.toBeNull();
     expect(root.querySelector('app-dashboard-stats')).toBeNull();
     expect(root.querySelector('app-dashboard-start')).toBeNull();
   });

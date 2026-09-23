@@ -7,32 +7,31 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardStats } from '@core/models';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent, CardGridComponent, MessageBannerComponent, StatCardComponent } from '@shared/ui';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
 import { formatCpuTime } from '../format';
 
 @Component({
   selector: 'app-dashboard-stats',
   standalone: true,
-  imports: [ButtonComponent],
+  imports: [ButtonComponent, CardGridComponent, MessageBannerComponent, StatCardComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (stats(); as s) {
-      <div class="strip">
-        <span><b>{{ cpu(s.cpu_time_ms) }}</b> CPU time</span>
-        <span><b>{{ count(s.builds_completed) }}</b> builds</span>
-        <span><b>{{ bytes(s.cache_size_bytes) }}</b> cache size</span>
-        <span><b>{{ s.workers.online ? s.workers.busy_pct + '%' : '-' }}</b> workers busy</span>
-        <span><b>{{ wait(s.queue_wait_p50_ms) }}</b> queue wait</span>
-      </div>
+      <gr-card-grid min="150px">
+        <gr-stat-card compact label="CPU time" [value]="cpu(s.cpu_time_ms)" />
+        <gr-stat-card compact label="Builds" [value]="count(s.builds_completed)" />
+        <gr-stat-card compact label="Cache size" [value]="bytes(s.cache_size_bytes)" />
+        <gr-stat-card compact label="Workers busy" [value]="s.workers.online ? s.workers.busy_pct + '%' : '-'" />
+        <gr-stat-card compact label="Queue wait" [value]="wait(s.queue_wait_p50_ms)" />
+      </gr-card-grid>
     } @else if (failed()) {
-      <p class="error">
+      <gr-message-banner type="error">
         Stats unavailable.
         <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-      </p>
+      </gr-message-banner>
     }
   `,
-  styleUrl: './dashboard-stats.component.scss',
 })
 export class DashboardStatsComponent implements OnInit {
   private dashboard = inject(DashboardService);

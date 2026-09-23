@@ -30,7 +30,7 @@ describe('DashboardActivityComponent', () => {
   it('switches between evaluations and failures without refetching', () => {
     const { f, spy, root } = render(() => of({ days: DAYS }));
     expect(root.querySelector('.hint')!.textContent).toContain('6 evaluations');
-    (root.querySelectorAll('.seg button')[1] as HTMLElement).click();
+    (root.querySelectorAll('gr-tab-switch button')[1] as HTMLElement).click();
     f.detectChanges();
     expect(root.querySelector('.hint')!.textContent).toContain('2 failed evaluations');
     expect(spy).toHaveBeenCalledTimes(1);
@@ -52,7 +52,7 @@ describe('DashboardActivityComponent', () => {
 
   it('shows an inline error with retry, and hides itself on 403', () => {
     const { root } = render(() => throwError(() => ({ status: 500 })));
-    expect(root.querySelector('.error button')).not.toBeNull();
+    expect(root.querySelector('gr-message-banner button')).not.toBeNull();
     TestBed.resetTestingModule();
     expect(render(() => throwError(() => ({ status: 403 }))).root.textContent!.trim()).toBe('');
   });
@@ -62,7 +62,7 @@ describe('DashboardActivityComponent', () => {
     const svg = () => root.querySelector('svg')!;
     expect(svg().getAttribute('role')).toBe('img');
     expect(svg().getAttribute('aria-label')).toBe('Daily evaluations over the last 2 days: 6 in total, busiest day 2026-09-22 with 4');
-    (root.querySelectorAll('.seg button')[1] as HTMLElement).click();
+    (root.querySelectorAll('gr-tab-switch button')[1] as HTMLElement).click();
     f.detectChanges();
     expect(svg().getAttribute('aria-label')).toBe('Daily failed evaluations over the last 2 days: 2 in total, busiest day 2026-09-23 with 2');
   });
