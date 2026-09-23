@@ -24,7 +24,7 @@ const LEVELS = 4;
         <div class="head">
           <h2>Activity</h2>
           @if (days(); as d) {
-            <span class="hint">{{ total() }} {{ mode() === 'evaluations' ? 'evaluations' : 'failed evaluations' }} in the last year</span>
+            <span class="hint">{{ total() }} {{ mode() === 'evaluations' ? '' : 'failed ' }}evaluation{{ total() === 1 ? '' : 's' }} in the last year</span>
           }
           <div class="seg" role="group" aria-label="Activity measure">
             <button type="button" [class.on]="mode() === 'evaluations'" [attr.aria-pressed]="mode() === 'evaluations'" (click)="mode.set('evaluations')">Evaluations</button>
