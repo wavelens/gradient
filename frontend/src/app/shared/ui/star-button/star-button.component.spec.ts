@@ -5,7 +5,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { StarButtonComponent } from './star-button.component';
 import { StarsService } from '@core/services/stars.service';
 
@@ -66,5 +66,43 @@ describe('StarButtonComponent', () => {
 
     expect(root.querySelector('button')!.textContent!.trim()).toBe('Starred');
     expect(root.querySelector('svg')!.classList).toContain('star--on');
+  });
+
+  it('ignores clicks while a request is in flight and rolls back to the pre-click state', () => {
+    const pending = new Subject<boolean>();
+    const set = vi.fn(() => pending);
+    TestBed.configureTestingModule({
+      imports: [StarButtonComponent],
+      providers: [{ provide: StarsService, useValue: { set } }],
+    });
+    const fixture = TestBed.createComponent(StarButtonComponent);
+    fixture.componentRef.setInput('target', { kind: 'cache', cache: 'main' });
+    fixture.detectChanges();
+    const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
+
+    button.click();
+    button.click();
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.starred()).toBe(true);
+
+    pending.error(new Error('x'));
+    expect(fixture.componentInstance.starred()).toBe(false);
+    button.click();
+    expect(set).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the icon-only label fixed and reports the state through aria-pressed', () => {
+    TestBed.configureTestingModule({
+      imports: [StarButtonComponent],
+      providers: [{ provide: StarsService, useValue: { set: () => of(true) } }],
+    });
+    const fixture = TestBed.createComponent(StarButtonComponent);
+    fixture.componentRef.setInput('target', { kind: 'project', project: 'acme' });
+    fixture.componentRef.setInput('starred', true);
+    fixture.detectChanges();
+    const button = (fixture.nativeElement as HTMLElement).querySelector('button')!;
+
+    expect(button.getAttribute('aria-label')).toBe('Star');
+    expect(button.getAttribute('aria-pressed')).toBe('true');
   });
 });

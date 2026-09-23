@@ -6,6 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, booleanAttribute, inject, input, model } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
+import { finalize } from 'rxjs';
 import { StarsService } from '@core/services/stars.service';
 import { StarTarget } from '@core/models';
 import { ButtonComponent } from '../button/button.component';
@@ -36,7 +37,7 @@ import { ButtonComponent } from '../button/button.component';
         type="button"
         class="star-button"
         [attr.aria-pressed]="starred()"
-        [attr.aria-label]="starred() ? 'Unstar' : 'Star'"
+        aria-label="Star"
         (click)="toggle($event)"
       >
         <ng-container [ngTemplateOutlet]="star" />
@@ -52,11 +53,18 @@ export class StarButtonComponent {
   starred = model(false);
   labeled = input(false, { transform: booleanAttribute });
 
+  private inFlight = false;
+
   toggle(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
-    const next = !this.starred();
-    this.starred.set(next);
-    this.stars.set(this.target(), next).subscribe({ error: () => this.starred.set(!next) });
+    if (this.inFlight) return;
+    const previous = this.starred();
+    this.inFlight = true;
+    this.starred.set(!previous);
+    this.stars
+      .set(this.target(), !previous)
+      .pipe(finalize(() => (this.inFlight = false)))
+      .subscribe({ error: () => this.starred.set(previous) });
   }
 }
