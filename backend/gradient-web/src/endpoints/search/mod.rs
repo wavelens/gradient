@@ -13,8 +13,8 @@ use axum::{Extension, Json};
 use classify::{Lookups, classify};
 use gradient_core::ServerState;
 use gradient_db::dashboard::{
-    CommitHitRow, NameHitRow, NameKind, NarHitRow, StarredNames, search_commits, search_names,
-    search_nars, starred_names,
+    CommitHitRow, NameHitRow, NameKind, NarHitRow, search_commits, search_names, search_nars,
+    starred,
 };
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DbErr};
@@ -81,16 +81,6 @@ fn cache_hit(name: String, starred: bool) -> SearchHit {
     }
 }
 
-fn starred_hits(s: StarredNames) -> Vec<SearchHit> {
-    let projects = s.projects.into_iter().map(|p| project_hit(p, true));
-    let tasks = s
-        .tasks
-        .into_iter()
-        .map(|t| task_hit(t.project, t.task, true));
-    let caches = s.caches.into_iter().map(|c| cache_hit(c, true));
-    projects.chain(tasks).chain(caches).collect()
-}
-
 fn nar_hit(n: NarHitRow) -> SearchHit {
     SearchHit {
         kind: HitKind::Nar,
@@ -115,10 +105,10 @@ fn commit_hit(c: CommitHitRow) -> SearchHit {
 }
 
 fn name_hit(n: NameHitRow) -> SearchHit {
-    let mut hit = match (n.kind, n.project) {
-        (NameKind::Task, Some(project)) => task_hit(project, n.name, n.starred),
-        (NameKind::Cache, _) => cache_hit(n.name, n.starred),
-        _ => project_hit(n.name, n.starred),
+    let mut hit = match n.kind {
+        NameKind::Project => project_hit(n.name, n.starred),
+        NameKind::Task { project } => task_hit(project, n.name, n.starred),
+        NameKind::Cache => cache_hit(n.name, n.starred),
     };
     hit.label = n.display_name;
     hit
@@ -127,23 +117,22 @@ fn name_hit(n: NameHitRow) -> SearchHit {
 pub async fn search<C: ConnectionTrait>(
     db: &C,
     user: UserId,
-    superuser: bool,
     lookups: Lookups,
     per_kind: u64,
 ) -> Result<Vec<SearchHit>, DbErr> {
     let Some(text) = lookups.text else {
-        return Ok(starred_hits(starred_names(db, user, superuser).await?));
+        return Ok(starred(db, user).await?.into_iter().map(name_hit).collect());
     };
     let mut hits = Vec::new();
     if let Some(hash) = &lookups.nar {
-        let nars = search_nars(db, hash, user, superuser).await?;
+        let nars = search_nars(db, hash, user).await?;
         hits.extend(nars.into_iter().map(nar_hit));
     }
     if let Some(range) = &lookups.commit {
-        let commits = search_commits(db, &range.low, &range.high, user, superuser).await?;
+        let commits = search_commits(db, &range.low, &range.high, user).await?;
         hits.extend(commits.into_iter().map(commit_hit));
     }
-    let names = search_names(db, &text, per_kind, user, superuser).await?;
+    let names = search_names(db, &text, per_kind, user).await?;
     hits.extend(names.into_iter().map(name_hit));
     Ok(hits)
 }
@@ -153,14 +142,7 @@ pub async fn get_search(
     Extension(user): Extension<MUser>,
     Query(q): Query<SearchQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<SearchHit>>>> {
-    let hits = search(
-        &state.web_db,
-        user.id,
-        user.superuser,
-        classify(&q.q),
-        per_kind(q.limit),
-    )
-    .await?;
+    let hits = search(&state.web_db, user.id, classify(&q.q), per_kind(q.limit)).await?;
     Ok(ok_json(hits))
 }
 
@@ -192,9 +174,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results(results)
             .into_connection();
-        let hits = search(&db, UserId::now_v7(), false, classify(q), 5)
-            .await
-            .unwrap();
+        let hits = search(&db, UserId::now_v7(), classify(q), 5).await.unwrap();
         (hits, db.into_transaction_log().len())
     }
 
@@ -206,16 +186,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_empty_query_lists_starred_items() {
+    async fn an_empty_query_lists_starred_items_by_display_name() {
         let (hits, statements) = run(
-            vec![
-                vec![BTreeMap::from([("name", Value::from("infra"))])],
-                vec![BTreeMap::from([
-                    ("project", Value::from("infra")),
-                    ("name", Value::from("hosts")),
-                ])],
-                vec![BTreeMap::from([("name", Value::from("main"))])],
-            ],
+            vec![vec![
+                name_row("cache", None, "main", true),
+                name_row("project", None, "infra", true),
+                name_row("task", Some("infra"), "hosts", true),
+            ]],
             "  ",
         )
         .await;
@@ -223,13 +200,24 @@ mod tests {
         assert_eq!(
             routes(&hits),
             [
+                (HitKind::Cache, "/caches/main"),
                 (HitKind::Project, "/project/infra"),
                 (HitKind::Task, "/project/infra/task/hosts"),
-                (HitKind::Cache, "/caches/main"),
             ]
         );
+        let labels: Vec<&str> = hits.iter().map(|h| h.label.as_str()).collect();
+        assert_eq!(labels, ["MAIN", "INFRA", "HOSTS"]);
         assert!(hits.iter().all(|h| h.starred));
-        assert_eq!(statements, 3);
+        assert_eq!(statements, 1);
+    }
+
+    #[tokio::test]
+    async fn a_task_hit_without_a_project_is_an_error() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![name_row("task", None, "hosts", false)]])
+            .into_connection();
+        let result = search(&db, UserId::now_v7(), classify("hosts"), 5).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

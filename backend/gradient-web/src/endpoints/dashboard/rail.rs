@@ -112,7 +112,7 @@ pub async fn get_rail(
     Ok(ok_json(build_rail(
         rail_projects(db, user.id).await?,
         rail_tasks(db, user.id).await?,
-        rail_caches(db, user.id, user.superuser).await?,
+        rail_caches(db, user.id).await?,
         operations,
     )))
 }

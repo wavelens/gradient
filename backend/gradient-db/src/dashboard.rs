@@ -32,17 +32,17 @@ pub struct StarredNames {
     pub caches: Vec<String>,
 }
 
-/// Visibility of `p` / `c` to user `$1`, with `$2` the superuser flag; mirrors `load_cache(Readable)`.
+/// Visibility of `p` / `c` to user `$1`, mirroring `load_*(Readable)`: no superuser bypass.
 macro_rules! project_readable {
     () => {
-        "($2 OR p.public OR EXISTS (SELECT 1 FROM project_user pu \
+        "(p.public OR EXISTS (SELECT 1 FROM project_user pu \
         WHERE pu.project = p.id AND pu.\"user\" = $1))"
     };
 }
 
 macro_rules! cache_readable {
     () => {
-        "($2 OR c.public OR c.created_by = $1 \
+        "(c.public OR c.created_by = $1 \
         OR EXISTS (SELECT 1 FROM cache_user cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
         OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_user pu ON pu.project = pc.project \
         WHERE pc.cache = c.id AND pu.\"user\" = $1))"
@@ -77,25 +77,19 @@ crate::sql! {
         params = [UserId, CacheId],
         tier = Hot;
 
-    STARRED_PROJECTS = concat!("SELECT p.name FROM user_project_star s JOIN project p ON p.id = s.project \
-        WHERE s.\"user\" = $1 AND ", project_readable!(), " ORDER BY p.name"),
-        params = [UserId, Bool(false)],
-        tier = Hot;
-
-    STARRED_TASKS = concat!("SELECT p.name AS project, t.name FROM user_task_star s \
-        JOIN task t ON t.id = s.task JOIN project p ON p.id = t.project \
-        WHERE s.\"user\" = $1 AND ", project_readable!(), " ORDER BY p.name, t.name"),
-        params = [UserId, Bool(false)],
-        tier = Hot;
-
-    STARRED_CACHES = concat!("SELECT c.name FROM user_cache_star s JOIN cache c ON c.id = s.cache \
-        WHERE s.\"user\" = $1 AND ", cache_readable!(), " ORDER BY c.name"),
-        params = [UserId, Bool(false)],
+    STARRED = concat!("SELECT 'project' AS kind, NULL::text AS project, p.name, p.display_name, true AS starred \
+        FROM user_project_star s JOIN project p ON p.id = s.project WHERE s.\"user\" = $1 AND ", project_readable!(), " \
+        UNION ALL SELECT 'task', p.name, t.name, t.display_name, true FROM user_task_star s \
+        JOIN task t ON t.id = s.task JOIN project p ON p.id = t.project WHERE s.\"user\" = $1 AND ", project_readable!(), " \
+        UNION ALL SELECT 'cache', NULL, c.name, c.display_name, true FROM user_cache_star s \
+        JOIN cache c ON c.id = s.cache WHERE s.\"user\" = $1 AND ", cache_readable!(), " \
+        ORDER BY kind, project, name"),
+        params = [UserId],
         tier = Hot;
 }
 
-fn pair(user: UserId, target: Uuid) -> [Value; 2] {
-    [user.into_inner().into(), target.into()]
+fn user_value(user: UserId) -> Value {
+    Value::Uuid(Some(user.into_inner()))
 }
 
 pub async fn star<C: ConnectionTrait>(
@@ -109,7 +103,8 @@ pub async fn star<C: ConnectionTrait>(
         StarKind::Task => &STAR_TASK,
         StarKind::Cache => &STAR_CACHE,
     };
-    db.execute_raw(query.bind(pair(user, target))).await?;
+    db.execute_raw(query.bind([user_value(user), target.into()]))
+        .await?;
     Ok(())
 }
 
@@ -124,41 +119,35 @@ pub async fn unstar<C: ConnectionTrait>(
         StarKind::Task => &UNSTAR_TASK,
         StarKind::Cache => &UNSTAR_CACHE,
     };
-    db.execute_raw(query.bind(pair(user, target))).await?;
+    db.execute_raw(query.bind([user_value(user), target.into()]))
+        .await?;
     Ok(())
 }
 
-fn names(rows: &[QueryResult]) -> Result<Vec<String>, DbErr> {
-    rows.iter().map(|r| r.try_get("", "name")).collect()
+pub async fn starred<C: ConnectionTrait>(db: &C, user: UserId) -> Result<Vec<NameHitRow>, DbErr> {
+    db.query_all_raw(STARRED.bind([user_value(user)]))
+        .await?
+        .iter()
+        .map(name_hit_row)
+        .collect()
 }
 
-fn starred_task(row: &QueryResult) -> Result<StarredTask, DbErr> {
-    Ok(StarredTask {
-        project: row.try_get("", "project")?,
-        task: row.try_get("", "name")?,
-    })
-}
-
-/// Only targets the user can still read: losing access hides a star, it does not delete it.
 pub async fn starred_names<C: ConnectionTrait>(
     db: &C,
     user: UserId,
-    superuser: bool,
 ) -> Result<StarredNames, DbErr> {
-    let bind = || -> [Value; 2] { [user.into_inner().into(), superuser.into()] };
-    let projects = names(&db.query_all_raw(STARRED_PROJECTS.bind(bind())).await?)?;
-    let tasks = db
-        .query_all_raw(STARRED_TASKS.bind(bind()))
-        .await?
-        .iter()
-        .map(starred_task)
-        .collect::<Result<_, _>>()?;
-    let caches = names(&db.query_all_raw(STARRED_CACHES.bind(bind())).await?)?;
-    Ok(StarredNames {
-        projects,
-        tasks,
-        caches,
-    })
+    let mut out = StarredNames::default();
+    for row in starred(db, user).await? {
+        match row.kind {
+            NameKind::Project => out.projects.push(row.name),
+            NameKind::Task { project } => out.tasks.push(StarredTask {
+                project,
+                task: row.name,
+            }),
+            NameKind::Cache => out.caches.push(row.name),
+        }
+    }
+    Ok(out)
 }
 
 const NON_PR: &str = "tt.trigger_type IS DISTINCT FROM 2";
@@ -317,12 +306,11 @@ fn task_facts_row(r: &QueryResult) -> Result<TaskFactsRow, DbErr> {
     })
 }
 
-/// Tasks of the viewer's projects plus starred tasks of public projects, PR evaluations excluded.
 pub async fn task_facts<C: ConnectionTrait>(
     db: &C,
     user: UserId,
 ) -> Result<Vec<TaskFactsRow>, DbErr> {
-    db.query_all_raw(TASK_FACTS.bind([Value::Uuid(Some(user.into_inner()))]))
+    db.query_all_raw(TASK_FACTS.bind([user_value(user)]))
         .await?
         .iter()
         .map(task_facts_row)
@@ -489,10 +477,7 @@ pub async fn cache_size<C: ConnectionTrait>(
     user: UserId,
     superuser: bool,
 ) -> Result<i64, DbErr> {
-    let stmt = CACHE_SIZE.bind([
-        Value::Uuid(Some(user.into_inner())),
-        Value::Bool(Some(superuser)),
-    ]);
+    let stmt = CACHE_SIZE.bind([user_value(user), superuser.into()]);
     Ok(match db.query_one_raw(stmt).await? {
         Some(r) => r.try_get("", "bytes")?,
         None => 0,
@@ -566,9 +551,9 @@ crate::sql! {
             OR EXISTS (SELECT 1 FROM cache_user cu WHERE cu.cache = c.id AND cu.\"user\" = $1) \
             OR EXISTS (SELECT 1 FROM project_cache pc JOIN project_user pu ON pu.project = pc.project \
                 WHERE pc.cache = c.id AND pu.\"user\" = $1) \
-            OR EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id AND (c.public OR $2)) \
+            OR EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id AND c.public) \
         ORDER BY starred DESC, c.name",
-        params = [UserId, Bool(false)],
+        params = [UserId],
         tier = Bulk;
 
     HAS_PROJECT_WORKERS = "SELECT EXISTS (SELECT 1 FROM worker_registration w JOIN project_user pu \
@@ -610,10 +595,6 @@ fn optional_status(r: &QueryResult) -> Result<Option<EvaluationStatus>, DbErr> {
         .transpose()
 }
 
-fn user_value(user: UserId) -> Value {
-    Value::Uuid(Some(user.into_inner()))
-}
-
 fn rail_project_row(r: &QueryResult) -> Result<RailProjectRow, DbErr> {
     Ok(RailProjectRow {
         id: ProjectId::new(r.try_get("", "id")?),
@@ -644,7 +625,6 @@ fn rail_cache_row(r: &QueryResult) -> Result<RailCacheRow, DbErr> {
     })
 }
 
-/// Member projects plus starred public ones; PR evaluations never count as activity.
 pub async fn rail_projects<C: ConnectionTrait>(
     db: &C,
     user: UserId,
@@ -670,9 +650,8 @@ pub async fn rail_tasks<C: ConnectionTrait>(
 pub async fn rail_caches<C: ConnectionTrait>(
     db: &C,
     user: UserId,
-    superuser: bool,
 ) -> Result<Vec<RailCacheRow>, DbErr> {
-    db.query_all_raw(RAIL_CACHES.bind([user_value(user), Value::Bool(Some(superuser))]))
+    db.query_all_raw(RAIL_CACHES.bind([user_value(user)]))
         .await?
         .iter()
         .map(rail_cache_row)
@@ -690,32 +669,32 @@ pub async fn has_project_workers<C: ConnectionTrait>(db: &C, user: UserId) -> Re
 crate::sql! {
     SEARCH_NARS = concat!("SELECT c.name AS cache, cp.hash, cp.package FROM cached_path cp \
         JOIN cached_path_signature s ON s.cached_path = cp.id JOIN cache c ON c.id = s.cache \
-        WHERE cp.hash = $3 AND ", cache_readable!(), " ORDER BY c.name LIMIT 10"),
-        params = [UserId, Bool(false), CachedPathHash],
+        WHERE cp.hash = $2 AND ", cache_readable!(), " ORDER BY c.name LIMIT 10"),
+        params = [UserId, CachedPathHash],
         tier = Bulk;
 
     SEARCH_COMMITS = concat!("SELECT p.name AS project, t.name AS task, e.id AS evaluation, \
         encode(c.hash, 'hex') AS hash FROM commit c JOIN evaluation e ON e.commit = c.id \
         JOIN task t ON t.id = e.task JOIN project p ON p.id = t.project \
-        WHERE c.hash BETWEEN decode($3, 'hex') AND decode($4, 'hex') AND ", project_readable!(), " \
+        WHERE c.hash BETWEEN decode($2, 'hex') AND decode($3, 'hex') AND ", project_readable!(), " \
         ORDER BY e.created_at DESC LIMIT 5"),
-        params = [UserId, Bool(false), CommitPrefixLow, CommitPrefixHigh],
+        params = [UserId, CommitPrefixLow, CommitPrefixHigh],
         tier = Hot;
 
     SEARCH_NAMES = concat!("SELECT kind, project, name, display_name, starred FROM ( \
         SELECT hits.*, row_number() OVER (PARTITION BY kind ORDER BY starred DESC, name) AS rank FROM ( \
             SELECT 'project' AS kind, NULL::text AS project, p.name, p.display_name, \
                 EXISTS (SELECT 1 FROM user_project_star s WHERE s.\"user\" = $1 AND s.project = p.id) AS starred \
-                FROM project p WHERE (p.name ILIKE $3 OR p.display_name ILIKE $3) AND ", project_readable!(), " \
+                FROM project p WHERE (p.name ILIKE $2 OR p.display_name ILIKE $2) AND ", project_readable!(), " \
             UNION ALL SELECT 'task', p.name, t.name, t.display_name, \
                 EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) \
                 FROM task t JOIN project p ON p.id = t.project \
-                WHERE (t.name ILIKE $3 OR t.display_name ILIKE $3) AND ", project_readable!(), " \
+                WHERE (t.name ILIKE $2 OR t.display_name ILIKE $2) AND ", project_readable!(), " \
             UNION ALL SELECT 'cache', NULL, c.name, c.display_name, \
                 EXISTS (SELECT 1 FROM user_cache_star s WHERE s.\"user\" = $1 AND s.cache = c.id) \
-                FROM cache c WHERE (c.name ILIKE $3 OR c.display_name ILIKE $3) AND ", cache_readable!(), " \
-        ) hits) ranked WHERE rank <= $4 ORDER BY starred DESC, kind, name"),
-        params = [UserId, Bool(false), Text("%a%"), Int(5)],
+                FROM cache c WHERE (c.name ILIKE $2 OR c.display_name ILIKE $2) AND ", cache_readable!(), " \
+        ) hits) ranked WHERE rank <= $3 ORDER BY starred DESC, kind, name"),
+        params = [UserId, Text("%a%"), Int(5)],
         tier = Bulk;
 }
 
@@ -734,24 +713,19 @@ pub struct CommitHitRow {
     pub hash: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NameKind {
     Project,
-    Task,
+    Task { project: String },
     Cache,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameHitRow {
     pub kind: NameKind,
-    pub project: Option<String>,
     pub name: String,
     pub display_name: String,
     pub starred: bool,
-}
-
-fn viewer(user: UserId, superuser: bool) -> [Value; 2] {
-    [user_value(user), Value::Bool(Some(superuser))]
 }
 
 fn ilike_contains(text: &str) -> String {
@@ -762,12 +736,13 @@ fn ilike_contains(text: &str) -> String {
     format!("%{escaped}%")
 }
 
-fn name_kind(raw: &str) -> Result<NameKind, DbErr> {
-    match raw {
-        "project" => Ok(NameKind::Project),
-        "task" => Ok(NameKind::Task),
-        "cache" => Ok(NameKind::Cache),
-        other => Err(DbErr::Type(format!("unknown search kind {other}"))),
+fn name_kind(raw: &str, project: Option<String>) -> Result<NameKind, DbErr> {
+    match (raw, project) {
+        ("project", _) => Ok(NameKind::Project),
+        ("task", Some(project)) => Ok(NameKind::Task { project }),
+        ("task", None) => Err(DbErr::Type("task hit without a project".into())),
+        ("cache", _) => Ok(NameKind::Cache),
+        (other, _) => Err(DbErr::Type(format!("unknown search kind {other}"))),
     }
 }
 
@@ -790,8 +765,7 @@ fn commit_hit_row(r: &QueryResult) -> Result<CommitHitRow, DbErr> {
 
 fn name_hit_row(r: &QueryResult) -> Result<NameHitRow, DbErr> {
     Ok(NameHitRow {
-        kind: name_kind(&r.try_get::<String>("", "kind")?)?,
-        project: r.try_get("", "project")?,
+        kind: name_kind(&r.try_get::<String>("", "kind")?, r.try_get("", "project")?)?,
         name: r.try_get("", "name")?,
         display_name: r.try_get("", "display_name")?,
         starred: r.try_get("", "starred")?,
@@ -802,10 +776,8 @@ pub async fn search_nars<C: ConnectionTrait>(
     db: &C,
     hash: &str,
     user: UserId,
-    superuser: bool,
 ) -> Result<Vec<NarHitRow>, DbErr> {
-    let [u, s] = viewer(user, superuser);
-    db.query_all_raw(SEARCH_NARS.bind([u, s, hash.into()]))
+    db.query_all_raw(SEARCH_NARS.bind([user_value(user), hash.into()]))
         .await?
         .iter()
         .map(nar_hit_row)
@@ -818,10 +790,9 @@ pub async fn search_commits<C: ConnectionTrait>(
     low: &str,
     high: &str,
     user: UserId,
-    superuser: bool,
 ) -> Result<Vec<CommitHitRow>, DbErr> {
-    let [u, s] = viewer(user, superuser);
-    db.query_all_raw(SEARCH_COMMITS.bind([u, s, low.into(), high.into()]))
+    let stmt = SEARCH_COMMITS.bind([user_value(user), low.into(), high.into()]);
+    db.query_all_raw(stmt)
         .await?
         .iter()
         .map(commit_hit_row)
@@ -833,12 +804,9 @@ pub async fn search_names<C: ConnectionTrait>(
     text: &str,
     per_kind: u64,
     user: UserId,
-    superuser: bool,
 ) -> Result<Vec<NameHitRow>, DbErr> {
-    let [u, s] = viewer(user, superuser);
     let stmt = SEARCH_NAMES.bind([
-        u,
-        s,
+        user_value(user),
         ilike_contains(text).into(),
         Value::BigInt(Some(per_kind as i64)),
     ]);

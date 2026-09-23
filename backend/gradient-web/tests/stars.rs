@@ -13,7 +13,7 @@ use gradient_entity::project;
 use gradient_test_support::fixtures::{self, user};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::{MProject, SessionId};
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Value};
 use serde_json::Value as Json;
 use std::collections::BTreeMap;
 
@@ -43,6 +43,12 @@ fn bearer(session_id: SessionId) -> String {
     format!("Bearer {}", make_token(session_id))
 }
 
+fn last_sql(db: DatabaseConnection) -> String {
+    let log = db.into_transaction_log();
+    let last = log.last().unwrap().statements().last().unwrap();
+    last.sql.clone()
+}
+
 #[test]
 fn starring_an_unknown_project_is_not_found() {
     run(async {
@@ -70,7 +76,8 @@ fn starring_twice_is_fine() {
                 last_insert_id: 0,
                 rows_affected: 0,
             }]);
-        let server = make_test_server(db.into_connection());
+        let db = db.into_connection();
+        let server = make_test_server(db.clone());
 
         let res = server
             .put("/api/v1/user/stars/projects/test-project")
@@ -81,6 +88,7 @@ fn starring_twice_is_fine() {
         let body: Json = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"], true);
+        assert!(last_sql(db).starts_with("INSERT INTO user_project_star"));
     });
 }
 
@@ -94,7 +102,8 @@ fn unstarring_twice_is_fine() {
                 last_insert_id: 0,
                 rows_affected: 0,
             }]);
-        let server = make_test_server(db.into_connection());
+        let db = db.into_connection();
+        let server = make_test_server(db.clone());
 
         let res = server
             .delete("/api/v1/user/stars/projects/test-project")
@@ -105,6 +114,7 @@ fn unstarring_twice_is_fine() {
         let body: Json = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"], false);
+        assert!(last_sql(db).starts_with("DELETE FROM user_project_star"));
     });
 }
 
@@ -112,14 +122,21 @@ fn unstarring_twice_is_fine() {
 fn stars_list_groups_by_kind() {
     run(async {
         let session_id = SessionId::now_v7();
-        let name = |n: &str| BTreeMap::from([("name", Value::from(n))]);
-        let task = |p: &str, t: &str| {
-            BTreeMap::from([("project", Value::from(p)), ("name", Value::from(t))])
+        let row = |kind: &str, project: Option<&str>, name: &str| {
+            BTreeMap::from([
+                ("kind", Value::from(kind)),
+                ("project", Value::String(project.map(str::to_string))),
+                ("name", Value::from(name)),
+                ("display_name", Value::from(name.to_uppercase())),
+                ("starred", Value::from(true)),
+            ])
         };
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![name("infra")]])
-            .append_query_results([vec![task("infra", "hosts")]])
-            .append_query_results([vec![name("main")]]);
+            .append_query_results([vec![
+                row("cache", None, "main"),
+                row("project", None, "infra"),
+                row("task", Some("infra"), "hosts"),
+            ]]);
         let server = make_test_server(db.into_connection());
 
         let res = server

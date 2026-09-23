@@ -95,9 +95,7 @@ pub async fn get_stars(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<StarredNames>>> {
-    Ok(ok_json(
-        starred_names(&state.web_db, user.id, user.superuser).await?,
-    ))
+    Ok(ok_json(starred_names(&state.web_db, user.id).await?))
 }
 
 pub async fn put_project_star(
