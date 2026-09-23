@@ -1,16 +1,18 @@
 @if (!hidden()) {
-  <div class="chips" role="group" aria-label="Filter tasks">
+  <div class="head">
+    <h2>Tasks</h2>
+    <div class="chips" role="group" aria-label="Filter tasks">
     @for (f of filters; track f.key) {
       <button
         type="button"
-        class="chip"
-        [class.chip--on]="filter() === f.key"
+        [class.on]="filter() === f.key"
         [attr.aria-pressed]="filter() === f.key"
         (click)="select(f.key)"
       >
         {{ f.label }} <b>{{ data()?.counts?.[f.key] ?? 0 }}</b>
       </button>
     }
+    </div>
   </div>
 
   @if (failed()) {

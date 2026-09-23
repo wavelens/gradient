@@ -5,43 +5,21 @@
  */
 
 @use '../../../styles/variables' as *;
+@use '../section';
 
 $dot-size: 8px;
 $dot-gap: 6px;
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $spacing-sm;
-  margin-bottom: $spacing-md;
+.head {
+  @include section.head;
 }
 
-.chip {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  padding: 6px 14px;
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: 999px;
-  background: none;
-  color: var(--gr-text-secondary);
-  font: inherit;
-  font-size: $font-size-sm;
-  cursor: pointer;
-  transition: border-color $transition-fast;
+.chips {
+  @include section.controls;
 
   b {
     color: var(--gr-text-primary);
     font-variant-numeric: tabular-nums;
-  }
-
-  &:hover {
-    border-color: var(--gr-border);
-  }
-
-  &--on,
-  &--on:hover {
-    border-color: var(--gr-accent);
   }
 }
 

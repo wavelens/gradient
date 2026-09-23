@@ -5,21 +5,10 @@
  */
 
 @use '../../../styles/variables' as *;
+@use '../section';
 
 .head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: $space-pair;
-  padding-bottom: $spacing-sm;
-  margin-bottom: $spacing-md;
-  border-bottom: 1px solid var(--gr-border-subtle);
-
-  h2 {
-    margin: 0;
-    color: var(--gr-text-primary);
-    font-size: $font-size-md;
-  }
+  @include section.head;
 }
 
 .hint {
@@ -28,25 +17,7 @@
 }
 
 .seg {
-  display: flex;
-  gap: $spacing-xs;
-  margin-left: auto;
-
-  button {
-    padding: 2px $spacing-sm;
-    border: 1px solid var(--gr-border-subtle);
-    border-radius: $border-radius-sm;
-    background: none;
-    color: var(--gr-text-secondary);
-    font: inherit;
-    font-size: $font-size-xs;
-    cursor: pointer;
-
-    &.on {
-      border-color: var(--gr-accent);
-      color: var(--gr-text-primary);
-    }
-  }
+  @include section.controls;
 }
 
 .heat {

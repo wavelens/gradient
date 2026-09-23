@@ -6,6 +6,12 @@
 
 @use '../../styles/variables' as *;
 
+.page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: $spacing-md;
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;

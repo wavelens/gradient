@@ -47,15 +47,15 @@ describe('DashboardTaskTableComponent', () => {
   it('reads the chip from the url and shows every count', () => {
     const { tasks, root } = render('failing', () => of(PAGE));
     expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 30);
-    const chips = Array.from(root.querySelectorAll('.chip')).map((c) => c.textContent?.replace(/\s+/g, ' ').trim());
+    const chips = Array.from(root.querySelectorAll('.chips button')).map((c) => c.textContent?.replace(/\s+/g, ' ').trim());
     expect(chips).toEqual(['All 12', 'Failing 3', 'Got worse 1', 'Starred 0']);
-    expect(root.querySelector('.chip--on')?.textContent).toContain('Failing');
+    expect(root.querySelector('.chips button.on')?.textContent).toContain('Failing');
   });
 
   it('writes the chip into the url and leaves loading to the url', () => {
     const { tasks, root } = render(null, () => of(PAGE));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
-    (root.querySelectorAll('.chip')[2] as HTMLElement).click();
+    (root.querySelectorAll('.chips button')[2] as HTMLElement).click();
     expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'worse' } }));
     expect(tasks).toHaveBeenCalledTimes(1);
   });
@@ -65,7 +65,7 @@ describe('DashboardTaskTableComponent', () => {
     params.next(convertToParamMap({ filter: 'starred' }));
     f.detectChanges();
     expect(tasks).toHaveBeenLastCalledWith('starred', 1, 10, 30);
-    expect(root.querySelector('.chip--on')?.textContent).toContain('Starred');
+    expect(root.querySelector('.chips button.on')?.textContent).toContain('Starred');
     params.next(convertToParamMap({ filter: 'starred', other: 'x' }));
     expect(tasks).toHaveBeenCalledTimes(2);
   });

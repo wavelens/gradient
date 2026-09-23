@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout title="Dashboard" maxWidth="1240px">
+<div class="page">
   <div class="layout" [class.layout--start]="newUser()">
     <div class="main">
       @if (newUser()) {
@@ -23,4 +23,4 @@
     </div>
     <app-dashboard-rail [class.hidden]="newUser()" (empty)="newUser.set($event)" />
   </div>
-</gr-page-layout>
+</div>
