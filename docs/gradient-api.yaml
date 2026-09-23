@@ -227,6 +227,7 @@ paths:
                   quic: false
                   create_project: everyone
                   create_cache: everyone
+                  github_app_enabled: false
 
   /proto:
     get:
@@ -8146,7 +8147,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache, github_app_enabled]
       properties:
         oidc_enabled:
           type: boolean
@@ -8174,6 +8175,9 @@ components:
           type: string
           enum: [none, superusers, everyone]
           description: Who may create caches via the API (`none` = only the declarative state).
+        github_app_enabled:
+          type: boolean
+          description: Whether a GitHub App is configured (app id, private key and webhook secret)
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     MakeLoginRequest:

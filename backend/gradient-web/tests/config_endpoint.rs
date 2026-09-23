@@ -36,6 +36,24 @@ fn config_defaults_to_everyone() {
         let body: Value = res.json();
         assert_eq!(body["message"]["create_project"], "everyone");
         assert_eq!(body["message"]["create_cache"], "everyone");
+        assert_eq!(body["message"]["github_app_enabled"], false);
+    });
+}
+
+#[test]
+fn config_reports_a_configured_github_app() {
+    run(async {
+        let db = MockDatabase::new(DatabaseBackend::Postgres);
+        let server = make_test_server_configured(db.into_connection(), |cli| {
+            cli.github_app.github_app_id = Some(1);
+            cli.github_app.github_app_private_key_file = Some("/run/key.pem".into());
+            cli.github_app.github_app_webhook_secret_file = Some("/run/secret".into());
+        });
+
+        let res = server.get("/api/v1/config").await;
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["message"]["github_app_enabled"], true);
     });
 }
 

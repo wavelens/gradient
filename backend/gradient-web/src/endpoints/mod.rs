@@ -141,6 +141,7 @@ pub struct ServerConfig {
     pub quic: bool,
     pub create_project: CreatePermission,
     pub create_cache: CreatePermission,
+    pub github_app_enabled: bool,
 }
 
 pub async fn get_config(
@@ -164,6 +165,7 @@ pub async fn get_config(
             quic: state.config.proto.quic,
             create_project: state.config.server.create_project,
             create_cache: state.config.server.create_cache,
+            github_app_enabled: state.config.github_app.is_some(),
         },
     };
 

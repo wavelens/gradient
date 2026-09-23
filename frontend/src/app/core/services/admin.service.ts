@@ -5,8 +5,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable, of } from 'rxjs';
-import { map, catchError } from 'rxjs/operators';
+import { Observable } from 'rxjs';
 import { ApiService } from '@core/services/api.service';
 
 export interface GithubAppManifestResponse {
@@ -64,9 +63,5 @@ export class AdminService {
 
   listTasks(): Observable<AdminTask[]> {
     return this.api.get<AdminTask[]>('admin/tasks');
-  }
-
-  githubAppConfigured(): Observable<boolean> {
-    return this.fetchGithubAppCredentials().pipe(map(() => true), catchError(() => of(false)));
   }
 }

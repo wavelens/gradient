@@ -60,24 +60,4 @@ describe('AdminService', () => {
 
     expect(result?.length).toBe(1);
   });
-
-  it('githubAppConfigured() emits true when credentials endpoint succeeds', () => {
-    let result: boolean | undefined;
-    service.githubAppConfigured().subscribe((v) => (result = v));
-
-    const req = httpMock.expectOne(`${apiUrl}/admin/github-app/credentials`);
-    req.flush({ error: false, message: { id: 1, slug: 'app', html_url: '', pem: '', webhook_secret: '', client_id: '', client_secret: '' } });
-
-    expect(result).toBe(true);
-  });
-
-  it('githubAppConfigured() emits false when credentials endpoint returns 404', () => {
-    let result: boolean | undefined;
-    service.githubAppConfigured().subscribe((v) => (result = v));
-
-    const req = httpMock.expectOne(`${apiUrl}/admin/github-app/credentials`);
-    req.flush('nope', { status: 404, statusText: 'Not Found' });
-
-    expect(result).toBe(false);
-  });
 });

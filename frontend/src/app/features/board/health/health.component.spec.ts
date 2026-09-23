@@ -6,10 +6,11 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { Observable, of } from 'rxjs';
+import { of } from 'rxjs';
 import { BoardHealthComponent } from './health.component';
 import { BoardService, BoardHealth } from '@core/services/board.service';
 import { AdminService, AdminTask } from '@core/services/admin.service';
+import { ConfigService } from '@core/services/config.service';
 
 const HEALTH: BoardHealth = {
   version: '1.0.0',
@@ -53,7 +54,7 @@ const TASK: AdminTask = {
 };
 
 function setup(
-  githubAppConfigured: () => Observable<boolean>,
+  githubAppEnabled: boolean,
   health: BoardHealth = HEALTH,
   setDraining = vi.fn(() => of({ draining: true })),
 ): ComponentFixture<BoardHealthComponent> {
@@ -62,11 +63,11 @@ function setup(
     providers: [
       provideRouter([]),
       { provide: BoardService, useValue: { getHealth: () => of(health) } },
+      { provide: ConfigService, useValue: { githubAppEnabled } },
       {
         provide: AdminService,
         useValue: {
           listTasks: () => of([TASK]),
-          githubAppConfigured,
           startDeepGc: () => of({ task_id: 't2', status: 'pending' }),
           setDraining,
         },
@@ -82,7 +83,7 @@ describe('BoardHealthComponent', () => {
   describe('when GitHub App is configured', () => {
     let fixture: ComponentFixture<BoardHealthComponent>;
 
-    beforeEach(() => { fixture = setup(() => of(true)); });
+    beforeEach(() => { fixture = setup(true); });
     afterEach(() => TestBed.resetTestingModule());
 
     it('does not render "HTTP routes" heading', () => {
@@ -103,7 +104,7 @@ describe('BoardHealthComponent', () => {
   describe('when GitHub App is NOT configured', () => {
     let fixture: ComponentFixture<BoardHealthComponent>;
 
-    beforeEach(() => { fixture = setup(() => of(false)); });
+    beforeEach(() => { fixture = setup(false); });
     afterEach(() => TestBed.resetTestingModule());
 
     it('shows "Set up GitHub App" text without disabled class', () => {
@@ -118,20 +119,20 @@ describe('BoardHealthComponent', () => {
     afterEach(() => TestBed.resetTestingModule());
 
     it('offers "Enable Draining" and no banner when not draining', () => {
-      const fixture = setup(() => of(true));
+      const fixture = setup(true);
       expect(fixture.nativeElement.textContent).toContain('Enable Draining');
       expect(fixture.nativeElement.textContent).not.toContain('Instance is draining');
     });
 
     it('offers "Disable Draining" and shows a banner when draining', () => {
-      const fixture = setup(() => of(true), { ...HEALTH, draining: true });
+      const fixture = setup(true, { ...HEALTH, draining: true });
       expect(fixture.nativeElement.textContent).toContain('Disable Draining');
       expect(fixture.nativeElement.textContent).toContain('Instance is draining');
     });
 
     it('toggles draining via the admin service when clicked', () => {
       const setDraining = vi.fn(() => of({ draining: true }));
-      const fixture = setup(() => of(true), HEALTH, setDraining);
+      const fixture = setup(true, HEALTH, setDraining);
       const button: HTMLButtonElement = Array.from(
         fixture.nativeElement.querySelectorAll('button.btn'),
       ).find((b) => (b as HTMLButtonElement).textContent?.includes('Enable Draining')) as HTMLButtonElement;
@@ -141,7 +142,7 @@ describe('BoardHealthComponent', () => {
   });
 
   it('lists every supervised loop and flags restarts', () => {
-    const fixture = setup(() => of(true));
+    const fixture = setup(true);
     const rows = fixture.nativeElement.querySelectorAll('gr-table.supervision tbody tr');
     expect(rows.length).toBe(2);
     expect(rows[0].textContent).toContain('build-dispatch');

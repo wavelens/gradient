@@ -20,6 +20,7 @@ interface ServerConfig {
   smtp_enabled: boolean;
   create_project: CreatePermission;
   create_cache: CreatePermission;
+  github_app_enabled: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -35,6 +36,7 @@ export class ConfigService {
   smtpEnabled = false;
   createProject: CreatePermission = 'everyone';
   createCache: CreatePermission = 'everyone';
+  githubAppEnabled = false;
 
   canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
     switch (permission) {
@@ -63,6 +65,7 @@ export class ConfigService {
           this.smtpEnabled = res.message.smtp_enabled;
           this.createProject = res.message.create_project ?? 'everyone';
           this.createCache = res.message.create_cache ?? 'everyone';
+          this.githubAppEnabled = res.message.github_app_enabled ?? false;
         }
       })
       .catch(() => {

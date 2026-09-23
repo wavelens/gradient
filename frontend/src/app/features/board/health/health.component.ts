@@ -10,6 +10,7 @@ import { RouterModule } from '@angular/router';
 import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
 import { BoardService, BoardHealth } from '@core/services/board.service';
 import { AdminService, AdminTask } from '@core/services/admin.service';
+import { ConfigService } from '@core/services/config.service';
 
 const MIB = 1024 ** 2;
 
@@ -70,7 +71,7 @@ const MIB = 1024 ** 2;
 
       <h2>Admin</h2>
       <div class="admin-actions">
-        @if (!githubConfigured()) {
+        @if (!config.githubAppEnabled) {
           <a class="btn" routerLink="/admin/github-app">Set up GitHub App</a>
         }
         <button class="btn" (click)="runDeepGc()" [disabled]="gcBusy()">Run Deep GC</button>
@@ -106,10 +107,10 @@ const MIB = 1024 ** 2;
 export class BoardHealthComponent implements OnInit {
   private board = inject(BoardService);
   private admin = inject(AdminService);
+  protected config = inject(ConfigService);
 
   health = signal<BoardHealth | null>(null);
   tasks = signal<AdminTask[]>([]);
-  githubConfigured = signal(false);
   gcBusy = signal(false);
   gcNotice = signal<string | null>(null);
   drainBusy = signal(false);
@@ -152,6 +153,5 @@ export class BoardHealthComponent implements OnInit {
   ngOnInit(): void {
     this.refreshHealth();
     this.loadTasks();
-    this.admin.githubAppConfigured().subscribe((v) => this.githubConfigured.set(v));
   }
 }
