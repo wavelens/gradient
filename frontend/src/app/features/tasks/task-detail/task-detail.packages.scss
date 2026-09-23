@@ -69,7 +69,9 @@
   .pkg-link {
     position: absolute;
     inset: 0;
+    padding: 0;
     border-radius: inherit;
+    &:hover { background: transparent; }
     &:focus-visible { outline-offset: -$focus-ring-width; }
   }
 
