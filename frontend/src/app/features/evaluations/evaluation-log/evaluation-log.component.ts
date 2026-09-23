@@ -1370,7 +1370,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const url = URL.createObjectURL(new Blob([log], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${this.buildDisplayName(build.name)}.log`;
+    link.download = `${this.buildFileName(build.name)}.log`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -1401,6 +1401,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       el?.scrollIntoView({ block: 'nearest' });
       el?.focus();
     }, 0);
+  }
+
+  // <hash>-name-version.drv → <hash>-name-version (the store file name, without .drv)
+  private buildFileName(path: string): string {
+    return (path.split('/').pop() ?? path).replace(/\.drv$/, '');
   }
 
   buildDisplayName(path: string): string {

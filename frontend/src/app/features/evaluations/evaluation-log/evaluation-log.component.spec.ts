@@ -466,7 +466,7 @@ describe('EvaluationLogComponent', () => {
       delete objectUrls['revokeObjectURL'];
     });
 
-    it('saves the whole log under the build display name', async () => {
+    it('saves the whole log under the store file name', async () => {
       const { cmp } = setup();
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
@@ -486,7 +486,7 @@ describe('EvaluationLogComponent', () => {
 
       expect(fetchMock).toHaveBeenCalledWith('/api/v1/builds/b1/log', { credentials: 'include' });
       expect(await created[0].text()).toBe('line 1\nline 2\n');
-      expect(clicked[0].download).toBe('hello-1.0.log');
+      expect(clicked[0].download).toBe('hash-hello-1.0.log');
       expect(revoke).toHaveBeenCalledWith('blob:log');
     });
 
