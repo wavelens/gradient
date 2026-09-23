@@ -432,8 +432,9 @@ mod tests {
             (breakdown.total - total).abs() < 1e-9,
             "total must match score()"
         );
-        assert_eq!(breakdown.rules.len(), 7, "simple policy has 7 rules");
+        assert_eq!(breakdown.rules.len(), 8, "simple policy has 8 rules");
         assert!(breakdown.rules.contains_key("MissingPathsRule"));
+        assert!(breakdown.rules.contains_key("QosRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
         let sum: f64 = breakdown.rules.values().sum();
         assert!(
@@ -455,6 +456,7 @@ mod tests {
             "MissingPathsRule",
             "NetworkAffinityRule",
             "PreferLocalBuildRule",
+            "QosRule",
             "RescoreWaitRule",
             "ReserveFetchWorkersRule",
             "ResourceFitRule",
