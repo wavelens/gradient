@@ -8,7 +8,9 @@
 //! worker pool (`Queued`/`Building` <-> `Waiting`), and self-heals a
 //! graph-stuck evaluation.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 
@@ -26,7 +28,9 @@ use tracing::{error, info, warn};
 /// stably-stuck eval's `updated_at` ages past this quickly.
 const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
+use crate::assessment_memo::AssessmentMemo;
 use crate::buildability::BuildabilityChecker;
+use gradient_db::EvalCounters;
 
 /// Sweep every in-flight evaluation and reconcile its status against the
 /// current set of connected workers, keyed on the eval's current state:
@@ -42,13 +46,18 @@ use crate::buildability::BuildabilityChecker;
 ///   back to `Queued` once the capability returns, `Workers` back to
 ///   `Building` once buildable. `Approval`/`NoCache`/`CacheStorageFull` parks
 ///   are owned by other hooks and left untouched.
-pub async fn reconcile_waiting_state(
+pub(crate) async fn reconcile_waiting_state(
     state: &Arc<ServerState>,
+    memo: &Mutex<AssessmentMemo>,
     worker_caps: &[(Vec<String>, Vec<String>)],
     eval_capable_workers: usize,
     fetch_capable_workers: usize,
     draining: bool,
 ) -> Result<()> {
+    gradient_db::fold_anchor_deltas(&state.worker_db)
+        .await
+        .context("fold evaluation anchor deltas")?;
+
     let evals = EEvaluation::find()
         .filter(CEvaluation::Status.is_in(vec![
             EvaluationStatus::Queued,
@@ -102,8 +111,14 @@ pub async fn reconcile_waiting_state(
     }
 
     let connected_workers = worker_caps.len() as u32;
+    let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
+    let counters = gradient_db::in_flight_counters(&state.worker_db, &ids)
+        .await
+        .context("read evaluation anchor counters")?;
+    lock(memo).retain(&ids.iter().copied().collect::<HashSet<_>>());
 
     for eval in evals {
+        let eval_counters = counters.get(&eval.id).copied().unwrap_or_default();
         let reason = eval
             .waiting_reason
             .as_ref()
@@ -140,8 +155,15 @@ pub async fn reconcile_waiting_state(
                 // Build-phase park, or a legacy/untagged row: recover from the
                 // pending builds, falling back to eval recovery when the eval
                 // never produced any (a pre-build park predating EvalWorkers).
-                _ => match build_phase_decision(state, eval.id, worker_caps, reason.as_ref())
-                    .await?
+                _ => match build_phase_decision(
+                    state,
+                    memo,
+                    eval.id,
+                    eval_counters,
+                    worker_caps,
+                    reason.as_ref(),
+                )
+                .await?
                 {
                     BuildPhase::Pending(a) => Some((a.target, a.reason)),
                     // Finalized rather than parked: unparking it to a status it
@@ -165,7 +187,16 @@ pub async fn reconcile_waiting_state(
                 connected_workers,
             ),
             EvaluationStatus::Building => {
-                match build_phase_decision(state, eval.id, worker_caps, reason.as_ref()).await? {
+                match build_phase_decision(
+                    state,
+                    memo,
+                    eval.id,
+                    eval_counters,
+                    worker_caps,
+                    reason.as_ref(),
+                )
+                .await?
+                {
                     BuildPhase::Pending(a) => Some((a.target, a.reason)),
                     BuildPhase::Settled | BuildPhase::Unnamed => None,
                 }
@@ -215,20 +246,23 @@ pub async fn reconcile_waiting_state(
 /// self-heal here: [`attempt_graph_unstick`], gated by [`unstick_due`].
 async fn build_phase_decision(
     state: &Arc<ServerState>,
+    memo: &Mutex<AssessmentMemo>,
     evaluation_id: EvaluationId,
+    counters: EvalCounters,
     worker_caps: &[(Vec<String>, Vec<String>)],
     current: Option<&WaitingReason>,
 ) -> Result<BuildPhase> {
-    let a = match assess_buildability(state, evaluation_id, worker_caps).await? {
-        BuildPhase::Pending(a) => a,
-        // Nothing it named is work any more. No park and no recovery says
-        // anything true about a finished evaluation, so settle it here.
-        BuildPhase::Settled => {
-            finalize_settled(state, evaluation_id).await;
-            return Ok(BuildPhase::Settled);
-        }
-        BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
-    };
+    let a =
+        match assess_buildability(state, Some(memo), evaluation_id, counters, worker_caps).await? {
+            BuildPhase::Pending(a) => a,
+            // Nothing it named is work any more. No park and no recovery says
+            // anything true about a finished evaluation, so settle it here.
+            BuildPhase::Settled => {
+                finalize_settled(state, evaluation_id).await;
+                return Ok(BuildPhase::Settled);
+            }
+            BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
+        };
 
     if let (EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. })) =
         (a.target, &a.reason)
@@ -285,21 +319,56 @@ enum BuildPhase {
     Pending(Assessment),
 }
 
-/// Decide `Building` vs `Waiting` for an eval's current blocking anchors.
-async fn assess_buildability(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    worker_caps: &[(Vec<String>, Vec<String>)],
-) -> Result<BuildPhase> {
-    let (named, pending) = eval_blocking_anchors(state, evaluation_id).await?;
-    if pending.is_empty() {
-        return Ok(if named {
-            BuildPhase::Settled
-        } else {
-            BuildPhase::Unnamed
-        });
+/// The verdicts the counters decide alone: no anchor named, nothing blocking,
+/// or a build already running. Anything else needs the pending anchors' systems.
+fn phase_from_counters(c: EvalCounters) -> Option<BuildPhase> {
+    if c.named == 0 {
+        return Some(BuildPhase::Unnamed);
     }
 
+    if c.active == 0 {
+        return Some(BuildPhase::Settled);
+    }
+
+    (c.building > 0).then_some(BuildPhase::Pending(Assessment {
+        target: EvaluationStatus::Building,
+        reason: None,
+        pending: c.active as u32,
+    }))
+}
+
+fn lock(memo: &Mutex<AssessmentMemo>) -> std::sync::MutexGuard<'_, AssessmentMemo> {
+    memo.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Decide `Building` vs `Waiting` for an eval's current blocking anchors. The
+/// anchors are read only when the counters cannot decide and `memo` holds no
+/// assessment for the same counters and pool; `None` forces the read.
+async fn assess_buildability(
+    state: &Arc<ServerState>,
+    memo: Option<&Mutex<AssessmentMemo>>,
+    evaluation_id: EvaluationId,
+    counters: EvalCounters,
+    worker_caps: &[(Vec<String>, Vec<String>)],
+) -> Result<BuildPhase> {
+    if let Some(phase) = phase_from_counters(counters) {
+        return Ok(phase);
+    }
+
+    let pending_count = counters.active as u32;
+    let now = Instant::now();
+    if let Some((target, reason)) =
+        memo.and_then(|m| lock(m).get(evaluation_id, counters, worker_caps, now))
+    {
+        return Ok(BuildPhase::Pending(Assessment {
+            target,
+            reason,
+            pending: pending_count,
+        }));
+    }
+
+    let pending = eval_blocking_anchors(state, evaluation_id).await?;
     let checker = BuildabilityChecker::load(state, &pending).await?;
     let target = if checker.any_buildable(&pending, worker_caps) {
         EvaluationStatus::Building
@@ -312,10 +381,21 @@ async fn assess_buildability(
         None
     };
 
+    if let Some(m) = memo {
+        lock(m).put(
+            evaluation_id,
+            counters,
+            worker_caps,
+            now,
+            target,
+            reason.clone(),
+        );
+    }
+
     Ok(BuildPhase::Pending(Assessment {
         target,
         reason,
-        pending: pending.len() as u32,
+        pending: pending_count,
     }))
 }
 
@@ -343,17 +423,21 @@ async fn attempt_graph_unstick(
         error!(error = %e, %evaluation_id, "unstick reconcile did not reach the graph actor");
     }
 
-    let blocked = match assess_buildability(state, evaluation_id, worker_caps).await? {
-        BuildPhase::Pending(a) if a.target == EvaluationStatus::Building => {
-            return Ok(BuildPhase::Pending(a));
-        }
-        BuildPhase::Pending(a) => a.pending,
-        BuildPhase::Settled => {
-            finalize_settled(state, evaluation_id).await;
-            return Ok(BuildPhase::Settled);
-        }
-        BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
-    };
+    let counters = gradient_db::eval_counters(&state.worker_db, evaluation_id)
+        .await
+        .context("read evaluation anchor counters after the heal")?;
+    let blocked =
+        match assess_buildability(state, None, evaluation_id, counters, worker_caps).await? {
+            BuildPhase::Pending(a) if a.target == EvaluationStatus::Building => {
+                return Ok(BuildPhase::Pending(a));
+            }
+            BuildPhase::Pending(a) => a.pending,
+            BuildPhase::Settled => {
+                finalize_settled(state, evaluation_id).await;
+                return Ok(BuildPhase::Settled);
+            }
+            BuildPhase::Unnamed => return Ok(BuildPhase::Unnamed),
+        };
 
     Ok(BuildPhase::Pending(Assessment {
         target: EvaluationStatus::Waiting,
@@ -536,52 +620,30 @@ fn unproducible_drv_block_sql() -> String {
     )
 }
 
-/// The anchors of `evaluation_id` that still block it, and whether it named any
-/// anchor at all. An anchor nothing demands is named but settled: no gate will
-/// ever queue it and no event is coming, so counting it parks the evaluation on
-/// work that never happens (#666). The two answers are one read, and the caller
-/// needs both: "named none" is a pre-build park to recover, "named some, none
-/// blocking" is an evaluation the graph has already finished.
+/// The anchors of `evaluation_id` that still block it. An anchor nothing
+/// demands is named but settled: no gate will ever queue it and no event is
+/// coming, so counting it parks the evaluation on work that never happens (#666).
 async fn eval_blocking_anchors(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
-) -> Result<(bool, Vec<MDerivationBuild>)> {
-    use sea_orm::QuerySelect;
-    let db = &state.worker_db;
-    let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
-        .select_only()
+) -> Result<Vec<MDerivationBuild>> {
+    use sea_orm::sea_query::Query;
+    let named = Query::select()
         .column(CBuildJob::DerivationBuild)
-        .filter(CBuildJob::Evaluation.eq(evaluation_id))
-        .into_tuple::<DerivationBuildId>()
-        .all(db)
+        .from(EBuildJob::default())
+        .and_where(CBuildJob::Evaluation.eq(evaluation_id))
+        .to_owned();
+    let pending = EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.in_subquery(named))
+        .filter(CDerivationBuild::Status.is_in(gradient_db::graph_sql::DEMANDABLE_STATUSES))
+        .all(&state.worker_db)
         .await
-        .context("fetch eval build_job anchors")?;
-    if anchor_ids.is_empty() {
-        return Ok((false, vec![]));
-    }
+        .context("fetch pending anchors")?;
 
-    let pending = gradient_db::fetch_in_chunks(&anchor_ids, |chunk| async move {
-        EDerivationBuild::find()
-            .filter(CDerivationBuild::Id.is_in(chunk))
-            .filter(CDerivationBuild::Status.is_in(vec![
-                BuildStatus::Created,
-                BuildStatus::Queued,
-                BuildStatus::Building,
-                BuildStatus::FailedTransient,
-            ]))
-            .all(db)
-            .await
-    })
-    .await
-    .context("fetch pending anchors")?;
-
-    Ok((
-        true,
-        pending
-            .into_iter()
-            .filter(|a| gradient_db::graph_sql::blocks_evaluation(a.status, a.demanded))
-            .collect(),
-    ))
+    Ok(pending
+        .into_iter()
+        .filter(|a| gradient_db::graph_sql::blocks_evaluation(a.status, a.demanded))
+        .collect())
 }
 
 /// The capability a pre-build evaluation needs to make progress: `Fetching`
@@ -824,6 +886,35 @@ mod tests {
 
     /// The heal is not a tick: it runs once per stuck state, and again only
     /// when the pending set moved.
+    /// The three verdicts the counters decide alone, without reading an anchor:
+    /// the tick is proportional to in-flight evaluations, not to their anchors.
+    #[test]
+    fn counters_decide_without_anchors() {
+        let c = |named, active, building| gradient_db::EvalCounters {
+            named,
+            active,
+            building,
+            ..Default::default()
+        };
+        assert!(matches!(
+            phase_from_counters(c(0, 0, 0)),
+            Some(BuildPhase::Unnamed)
+        ));
+        assert!(matches!(
+            phase_from_counters(c(4, 0, 0)),
+            Some(BuildPhase::Settled)
+        ));
+        assert!(matches!(
+            phase_from_counters(c(4, 2, 1)),
+            Some(BuildPhase::Pending(Assessment {
+                target: EvaluationStatus::Building,
+                reason: None,
+                pending: 2
+            }))
+        ));
+        assert!(phase_from_counters(c(4, 2, 0)).is_none());
+    }
+
     #[test]
     fn the_graph_stuck_heal_runs_on_entry_and_on_change_only() {
         assert!(unstick_due(None, 3));

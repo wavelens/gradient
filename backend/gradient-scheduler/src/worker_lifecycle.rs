@@ -323,8 +323,15 @@ impl Scheduler {
             .map(|w| (w.architectures, w.system_features))
             .collect();
         let draining = self.draining.load(std::sync::atomic::Ordering::Relaxed);
-        build::reconcile_waiting_state(&self.state, &caps, eval_capable, fetch_capable, draining)
-            .await
+        build::reconcile_waiting_state(
+            &self.state,
+            &self.assessments,
+            &caps,
+            eval_capable,
+            fetch_capable,
+            draining,
+        )
+        .await
     }
 
     /// Every connected worker, including the sampling fields the API masks.

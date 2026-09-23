@@ -17,6 +17,7 @@
 //! - [`buildability`] - whether the connected pool can build a pending anchor
 
 pub mod actor;
+mod assessment_memo;
 pub mod build;
 pub mod buildability;
 pub mod dispatch;
@@ -95,6 +96,9 @@ pub struct Scheduler {
     /// in-flight evaluations are parked so the server can be stopped safely.
     /// In-memory only, so it auto-clears on the next startup.
     pub draining: Arc<AtomicBool>,
+    /// Each in-flight evaluation's last build-phase assessment, reused while
+    /// its counters and the pool are unchanged.
+    pub(crate) assessments: Arc<std::sync::Mutex<assessment_memo::AssessmentMemo>>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -119,6 +123,7 @@ impl Scheduler {
                 std::collections::HashMap::new(),
             )),
             draining: Arc::new(AtomicBool::new(false)),
+            assessments: Arc::default(),
         }
     }
 
