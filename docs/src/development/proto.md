@@ -1361,7 +1361,7 @@ After a successful build, the worker reads `<output>/nix-support/hydra-build-pro
 
 Outputs with no `hydra-build-products` file send `products: []` and have no `build_product` rows.
 
-A declared product whose file is missing arrives with `size: None`. The server stores no `build_product` row for it and records an `Error` evaluation message (source `builder`) on every active evaluation referencing the derivation. The build itself still completes; the evaluation finalizes as `Failed`.
+A declared product whose file is missing arrives with `size: None`. The server stores no `build_product` row for it and records a `Warning` evaluation message (source `builder`) on every active evaluation referencing the derivation. The build and the evaluation still complete.
 
 ---
 

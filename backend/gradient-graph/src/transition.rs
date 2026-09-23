@@ -409,7 +409,7 @@ async fn build_output(
 }
 
 /// A declared artefact the build did not produce leaves the build successful but
-/// fails every evaluation still waiting on it.
+/// warns every evaluation still waiting on it.
 async fn report_missing_artefacts(
     ctx: &DbContext,
     derivation: DerivationId,
@@ -433,7 +433,7 @@ async fn report_missing_artefacts(
             gradient_db::record_evaluation_message(
                 ctx,
                 evaluation.id,
-                MessageLevel::Error,
+                MessageLevel::Warning,
                 missing_artefact_message(product),
                 Some("builder".to_owned()),
             )
