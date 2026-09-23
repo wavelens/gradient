@@ -278,4 +278,36 @@ report = latency_report("stress")
 assert report["builds"] == len(RESOLVED["stress"]["derivations"]), report["builds"]
 assert report["overhead_factor"] < 20, f"scheduling overhead {report['overhead_factor']:.1f}x the critical path"
 
+banner("replay")
+nodes = RESOLVED["replay"]["derivations"]
+failing = {n for n, node in nodes.items() if node["build"]["outcome"] == "fail"}
+blocked = set(failing)
+while True:
+    grown = {n for n, node in nodes.items() if set(node["deps"]) & blocked} | blocked
+    if grown == blocked:
+        break
+    blocked = grown
+e = phase("replay")
+wait_evaluation(e, "Failed" if failing else "Completed", timeout=900)
+by_drv = {}
+for w in WORKERS:
+    for entry in daemon(w, "builds"):
+        for p in entry["paths"]:
+            by_drv.setdefault(p, []).append((w, entry))
+built = {n: by_drv.get(node["drvPath"], []) for n, node in nodes.items() if not node["present"]["cache"]}
+for n, builds in built.items():
+    if n in failing:
+        assert [entry["ok"] for _, entry in builds] == [False], f"{n}: {builds}"
+    elif n in blocked:
+        assert builds == [], f"{n} built although a dependency failed"
+    else:
+        assert [entry["ok"] for _, entry in builds] == [True], f"{n} built {len(builds)} times"
+starts = {n: b[0][1]["at_us"] for n, b in built.items() if b}
+ends = {n: b[0][1]["at_us"] + b[0][1]["duration_us"] for n, b in built.items() if b}
+for n, start in starts.items():
+    late = [d for d in nodes[n]["deps"] if d in ends and ends[d] > start]
+    assert late == [], f"{n} started before {late} finished"
+assert_clean()
+latency_report("replay")
+
 server.copy_from_vm("/tmp/xchg-out/latency.jsonl", "")

@@ -21,6 +21,7 @@ let
     upstream-cached = ./specs/upstream-cached.nix;
     hang = ./specs/hang.nix;
     stress = ./specs/stress.nix;
+    replay = ./specs/replay.nix;
   };
   specs = lib.attrValues specFiles;
   specNames = lib.unique (map (s: s.name) specs);
