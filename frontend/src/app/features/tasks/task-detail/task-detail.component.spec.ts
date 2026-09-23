@@ -723,3 +723,23 @@ describe('TaskDetailComponent - #636 eval page', () => {
     expect(spy).toHaveBeenCalled();
   });
 });
+
+describe('TaskDetailComponent - status phases', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+
+  it('marks the evaluation card and its icon with the evaluation phase', () => {
+    const { fixture } = setup(access, { primaryStatus: 'Building' });
+    const card: HTMLElement = fixture.nativeElement.querySelector('.eval-card');
+    expect(card.dataset['phase']).toBe('running');
+    expect(card.querySelector('gr-status-icon.si')?.getAttribute('data-phase')).toBe('running');
+  });
+
+  it('marks a package row and its icon with the build phase', () => {
+    const skipped = { ...epSummary('a'), build_status: 'Skipped' as const };
+    const { fixture } = setup(access, { getEntryPoints: () => of({ entry_points: [skipped], total: 1 }) });
+    fixture.detectChanges();
+    const pkg: HTMLElement = fixture.nativeElement.querySelector('.pkg');
+    expect(pkg.dataset['phase']).toBe('aborted');
+    expect(pkg.querySelector('gr-status-icon.si')?.getAttribute('data-phase')).toBe('aborted');
+  });
+});

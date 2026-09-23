@@ -95,20 +95,22 @@
 .s-ico {
   transition: background $transition-slow, color $transition-slow;
 
-  &.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
-  &.err { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
-  &.run { color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); }
-  &.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-  &.muted { color: var(--gr-text-muted); background: var(--gr-surface-hover); }
+  &[data-phase='success'] { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  &[data-phase='failure'] { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
+  &[data-phase='queued'],
+  &[data-phase='running'] { color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); }
+  &[data-phase='waiting'] { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  &[data-phase='aborted'] { color: var(--gr-text-muted); background: var(--gr-surface-hover); }
 }
 
 .eval-card,
 .pkg {
-  &.ok { --rail-c: var(--ok); }
-  &.err { --rail-c: var(--err); }
-  &.run { --rail-c: var(--run); }
-  &.warn { --rail-c: var(--warn); }
-  &.muted { --rail-c: var(--idle); }
+  &[data-phase='success'] { --rail-c: var(--ok); }
+  &[data-phase='failure'] { --rail-c: var(--err); }
+  &[data-phase='queued'],
+  &[data-phase='running'] { --rail-c: var(--run); }
+  &[data-phase='waiting'] { --rail-c: var(--warn); }
+  &[data-phase='aborted'] { --rail-c: var(--idle); }
 }
 
 @media (prefers-reduced-motion: reduce) {

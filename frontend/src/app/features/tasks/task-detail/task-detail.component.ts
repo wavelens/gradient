@@ -14,11 +14,11 @@ import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
-import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
+import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, StatusIconComponent, TooltipDirective } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
-import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
-import { buildDuration, commitLabel, evaluationDuration, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus } from '@shared/evaluation';
+import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts } from '@core/models';
+import { buildDuration, buildPhase, commitLabel, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
@@ -28,7 +28,7 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
-    IconComponent, InViewDirective,
+    IconComponent, InViewDirective, StatusIconComponent,
   ],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -407,48 +407,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return TaskDetailComponent.attrSegments(attr).at(-1) ?? attr;
   }
 
-  statusClass(status: EvaluationStatus): string {
-    switch (status) {
-      case 'Completed': return 'ok';
-      case 'Failed': return 'err';
-      case 'Aborted': return 'muted';
-      case 'Waiting': return 'warn';
-      default: return 'run';
-    }
-  }
-
-  statusIcon(status: EvaluationStatus): string {
-    switch (status) {
-      case 'Completed': return 'check_circle';
-      case 'Failed': return 'error';
-      case 'Aborted': return 'cancel';
-      case 'Waiting': return 'pause_circle';
-      case 'Fetching': return 'cloud_download';
-      case 'Queued': return 'schedule';
-      default: return 'sync';
-    }
-  }
-
-  buildStatusClass(status: BuildStatus): string {
-    switch (status) {
-      case 'Completed': case 'Substituted': return 'ok';
-      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'err';
-      case 'Aborted': case 'DependencyFailed': case 'Skipped': return 'muted';
-      case 'Building': return 'run';
-      default: return 'warn';
-    }
-  }
-
-  buildStatusIcon(status: BuildStatus): string {
-    switch (status) {
-      case 'Completed': case 'Substituted': return 'check_circle';
-      case 'FailedPermanent': case 'FailedTransient': case 'FailedTimeout': return 'error';
-      case 'Aborted': case 'DependencyFailed': return 'cancel';
-      case 'Skipped': return 'remove_circle_outline';
-      case 'Building': return 'sync';
-      default: return 'schedule';
-    }
-  }
+  protected readonly evaluationPhase = evaluationPhase;
+  protected readonly buildPhase = buildPhase;
 
   pkgMenuModel = signal<MenuItem[]>([]);
 
