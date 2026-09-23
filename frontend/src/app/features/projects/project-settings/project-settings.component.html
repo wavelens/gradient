@@ -109,17 +109,8 @@
       <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
       @if (sshKey()) {
         <gr-form-field label="Public Key">
-          <textarea
-            grInput
-            [value]="sshKey()"
-            readonly
-            rows="4"
-            class="w-full ssh-key-area"
-          ></textarea>
+          <gr-copy-field multiline [rows]="4" [value]="sshKey()" />
         </gr-form-field>
-        <div class="form-actions">
-          <button grButton label="Copy Key" icon="content_copy" severity="secondary" (click)="copySSHKey()"></button>
-        </div>
       } @else {
         <p class="text-secondary">No SSH key generated yet.</p>
         <button

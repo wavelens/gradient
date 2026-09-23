@@ -13,6 +13,7 @@ import { ProjectAccessService } from '@core/services/project-access.service';
 import {
   ButtonComponent,
   CheckboxComponent,
+  CopyFieldComponent,
   DialogComponent,
   FormFieldComponent,
   InputDirective,
@@ -37,7 +38,7 @@ import { Project, AccessState } from '@core/models';
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    InputDirective,
+    CopyFieldComponent,
     CheckboxComponent,
     LoadingSpinnerComponent,
     WritableDirective,
@@ -196,9 +197,5 @@ export class ProjectSettingsComponent implements OnInit {
         this.generatingSSH.set(false);
       },
     });
-  }
-
-  copySSHKey(): void {
-    navigator.clipboard.writeText(this.sshKey());
   }
 }
