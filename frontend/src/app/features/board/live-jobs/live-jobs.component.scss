@@ -19,3 +19,5 @@ tbody tr.negative td { color: var(--gr-status-warning); }
 .view-toggle button { background: var(--gr-surface-raised); color: var(--gr-text-secondary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.3rem 0.8rem; cursor: pointer; }
 .view-toggle button.active { background: var(--gr-surface-hover); color: var(--gr-text-primary); }
     
+
+td.subject { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

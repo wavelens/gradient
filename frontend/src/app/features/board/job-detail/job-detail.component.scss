@@ -45,6 +45,9 @@ gr-table.kv.counts { display: block; margin-top: 1rem; }
 .drv-row .path { color: var(--gr-text-muted); font-size: $font-size-xs; word-break: break-all; }
 tbody tr.clickable { cursor: pointer; transition: background 0.1s; }
 tbody tr.clickable:hover { background: var(--gr-surface-hover); }
+tbody tr.current td { color: var(--gr-text-primary); font-weight: 600; }
+// gr-table lights every row on hover; the attempt on screen goes nowhere.
+:host ::ng-deep tbody tr.current:hover td { background: none; }
 .help { margin-left: 0.4rem; width: 1.1rem; height: 1.1rem; padding: 0; border-radius: 50%; border: 1px solid var(--gr-border-subtle); background: var(--gr-surface-hover); color: var(--gr-text-secondary); font-size: $font-size-xs; line-height: 1; cursor: pointer; }
 .help:hover { color: var(--gr-text-primary); border-color: var(--gr-accent); }
 .rule-help { max-width: 22rem; }

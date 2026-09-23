@@ -19,7 +19,7 @@ const PENDING: PendingJobSummary = {
   build_id: 'b1',
   queued_at: '2026-06-08T00:00:00Z',
   dependency_count: 3,
-  pname: null,
+  subject: null,
 };
 
 function setup(): ComponentFixture<BoardLiveJobsComponent> {
@@ -54,7 +54,7 @@ const DISPATCHED: DispatchedJobSummary = {
   dispatched_at: '2026-06-08T00:00:00Z',
   build_id: 'b1',
   evaluation_id: 'e1abc123',
-  pname: 'hello',
+  subject: 'hello-2.12.1',
 };
 
 function setupWithDispatched(dispatched: DispatchedJobSummary[]): ComponentFixture<BoardLiveJobsComponent> {
@@ -80,21 +80,34 @@ function setupWithDispatched(dispatched: DispatchedJobSummary[]): ComponentFixtu
   return fixture;
 }
 
-describe('BoardLiveJobsComponent - dispatched pname column', () => {
+describe('BoardLiveJobsComponent - dispatched subject column', () => {
   beforeEach(() => sessionStorage.clear());
 
-  it('renders pname in the Derivation column for a dispatched build job', () => {
+  const subjectCell = (fixture: ComponentFixture<BoardLiveJobsComponent>) =>
+    (fixture.nativeElement as HTMLElement).querySelector('tbody td.subject')?.textContent?.trim();
+
+  it('names the derivation of a build job', () => {
     const fixture = setupWithDispatched([DISPATCHED]);
     fixture.detectChanges();
-    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('hello');
+    expect(subjectCell(fixture)).toBe('hello-2.12.1');
   });
 
-  it('renders - when pname is null', () => {
-    const fixture = setupWithDispatched([{ ...DISPATCHED, pname: null }]);
+  it('names the repository of an eval job', () => {
+    const fixture = setupWithDispatched([{ ...DISPATCHED, kind: 0, build_id: null, subject: 'https://git.example/acme.git' }]);
     fixture.detectChanges();
-    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('-');
+    expect(subjectCell(fixture)).toBe('https://git.example/acme.git');
+  });
+
+  it('heads the column for both kinds', () => {
+    const fixture = setupWithDispatched([DISPATCHED]);
+    fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Derivation / Evaluation');
+  });
+
+  it('renders - when the subject is unknown', () => {
+    const fixture = setupWithDispatched([{ ...DISPATCHED, subject: null }]);
+    fixture.detectChanges();
+    expect(subjectCell(fixture)).toBe('-');
   });
 });
 
@@ -107,8 +120,8 @@ const DECISIONS: DispatchDecisionView[] = [
     kind: 1,
     winner: 'j1',
     candidates: [
-      { id: 'c1', job_id: 'j1', kind: 1, project: 'o1', build_id: 'b1', evaluation_id: 'e1', pname: 'win', score: 12, won: true },
-      { id: 'c2', job_id: 'j2', kind: 1, project: 'o2', build_id: 'b2', evaluation_id: 'e2', pname: 'loser', score: -8, won: false },
+      { id: 'c1', job_id: 'j1', kind: 1, project: 'o1', build_id: 'b1', evaluation_id: 'e1', subject: 'win', score: 12, won: true },
+      { id: 'c2', job_id: 'j2', kind: 1, project: 'o2', build_id: 'b2', evaluation_id: 'e2', subject: 'loser', score: -8, won: false },
     ],
   },
 ];
@@ -145,8 +158,8 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
 
     const rows = cmp.decisionRows();
     expect(rows.length).toBe(2);
-    expect(rows.some((r) => r.score < 0 && r.pname === 'loser' && !r.won)).toBe(true);
-    expect(rows.some((r) => r.pname === 'win' && r.won)).toBe(true);
+    expect(rows.some((r) => r.score < 0 && r.subject === 'loser' && !r.won)).toBe(true);
+    expect(rows.some((r) => r.subject === 'win' && r.won)).toBe(true);
 
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('passed over');

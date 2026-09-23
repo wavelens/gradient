@@ -23,7 +23,7 @@ interface DecisionRow {
   at: string;
   worker_id: string;
   kind: number;
-  pname: string | null;
+  subject: string | null;
   score: number;
   won: boolean;
 }
@@ -81,14 +81,14 @@ interface DecisionRow {
         @if (scoreScope() === 'current') {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>Dispatched</th><th></th></tr>
+              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation</th><th>Score</th><th>Dispatched</th><th></th></tr>
             </thead>
             <tbody>
               @for (j of filteredJobs(); track j.id) {
                 <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
                   <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
                   <td class="mono">{{ j.worker_id }}</td>
-                  <td class="mono">{{ j.pname ?? '-' }}</td>
+                  <td class="mono subject" [title]="j.subject ?? ''">{{ j.subject ?? '-' }}</td>
                   <td>{{ j.score | number: '1.1-1' }}</td>
                   <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
                   <td>{{ canInspect(j) ? '›' : '' }}</td>
@@ -101,7 +101,7 @@ interface DecisionRow {
         } @else {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>When</th><th></th></tr>
+              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation / Evaluation</th><th>Score</th><th>When</th><th></th></tr>
             </thead>
             <tbody>
               @for (r of decisionRows(); track r.id) {
@@ -109,7 +109,7 @@ interface DecisionRow {
                   <td>{{ r.won ? 'dispatched' : 'passed over' }}</td>
                   <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
                   <td class="mono">{{ r.worker_id }}</td>
-                  <td class="mono">{{ r.pname ?? '-' }}</td>
+                  <td class="mono subject" [title]="r.subject ?? ''">{{ r.subject ?? '-' }}</td>
                   <td>{{ r.score | number: '1.1-1' }}</td>
                   <td>{{ r.at | date: 'HH:mm:ss' }}</td>
                   <td>›</td>
@@ -128,18 +128,17 @@ interface DecisionRow {
           @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
         </div>
         <gr-table class="jobs">
-          <thead><tr><th>Kind</th><th>Evaluation</th><th>Derivation</th><th>Deps</th><th>Queued</th></tr></thead>
+          <thead><tr><th>Kind</th><th>Derivation / Evaluation</th><th>Deps</th><th>Queued</th></tr></thead>
           <tbody>
             @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '')) {
               <tr class="clickable" [routerLink]="['/board/jobs', p.evaluation_id]">
                 <td>{{ p.kind === 1 ? 'build' : 'eval' }}</td>
-                <td class="mono">{{ p.evaluation_id.slice(0, 8) }}</td>
-                <td class="mono">{{ p.pname ?? '-' }}</td>
+                <td class="mono subject" [title]="p.subject ?? ''">{{ p.subject ?? '-' }}</td>
                 <td>{{ p.dependency_count }}</td>
                 <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
               </tr>
             } @empty {
-              <tr><td colspan="5" class="muted">No pending jobs.</td></tr>
+              <tr><td colspan="4" class="muted">No pending jobs.</td></tr>
             }
           </tbody>
         </gr-table>
@@ -231,7 +230,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
           at: d.at,
           worker_id: d.worker_id,
           kind: c.kind,
-          pname: c.pname,
+          subject: c.subject,
           score: c.score,
           won: c.won,
         });
@@ -259,7 +258,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
                 dispatched_at: new Date().toISOString(),
                 build_id: ev.build_id ?? null,
                 evaluation_id: ev.evaluation_id ?? '',
-                pname: null,
+                subject: null,
               },
               ...list,
             ].slice(0, BoardLiveJobsComponent.MAX_DISPATCHED)

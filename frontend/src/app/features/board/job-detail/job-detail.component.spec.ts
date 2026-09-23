@@ -22,6 +22,7 @@ const DETAIL: DispatchedJobDetail = {
   dispatched_at: '2026-06-08T00:01:00Z',
   build_id: null,
   evaluation_id: 'e1',
+  evaluation: null,
   pname: null,
   queued_at: '2026-06-08T00:00:00Z',
   finished_at: null,
@@ -98,6 +99,14 @@ const DETAIL: DispatchedJobDetail = {
 const EVAL_DETAIL: DispatchedJobDetail = {
   ...DETAIL,
   kind: 0,
+  derivations: [],
+  evaluation: {
+    repository: 'https://git.example/acme.git',
+    commit: 'abc1234def5678abc1234def5678abc1234def56',
+    commit_message: 'Bump inputs',
+    wildcard: 'packages.*.*',
+    task: 'ci',
+  },
   job_context: {
     kind: 'Eval',
     architecture: '',
@@ -118,7 +127,7 @@ const PENDING: PendingJobSummary = {
   build_id: 'b9',
   queued_at: '2026-06-08T00:00:00Z',
   dependency_count: 3,
-  pname: null,
+  subject: 'hello-2.12.1',
 };
 
 function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixture<BoardJobDetailComponent> {
@@ -328,5 +337,52 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
     const section = el.querySelector('section.attempts') as HTMLElement;
     expect(section.textContent).toContain('builder for ... failed with exit code 1');
+  });
+});
+
+describe('BoardJobDetailComponent - #636', () => {
+  it('shows an eval job the evaluation it ran, not an empty derivation list', () => {
+    const el = setup({ getJob: () => of(EVAL_DETAIL) }).nativeElement as HTMLElement;
+    const section = el.querySelector('section.evaluation') as HTMLElement;
+    expect(section.textContent).toContain('https://git.example/acme.git');
+    expect(section.textContent).toContain('abc1234');
+    expect(section.textContent).toContain('Bump inputs');
+    expect(section.textContent).toContain('packages.*.*');
+    expect(el.textContent).not.toContain('Derivations');
+  });
+
+  it('links the evaluation to its log page', () => {
+    const fixture = setup({ getJob: () => of(EVAL_DETAIL) });
+    const link = fixture.debugElement.query(By.css('section.ids a[href*="/log/"]'));
+    expect(link.injector.get(RouterLink).urlTree?.toString()).toBe('/project/project-one/log/e1');
+  });
+
+  it('marks the attempt being viewed instead of linking it to itself', () => {
+    const job: DispatchedJobDetail = {
+      ...DETAIL,
+      previous_attempts: [
+        { dispatched_job_id: 'dj-old', substitute: false, outcome: 3, reason: null, failure_message: null, created_at: '2026-06-08T00:00:00Z' },
+        { dispatched_job_id: 'job-1', substitute: false, outcome: 1, reason: null, failure_message: null, created_at: '2026-06-08T00:01:00Z' },
+      ],
+    };
+    const el = setup({ getJob: () => of(job) }).nativeElement as HTMLElement;
+    const rows = el.querySelectorAll('section.attempts tbody tr');
+    expect(rows[1].classList).toContain('current');
+    expect(rows[1].classList).not.toContain('clickable');
+    expect(rows[1].textContent).not.toContain('\u203a');
+    expect(rows[0].classList).toContain('clickable');
+  });
+
+  it('reads sizes and times in units a person can take in', () => {
+    const text = (setup().nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('31.3 GiB');
+    expect(text).toContain('1.0 KiB');
+    expect(text).toContain('4.2 s');
+    expect(text).toContain('777 MiB');
+  });
+
+  it('names the pending job by what it works on', () => {
+    const el = setup({ getJob: () => throwError(() => new Error('404')), getPendingJobs: () => of({ jobs: [PENDING], other_pending: 0 }) }, 'e1').nativeElement as HTMLElement;
+    expect(el.textContent).toContain('hello-2.12.1');
   });
 });

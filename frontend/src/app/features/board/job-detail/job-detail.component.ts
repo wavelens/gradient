@@ -19,6 +19,7 @@ import {
 } from '@core/services/board.service';
 import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
 import { ButtonComponent, DialogComponent, LoadingSpinnerComponent, PopoverComponent, TableComponent } from '@shared/ui';
+import { formatBytes, formatDuration, formatMegabytes } from '@shared/text';
 import { JobTimelineComponent } from './job-timeline.component';
 
 interface RuleRow {
@@ -53,8 +54,30 @@ interface RuleRow {
           <span class="label">Worker</span>
           <a class="mono worker-link" [routerLink]="['/project', j.project_name, 'workers', j.worker_id, 'metrics']">{{ j.worker_id }}</a>
         </div>
-        <div><span class="label">Evaluation</span><span class="mono">{{ j.evaluation_id }}</span></div>
+        <div>
+          <span class="label">Evaluation</span>
+          <a class="mono" [routerLink]="['/project', j.project_name, 'log', j.evaluation_id]">{{ j.evaluation_id }}</a>
+        </div>
       </section>
+
+      @if (j.evaluation; as ev) {
+        <section class="ctx evaluation">
+          <h2>Evaluation</h2>
+          <gr-table class="kv">
+            <tbody>
+              <tr><td class="label">Repository</td><td class="mono">{{ ev.repository }}</td></tr>
+              <tr>
+                <td class="label">Commit</td>
+                <td class="mono" [title]="ev.commit">{{ ev.commit.slice(0, 12) }}@if (ev.commit_message) { <span class="muted"> {{ ev.commit_message }}</span> }</td>
+              </tr>
+              <tr><td class="label">Wildcard</td><td class="mono">{{ ev.wildcard }}</td></tr>
+              @if (ev.task) {
+                <tr><td class="label">Task</td><td class="mono">{{ ev.task }}</td></tr>
+              }
+            </tbody>
+          </gr-table>
+        </section>
+      }
 
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | date: 'medium' }}</span></div>
@@ -114,8 +137,8 @@ interface RuleRow {
             <tr><td class="label">CPU count</td><td class="mono">{{ j.worker_context.cpu_count }}</td></tr>
             <tr><td class="label">CPU core score</td><td class="mono">{{ j.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
             <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct != null ? (j.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
-            <tr><td class="label">RAM total</td><td class="mono">{{ j.worker_context.ram_total_mb | number }} MB</td></tr>
-            <tr><td class="label">RAM free</td><td class="mono">{{ j.worker_context.ram_free_mb != null ? (j.worker_context.ram_free_mb | number) + ' MB' : '-' }}</td></tr>
+            <tr><td class="label">RAM total</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_total_mb) }}</td></tr>
+            <tr><td class="label">RAM free</td><td class="mono">{{ formatMegabytes(j.worker_context.ram_free_mb) }}</td></tr>
             <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
             <tr><td class="label">Network speed</td><td class="mono">{{ j.worker_context.network_speed_mbps != null ? (j.worker_context.network_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
           </tbody>
@@ -131,7 +154,7 @@ interface RuleRow {
               <tr><td class="label">Architecture</td><td class="mono">{{ j.job_context.architecture }}</td></tr>
             }
             <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '-' }}</td></tr>
-            <tr><td class="label">Missing NAR size</td><td class="mono">{{ j.job_context.missing_nar_size != null ? (j.job_context.missing_nar_size | number) : '-' }}</td></tr>
+            <tr><td class="label">Missing NAR size</td><td class="mono">{{ formatBytes(j.job_context.missing_nar_size) }}</td></tr>
             <tr><td class="label">Project work share</td><td class="mono">{{ j.job_context.project_work_share != null ? (j.job_context.project_work_share | number: '1.0-3') : '-' }}</td></tr>
             <tr><td class="label">Rescore count</td><td class="mono">{{ j.job_context.rescore_count }}</td></tr>
             <tr><td class="label">Queued</td><td class="mono">{{ j.job_context.queued_at | date: 'medium' }}</td></tr>
@@ -139,7 +162,7 @@ interface RuleRow {
             @if (j.job_context.kind === 'Build') {
               <tr><td class="label">Dependency count</td><td class="mono">{{ j.job_context.dependency_count ?? '-' }}</td></tr>
               <tr><td class="label">Package name</td><td class="mono">{{ j.job_context.pname ?? '-' }}</td></tr>
-              <tr><td class="label">Closure size</td><td class="mono">{{ j.job_context.closure_size != null ? (j.job_context.closure_size | number) : '-' }}</td></tr>
+              <tr><td class="label">Closure size</td><td class="mono">{{ formatBytes(j.job_context.closure_size) }}</td></tr>
               <tr><td class="label">Prefer local build</td><td class="mono">{{ j.job_context.prefer_local_build ? 'yes' : 'no' }}</td></tr>
               <tr><td class="label">Fixed output</td><td class="mono">{{ j.job_context.is_fixed_output ? 'yes' : 'no' }}</td></tr>
             } @else {
@@ -152,10 +175,10 @@ interface RuleRow {
           <h3>History</h3>
           <gr-table class="kv">
             <tbody>
-              <tr><td class="label">Peak RAM</td><td class="mono">{{ h.peak_ram_mb | number }} MB</td></tr>
-              <tr><td class="label">Avg CPU time</td><td class="mono">{{ h.avg_cpu_time_ms | number }} ms</td></tr>
-              <tr><td class="label">Build time</td><td class="mono">{{ h.build_time_ms | number }} ms</td></tr>
-              <tr><td class="label">Avg disk bytes</td><td class="mono">{{ h.avg_disk_bytes | number }}</td></tr>
+              <tr><td class="label">Peak RAM</td><td class="mono">{{ formatMegabytes(h.peak_ram_mb) }}</td></tr>
+              <tr><td class="label">Avg CPU time</td><td class="mono">{{ formatDuration(h.avg_cpu_time_ms) }}</td></tr>
+              <tr><td class="label">Build time</td><td class="mono">{{ formatDuration(h.build_time_ms) }}</td></tr>
+              <tr><td class="label">Avg disk usage</td><td class="mono">{{ formatBytes(h.avg_disk_bytes) }}</td></tr>
               <tr><td class="label">OOM rate</td><td class="mono">{{ h.oom_rate | number: '1.0-3' }}</td></tr>
               <tr><td class="label">Samples</td><td class="mono">{{ h.samples }}</td></tr>
             </tbody>
@@ -209,13 +232,15 @@ interface RuleRow {
             <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>Reason</th><th>When</th><th></th></tr></thead>
             <tbody>
               @for (a of j.previous_attempts; track a.dispatched_job_id; let i = $index) {
-                <tr class="clickable" [routerLink]="['/board/jobs', a.dispatched_job_id]">
+                @let current = a.dispatched_job_id === j.id;
+                <tr [class.clickable]="!current" [class.current]="current"
+                    [routerLink]="current ? null : ['/board/jobs', a.dispatched_job_id]">
                   <td>{{ i + 1 }}</td>
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
                   <td class="mono reason" [title]="a.failure_message ?? ''">{{ a.failure_message ?? '-' }}</td>
                   <td>{{ a.created_at | date: 'medium' }}</td>
-                  <td>&rsaquo;</td>
+                  <td>{{ current ? '' : '\u203a' }}</td>
                 </tr>
               }
             </tbody>
@@ -231,6 +256,9 @@ interface RuleRow {
       </header>
       <p class="muted">Still queued - limited details are available until it is dispatched.</p>
       <section class="ids">
+        @if (p.subject) {
+          <div><span class="label">{{ p.kind === 1 ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
+        }
         <div><span class="label">Evaluation</span><span class="mono">{{ p.evaluation_id }}</span></div>
         @if (p.build_id) {
           <div><span class="label">Build</span><span class="mono">{{ p.build_id }}</span></div>
@@ -299,6 +327,10 @@ export class BoardJobDetailComponent implements OnInit {
   buildLoading = signal(false);
   buildError = signal<string | null>(null);
 
+  protected readonly formatBytes = formatBytes;
+  protected readonly formatMegabytes = formatMegabytes;
+  protected readonly formatDuration = formatDuration;
+
   private static readonly WORKER_CAPS: (keyof GradientCapabilities)[] = ['federate', 'fetch', 'eval', 'build'];
 
   currentState = computed(() => {
@@ -335,8 +367,7 @@ export class BoardJobDetailComponent implements OnInit {
     const j = this.job();
     if (!j) return '-';
     const ms = new Date(j.dispatched_at).getTime() - new Date(j.queued_at).getTime();
-    if (!isFinite(ms) || ms < 0) return '-';
-    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+    return ms < 0 ? '-' : formatDuration(ms);
   });
 
   ngOnInit(): void {

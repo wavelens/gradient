@@ -17,7 +17,8 @@ export interface DispatchedJobSummary {
   dispatched_at: string;
   build_id: string | null;
   evaluation_id: string;
-  pname: string | null;
+  /** The derivation's name for a build job, the repository for an eval job. */
+  subject: string | null;
 }
 
 export interface DispatchedJobsResponse {
@@ -32,7 +33,7 @@ export interface PendingJobSummary {
   build_id: string | null;
   queued_at: string;
   dependency_count: number;
-  pname: string | null;
+  subject: string | null;
 }
 
 export interface PendingJobsResponse {
@@ -47,7 +48,7 @@ export interface DecisionCandidateView {
   project: string;
   build_id: string | null;
   evaluation_id: string;
-  pname: string | null;
+  subject: string | null;
   score: number;
   won: boolean;
 }
@@ -144,7 +145,18 @@ export interface JobPhase {
   bytes: number;
 }
 
-export interface DispatchedJobDetail extends DispatchedJobSummary {
+/// The evaluation an eval job ran.
+export interface JobEvaluationView {
+  repository: string;
+  commit: string;
+  commit_message: string | null;
+  wildcard: string;
+  task: string | null;
+}
+
+export interface DispatchedJobDetail extends Omit<DispatchedJobSummary, 'subject'> {
+  pname: string | null;
+  evaluation: JobEvaluationView | null;
   project_name: string;
   queued_at: string;
   finished_at: string | null;
