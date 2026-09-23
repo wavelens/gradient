@@ -73,6 +73,7 @@ pub mod m20260923_000002_evaluation_anchor_counters;
 mod m20260923_000003_entry_point_unique_eval;
 mod m20260923_000004_dispatched_job_eval_index;
 mod m20260923_000005_dispatched_job_open_unique;
+mod m20260923_000006_user_stars;
 
 pub struct Migrator;
 
@@ -142,6 +143,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260923_000003_entry_point_unique_eval::Migration),
             Box::new(m20260923_000004_dispatched_job_eval_index::Migration),
             Box::new(m20260923_000005_dispatched_job_open_unique::Migration),
+            Box::new(m20260923_000006_user_stars::Migration),
         ]
     }
 }

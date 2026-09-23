@@ -71,6 +71,9 @@ pub mod task_trigger;
 pub mod upload_session;
 pub mod upstream_metric;
 pub mod user;
+pub mod user_cache_star;
+pub mod user_project_star;
+pub mod user_task_star;
 pub mod worker_registration;
 
 pub mod dispatched_job;
