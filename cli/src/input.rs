@@ -9,7 +9,7 @@ use crate::output::{ExitKind, Output};
 use connector::Client;
 use rpassword::read_password;
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::process::Command;
 use std::{fs, io};
 
@@ -186,6 +186,50 @@ pub fn ask_for_input(prompt: &str, out: Output) -> String {
     input
 }
 
+pub fn is_interactive(out: Output) -> bool {
+    !out.is_json() && io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+/// Numbered pick from `options`; an empty answer skips the choice.
+pub fn ask_for_choice(prompt: &str, options: &[String], out: Output) -> Option<String> {
+    for (i, option) in options.iter().enumerate() {
+        out.human(format!("  {}) {}", i + 1, option));
+    }
+    loop {
+        print!("{} [1-{}, empty to skip]: ", prompt, options.len());
+        flush_stdout(out);
+
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input).unwrap_or_else(|e| {
+            out.err(ExitKind::Usage, format!("Failed to read {}: {}", prompt, e))
+        });
+        if read == 0 {
+            return None;
+        }
+
+        match parse_choice(&input, options) {
+            Ok(choice) => return choice,
+            Err(e) => out.human(e),
+        }
+    }
+}
+
+fn parse_choice(input: &str, options: &[String]) -> Result<Option<String>, String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Ok(None);
+    }
+    let by_index = input
+        .parse::<usize>()
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .and_then(|i| options.get(i));
+    by_index
+        .or_else(|| options.iter().find(|o| *o == input))
+        .map(|o| Some(o.clone()))
+        .ok_or_else(|| format!("Invalid choice: {}", input))
+}
+
 pub fn flush_stdout(out: Output) {
     io::stdout()
         .flush()
@@ -198,6 +242,32 @@ mod tests {
 
     fn fields(names: &[&str]) -> Vec<(String, Option<String>)> {
         names.iter().map(|n| (n.to_string(), None)).collect()
+    }
+
+    #[test]
+    fn a_choice_by_number_picks_that_option() {
+        let options = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(parse_choice(" 2\n", &options), Ok(Some("b".into())));
+    }
+
+    #[test]
+    fn a_choice_by_name_picks_that_option() {
+        let options = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(parse_choice("a\n", &options), Ok(Some("a".into())));
+    }
+
+    #[test]
+    fn an_empty_choice_skips() {
+        let options = vec!["a".to_string()];
+        assert_eq!(parse_choice("\n", &options), Ok(None));
+    }
+
+    #[test]
+    fn an_out_of_range_choice_is_rejected() {
+        let options = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(parse_choice("0", &options), Err("Invalid choice: 0".into()));
+        assert_eq!(parse_choice("3", &options), Err("Invalid choice: 3".into()));
+        assert_eq!(parse_choice("c", &options), Err("Invalid choice: c".into()));
     }
 
     #[test]

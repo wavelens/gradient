@@ -42,7 +42,7 @@ Log in and point the CLI at your Gradient server in one step:
 gradient login https://gradient.example.com
 ```
 
-Passing the URL sets it as the configured server, so a separate `gradient config server` is no longer needed. On a successful first login the CLI selects your project automatically when you belong to exactly one, and otherwise lists them so you can pick with `gradient project select <name>`.
+Passing the URL sets it as the configured server, so a separate `gradient config server` is no longer needed. On a successful first login the CLI selects your project automatically when you belong to exactly one, and otherwise asks you to pick one from a numbered list in an interactive terminal (an empty answer skips; non-interactive or `--json` runs only print the list for `gradient project select <name>`).
 
 By default this opens your browser to authorize the CLI session, which is what you want for interactive use and works the same when the Gradient server is configured for OIDC-only login. Pass `--no-browser` to print the URL instead - useful when running over SSH on a headless machine, where you can open the URL on your laptop. The browser flow asks you to confirm a short code that the CLI also prints, then issues a 30-day session token.
 

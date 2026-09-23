@@ -6,7 +6,7 @@
 
 use crate::commands::completion;
 use crate::config::*;
-use crate::input::{client_from_config, handle_input};
+use crate::input::{ask_for_choice, client_from_config, handle_input, is_interactive};
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
@@ -424,6 +424,16 @@ pub async fn post_login_project_setup(client: &Client, out: Output) {
         ProjectOnboarding::AutoSelect(name) => {
             set_value(ConfigKey::SelectedProject, name.clone(), true);
             out.human(format!("Selected project {name}."));
+        }
+        ProjectOnboarding::Choose(names) if is_interactive(out) => {
+            out.human("You belong to multiple projects:");
+            match ask_for_choice("Project", &names, out) {
+                Some(name) => {
+                    set_value(ConfigKey::SelectedProject, name.clone(), true);
+                    out.human(format!("Selected project {name}."));
+                }
+                None => out.human("Select one later with `gradient project select <name>`."),
+            }
         }
         ProjectOnboarding::Choose(names) => {
             out.human("You belong to multiple projects:");
