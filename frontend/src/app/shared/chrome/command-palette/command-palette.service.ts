@@ -18,8 +18,4 @@ export class CommandPaletteService {
   close(): void {
     this.openState.set(false);
   }
-
-  toggle(): void {
-    this.openState.update((open) => !open);
-  }
 }

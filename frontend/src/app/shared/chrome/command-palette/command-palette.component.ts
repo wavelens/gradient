@@ -36,6 +36,17 @@ const KIND_LABEL: Record<SearchHit['kind'], string> = {
   commit: 'Commit',
 };
 
+function isTextField(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+}
+
+function stepOf(e: KeyboardEvent): number {
+  const key = e.key.toLowerCase();
+  if (e.key === 'ArrowDown' || (e.ctrlKey && key === 'j')) return 1;
+  if (e.key === 'ArrowUp' || (e.ctrlKey && key === 'k')) return -1;
+  return 0;
+}
+
 interface Result {
   query: string;
   hits: SearchHit[];
@@ -81,9 +92,9 @@ export class CommandPaletteComponent {
   }
 
   onGlobalKey(e: KeyboardEvent): void {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !this.palette.isOpen() && !isTextField(e.target)) {
       e.preventDefault();
-      this.palette.toggle();
+      this.palette.open();
     } else if (e.key === 'Escape' && this.palette.isOpen()) {
       this.palette.close();
     }
@@ -92,12 +103,10 @@ export class CommandPaletteComponent {
   onKey(e: KeyboardEvent): void {
     const hits = this.result().hits;
     if (!hits.length) return;
-    if (e.key === 'ArrowDown') {
+    const step = stepOf(e);
+    if (step) {
       e.preventDefault();
-      this.active.set((this.active() + 1) % hits.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      this.active.set((this.active() - 1 + hits.length) % hits.length);
+      this.active.set((this.active() + step + hits.length) % hits.length);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       this.go(hits[this.active()]);

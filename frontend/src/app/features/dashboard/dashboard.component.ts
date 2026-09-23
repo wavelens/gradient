@@ -13,12 +13,6 @@ import { DashboardActivityComponent } from './activity/dashboard-activity.compon
 import { DashboardRailComponent } from './rail/dashboard-rail.component';
 import { DashboardStartComponent } from './start/dashboard-start.component';
 
-function isApplePlatform(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  return /mac|iphone|ipad/i.test(nav.userAgentData?.platform || nav.platform || '');
-}
-
 @Component({
   selector: 'app-dashboard',
   standalone: true,
@@ -38,5 +32,4 @@ export class DashboardComponent {
   palette = inject(CommandPaletteService);
   // null until the rail answers; the rail alone decides between first steps and the router blocks.
   newUser = signal<boolean | null>(null);
-  readonly paletteKey = isApplePlatform() ? '\u2318 K' : 'Ctrl K';
 }

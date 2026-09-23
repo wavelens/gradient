@@ -64,12 +64,8 @@ describe('DashboardComponent', () => {
     expect(root.querySelector('app-dashboard-start')).toBeNull();
   });
 
-  it('labels the palette shortcut for the platform', () => {
+  it('labels the palette shortcut', () => {
     const user = { projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }], operations: false };
-    expect(render(user).querySelector('.palette-trigger kbd')!.textContent).toBe('Ctrl K');
-    TestBed.resetTestingModule();
-    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
-    expect(render(user).querySelector('.palette-trigger kbd')!.textContent).toBe('\u2318 K');
-    platform.mockRestore();
+    expect(render(user).querySelector('.palette-trigger kbd')!.textContent).toBe('/');
   });
 });

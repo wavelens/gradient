@@ -45,7 +45,8 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 
 ## Command palette
 
-- Open it with Ctrl+K (Cmd+K on macOS) on any page, or through the search field on the dashboard.
+- Open it with `/` on any page outside a text field, or through the search field on the dashboard.
+- Move through the results with the arrow keys or Ctrl+J / Ctrl+K, open one with Enter, close with Escape.
 - It finds:
     - projects, tasks and caches by name (case-insensitive substring, starred first)
     - commits by hash prefix (7 to 40 hex characters); names matching the same text are still listed

@@ -35,25 +35,45 @@ function press(key: string, init: KeyboardEventInit = {}): void {
 describe('CommandPaletteComponent', () => {
   afterEach(() => vi.useRealTimers());
 
-  it('opens on Ctrl+K from anywhere', () => {
+  it('opens on / from anywhere outside a text field', () => {
     const { f, root } = render();
-    press('k', { ctrlKey: true });
+    press('/');
     f.detectChanges();
     expect(root.querySelector('input')).not.toBeNull();
   });
 
-  it('toggles closed on Cmd+K and closes on Escape', () => {
+  it('leaves / to a focused text field and ignores Ctrl+K', () => {
+    render();
+    const palette = TestBed.inject(CommandPaletteService);
+    const field = document.body.appendChild(document.createElement('textarea'));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+    press('k', { ctrlKey: true });
+    field.remove();
+    expect(palette.isOpen()).toBe(false);
+  });
+
+  it('closes on Escape', () => {
     const { f, root } = render();
     const palette = TestBed.inject(CommandPaletteService);
-    press('k', { metaKey: true });
-    expect(palette.isOpen()).toBe(true);
-    press('k', { metaKey: true });
-    expect(palette.isOpen()).toBe(false);
     palette.open();
     press('Escape');
     f.detectChanges();
     expect(palette.isOpen()).toBe(false);
     expect(root.querySelector('input')).toBeNull();
+  });
+
+  it('moves through hits with Ctrl+J and Ctrl+K', () => {
+    const { f, root } = render();
+    TestBed.inject(CommandPaletteService).open();
+    f.detectChanges();
+    const input = root.querySelector('input')!;
+    const selected = () => root.querySelector('[aria-selected="true"]')!.id;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true }));
+    f.detectChanges();
+    expect(selected()).toBe('palette-hit-1');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));
+    f.detectChanges();
+    expect(selected()).toBe('palette-hit-0');
   });
 
   it('searches as you type and opens the chosen hit with Enter', () => {
