@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Its own workspace: harmonia-daemon pulls rusqlite 0.40, which cannot share a
+# lock with the backend's sea-orm (libsqlite3-sys < 0.38).
+[workspace]
+members  = ["."]
+resolver = "2"
+
+[package]
+name        = "gradient-daemon"
+description = "Nix daemon protocol server with a mock store backend"
+version     = "1.3.0"
+edition     = "2024"
+license     = "AGPL-3.0-only"
+authors     = ["Wavelens GmbH <info@wavelens.io>"]
+repository  = "https://github.com/wavelens/gradient"
+publish     = false
+
+[lib]
+name    = "gradient_daemon"
+path    = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name              = "gradient-daemon"
+path              = "src/main.rs"
+required-features = ["mock"]
+
+[features]
+mock = ["dep:harmonia-store-db", "dep:harmonia-store-aterm"]
+
+[lints.rust]
+unused           = "warn"
+dead_code        = "warn"
+unreachable_code = "warn"
+
+[lints.clippy]
+dbg_macro                       = "warn"
+todo                            = "warn"
+allow_attributes_without_reason = "warn"
+unwrap_used                     = "deny"
+
+[dependencies]
+anyhow                         = { version = "1.0" }
+async-stream                   = { version = "0.3" }
+bytes                          = { version = "1.11" }
+clap                           = { version = "4.6", features = ["derive", "env"] }
+futures                        = { version = "0.3" }
+harmonia-daemon                = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-protocol              = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-aterm           = { git = "https://github.com/nix-community/harmonia.git", optional = true }
+harmonia-store-content-address = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-db              = { git = "https://github.com/nix-community/harmonia.git", optional = true }
+harmonia-store-derivation      = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-path            = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-path-info       = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-hash            = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-signature       = { git = "https://github.com/nix-community/harmonia.git" }
+serde                          = { version = "1", features = ["derive"] }
+serde_json                     = { version = "1.0" }
+thiserror                      = { version = "2.0" }
+tokio                          = { version = "1.50", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing                        = { version = "0.1" }
+tracing-subscriber             = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+harmonia-store-remote = { git = "https://github.com/nix-community/harmonia.git" }
+tempfile              = { version = "3.27" }
