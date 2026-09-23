@@ -6,50 +6,6 @@
 
 @use '../../../styles/variables' as *;
 
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: color-mix(in srgb, var(--gr-black) 60%, transparent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: $z-modal;
-}
-
-.modal {
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  width: min(90vw, 860px);
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: $spacing-md $spacing-lg;
-    border-bottom: 1px solid var(--gr-border-subtle);
-    flex-shrink: 0;
-
-    h2 { margin: 0; font-size: $font-size-lg; }
-  }
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  color: var(--gr-text-secondary);
-  font-size: $font-size-xl;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0 $spacing-xs;
-
-  &:hover { color: var(--gr-text-primary); }
-}
-
 .state-msg {
   padding: $spacing-lg;
   color: var(--gr-text-secondary);
@@ -86,26 +42,4 @@
   cursor: pointer;
 
   &:hover { border-color: var(--gr-text-secondary); color: var(--gr-text-primary); }
-}
-
-footer {
-  display: flex;
-  gap: $spacing-sm;
-  justify-content: flex-end;
-  padding: $spacing-sm $spacing-lg;
-  border-top: 1px solid var(--gr-border-subtle);
-  flex-shrink: 0;
-
-  button {
-    background: var(--gr-surface-sunken);
-    border: 1px solid var(--gr-border);
-    border-radius: $border-radius-sm;
-    color: var(--gr-text-primary);
-    font-size: $font-size-sm;
-    padding: $spacing-xs $spacing-md;
-    cursor: pointer;
-
-    &:hover:not(:disabled) { border-color: var(--gr-text-secondary); }
-    &:disabled { opacity: 0.4; cursor: not-allowed; }
-  }
 }

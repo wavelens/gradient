@@ -7,6 +7,7 @@
 import {
   BadgeComponent,
   ButtonComponent,
+  DialogComponent,
   TableComponent,
 } from '@shared/ui';
 import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
@@ -17,7 +18,7 @@ import { ActionDelivery, ActionDeliveryDetail } from '../../../core/models/actio
 @Component({
   selector: 'app-action-deliveries',
   standalone: true,
-  imports: [CommonModule, BadgeComponent, TableComponent, ButtonComponent],
+  imports: [CommonModule, BadgeComponent, TableComponent, ButtonComponent, DialogComponent],
   templateUrl: './action-deliveries.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './action-deliveries.component.scss',
@@ -30,6 +31,7 @@ export class ActionDeliveriesComponent implements OnInit {
   actionId = input.required<string>();
   closed = output<void>();
 
+  visible = signal(true);
   deliveries = signal<ActionDelivery[]>([]);
   loading = signal(true);
   loadError = signal<string | null>(null);
@@ -90,6 +92,4 @@ export class ActionDeliveriesComponent implements OnInit {
     this.offset.update(o => Math.max(0, o - this.limit));
     this.loadPage();
   }
-
-  close() { this.closed.emit(); }
 }

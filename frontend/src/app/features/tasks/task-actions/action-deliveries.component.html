@@ -4,78 +4,74 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="modal-backdrop" (click)="close()">
-  <div class="modal" (click)="$event.stopPropagation()">
-    <header>
-      <h2>Delivery history</h2>
-      <button type="button" class="close-btn" (click)="close()" aria-label="Close">×</button>
-    </header>
-
-    @if (loading()) {
-      <p class="state-msg">Loading…</p>
-    } @else if (loadError(); as err) {
-      <p class="state-msg error">{{ err }}</p>
-    } @else if (deliveries().length === 0) {
-      <p class="state-msg">No deliveries yet.</p>
-    } @else {
-      <gr-table>
-          <thead>
+<gr-dialog header="Delivery history" width="860px" [(visible)]="visible" (hide)="closed.emit()">
+  @if (loading()) {
+    <p class="state-msg">Loading…</p>
+  } @else if (loadError(); as err) {
+    <p class="state-msg error">{{ err }}</p>
+  } @else if (deliveries().length === 0) {
+    <p class="state-msg">No deliveries yet.</p>
+  } @else {
+    <gr-table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Result</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (d of deliveries(); track d.id) {
             <tr>
-              <th>Time</th>
-              <th>Event</th>
-              <th>Result</th>
-              <th>Status</th>
-              <th>Duration</th>
-              <th></th>
+              <td>{{ d.delivered_at }}</td>
+              <td>{{ d.event }}</td>
+              <td>
+                @if (d.success) {
+                  <gr-badge severity="success">OK</gr-badge>
+                } @else {
+                  <gr-badge severity="danger">FAIL</gr-badge>
+                }
+              </td>
+              <td>{{ d.response_status ?? '-' }}</td>
+              <td>{{ d.duration_ms }} ms</td>
+              <td>
+                <button type="button" class="toggle-btn" (click)="toggleRow(d.id)">
+                  @if (expanded().has(d.id)) { Hide } @else { Show }
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            @for (d of deliveries(); track d.id) {
-              <tr>
-                <td>{{ d.delivered_at }}</td>
-                <td>{{ d.event }}</td>
-                <td>
-                  @if (d.success) {
-                    <gr-badge severity="success">OK</gr-badge>
+            @if (expanded().get(d.id); as exp) {
+              <tr class="detail-row">
+                <td colspan="6">
+                  @if (exp === 'loading') {
+                    <p>Loading detail…</p>
+                  } @else if (exp === 'error') {
+                    <p class="error">Failed to load detail</p>
                   } @else {
-                    <gr-badge severity="danger">FAIL</gr-badge>
+                    @if (exp.error_message) {
+                      <p class="error">{{ exp.error_message }}</p>
+                    }
+                    <details><summary>Request body</summary><pre>{{ exp.request_body }}</pre></details>
+                    @if (exp.response_body) {
+                      <details><summary>Response body</summary><pre>{{ exp.response_body }}</pre></details>
+                    }
                   }
                 </td>
-                <td>{{ d.response_status ?? '-' }}</td>
-                <td>{{ d.duration_ms }} ms</td>
-                <td>
-                  <button type="button" class="toggle-btn" (click)="toggleRow(d.id)">
-                    @if (expanded().has(d.id)) { Hide } @else { Show }
-                  </button>
-                </td>
               </tr>
-              @if (expanded().get(d.id); as exp) {
-                <tr class="detail-row">
-                  <td colspan="6">
-                    @if (exp === 'loading') {
-                      <p>Loading detail…</p>
-                    } @else if (exp === 'error') {
-                      <p class="error">Failed to load detail</p>
-                    } @else {
-                      @if (exp.error_message) {
-                        <p class="error">{{ exp.error_message }}</p>
-                      }
-                      <details><summary>Request body</summary><pre>{{ exp.request_body }}</pre></details>
-                      @if (exp.response_body) {
-                        <details><summary>Response body</summary><pre>{{ exp.response_body }}</pre></details>
-                      }
-                    }
-                  </td>
-                </tr>
-              }
             }
-          </tbody>
-      </gr-table>
+          }
+        </tbody>
+    </gr-table>
 
-      <footer>
-        <button grButton type="button" label="Previous" severity="secondary" [disabled]="offset() === 0" (click)="prevPage()"></button>
-        <button grButton type="button" label="Next" severity="secondary" [disabled]="!hasMore()" (click)="nextPage()"></button>
-      </footer>
-    }
-  </div>
-</div>
+  }
+
+  @if (offset() > 0 || hasMore()) {
+    <div grDialogFooter>
+      <button grButton type="button" label="Previous" severity="secondary" [disabled]="offset() === 0" (click)="prevPage()"></button>
+      <button grButton type="button" label="Next" severity="secondary" [disabled]="!hasMore()" (click)="nextPage()"></button>
+    </div>
+  }
+</gr-dialog>
