@@ -22,7 +22,6 @@
     </div>
     <div class="head-actions">
       @if (authService.isAuthenticated()) {
-        <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
         <button *appWritable="triggerAccess()" grButton label="Start Evaluation" icon="play_arrow"
                 (click)="startEvaluation()" [loading]="starting()"
                 [disabled]="starting() || evaluationInProgress()"
@@ -34,6 +33,9 @@
       }
       <a grButton label="Metrics" icon="show_chart" severity="secondary"
               [routerLink]="['/project', projectName, 'task', taskName, 'metrics']"></a>
+      @if (authService.isAuthenticated()) {
+        <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
+      }
     </div>
   </div>
 

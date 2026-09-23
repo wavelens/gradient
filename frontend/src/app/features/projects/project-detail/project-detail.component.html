@@ -9,12 +9,12 @@
 } @else if (project(); as project) {
   <gr-page-layout [title]="project.display_name" [subtitle]="project.description || 'No description'">
   <div slot="actions">
-    @if (authService.isAuthenticated()) {
-      <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
-    }
     @if (project.role) {
       <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
       <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
+    }
+    @if (authService.isAuthenticated()) {
+      <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
     }
   </div>
   <!-- Tasks -->
