@@ -8,7 +8,7 @@
   <gr-loading-spinner message="Loading task settings..." />
 } @else if (task(); as proj) {
   <gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: proj.display_name, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings' }]" title="Task Settings">
-  <button slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
+  <a slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
   @if (errorMessage()) {
     <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
   }

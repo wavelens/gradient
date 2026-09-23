@@ -6,8 +6,8 @@
 
 <gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskDisplayName() || taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Entry Point Metrics' }]" [title]="evalAttr()" [subtitle]="'Build history over the last ' + (keepEvaluations()) + ' completed evaluations.'">
   @if (latestBuildId()) {
-    <button slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
-      [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></button>
+    <a slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
+      [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></a>
   }
   @if (loading()) {
     <gr-loading-spinner message="Loading metrics..." />

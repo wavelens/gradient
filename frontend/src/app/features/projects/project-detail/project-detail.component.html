@@ -11,7 +11,7 @@
   @if (project.role) {
     <div slot="actions">
       <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
-      <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
+      <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></a>
     </div>
   }
   <!-- Tasks -->

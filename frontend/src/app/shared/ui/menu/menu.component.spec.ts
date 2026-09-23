@@ -7,6 +7,7 @@
 import { OverlayPositionBuilder } from '@angular/cdk/overlay';
 import { Component, signal, viewChild } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { MenuComponent } from './menu.component';
 import { MenuItem } from '../types';
 
@@ -26,11 +27,12 @@ class HostComponent {
     { label: 'Edit', icon: 'edit', command: () => this.ran.set(this.ran() + 1) },
     { separator: true },
     { label: 'Delete', icon: 'delete', disabled: true },
+    { label: 'Open', icon: 'open_in_new', routerLink: ['/elsewhere'] },
   ]);
 }
 
 function render() {
-  TestBed.configureTestingModule({ imports: [HostComponent] });
+  TestBed.configureTestingModule({ imports: [HostComponent], providers: [provideRouter([])] });
   const fixture = TestBed.createComponent(HostComponent);
   fixture.detectChanges();
   const anchor = () => fixture.nativeElement.querySelector('.anchor') as HTMLButtonElement;
@@ -46,7 +48,7 @@ describe('MenuComponent', () => {
     expect(items()).toHaveLength(0);
     anchor().click();
     fixture.detectChanges();
-    expect(items().map((i) => i.querySelector('span:last-child')!.textContent)).toEqual(['Edit', 'Delete']);
+    expect(items().map((i) => i.querySelector('span:last-child')!.textContent)).toEqual(['Edit', 'Delete', 'Open']);
     anchor().click();
     fixture.detectChanges();
     expect(items()).toHaveLength(0);
@@ -76,6 +78,18 @@ describe('MenuComponent', () => {
     expect(items()[1].disabled).toBe(true);
   });
 
+  /// A middle click opens the link in a new tab; the menu has done its job.
+  it('renders links as anchors and closes after a middle click', () => {
+    const { fixture, anchor } = render();
+    anchor().click();
+    fixture.detectChanges();
+    const link = items()[2] as unknown as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/elsewhere');
+    link.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
+    fixture.detectChanges();
+    expect(items()).toHaveLength(0);
+  });
+
   describe('openAt', () => {
     function rightClick(target: HTMLElement, x: number, y: number): MouseEvent {
       const event = new MouseEvent('contextmenu', { clientX: x, clientY: y, bubbles: true, cancelable: true });
@@ -93,7 +107,7 @@ describe('MenuComponent', () => {
       const event = rightClick(row(), 120, 80);
       fixture.detectChanges();
       expect(event.defaultPrevented).toBe(true);
-      expect(items()).toHaveLength(2);
+      expect(items()).toHaveLength(3);
       expect(spy).toHaveBeenCalledWith({ x: 120, y: 80 });
     });
 

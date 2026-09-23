@@ -59,6 +59,7 @@ const CONTEXT_POSITIONS: ConnectedPosition[] = [
                   [routerLink]="item.routerLink"
                   [queryParams]="item.queryParams ?? null"
                   (click)="run(item)"
+                  (auxclick)="hide()"
                 >
                   @if (item.icon) {
                     <span class="material-symbols-outlined gr-menu__icon" aria-hidden="true">{{ item.icon }}</span>

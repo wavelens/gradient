@@ -18,9 +18,9 @@
       </gr-badge>
     </div>
     <div slot="actions">
-      <button grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
+      <a grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></a>
       @if (c.can_edit) {
-        <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
+        <a grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></a>
       }
     </div>
 
