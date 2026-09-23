@@ -137,6 +137,7 @@ that does not depend on the host, every value a `mkDefault` you can override:
 |---|---|---|
 | `random_page_cost` | `1.1` | SSD: a random page costs almost what a sequential one does. At the default of 4 the planner picks bitmap heap scans over the index-only scans the edge tables are built for. |
 | `max_connections` | `200` | See below. |
+| `max_locks_per_transaction` | `1024` | Graph writes hold one advisory lock per anchor and per dependency they count until they commit. The stock 64 runs out on one large ingest batch ("out of shared memory"); the server logs an error at startup below 256. |
 
 The four settings that scale with the host's RAM have no defensible static
 default, so they are options instead. A module that guessed them would size a
@@ -150,7 +151,7 @@ default, so they are options instead. A module that guessed them would size a
 | `postgresMaintenanceWorkMem` | `null` | `maintenance_work_mem`: index builds and the autovacuum passes over the edge tables. Each of `autovacuum_max_workers` can claim this much at once, so `"1GB"` wants RAM to spare. |
 
 When `databaseUrl` points at a cluster this module does not configure, set the
-same six values there by hand.
+same seven values there by hand.
 
 `max_connections` has to cover every server process's three pools at once:
 `databaseMaxConnections` plus `databaseWebMaxConnections` plus

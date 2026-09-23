@@ -1405,6 +1405,7 @@ in {
         settings = {
           max_connections = lib.mkDefault 200;
           random_page_cost = lib.mkDefault 1.1;
+          max_locks_per_transaction = lib.mkDefault 1024;
         } // lib.optionalAttrs (cfg.postgresSharedBuffers != null) {
           shared_buffers = cfg.postgresSharedBuffers;
         } // lib.optionalAttrs (cfg.postgresEffectiveCacheSize != null) {

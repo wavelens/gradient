@@ -73,9 +73,44 @@ fn require_supported_pg_version(server_version_num: i32) -> Result<()> {
     Ok(())
 }
 
+const MIN_MAX_LOCKS_PER_TRANSACTION: i32 = 256;
+
+fn lock_table_warning(max_locks_per_transaction: i32) -> Option<String> {
+    (max_locks_per_transaction < MIN_MAX_LOCKS_PER_TRANSACTION).then(|| {
+        format!(
+            "PostgreSQL runs with max_locks_per_transaction = {max_locks_per_transaction}; \
+             graph writes hold one advisory lock per anchor and dependency they count, and an \
+             ingest batch can exhaust the lock table (\"out of shared memory\"). Set it to at \
+             least {MIN_MAX_LOCKS_PER_TRANSACTION} (the NixOS module sets 1024)."
+        )
+    })
+}
+
 crate::sql! {
     SERVER_VERSION_NUM = "SELECT current_setting('server_version_num')::int4 AS v",
         params = [];
+
+    MAX_LOCKS_PER_TRANSACTION = "SELECT current_setting('max_locks_per_transaction')::int4 AS v",
+        params = [];
+}
+
+/// Warn, never fail: a small lock table only bites a large enough batch, and the
+/// setting needs a Postgres restart the operator has to schedule.
+async fn check_lock_table(db: &DatabaseConnection) {
+    let setting = db
+        .query_one_raw(MAX_LOCKS_PER_TRANSACTION.stmt())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.try_get::<i32>("", "v").ok());
+    match setting {
+        Some(v) => {
+            if let Some(warning) = lock_table_warning(v) {
+                tracing::error!("{warning}");
+            }
+        }
+        None => tracing::warn!("could not read max_locks_per_transaction"),
+    }
 }
 
 async fn server_version_num(db: &DatabaseConnection) -> Result<i32> {
@@ -96,6 +131,7 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     .await
     .context("Failed to connect to database")?;
     require_supported_pg_version(server_version_num(&db).await?)?;
+    check_lock_table(&db).await;
     Migrator::install(&db)
         .await
         .context("Failed to install seaql_migrations table")?;
@@ -461,5 +497,19 @@ mod pg_version_tests {
     fn accepts_postgres_18_and_newer() {
         assert!(require_supported_pg_version(180_000).is_ok());
         assert!(require_supported_pg_version(190_002).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod lock_table_tests {
+    use super::lock_table_warning;
+
+    #[test]
+    fn a_lock_table_below_the_floor_names_the_setting_and_the_fix() {
+        let w = lock_table_warning(64).expect("64 is below the floor");
+        assert!(w.contains("max_locks_per_transaction = 64"), "{w}");
+        assert!(w.contains("256"), "{w}");
+        assert!(lock_table_warning(256).is_none());
+        assert!(lock_table_warning(1024).is_none());
     }
 }
