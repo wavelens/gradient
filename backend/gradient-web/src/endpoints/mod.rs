@@ -9,6 +9,7 @@ pub mod auth;
 pub mod badges;
 pub mod board;
 pub mod board_metrics;
+pub mod board_subjects;
 pub mod build_requests;
 pub mod builds;
 pub mod caches;

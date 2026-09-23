@@ -9,6 +9,7 @@
 //! masked: their jobs collapse to an aggregate count and foreign workers lose
 //! their identity and live metrics.
 
+use super::board_subjects::{JobEvaluationView, JobSubjects, job_evaluation};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::evals::EvalAccessContext;
 use crate::error::{WebError, WebResult, require_superuser};
@@ -19,6 +20,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, flake_output_node};
 use gradient_scheduler::{BoardEvent, Scheduler};
 use gradient_types::ids::DispatchedJobId;
@@ -40,7 +42,8 @@ pub struct DispatchedJobSummary {
     pub dispatched_at: String,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
-    pub pname: Option<String>,
+    /// The derivation's name for a build job, the repository for an eval job.
+    pub subject: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -58,7 +61,7 @@ pub struct PendingJobSummary {
     pub build_id: Option<Uuid>,
     pub queued_at: String,
     pub dependency_count: u32,
-    pub pname: Option<String>,
+    pub subject: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -74,25 +77,34 @@ pub async fn get_pending_jobs(
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<PendingJobsResponse>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let snapshot = scheduler.pending_jobs_snapshot().await;
+    let (snapshot, hidden): (Vec<_>, Vec<_>) = scheduler
+        .pending_jobs_snapshot()
+        .await
+        .into_iter()
+        .partition(|j| scope.allows(&Uuid::from(j.project)));
+    let other_pending = hidden.len() as u64;
 
-    let mut jobs = Vec::new();
-    let mut other_pending = 0u64;
-    for j in snapshot {
-        if scope.allows(&Uuid::from(j.project)) {
-            jobs.push(PendingJobSummary {
-                kind: i16::from(j.kind),
-                project: j.project.into(),
-                evaluation_id: j.evaluation_id.into(),
-                build_id: j.derivation_build.map(Into::into),
-                queued_at: j.queued_at.and_utc().to_rfc3339(),
-                dependency_count: j.dependency_count,
-                pname: j.pname.clone(),
-            });
-        } else {
-            other_pending += 1;
-        }
-    }
+    let anchors: Vec<DerivationBuildId> =
+        snapshot.iter().filter_map(|j| j.derivation_build).collect();
+    let evaluations: Vec<EvaluationId> = snapshot
+        .iter()
+        .filter(|j| j.derivation_build.is_none())
+        .map(|j| j.evaluation_id)
+        .collect();
+    let subjects = JobSubjects::load(&state.web_db, &anchors, &evaluations).await?;
+
+    let jobs = snapshot
+        .into_iter()
+        .map(|j| PendingJobSummary {
+            kind: i16::from(j.kind),
+            project: j.project.into(),
+            evaluation_id: j.evaluation_id.into(),
+            build_id: j.derivation_build.map(Into::into),
+            queued_at: j.queued_at.and_utc().to_rfc3339(),
+            dependency_count: j.dependency_count,
+            subject: subjects.subject(j.derivation_build, j.evaluation_id),
+        })
+        .collect();
 
     Ok(ok_json(PendingJobsResponse {
         jobs,
@@ -128,35 +140,18 @@ pub async fn get_dispatched_jobs(
         .map(|a| (a.dispatched_job, a))
         .collect();
 
-    let anchor_ids: Vec<DerivationBuildId> =
-        attempts.values().map(|a| a.derivation_build).collect();
-    let anchors: HashMap<DerivationBuildId, DerivationId> = EDerivationBuild::find()
-        .filter(gradient_entity::derivation_build::Column::Id.is_in(anchor_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|a| (a.id, a.derivation))
+    let anchors: Vec<DerivationBuildId> = attempts.values().map(|a| a.derivation_build).collect();
+    let evaluations: Vec<EvaluationId> = visible
+        .iter()
+        .filter(|j| j.kind == DispatchedJobKind::Eval)
+        .map(|j| j.evaluation_id)
         .collect();
-
-    let pnames: HashMap<DerivationId, Option<String>> = gradient_entity::derivation::Entity::find()
-        .filter(
-            gradient_entity::derivation::Column::Id
-                .is_in(anchors.values().copied().collect::<Vec<_>>()),
-        )
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|d| (d.id, d.pname))
-        .collect();
+    let subjects = JobSubjects::load(&state.web_db, &anchors, &evaluations).await?;
 
     let mut jobs = Vec::with_capacity(visible.len());
     for j in visible {
         let attempt = attempts.get(&j.id);
-        let pname = attempt
-            .and_then(|a| anchors.get(&a.derivation_build))
-            .and_then(|drv| pnames.get(drv))
-            .cloned()
-            .flatten();
+        let subject = subjects.subject(attempt.map(|a| a.derivation_build), j.evaluation_id);
 
         jobs.push(DispatchedJobSummary {
             id: j.id.into(),
@@ -167,7 +162,7 @@ pub async fn get_dispatched_jobs(
             dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
             build_id: attempt.map(|a| a.derivation_build.into()),
             evaluation_id: j.evaluation_id.into(),
-            pname,
+            subject,
         });
     }
 
@@ -187,7 +182,7 @@ pub struct DecisionCandidateView {
     pub project: Uuid,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
-    pub pname: Option<String>,
+    pub subject: Option<String>,
     pub score: f64,
     pub won: bool,
 }
@@ -205,14 +200,25 @@ pub struct DispatchDecisionView {
 /// negative ones the dispatcher passed over. Superuser-only: candidates span all
 /// projects, and the view exists to tune cross-project scoring rules (#419).
 pub async fn get_dispatch_decisions(
+    State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<DispatchDecisionView>>>> {
     require_superuser(&user)?;
 
-    let views = scheduler
-        .recent_decisions()
-        .await
+    let decisions = scheduler.recent_decisions().await;
+    let candidates = decisions.iter().flat_map(|d| &d.candidates);
+    let anchors: Vec<DerivationBuildId> = candidates
+        .clone()
+        .filter_map(|c| c.derivation_build)
+        .collect();
+    let evaluations: Vec<EvaluationId> = candidates
+        .filter(|c| c.derivation_build.is_none())
+        .map(|c| c.evaluation_id)
+        .collect();
+    let subjects = JobSubjects::load(&state.web_db, &anchors, &evaluations).await?;
+
+    let views = decisions
         .into_iter()
         .map(|d| DispatchDecisionView {
             at: d.at.and_utc().to_rfc3339(),
@@ -229,7 +235,7 @@ pub async fn get_dispatch_decisions(
                     project: c.project.into(),
                     build_id: c.derivation_build.map(Into::into),
                     evaluation_id: c.evaluation_id.into(),
-                    pname: c.pname,
+                    subject: subjects.subject(c.derivation_build, c.evaluation_id),
                     score: c.score,
                     won: c.won,
                 })
@@ -388,6 +394,8 @@ pub struct DispatchedJobDetail {
     pub derivation_build_id: Option<Uuid>,
     pub derivations: Vec<JobDerivationView>,
     pub evaluation_id: Uuid,
+    /// The evaluation an eval job ran; `None` for build jobs.
+    pub evaluation: Option<JobEvaluationView>,
     pub pname: Option<String>,
     pub score_breakdown: serde_json::Value,
     pub worker_context: serde_json::Value,
@@ -450,6 +458,7 @@ pub async fn get_dispatched_job(
             derivation_build_id: c.derivation_build.map(Into::into),
             derivations,
             evaluation_id: c.evaluation_id.into(),
+            evaluation: eval_job_evaluation(&state.web_db, c.kind, c.evaluation_id).await?,
             pname: c.pname,
             score_breakdown: c.score_breakdown,
             worker_context: c.worker_context,
@@ -556,6 +565,7 @@ pub async fn get_dispatched_job(
         derivation_build_id: anchor_id.map(Into::into),
         derivations,
         evaluation_id: j.evaluation_id.into(),
+        evaluation: eval_job_evaluation(&state.web_db, i16::from(j.kind), j.evaluation_id).await?,
         pname,
         score_breakdown: j.score_breakdown,
         worker_context: j.worker_context,
@@ -565,6 +575,18 @@ pub async fn get_dispatched_job(
         previous_attempts,
         passed_over: false,
     }))
+}
+
+async fn eval_job_evaluation<C: ConnectionTrait>(
+    db: &C,
+    kind: i16,
+    evaluation: EvaluationId,
+) -> Result<Option<JobEvaluationView>, sea_orm::DbErr> {
+    if kind != i16::from(DispatchedJobKind::Eval) {
+        return Ok(None);
+    }
+
+    job_evaluation(db, evaluation).await
 }
 
 #[derive(Serialize)]

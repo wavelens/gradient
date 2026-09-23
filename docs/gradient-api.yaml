@@ -11327,6 +11327,16 @@ components:
           description: The derivations this job builds, each carrying both identities.
           items: { $ref: '#/components/schemas/JobDerivation' }
         evaluation_id: { type: string, format: uuid }
+        evaluation:
+          type: object
+          nullable: true
+          description: The evaluation an eval job ran; null for build jobs.
+          properties:
+            repository: { type: string }
+            commit: { type: string, description: Hex-encoded commit hash }
+            commit_message: { type: string, nullable: true, description: First line of the commit message }
+            wildcard: { type: string }
+            task: { type: string, nullable: true, description: Name of the task the evaluation belongs to }
         pname: { type: string, nullable: true }
         score_breakdown:
           type: object
@@ -11423,7 +11433,7 @@ components:
         dispatched_at: { type: string, format: date-time }
         build_id: { type: string, format: uuid, nullable: true }
         evaluation_id: { type: string, format: uuid }
-        pname: { type: string, nullable: true }
+        subject: { type: string, nullable: true, description: The derivation's name for a build job, the repository for an eval job. }
 
     PendingJobSummary:
       type: object
@@ -11435,7 +11445,7 @@ components:
         build_id: { type: string, format: uuid, nullable: true }
         queued_at: { type: string, format: date-time }
         dependency_count: { type: integer }
-        pname: { type: string, nullable: true }
+        subject: { type: string, nullable: true, description: The derivation's name for a build job, the repository for an eval job. }
 
     DispatchDecisionCandidate:
       type: object
@@ -11450,7 +11460,7 @@ components:
         project: { type: string, format: uuid }
         build_id: { type: string, format: uuid, nullable: true }
         evaluation_id: { type: string, format: uuid }
-        pname: { type: string, nullable: true }
+        subject: { type: string, nullable: true, description: The derivation's name for a build job, the repository for an eval job. }
         score: { type: number }
         won: { type: boolean, description: Whether this candidate won the decision and was dispatched. }
 
