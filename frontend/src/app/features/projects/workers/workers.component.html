@@ -93,9 +93,13 @@
               @if (!worker.active) {
                 <gr-badge severity="danger">Inactive</gr-badge>
               }
-              <gr-badge [severity]="worker.live ? 'success' : 'neutral'">
-                {{ worker.live ? 'Connected' : 'Offline' }}
-              </gr-badge>
+              @if (!worker.live) {
+                <gr-badge severity="neutral">Offline</gr-badge>
+              } @else if (worker.active) {
+                <gr-badge severity="success">Connected</gr-badge>
+              } @else {
+                <gr-badge severity="warning">Disconnecting</gr-badge>
+              }
               <a
                 grButton
                 label="Metrics"

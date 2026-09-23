@@ -226,3 +226,33 @@ describe('WorkersComponent - base workers', () => {
     );
   });
 });
+
+describe('WorkersComponent - connection badge', () => {
+  const live = {
+    capabilities: { fetch: true, eval: true, build: true, federate: false },
+    architectures: [], system_features: [], max_concurrent_builds: 1, assigned_job_count: 0, draining: false,
+  } as unknown as Worker['live'];
+  const badges = (fixture: ComponentFixture<WorkersComponent>) =>
+    Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('gr-badge')).map((b) => b.textContent?.trim());
+
+  it('marks a deactivated worker that is still connected as on its way out', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [{ ...workerUnmanaged, active: false, live }],
+      caches: [{ id: 'c', name: 'cache-1' }],
+    });
+    await settled(fixture);
+    expect(badges(fixture)).toContain('Disconnecting');
+    expect(badges(fixture)).not.toContain('Connected');
+  });
+
+  it('shows an active connected worker as connected', async () => {
+    const fixture = setup({
+      access: { managed: false, canEdit: true, canTrigger: true },
+      workers: [{ ...workerUnmanaged, live }],
+      caches: [{ id: 'c', name: 'cache-1' }],
+    });
+    await settled(fixture);
+    expect(badges(fixture)).toContain('Connected');
+  });
+});
