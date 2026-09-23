@@ -1488,6 +1488,103 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /dashboard/rail:
+    get:
+      tags: [dashboard]
+      summary: Sidebar rail of the current user
+      description: |-
+        Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `member`), then name.
+        Active means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.
+        `tasks` is present only on `starred_active` projects and omitted otherwise.
+        Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones (any starred cache for a superuser); starred first, then name.
+        `operations` is true for a superuser or when a member project has a registered worker.
+      operationId: getDashboardRail
+      responses:
+        '200':
+          description: Rail projects, caches and the operations flag
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [projects, caches, operations]
+                        properties:
+                          projects:
+                            type: array
+                            items:
+                              type: object
+                              required: [name, display_name, starred, tier, status, task_count]
+                              properties:
+                                name:
+                                  type: string
+                                display_name:
+                                  type: string
+                                starred:
+                                  type: boolean
+                                tier:
+                                  type: string
+                                  enum: [starred_active, active, starred, member]
+                                status:
+                                  allOf:
+                                    - $ref: '#/components/schemas/EvaluationStatus'
+                                  nullable: true
+                                task_count:
+                                  type: integer
+                                  format: int64
+                                tasks:
+                                  type: array
+                                  description: Only on `starred_active` projects; omitted otherwise.
+                                  items:
+                                    type: object
+                                    required: [name, status]
+                                    properties:
+                                      name:
+                                        type: string
+                                      status:
+                                        allOf:
+                                          - $ref: '#/components/schemas/EvaluationStatus'
+                                        nullable: true
+                          caches:
+                            type: array
+                            items:
+                              type: object
+                              required: [name, display_name, starred, nar_count]
+                              properties:
+                                name:
+                                  type: string
+                                display_name:
+                                  type: string
+                                starred:
+                                  type: boolean
+                                nar_count:
+                                  type: integer
+                                  format: int64
+                          operations:
+                            type: boolean
+              example:
+                error: false
+                message:
+                  projects:
+                    - name: infra
+                      display_name: Infra
+                      starred: true
+                      tier: starred_active
+                      status: Completed
+                      task_count: 2
+                      tasks:
+                        - { name: hosts, status: Completed }
+                        - { name: home, status: null }
+                    - { name: docs, display_name: Docs, starred: false, tier: member, status: null, task_count: 1 }
+                  caches:
+                    - { name: main, display_name: Main, starred: true, nar_count: 18234 }
+                  operations: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /user/stars:
     get:
       tags: [user]

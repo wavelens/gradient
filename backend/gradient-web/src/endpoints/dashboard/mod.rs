@@ -5,6 +5,7 @@
  */
 
 pub mod activity;
+pub mod rail;
 pub mod rank;
 pub mod stats;
 pub mod tasks;

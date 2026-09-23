@@ -70,6 +70,7 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `PUT` / `DELETE` | `/user/stars/caches/{cache}` | Star / unstar a cache (idempotent) |
 | `GET` | `/dashboard/stats` | Dashboard stat tiles over the projects the user can see |
 | `GET` | `/dashboard/activity` | Daily non-PR evaluation counts of the last 370 days |
+| `GET` | `/dashboard/rail` | Sidebar rail: ranked projects, readable caches, operations flag |
 
 ### Configuring API-key options
 
