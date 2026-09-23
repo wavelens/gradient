@@ -25,6 +25,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
+  TooltipDirective,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConcurrencyPolicy, Task } from '@core/models';
@@ -40,7 +41,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     DialogComponent,
     ButtonComponent,
     InputDirective,
-    InputDirective,
+    TooltipDirective,
     AutoCompleteComponent,
     SelectComponent,
     CheckboxComponent,
@@ -145,6 +146,28 @@ export class TaskSettingsComponent implements OnInit {
       error: (error) => {
         console.error('Failed to load task:', error);
         this.loading.set(false);
+      },
+    });
+  }
+
+  repoCheck = signal<{ ok: boolean; message: string } | null>(null);
+  checkingRepo = signal(false);
+
+  repositoryEdited(): boolean {
+    return this.formData.repository !== (this.task()?.repository ?? '');
+  }
+
+  testConnection(): void {
+    this.checkingRepo.set(true);
+    this.repoCheck.set(null);
+    this.tasksService.checkRepository(this.projectName, this.taskName).subscribe({
+      next: (head) => {
+        this.checkingRepo.set(false);
+        this.repoCheck.set({ ok: true, message: `Reachable, head at ${head.slice(0, 12)}` });
+      },
+      error: (error) => {
+        this.checkingRepo.set(false);
+        this.repoCheck.set({ ok: false, message: error.message || 'Repository unreachable.' });
       },
     });
   }

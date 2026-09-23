@@ -8,7 +8,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { of } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { TaskSettingsComponent } from './task-settings.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -55,7 +55,10 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(c: AccessCase): ComponentFixture<TaskSettingsComponent> {
+function setup(
+  c: AccessCase,
+  checkRepository: () => Observable<string> = () => of('abc1234def5678'),
+): ComponentFixture<TaskSettingsComponent> {
   TestBed.configureTestingModule({
     imports: [TaskSettingsComponent],
     providers: [
@@ -65,7 +68,7 @@ function setup(c: AccessCase): ComponentFixture<TaskSettingsComponent> {
       { provide: ActivatedRoute, useValue: activatedRouteStub(c) },
       {
         provide: TasksService,
-        useValue: { getTaskInfo: () => of(taskFor(c)) },
+        useValue: { getTaskInfo: () => of(taskFor(c)), checkRepository },
       },
       {
         provide: ProjectsService,
@@ -101,5 +104,42 @@ describe('TaskSettingsComponent - access gating', () => {
     const btn = findByText(fixture.nativeElement, 'delete task') as HTMLButtonElement | null;
     expect(btn).not.toBeNull();
     expect(btn!.disabled).toBe(true);
+  });
+});
+
+describe('TaskSettingsComponent - repository connection test', () => {
+  const editor = { managed: false, canEdit: true };
+  const status = (fixture: ComponentFixture<TaskSettingsComponent>) =>
+    (fixture.nativeElement as HTMLElement).querySelector('.repo-check')?.textContent?.trim() ?? '';
+
+  it('reports the head it reached', () => {
+    const fixture = setup(editor);
+    (findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(status(fixture)).toContain('abc1234');
+  });
+
+  it('shows why the repository could not be reached', () => {
+    const fixture = setup(editor, () => throwError(() => new Error('Permission denied (publickey)')));
+    (findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(status(fixture)).toContain('Permission denied (publickey)');
+  });
+
+  /// The server checks the saved URL, so an edited one would test the old remote.
+  it('asks to save an edited URL before testing it', async () => {
+    const fixture = setup(editor);
+    await fixture.whenStable();
+    const input = (fixture.nativeElement as HTMLElement).querySelector('#proj-repo') as HTMLInputElement;
+    input.value = 'git@example.org:other.git';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    const btn = findByText(fixture.nativeElement, 'test connection') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('is not offered to a viewer', () => {
+    const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
+    expect(findByText(fixture.nativeElement, 'test connection')).toBeNull();
   });
 });

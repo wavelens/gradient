@@ -89,6 +89,11 @@ export class TasksService {
     return this.api.post<string>(`tasks/${project}/${task}/active`);
   }
 
+  /** Fetches the saved repository the way the scheduler does; resolves to the head commit. */
+  checkRepository(project: string, task: string): Observable<string> {
+    return this.api.post<string>(`tasks/${project}/${task}/check-repository`, {});
+  }
+
   deactivateTask(project: string, task: string): Observable<string> {
     return this.api.delete<string>(`tasks/${project}/${task}/active`);
   }

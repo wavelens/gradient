@@ -18,3 +18,17 @@
   border-top: 1px solid color-mix(in srgb, var(--gr-status-danger) 20%, transparent);
   margin: $spacing-lg 0;
 }
+.repo-row {
+  display: flex;
+  gap: $spacing-sm;
+
+  input { flex: 1; min-width: 0; }
+}
+
+.repo-check {
+  margin: $spacing-xs 0 0;
+  color: var(--gr-status-success);
+  font-size: $font-size-sm;
+
+  &--error { color: var(--gr-status-danger); }
+}
