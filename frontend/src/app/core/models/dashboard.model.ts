@@ -86,3 +86,9 @@ export type StarTarget =
   | { kind: 'project'; project: string }
   | { kind: 'task'; project: string; task: string }
   | { kind: 'cache'; cache: string };
+
+export interface UserStars {
+  projects: string[];
+  tasks: { project: string; task: string }[];
+  caches: string[];
+}

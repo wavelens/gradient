@@ -12,13 +12,14 @@ import { interval, Observable, Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
+import { StarsService } from '@core/services/stars.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
-import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, MessageService, StatusIconComponent, ToastComponent, TooltipDirective } from '@shared/ui';
+import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, MessageService, StarButtonComponent, StatusIconComponent, ToastComponent, TooltipDirective } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
-import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
+import { StarTarget, TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
 import { buildDuration, buildPhase, commitLabel, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
@@ -29,7 +30,7 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
-    IconComponent, InViewDirective, StatusIconComponent, ToastComponent,
+    IconComponent, InViewDirective, StatusIconComponent, ToastComponent, StarButtonComponent,
   ],
   providers: [MessageService],
   templateUrl: './task-detail.component.html',
@@ -51,6 +52,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private messageService = inject(MessageService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
+  private stars = inject(StarsService);
 
   access = injectTaskAccess();
   triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
@@ -67,6 +69,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private entryPointsAppending = false;
   selectedId = signal<string | null>(null);
   starting = signal(false);
+  starred = signal(false);
   errorMessage = signal<string | null>(null);
   abortTarget = signal<string | null>(null);
   aborting = signal(false);
@@ -75,6 +78,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   projectName = '';
   projectDisplayName = signal('');
   taskName = '';
+  starTarget: StarTarget = { kind: 'task', project: '', task: '' };
 
   private liveSub?: Subscription;
   private tickSubscription?: Subscription;
@@ -109,6 +113,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
+    this.starTarget = { kind: 'task', project: this.projectName, task: this.taskName };
+    this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
     this.selectedId.set(this.route.snapshot.queryParamMap.get('eval'));
     this.projectsService.getProject(this.projectName).subscribe({
       next: (project) => this.projectDisplayName.set(project.display_name),

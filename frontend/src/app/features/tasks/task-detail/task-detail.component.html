@@ -22,6 +22,7 @@
     </div>
     <div class="head-actions">
       @if (authService.isAuthenticated()) {
+        <gr-star-button [target]="starTarget" [(starred)]="starred" />
         <button *appWritable="triggerAccess()" grButton label="Start Evaluation" icon="play_arrow"
                 (click)="startEvaluation()" [loading]="starting()"
                 [disabled]="starting() || evaluationInProgress()"

@@ -16,6 +16,7 @@ import { TasksService } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
+import { StarsService } from '@core/services/stars.service';
 import { AccessState } from '@core/models/access.model';
 import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models/task.model';
 
@@ -152,6 +153,7 @@ function setup(
       { provide: EvaluationsService, useValue: evaluationsService },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
+      { provide: StarsService, useValue: { starred: vi.fn(() => of(true)), set: () => of(true) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
@@ -837,5 +839,22 @@ describe('TaskDetailComponent prioritize', () => {
     const { fixture } = setup(viewer);
     const ep = { ...epSummary('hello'), build_status: 'Building' } as EntryPointSummary;
     expect(pkgLabels(fixture, ep)).not.toContain('Prioritize');
+  });
+});
+
+describe('TaskDetailComponent header star', () => {
+  const access = { managed: false, canEdit: false, canTrigger: false };
+
+  it('stars the task from its header', () => {
+    const { fixture } = setup(access);
+    const stars = TestBed.inject(StarsService);
+    expect(stars.starred).toHaveBeenCalledWith({ kind: 'task', project: 'acme', task: 'demo' });
+    const button = (fixture.nativeElement as HTMLElement).querySelector('gr-star-button button');
+    expect(button!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows no star to a guest', () => {
+    const { fixture } = setup(access, {}, false);
+    expect((fixture.nativeElement as HTMLElement).querySelector('gr-star-button')).toBeNull();
   });
 });

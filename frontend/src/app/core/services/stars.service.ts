@@ -5,9 +5,11 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { ApiService } from './api.service';
-import { StarTarget } from '@core/models';
+import { AuthService } from './auth.service';
+import { StarTarget, UserStars } from '@core/models';
 
 export function starPath(t: StarTarget): string {
   switch (t.kind) {
@@ -20,9 +22,34 @@ export function starPath(t: StarTarget): string {
   }
 }
 
+export function isStarred(stars: UserStars, t: StarTarget): boolean {
+  switch (t.kind) {
+    case 'project':
+      return stars.projects.includes(t.project);
+    case 'task':
+      return stars.tasks.some((s) => s.project === t.project && s.task === t.task);
+    case 'cache':
+      return stars.caches.includes(t.cache);
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class StarsService {
   private api = inject(ApiService);
+  private auth = inject(AuthService);
+
+  list(): Observable<UserStars> {
+    return this.api.get<UserStars>('user/stars');
+  }
+
+  /// Guests have no stars, and a failed lookup renders as unstarred.
+  starred(target: StarTarget): Observable<boolean> {
+    return this.auth.initialized$.pipe(
+      switchMap(() => (this.auth.isAuthenticated() ? this.list() : of(null))),
+      map((stars) => !!stars && isStarred(stars, target)),
+      catchError(() => of(false)),
+    );
+  }
 
   set(target: StarTarget, starred: boolean): Observable<boolean> {
     return starred

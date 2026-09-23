@@ -8,6 +8,8 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint } from '@core/services/caches.service';
+import { AuthService } from '@core/services/auth.service';
+import { StarsService } from '@core/services/stars.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -22,9 +24,10 @@ import {
   PageLayoutComponent,
   TabSwitchComponent,
   SettingsSectionComponent,
+  StarButtonComponent,
   StatCardComponent,
 } from '@shared/ui';
-import { Cache } from '@core/models';
+import { Cache, StarTarget } from '@core/models';
 import { formatBytes, formatCount } from '@shared/text';
 import { FormsModule } from '@angular/forms';
 
@@ -56,6 +59,7 @@ const CHART_COLORS = {
     StatCardComponent,
     CardGridComponent,
     TabSwitchComponent,
+    StarButtonComponent,
     FormsModule,
   ],
   templateUrl: './cache-detail.component.html',
@@ -65,12 +69,15 @@ const CHART_COLORS = {
 export class CacheDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
+  private stars = inject(StarsService);
+  protected authService = inject(AuthService);
 
   loading = signal(true);
   statsLoading = signal(true);
   cache = signal<Cache | null>(null);
   stats = signal<CacheStats | null>(null);
   activeWindow = signal<Window>('hours');
+  starred = signal(false);
 
   setWindow(value: unknown): void {
     this.activeWindow.set(value as Window);
@@ -85,6 +92,7 @@ export class CacheDetailComponent implements OnInit {
   });
 
   cacheName = '';
+  starTarget: StarTarget = { kind: 'cache', cache: '' };
   cacheUrl = '';
   serverUrl = '';
 
@@ -143,6 +151,8 @@ export class CacheDetailComponent implements OnInit {
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
+    this.starTarget = { kind: 'cache', cache: this.cacheName };
+    this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
     this.serverUrl = window.location.origin;
     this.cacheUrl = `${this.serverUrl}/cache/${this.cacheName}`;
     this.loadCache();

@@ -13,6 +13,7 @@ import { debounceTime, switchMap } from 'rxjs/operators';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
+import { StarsService } from '@core/services/stars.service';
 import {
   ButtonComponent,
   CardGridComponent,
@@ -27,9 +28,10 @@ import {
   NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
+  StarButtonComponent,
 } from '@shared/ui';
 import { slugify } from '@shared/text';
-import { Project, Task } from '@core/models';
+import { Project, StarTarget, Task } from '@core/models';
 
 const RESERVED_TASK_NAMES = ['build-request'];
 
@@ -54,6 +56,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
     PageLayoutComponent,
     FormFieldComponent,
     NameFieldComponent,
+    StarButtonComponent,
   ],
   templateUrl: './project-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -64,6 +67,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   protected authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
   private tasksService = inject(TasksService);
+  private stars = inject(StarsService);
   private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
@@ -74,9 +78,11 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
+  starred = signal(false);
   nameCheckState = signal<'idle' | 'invalid' | 'reserved' | 'checking' | 'available' | 'taken'>('idle');
 
   projectName = '';
+  starTarget: StarTarget = { kind: 'project', project: '' };
 
   newTask = {
     name: '',
@@ -90,6 +96,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
+    this.starTarget = { kind: 'project', project: this.projectName };
+    this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
     this.loadProjectData();
     this.nameCheck$.pipe(
       debounceTime(400),
