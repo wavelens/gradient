@@ -178,7 +178,7 @@ impl Paging {
         let limit = per_page.unwrap_or(10).clamp(1, 25) as usize;
         let page = page.unwrap_or(1).max(1) as usize;
         Paging {
-            offset: (page - 1) * limit,
+            offset: (page - 1).saturating_mul(limit),
             limit,
         }
     }
@@ -382,9 +382,30 @@ mod tests {
                 limit: 25
             }
         );
+        assert_eq!(
+            Paging::from_query(Some(u64::MAX), Some(25)),
+            Paging {
+                offset: usize::MAX,
+                limit: 25
+            }
+        );
         assert_eq!(history_len(None), 30);
         assert_eq!(history_len(Some(0)), 1);
         assert_eq!(history_len(Some(999)), 60);
+    }
+
+    #[test]
+    fn rank_puts_tasks_without_evaluations_last_in_their_tier() {
+        let mut rows: Vec<TaskRow> = vec![
+            facts("never", true, 0, None),
+            facts("old", true, 0, Some((EvaluationStatus::Completed, 1))),
+        ]
+        .into_iter()
+        .map(|f| TaskRow::build(f, &HashMap::new()))
+        .collect();
+        rank(&mut rows);
+        let names: Vec<&str> = rows.iter().map(|r| r.task.as_str()).collect();
+        assert_eq!(names, ["old", "never"]);
     }
 
     #[test]
