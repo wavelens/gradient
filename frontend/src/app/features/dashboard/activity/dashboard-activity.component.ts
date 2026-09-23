@@ -37,7 +37,13 @@ const LEVELS = 4;
             <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
           </p>
         } @else if (days()) {
-          <svg [attr.viewBox]="'0 0 ' + width() + ' ' + 7 * STEP" class="heat" [class.heat--failed]="mode() === 'failed'">
+          <svg
+            role="img"
+            [attr.aria-label]="summary()"
+            [attr.viewBox]="'0 0 ' + width() + ' ' + 7 * STEP"
+            class="heat"
+            [class.heat--failed]="mode() === 'failed'"
+          >
             @for (c of cells(); track c.date) {
               <rect [attr.class]="'day day--' + c.level" [attr.x]="c.x" [attr.y]="c.y" width="11" height="11" rx="2">
                 <title>{{ c.title }}</title>
@@ -59,6 +65,14 @@ export class DashboardActivityComponent implements OnInit {
   hidden = signal(false);
 
   total = computed(() => (this.days() ?? []).reduce((a, d) => a + d[this.mode()], 0));
+  summary = computed(() => {
+    const key = this.mode();
+    const days = this.days() ?? [];
+    const what = key === 'evaluations' ? 'evaluations' : 'failed evaluations';
+    const busiest = days.reduce<ActivityDay | null>((top, d) => (d[key] > (top?.[key] ?? 0) ? d : top), null);
+    const head = `Daily ${what} over the last ${days.length} days`;
+    return busiest ? `${head}: ${this.total()} in total, busiest day ${busiest.date} with ${busiest[key]}` : `${head}: none`;
+  });
   private offset = computed(() => {
     const first = this.days()?.[0];
     return first ? new Date(`${first.date}T00:00:00Z`).getUTCDay() : 0;

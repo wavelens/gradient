@@ -49,4 +49,14 @@ describe('DashboardActivityComponent', () => {
     TestBed.resetTestingModule();
     expect(render(() => throwError(() => ({ status: 403 }))).root.textContent!.trim()).toBe('');
   });
+
+  it('describes the heatmap to assistive technology', () => {
+    const { f, root } = render(() => of({ days: DAYS }));
+    const svg = () => root.querySelector('svg')!;
+    expect(svg().getAttribute('role')).toBe('img');
+    expect(svg().getAttribute('aria-label')).toBe('Daily evaluations over the last 2 days: 6 in total, busiest day 2026-09-22 with 4');
+    (root.querySelectorAll('.seg button')[1] as HTMLElement).click();
+    f.detectChanges();
+    expect(svg().getAttribute('aria-label')).toBe('Daily failed evaluations over the last 2 days: 2 in total, busiest day 2026-09-23 with 2');
+  });
 });
