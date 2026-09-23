@@ -13,10 +13,12 @@
         <app-dashboard-stats />
         <button type="button" class="palette-trigger" (click)="palette.open()">
           <span>Jump to project, task, cache, commit, or paste a store path / hash</span>
-          <kbd>Ctrl K</kbd>
+          <kbd>{{ paletteKey }}</kbd>
         </button>
         <app-dashboard-task-table />
         <app-dashboard-activity />
+      } @else {
+        <p class="loading">Loading dashboard...</p>
       }
     </div>
     <app-dashboard-rail [class.hidden]="newUser()" (empty)="newUser.set($event)" />

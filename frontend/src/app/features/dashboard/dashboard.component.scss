@@ -19,6 +19,7 @@
 
 .main {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: $spacing-xl;
   min-width: 0;
 }
@@ -59,6 +60,12 @@
     font-family: inherit;
     font-size: $font-size-xs;
   }
+}
+
+.loading {
+  margin: 0;
+  color: var(--gr-text-muted);
+  font-size: $font-size-sm;
 }
 
 .hidden {

@@ -6,20 +6,22 @@
 
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { NEVER, Observable, of } from 'rxjs';
 import { DashboardComponent } from './dashboard.component';
 import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
 import { CommandPaletteService } from '@shared/chrome/command-palette/command-palette.service';
 
-function render(rail: { projects: unknown[]; caches: unknown[]; operations: boolean }) {
+type RailStub = { projects: unknown[]; caches: unknown[]; operations: boolean };
+
+function render(rail: RailStub | Observable<RailStub>) {
   TestBed.configureTestingModule({
     imports: [DashboardComponent],
     providers: [
       provideRouter([]),
       { provide: StarsService, useValue: { set: () => of(true) } },
       { provide: DashboardService, useValue: {
-        rail: () => of(rail),
+        rail: () => (rail instanceof Observable ? rail : of(rail)),
         stats: () => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { online: 0, busy_pct: 0 }, queue_wait_p50_ms: 0 }),
         tasks: () => of({ counts: { all: 0, failing: 0, worse: 0, starred: 0 }, total: 0, tasks: [] }),
         activity: () => of({ days: [] }),
@@ -53,5 +55,21 @@ describe('DashboardComponent', () => {
     const root = render({ projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }], operations: false });
     (root.querySelector('.palette-trigger') as HTMLElement).click();
     expect(TestBed.inject(CommandPaletteService).isOpen()).toBe(true);
+  });
+
+  it('shows a loading line until the rail answers', () => {
+    const root = render(NEVER);
+    expect(root.querySelector('.loading')).not.toBeNull();
+    expect(root.querySelector('app-dashboard-stats')).toBeNull();
+    expect(root.querySelector('app-dashboard-start')).toBeNull();
+  });
+
+  it('labels the palette shortcut for the platform', () => {
+    const user = { projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }], operations: false };
+    expect(render(user).querySelector('.palette-trigger kbd')!.textContent).toBe('Ctrl K');
+    TestBed.resetTestingModule();
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    expect(render(user).querySelector('.palette-trigger kbd')!.textContent).toBe('\u2318 K');
+    platform.mockRestore();
   });
 });

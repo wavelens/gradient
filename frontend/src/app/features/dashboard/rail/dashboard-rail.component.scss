@@ -15,6 +15,7 @@
   position: sticky;
   top: $spacing-lg;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: $spacing-xl;
   font-size: $font-size-sm;
 }
@@ -40,6 +41,7 @@ h3 {
 
 ul {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   margin: 0;
   padding: 0;
