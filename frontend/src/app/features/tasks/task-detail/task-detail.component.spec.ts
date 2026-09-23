@@ -6,11 +6,11 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { ActivatedRoute, ParamMap, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
-import { NEVER, of, throwError } from 'rxjs';
+import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
 import { TaskDetailComponent, filenameFromDisposition } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
@@ -70,12 +70,12 @@ function evalSummary(
   };
 }
 
-function activatedRouteStub(access: AccessState): ActivatedRoute {
+function activatedRouteStub(access: AccessState, query: BehaviorSubject<ParamMap>): ActivatedRoute {
   return {
     snapshot: {
       paramMap: convertToParamMap({ project: 'acme', task: 'demo' }),
-      queryParamMap: convertToParamMap({}),
     },
+    queryParamMap: query,
     data: of({}),
     parent: { data: of({ taskAccess: { task: {}, access } }) },
   } as unknown as ActivatedRoute;
@@ -136,7 +136,13 @@ function setup(
   access: AccessState,
   serviceOverrides: Parameters<typeof makeTasksService>[1] = {},
   authenticated = true,
-): { fixture: ComponentFixture<TaskDetailComponent>; tasksService: TasksService; evaluationsService: EvaluationsService } {
+): {
+  fixture: ComponentFixture<TaskDetailComponent>;
+  tasksService: TasksService;
+  evaluationsService: EvaluationsService;
+  query: BehaviorSubject<ParamMap>;
+} {
+  const query = new BehaviorSubject(convertToParamMap({}));
   const tasksService = makeTasksService(access, serviceOverrides);
   const evaluationsService = {
     prioritizeEvaluation: () => of('Success'),
@@ -148,7 +154,7 @@ function setup(
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(access, query) },
       { provide: TasksService, useValue: tasksService },
       { provide: EvaluationsService, useValue: evaluationsService },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
@@ -158,7 +164,7 @@ function setup(
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
   fixture.detectChanges();
-  return { fixture, tasksService, evaluationsService };
+  return { fixture, tasksService, evaluationsService, query };
 }
 
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
@@ -856,5 +862,22 @@ describe('TaskDetailComponent header star', () => {
   it('shows no star to a guest', () => {
     const { fixture } = setup(access, {}, false);
     expect((fixture.nativeElement as HTMLElement).querySelector('gr-star-button')).toBeNull();
+  });
+});
+
+describe('TaskDetailComponent - eval query param', () => {
+  it('selects the evaluation a changed ?eval= names and loads its entry points', () => {
+    const { fixture, tasksService, query } = setup(
+      { managed: false, canEdit: true, canTrigger: true },
+      { extraEvals: [evalSummary('e2', 'Completed')] },
+    );
+    const spy = vi.spyOn(tasksService, 'getEntryPoints');
+    expect(fixture.componentInstance.selected()?.id).toBe('e1');
+
+    query.next(convertToParamMap({ eval: 'e2' }));
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.selected()?.id).toBe('e2');
+    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e2', 25, 0);
   });
 });

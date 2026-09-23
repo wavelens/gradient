@@ -81,6 +81,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   starTarget: StarTarget = { kind: 'task', project: '', task: '' };
 
   private liveSub?: Subscription;
+  private querySub?: Subscription;
   private tickSubscription?: Subscription;
 
   // Content signatures + a throttle so a running evaluation's rapid live pings
@@ -115,7 +116,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.starTarget = { kind: 'task', project: this.projectName, task: this.taskName };
     this.stars.starred(this.starTarget).subscribe((starred) => this.starred.set(starred));
-    this.selectedId.set(this.route.snapshot.queryParamMap.get('eval'));
+    this.querySub = this.route.queryParamMap.subscribe((q) => this.followEvalParam(q.get('eval')));
     this.projectsService.getProject(this.projectName).subscribe({
       next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
@@ -127,7 +128,14 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.liveSub?.unsubscribe();
+    this.querySub?.unsubscribe();
     this.tickSubscription?.unsubscribe();
+  }
+
+  private followEvalParam(id: string | null): void {
+    if (!id || id === this.selectedId()) return;
+    if (this.task()) this.showEvaluation(id);
+    else this.selectedId.set(id);
   }
 
   loadTaskData(showLoading = true, live = false): void {
@@ -174,16 +182,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   select(evaluation: EvaluationSummary): void {
-    if (this.selectedId() !== evaluation.id) {
-      // Drop the previous evaluation's packages immediately so the panel shows a
-      // loading state, not stale data, during the (slow) entry-point fetch.
-      this.entryPoints.set([]);
-      this.entryPointsTotal.set(0);
-      this.entryPointsEvalId = undefined;
-      this.entryPointsSig = '';
-    }
-    this.selectedId.set(evaluation.id);
-    this.loadEntryPoints(evaluation.id);
+    this.showEvaluation(evaluation.id);
     // Keep the selection in the URL so navigating away and back restores it.
     this.router.navigate([], {
       relativeTo: this.route,
@@ -191,6 +190,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
+  }
+
+  private showEvaluation(id: string): void {
+    if (this.selectedId() !== id) {
+      // Drop the previous evaluation's packages immediately so the panel shows a
+      // loading state, not stale data, during the (slow) entry-point fetch.
+      this.entryPoints.set([]);
+      this.entryPointsTotal.set(0);
+      this.entryPointsEvalId = undefined;
+      this.entryPointsSig = '';
+    }
+    this.selectedId.set(id);
+    this.loadEntryPoints(id);
   }
 
   private entryPointSignature(eps: EntryPointSummary[]): string {
