@@ -34,12 +34,15 @@
       unittest = self.packages.${system}.gradient.tests;
       cli-clippy = self.packages.${system}.gradient-cli-full.clippy;
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
+      daemon-clippy = self.packages.${system}.gradient-daemon-mock.clippy;
+      daemon-unittest = self.packages.${system}.gradient-daemon-mock.tests;
     };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
       inherit (pkgs) gradient-nix;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
+      gradient-daemon-mock = pkgs.callPackage ./nix/packages/gradient-daemon.nix { inherit craneLib; };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {
         inherit craneLib;
