@@ -2745,8 +2745,8 @@ in {
       # that race on a second anchor, releases the first, and waits for the server
       # to settle it with counters that match their recount.
       banner("Phase 10i: a naming racing a transition still settles (#640)")
-      CR_DRV = "[uuid9]"
-      CR_HOLD_DRV = "[uuid10]"
+      CR_DRV = "1950ecc8-8530-4e1c-bc1c-de4bd759fe57"
+      CR_HOLD_DRV = "5f923367-19cc-4823-9b73-5c4b9fe4d0ca"
       cr_eval = sql(
           "SELECT e.id FROM evaluation e WHERE e.status = 5 AND NOT EXISTS ("
           "SELECT 1 FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
@@ -2802,7 +2802,7 @@ in {
       # the job is out exactly once. The anchor has no build_job, so the running
       # server never dispatches it.
       banner("Phase 10j: two instances claiming one job, one wins (#641)")
-      CL_DRV = "[uuid13]"
+      CL_DRV = "8ef77385-09cc-40f8-833e-732d330a2685"
       cl_owner = sql("SELECT evaluation_id || ' ' || project FROM dispatched_job LIMIT 1;")
       assert cl_owner, "no dispatched job to borrow an evaluation and project from"
       cl_eval, cl_project = cl_owner.split()
