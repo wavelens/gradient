@@ -22,6 +22,7 @@ pub mod live;
 pub mod metrics;
 pub mod metrics_query;
 pub mod projects;
+pub mod search;
 pub mod stars;
 pub mod stats;
 pub mod tasks;

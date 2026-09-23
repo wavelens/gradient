@@ -71,6 +71,7 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `GET` | `/dashboard/stats` | Dashboard stat tiles over the projects the user can see |
 | `GET` | `/dashboard/activity` | Daily non-PR evaluation counts of the last 370 days |
 | `GET` | `/dashboard/rail` | Sidebar rail: ranked projects, readable caches, operations flag |
+| `GET` | `/search` | Command palette search: names, NAR hashes and commit prefixes; starred items when `q` is empty |
 
 ### Configuring API-key options
 

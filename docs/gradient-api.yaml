@@ -1585,6 +1585,75 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /search:
+    get:
+      tags: [dashboard]
+      summary: Typed search for the command palette
+      description: |-
+        Classifies `q` and runs every lookup it could mean; the name lookup always runs, so a project named like a commit hash is still found.
+        - Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).
+        - 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).
+        - Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.
+        An empty `q` returns the user's starred projects, tasks and caches.
+        Visibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user; a superuser reads everything.
+        Results are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).
+      operationId: getSearch
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search text, store path, NAR hash or commit hash prefix
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+          description: Name hits per kind; out-of-range values are clamped
+      responses:
+        '200':
+          description: Search hits with the frontend route each one navigates to
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          type: object
+                          required: [kind, label, sublabel, route, starred]
+                          properties:
+                            kind:
+                              type: string
+                              enum: [project, task, cache, nar, commit]
+                            label:
+                              type: string
+                              description: Display name, package name or short commit hash
+                            sublabel:
+                              type: string
+                              description: Owning project, cache or `project / task`; empty when none
+                            route:
+                              type: string
+                              description: |-
+                                `/project/{p}`, `/project/{p}/task/{t}`, `/caches/{c}`, `/caches/{c}/nars?hash={hash}` or `/project/{p}/task/{t}?eval={evaluation}`
+                            starred:
+                              type: boolean
+              example:
+                error: false
+                message:
+                  - { kind: commit, label: deadbee, sublabel: infra / hosts, route: "/project/infra/task/hosts?eval=fe0d108b-d4b5-423e-9ba2-52a43179cf84", starred: false }
+                  - { kind: task, label: Hosts, sublabel: infra, route: /project/infra/task/hosts, starred: true }
+                  - { kind: cache, label: Main, sublabel: "", route: /caches/main, starred: false }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /user/stars:
     get:
       tags: [user]

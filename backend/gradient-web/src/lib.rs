@@ -459,6 +459,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(dashboard::activity::get_activity),
         )
         .route("/dashboard/rail", get(dashboard::rail::get_rail))
+        .route("/search", get(search::get_search))
         .route("/user/stars", get(stars::get_stars))
         .route(
             "/user/stars/projects/{project}",
