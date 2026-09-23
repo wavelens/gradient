@@ -253,7 +253,7 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     let written = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
         let mut outcomes = Vec::with_capacity(batches_ref.len());
         for batch in batches_ref {
-            outcomes.push(ingest_one(&scoped, batch).await);
+            outcomes.push(escalate_retryable(ingest_one(&scoped, batch).await)?);
         }
 
         Ok(outcomes)
@@ -287,6 +287,18 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     }
 }
 
+/// A batch that failed for its timing fails the whole flush, which `transact` then
+/// retries; one that failed for its content stays that batch's own outcome. Its
+/// savepoint already rolled back, but a deadlock victim is no verdict on the batch.
+fn escalate_retryable(
+    outcome: anyhow::Result<IngestReport>,
+) -> anyhow::Result<anyhow::Result<IngestReport>> {
+    match outcome {
+        Err(e) if is_retryable(&e) => Err(e),
+        outcome => Ok(outcome),
+    }
+}
+
 /// One batch under its own savepoint, so a bad batch fails only its caller.
 async fn ingest_one(scoped: &DbContext, batch: &IngestBatch) -> anyhow::Result<IngestReport> {
     let savepoint = Arc::new(scoped.worker_db.begin().await.context("savepoint")?);
@@ -311,7 +323,8 @@ async fn ingest_one(scoped: &DbContext, batch: &IngestBatch) -> anyhow::Result<I
 /// or serialization failure rolls back and runs `work` again, up to
 /// [`GRAPH_TX_ATTEMPTS`] times: the advisory anchor keys make two graph writers wait
 /// on each other instead of missing each other's rows, and Postgres breaks the rare
-/// cycle that creates by aborting one of them.
+/// cycle that creates by aborting one of them. Board events and probe requests a
+/// failed attempt already sent are not recalled, so a retry sends them again.
 pub async fn transact<T, F, Fut>(ctx: &DbContext, budget: Duration, work: F) -> anyhow::Result<T>
 where
     F: Fn(DbContext) -> Fut,
@@ -590,6 +603,22 @@ mod tests {
         assert!(
             log.iter().any(|t| t.contains("ROLLBACK")) && log.iter().any(|t| t.contains("COMMIT")),
             "the first attempt rolled back, the second committed: {log:?}"
+        );
+    }
+
+    #[test]
+    fn a_batch_that_deadlocked_fails_the_flush_so_it_is_retried() {
+        assert!(escalate_retryable(Err(coded("40P01").context("seed"))).is_err());
+    }
+
+    #[test]
+    fn a_batch_that_failed_for_its_content_fails_only_itself() {
+        let outcome = escalate_retryable(Err(coded("23505"))).expect("stays the batch's own");
+        assert!(outcome.is_err());
+        assert!(
+            escalate_retryable(Ok(IngestReport::default()))
+                .unwrap()
+                .is_ok()
         );
     }
 

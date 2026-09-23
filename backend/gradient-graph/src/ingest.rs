@@ -363,7 +363,7 @@ impl BatchWriter<'_> {
             if let Err(e) = res
                 && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
-                return Err(anyhow!("failed to insert derivation outputs: {e}"));
+                return Err(anyhow::Error::new(e).context("failed to insert derivation outputs"));
             }
         }
 
@@ -536,7 +536,7 @@ impl BatchWriter<'_> {
             if let Err(e) = res
                 && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
-                return Err(anyhow!("failed to upsert anchors: {e}"));
+                return Err(anyhow::Error::new(e).context("failed to upsert anchors"));
             }
         }
         self.set_anchor_limits(&limits).await?;
@@ -587,7 +587,7 @@ impl BatchWriter<'_> {
             if let Err(e) = res
                 && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
-                return Err(anyhow!("failed to upsert build_job rows: {e}"));
+                return Err(anyhow::Error::new(e).context("failed to upsert build_job rows"));
             }
         }
 

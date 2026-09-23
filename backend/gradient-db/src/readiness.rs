@@ -1339,7 +1339,7 @@ mod tests {
             sql.contains("(SELECT n FROM anchor_locks) >= 0 ORDER BY derivation FOR UPDATE"),
             "{sql}"
         );
-        assert!(!sql.contains("_shared"), "{sql}");
+        assert!(!sql.contains("derivation_dependency"), "{sql}");
 
         let seed = LOCK_SEED_ANCHORS.text();
         assert!(

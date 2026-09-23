@@ -84,10 +84,9 @@ fn count_up_sql() -> String {
 }
 
 fn whole_among_sql() -> String {
-    let (with, filter) = crate::anchor_guard::advisory_filter("$1", false);
     format!(
-        "WITH {with} SELECT db.derivation FROM derivation_build db \
-         WHERE db.derivation = ANY($1::uuid[]) AND {whole} AND {filter} \
+        "SELECT db.derivation FROM derivation_build db \
+         WHERE db.derivation = ANY($1::uuid[]) AND {whole} \
          ORDER BY db.derivation FOR UPDATE",
         whole = anchor_whole_predicate("db"),
     )
@@ -181,10 +180,17 @@ pub async fn whole_output_hashes<C: ConnectionTrait>(
 /// The hash-ordered `FOR UPDATE` pass every retire opens with. It conflicts with
 /// the RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds on the
 /// parent row, so that wait is absorbed in its own statement and the DELETE opens
-/// a snapshot that sees the signature it would otherwise cascade away. It reads
-/// nothing and decides nothing.
-const LOCK_CACHED_PATHS_SQL: &str =
-    "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
+/// a snapshot that sees the signature it would otherwise cascade away. It also holds
+/// the producers' advisory keys exclusively, ahead of the rows, so the statements
+/// after it read their wholeness from a snapshot that includes any flip they waited
+/// for ([`crate::anchor_guard`]). It reads nothing and decides nothing.
+fn lock_cached_paths_sql() -> String {
+    let (with, filter) = crate::anchor_guard::producer_filter("$1");
+    format!(
+        "WITH {with} SELECT 1 FROM cached_path \
+         WHERE hash = ANY($1) AND {filter} ORDER BY hash FOR UPDATE"
+    )
+}
 
 fn reset_uncached_producers_sql() -> String {
     format!(
@@ -206,10 +212,12 @@ crate::sql_fn! {
         params = [DerivationIds(64)];
 }
 
-crate::sql! {
-    LOCK_CACHED_PATHS = LOCK_CACHED_PATHS_SQL,
+crate::sql_fn! {
+    LOCK_CACHED_PATHS = lock_cached_paths_sql,
         params = [CachedPathHashes(64)];
+}
 
+crate::sql! {
     DELETE_CACHED_PATHS = "DELETE FROM cached_path cp WHERE cp.hash = ANY($1) RETURNING cp.hash",
         params = [CachedPathHashes(64)];
 
@@ -373,7 +381,9 @@ pub async fn lock_cached_paths(txn: &DatabaseTransaction, hashes: &[String]) -> 
 
 /// The anchors among `derivations` that are whole right now, held `FOR UPDATE`.
 /// Read BEFORE the event that takes their presence away, because nothing after it
-/// can recover the endpoint.
+/// can recover the endpoint, and only after their advisory keys are held by an
+/// earlier statement: [`retire_outputs`] opens with [`LOCK_CACHED_PATHS`], which
+/// takes them.
 pub async fn whole_among(
     txn: &DatabaseTransaction,
     derivations: &[DerivationId],
@@ -535,15 +545,26 @@ mod tests {
         Vec::new()
     }
 
+    /// The keys have to be held before the statement that reads wholeness starts:
+    /// a statement that waits for a key inside itself still reads the snapshot it
+    /// took before the wait, and misses the flip it waited for.
     #[test]
-    fn whole_among_holds_the_exclusive_keys_of_what_it_reads() {
-        let sql = WHOLE_AMONG.text();
+    fn the_retire_holds_its_producers_keys_before_it_reads_their_wholeness() {
+        let lock = LOCK_CACHED_PATHS.text();
+        assert!(lock.contains("pg_advisory_xact_lock(643, k)"), "{lock}");
         assert!(
-            sql.starts_with("WITH anchor_keys AS MATERIALIZED ("),
-            "{sql}"
+            lock.contains("FROM derivation_output o WHERE o.hash = ANY($1)"),
+            "{lock}"
         );
-        assert!(!sql.contains("_shared"), "{sql}");
-        assert!(sql.contains("ORDER BY db.derivation FOR UPDATE"), "{sql}");
+        assert!(!lock.contains("derivation_dependency"), "{lock}");
+        assert!(lock.contains("ORDER BY hash FOR UPDATE"), "{lock}");
+
+        let whole = WHOLE_AMONG.text();
+        assert!(!whole.contains("pg_advisory"), "{whole}");
+        assert!(
+            whole.contains("ORDER BY db.derivation FOR UPDATE"),
+            "{whole}"
+        );
     }
 
     /// A row that was whole before the seed and after it flipped nothing, so no

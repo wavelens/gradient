@@ -879,6 +879,7 @@ in {
       LOCK_ANCHORS=$(stmt LOCK_ANCHORS) || exit 1
       LOCK_SEED=$(stmt LOCK_SEED_ANCHORS) || exit 1
       WHOLE_AMONG=$(stmt WHOLE_AMONG) || exit 1
+      LOCK_PATHS=$(stmt LOCK_CACHED_PATHS) || exit 1
       SEED=$(stmt SEED_MISSING_RUNTIME_DEPS) || exit 1
       DEPENDENTS=$(stmt RUNTIME_DEPENDENT_COUNTS) || exit 1
       COUNT_DOWN=$(stmt COUNT_DOWN_RUNTIME) || exit 1
@@ -999,8 +1000,8 @@ in {
       grep -q "^$P|1$" $D/b.out || fail "seed-first: the ripple did not see P's edge"
       recount seed-first
 
-      # 3. A retire of D against a seed of a second referrer Q: the retire's read of D's
-      # wholeness waits for Q's seed, and its count-up then reaches both referrers.
+      # 3. A retire of D against a seed of a second referrer Q: the retire's opening lock
+      # waits for Q's seed on D's key, and its count-up then reaches both referrers.
       reset present
       q "INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$P', '$DEP', 1);" >/dev/null
       send_a "BEGIN;"
@@ -1009,11 +1010,12 @@ in {
       send_a "$(bind "$SEED" "'{$Q}'" "'{f}'")"
       idle_tx a "unwhole: the seed of Q never held D's key"
       send_b "BEGIN;"
-      send_b "$(bind "$WHOLE_AMONG" "'{$DEP}'")"
+      send_b "$(bind "$LOCK_PATHS" "'{lgd}'")"
       blocked b "unwhole: the retire did not wait on the seed"
       send_a "COMMIT;"
       idle a "unwhole: the seed never committed"
       idle_tx b "unwhole: the retire never resumed"
+      send_b "$(bind "$WHOLE_AMONG" "'{$DEP}'")"
       send_b "DELETE FROM cached_path WHERE hash = 'lgd';"
       send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
       send_b "$(bind "$COUNT_UP" "'{$P,$Q}'" "'{1,1}'")"
@@ -1021,6 +1023,27 @@ in {
       idle b "unwhole: the retire never committed"
       grep -q "^$Q|1$" $D/b.out || fail "unwhole: the ripple did not see Q's edge"
       recount unwhole
+
+      # 3b. A retire that waited on a flip reads the flipped row. The flip counts D down
+      # to whole under D's key; the retire's opening lock waits on that key, so the
+      # statement that reads whether D was whole starts after the flip committed.
+      reset present
+      q "UPDATE derivation_build SET missing_runtime_deps = 1 WHERE derivation = '$DEP';" >/dev/null
+      send_a "BEGIN;"
+      send_a "$(bind "$LOCK_ANCHORS" "'{$DEP}'")"
+      send_a "$(bind "$COUNT_DOWN" "'{$DEP}'" "'{1}'")"
+      idle_tx a "retire-reads: the flip never held D"
+      send_b "BEGIN;"
+      send_b "$(bind "$LOCK_PATHS" "'{lgd}'")"
+      blocked b "retire-reads: the retire did not wait on the flip"
+      send_a "COMMIT;"
+      idle a "retire-reads: the flip never committed"
+      idle_tx b "retire-reads: the retire never resumed"
+      send_b "$(bind "$WHOLE_AMONG" "'{$DEP}'")"
+      send_b "ROLLBACK;"
+      idle b "retire-reads: the retire never finished"
+      grep -q "^$DEP$" $D/b.out || fail "retire-reads: the retire read D as it was before the flip it waited for"
+      recount retire-reads
 
       # 4. Two seeds sharing D hold its key shared, and neither waits for the other.
       reset present
@@ -2823,7 +2846,7 @@ in {
           "LG_GATE=${pkgs.gradient.gate}/bin/gradient-sql-gate bash /tmp/lockguard.sh 2>&1"
       )
       print(out)
-      for arm in ("flip-first", "seed-first", "unwhole", "shared"):
+      for arm in ("flip-first", "seed-first", "unwhole", "retire-reads", "shared"):
           assert f"lockguard {arm}: recount wrote 0" in out, f"arm {arm} drifted:\n{out}"
       assert "lockguard unguarded: recount wrote 1" in out, (
           f"the unguarded arm did not drift, so the keys are not what the others prove:\n{out}"

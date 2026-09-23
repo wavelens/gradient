@@ -243,7 +243,7 @@ The Nix binary cache endpoints (`/cache/{cache}/…`) are registered at the root
 
 PostgreSQL is the only supported database. Migrations are in `migration/src/` and applied by running `cargo run -p migration`.
 
-Graph writers do not rely on one another's absence. A seed of an absolute counter holds the advisory keys of the dependencies it counts shared, and every flip of an anchor's wholeness or fetchability holds that anchor's key exclusively, both in namespace `643` (`gradient_db::anchor_guard`), so a seed and a concurrent flip each see the other's committed rows. A transaction aborted for a deadlock or serialization failure is retried up to three times. Postgres needs `max_locks_per_transaction` of at least 256 for this; the server logs an error at startup below that.
+Graph writers do not rely on one another's absence. A seed of an absolute counter holds the advisory keys of the dependencies it counts shared, and every flip of an anchor's wholeness or fetchability holds that anchor's key exclusively, both in namespace `643` (`gradient_db::anchor_guard`), so a seed and a concurrent flip each see the other's committed rows. A graph transaction aborted for a deadlock or serialization failure is retried up to three times; the passes outside the graph actor are not, and their next run repeats the work. Postgres needs `max_locks_per_transaction` of at least 256 for this; the server logs an error at startup below that.
 
 All timestamps are `NaiveDateTime` (UTC, stored without timezone). The `NULL_TIME` constant (`1970-01-01 00:00:00`) is used as a sentinel for "never" (e.g. `last_login_at`).
 

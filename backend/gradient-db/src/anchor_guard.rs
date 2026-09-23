@@ -36,10 +36,25 @@ pub(crate) fn advisory_filter(anchors_param: &str, with_dependencies: bool) -> (
     } else {
         String::new()
     };
+
+    key_pass(&format!(
+        "SELECT hashtext(a::text) AS k, true AS own \
+         FROM unnest({anchors_param}::uuid[]) AS a{dependencies}"
+    ))
+}
+
+/// [`advisory_filter`] for the producers of the store paths bound at `hashes_param`,
+/// exclusively: what a retire takes before it reads whether they were whole.
+pub(crate) fn producer_filter(hashes_param: &str) -> (String, String) {
+    key_pass(&format!(
+        "SELECT hashtext(o.derivation::text) AS k, true AS own \
+         FROM derivation_output o WHERE o.hash = ANY({hashes_param})"
+    ))
+}
+
+fn key_pass(keys: &str) -> (String, String) {
     let with = format!(
-        "anchor_keys AS MATERIALIZED (SELECT k, bool_or(own) AS own FROM (\
-             SELECT hashtext(a::text) AS k, true AS own \
-             FROM unnest({anchors_param}::uuid[]) AS a{dependencies}) x \
+        "anchor_keys AS MATERIALIZED (SELECT k, bool_or(own) AS own FROM ({keys}) x \
          GROUP BY k ORDER BY k), \
          anchor_locks AS (SELECT count(CASE WHEN own \
              THEN pg_advisory_xact_lock({ns}, k) \
@@ -76,6 +91,5 @@ mod tests {
     fn without_dependencies_only_the_anchors_are_keyed() {
         let (with, _) = advisory_filter("$1", false);
         assert!(!with.contains("derivation_dependency"), "{with}");
-        assert!(!with.contains("_shared"), "{with}");
     }
 }

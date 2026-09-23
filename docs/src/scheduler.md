@@ -83,7 +83,12 @@ exclusively before its ripple reads the edges into it. Whichever of a seed and a
 concurrent flip comes second waits for the first to commit and reads its rows, so
 the ripple sees the seed's new edge or the seed sees the flip. Shared keys never
 wait on each other, so the hundreds of thousands of `.drv` NARs that reference
-`source-stdenv.sh` queue on nothing. A deadlock between two ripples is retried.
+`source-stdenv.sh` queue on nothing. A graph transaction aborted as a deadlock
+victim is rolled back and run again, up to three times, an ingest flush included;
+the passes outside the actor (the consistency sweep, reconcile's fetchable
+advance, a cache demotion) are not retried and leave the work to their next run.
+A retried attempt may already have sent its board events and probe requests,
+which the successful attempt then sends again.
 `demanded` is the exception: a demand recompute locks only its roots, and the
 sweep's `recount_demanded` corrects a lost one, which at worst leaves an anchor
 `Skipped` until the next sweep.
