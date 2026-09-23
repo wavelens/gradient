@@ -10,17 +10,11 @@
 .pkg-list { display: flex; flex-direction: column; gap: $space-pair; }
 
 .pkg-more {
-  width: 100%;
   margin-top: $space-pair;
   padding: $spacing-sm $spacing-md;
-  background-color: var(--gr-surface-control);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  color: var(--gr-text-secondary);
+  color: var(--gr-text-muted);
   font-size: $font-size-sm;
-  cursor: pointer;
-
-  &:hover { border-color: var(--gr-text-muted); color: var(--gr-text); }
+  text-align: center;
 }
 
 .pkg {
@@ -33,7 +27,6 @@
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  cursor: pointer;
   animation: pkg-in $transition-base ease backwards;
 
   &:hover { border-color: var(--gr-text-muted); border-left-color: var(--rail-c, var(--idle)); }
@@ -71,7 +64,17 @@
     gap: $spacing-xs;
   }
 
+  // The link stretches across the row so a middle click opens the log in a
+  // new tab; the kebab stacks above it.
+  .pkg-link {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    &:focus-visible { outline-offset: -$focus-ring-width; }
+  }
+
   .kebab {
+    position: relative;
     color: var(--gr-text-muted);
     padding-left: $spacing-sm;
     border: none;

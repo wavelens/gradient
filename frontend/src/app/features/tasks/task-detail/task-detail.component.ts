@@ -14,7 +14,7 @@ import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
-import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
+import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
@@ -28,7 +28,7 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
-    IconComponent,
+    IconComponent, InViewDirective,
   ],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -456,19 +456,34 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   // browsing a public task is not offered an action that can only 403.
   panelMenuModel = computed<MenuItem[]>(() => {
     const selected = this.selected();
+    const job = selected?.dispatched_job;
     return [
       { label: 'Logs', icon: 'article', disabled: !selected,
         routerLink: selected
           ? ['/project', this.projectName, 'log', selected.id]
           : undefined },
+      { label: 'Show job', icon: 'work', disabled: !job,
+        routerLink: job ? ['/board', 'jobs', job] : undefined },
       { label: 'Metrics', icon: 'show_chart',
         routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
+      ...(selected && this.canRestartFailed(selected)
+        ? [{ label: 'Restart failed builds', icon: 'refresh', disabled: this.starting(),
+             command: () => this.restartFailedBuilds() }]
+        : []),
       ...(this.authService.isAuthenticated()
         ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !selected,
              command: () => this.reportDialogOpen.set(true) }]
         : []),
     ];
   });
+
+  /// The server restarts the task's newest evaluation, so only that one offers it.
+  private canRestartFailed(evaluation: EvaluationSummary): boolean {
+    return this.triggerAccess().canEdit
+      && evaluation.id === this.evaluations()[0]?.id
+      && !this.isRunning(evaluation.status)
+      && evaluation.builds.failed + evaluation.builds.aborted > 0;
+  }
 
   reportDialogOpen = signal(false);
   reportBusy = signal(false);

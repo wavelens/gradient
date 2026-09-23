@@ -5,6 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
@@ -38,7 +39,11 @@ function epSummary(id: string, attr = `packages."x86_64-linux".${id}`): EntryPoi
   } as EntryPointSummary;
 }
 
-function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building'): EvaluationSummary {
+function evalSummary(
+  id: string,
+  status: EvaluationSummary['status'] = 'Building',
+  extra: Partial<EvaluationSummary> = {},
+): EvaluationSummary {
   return {
     id,
     commit: 'abc1234def5678',
@@ -57,6 +62,7 @@ function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building
     started_at: null,
     finished_at: null,
     updated_at: '2026-01-01T00:01:00',
+    ...extra,
   };
 }
 
@@ -75,6 +81,7 @@ function taskFor(
   access: AccessState,
   extraEvals: EvaluationSummary[] = [],
   primaryStatus: EvaluationSummary['status'] = 'Building',
+  primary: Partial<EvaluationSummary> = {},
 ) {
   return {
     id: 'p',
@@ -88,7 +95,7 @@ function taskFor(
     keep_evaluations: 5,
     last_check_at: '2026-01-01T00:00:00',
     queue: { building: 0, queued: 0 },
-    last_evaluations: [evalSummary('e1', primaryStatus), ...extraEvals],
+    last_evaluations: [evalSummary('e1', primaryStatus, primary), ...extraEvals],
     can_edit: access.canEdit,
     can_trigger: access.canTrigger,
     managed: access.managed,
@@ -109,10 +116,11 @@ function makeTasksService(access: AccessState, overrides: Partial<{
   getEntryPoints: () => ReturnType<TasksService['getEntryPoints']>;
   extraEvals: EvaluationSummary[];
   primaryStatus: EvaluationSummary['status'];
+  primary: Partial<EvaluationSummary>;
 }> = {}): TasksService {
   const extraEvals = overrides.extraEvals ?? [];
   return {
-    getTask: () => of(taskFor(access, extraEvals, overrides.primaryStatus)),
+    getTask: () => of(taskFor(access, extraEvals, overrides.primaryStatus, overrides.primary)),
     getEntryPoints: overrides.getEntryPoints ?? (() => of({ entry_points: [], total: 0 })),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
@@ -143,32 +151,85 @@ function setup(
   return { fixture, tasksService };
 }
 
+const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
+const menuLabels = (fixture: ComponentFixture<TaskDetailComponent>) =>
+  fixture.componentInstance.panelMenuModel().map(i => i.label);
+
 describe('TaskDetailComponent - access gating', () => {
   it('hides Start Evaluation / Restart / Abort when canTrigger is false', () => {
-    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: false });
+    const { fixture } = setup(
+      { managed: false, canEdit: false, canTrigger: false },
+      { primaryStatus: 'Completed', primary: failedBuilds },
+    );
     expect(findByText(fixture.nativeElement, 'start evaluation')).toBeNull();
-    expect(findByText(fixture.nativeElement, 'restart failed')).toBeNull();
+    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
     expect(findByText(fixture.nativeElement, 'abort')).toBeNull();
   });
 
-  it('keeps Start Evaluation / Restart / Abort enabled on state-managed tasks', () => {
-    const { fixture } = setup({ managed: true, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
+  it('keeps Start Evaluation / Restart enabled on state-managed tasks', () => {
+    const { fixture } = setup(
+      { managed: true, canEdit: true, canTrigger: true },
+      { primaryStatus: 'Completed', primary: failedBuilds },
+    );
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
-    const restartBtn = findByText(fixture.nativeElement, 'restart failed') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(false);
-    expect(restartBtn).not.toBeNull();
-    expect(restartBtn!.disabled).toBe(false);
+    expect(menuLabels(fixture)).toContain('Restart failed builds');
   });
 
   it('shows Start / Restart to a caller with TriggerEvaluation but not EditTask', () => {
-    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: true }, { primaryStatus: 'Completed' });
+    const { fixture } = setup(
+      { managed: false, canEdit: false, canTrigger: true },
+      { primaryStatus: 'Completed', primary: failedBuilds },
+    );
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
-    const restartBtn = findByText(fixture.nativeElement, 'restart failed') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(false);
-    expect(restartBtn).not.toBeNull();
-    expect(restartBtn!.disabled).toBe(false);
+    expect(menuLabels(fixture)).toContain('Restart failed builds');
+  });
+});
+
+describe('TaskDetailComponent evaluation menu', () => {
+  const trigger = { managed: false, canEdit: true, canTrigger: true };
+
+  it('restarts from the menu, not from a header button', () => {
+    const { fixture, tasksService } = setup(trigger, { primaryStatus: 'Completed', primary: failedBuilds });
+    const spy = vi.spyOn(tasksService, 'restartFailedBuilds');
+    expect(findByText(fixture.nativeElement, 'restart failed')).toBeNull();
+    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Restart failed builds')!.command!();
+    expect(spy).toHaveBeenCalledWith('acme', 'demo');
+  });
+
+  it('offers no restart while the evaluation still runs', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Building', primary: failedBuilds });
+    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
+  });
+
+  it('offers no restart when nothing failed', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
+    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
+  });
+
+  /// The server restarts the task's newest evaluation, whichever one is selected.
+  it('offers no restart on an older evaluation', () => {
+    const { fixture } = setup(trigger, {
+      primaryStatus: 'Completed',
+      extraEvals: [evalSummary('e0', 'Failed', failedBuilds)],
+    });
+    fixture.componentInstance.select(fixture.componentInstance.evaluations()[1]);
+    expect(menuLabels(fixture)).not.toContain('Restart failed builds');
+  });
+
+  it('links Show job to the evaluation job on the Job Board', () => {
+    const { fixture } = setup(trigger, { primary: { dispatched_job: 'job-1' } });
+    const item = fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job');
+    expect(item?.routerLink).toEqual(['/board', 'jobs', 'job-1']);
+    expect(item?.disabled).toBe(false);
+  });
+
+  it('disables Show job until an eval worker picked the evaluation up', () => {
+    const { fixture } = setup(trigger);
+    expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Show job')?.disabled).toBe(true);
   });
 });
 
@@ -512,7 +573,7 @@ describe('TaskDetailComponent diagnostic report', () => {
 
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const labels = component().panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Metrics', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Show job', 'Metrics', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -525,7 +586,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, false);
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Metrics']);
+    expect(labels).toEqual(['Logs', 'Show job', 'Metrics']);
   });
 
   it('opens the dialog from the menu command', () => {
@@ -625,6 +686,29 @@ describe('TaskDetailComponent - #636 eval page', () => {
     const closure = comp.pkgMenuModel().find(i => i.label === 'View closure');
     expect(closure?.disabled).toBe(false);
     expect(closure?.routerLink).toEqual(['/project', 'acme', 'closure', 'build', 'b-hello']);
+  });
+
+  it('links each package with a real href, so a middle click opens a new tab', () => {
+    const { fixture } = setup(access, {
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+    });
+    fixture.detectChanges();
+    const link = fixture.nativeElement.querySelector('.pkg a.pkg-link') as HTMLAnchorElement;
+    expect(link.getAttribute('href')).toBe('/project/acme/log/e1?build=b-hello');
+  });
+
+  it('loads the next page when the end of the list scrolls into view', () => {
+    const { fixture, tasksService } = setup(access, {
+      getEntryPoints: () => of({ entry_points: [epSummary('a')], total: 2 }),
+    });
+    fixture.detectChanges();
+    const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of({ entry_points: [epSummary('b')], total: 2 }));
+    const sentinel = fixture.debugElement.query(By.css('.pkg-more'));
+    expect(fixture.nativeElement.textContent).not.toContain('Show more');
+    sentinel.triggerEventHandler('grInView');
+    expect(spy).toHaveBeenCalledWith('acme', 'demo', 'e1', 25, 1);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.pkg-more')).toBeNull();
   });
 
   it('opens the package menu on right-click', () => {
