@@ -18,7 +18,7 @@ body {
 
 // Make page components fill remaining vertical space so the footer stays at the bottom.
 // Angular's router-outlet inserts activated components as siblings of the outlet element.
-app-root > *:not(app-header):not(app-footer):not(router-outlet) {
+app-root > *:not(app-header):not(app-footer):not(app-command-palette):not(router-outlet) {
   flex: 1;
 }
 
