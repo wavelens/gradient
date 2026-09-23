@@ -28,12 +28,12 @@
   align-items: center;
   gap: $spacing-sm;
   width: 100%;
-  padding: 0.45rem 0.7rem;
+  padding: 0.35rem 0.6rem;
   background: none;
   border: 0;
   color: var(--gr-text-primary);
   font-family: $font-family-base;
-  font-size: $font-size-md;
+  font-size: $font-size-sm;
   text-align: left;
   cursor: pointer;
 
@@ -41,4 +41,4 @@
   &:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
-.gr-menu__icon { color: var(--gr-text-secondary); }
+.gr-menu__icon { color: var(--gr-text-secondary); font-size: 1.125rem; }
