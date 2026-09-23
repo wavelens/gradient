@@ -39,7 +39,7 @@
       </div>
     } @else {
       <div class="header-user">
-        <a routerLink="/account/login" class="user-link">Login</a>
+        <a routerLink="/account/login" [queryParams]="router.url.startsWith('/account/') ? null : { next: router.url }" class="user-link">Login</a>
         @if (!registrationDisabled) {
           <a routerLink="/account/register" class="user-link">Register</a>
         }

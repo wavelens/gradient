@@ -35,8 +35,9 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
         case 401: {
           localStorage.removeItem('jwt_token');
           sessionStorage.removeItem('jwt_token');
-          const next = router.url;
-          const carry = next && !next.startsWith('/account/');
+          const pending = router.currentNavigation()?.finalUrl;
+          const next = pending ? router.serializeUrl(pending) : router.url;
+          const carry = next && next !== '/' && !next.startsWith('/account/');
           router.navigate(['/account/login'], carry ? { queryParams: { next } } : {});
           break;
         }

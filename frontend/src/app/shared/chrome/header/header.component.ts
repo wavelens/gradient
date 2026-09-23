@@ -10,7 +10,7 @@ import {
   LogoComponent,
 } from '@shared/ui';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 
@@ -24,6 +24,7 @@ import { ConfigService } from '@core/services/config.service';
 })
 export class HeaderComponent {
   authService = inject(AuthService);
+  protected router = inject(Router);
   private config = inject(ConfigService);
 
   get registrationDisabled() { return this.config.registrationDisabled; }
