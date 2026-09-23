@@ -77,6 +77,9 @@ pub struct EntryPointSummary {
     pub outputs: std::collections::BTreeMap<String, String>,
     pub architecture: gradient_entity::server::Architecture,
     pub build_time_ms: Option<i64>,
+    /// When the latest attempt left the queue and started building, so a live
+    /// timer counts build time only.
+    pub build_started_at: Option<chrono::NaiveDateTime>,
     pub deps: BuildStatusCounts,
     /// Size of the entry point's build-time dependency closure within this
     /// evaluation: the sum of `deps` over every status, substituted and aborted
@@ -116,7 +119,13 @@ pub struct EvaluationSummary {
     pub builds: BuildStatusCounts,
     pub errors: i64,
     pub warnings: i64,
+    /// The evaluation's latest eval job on the Job Board; `None` until an eval
+    /// worker picked it up.
+    pub dispatched_job: Option<DispatchedJobId>,
     pub created_at: chrono::NaiveDateTime,
+    /// When it left the queue and started fetching; the duration counts from here.
+    pub started_at: Option<chrono::NaiveDateTime>,
+    pub finished_at: Option<chrono::NaiveDateTime>,
     pub updated_at: chrono::NaiveDateTime,
 }
 

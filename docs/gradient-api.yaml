@@ -8932,6 +8932,11 @@ components:
           type: integer
           nullable: true
           description: Wall time of the entry point's own build (latest attempt)
+        build_started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the latest attempt left the queue and started building; the start of a live build timer
         deps:
           $ref: '#/components/schemas/BuildStatusCounts'
         deps_total:
@@ -9014,9 +9019,24 @@ components:
         warnings:
           type: integer
           description: Count of evaluation messages with level Warning
+        dispatched_job:
+          type: string
+          format: uuid
+          nullable: true
+          description: The evaluation's latest eval job, its Job Board entry (`GET /board/jobs/{id}`); null until an eval worker picked it up
         created_at:
           type: string
           format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the evaluation left the queue and started fetching; its duration counts from here
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the evaluation reached Completed, Failed or Aborted
         updated_at:
           type: string
           format: date-time
@@ -9269,6 +9289,16 @@ components:
         created_at:
           type: string
           format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the evaluation left the queue and started fetching; its duration counts from here
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the evaluation reached Completed, Failed or Aborted
         updated_at:
           type: string
           format: date-time
@@ -9499,6 +9529,11 @@ components:
           type: integer
           nullable: true
           description: Measured build duration in milliseconds (null if not yet recorded)
+        build_started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the latest attempt left the queue and started building; the start of a live build timer
         dispatched_job:
           type: string
           format: uuid

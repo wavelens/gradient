@@ -103,6 +103,7 @@ pub(super) async fn evaluations_to_summaries(
 
     let status_counts = gradient_db::build_status_counts_by_evaluation(db, &eval_ids).await?;
     let message_counts = gradient_db::evaluation_message_counts(db, &eval_ids).await?;
+    let eval_jobs = gradient_db::latest_eval_jobs(db, &eval_ids).await?;
 
     let mut out = Vec::with_capacity(evaluations.len());
     for evaluation in evaluations {
@@ -164,7 +165,10 @@ pub(super) async fn evaluations_to_summaries(
             builds,
             errors,
             warnings,
+            dispatched_job: eval_jobs.get(&evaluation.id).copied(),
             created_at: evaluation.created_at,
+            started_at: evaluation.fetch_started_at,
+            finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
         });
     }
@@ -663,7 +667,7 @@ struct EntryPointRelatedData {
     derivations: HashMap<DerivationId, MDerivation>,
     has_products: HashMap<DerivationId, bool>,
     outputs: HashMap<DerivationId, BTreeMap<String, String>>,
-    build_time_ms: HashMap<DerivationId, Option<i64>>,
+    attempts: HashMap<DerivationId, MBuildAttempt>,
     deps: HashMap<EntryPointId, BuildStatusCounts>,
     deps_total: HashMap<EntryPointId, i64>,
 }
@@ -788,12 +792,12 @@ impl EntryPointRelatedData {
 
         // Latest attempt per anchor, batched into one DISTINCT ON query, then
         // re-keyed by derivation for the summary lookup.
-        let build_time_ms: HashMap<DerivationId, Option<i64>> = {
+        let attempts: HashMap<DerivationId, MBuildAttempt> = {
             let anchor_ids: Vec<DerivationBuildId> = anchors.values().map(|a| a.id).collect();
-            let by_anchor = gradient_db::latest_attempts(db, &anchor_ids).await?;
+            let mut by_anchor = gradient_db::latest_attempts(db, &anchor_ids).await?;
             anchors
                 .iter()
-                .filter_map(|(drv, a)| by_anchor.get(&a.id).map(|att| (*drv, att.duration_ms())))
+                .filter_map(|(drv, a)| by_anchor.remove(&a.id).map(|att| (*drv, att)))
                 .collect()
         };
 
@@ -818,7 +822,7 @@ impl EntryPointRelatedData {
             derivations,
             has_products,
             outputs,
-            build_time_ms,
+            attempts,
             deps,
             deps_total,
         })
@@ -839,6 +843,7 @@ impl EntryPointRelatedData {
                 .map(|a| a.status)
                 .unwrap_or(BuildStatus::Queued)
                 .for_api();
+            let attempt = self.attempts.get(&ep.derivation);
             summaries.push(EntryPointSummary {
                 id: ep.id,
                 build_id,
@@ -852,7 +857,8 @@ impl EntryPointRelatedData {
                     .cloned()
                     .unwrap_or_default(),
                 architecture: drv.architecture.clone(),
-                build_time_ms: self.build_time_ms.get(&ep.derivation).copied().flatten(),
+                build_time_ms: attempt.and_then(|a| a.duration_ms()),
+                build_started_at: attempt.and_then(|a| a.build_started_at),
                 deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
                 deps_total: self.deps_total.get(&ep.id).copied().unwrap_or(0),
                 created_at: ep.created_at,

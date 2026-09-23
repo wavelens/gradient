@@ -144,6 +144,8 @@ pub async fn get_evaluation(
             previous: evaluation.previous,
             next: evaluation.next,
             created_at: evaluation.created_at,
+            started_at: evaluation.fetch_started_at,
+            finished_at: evaluation.finished_at,
             updated_at: evaluation.updated_at,
             error_count,
             warning_count,
@@ -341,6 +343,7 @@ pub async fn get_evaluation_builds(
             has_artefacts: has_artefacts.contains(&j.derivation),
             updated_at: anchor.updated_at,
             build_time_ms,
+            build_started_at: attempt.and_then(|a| a.build_started_at),
             dispatched_job: attempt.map(|a| a.dispatched_job),
             depth: *layer,
         });

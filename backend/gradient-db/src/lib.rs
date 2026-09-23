@@ -80,7 +80,7 @@ pub use self::derivation::*;
 pub use self::dispatch_record::{
     BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, abandon_all_open_dispatches, abandon_open_dispatch,
     abandon_open_dispatches, abandon_open_dispatches_for_jobs, abandon_open_dispatches_for_worker,
-    build_job_key_sql, eval_job_key_sql, no_open_dispatch_predicate,
+    build_job_key_sql, eval_job_key_sql, latest_eval_jobs, no_open_dispatch_predicate,
 };
 pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::drv_output_spec::DrvOutputSpec;

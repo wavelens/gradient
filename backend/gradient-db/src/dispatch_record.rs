@@ -10,11 +10,15 @@
 //! the SQL and a copy that drifts cannot silently open the gate.
 
 use gradient_entity::dispatched_job::{
-    Column as CDispatchedJob, DispatchedJobOutcome, Entity as EDispatchedJob,
+    Column as CDispatchedJob, DispatchedJobKind, DispatchedJobOutcome, Entity as EDispatchedJob,
 };
-use gradient_entity::ids::DispatchedJobId;
+use gradient_entity::ids::{DispatchedJobId, EvaluationId};
 use sea_orm::sea_query::{Expr, Value};
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter, QueryOrder,
+    QuerySelect,
+};
+use std::collections::HashMap;
 
 pub const EVAL_KEY_PREFIX: &str = "eval:";
 pub const BUILD_KEY_PREFIX: &str = "build:";
@@ -36,6 +40,29 @@ pub fn no_open_dispatch_predicate(job_key_sql: &str) -> String {
         "NOT EXISTS (SELECT 1 FROM dispatched_job dj WHERE dj.job_id = {job_key_sql} \
          AND dj.finished_at IS NULL)"
     )
+}
+
+/// The newest eval job of each evaluation, its Job Board entry. Served by
+/// `idx-dispatched_job-eval-by-evaluation`.
+pub async fn latest_eval_jobs<C: ConnectionTrait>(
+    db: &C,
+    evaluations: &[EvaluationId],
+) -> Result<HashMap<EvaluationId, DispatchedJobId>, DbErr> {
+    let rows = crate::fetch_in_chunks(evaluations, |chunk| async move {
+        EDispatchedJob::find()
+            .select_only()
+            .column(CDispatchedJob::EvaluationId)
+            .column(CDispatchedJob::Id)
+            .filter(CDispatchedJob::Kind.eq(DispatchedJobKind::Eval))
+            .filter(CDispatchedJob::EvaluationId.is_in(chunk))
+            .order_by_asc(CDispatchedJob::DispatchedAt)
+            .into_tuple::<(EvaluationId, DispatchedJobId)>()
+            .all(db)
+            .await
+    })
+    .await?;
+
+    Ok(rows.into_iter().collect())
 }
 
 /// Close every open row of `worker_id` dispatched before `before` as
@@ -186,6 +213,35 @@ mod tests {
 
         let values = format!("{:?}", statement.values);
         assert!(values.contains(&abandoned_bound()), "{values}");
+    }
+
+    #[tokio::test]
+    async fn the_newest_eval_job_wins() {
+        let evaluation = EvaluationId::now_v7();
+        let (older, newer) = (DispatchedJobId::now_v7(), DispatchedJobId::now_v7());
+        let row = |job: DispatchedJobId| {
+            std::collections::BTreeMap::from([
+                (
+                    "evaluation_id",
+                    sea_orm::Value::from(evaluation.into_inner()),
+                ),
+                ("id", sea_orm::Value::from(job.into_inner())),
+            ])
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row(older), row(newer)]])
+            .into_connection();
+
+        let jobs = latest_eval_jobs(&db, &[evaluation]).await.unwrap();
+
+        assert_eq!(jobs.get(&evaluation), Some(&newer));
+        let log = db.into_transaction_log();
+        let sql = &log[0].statements()[0].sql;
+        assert!(sql.contains("\"kind\" = $1"), "{sql}");
+        assert!(
+            sql.ends_with("ORDER BY \"dispatched_job\".\"dispatched_at\" ASC"),
+            "{sql}"
+        );
     }
 
     #[test]

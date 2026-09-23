@@ -22,6 +22,8 @@ pub struct BuildItem {
     pub has_artefacts: bool,
     pub updated_at: chrono::NaiveDateTime,
     pub build_time_ms: Option<i64>,
+    /// When the latest attempt left the queue and started building.
+    pub build_started_at: Option<chrono::NaiveDateTime>,
     /// The dispatched job behind the build's latest attempt - its Job Board
     /// entry. `None` until the build has been dispatched at least once.
     pub dispatched_job: Option<DispatchedJobId>,
@@ -65,6 +67,9 @@ pub struct EvaluationResponse {
     pub previous: Option<EvaluationId>,
     pub next: Option<EvaluationId>,
     pub created_at: chrono::NaiveDateTime,
+    /// When it left the queue and started fetching; the duration counts from here.
+    pub started_at: Option<chrono::NaiveDateTime>,
+    pub finished_at: Option<chrono::NaiveDateTime>,
     pub updated_at: chrono::NaiveDateTime,
     pub error_count: u64,
     pub warning_count: u64,
