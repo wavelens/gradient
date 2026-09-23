@@ -103,6 +103,7 @@ let
     in pkgs.runCommand "store-spec-flake-${spec.name}" { } ''
       mkdir -p $out
       cp ${./derivations.nix} $out/derivations.nix
+      echo '{"nodes":{"root":{}},"root":"root","version":7}' > $out/flake.lock
       cat > $out/store-spec.nix <<'EOF'
       ${lib.generators.toPretty { } spec}
       EOF
