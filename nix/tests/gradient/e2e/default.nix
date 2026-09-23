@@ -643,9 +643,11 @@ in {
       echo "lockrace: the unlocked arm committed; the driver checks what it wrote"
       """
 
-      # Phase 10i's two-session handshake, on the phase 10f scaffolding. It reads
-      # CR_EVAL and CR_ANCHOR from the environment and prints one line per order:
-      # the evaluation's counters (folded plus unfolded) and their recount.
+      # Phase 10i's two-session interleaving, on the phase 10f scaffolding. It reads
+      # CR_EVAL, CR_ANCHOR and CR_HOLD from the environment, parks the evaluation in
+      # its build phase behind CR_HOLD, races a naming of CR_ANCHOR against its
+      # transition, then releases CR_HOLD. Nothing locks, so the naming counts the
+      # anchor it cannot see move: the server's exact reads have to repair that.
       COUNTER_RACE_SH = """
       set -u
       D=/tmp/counterrace
@@ -666,7 +668,7 @@ in {
 
       q() {
         printf '%s\\n' "$1" > $D/q.sql
-        su postgres -c "psql -d gradient -At -q -f $D/q.sql"
+        su postgres -c "psql -d gradient -At -q -v ON_ERROR_STOP=1 -f $D/q.sql"
       }
 
       wait_state() {
@@ -688,19 +690,15 @@ in {
       send_a() { printf '%s\\n' "$1" >&3; }
       send_b() { printf '%s\\n' "$1" >&4; }
 
-      counters() {
-        q "SELECT concat_ws(' ', e.named_anchors + coalesce(sum(d.named), 0), e.active_anchors + coalesce(sum(d.active), 0), e.failed_anchors + coalesce(sum(d.failed), 0), e.queued_anchors + coalesce(sum(d.queued), 0), e.building_anchors + coalesce(sum(d.building), 0)) FROM evaluation e LEFT JOIN evaluation_anchor_delta d ON d.evaluation = e.id WHERE e.id = '$CR_EVAL' GROUP BY e.id"
+      name() {
+        echo "INSERT INTO build_job (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) SELECT uuidv7(), '$CR_EVAL', db.derivation, db.id, 0, '{}'::jsonb, now() AT TIME ZONE 'UTC' FROM derivation_build db WHERE db.id = '$1';"
       }
-
-      recount() {
-        q "SELECT concat_ws(' ', count(bj.id), coalesce(sum(x.active), 0), coalesce(sum(x.failed), 0), coalesce(sum(x.queued), 0), coalesce(sum(x.building), 0)) FROM evaluation e LEFT JOIN build_job bj ON bj.evaluation = e.id LEFT JOIN derivation_build db ON db.id = bj.derivation_build LEFT JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) x ON db.id IS NOT NULL WHERE e.id = '$CR_EVAL' GROUP BY e.id"
-      }
-
-      NAME="INSERT INTO build_job (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) SELECT uuidv7(), '$CR_EVAL', db.derivation, db.id, 0, '{}'::jsonb, now() AT TIME ZONE 'UTC' FROM derivation_build db WHERE db.id = '$CR_ANCHOR';"
-      MOVE="UPDATE derivation_build SET status = 3 WHERE id = '$CR_ANCHOR';"
 
       rm -rf $D
       mkdir -p $D
+
+      q "BEGIN; SELECT pg_advisory_xact_lock(640); UPDATE evaluation SET status = 3, waiting_reason = NULL WHERE id = '$CR_EVAL'; $(name "$CR_HOLD") WITH gone AS (DELETE FROM evaluation_anchor_delta WHERE evaluation = '$CR_EVAL' RETURNING 1), c AS (SELECT count(bj.id)::int AS named, coalesce(sum(x.active), 0)::int AS active, coalesce(sum(x.failed), 0)::int AS failed, coalesce(sum(x.queued), 0)::int AS queued, coalesce(sum(x.building), 0)::int AS building FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build CROSS JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) x WHERE bj.evaluation = '$CR_EVAL') UPDATE evaluation e SET named_anchors = c.named, active_anchors = c.active, failed_anchors = c.failed, queued_anchors = c.queued, building_anchors = c.building FROM c WHERE e.id = '$CR_EVAL'; COMMIT;" >/dev/null
+
       mkfifo $D/a.in
       mkfifo $D/b.in
       su postgres -c "psql -d gradient -At" < $D/a.in > $D/a.out 2>&1 &
@@ -712,35 +710,16 @@ in {
       send_a "SET application_name = 'counterrace_a';"
       send_b "SET application_name = 'counterrace_b';"
 
-      # transition_first: the move holds the anchor, the naming waits on its
-      # FOR SHARE and must count the committed post-move row.
       send_a "BEGIN;"
-      send_a "$MOVE"
+      send_a "UPDATE derivation_build SET status = 3 WHERE id = '$CR_ANCHOR';"
       wait_state "application_name = 'counterrace_a' AND state = 'idle in transaction'" "the move never held its row"
       send_b "BEGIN;"
-      send_b "$NAME"
-      wait_state "application_name = 'counterrace_b' AND wait_event_type = 'Lock'" "the naming never blocked on the move"
-      send_a "COMMIT;"
-      wait_state "application_name = 'counterrace_a' AND state = 'idle'" "the move never committed"
-      send_b "COMMIT;"
-      wait_state "application_name = 'counterrace_b' AND state = 'idle'" "the naming never committed"
-      echo "transition_first $(counters) | $(recount)"
-
-      q "DELETE FROM build_job WHERE evaluation = '$CR_EVAL' AND derivation_build = '$CR_ANCHOR'; UPDATE derivation_build SET status = 0 WHERE id = '$CR_ANCHOR';" >/dev/null
-
-      # naming_first: the naming holds the anchor FOR SHARE, the move waits, and
-      # its trigger must see the committed build_job.
-      send_b "BEGIN;"
-      send_b "$NAME"
-      wait_state "application_name = 'counterrace_b' AND state = 'idle in transaction'" "the naming never held its lock"
-      send_a "BEGIN;"
-      send_a "$MOVE"
-      wait_state "application_name = 'counterrace_a' AND wait_event_type = 'Lock'" "the move never blocked on the naming"
+      send_b "$(name "$CR_ANCHOR")"
+      wait_state "application_name = 'counterrace_b' AND state = 'idle in transaction'" "the naming waited on the move: a trigger took a lock"
       send_b "COMMIT;"
       wait_state "application_name = 'counterrace_b' AND state = 'idle'" "the naming never committed"
       send_a "COMMIT;"
       wait_state "application_name = 'counterrace_a' AND state = 'idle'" "the move never committed"
-      echo "naming_first $(counters) | $(recount)"
 
       if grep -q ERROR $D/a.out $D/b.out; then
         echo "COUNTERRACE: a session reported an error"
@@ -748,6 +727,9 @@ in {
         cat $D/b.out
         exit 1
       fi
+
+      q "UPDATE derivation_build SET status = 3 WHERE id = '$CR_HOLD';" >/dev/null
+      echo "counterrace: raced and released"
       """
 
       start_all()
@@ -2419,49 +2401,64 @@ in {
           "a path its own name still reaches left the cache with hello"
       assert runtime_drift() == 0, "wholeness disagrees with its recompute after the GC and the eviction"
 
-      # ── Phase 10i: a naming racing a transition counts once ───────────────
-      # `evaluation_anchor_named` reads the anchor under FOR SHARE and
-      # `evaluation_anchor_moved` reads build_job from a fresh snapshot: whichever
-      # commits second must see the first, or the evaluation keeps counting a
-      # blocking anchor that finished and never settles. Both orders, one script,
-      # the phase 10f handshake. The evaluation is a finished one, so the server
-      # never acts on the anchor we name into it; the fixture leaves with the phase.
-      banner("Phase 10i: a naming racing a transition counts once (#640)")
-      CR_DRV = "[uuid6]"
-      cr_drv_hash = "counterrc".ljust(32, "0")
+      # ── Phase 10i: a naming racing a transition settles anyway ────────────
+      # The counter triggers take no lock: a naming held FOR SHARE until the
+      # ingest flush commits deadlocks that flush against a ripple. So a naming
+      # and a transition in flight together miss each other, and the evaluation
+      # counts an anchor that already finished. The exact reads are the arbiter:
+      # the tick's anchor read finds nothing blocking, recounts, and settles. This
+      # parks a finished evaluation back in `Building` behind a held anchor, runs
+      # that race on a second anchor, releases the first, and waits for the server
+      # to settle it with counters that match their recount.
+      banner("Phase 10i: a naming racing a transition still settles (#640)")
+      CR_DRV = "[uuid9]"
+      CR_HOLD_DRV = "[uuid10]"
       cr_eval = sql(
-          "SELECT id FROM evaluation WHERE status IN (5, 6, 7) ORDER BY created_at LIMIT 1;"
+          "SELECT e.id FROM evaluation e WHERE e.status = 5 AND NOT EXISTS ("
+          "SELECT 1 FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
+          "WHERE bj.evaluation = e.id AND db.status NOT IN (3, 7)) "
+          "ORDER BY e.created_at LIMIT 1;"
       )
-      assert cr_eval, "no finished evaluation to name the race fixture into"
-      sql(
-          f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
-          f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
-          f"('{CR_DRV}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{cr_drv_hash}', "
-          f"'counterrace', false, true, false, false);\n"
-          f"INSERT INTO derivation_build (id, derivation, status, substitutable, substituted, "
-          f"fetchable, unready_deps, attempt, demanded, created_at, updated_at) VALUES "
-          f"(uuidv7(), '{CR_DRV}', 0, false, false, false, 0, 0, true, "
-          f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
-      )
-      cr_anchor = sql(f"SELECT id FROM derivation_build WHERE derivation = '{CR_DRV}';")
+      assert cr_eval, "no cleanly completed evaluation to park for the race"
+
+      def counterrace_anchor(drv, name, status):
+          sql(
+              f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
+              f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
+              f"('{drv}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{name.ljust(32, '0')}', "
+              f"'{name}', false, true, false, false);\n"
+              f"INSERT INTO derivation_build (id, derivation, status, substitutable, substituted, "
+              f"fetchable, unready_deps, attempt, demanded, created_at, updated_at) VALUES "
+              f"(uuidv7(), '{drv}', {status}, false, false, false, 0, 0, true, "
+              f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
+          )
+          return sql(f"SELECT id FROM derivation_build WHERE derivation = '{drv}';")
+
+      cr_anchor = counterrace_anchor(CR_DRV, "counterrace", 0)
+      cr_hold = counterrace_anchor(CR_HOLD_DRV, "counterhold", 2)
 
       server.succeed(f"cat > /tmp/counterrace.sh <<'COUNTERRACE'\n{COUNTER_RACE_SH}\nCOUNTERRACE")
-      out = server.succeed(f"CR_EVAL={cr_eval} CR_ANCHOR={cr_anchor} sh /tmp/counterrace.sh")
-      print(out)
+      print(server.succeed(
+          f"CR_EVAL={cr_eval} CR_ANCHOR={cr_anchor} CR_HOLD={cr_hold} sh /tmp/counterrace.sh"
+      ))
 
-      sql(
-          f"DELETE FROM build_job WHERE derivation_build = '{cr_anchor}';\n"
-          f"DELETE FROM derivation_build WHERE id = '{cr_anchor}';\n"
-          f"DELETE FROM derivation WHERE id = '{CR_DRV}';"
+      poll(f"SELECT status FROM evaluation WHERE id = '{cr_eval}';", "5",
+           "an evaluation whose counters kept an anchor the race hid never settled", timeout=120)
+      agree = sql(
+          "SELECT (e.named_anchors + coalesce((SELECT sum(d.named) FROM evaluation_anchor_delta d WHERE d.evaluation = e.id), 0), "
+          "e.active_anchors + coalesce((SELECT sum(d.active) FROM evaluation_anchor_delta d WHERE d.evaluation = e.id), 0)) "
+          "= (SELECT (count(*), coalesce(sum(x.active), 0)) FROM build_job bj "
+          "JOIN derivation_build db ON db.id = bj.derivation_build "
+          "CROSS JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) x "
+          f"WHERE bj.evaluation = e.id) FROM evaluation e WHERE e.id = '{cr_eval}';"
       )
 
-      for order in ("transition_first", "naming_first"):
-          line = next(l for l in out.splitlines() if l.startswith(order + " "))
-          counted, recounted = (part.strip() for part in line[len(order):].split("|"))
-          assert counted == recounted, (
-              f"{order}: the evaluation counts {counted!r} but its build_job rows recount to "
-              f"{recounted!r}: a naming and a transition on one anchor did not see each other"
-          )
+      sql(
+          f"DELETE FROM build_job WHERE derivation_build IN ('{cr_anchor}', '{cr_hold}');\n"
+          f"DELETE FROM derivation_build WHERE id IN ('{cr_anchor}', '{cr_hold}');\n"
+          f"DELETE FROM derivation WHERE id IN ('{CR_DRV}', '{CR_HOLD_DRV}');"
+      )
+      assert agree == "t", "the evaluation settled but its counters still disagree with their recount"
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")

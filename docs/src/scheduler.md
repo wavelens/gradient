@@ -183,11 +183,14 @@ anchors its `build_job` rows name:
 They move by triggers, so every writer of `derivation_build.status` or
 `demanded` and every `build_job` insert or delete moves them, raw SQL or ORM:
 
-- The triggers append signed rows to `evaluation_anchor_delta` and never lock the
-  `evaluation` row: no hot row, and no lock taken behind the anchor locks.
-- A `build_job` insert or delete takes its anchors `FOR SHARE` in `derivation`
-  order before it reads them, so a naming and a transition on one anchor always
-  see each other, in either commit order (e2e phase 10i).
+- The triggers append signed rows to `evaluation_anchor_delta`, only for live
+  evaluations, and take no lock at all: no hot `evaluation` row, and no wait edge
+  behind the ingest flush's own `lock_anchors`.
+- Without a lock, a naming and a transition in flight together can miss each
+  other. The counters therefore only ever answer "not yet": zero is confirmed by
+  the exact `EXISTS` reads, a zero they contradict is recounted, and the tick's
+  anchor read recounts an evaluation whose counters say something blocks while
+  nothing does (e2e phase 10i).
 - The membership is the SQL function `evaluation_anchor_counts`; a unit test
   holds its body to `graph_sql`, so a predicate change needs a migration.
 - Every dispatch tick folds the ledger into the columns in one
@@ -195,7 +198,7 @@ They move by triggers, so every writer of `derivation_build.status` or
   finds the lock taken skips, since the holder folds the same rows.
 - `eval_counters` reads the columns plus the evaluation's unfolded rows, so
   `check_evaluation_done` is one read per terminal transition however large the
-  evaluation is.
+  evaluation is; the exact reads run once, when the counters reach zero.
 - The consistency sweep recounts every in-flight evaluation, clearing its ledger
   in the snapshot that counted, and reports `eval_counter_drift`.
 
