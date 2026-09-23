@@ -40,9 +40,9 @@
       <gr-empty-state
         icon="corporate_fare"
         title="No projects yet"
-        [message]="authService.isAuthenticated() ? 'Create your first project to get started with Gradient' : 'No projects have been created yet'"
-        [actionLabel]="authService.isAuthenticated() ? 'Create Project' : ''"
-        (actionClick)="authService.isAuthenticated() && openCreateDialog()"
+        [message]="canCreateProject ? 'Create your first project to get started with Gradient' : 'No projects have been created yet'"
+        [actionLabel]="canCreateProject ? 'Create Project' : ''"
+        (actionClick)="canCreateProject && openCreateDialog()"
       />
     }
   }

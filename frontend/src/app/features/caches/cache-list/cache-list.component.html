@@ -65,9 +65,9 @@
       <gr-empty-state
         icon="storage"
         title="No caches yet"
-        [message]="authService.isAuthenticated() ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
-        [actionLabel]="authService.isAuthenticated() ? 'Create Cache' : ''"
-        (actionClick)="authService.isAuthenticated() && openCreateDialog()"
+        [message]="canCreateCache ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
+        [actionLabel]="canCreateCache ? 'Create Cache' : ''"
+        (actionClick)="canCreateCache && openCreateDialog()"
       />
     }
   }
