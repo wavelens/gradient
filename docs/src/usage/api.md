@@ -345,6 +345,7 @@ Private caches require HTTP Basic Auth (any username, JWT or API key as password
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/cache/{cache}` | `302` redirect to `/cache/{cache}/nix-cache-info` |
 | `GET` | `/cache/{cache}/nix-cache-info` | Cache metadata (add `?json` for JSON) |
 | `GET` | `/cache/{cache}/gradient-cache-info` | Gradient cache metadata (add `?json` for JSON) |
 | `GET` | `/cache/{cache}/{hash}.narinfo` | Path info (add `?json` for JSON). `References`/`Deriver` are store-path basenames; the empty `References` line is omitted. Responds with `X-Cache: HIT` when served from our store, `MISS` when proxied from an upstream. |

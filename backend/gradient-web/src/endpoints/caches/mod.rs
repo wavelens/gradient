@@ -31,7 +31,7 @@ pub use self::management::{
     put,
 };
 pub use self::nar::{nar, upstream_nar};
-pub use self::narinfo::{gradient_cache_info, nix_cache_info, path};
+pub use self::narinfo::{cache_root, gradient_cache_info, nix_cache_info, path};
 pub use self::narlist::ls;
 pub use self::nars::{
     available as nars_available, delete as nars_delete, list as nars_list, show as nars_show,

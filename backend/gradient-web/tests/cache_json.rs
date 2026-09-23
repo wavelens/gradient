@@ -60,6 +60,31 @@ fn nix_cache_info_no_json_returns_text() {
             "text/x-nix-cache-info"
         );
         assert!(resp.text().contains("StoreDir: /nix/store"));
+        assert!(resp.text().contains("WantMassQuery: 1"));
+    });
+}
+
+#[test]
+fn cache_root_redirects_to_nix_cache_info() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_state().await;
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+
+        for path in [
+            format!("/cache/{FIXTURE_CACHE_NAME}"),
+            format!("/cache/{FIXTURE_CACHE_NAME}/"),
+        ] {
+            let resp = server.get(&path).await;
+            resp.assert_status(StatusCode::FOUND);
+            assert_eq!(
+                resp.header("location").to_str().unwrap(),
+                format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info")
+            );
+        }
     });
 }
 

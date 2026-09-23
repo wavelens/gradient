@@ -750,6 +750,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     // cache-scoped proto WS upgrade shares this same tier.
     let nar_cache_limit = || rl_per_ms(20, 3000);
     let cache_routes = Router::new()
+        .route("/cache/{cache}", get(caches::cache_root))
+        .route("/cache/{cache}/", get(caches::cache_root))
         .route(
             "/cache/{cache}/gradient-cache-info",
             get(caches::gradient_cache_info),

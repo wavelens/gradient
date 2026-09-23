@@ -8,7 +8,7 @@ use super::helpers::{CacheContext, JsonFlag, cache_client_ip, get_nar_by_hash};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream::UpstreamProbe;
@@ -42,6 +42,14 @@ fn with_narinfo_headers(mut response: Response, cache_status: &'static str) -> R
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
+
+pub async fn cache_root(Path(cache): Path<String>) -> Response {
+    (
+        StatusCode::FOUND,
+        [(header::LOCATION, format!("/cache/{cache}/nix-cache-info"))],
+    )
+        .into_response()
+}
 
 pub async fn nix_cache_info(
     state: State<Arc<ServerState>>,
