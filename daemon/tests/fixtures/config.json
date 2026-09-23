@@ -1,0 +1,24 @@
+{
+  "worker": "worker1",
+  "timing": { "seed": 1, "scale": 1.0, "buildMs": { "dist": "fixed", "ms": 0 }, "chunkMs": { "dist": "fixed", "ms": 0 }, "chunkBytes": 65536 },
+  "derivations": {
+    "t/lib": {
+      "name": "lib", "drvPath": "/nix/store/11111111111111111111111111111111-lib.drv",
+      "fixedOutput": false, "fodContent": null,
+      "outputs": { "out": { "path": "/nix/store/22222222222222222222222222222222-lib", "size": 64, "references": [], "products": [] } },
+      "build": { "durationMs": 5, "outcome": "success", "failStatus": "PermanentFailure", "log": ["building lib"] },
+      "present": { "workers": [], "cache": false },
+      "timing": { "seed": 1, "scale": 1.0, "buildMs": { "dist": "fixed", "ms": 0 }, "chunkMs": { "dist": "fixed", "ms": 0 }, "chunkBytes": 65536 }
+    },
+    "t/app": {
+      "name": "app", "drvPath": "/nix/store/33333333333333333333333333333333-app.drv",
+      "fixedOutput": false, "fodContent": null,
+      "outputs": { "out": { "path": "/nix/store/44444444444444444444444444444444-app", "size": 128,
+        "references": ["/nix/store/22222222222222222222222222222222-lib"],
+        "products": [{ "type": "file", "subtype": "binary", "path": "bin/app" }] } },
+      "build": { "durationMs": null, "outcome": "success", "failStatus": "PermanentFailure", "log": [] },
+      "present": { "workers": [], "cache": false },
+      "timing": { "seed": 1, "scale": 1.0, "buildMs": { "dist": "lognormal", "median": 40, "p99": 800 }, "chunkMs": { "dist": "uniform", "min": 0, "max": 3 }, "chunkBytes": 65536 }
+    }
+  }
+}
