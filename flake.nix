@@ -36,6 +36,7 @@
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
       daemon-clippy = self.packages.${system}.gradient-daemon-mock.clippy;
       daemon-unittest = self.packages.${system}.gradient-daemon-mock.tests;
+      store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
     };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
