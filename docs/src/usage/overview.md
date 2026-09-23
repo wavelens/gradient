@@ -6,6 +6,7 @@
 2. **Create a project** - projects own tasks, caches, and workers.
 3. **Create a task** - point it at a Git repository and set an evaluation wildcard.
 4. **Configure a worker** - at least one `gradient-worker` must be connected to run jobs. Deploy one co-located on the server or on a dedicated build machine (see [Workers](#workers) below).
+5. **Star what you watch** - the star on a project or task page ranks it higher on the [Dashboard](dashboard.md#stars).
 
 ## Evaluation Wildcard
 

@@ -9,7 +9,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 Gradient serves build outputs from per-project binary caches. Each cache
 exposes a substituter URL and one trusted public key that clients add to their
 Nix configuration. The cache detail page renders the exact snippet for a given
-cache.
+cache. Its star lists the cache first on the [Dashboard](dashboard.md#stars).
 
 That one key is enough even for paths the cache did not build itself: a narinfo
 proxied from an upstream is verified against that upstream's key and then
