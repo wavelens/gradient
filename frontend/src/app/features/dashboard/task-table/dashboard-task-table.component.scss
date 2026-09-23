@@ -1,0 +1,198 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: 6px 14px;
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: 999px;
+  background: none;
+  color: var(--gr-text-secondary);
+  font: inherit;
+  font-size: $font-size-sm;
+  cursor: pointer;
+  transition: border-color $transition-fast;
+
+  b {
+    color: var(--gr-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &:hover {
+    border-color: var(--gr-border);
+  }
+
+  &--on,
+  &--on:hover {
+    border-color: var(--gr-accent);
+  }
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+
+  th {
+    padding: 0 $spacing-sm $spacing-sm 0;
+    border-bottom: 1px solid var(--gr-border-subtle);
+    color: var(--gr-text-muted);
+    font-size: $font-size-xs;
+    font-weight: 500;
+    text-align: left;
+  }
+
+  td {
+    padding: $spacing-sm $spacing-sm $spacing-sm 0;
+    border-bottom: 1px solid var(--gr-border-subtle);
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  abbr {
+    text-decoration: none;
+  }
+}
+
+.history-col {
+  width: 40%;
+  min-width: 90px;
+}
+
+.star-col {
+  width: 1%;
+}
+
+.num {
+  font-size: $font-size-sm;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+
+  .ptable & {
+    text-align: right;
+  }
+}
+
+.name {
+  color: var(--gr-text-primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+
+.project,
+.sub {
+  color: var(--gr-text-muted);
+}
+
+.sub {
+  margin-top: 2px;
+  font-size: $font-size-xs;
+
+  code {
+    font-family: $font-family-mono;
+  }
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--gr-text-muted);
+
+  &--Completed {
+    background: var(--gr-graph-success);
+  }
+
+  &--Failed,
+  &--Aborted {
+    background: var(--gr-graph-danger);
+  }
+
+  &--Queued,
+  &--Fetching,
+  &--EvaluatingFlake,
+  &--EvaluatingDerivation,
+  &--Building,
+  &--Waiting {
+    background: var(--gr-graph-running);
+  }
+}
+
+.delta {
+  font-weight: 600;
+
+  &.up {
+    color: var(--gr-status-danger-text);
+  }
+
+  &.down {
+    color: var(--gr-status-success-text);
+  }
+}
+
+.show-all,
+.pager button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gr-accent);
+  font: inherit;
+  cursor: pointer;
+
+  &:disabled {
+    color: var(--gr-text-muted);
+    cursor: default;
+  }
+}
+
+.show-all {
+  margin-top: $spacing-sm;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+  color: var(--gr-text-muted);
+  font-size: $font-size-sm;
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: $space-pair;
+  margin: 0;
+  color: var(--gr-text-muted);
+  font-size: $font-size-sm;
+}
+
+@media (max-width: $breakpoint-md) {
+  .ptable th:nth-child(n + 4),
+  .ptable td:nth-child(n + 4) {
+    display: none;
+  }
+}

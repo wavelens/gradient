@@ -1,0 +1,79 @@
+@if (!hidden()) {
+  <div class="chips" role="group" aria-label="Filter tasks">
+    @for (f of filters; track f.key) {
+      <button
+        type="button"
+        class="chip"
+        [class.chip--on]="filter() === f.key"
+        [attr.aria-pressed]="filter() === f.key"
+        (click)="select(f.key)"
+      >
+        {{ f.label }} <b>{{ data()?.counts?.[f.key] ?? 0 }}</b>
+      </button>
+    }
+  </div>
+
+  @if (failed()) {
+    <p class="error">
+      Tasks unavailable.
+      <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
+    </p>
+  } @else if (data(); as d) {
+    <div class="scroll">
+      <table class="ptable">
+        <thead>
+          <tr>
+            <th><span class="sr-only">Star</span></th>
+            <th>Task</th>
+            <th class="history-col">Last evaluations</th>
+            <th class="num">Entry points</th>
+            <th class="num"><abbr title="Failing entry points against the previous evaluation">Δ</abbr></th>
+            <th class="num">Speed</th>
+            <th class="num">Reliability</th>
+            <th class="num">Evals / week</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (t of d.tasks; track t.project + '/' + t.task) {
+            <tr>
+              <td class="star-col">
+                <gr-star-button [target]="{ kind: 'task', project: t.project, task: t.task }" [(starred)]="t.starred" />
+              </td>
+              <td>
+                <a class="name" [routerLink]="['/project', t.project, 'task', t.task]">
+                  <span [class]="'dot dot--' + (t.latest?.status ?? 'none')"></span>
+                  <span class="project">{{ t.project }} /</span> {{ t.task }}
+                </a>
+                <div class="sub">
+                  @if (t.latest; as l) {
+                    <code>{{ l.commit.slice(0, 7) }}</code> · {{ age(l.created_at) }}
+                  } @else {
+                    No evaluations yet
+                  }
+                </div>
+              </td>
+              <td><app-evaluation-history [bars]="t.history" [project]="t.project" [task]="t.task" /></td>
+              <td class="num">{{ t.entry_points ? t.entry_points.ok + '/' + t.entry_points.total : '-' }}</td>
+              <td class="num">
+                <span class="delta" [class.up]="(t.delta ?? 0) > 0" [class.down]="(t.delta ?? 0) < 0">{{ delta(t.delta) }}</span>
+              </td>
+              <td class="num">{{ duration(t.speed_ms) }}</td>
+              <td class="num">{{ t.reliability === null ? '-' : (t.reliability * 100 | number: '1.0-0') + '%' }}</td>
+              <td class="num">{{ t.evaluations_per_week | number: '1.0-1' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    @if (!expanded() && d.total > d.tasks.length) {
+      <button type="button" class="show-all" (click)="showAll()">Show all {{ d.total }}</button>
+    } @else if (expanded() && pages() > 1) {
+      <nav class="pager" aria-label="Task pages">
+        <button type="button" [disabled]="page() === 1" (click)="go(page() - 1)">Previous</button>
+        <span>{{ page() }} / {{ pages() }}</span>
+        <button type="button" [disabled]="page() === pages()" (click)="go(page() + 1)">Next</button>
+      </nav>
+    }
+  }
+}
