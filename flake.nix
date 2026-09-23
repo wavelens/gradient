@@ -29,6 +29,7 @@
     gradient-report = pkgs.callPackage ./nix/tools/report-inspector { };
   in
   {
+    apps = import ./nix/vms { inherit inputs system pkgs; };
     checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
       clippy = self.packages.${system}.gradient.clippy;
       unittest = self.packages.${system}.gradient.tests;
@@ -38,9 +39,10 @@
       daemon-unittest = self.packages.${system}.gradient-daemon-mock.tests;
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
     };
-    apps = import ./nix/vms { inherit inputs system pkgs; };
+
     packages = rec {
       inherit (pkgs) gradient-nix;
+      inherit gradient-report;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
       gradient-daemon-mock = pkgs.callPackage ./nix/packages/gradient-daemon.nix { inherit craneLib; };
@@ -49,12 +51,11 @@
         inherit craneLib;
         cargoFeatures = [ "nix" ];
       };
+
       gradient-cli-full = pkgs.callPackage ./nix/packages/gradient-cli.nix {
         inherit craneLib;
         cargoFeatures = [ "nix" "eval" ];
       };
-
-      inherit gradient-report;
 
       default = gradient;
     };
