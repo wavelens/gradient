@@ -14,7 +14,7 @@ import { of } from 'rxjs';
 import { Evaluation } from '@core/models';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
-  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, dispatched_job: null, depth };
+  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth };
 }
 
 function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: EvaluationLogComponent } {

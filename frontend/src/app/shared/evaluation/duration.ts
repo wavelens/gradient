@@ -33,11 +33,32 @@ export function parseUtcTimestamp(ts: string): number {
   return new Date(ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z').getTime();
 }
 
-export function evaluationDuration(
-  evaluation: { status: EvaluationStatus; created_at: string; updated_at: string },
-  nowMs: number,
-): number {
-  const start = parseUtcTimestamp(evaluation.created_at);
-  const end = isRunningEvaluationStatus(evaluation.status) ? nowMs : parseUtcTimestamp(evaluation.updated_at);
+interface EvaluationTimes {
+  status: EvaluationStatus;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+}
+
+/// Queue time until the evaluation starts fetching, then time since it did.
+export function evaluationDuration(evaluation: EvaluationTimes, nowMs: number): number {
+  const queued = evaluation.status === 'Queued';
+  const start = parseUtcTimestamp((!queued && evaluation.started_at) || evaluation.created_at);
+  const end = isRunningEvaluationStatus(evaluation.status)
+    ? nowMs
+    : parseUtcTimestamp(evaluation.finished_at ?? evaluation.updated_at);
   return end - start;
+}
+
+interface BuildTimes {
+  status: string;
+  build_time_ms: number | null;
+  build_started_at: string | null;
+}
+
+export function buildDuration(build: BuildTimes, nowMs: number): number | null {
+  if (build.build_time_ms != null) return build.build_time_ms;
+  if (build.status !== 'Building' || !build.build_started_at) return null;
+  return Math.max(0, nowMs - parseUtcTimestamp(build.build_started_at));
 }

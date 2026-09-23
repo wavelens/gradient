@@ -141,7 +141,7 @@
                   <app-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />
                   <span class="pkg-deps">{{ doneCount(barCounts(ep)) }} / {{ totalCount(barCounts(ep)) }} deps</span>
                   <span class="pkg-time">
-                    @if (ep.build_time_ms != null) { {{ formatDurationMs(ep.build_time_ms) }} }
+                    {{ pkgDuration(ep) }}
                     @if (ep.has_artefacts) { <gr-icon name="inventory_2" size="sm" /> }
                   </span>
                   <button type="button" class="kebab"

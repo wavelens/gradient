@@ -53,7 +53,7 @@ import {
   MenuItem,
   MessageBannerComponent,
 } from '@shared/ui';
-import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
+import { buildDuration, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
@@ -610,6 +610,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           has_artefacts: false,
           updated_at: b.updated_at,
           build_time_ms: null,
+          build_started_at: null,
           dispatched_job: b.dispatched_job,
           // `?build=` also scopes the list to this build's closure, so it is the
           // root of everything the API returns.
@@ -1296,11 +1297,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private updateDuration(evaluation: Evaluation): void {
-    const start = parseUtcTimestamp(evaluation.created_at);
-    const end = this.isRunningStatus(evaluation.status)
-      ? Date.now()
-      : parseUtcTimestamp(evaluation.updated_at);
-    this.duration.set(formatEvaluationDuration(end - start));
+    this.duration.set(formatEvaluationDuration(evaluationDuration(evaluation, Date.now())));
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {
@@ -1371,17 +1368,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   getBuildElapsed(build: BuildItem): string {
-    if (build.status === 'Completed') {
-      if (build.build_time_ms !== null) return this.formatMs(build.build_time_ms);
-      return '';
-    }
-    if (build.status === 'Building') {
-      this.tick(); // reactive dependency - re-evaluated every second
-      const ts = build.updated_at;
-      const start = new Date(ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z');
-      return this.formatMs(Math.max(0, Date.now() - start.getTime()));
-    }
-    return '';
+    if (build.status !== 'Completed' && build.status !== 'Building') return '';
+    this.tick(); // reactive dependency - re-evaluated every second
+    const ms = buildDuration(build, Date.now());
+    return ms == null ? '' : this.formatMs(ms);
   }
 
   private formatMs(ms: number): string {

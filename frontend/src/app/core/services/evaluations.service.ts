@@ -58,6 +58,7 @@ export interface BuildItem {
   has_artefacts: boolean;
   updated_at: string;
   build_time_ms: number | null;
+  build_started_at: string | null;
   dispatched_job: string | null;  // Job Board entry of the latest attempt, null until dispatched
   depth: number;         // dependency layer, 0 = nothing in the list depends on it
 }

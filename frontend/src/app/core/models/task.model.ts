@@ -57,7 +57,10 @@ export interface EvaluationSummary {
   builds: BuildStatusCounts;
   errors: number;
   warnings: number;
+  dispatched_job: string | null;
   created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
   updated_at: string;
 }
 
@@ -72,6 +75,7 @@ export interface EntryPointSummary {
   outputs: Record<string, string>;
   architecture: Architecture;
   build_time_ms: number | null;
+  build_started_at: string | null;
   deps: BuildStatusCounts;
   deps_total: number;
   created_at: string;
@@ -121,6 +125,8 @@ export interface Evaluation {
   previous?: string;
   next?: string;
   created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
   updated_at: string;
   error_count: number;
   warning_count: number;

@@ -52,7 +52,10 @@ function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building
     builds: zeroCounts(),
     errors: 0,
     warnings: 0,
+    dispatched_job: null,
     created_at: '2026-01-01T00:00:00',
+    started_at: null,
+    finished_at: null,
     updated_at: '2026-01-01T00:01:00',
   };
 }

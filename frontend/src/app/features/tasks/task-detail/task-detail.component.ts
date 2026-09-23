@@ -18,7 +18,7 @@ import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponen
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
-import { commitLabel, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
+import { buildDuration, commitLabel, evaluationDuration, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
@@ -338,14 +338,12 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   isRunning(status: EvaluationStatus): boolean { return isRunningEvaluationStatus(status); }
 
   evalDuration(evaluation: EvaluationSummary): string {
-    const start = parseUtcTimestamp(evaluation.created_at);
-    const end = this.isRunning(evaluation.status) ? this.tick() : parseUtcTimestamp(evaluation.updated_at);
-    return formatEvaluationDuration(end - start);
+    return formatEvaluationDuration(evaluationDuration(evaluation, this.tick()));
   }
 
-  formatDurationMs(ms: number | null): string {
-    if (ms == null) return '';
-    return formatEvaluationDuration(ms);
+  pkgDuration(ep: EntryPointSummary): string {
+    const ms = buildDuration({ status: ep.build_status, ...ep }, this.tick());
+    return ms == null ? '' : formatEvaluationDuration(ms);
   }
 
   readonly commitLabel = commitLabel;
