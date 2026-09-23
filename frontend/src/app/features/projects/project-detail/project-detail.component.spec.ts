@@ -36,6 +36,7 @@ describe('ProjectDetailComponent header', () => {
     const { root, starred } = render(true);
     expect(starred).toHaveBeenCalledWith({ kind: 'project', project: 'acme' });
     expect(root.querySelector('gr-star-button button')!.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('gr-star-button button')!.textContent!.trim()).toBe('Starred');
   });
 
   it('shows no star to a guest', () => {

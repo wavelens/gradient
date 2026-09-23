@@ -89,9 +89,11 @@
 }
 
 <h2>Star button</h2>
-<p>Optimistic toggle; a failed request rolls the star back.</p>
+<p>Optimistic toggle; a failed request rolls the star back. Page headers use the labeled variant.</p>
 <gr-star-button [target]="{ kind: 'project', project: 'gradient' }" />
 <gr-star-button [target]="{ kind: 'cache', cache: 'main' }" [starred]="true" />
+<gr-star-button labeled [target]="{ kind: 'project', project: 'gradient' }" />
+<gr-star-button labeled [target]="{ kind: 'cache', cache: 'main' }" [starred]="true" />
 
 <h2>Status icon</h2>
 <p>One SVG per icon that morphs between phases. The first render is static; reduced motion switches instantly.</p>

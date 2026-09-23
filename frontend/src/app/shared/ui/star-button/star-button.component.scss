@@ -13,11 +13,29 @@
   padding: 0;
   background: none;
   border: 0;
-  color: var(--gr-border);
+  color: var(--gr-text-muted);
   cursor: pointer;
 
-  &:hover,
-  &--on {
+  &:hover {
     color: var(--gr-amber-550);
+  }
+
+  .star {
+    width: 1rem;
+    height: 1rem;
+  }
+}
+
+.star {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+
+  &--on {
+    fill: var(--gr-amber-550);
+    stroke: var(--gr-amber-550);
   }
 }

@@ -19,7 +19,7 @@
     </div>
     <div slot="actions">
       @if (authService.isAuthenticated()) {
-        <gr-star-button [target]="starTarget" [(starred)]="starred" />
+        <gr-star-button labeled [target]="starTarget" [(starred)]="starred" />
       }
       <a grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></a>
       @if (c.can_edit) {

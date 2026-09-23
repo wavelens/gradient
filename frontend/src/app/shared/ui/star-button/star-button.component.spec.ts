@@ -27,6 +27,7 @@ describe('StarButtonComponent', () => {
     expect(set).toHaveBeenCalledWith({ kind: 'task', project: 'infra', task: 'hosts' }, true);
     expect(fixture.componentInstance.starred()).toBe(true);
     expect((fixture.nativeElement as HTMLElement).querySelector('button')!.getAttribute('aria-pressed')).toBe('true');
+    expect((fixture.nativeElement as HTMLElement).querySelector('svg')!.classList).toContain('star--on');
   });
 
   it('rolls back when the request fails', () => {
@@ -42,6 +43,28 @@ describe('StarButtonComponent', () => {
 
     (fixture.nativeElement as HTMLElement).querySelector('button')!.click();
 
+    expect(set).toHaveBeenCalledWith({ kind: 'cache', cache: 'main' }, false);
     expect(fixture.componentInstance.starred()).toBe(true);
+  });
+
+  it('labels the button Star or Starred and fills the star when starred', () => {
+    TestBed.configureTestingModule({
+      imports: [StarButtonComponent],
+      providers: [{ provide: StarsService, useValue: { set: () => of(true) } }],
+    });
+    const fixture = TestBed.createComponent(StarButtonComponent);
+    fixture.componentRef.setInput('target', { kind: 'project', project: 'acme' });
+    fixture.componentRef.setInput('labeled', true);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+
+    expect(root.querySelector('button')!.textContent!.trim()).toBe('Star');
+    expect(root.querySelector('svg')!.classList).not.toContain('star--on');
+
+    root.querySelector('button')!.click();
+    fixture.detectChanges();
+
+    expect(root.querySelector('button')!.textContent!.trim()).toBe('Starred');
+    expect(root.querySelector('svg')!.classList).toContain('star--on');
   });
 });
