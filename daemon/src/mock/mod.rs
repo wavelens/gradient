@@ -8,4 +8,5 @@ pub mod artefact;
 pub mod ca_path;
 pub mod nar;
 pub mod spec;
+pub mod store;
 pub mod timing;
