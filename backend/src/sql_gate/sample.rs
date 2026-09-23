@@ -62,6 +62,14 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
         Param::TaskId => "SELECT id AS v FROM task LIMIT 1",
         Param::TaskActionId => "SELECT id AS v FROM task_action LIMIT 1",
         Param::IntegrationId => "SELECT id AS v FROM integration LIMIT 1",
+        Param::CommitPrefixLow => {
+            "SELECT rpad(left(encode(c.hash, 'hex'), 7), 40, '0') AS v FROM commit c \
+             WHERE EXISTS (SELECT 1 FROM evaluation e WHERE e.commit = c.id) ORDER BY c.id LIMIT 1"
+        }
+        Param::CommitPrefixHigh => {
+            "SELECT rpad(left(encode(c.hash, 'hex'), 7), 40, 'f') AS v FROM commit c \
+             WHERE EXISTS (SELECT 1 FROM evaluation e WHERE e.commit = c.id) ORDER BY c.id LIMIT 1"
+        }
         Param::NewUuid
         | Param::NewUuids(_)
         | Param::Text(_)
@@ -99,7 +107,10 @@ fn shape(param: &Param) -> Option<Shape> {
         | Param::AnchorIds(n)
         | Param::EvaluationIds(n)
         | Param::EntryPointIds(n) => Shape::Uuids(*n),
-        Param::DerivationHash | Param::CachedPathHash => Shape::Text,
+        Param::DerivationHash
+        | Param::CachedPathHash
+        | Param::CommitPrefixLow
+        | Param::CommitPrefixHigh => Shape::Text,
         Param::DerivationHashes(n) | Param::CachedPathHashes(n) => Shape::Texts(*n),
         Param::NewUuid
         | Param::NewUuids(_)
@@ -218,6 +229,8 @@ mod tests {
             Param::TaskId,
             Param::TaskActionId,
             Param::IntegrationId,
+            Param::CommitPrefixLow,
+            Param::CommitPrefixHigh,
         ] {
             assert!(draw_sql(&param).is_some(), "{param:?} has no sampler");
         }

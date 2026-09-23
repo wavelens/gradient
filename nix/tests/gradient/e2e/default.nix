@@ -2943,6 +2943,12 @@ in {
       # each statement in a transaction it rolls back, which is what makes a
       # registered INSERT, UPDATE, DELETE or FOR UPDATE safe to ANALYZE.
       banner("Phase 13: the SQL plan gate")
+      # A statement over an empty table is unmeasured, and nothing earlier stars.
+      for star in ("projects/project", "tasks/project/task", "caches/main"):
+          server.succeed(
+              f"{CURL} -sf -X PUT -H 'Authorization: Bearer {token}' "
+              f"{API}/user/stars/{star}"
+          )
       builder.succeed("systemctl stop gradient-worker.service")
       builder2.succeed("systemctl stop gradient-worker.service")
       server.succeed("systemctl stop gradient-server.service")

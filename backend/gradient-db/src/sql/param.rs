@@ -36,6 +36,10 @@ pub enum Param {
     TaskId,
     TaskActionId,
     IntegrationId,
+    /// The 40-hex bounds of a 7-char prefix of a commit an evaluation ran,
+    /// drawn because a commit hash differs on every run of the fixture.
+    CommitPrefixLow,
+    CommitPrefixHigh,
     /// An id the STATEMENT mints rather than one the data already has: what an
     /// INSERT writes into its own primary key, which a drawn id would collide
     /// with.

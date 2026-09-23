@@ -682,19 +682,14 @@ crate::sql! {
         JOIN cached_path_signature s ON s.cached_path = cp.id JOIN cache c ON c.id = s.cache \
         WHERE cp.hash = $3 AND ", cache_readable!(), " ORDER BY c.name LIMIT 10"),
         params = [UserId, Bool(false), CachedPathHash],
-        tier = Hot;
+        tier = Bulk;
 
     SEARCH_COMMITS = concat!("SELECT p.name AS project, t.name AS task, e.id AS evaluation, \
         encode(c.hash, 'hex') AS hash FROM commit c JOIN evaluation e ON e.commit = c.id \
         JOIN task t ON t.id = e.task JOIN project p ON p.id = t.project \
         WHERE c.hash BETWEEN decode($3, 'hex') AND decode($4, 'hex') AND ", project_readable!(), " \
         ORDER BY e.created_at DESC LIMIT 5"),
-        params = [
-            UserId,
-            Bool(false),
-            Text("a1b2c3d000000000000000000000000000000000"),
-            Text("a1b2c3dfffffffffffffffffffffffffffffffff"),
-        ],
+        params = [UserId, Bool(false), CommitPrefixLow, CommitPrefixHigh],
         tier = Hot;
 
     SEARCH_NAMES = concat!("SELECT kind, project, name, display_name, starred FROM ( \
@@ -711,7 +706,7 @@ crate::sql! {
                 FROM cache c WHERE (c.name ILIKE $3 OR c.display_name ILIKE $3) AND ", cache_readable!(), " \
         ) hits) ranked WHERE rank <= $4 ORDER BY starred DESC, kind, name"),
         params = [UserId, Bool(false), Text("%a%"), Int(5)],
-        tier = Hot;
+        tier = Bulk;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
