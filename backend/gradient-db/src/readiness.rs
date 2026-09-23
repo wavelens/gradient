@@ -440,10 +440,28 @@ crate::sql_lazy! {
         tier = Bulk;
 }
 
-crate::sql! {
-    LOCK_ANCHORS = "SELECT 1 FROM derivation_build \
-                    WHERE derivation = ANY($1::uuid[]) \
-                    ORDER BY derivation FOR UPDATE",
+fn lock_anchors_sql(with_dependencies: bool) -> String {
+    let (with, filter) = crate::anchor_guard::advisory_filter("$1", with_dependencies);
+    format!(
+        "WITH {with} SELECT 1 FROM derivation_build \
+         WHERE derivation = ANY($1::uuid[]) AND {filter} \
+         ORDER BY derivation FOR UPDATE"
+    )
+}
+
+fn lock_flip_anchors_sql() -> String {
+    lock_anchors_sql(false)
+}
+
+fn lock_seed_anchors_sql() -> String {
+    lock_anchors_sql(true)
+}
+
+crate::sql_fn! {
+    LOCK_ANCHORS = lock_flip_anchors_sql,
+        params = [DerivationIds(64)];
+
+    LOCK_SEED_ANCHORS = lock_seed_anchors_sql,
         params = [DerivationIds(64)];
 }
 
@@ -468,10 +486,11 @@ pub struct AnchorLock<'txn> {
 }
 
 /// Take `derivations` `FOR UPDATE` in one `derivation`-ordered statement, before the
-/// caller decides anything. With acquisition monotone in `derivation` a wait-for cycle
-/// would need some transaction to wait on a lower id than one it already holds; the
-/// ripples acquire in plan order and are outside that, which the module doc accounts
-/// for. An empty batch locks nothing and issues no statement.
+/// caller decides anything, with each anchor's advisory key held exclusively ahead of
+/// its row (see [`crate::anchor_guard`]). With acquisition monotone in `derivation` a
+/// wait-for cycle would need some transaction to wait on a lower id than one it
+/// already holds; the ripples acquire in plan order and are outside that, which the
+/// module doc accounts for. An empty batch locks nothing and issues no statement.
 pub async fn lock_anchors<'txn>(
     txn: &'txn DatabaseTransaction,
     derivations: &[DerivationId],
@@ -485,6 +504,35 @@ pub async fn lock_anchors<'txn>(
         txn,
         derivations: derivations.to_vec(),
     })
+}
+
+/// [`AnchorLock`] for a seed: the anchors' keys exclusively and their dependencies'
+/// keys shared, held to commit, so the count a seed writes cannot miss a flip of what
+/// it counts. The only proof [`seed_unready_deps`] accepts.
+#[must_use = "a lock proves nothing unless a write runs on it"]
+pub struct SeedLock<'txn>(AnchorLock<'txn>);
+
+impl<'txn> std::ops::Deref for SeedLock<'txn> {
+    type Target = AnchorLock<'txn>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub async fn lock_seed_anchors<'txn>(
+    txn: &'txn DatabaseTransaction,
+    derivations: &[DerivationId],
+) -> Result<SeedLock<'txn>, DbErr> {
+    if !derivations.is_empty() {
+        txn.execute_raw(LOCK_SEED_ANCHORS.bind([ids(derivations)]))
+            .await?;
+    }
+
+    Ok(SeedLock(AnchorLock {
+        txn,
+        derivations: derivations.to_vec(),
+    }))
 }
 
 pub(crate) fn ids(derivations: &[DerivationId]) -> Value {
@@ -1275,6 +1323,27 @@ mod tests {
             !recount.contains(&norm(&fetchable_predicate("dep"))),
             "the recount reads the column it just repaired: {recount}"
         );
+    }
+
+    #[test]
+    fn the_anchor_lock_takes_its_advisory_keys_before_the_row_locks() {
+        let sql = LOCK_ANCHORS.text();
+        assert!(
+            sql.starts_with("WITH anchor_keys AS MATERIALIZED ("),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("(SELECT n FROM anchor_locks) >= 0 ORDER BY derivation FOR UPDATE"),
+            "{sql}"
+        );
+        assert!(!sql.contains("_shared"), "{sql}");
+
+        let seed = LOCK_SEED_ANCHORS.text();
+        assert!(
+            seed.contains("pg_advisory_xact_lock_shared(643, k)"),
+            "{seed}"
+        );
+        assert!(seed.contains("ORDER BY derivation FOR UPDATE"), "{seed}");
     }
 
     /// An empty batch is not a statement, the lock included: every entry point

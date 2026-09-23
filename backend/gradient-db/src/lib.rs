@@ -5,6 +5,7 @@
  */
 
 pub mod admin_tasks;
+pub mod anchor_guard;
 pub mod base_workers;
 pub mod build_attempt;
 pub mod cache_metric;
@@ -114,11 +115,11 @@ pub use self::reachability::{
     producers_of_hashes,
 };
 pub use self::readiness::{
-    AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,
-    lost_fetchability, promote, promote_closure, readiness_scope, recompute_demand,
-    recount_demanded, repair_fetchable, repair_readiness, seed_unready_deps, settle_demand,
-    settle_skipped, skip_undemanded, thaw_demanded, unpromote_drv_owners, unpromote_ungated,
-    unwalk_derivations,
+    AnchorLock, DemandMoved, Repaired, SeedLock, advance_fetchable, became_fetchable, lock_anchors,
+    lock_seed_anchors, lost_fetchability, promote, promote_closure, readiness_scope,
+    recompute_demand, recount_demanded, repair_fetchable, repair_readiness, seed_unready_deps,
+    settle_demand, settle_skipped, skip_undemanded, thaw_demanded, unpromote_drv_owners,
+    unpromote_ungated, unwalk_derivations,
 };
 pub use self::ready_set::{ReadyMoves, ReadySet};
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};

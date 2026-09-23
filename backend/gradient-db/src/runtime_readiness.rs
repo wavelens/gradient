@@ -79,9 +79,10 @@ fn count_up_sql() -> String {
 }
 
 fn whole_among_sql() -> String {
+    let (with, filter) = crate::anchor_guard::advisory_filter("$1", false);
     format!(
-        "SELECT db.derivation FROM derivation_build db \
-         WHERE db.derivation = ANY($1::uuid[]) AND {whole} \
+        "WITH {with} SELECT db.derivation FROM derivation_build db \
+         WHERE db.derivation = ANY($1::uuid[]) AND {whole} AND {filter} \
          ORDER BY db.derivation FOR UPDATE",
         whole = anchor_whole_predicate("db"),
     )
@@ -527,6 +528,17 @@ mod tests {
 
     fn none() -> Vec<BTreeMap<String, Value>> {
         Vec::new()
+    }
+
+    #[test]
+    fn whole_among_holds_the_exclusive_keys_of_what_it_reads() {
+        let sql = WHOLE_AMONG.text();
+        assert!(
+            sql.starts_with("WITH anchor_keys AS MATERIALIZED ("),
+            "{sql}"
+        );
+        assert!(!sql.contains("_shared"), "{sql}");
+        assert!(sql.contains("ORDER BY db.derivation FOR UPDATE"), "{sql}");
     }
 
     /// A row that was whole before the seed and after it flipped nothing, so no
