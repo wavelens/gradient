@@ -33,7 +33,7 @@ left):
 7. **Popups & Overlays** - `<gr-form-dialog>`, `<gr-confirm-dialog>`,
    toast notifications, and tooltips.
 8. **Feedback** - `<app-loading-spinner>`, `<app-empty-state>`,
-   `<app-stat-card>`, status chips, and badges.
+   `<app-stat-card>`, status chips, badges, and the morphing `<gr-status-icon>` with a phase switcher.
 9. **Tables & Lists** - table styles, list rows using the
    `.gr-grid-rows` utility, breadcrumb.
 10. **Grids** - `.gr-grid-stats`, `.gr-grid-form`, `.gr-grid-cards`,
