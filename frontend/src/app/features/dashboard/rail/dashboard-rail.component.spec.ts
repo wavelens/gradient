@@ -40,17 +40,10 @@ describe('DashboardRailComponent', () => {
       projects: [{ name: 'infra', display_name: 'Infra', starred: true, tier: 'starred_active', status: 'Failed', task_count: 2,
         tasks: [{ name: 'hosts', status: 'Failed' }] }],
       caches: [{ name: 'main', display_name: 'Main', starred: false, nar_count: 1200 }],
-      operations: false,
     });
     expect(hrefs(root)).toContain('/project/infra');
     expect(hrefs(root)).toContain('/project/infra/task/hosts');
     expect(hrefs(root)).toContain('/caches/main');
-    expect(root.textContent).not.toContain('Operations');
-  });
-
-  it('shows operations links for operators', () => {
-    const root = render({ projects: [], caches: [], operations: true });
-    expect(hrefs(root)).toEqual(expect.arrayContaining(['/board', '/board/workers', '/board/scheduler', '/board/health']));
   });
 
   it('keeps the order it received and counts tasks only when not nested', () => {
@@ -60,27 +53,26 @@ describe('DashboardRailComponent', () => {
         { name: 'a', display_name: 'A', starred: false, tier: 'member', status: null, task_count: 3 },
       ],
       caches: [],
-      operations: false,
     });
-    const names = Array.from(root.querySelectorAll('section:first-child .row-name > .name')).map((n) => n.textContent!.trim());
+    const names = Array.from(root.querySelectorAll('section:first-child > ul > li > .row .n')).map((n) => n.textContent!.trim());
     expect(names).toEqual(['B', 'A']);
     expect(root.textContent).toContain('1 task');
     expect(root.textContent).toContain('3 tasks');
   });
 
   it('reports an empty rail', () => {
-    expect(mount(() => of({ projects: [], caches: [], operations: false })).empty).toEqual([true]);
+    expect(mount(() => of({ projects: [], caches: [] })).empty).toEqual([true]);
   });
 
   it('shows an inline error and loads again on retry', () => {
     let calls = 0;
-    const rail: Rail = { projects: [], caches: [], operations: true };
+    const rail: Rail = { projects: [], caches: [{ name: 'main', display_name: 'Main', starred: false, nar_count: 1 }] };
     const { f, root, empty } = mount(() => (++calls === 1 ? throwError(() => ({ status: 500 })) : of(rail)));
     expect(empty).toEqual([false]);
-    (root.querySelector('gr-message-banner button') as HTMLElement).click();
+    (root.querySelector('.error button') as HTMLElement).click();
     f.detectChanges();
-    expect(root.querySelector('gr-message-banner')).toBeNull();
-    expect(hrefs(root)).toContain('/board/workers');
+    expect(root.querySelector('.error')).toBeNull();
+    expect(hrefs(root)).toContain('/caches/main');
   });
 
   it('hides itself on 403', () => {

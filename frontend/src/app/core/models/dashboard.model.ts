@@ -69,7 +69,6 @@ export interface RailCache {
 export interface Rail {
   projects: RailProject[];
   caches: RailCache[];
-  operations: boolean;
 }
 
 export interface SearchHit {

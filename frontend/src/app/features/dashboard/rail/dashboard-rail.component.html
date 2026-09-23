@@ -6,66 +6,56 @@
 
 @if (rail(); as r) {
   <aside class="rail">
-    <section class="section">
-      <h2>Projects <a grButton size="small" [text]="true" icon="add" label="New" routerLink="/projects"></a></h2>
-      <gr-row-list>
+    <section>
+      <h3>Projects <a routerLink="/projects">+ New</a></h3>
+      <ul>
         @for (p of r.projects; track p.name) {
-          <gr-row [link]="['/project', p.name]" [linkLabel]="p.display_name">
-            @if (p.status) {
-              <gr-status-icon size="sm" [phase]="phase(p.status)" [label]="p.status" />
-            }
-            <span class="name">{{ p.display_name }}</span>
-            <span slot="meta">
-              @if (p.tasks) {
-                <span class="tasks">
-                  @for (t of p.tasks; track t.name) {
-                    <a class="task" [routerLink]="['/project', p.name, 'task', t.name]">
-                      @if (t.status) {
-                        <gr-status-icon size="sm" [phase]="phase(t.status)" [label]="t.status" />
-                      }
-                      <span class="name">{{ t.name }}</span>
-                    </a>
-                  }
-                </span>
-              } @else {
-                {{ p.task_count }} {{ p.task_count === 1 ? 'task' : 'tasks' }}
+          <li>
+            <span class="row">
+              <gr-star-button [target]="{ kind: 'project', project: p.name }" [(starred)]="p.starred" />
+              <span [class]="'dot dot--' + (p.status ?? 'none')"></span>
+              <a class="n" [routerLink]="['/project', p.name]">{{ p.display_name }}</a>
+              @if (!p.tasks) {
+                <span class="count">{{ p.task_count }} {{ p.task_count === 1 ? 'task' : 'tasks' }}</span>
               }
             </span>
-            <gr-star-button slot="actions" [target]="{ kind: 'project', project: p.name }" [(starred)]="p.starred" />
-          </gr-row>
+            @if (p.tasks) {
+              <ul class="tasks">
+                @for (t of p.tasks; track t.name) {
+                  <li>
+                    <a class="row" [routerLink]="['/project', p.name, 'task', t.name]">
+                      <span [class]="'dot dot--' + (t.status ?? 'none')"></span>
+                      <span class="n">{{ t.name }}</span>
+                    </a>
+                  </li>
+                }
+              </ul>
+            }
+          </li>
         }
-      </gr-row-list>
+      </ul>
       <a class="all" routerLink="/projects">All projects -></a>
     </section>
 
-    <section class="section">
-      <h2>Caches <a grButton size="small" [text]="true" icon="add" label="New" routerLink="/caches"></a></h2>
-      <gr-row-list>
+    <section>
+      <h3>Caches <a routerLink="/caches">+ New</a></h3>
+      <ul>
         @for (c of r.caches; track c.name) {
-          <gr-row [link]="['/caches', c.name]" [linkLabel]="c.display_name">
-            <span class="name">{{ c.display_name }}</span>
-            <span slot="meta">{{ count(c.nar_count) }} NARs</span>
-            <gr-star-button slot="actions" [target]="{ kind: 'cache', cache: c.name }" [(starred)]="c.starred" />
-          </gr-row>
+          <li>
+            <span class="row">
+              <gr-star-button [target]="{ kind: 'cache', cache: c.name }" [(starred)]="c.starred" />
+              <a class="n" [routerLink]="['/caches', c.name]">{{ c.display_name }}</a>
+              <span class="count">{{ count(c.nar_count) }} NARs</span>
+            </span>
+          </li>
         }
-      </gr-row-list>
+      </ul>
       <a class="all" routerLink="/caches">All caches -></a>
     </section>
-
-    @if (r.operations) {
-      <section class="section">
-        <h2>Operations</h2>
-        <gr-row-list>
-          @for (o of operations; track o.link) {
-            <gr-row [icon]="o.icon" [link]="[o.link]" [linkLabel]="o.label">{{ o.label }}</gr-row>
-          }
-        </gr-row-list>
-      </section>
-    }
   </aside>
 } @else if (failed()) {
-  <gr-message-banner type="error">
+  <p class="error">
     Projects and caches unavailable.
     <button grButton size="small" [text]="true" label="Retry" (click)="load()"></button>
-  </gr-message-banner>
+  </p>
 }

@@ -1488,11 +1488,10 @@ paths:
         Active means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.
         `tasks` is present only on `starred_active` projects and omitted otherwise.
         Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.
-        `operations` is true for a superuser or when a member project has a registered worker.
       operationId: getDashboardRail
       responses:
         '200':
-          description: Rail projects, caches and the operations flag
+          description: Rail projects and caches
           content:
             application/json:
               schema:
@@ -1502,7 +1501,7 @@ paths:
                     properties:
                       message:
                         type: object
-                        required: [projects, caches, operations]
+                        required: [projects, caches]
                         properties:
                           projects:
                             type: array
@@ -1554,8 +1553,6 @@ paths:
                                 nar_count:
                                   type: integer
                                   format: int64
-                          operations:
-                            type: boolean
               example:
                 error: false
                 message:
@@ -1572,7 +1569,6 @@ paths:
                     - { name: docs, display_name: Docs, starred: false, tier: member, status: null, task_count: 1 }
                   caches:
                     - { name: main, display_name: Main, starred: true, nar_count: 18234 }
-                  operations: true
         '401':
           $ref: '#/components/responses/Unauthorized'
 

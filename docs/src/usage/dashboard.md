@@ -19,7 +19,7 @@ The dashboard routes you to what needs attention. Its sections follow your data 
     - Bars show the last evaluations: height is the duration, color the status, hover for details. The number of bars follows the available width.
     - A row opens the task, a bar opens its evaluation.
 - **Activity**: a calendar of the last 371 days, switchable between evaluations and failures.
-- **Rail**: your projects, ordered by tier (see [Ranking](#ranking)), and your caches, starred first. Starred and active projects list their tasks. Superusers and worker owners also get Operations links (Job Board, Workers, Scheduler, Health).
+- **Rail**: your projects, ordered by tier (see [Ranking](#ranking)), and your caches, starred first. Starred and active projects list their tasks.
 - **New users** (no projects, no caches) only see the first steps: create a project, add a task, connect a worker, create or subscribe to a cache.
 - Each block loads on its own. A failed block shows an inline retry, a block you may not read is hidden.
 

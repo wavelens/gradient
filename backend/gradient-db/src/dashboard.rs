@@ -541,11 +541,6 @@ crate::sql! {
         ORDER BY starred DESC, c.name",
         params = [UserId],
         tier = Bulk;
-
-    HAS_PROJECT_WORKERS = "SELECT EXISTS (SELECT 1 FROM worker_registration w JOIN project_user pu \
-        ON pu.project = w.peer_id WHERE pu.\"user\" = $1) AS has",
-        params = [UserId],
-        tier = Hot;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -642,14 +637,6 @@ pub async fn rail_caches<C: ConnectionTrait>(
         .iter()
         .map(rail_cache_row)
         .collect()
-}
-
-pub async fn has_project_workers<C: ConnectionTrait>(db: &C, user: UserId) -> Result<bool, DbErr> {
-    let stmt = HAS_PROJECT_WORKERS.bind([user_value(user)]);
-    Ok(match db.query_one_raw(stmt).await? {
-        Some(r) => r.try_get("", "has")?,
-        None => false,
-    })
 }
 
 crate::sql! {

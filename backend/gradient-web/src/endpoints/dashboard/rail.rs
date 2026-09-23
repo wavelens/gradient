@@ -11,8 +11,7 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::dashboard::{
-    RailCacheRow, RailProjectRow, RailTaskRow, has_project_workers, rail_caches, rail_projects,
-    rail_tasks,
+    RailCacheRow, RailProjectRow, RailTaskRow, rail_caches, rail_projects, rail_tasks,
 };
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
@@ -49,7 +48,6 @@ pub struct RailCache {
 pub struct Rail {
     pub projects: Vec<RailProject>,
     pub caches: Vec<RailCache>,
-    pub operations: bool,
 }
 
 fn nested_tasks(project: ProjectId, tasks: &[RailTaskRow]) -> Vec<RailTask> {
@@ -89,7 +87,6 @@ pub fn build_rail(
     projects: Vec<RailProjectRow>,
     tasks: Vec<RailTaskRow>,
     caches: Vec<RailCacheRow>,
-    operations: bool,
 ) -> Rail {
     let mut projects: Vec<RailProject> = projects
         .into_iter()
@@ -99,7 +96,6 @@ pub fn build_rail(
     Rail {
         projects,
         caches: caches.into_iter().map(rail_cache).collect(),
-        operations,
     }
 }
 
@@ -108,12 +104,10 @@ pub async fn get_rail(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Rail>>> {
     let db = &state.web_db;
-    let operations = user.superuser || has_project_workers(db, user.id).await?;
     Ok(ok_json(build_rail(
         rail_projects(db, user.id).await?,
         rail_tasks(db, user.id).await?,
         rail_caches(db, user.id).await?,
-        operations,
     )))
 }
 
@@ -159,7 +153,7 @@ mod tests {
                 status: None,
             },
         ];
-        let rail = build_rail(vec![starred, both], tasks, vec![], false);
+        let rail = build_rail(vec![starred, both], tasks, vec![]);
         assert_eq!(rail.projects[0].name, "both");
         assert_eq!(rail.projects[0].tasks.as_ref().unwrap().len(), 1);
         assert!(rail.projects[1].tasks.is_none());
@@ -175,7 +169,7 @@ mod tests {
             project("both", true, 1),
         ];
         let caches = vec![cache("zz", true), cache("aa", false)];
-        let rail = build_rail(projects, vec![], caches, true);
+        let rail = build_rail(projects, vec![], caches);
         let names: Vec<&str> = rail.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["both", "active", "starred", "alpha", "zeta"]);
         let tiers: Vec<Tier> = rail.projects.iter().map(|p| p.tier).collect();
@@ -195,6 +189,5 @@ mod tests {
             .map(|c| (c.name.as_str(), c.starred))
             .collect();
         assert_eq!(caches, [("zz", true), ("aa", false)]);
-        assert!(rail.operations);
     }
 }

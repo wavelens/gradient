@@ -12,7 +12,7 @@ import { DashboardService } from '@core/services/dashboard.service';
 import { StarsService } from '@core/services/stars.service';
 import { CommandPaletteService } from '@shared/chrome/command-palette/command-palette.service';
 
-type RailStub = { projects: unknown[]; caches: unknown[]; operations: boolean };
+type RailStub = { projects: unknown[]; caches: unknown[] };
 
 function render(rail: RailStub | Observable<RailStub>) {
   TestBed.configureTestingModule({
@@ -36,7 +36,7 @@ function render(rail: RailStub | Observable<RailStub>) {
 
 describe('DashboardComponent', () => {
   it('routes a new user to the first steps only', () => {
-    const root = render({ projects: [], caches: [], operations: false });
+    const root = render({ projects: [], caches: [] });
     expect(root.querySelector('app-dashboard-start')).not.toBeNull();
     expect(root.querySelector('app-dashboard-task-table')).toBeNull();
     expect(root.querySelector('app-dashboard-stats')).toBeNull();
@@ -44,7 +44,7 @@ describe('DashboardComponent', () => {
   });
 
   it('shows the router blocks once the user has something', () => {
-    const root = render({ projects: [{ name: 'p', display_name: 'P', starred: false, tier: 'member', status: null, task_count: 1 }], caches: [], operations: false });
+    const root = render({ projects: [{ name: 'p', display_name: 'P', starred: false, tier: 'member', status: null, task_count: 1 }], caches: [] });
     for (const sel of ['app-dashboard-stats', 'app-dashboard-task-table', 'app-dashboard-activity', 'app-dashboard-rail', '.palette-trigger']) {
       expect(root.querySelector(sel)).not.toBeNull();
     }
@@ -52,7 +52,7 @@ describe('DashboardComponent', () => {
   });
 
   it('opens the command palette from the search field', () => {
-    const root = render({ projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }], operations: false });
+    const root = render({ projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }] });
     (root.querySelector('.palette-trigger') as HTMLElement).click();
     expect(TestBed.inject(CommandPaletteService).isOpen()).toBe(true);
   });
@@ -65,7 +65,7 @@ describe('DashboardComponent', () => {
   });
 
   it('labels the palette shortcut', () => {
-    const user = { projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }], operations: false };
+    const user = { projects: [], caches: [{ name: 'c', display_name: 'C', starred: false, nar_count: 0 }] };
     expect(render(user).querySelector('.palette-trigger kbd')!.textContent).toBe('/');
   });
 });
