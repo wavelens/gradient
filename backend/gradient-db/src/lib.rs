@@ -86,7 +86,7 @@ pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::drv_output_spec::DrvOutputSpec;
 pub use self::eval_counters::{
     EvalCounters, eval_counters, fold_anchor_deltas, in_flight_counters,
-    recount_eval_anchor_counters,
+    recount_eval_anchor_counters, recount_evaluations,
 };
 pub use self::eval_watchdog::{LostCompletion, lost_eval_completions};
 pub use self::gc::*;
@@ -106,8 +106,9 @@ pub use self::promotion::{
 pub use self::reachability::{
     Adopted, adopt_pending_closure, adopt_pending_closures, anchor_dispatch_state, anchor_status,
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
-    derivations_with_hashes, evals_referencing_derivation, evals_referencing_derivations,
-    inherit_names, pending_orphan_frontier, pending_orphans_among, producers_of_hashes,
+    derivations_with_hashes, eval_any_anchor_failed, eval_blocked, evals_referencing_derivation,
+    evals_referencing_derivations, inherit_names, pending_orphan_frontier, pending_orphans_among,
+    producers_of_hashes,
 };
 pub use self::readiness::{
     AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,

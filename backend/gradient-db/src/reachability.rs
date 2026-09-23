@@ -26,6 +26,85 @@ use sea_orm::{
 };
 use std::sync::LazyLock;
 
+/// Whether an evaluation still names an anchor it is waiting for.
+///
+/// The exact answer behind the evaluation counters: asked only once they say
+/// nothing blocks, so normally once per evaluation, and then it reads every
+/// anchor the evaluation names. That is the working set it was handed, which is
+/// what `Bulk` is for.
+static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT EXISTS (SELECT 1 FROM build_job bj \
+         JOIN derivation_build db ON db.id = bj.derivation_build \
+         WHERE bj.evaluation = $1 AND {blocks}) AS blocked",
+        blocks = crate::graph_sql::blocks_evaluation_predicate("db"),
+    )
+});
+
+crate::sql_lazy! {
+    EVAL_BLOCKED = || EVAL_BLOCKED_SQL.as_str(),
+        params = [EvaluationId],
+        tier = Bulk;
+}
+
+/// Whether any anchor the evaluation names ended without being built: what
+/// decides `Failed` over `Completed` once [`eval_blocked`] says nothing is left.
+///
+/// The set is [`BuildStatus::REQUEUEABLE`], because the two questions are one
+/// question seen from either end - what a fresh evaluation thaws is exactly what
+/// this evaluation did not get built. `Aborted` is the member that matters and
+/// the one this used to omit: `derivation_build` is global, so an anchor a
+/// previous evaluation hard-aborted is already terminal when the next evaluation
+/// names it, and an abort blocks nothing. An evaluation whose every anchor sat
+/// `Aborted` therefore finalized `Completed` milliseconds after reaching
+/// `Building` - a green check for a commit on which nothing was built. It is
+/// deliberately NOT [`BuildStatus::TERMINAL_FAILURE`], which excludes `Aborted`
+/// so an abort never cascades `DependencyFailed` downward.
+static EVAL_ANY_ANCHOR_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT EXISTS (SELECT 1 FROM build_job bj \
+         JOIN derivation_build db ON db.id = bj.derivation_build \
+         WHERE bj.evaluation = $1 AND db.status IN ({failed})) AS failed",
+        failed = crate::status_sql::build_in(&BuildStatus::REQUEUEABLE),
+    )
+});
+
+crate::sql_lazy! {
+    EVAL_ANY_ANCHOR_FAILED = || EVAL_ANY_ANCHOR_FAILED_SQL.as_str(),
+        params = [EvaluationId];
+}
+
+/// See [`EVAL_BLOCKED_SQL`]. An evaluation naming no anchor at all is not blocked.
+pub async fn eval_blocked<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<bool, DbErr> {
+    flag(db, &EVAL_BLOCKED, evaluation, "blocked").await
+}
+
+/// See [`EVAL_ANY_ANCHOR_FAILED_SQL`].
+pub async fn eval_any_anchor_failed<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<bool, DbErr> {
+    flag(db, &EVAL_ANY_ANCHOR_FAILED, evaluation, "failed").await
+}
+
+/// A one-row, one-column `EXISTS` read. A missing row is an error and not `false`:
+/// an eval-done decision that silently read "nothing blocks" would settle an
+/// evaluation whose builds are still running.
+async fn flag<C: ConnectionTrait>(
+    db: &C,
+    query: &crate::sql::Query,
+    evaluation: EvaluationId,
+    column: &str,
+) -> Result<bool, DbErr> {
+    db.query_one_raw(query.bind([Value::Uuid(Some(evaluation.into_inner()))]))
+        .await?
+        .ok_or_else(|| DbErr::Custom(format!("{} returned no row", query.name)))?
+        .try_get::<bool>("", column)
+}
+
 /// The anchor's current status, for the dispatcher's last look before a
 /// hand-out: a queued job whose gate regressed since it was enqueued reads
 /// `Created` here and is dropped instead of dispatched with a missing input.
@@ -425,6 +504,30 @@ mod tests {
         MockExecResult {
             last_insert_id: 0,
             rows_affected: 0,
+        }
+    }
+
+    /// `derivation_build` is global, so an anchor a previous evaluation aborted
+    /// is terminal before the next evaluation ever dispatches it - and an abort
+    /// blocks nothing. Omitting `Aborted` here finalized such an evaluation
+    /// `Completed`: 26 of 26 anchors aborted, nothing built, a green check.
+    #[test]
+    fn an_aborted_anchor_fails_the_evaluation_it_was_never_built_for() {
+        let sql = EVAL_ANY_ANCHOR_FAILED_SQL.as_str();
+        let expected = crate::status_sql::build_in(&BuildStatus::REQUEUEABLE);
+        assert!(
+            sql.contains(&format!("db.status IN ({expected})")),
+            "the verdict set is what a fresh evaluation would thaw: {sql}"
+        );
+        assert!(
+            BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted),
+            "an anchor nothing built is not a success"
+        );
+        for ok in BuildStatus::TERMINAL_SUCCESS {
+            assert!(
+                !BuildStatus::REQUEUEABLE.contains(&ok),
+                "{ok:?} must not fail its evaluation"
+            );
         }
     }
 

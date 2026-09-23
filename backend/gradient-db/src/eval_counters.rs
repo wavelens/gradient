@@ -46,10 +46,14 @@ crate::sql! {
         params = [EvaluationId],
         tier = Hot;
 
-    IN_FLIGHT_COUNTERS = "SELECT id, named_anchors::bigint AS named, \
-        active_anchors::bigint AS active, failed_anchors::bigint AS failed, \
-        queued_anchors::bigint AS queued, building_anchors::bigint AS building \
-        FROM evaluation WHERE id = ANY($1::uuid[])",
+    IN_FLIGHT_COUNTERS = "SELECT e.id, \
+        (e.named_anchors + coalesce(sum(d.named), 0))::bigint AS named, \
+        (e.active_anchors + coalesce(sum(d.active), 0))::bigint AS active, \
+        (e.failed_anchors + coalesce(sum(d.failed), 0))::bigint AS failed, \
+        (e.queued_anchors + coalesce(sum(d.queued), 0))::bigint AS queued, \
+        (e.building_anchors + coalesce(sum(d.building), 0))::bigint AS building \
+        FROM evaluation e LEFT JOIN evaluation_anchor_delta d ON d.evaluation = e.id \
+        WHERE e.id = ANY($1::uuid[]) GROUP BY e.id",
         params = [EvaluationIds(64)],
         tier = Bulk;
 
@@ -116,21 +120,18 @@ fn uuids(evaluations: &[EvaluationId]) -> Value {
 }
 
 /// One evaluation's counters as of now: its folded columns plus the deltas no
-/// fold has reached yet. A missing row is an error, not zeros: zero `active`
-/// settles an evaluation.
+/// fold has reached yet. `None` when the evaluation is gone.
 pub async fn eval_counters<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<EvalCounters, DbErr> {
-    let row = db
-        .query_one_raw(EVAL_COUNTERS.bind([Value::Uuid(Some(evaluation.into_inner()))]))
+) -> Result<Option<EvalCounters>, DbErr> {
+    db.query_one_raw(EVAL_COUNTERS.bind([Value::Uuid(Some(evaluation.into_inner()))]))
         .await?
-        .ok_or_else(|| DbErr::Custom(format!("{} returned no row", EVAL_COUNTERS.name)))?;
-
-    EvalCounters::from_row(&row)
+        .map(|row| EvalCounters::from_row(&row))
+        .transpose()
 }
 
-/// The folded counters of `evaluations`, for a caller that has just folded.
+/// The counters of `evaluations`, folded columns plus unfolded deltas.
 pub async fn in_flight_counters<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],
@@ -171,8 +172,7 @@ where
     Ok(true)
 }
 
-/// Recount the counters of every in-flight evaluation from its `build_job`
-/// rows and clear its ledger in the same snapshot. Returns the evaluations
+/// Recount the counters of every in-flight evaluation. Returns the evaluations
 /// whose stored counters disagreed.
 pub async fn recount_eval_anchor_counters<C>(db: &C) -> Result<u64, DbErr>
 where
@@ -185,6 +185,16 @@ where
         .map(|r| r.try_get::<uuid::Uuid>("", "id").map(EvaluationId::new))
         .collect::<Result<_, _>>()?;
 
+    recount_evaluations(db, &evaluations).await
+}
+
+/// Recount `evaluations` from their `build_job` rows and clear their ledger in
+/// the same snapshot, under the fold's lock. What an exact read found the
+/// counters wrong about is repaired here, not left for the sweep.
+pub async fn recount_evaluations<C>(db: &C, evaluations: &[EvaluationId]) -> Result<u64, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let mut drift = 0;
     for chunk in evaluations.chunks(crate::IN_CHUNK_SIZE) {
         let txn = db.begin().await?;
@@ -237,21 +247,6 @@ mod tests {
         );
     }
 
-    /// `derivation_build` is global, so an anchor a previous evaluation aborted
-    /// is terminal before the next evaluation ever dispatches it, and an abort
-    /// blocks nothing. Omitting `Aborted` from `failed` finalized such an
-    /// evaluation `Completed`: 26 of 26 anchors aborted, nothing built.
-    #[test]
-    fn an_aborted_anchor_counts_as_failed() {
-        assert!(BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted));
-        for ok in BuildStatus::TERMINAL_SUCCESS {
-            assert!(
-                !BuildStatus::REQUEUEABLE.contains(&ok),
-                "{ok:?} must not fail its evaluation"
-            );
-        }
-    }
-
     /// The fold deletes what it adds in one statement, so a delta is either
     /// folded or still in the ledger, never both and never neither.
     #[test]
@@ -299,7 +294,10 @@ mod tests {
             .append_query_results([vec![row]])
             .into_connection();
 
-        let c = eval_counters(&db, EvaluationId::now_v7()).await.unwrap();
+        let c = eval_counters(&db, EvaluationId::now_v7())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             c,
             EvalCounters {
