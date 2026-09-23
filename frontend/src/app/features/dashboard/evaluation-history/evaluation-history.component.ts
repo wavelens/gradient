@@ -8,6 +8,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { RouterLink } from '@angular/router';
 import { EvaluationStatus, HistoryBar } from '@core/models';
 import { formatDuration } from '@shared/text';
+import { TooltipDirective } from '@shared/ui';
 
 const TONE: Partial<Record<EvaluationStatus, string>> = { Completed: 'ok', Failed: 'fail', Aborted: 'fail' };
 const MIN_HEIGHT_PCT = 15;
@@ -15,7 +16,7 @@ const MIN_HEIGHT_PCT = 15;
 @Component({
   selector: 'app-evaluation-history',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <div class="history">
@@ -25,7 +26,7 @@ const MIN_HEIGHT_PCT = 15;
           [style.height]="b.height"
           [routerLink]="['/project', project(), 'task', task()]"
           [queryParams]="{ eval: b.id }"
-          [title]="b.title"
+          [grTooltip]="b.title"
           [attr.aria-label]="b.title"
         ></a>
       }

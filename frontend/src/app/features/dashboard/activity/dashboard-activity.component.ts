@@ -7,16 +7,18 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { DashboardService } from '@core/services/dashboard.service';
 import { ActivityDay } from '@core/models';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent, TooltipDirective } from '@shared/ui';
 
 type Mode = 'evaluations' | 'failed';
 const STEP = 13;
 const LEVELS = 4;
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 @Component({
   selector: 'app-dashboard-activity',
   standalone: true,
-  imports: [ButtonComponent],
+  imports: [ButtonComponent, TooltipDirective],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     @if (!hidden()) {
@@ -45,9 +47,15 @@ const LEVELS = 4;
             [class.heat--failed]="mode() === 'failed'"
           >
             @for (c of cells(); track c.date) {
-              <rect [attr.class]="'day day--' + c.level" [attr.x]="c.x" [attr.y]="c.y" width="11" height="11" rx="2">
-                <title>{{ c.title }}</title>
-              </rect>
+              <rect
+                [attr.class]="'day day--' + c.level"
+                [attr.x]="c.x"
+                [attr.y]="c.y"
+                width="11"
+                height="11"
+                rx="2"
+                [grTooltip]="c.title"
+              ></rect>
             }
           </svg>
         }
@@ -91,7 +99,7 @@ export class DashboardActivityComponent implements OnInit {
         x: Math.floor(idx / 7) * STEP,
         y: (idx % 7) * STEP,
         level: v === 0 ? 0 : Math.min(LEVELS, 1 + Math.floor((v / max) * LEVELS)),
-        title: `${d.date}: ${d.evaluations} evaluations, ${d.failed} failed`,
+        title: `${d.date}: ${plural(d.evaluations, 'evaluation')}, ${d.failed} failed`,
       };
     });
   });

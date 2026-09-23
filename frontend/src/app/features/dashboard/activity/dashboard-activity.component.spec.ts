@@ -43,6 +43,13 @@ describe('DashboardActivityComponent', () => {
     expect(levels).toEqual(['day day--4', 'day day--3']);
   });
 
+  it('shows the day and its counts when hovering a block', () => {
+    const { root } = render(() => of({ days: DAYS }));
+    root.querySelectorAll('rect.day')[1].dispatchEvent(new MouseEvent('mouseenter'));
+    expect(document.querySelector('.gr-tooltip')!.textContent).toBe('2026-09-23: 2 evaluations, 2 failed');
+    root.querySelectorAll('rect.day')[1].dispatchEvent(new MouseEvent('mouseleave'));
+  });
+
   it('shows an inline error with retry, and hides itself on 403', () => {
     const { root } = render(() => throwError(() => ({ status: 500 })));
     expect(root.querySelector('.error button')).not.toBeNull();
