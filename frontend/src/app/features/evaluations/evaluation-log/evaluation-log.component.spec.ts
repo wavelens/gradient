@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
@@ -176,10 +176,31 @@ describe('EvaluationLogComponent', () => {
       expect(ev.defaultPrevented).toBe(true);
     });
 
-    it('stays closed on Ctrl+F when the sidebar is not focused', () => {
+    it('opens on Ctrl+F while no log is open, so the browser find never shows', () => {
       const { cmp } = setup();
-      cmp.onKeydown(key({ key: 'f', ctrlKey: true }));
+      const ev = key({ key: 'f', ctrlKey: true });
+      cmp.onKeydown(ev);
+      expect(cmp.sidebarSearchOpen()).toBe(true);
+      expect(ev.defaultPrevented).toBe(true);
+    });
+
+    it('opens the log search instead while a log is open, streaming or not', () => {
+      const { cmp } = setup();
+      cmp.selectedBuildId.set('b1');
+      const ev = key({ key: 'f', ctrlKey: true });
+      cmp.onKeydown(ev);
+      expect(cmp.searchOpen()).toBe(true);
       expect(cmp.sidebarSearchOpen()).toBe(false);
+      expect(ev.defaultPrevented).toBe(true);
+    });
+
+    it('prefers the builds search while the sidebar holds focus, even with a log open', () => {
+      const { cmp } = setup();
+      cmp.selectedBuildId.set('b1');
+      cmp.setSidebarFocus(true);
+      cmp.onKeydown(key({ key: 'f', ctrlKey: true }));
+      expect(cmp.sidebarSearchOpen()).toBe(true);
+      expect(cmp.searchOpen()).toBe(false);
     });
 
     it('opens on "/" when not typing in a field', () => {
@@ -295,14 +316,143 @@ describe('EvaluationLogComponent', () => {
       expect(labels).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log']);
     });
 
-    it('leaves no hover affordance on the row behind', () => {
+    it('opens the same menu from the row\'s three dots, without selecting the row', () => {
       const { fixture, cmp } = setup();
       fixture.detectChanges();
       cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as Evaluation);
-      cmp.visibleBuilds.set([target({ has_artefacts: true })]);
+      cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2' })]);
+      fixture.detectChanges();
+      const select = vi.spyOn(cmp, 'selectBuild');
+
+      const kebabs = fixture.nativeElement.querySelectorAll('.build-item .build-kebab') as NodeListOf<HTMLButtonElement>;
+      expect(kebabs).toHaveLength(2);
+      kebabs[1].click();
       fixture.detectChanges();
 
-      expect(fixture.nativeElement.querySelectorAll('.build-item a')).toHaveLength(0);
+      expect(cmp.contextBuild()!.id).toBe('b2');
+      expect(select).not.toHaveBeenCalled();
+      expect(document.querySelectorAll('.gr-menu__item').length).toBeGreaterThan(0);
+    });
+  });
+
+  // #636: a live log arrives in batches and follows the tail with a smooth
+  // scroll, rather than jumping one line every tick.
+  describe('following a live log', () => {
+    type Follow = {
+      pendingLogLines: string[];
+      startLogDrainTimer: () => void;
+      stopLogDrainTimer: () => void;
+      appendStreamedLines: (lines: string[]) => void;
+      scrollToBottom: (smooth?: boolean) => void;
+      logContainerRef: { nativeElement: Partial<HTMLElement> } | undefined;
+    };
+    const scrolled = (scrollTop: number) =>
+      ({ target: { scrollHeight: 1000, scrollTop, clientHeight: 200 } }) as unknown as Event;
+
+    it('drains everything that arrived in one batch', () => {
+      vi.useFakeTimers();
+      const { cmp } = setup();
+      const c = cmp as unknown as Follow;
+      const append = vi.spyOn(c, 'appendStreamedLines');
+      c.pendingLogLines.push(...Array.from({ length: 12 }, (_, i) => `l${i}`));
+      c.startLogDrainTimer();
+      vi.advanceTimersByTime(300);
+      expect(append).toHaveBeenCalledTimes(1);
+      expect(append.mock.calls[0][0]).toHaveLength(12);
+      c.stopLogDrainTimer();
+      vi.useRealTimers();
+    });
+
+    it('keeps following while its own smooth scroll is still on the way down', () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Follow;
+      const scrollTo = vi.fn();
+      c.logContainerRef = { nativeElement: { scrollHeight: 1000, scrollTo } as Partial<HTMLElement> };
+      c.scrollToBottom(true);
+      expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: 'smooth' });
+      cmp.onLogScroll(scrolled(300));
+      expect(cmp.autoScroll()).toBe(true);
+    });
+
+    it('stops following once the reader scrolls up', () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Follow;
+      c.logContainerRef = { nativeElement: { scrollHeight: 1000, scrollTo: vi.fn() } as Partial<HTMLElement> };
+      c.scrollToBottom(true);
+      cmp.onLogWheel(new WheelEvent('wheel', { deltaY: -40 }));
+      cmp.onLogScroll(scrolled(300));
+      expect(cmp.autoScroll()).toBe(false);
+      expect(cmp.showScrollBtn()).toBe(true);
+    });
+  });
+
+  describe('log search on a streaming log', () => {
+    it('searches the lines in memory, where no chunk index exists yet', async () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Internals;
+      c.appendStreamedLines(['compiling', 'error: nope', 'linking']);
+      cmp.selectedBuildId.set('b1');
+      cmp.searchQuery.set('error');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      await cmp.runSearch();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(cmp.searchHits().map(h => h.line_number)).toEqual([2]);
+      expect(cmp.searchTotal()).toBe(1);
+    });
+  });
+
+  // #636: a finished log opens on its last line, however the page was reached.
+  describe('opening a finished log', () => {
+    it('scrolls to the tail once the chunked log is on screen', async () => {
+      const { cmp } = setup();
+      const c = cmp as unknown as Internals & {
+        fetchChunkedLog: (id: string) => Promise<boolean>;
+        fetchInitialLogs: (id: string) => Promise<void>;
+        scrollToBottomIfAuto: () => void;
+      };
+      cmp.builds.set([build('b1', 'hash-hello.drv', 'Completed')]);
+      vi.spyOn(c, 'fetchChunkedLog').mockResolvedValue(true);
+      let loadingWhenScrolled: boolean | null = null;
+      vi.spyOn(c, 'scrollToBottomIfAuto').mockImplementation(() => { loadingWhenScrolled = cmp.logLoading(); });
+      cmp.logLoading.set(true);
+      await c.fetchInitialLogs('b1');
+      expect(loadingWhenScrolled).toBe(false);
+    });
+  });
+
+  // #636: with `?build=` the reader came for that log, so it loads before the list.
+  describe('deep-linked build', () => {
+    it('fetches the linked build before the build list', () => {
+      const getBuild = vi.fn(() => of({
+        id: 'b1', evaluation: 'eval-1', status: 'Completed', derivation_path: 'hash-hello.drv',
+        architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, created_at: '', updated_at: '',
+      }));
+      const getBuilds = vi.fn(() => of({ builds: [], total: 0, active_count: 0 }));
+      TestBed.configureTestingModule({
+        imports: [EvaluationLogComponent],
+        providers: [
+          provideRouter([]), provideHttpClient(), provideHttpClientTesting(),
+          { provide: ActivatedRoute, useValue: {
+            snapshot: {
+              paramMap: convertToParamMap({ project: 'proj', evaluationId: 'eval-1' }),
+              queryParamMap: convertToParamMap({ build: 'b1' }),
+              fragment: null,
+            },
+          } },
+          { provide: EvaluationsService, useValue: {
+            getEvaluation: () => of({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', started_at: null, finished_at: null, trigger: null }),
+            getBuild,
+            getBuilds,
+            getEvaluationMessages: () => of([]),
+          } },
+        ],
+      });
+      const fixture = TestBed.createComponent(EvaluationLogComponent);
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
+      fixture.componentInstance.ngOnInit();
+      expect(getBuild).toHaveBeenCalled();
+      expect(getBuild.mock.invocationCallOrder[0]).toBeLessThan(getBuilds.mock.invocationCallOrder[0]);
+      fixture.destroy();
     });
   });
 

@@ -19,12 +19,7 @@ import {
   ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  LogChunkIndex,
-  LogSearchHit,
-  parseLineFragment,
-  windowAround,
-} from './log-window';
+import { LogChunkIndex, LogSearchHit, parseLineFragment, searchLines, windowAround } from './log-window';
 import { matchesBuildSearch } from './build-search';
 import { isTypingTarget } from './keyboard';
 import { CommonModule } from '@angular/common';
@@ -131,8 +126,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   visibleBuilds = signal<BuildItem[]>([]);
 
-  // The build the sidebar's right-click menu is acting on - every per-build
-  // action lives there rather than in hover affordances on the row.
+  // The build the sidebar's menu is acting on, opened by right-click or the
+  // row's three dots.
   contextBuild = signal<BuildItem | null>(null);
 
   buildMenuModel = computed<MenuItem[]>(() => {
@@ -215,6 +210,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private loadingWindow = false;
   private pendingDeepLink: number | null = null;
   private readonly LINE_PX = 18;
+  private readonly DRAIN_MS = 250;
+  private followScroll = false;
   private readonly WINDOW_PAGE = 800;
   private readonly MAX_WINDOW = 4000;
 
@@ -255,7 +252,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.evaluation.set(evaluation);
         this.loading.set(false);
         this.loadAccess(evaluation.task_name);
-        this.loadBuilds();
+        if (this.initialBuildId) {
+          this.resolveInitialBuild(() => this.loadBuilds());
+        } else {
+          this.loadBuilds();
+        }
         this.loadMessages();
         this.startDurationTimer(evaluation);
         this.startLiveUpdates(evaluation.status);
@@ -421,7 +422,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             // or implicit fallback when there is nothing to build).
             this.initialShowEval = false;
             this.selectEvaluationSection();
-          } else if (!this.initialBuildId) {
+          } else if (!this.initialBuildId && !this.selectedBuildId()) {
             // Auto-select first Building build when no explicit build was requested
             const firstBuilding = this.builds().find(b => b.status === 'Building');
             if (firstBuilding) {
@@ -588,7 +589,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   /// select it; otherwise we fetch that single build directly and inject it into
   /// the sidebar so its log shows immediately, rather than paging through the
   /// whole evaluation. `sortBuilds` dedups it once pagination catches up.
-  private resolveInitialBuild(): void {
+  private resolveInitialBuild(settled?: () => void): void {
     const id = this.initialBuildId;
     if (!id) return;
     const target = this.builds().find(b => b.id === id);
@@ -602,7 +603,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evalService.getBuild(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (b: BuildWithOutputs) => {
         this.fetchingInitialBuild = false;
-        if (this.initialBuildId !== id) return;
+        if (this.initialBuildId !== id) return settled?.();
         const item: BuildItem = {
           id: b.id,
           name: b.derivation_path,
@@ -620,8 +621,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.builds.update(cur => this.sortBuilds([item, ...cur]));
         this.visibleBuilds.update(cur => this.sortBuilds([item, ...cur]));
         this.selectBuild(item, true);
+        settled?.();
       },
-      error: () => { this.fetchingInitialBuild = false; },
+      error: () => {
+        this.fetchingInitialBuild = false;
+        settled?.();
+      },
     });
   }
 
@@ -654,6 +659,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const terminal = selected && !['Queued', 'Building', 'Created'].includes(selected.status);
     if (terminal && (await this.fetchChunkedLog(buildId))) {
       this.logLoading.set(false);
+      this.scrollToBottomIfAuto();
       return;
     }
 
@@ -887,9 +893,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   onKeydown(event: KeyboardEvent): void {
     const isFind = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f';
 
-    // Reveal the builds search on "/" (when not already typing) or on Ctrl/Cmd+F
-    // while the sidebar holds focus.
-    if ((event.key === '/' && !isTypingTarget(event.target)) || (isFind && this.sidebarFocused)) {
+    // Ctrl/Cmd+F never reaches the browser here: it searches the open log, or
+    // the builds when no log is open or the sidebar holds focus.
+    const logOpen = !!this.selectedBuildId() && this.selectedSection() !== 'messages';
+    if ((event.key === '/' && !isTypingTarget(event.target)) || (isFind && (this.sidebarFocused || !logOpen))) {
       event.preventDefault();
       this.openSidebarSearch();
       return;
@@ -900,7 +907,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (!this.chunkedMode() || !this.selectedBuildId()) return;
+    if (!logOpen) return;
     if (isFind) {
       event.preventDefault();
       this.searchOpen.set(true);
@@ -961,6 +968,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       return;
     }
     const seq = ++this.searchSeq;
+    if (this.logSource === 'memory') {
+      const hits = searchLines(this.logLines, q);
+      this.searchHits.set(hits);
+      this.searchTotal.set(hits.length);
+      this.searchLoading.set(false);
+      if (hits.length > 0) this.gotoHit(0);
+      return;
+    }
     this.searchHits.set([]);
     this.searchTotal.set(0);
     this.currentHit.set(-1);
@@ -1046,16 +1061,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Log drain animation ─────────────────────────────────────────────────────
 
+  // One batch per tick keeps change detection and layout to a few passes a
+  // second; the smooth follow-scroll carries the eye across each batch.
   private startLogDrainTimer(): void {
     if (this.logDrainTimer !== undefined) return;
     this.logDrainTimer = setInterval(() => {
       if (this.pendingLogLines.length === 0) return;
-      // Drain faster when the queue is large so we never fall too far behind
-      const count = this.pendingLogLines.length > 30
-        ? Math.ceil(this.pendingLogLines.length / 8)
-        : 1;
-      this.appendStreamedLines(this.pendingLogLines.splice(0, count));
-    }, 80);
+      this.appendStreamedLines(this.pendingLogLines.splice(0));
+    }, this.DRAIN_MS);
   }
 
   private stopLogDrainTimer(): void {
@@ -1098,7 +1111,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
 
     this.updateSpacers();
-    this.scrollToBottomIfAuto();
+    this.scrollToBottomIfAuto(true);
   }
 
   // ── Log parsing & rendering ─────────────────────────────────────────────────
@@ -1204,9 +1217,25 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   onLogScroll(event: Event): void {
     const el = event.target as HTMLElement;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    this.autoScroll.set(atBottom);
-    this.showScrollBtn.set(!atBottom);
+    if (atBottom) {
+      this.followScroll = false;
+      this.autoScroll.set(true);
+      this.showScrollBtn.set(false);
+    } else if (!this.followScroll) {
+      this.autoScroll.set(false);
+      this.showScrollBtn.set(true);
+    }
     this.maybePageLog(el);
+  }
+
+  /// A smooth follow-scroll passes through positions above the bottom; only the
+  /// reader's own input may read those as leaving the tail.
+  onLogWheel(event: WheelEvent): void {
+    if (event.deltaY < 0) this.stopFollowScroll();
+  }
+
+  stopFollowScroll(): void {
+    this.followScroll = false;
   }
 
   private maybePageLog(el: HTMLElement): void {
@@ -1254,9 +1283,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }
   }
 
-  scrollToBottom(): void {
+  scrollToBottom(smooth = false): void {
     const el = this.logContainerRef?.nativeElement;
     if (!el) return;
+    if (smooth) {
+      this.followScroll = true;
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      this.autoScroll.set(true);
+      this.showScrollBtn.set(false);
+      return;
+    }
     const buildId = this.selectedBuildId();
     const total = this.totalLines();
     if (buildId && this.windowStart + this.windowLines().length - 1 < total) {
@@ -1268,9 +1304,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.showScrollBtn.set(false);
   }
 
-  private scrollToBottomIfAuto(): void {
+  private scrollToBottomIfAuto(smooth = false): void {
     if (this.autoScroll()) {
-      setTimeout(() => this.scrollToBottom(), 0);
+      setTimeout(() => this.scrollToBottom(smooth), 0);
     }
   }
 
@@ -1309,6 +1345,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   openBuildMenu(event: MouseEvent, build: BuildItem, menu: MenuComponent): void {
     this.contextBuild.set(build);
     menu.openAt(event);
+  }
+
+  toggleBuildMenu(event: MouseEvent, build: BuildItem, menu: MenuComponent): void {
+    event.stopPropagation();
+    this.contextBuild.set(build);
+    menu.toggle(event);
   }
 
   /// Saves the build's complete log, which is not what the page holds in memory:

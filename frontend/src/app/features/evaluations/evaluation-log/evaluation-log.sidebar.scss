@@ -207,3 +207,21 @@
   }
 }
 
+
+.build-kebab {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: -$spacing-xs;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--gr-text-muted);
+  cursor: pointer;
+  opacity: 0;
+
+  .build-item:hover &,
+  .build-item:focus-within &,
+  .build-item.selected & { opacity: 1; }
+
+  &:hover { color: var(--gr-text-primary); }
+}

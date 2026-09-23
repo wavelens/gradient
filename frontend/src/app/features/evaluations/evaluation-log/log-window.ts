@@ -63,3 +63,20 @@ export function windowAround(
   start = Math.max(1, end - windowSize + 1);
   return { start, end };
 }
+
+// eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
+const ANSI_ESCAPE = /\u001b\[[?0-9;]*[A-Za-z~]/g;
+
+/** Case-insensitive search over a log held in memory, as a streaming build's is. */
+export function searchLines(lines: readonly string[], query: string): LogSearchHit[] {
+  const needle = query.toLowerCase();
+  const hits: LogSearchHit[] = [];
+  lines.forEach((line, i) => {
+    const text = line.replace(ANSI_ESCAPE, '');
+    if (text.toLowerCase().includes(needle)) {
+      hits.push({ line_number: i + 1, chunk_index: 0, byte_offset: 0, preview: text });
+    }
+  });
+
+  return hits;
+}

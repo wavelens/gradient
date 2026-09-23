@@ -9,6 +9,7 @@ import {
   parseLineFragment,
   chunkIndexForLine,
   windowAround,
+  searchLines,
   LogChunkMeta,
 } from './log-window';
 
@@ -50,5 +51,17 @@ describe('windowAround', () => {
   });
   it('handles empty logs', () => {
     expect(windowAround(0, 1, 100)).toEqual({ start: 1, end: 0 });
+  });
+});
+
+describe('searchLines', () => {
+  it('finds a streamed line case-insensitively, numbered from 1', () => {
+    const hits = searchLines(['building', 'Error: boom', 'done', 'another error'], 'error');
+    expect(hits.map(h => h.line_number)).toEqual([2, 4]);
+    expect(hits[0].preview).toBe('Error: boom');
+  });
+
+  it('matches the text a reader sees, not the colour codes around it', () => {
+    expect(searchLines(['\x1b[31mfail\x1b[0med'], 'failed')).toHaveLength(1);
   });
 });

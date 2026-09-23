@@ -170,6 +170,10 @@
   flex: 1;
   overflow-y: auto;
   padding: $spacing-md $spacing-lg;
+  // Streamed lines repaint only the log, and the browser's own scroll anchoring
+  // stays out of the way of the virtual window's spacers.
+  contain: content;
+  overflow-anchor: none;
 }
 
 .scroll-btn {
@@ -179,14 +183,13 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--gr-surface-raised) 90%, transparent);
+  background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background $transition-fast;
-  backdrop-filter: blur(4px);
 
   &:hover { background: var(--gr-surface-hover); }
 

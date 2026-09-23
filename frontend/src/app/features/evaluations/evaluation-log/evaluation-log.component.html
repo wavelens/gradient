@@ -115,6 +115,10 @@
                   @if (getBuildElapsed(item.build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="item.build.status === 'Building'">{{ getBuildElapsed(item.build) }}</span>
                   }
+                  <button type="button" class="build-kebab" aria-label="Build actions" tabindex="-1"
+                          (click)="toggleBuildMenu($event, item.build, buildMenu)">
+                    <gr-icon name="more_vert" size="sm" />
+                  </button>
                 </div>
               }
             </div>
@@ -284,7 +288,7 @@
                 {{ selectedBuild()?.status }}
               </gr-badge>
             </div>
-            @if (chunkedMode() && searchOpen()) {
+            @if (searchOpen()) {
               <div class="log-search-bar">
                 <input
                   grInput
@@ -308,7 +312,8 @@
                 <button class="log-search-btn" (click)="closeSearch()" title="Close (Esc)">✕</button>
               </div>
             }
-            <div class="log-container" #logContainer (scroll)="onLogScroll($event)">
+            <div class="log-container" #logContainer (scroll)="onLogScroll($event)"
+                 (wheel)="onLogWheel($event)" (pointerdown)="stopFollowScroll()" (keydown)="stopFollowScroll()">
               @if (logLineCount() > 0) {
                 <div class="log-spacer" [style.height.px]="topSpacerPx()"></div>
                 <div class="log-lines">
