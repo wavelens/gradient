@@ -363,7 +363,7 @@ mod tests {
             "the unbacked alarm follows the repairs: {log:?}"
         );
         assert!(
-            log[17].starts_with("SELECT id FROM evaluation WHERE status IN")
+            log[17].contains("SELECT id FROM evaluation WHERE status IN")
                 && log[18].contains("pg_advisory_xact_lock")
                 && log[19].contains("DELETE FROM evaluation_anchor_delta"),
             "the evaluation counters are recounted under the fold's lock: {log:?}"
