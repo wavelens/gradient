@@ -901,9 +901,10 @@ impl BatchWriter<'_> {
         }
 
         for chunk in active_entry_points.chunks(BATCH_SIZE) {
-            if let Err(e) = EEntryPoint::insert_many(chunk.to_vec())
+            if let Err(e) = insert_entry_points(chunk.to_vec())
                 .exec(&self.ctx.worker_db)
                 .await
+                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
             {
                 error!(error = %e, "failed to insert entry points");
             }
@@ -911,6 +912,16 @@ impl BatchWriter<'_> {
 
         entry_point_drvs
     }
+}
+
+/// A re-run evaluation walks the same attributes again, so an entry point it
+/// already has is kept rather than listed twice.
+fn insert_entry_points(rows: Vec<AEntryPoint>) -> sea_orm::InsertMany<AEntryPoint> {
+    EEntryPoint::insert_many(rows).on_conflict(
+        sea_orm::sea_query::OnConflict::columns([CEntryPoint::Evaluation, CEntryPoint::Eval])
+            .do_nothing()
+            .to_owned(),
+    )
 }
 
 /// Only a streaming evaluation takes batches. Anything else is a stale
@@ -1291,6 +1302,25 @@ mod tests {
     use gradient_entity::evaluation::EvaluationStatus;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement, Value};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn a_rewalked_entry_point_is_kept_not_duplicated() {
+        let row = MEntryPoint {
+            id: EntryPointId::now_v7(),
+            eval: "packages.x86_64-linux.hello".to_string(),
+            ..Default::default()
+        }
+        .into_active_model();
+
+        let sql =
+            sea_orm::QueryTrait::build(&insert_entry_points(vec![row]), DatabaseBackend::Postgres)
+                .to_string();
+
+        assert!(
+            sql.contains(r#"ON CONFLICT ("evaluation", "eval") DO NOTHING"#),
+            "{sql}"
+        );
+    }
 
     /// A fresh evaluation's demand is established by the ingest walk, not by a
     /// status transition, so `emit_transition_effects` sees nothing left to gain

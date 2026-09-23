@@ -630,7 +630,6 @@ pub async fn get_task_entry_points(
     let total = scope.clone().count(&state.web_db).await?;
     let entry_points = scope
         .order_by_asc(CEntryPoint::Eval)
-        .order_by_asc(CEntryPoint::Id)
         .offset(offset)
         .limit(limit)
         .all(&state.web_db)

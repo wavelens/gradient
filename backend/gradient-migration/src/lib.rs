@@ -70,6 +70,7 @@ mod m20260922_000000_derivation_build_open;
 mod m20260923_000000_derivation_build_fetchable_unwhole;
 mod m20260923_000001_derivation_build_open_aborted;
 pub mod m20260923_000002_evaluation_anchor_counters;
+mod m20260923_000003_entry_point_unique_eval;
 
 pub struct Migrator;
 
@@ -136,6 +137,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260923_000000_derivation_build_fetchable_unwhole::Migration),
             Box::new(m20260923_000001_derivation_build_open_aborted::Migration),
             Box::new(m20260923_000002_evaluation_anchor_counters::Migration),
+            Box::new(m20260923_000003_entry_point_unique_eval::Migration),
         ]
     }
 }
