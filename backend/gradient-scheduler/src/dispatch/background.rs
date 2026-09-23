@@ -66,6 +66,7 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
             adopted = report.adopted,
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,
             wedged_building_evals = report.wedged_building_evals,
+            eval_counter_drift = report.eval_counter_drift,
             scope = report.repair_scope,
             "graph consistency sweep found invariant violations"
         );

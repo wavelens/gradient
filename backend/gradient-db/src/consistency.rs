@@ -24,7 +24,6 @@
 //! the state the design calls unrecoverable and the drift count cannot see it.
 
 use crate::{DbContext, status_sql};
-use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::{ConnectionTrait, DbErr, Statement};
 
@@ -54,8 +53,12 @@ pub struct ConsistencyReport {
     /// happens (see [`crate::cache_storage::unbacked_trusted_outputs_select`]), so
     /// a non-zero count is a bug in one of those, not a queue of work.
     pub unbacked_trusted_outputs: i64,
-    /// `Building` evaluations with zero non-terminal anchors left.
+    /// `Building` evaluations whose counters say nothing blocks them: the
+    /// finalize that should have settled them never ran.
     pub wedged_building_evals: i64,
+    /// Evaluations whose anchor counters disagreed with a recount of their
+    /// `build_job` rows. A repair, like the other drift counts.
+    pub eval_counter_drift: i64,
     /// How many anchors the readiness repair locked and recounted. A measurement,
     /// not a violation: each is taken `FOR UPDATE`, twice, against rows every live
     /// graph writer also locks, so the cost is worth seeing on a clean pass too.
@@ -76,6 +79,7 @@ impl ConsistencyReport {
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
+            + self.eval_counter_drift
             + self.adopted
     }
 }
@@ -96,18 +100,8 @@ crate::sql_fn! {
 fn wedged_building_evals_sql() -> String {
     format!(
         "SELECT count(*) AS n FROM evaluation ev \
-         WHERE ev.status = {building} \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM build_job bj \
-             JOIN derivation_build db ON db.derivation = bj.derivation \
-             WHERE bj.evaluation = ev.id AND db.status IN ({non_terminal}))",
+         WHERE ev.status = {building} AND ev.active_anchors = 0",
         building = status_sql::eval(EvaluationStatus::Building),
-        non_terminal = status_sql::build_in(&[
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-            BuildStatus::FailedTransient,
-        ]),
     )
 }
 
@@ -196,6 +190,8 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
 
     let unbacked_trusted_outputs = count(db, UNBACKED_TRUSTED_OUTPUT_COUNT.stmt()).await?;
 
+    // Before the wedged alarm, which reads the counters this corrects.
+    let eval_counter_drift = crate::eval_counters::recount_eval_anchor_counters(db).await? as i64;
     let wedged_building_evals = count(db, WEDGED_BUILDING_EVALS.stmt()).await?;
 
     Ok(ConsistencyReport {
@@ -208,6 +204,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         adopted,
         unbacked_trusted_outputs,
         wedged_building_evals,
+        eval_counter_drift,
         repair_scope: scope.len() as i64,
     })
 }
@@ -269,7 +266,14 @@ mod tests {
             db.append_query_results([empty.clone()])
         };
 
-        db.append_query_results([n(), n()]).into_connection()
+        db.append_query_results([n()])
+            .append_query_results([vec![BTreeMap::from([(
+                "id".to_owned(),
+                Value::from(uuid::Uuid::now_v7()),
+            )])]])
+            .append_query_results([n()])
+            .append_exec_results([exec(0), exec(2)])
+            .into_connection()
     }
 
     /// The repairs are these counters' only backstop, so the report has to
@@ -304,6 +308,10 @@ mod tests {
             "the anchor wholeness recount runs before the readiness repair that reads it"
         );
         assert_eq!(report.adopted, 0);
+        assert_eq!(
+            report.eval_counter_drift, 2,
+            "the evaluation counters are recounted and their drift reported"
+        );
 
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
@@ -351,10 +359,20 @@ mod tests {
             "the naming backstop asks before it walks: {log:?}"
         );
         assert!(
-            log[16].contains("SELECT DISTINCT o.hash") && log[17].contains("FROM evaluation ev"),
-            "the read-only alarms come last: {log:?}"
+            log[16].contains("SELECT DISTINCT o.hash"),
+            "the unbacked alarm follows the repairs: {log:?}"
         );
-        assert_eq!(log.len(), 18, "{log:?}");
+        assert!(
+            log[17].starts_with("SELECT id FROM evaluation WHERE status IN")
+                && log[18].contains("pg_advisory_xact_lock")
+                && log[19].contains("DELETE FROM evaluation_anchor_delta"),
+            "the evaluation counters are recounted under the fold's lock: {log:?}"
+        );
+        assert!(
+            log[20].contains("active_anchors = 0"),
+            "the wedged alarm reads the counters the recount just corrected: {log:?}"
+        );
+        assert_eq!(log.len(), 21, "{log:?}");
     }
 
     /// A pending anchor nobody names below a live evaluation's builder is the one
@@ -387,8 +405,8 @@ mod tests {
             "then queue what was named and bump: {log:?}"
         );
         assert!(
-            log[23].contains("SELECT DISTINCT o.hash") && log[24].contains("FROM evaluation ev"),
-            "the read-only alarms still come last: {log:?}"
+            log[23].contains("SELECT DISTINCT o.hash") && log[27].contains("active_anchors = 0"),
+            "the alarms still come last: {log:?}"
         );
     }
 
@@ -405,10 +423,11 @@ mod tests {
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
+            eval_counter_drift: 6,
             repair_scope: 2000,
             adopted: 2,
         };
-        assert_eq!(r.total(), 53);
+        assert_eq!(r.total(), 59);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }

@@ -10,7 +10,7 @@
 
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, QueryResult, TransactionTrait, Value};
+use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait, Value};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -151,7 +151,10 @@ pub async fn in_flight_counters<C: ConnectionTrait>(
 
 /// Move the ledger into the evaluation columns. False when another instance
 /// holds the fold: its fold covers the same rows.
-pub async fn fold_anchor_deltas(db: &DatabaseConnection) -> Result<bool, DbErr> {
+pub async fn fold_anchor_deltas<C>(db: &C) -> Result<bool, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let txn = db.begin().await?;
     let locked = txn
         .query_one_raw(FOLD_LOCK_TRY.bind([FOLD_LOCK.into()]))
@@ -171,7 +174,10 @@ pub async fn fold_anchor_deltas(db: &DatabaseConnection) -> Result<bool, DbErr> 
 /// Recount the counters of every in-flight evaluation from its `build_job`
 /// rows and clear its ledger in the same snapshot. Returns the evaluations
 /// whose stored counters disagreed.
-pub async fn recount_eval_anchor_counters(db: &DatabaseConnection) -> Result<u64, DbErr> {
+pub async fn recount_eval_anchor_counters<C>(db: &C) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let evaluations: Vec<EvaluationId> = db
         .query_all_raw(IN_FLIGHT_EVALS.stmt())
         .await?
