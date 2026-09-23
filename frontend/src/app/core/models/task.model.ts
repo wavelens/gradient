@@ -58,6 +58,7 @@ export interface EvaluationSummary {
   errors: number;
   warnings: number;
   dispatched_job: string | null;
+  prioritized: boolean;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -78,6 +79,7 @@ export interface EntryPointSummary {
   build_started_at: string | null;
   deps: BuildStatusCounts;
   deps_total: number;
+  prioritized: boolean;
   created_at: string;
 }
 
@@ -132,6 +134,7 @@ export interface Evaluation {
   warning_count: number;
   waiting_reason?: WaitingReason;
   trigger: { id: string; type: TriggerType } | null;
+  prioritized: boolean;
 }
 
 export type WaitingReason =

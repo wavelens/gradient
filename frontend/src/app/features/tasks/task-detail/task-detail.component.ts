@@ -8,17 +8,18 @@ import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, injec
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { interval, Subscription } from 'rxjs';
+import { interval, Observable, Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
-import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, StatusIconComponent, TooltipDirective } from '@shared/ui';
+import { EvaluationsService } from '@core/services/evaluations.service';
+import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, MessageService, StatusIconComponent, ToastComponent, TooltipDirective } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, buildPhase, commitLabel, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildDuration, buildPhase, commitLabel, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
@@ -28,8 +29,9 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
-    IconComponent, InViewDirective, StatusIconComponent,
+    IconComponent, InViewDirective, StatusIconComponent, ToastComponent,
   ],
+  providers: [MessageService],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -45,6 +47,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   protected authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
   private tasksService = inject(TasksService);
+  private evaluationsService = inject(EvaluationsService);
+  private messageService = inject(MessageService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
 
@@ -153,7 +157,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   /// Fields whose change should re-render the header / eval strip / panel.
   private taskSignature(p: TaskDetail): string {
     const evals = (p.last_evaluations ?? [])
-      .map(e => `${e.id}:${e.status}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}`)
+      .map(e => `${e.id}:${e.status}:${e.prioritized}:${e.errors}:${e.warnings}:${e.updated_at}:${JSON.stringify(e.builds)}`)
       .join('|');
     return [p.active, p.can_edit, p.can_trigger, p.display_name, p.description, p.repository,
       p.wildcard, p.last_check_at, JSON.stringify(p.queue), evals].join('§');
@@ -184,7 +188,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private entryPointSignature(eps: EntryPointSummary[]): string {
-    return eps.map(e => `${e.id}:${e.build_status}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
+    return eps.map(e => `${e.id}:${e.build_status}:${e.prioritized}:${e.build_time_ms}:${e.has_artefacts}:${JSON.stringify(e.deps)}`).join('|');
   }
 
   private loadEntryPoints(evaluationId?: string): void {
@@ -430,6 +434,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         ? [{ label: 'Restart failed builds', icon: 'refresh', disabled: this.starting(),
              command: () => this.restartFailedBuilds() }]
         : []),
+      ...(selected && this.canPrioritizeEvaluation(selected)
+        ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
+             command: () => this.prioritize(this.evaluationsService.prioritizeEvaluation(selected.id), 'Evaluation') }]
+        : []),
       ...(this.authService.isAuthenticated() && this.triggerAccess().canEdit
         ? [{ label: 'Full rewalk', icon: 'account_tree',
              disabled: this.starting() || this.evaluationInProgress(),
@@ -441,6 +449,28 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         : []),
     ];
   });
+
+  private canPrioritize(): boolean {
+    return this.authService.isAuthenticated() && this.triggerAccess().canEdit;
+  }
+
+  private canPrioritizeEvaluation(evaluation: EvaluationSummary): boolean {
+    return this.canPrioritize() && !evaluation.prioritized && this.isRunning(evaluation.status);
+  }
+
+  private canPrioritizeEntryPoint(ep: EntryPointSummary): boolean {
+    return this.canPrioritize() && !ep.prioritized && isPendingBuildStatus(ep.build_status);
+  }
+
+  private prioritize(request: Observable<string>, target: 'Evaluation' | 'Build'): void {
+    request.subscribe({
+      next: () => {
+        this.messageService.add({ severity: 'success', summary: `${target} prioritized` });
+        this.loadTaskData(false);
+      },
+      error: (error: Error) => this.errorMessage.set(error?.message || `Failed to prioritize ${target.toLowerCase()}.`),
+    });
+  }
 
   /// The server restarts the task's newest evaluation, so only that one offers it.
   private canRestartFailed(evaluation: EvaluationSummary): boolean {
@@ -522,6 +552,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         routerLink: ['/project', this.projectName, 'task', this.taskName, 'entry-point-metrics'],
         queryParams: { eval: ep.eval },
       },
+      ...(this.canPrioritizeEntryPoint(ep)
+        ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up',
+             command: () => this.prioritize(this.evaluationsService.prioritizeBuild(ep.build_id), 'Build') }]
+        : []),
     ];
   }
 

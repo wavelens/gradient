@@ -13,6 +13,7 @@ import { vi } from 'vitest';
 import { NEVER, of, throwError } from 'rxjs';
 import { TaskDetailComponent, filenameFromDisposition } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
+import { EvaluationsService } from '@core/services/evaluations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { AccessState } from '@core/models/access.model';
@@ -35,6 +36,7 @@ function epSummary(id: string, attr = `packages."x86_64-linux".${id}`): EntryPoi
     build_time_ms: null,
     deps: zeroCounts(),
     deps_total: 0,
+    prioritized: false,
     created_at: '2026-01-01T00:00:00',
   } as EntryPointSummary;
 }
@@ -58,6 +60,7 @@ function evalSummary(
     errors: 0,
     warnings: 0,
     dispatched_job: null,
+    prioritized: false,
     created_at: '2026-01-01T00:00:00',
     started_at: null,
     finished_at: null,
@@ -132,8 +135,12 @@ function setup(
   access: AccessState,
   serviceOverrides: Parameters<typeof makeTasksService>[1] = {},
   authenticated = true,
-): { fixture: ComponentFixture<TaskDetailComponent>; tasksService: TasksService } {
+): { fixture: ComponentFixture<TaskDetailComponent>; tasksService: TasksService; evaluationsService: EvaluationsService } {
   const tasksService = makeTasksService(access, serviceOverrides);
+  const evaluationsService = {
+    prioritizeEvaluation: () => of('Success'),
+    prioritizeBuild: () => of('Success'),
+  } as unknown as EvaluationsService;
   TestBed.configureTestingModule({
     imports: [TaskDetailComponent],
     providers: [
@@ -142,13 +149,14 @@ function setup(
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: TasksService, useValue: tasksService },
+      { provide: EvaluationsService, useValue: evaluationsService },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
     ],
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
   fixture.detectChanges();
-  return { fixture, tasksService };
+  return { fixture, tasksService, evaluationsService };
 }
 
 const failedBuilds = { builds: { ...zeroCounts(), failed: 2 } };
@@ -590,7 +598,7 @@ describe('TaskDetailComponent diagnostic report', () => {
 
   it('offers the logs first, then metrics and the diagnostic report', () => {
     const labels = component().panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Logs', 'Show job', 'Metrics', 'Full rewalk', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Show job', 'Metrics', 'Prioritize', 'Full rewalk', 'Diagnostic report']);
   });
 
   it('points the logs entry at the selected evaluation', () => {
@@ -758,5 +766,76 @@ describe('TaskDetailComponent - status phases', () => {
     const pkg: HTMLElement = fixture.nativeElement.querySelector('.pkg');
     expect(pkg.dataset['phase']).toBe('aborted');
     expect(pkg.querySelector('gr-status-icon.si')?.getAttribute('data-phase')).toBe('aborted');
+  });
+});
+
+describe('TaskDetailComponent prioritize', () => {
+  const trigger = { managed: false, canEdit: true, canTrigger: true };
+  const viewer = { managed: false, canEdit: false, canTrigger: false };
+  const pkgLabels = (fixture: ComponentFixture<TaskDetailComponent>, ep: EntryPointSummary) => {
+    fixture.componentInstance.openPkgMenu(new Event('click'), ep, 'e1', { toggle: () => {} });
+    return fixture.componentInstance.pkgMenuModel().map(i => i.label);
+  };
+
+  it('prioritizes a running evaluation from the panel menu, then refreshes', () => {
+    const { fixture, tasksService, evaluationsService } = setup(trigger, { primaryStatus: 'Building' });
+    const spy = vi.spyOn(evaluationsService, 'prioritizeEvaluation');
+    const reload = vi.spyOn(tasksService, 'getTask');
+    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Prioritize')!.command!();
+    expect(spy).toHaveBeenCalledWith('e1');
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it('offers no evaluation prioritize once the evaluation finished', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Completed' });
+    expect(menuLabels(fixture)).not.toContain('Prioritize');
+  });
+
+  it('offers no evaluation prioritize once it is prioritized', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Building', primary: { prioritized: true } });
+    expect(menuLabels(fixture)).not.toContain('Prioritize');
+  });
+
+  it('offers no evaluation prioritize without trigger access', () => {
+    const { fixture } = setup(viewer, { primaryStatus: 'Building' });
+    expect(menuLabels(fixture)).not.toContain('Prioritize');
+  });
+
+  it('offers no evaluation prioritize to an anonymous visitor', () => {
+    const { fixture } = setup(trigger, { primaryStatus: 'Building' }, false);
+    expect(menuLabels(fixture)).not.toContain('Prioritize');
+  });
+
+  it('reports a failed prioritize', () => {
+    const { fixture, evaluationsService } = setup(trigger, { primaryStatus: 'Building' });
+    vi.spyOn(evaluationsService, 'prioritizeEvaluation').mockReturnValue(throwError(() => new Error('Evaluation already finished')));
+    fixture.componentInstance.panelMenuModel().find(i => i.label === 'Prioritize')!.command!();
+    expect(fixture.componentInstance.errorMessage()).toBe('Evaluation already finished');
+  });
+
+  it('prioritizes a pending entry point by its build id', () => {
+    const { fixture, evaluationsService } = setup(trigger);
+    const spy = vi.spyOn(evaluationsService, 'prioritizeBuild');
+    const ep = { ...epSummary('hello'), build_status: 'Queued' } as EntryPointSummary;
+    expect(pkgLabels(fixture, ep)).toContain('Prioritize');
+    fixture.componentInstance.pkgMenuModel().find(i => i.label === 'Prioritize')!.command!();
+    expect(spy).toHaveBeenCalledWith('b-hello');
+  });
+
+  it('offers no entry point prioritize once its build finished', () => {
+    const { fixture } = setup(trigger);
+    expect(pkgLabels(fixture, epSummary('hello'))).not.toContain('Prioritize');
+  });
+
+  it('offers no entry point prioritize once it is prioritized', () => {
+    const { fixture } = setup(trigger);
+    const ep = { ...epSummary('hello'), build_status: 'Queued', prioritized: true } as EntryPointSummary;
+    expect(pkgLabels(fixture, ep)).not.toContain('Prioritize');
+  });
+
+  it('offers no entry point prioritize without trigger access', () => {
+    const { fixture } = setup(viewer);
+    const ep = { ...epSummary('hello'), build_status: 'Building' } as EntryPointSummary;
+    expect(pkgLabels(fixture, ep)).not.toContain('Prioritize');
   });
 });

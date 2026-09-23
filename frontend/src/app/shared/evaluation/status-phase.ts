@@ -37,3 +37,9 @@ export function buildPhase(status: BuildStatus): StatusPhase {
     case 'Skipped': return 'aborted';
   }
 }
+
+const PENDING_BUILD_STATUSES: ReadonlySet<string> = new Set<BuildStatus>(['Created', 'Queued', 'Building']);
+
+export function isPendingBuildStatus(status: string): boolean {
+  return PENDING_BUILD_STATUSES.has(status);
+}

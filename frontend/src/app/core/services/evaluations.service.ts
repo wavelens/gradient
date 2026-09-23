@@ -61,6 +61,7 @@ export interface BuildItem {
   build_started_at: string | null;
   dispatched_job: string | null;  // Job Board entry of the latest attempt, null until dispatched
   depth: number;         // dependency layer, 0 = nothing in the list depends on it
+  prioritized: boolean;
 }
 
 export interface BuildWithOutputs {
@@ -72,6 +73,7 @@ export interface BuildWithOutputs {
   worker: string | null;
   dispatched_job: string | null;
   output: Record<string, string>;
+  prioritized: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -114,6 +116,10 @@ export class EvaluationsService {
     return this.api.post<string>(`evals/${id}`, { method: 'abort' });
   }
 
+  prioritizeEvaluation(id: string): Observable<string> {
+    return this.api.post<string>(`evals/${id}/prioritize`);
+  }
+
   getBuilds(evaluationId: string, limit?: number, offset?: number, scope?: string): Observable<PaginatedBuilds> {
     const params: string[] = [];
     if (limit !== undefined) params.push(`limit=${limit}`);
@@ -125,6 +131,10 @@ export class EvaluationsService {
 
   getBuild(buildId: string): Observable<BuildWithOutputs> {
     return this.api.get<BuildWithOutputs>(`builds/${buildId}`);
+  }
+
+  prioritizeBuild(buildId: string): Observable<string> {
+    return this.api.post<string>(`builds/${buildId}/prioritize`);
   }
 
   getBuildLog(buildId: string): Observable<string> {

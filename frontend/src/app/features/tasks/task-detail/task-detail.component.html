@@ -4,6 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
+<gr-toast />
+
 @if (loading()) {
   <gr-loading-spinner message="Loading task..." />
 } @else if (task(); as proj) {

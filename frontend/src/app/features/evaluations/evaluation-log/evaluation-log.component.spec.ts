@@ -14,7 +14,7 @@ import { of } from 'rxjs';
 import { Evaluation } from '@core/models';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
-  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth };
+  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, build_started_at: null, dispatched_job: null, depth, prioritized: false };
 }
 
 function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: EvaluationLogComponent } {
@@ -333,6 +333,44 @@ describe('EvaluationLogComponent', () => {
       expect(select).not.toHaveBeenCalled();
       expect(document.querySelectorAll('.gr-menu__item').length).toBeGreaterThan(0);
     });
+
+    describe('prioritize', () => {
+      function withTrigger(cmp: EvaluationLogComponent): EvaluationLogComponent {
+        cmp.access.set({ managed: false, canEdit: false, canTrigger: true });
+        return cmp;
+      }
+
+      it('offers prioritize for a pending build to a member who may trigger', () => {
+        const { cmp } = setup();
+        expect(open(withTrigger(cmp), target({ status: 'Queued' })).has('Prioritize')).toBe(true);
+      });
+
+      it('hides prioritize from a view-only visitor', () => {
+        const { cmp } = setup();
+        expect(open(cmp, target({ status: 'Queued' })).has('Prioritize')).toBe(false);
+      });
+
+      it('hides prioritize once the build is already prioritized', () => {
+        const { cmp } = setup();
+        expect(open(withTrigger(cmp), target({ status: 'Queued', prioritized: true })).has('Prioritize')).toBe(false);
+      });
+
+      it('hides prioritize for a finished build', () => {
+        const { cmp } = setup();
+        for (const status of ['Completed', 'Substituted', 'FailedPermanent', 'DependencyFailed', 'Skipped']) {
+          expect(open(withTrigger(cmp), target({ status })).has('Prioritize')).toBe(false);
+        }
+      });
+
+      it('prioritizes the build, then reloads the build list', () => {
+        const { cmp } = setup();
+        const prioritize = vi.spyOn(TestBed.inject(EvaluationsService), 'prioritizeBuild').mockReturnValue(of('Success'));
+        const reload = vi.spyOn(cmp, 'loadBuilds').mockImplementation(() => {});
+        open(withTrigger(cmp), target({ status: 'Building' })).get('Prioritize')!.command!();
+        expect(prioritize).toHaveBeenCalledWith('b1');
+        expect(reload).toHaveBeenCalled();
+      });
+    });
   });
 
   // #636: a live log arrives in batches and follows the tail with a smooth
@@ -425,7 +463,7 @@ describe('EvaluationLogComponent', () => {
     it('fetches the linked build before the build list', () => {
       const getBuild = vi.fn(() => of({
         id: 'b1', evaluation: 'eval-1', status: 'Completed', derivation_path: 'hash-hello.drv',
-        architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, created_at: '', updated_at: '',
+        architecture: 'x86_64-linux', worker: null, dispatched_job: null, output: {}, prioritized: true, created_at: '', updated_at: '',
       }));
       const getBuilds = vi.fn(() => of({ builds: [], total: 0, active_count: 0 }));
       TestBed.configureTestingModule({
@@ -452,6 +490,7 @@ describe('EvaluationLogComponent', () => {
       fixture.componentInstance.ngOnInit();
       expect(getBuild).toHaveBeenCalled();
       expect(getBuild.mock.invocationCallOrder[0]).toBeLessThan(getBuilds.mock.invocationCallOrder[0]);
+      expect(fixture.componentInstance.builds().find(b => b.id === 'b1')?.prioritized).toBe(true);
       fixture.destroy();
     });
   });

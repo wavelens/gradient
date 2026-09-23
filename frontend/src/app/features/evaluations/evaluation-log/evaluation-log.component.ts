@@ -47,14 +47,17 @@ import {
   MenuComponent,
   MenuItem,
   MessageBannerComponent,
+  MessageService,
+  ToastComponent,
 } from '@shared/ui';
-import { buildDuration, commitLabel, evaluationDuration, formatEvaluationDuration, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildDuration, commitLabel, evaluationDuration, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MenuComponent, MessageBannerComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MenuComponent, MessageBannerComponent, ToastComponent, WritableDirective],
+  providers: [MessageService],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -72,6 +75,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private projectsService = inject(ProjectsService);
   private tasksService = inject(TasksService);
   private accessService = inject(AccessService);
+  private messageService = inject(MessageService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private cdr = inject(ChangeDetectorRef);
@@ -163,6 +167,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         disabled: ['Created', 'Queued'].includes(build.status),
         command: () => void this.downloadLog(build),
       },
+      ...(this.canPrioritize(build)
+        ? [{ label: 'Prioritize', icon: 'keyboard_double_arrow_up', command: () => this.prioritizeBuild(build) }]
+        : []),
     ];
   });
 
@@ -613,6 +620,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           build_time_ms: null,
           build_started_at: null,
           dispatched_job: b.dispatched_job,
+          prioritized: b.prioritized,
           // `?build=` also scopes the list to this build's closure, so it is the
           // root of everything the API returns.
           depth: 0,
@@ -1373,6 +1381,24 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     link.download = `${this.buildFileName(build.name)}.log`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  canPrioritize(build: BuildItem): boolean {
+    return this.triggerAccess().canEdit && !build.prioritized && isPendingBuildStatus(build.status);
+  }
+
+  prioritizeBuild(build: BuildItem): void {
+    this.evalService.prioritizeBuild(build.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.messageService.add({ severity: 'success', summary: 'Build prioritized', detail: this.buildDisplayName(build.name) });
+        this.loadBuilds();
+      },
+      error: (error: Error) => this.messageService.add({
+        severity: 'error',
+        summary: 'Prioritize failed',
+        detail: error?.message || 'Failed to prioritize build.',
+      }),
+    });
   }
 
   // ── Abort ───────────────────────────────────────────────────────────────────

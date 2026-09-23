@@ -5,7 +5,7 @@
  */
 
 import type { BuildStatus, EvaluationStatus } from '@core/models';
-import { buildPhase, evaluationPhase, type StatusPhase } from './status-phase';
+import { buildPhase, evaluationPhase, isPendingBuildStatus, type StatusPhase } from './status-phase';
 
 describe('evaluationPhase', () => {
   it.each<[EvaluationStatus, StatusPhase]>([
@@ -38,5 +38,23 @@ describe('buildPhase', () => {
     ['Skipped', 'aborted'],
   ])('maps %s to %s', (status, phase) => {
     expect(buildPhase(status)).toBe(phase);
+  });
+});
+
+describe('isPendingBuildStatus', () => {
+  it.each<[BuildStatus, boolean]>([
+    ['Created', true],
+    ['Queued', true],
+    ['Building', true],
+    ['Completed', false],
+    ['Substituted', false],
+    ['FailedPermanent', false],
+    ['FailedTransient', false],
+    ['FailedTimeout', false],
+    ['Aborted', false],
+    ['DependencyFailed', false],
+    ['Skipped', false],
+  ])('treats %s as pending: %s', (status, pending) => {
+    expect(isPendingBuildStatus(status)).toBe(pending);
   });
 });
