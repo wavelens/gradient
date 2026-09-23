@@ -67,6 +67,7 @@ export class CommandPaletteComponent {
   private search = inject(SearchService);
   private router = inject(Router);
   private typed$ = new Subject<string>();
+  private pendingEnter = false;
   private queryInput = viewChild<ElementRef<HTMLInputElement>>('query');
 
   protected readonly kindLabel = KIND_LABEL;
@@ -82,6 +83,7 @@ export class CommandPaletteComponent {
       .subscribe((result) => {
         this.result.set(result);
         this.active.set(0);
+        this.resolvePendingEnter(result);
       });
     effect(() => this.queryInput()?.nativeElement.focus());
     inject(DestroyRef).onDestroy(() => this.palette.close());
@@ -101,14 +103,16 @@ export class CommandPaletteComponent {
   }
 
   onKey(e: KeyboardEvent): void {
-    const hits = this.result().hits;
-    if (!hits.length) return;
     const step = stepOf(e);
-    if (step) {
-      e.preventDefault();
+    if (step || e.key === 'Tab' || e.key === 'Enter') e.preventDefault();
+    const { query, hits } = this.result();
+    if (e.key === 'Enter' && this.typedQuery() !== query) {
+      this.pendingEnter = true;
+    } else if (!hits.length) {
+      return;
+    } else if (step) {
       this.active.set((this.active() + step + hits.length) % hits.length);
     } else if (e.key === 'Enter') {
-      e.preventDefault();
       this.go(hits[this.active()]);
     }
   }
@@ -118,10 +122,21 @@ export class CommandPaletteComponent {
     void this.router.navigateByUrl(hit.route);
   }
 
+  private typedQuery(): string {
+    return this.queryInput()?.nativeElement.value.trim() ?? '';
+  }
+
+  private resolvePendingEnter(result: Result): void {
+    if (!this.pendingEnter || result.query !== this.typedQuery()) return;
+    this.pendingEnter = false;
+    if (result.hits.length) this.go(result.hits[0]);
+  }
+
   /// One open palette: starred items at once, then debounced typing; switchMap drops stale answers.
   private session(): Observable<Result> {
     return defer(() => {
       const returnFocus = document.activeElement as HTMLElement | null;
+      this.pendingEnter = false;
       this.result.set({ query: '', hits: [], failed: false });
       return this.typed$.pipe(
         debounceTime(DEBOUNCE_MS),

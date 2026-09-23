@@ -6,7 +6,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { CommandPaletteComponent } from './command-palette.component';
 import { CommandPaletteService } from './command-palette.service';
 import { SearchService } from '@core/services/search.service';
@@ -144,5 +144,61 @@ describe('CommandPaletteComponent', () => {
     f.detectChanges();
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('Search failed');
     expect(root.querySelectorAll('[role="option"]').length).toBe(0);
+  });
+
+  it('opens the first hit of the typed query when Enter lands inside the debounce', () => {
+    vi.useFakeTimers();
+    const typed: SearchHit = { kind: 'project', label: 'hello', sublabel: '', route: '/project/hello', starred: false };
+    const { f, search, root } = render(() => of([typed]));
+    search.mockImplementationOnce(() => of(HITS));
+    TestBed.inject(CommandPaletteService).open();
+    f.detectChanges();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const input = root.querySelector('input')!;
+    input.value = 'hel';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(navigate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(200);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('/project/hello');
+  });
+
+  it('waits for the answer to the typed query when Enter lands inside the request', () => {
+    vi.useFakeTimers();
+    const pending = new Subject<SearchHit[]>();
+    const { f, search, root } = render(() => of(HITS));
+    TestBed.inject(CommandPaletteService).open();
+    f.detectChanges();
+    search.mockImplementation(() => pending);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const input = root.querySelector('input')!;
+    input.value = 'hel';
+    input.dispatchEvent(new Event('input'));
+    vi.advanceTimersByTime(200);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(navigate).not.toHaveBeenCalled();
+    pending.next([HITS[1]]);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('/caches/main/nars?hash=abc');
+  });
+
+  it('keeps Ctrl+J and Ctrl+K from the browser even without hits', () => {
+    const { f, root } = render(() => of([]));
+    TestBed.inject(CommandPaletteService).open();
+    f.detectChanges();
+    const input = root.querySelector('input')!;
+    for (const key of ['j', 'k']) {
+      const e = new KeyboardEvent('keydown', { key, ctrlKey: true, cancelable: true });
+      input.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(true);
+    }
+  });
+
+  it('traps Tab inside the dialog', () => {
+    const { f, root } = render();
+    TestBed.inject(CommandPaletteService).open();
+    f.detectChanges();
+    const e = new KeyboardEvent('keydown', { key: 'Tab', cancelable: true });
+    root.querySelector('input')!.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
   });
 });
