@@ -14,7 +14,7 @@ use gradient_db::{
 };
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput};
+use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct};
 use gradient_types::*;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
@@ -329,6 +329,7 @@ async fn build_output(
         record_metrics(ctx, &anchor, derivation_id, &metrics).await;
     }
 
+    let mut missing: Vec<&BuildProduct> = Vec::new();
     for output in &outputs {
         let existing = EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.eq(derivation_id))
@@ -366,7 +367,11 @@ async fn build_output(
             warn!(error = %e, %build_id, output_name = %output.name, "failed to delete prior build_product rows");
         }
 
-        for product in &output.products {
+        let (present, absent): (Vec<&BuildProduct>, Vec<&BuildProduct>) =
+            output.products.iter().partition(|p| p.size.is_some());
+        missing.extend(absent);
+
+        for product in present {
             let am = MBuildProduct {
                 id: BuildProductId::now_v7(),
                 derivation_output: row_id,
@@ -386,6 +391,7 @@ async fn build_output(
     }
 
     info!(%build_id, output_count = outputs.len(), "build outputs recorded");
+    report_missing_artefacts(ctx, derivation_id, &missing).await?;
 
     // The daemon found the outputs already valid, but the worker has not pushed
     // their NARs yet: record the flag and let `build_completed` turn it into the
@@ -400,6 +406,48 @@ async fn build_output(
     }
 
     Ok(())
+}
+
+/// A declared artefact the build did not produce leaves the build successful but
+/// fails every evaluation still waiting on it.
+async fn report_missing_artefacts(
+    ctx: &DbContext,
+    derivation: DerivationId,
+    missing: &[&BuildProduct],
+) -> Result<()> {
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let referencing =
+        gradient_db::evals_referencing_derivations(&ctx.worker_db, &[derivation]).await?;
+    let active = EEvaluation::find()
+        .filter(CEvaluation::Id.is_in(referencing))
+        .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
+        .all(&ctx.worker_db)
+        .await
+        .context("fetch active evaluations for missing artefacts")?;
+
+    for evaluation in &active {
+        for product in missing {
+            gradient_db::record_evaluation_message(
+                ctx,
+                evaluation.id,
+                MessageLevel::Error,
+                missing_artefact_message(product),
+                Some("builder".to_owned()),
+            )
+            .await;
+        }
+    }
+    Ok(())
+}
+
+fn missing_artefact_message(product: &BuildProduct) -> String {
+    format!(
+        "artefact {} ({} {}) is declared in hydra-build-products but missing from the build output",
+        product.path, product.file_type, product.subtype
+    )
 }
 
 async fn build_completed(
@@ -903,4 +951,25 @@ async fn ready(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_artefact_message_names_the_path_and_kind() {
+        let product = BuildProduct {
+            file_type: "file".into(),
+            subtype: "iso".into(),
+            name: "image.iso".into(),
+            path: "/nix/store/abc-img/image.iso".into(),
+            size: None,
+        };
+        assert_eq!(
+            missing_artefact_message(&product),
+            "artefact /nix/store/abc-img/image.iso (file iso) is declared in \
+             hydra-build-products but missing from the build output"
+        );
+    }
 }

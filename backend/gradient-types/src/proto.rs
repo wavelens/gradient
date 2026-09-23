@@ -432,7 +432,8 @@ pub struct BuildProduct {
     pub name: String,
     /// Absolute store path to the product file (e.g. `/nix/store/abc-pkg/image.iso`).
     pub path: String,
-    /// Product file size in bytes (from `stat`); `None` on stat failure.
+    /// Product file size in bytes (from `stat`); `None` when the file is missing,
+    /// which the server reports as a missing artefact.
     pub size: Option<u64>,
 }
 

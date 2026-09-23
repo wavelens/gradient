@@ -903,4 +903,20 @@ mod tests {
         assert_eq!(products[0].name, "index.html");
         assert_eq!(products[0].size, Some(13));
     }
+
+    #[tokio::test]
+    async fn load_products_reports_a_missing_artefact_without_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let support = dir.path().join("nix-support");
+        tokio::fs::create_dir_all(&support).await.unwrap();
+        let line = format!("file iso {}", dir.path().join("image.iso").display());
+        tokio::fs::write(support.join("hydra-build-products"), line)
+            .await
+            .unwrap();
+
+        let products = load_products(dir.path().to_str().unwrap()).await;
+        assert_eq!(products.len(), 1);
+        assert_eq!(products[0].name, "image.iso");
+        assert_eq!(products[0].size, None);
+    }
 }
