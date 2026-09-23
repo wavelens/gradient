@@ -75,6 +75,7 @@ mod m20260923_000004_dispatched_job_eval_index;
 mod m20260923_000005_dispatched_job_open_unique;
 mod m20260923_000006_user_stars;
 mod m20260923_000007_evaluation_walk_mode;
+mod m20260923_000008_evaluation_task_commit_index;
 
 pub struct Migrator;
 
@@ -146,6 +147,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260923_000005_dispatched_job_open_unique::Migration),
             Box::new(m20260923_000006_user_stars::Migration),
             Box::new(m20260923_000007_evaluation_walk_mode::Migration),
+            Box::new(m20260923_000008_evaluation_task_commit_index::Migration),
         ]
     }
 }
