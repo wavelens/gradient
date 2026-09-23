@@ -34,7 +34,7 @@ The dashboard routes you to what needs attention. Its sections follow your data 
     3. starred (also a starred task in a public project you are not a member of)
     4. member only
 - Within a tier the newest latest evaluation comes first.
-- Pull request evaluations are excluded everywhere on the dashboard: stats, history bars, deltas, activity and "active".
+- Pull request evaluations are excluded from status, history bars, deltas, activity and "active". The stats line totals include PR work.
 
 ## Stars
 

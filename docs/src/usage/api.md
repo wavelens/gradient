@@ -69,7 +69,8 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `PUT` / `DELETE` | `/user/stars/tasks/{project}/{task}` | Star / unstar a task (idempotent) |
 | `PUT` / `DELETE` | `/user/stars/caches/{cache}` | Star / unstar a cache (idempotent) |
 | `GET` | `/dashboard/stats` | Dashboard stat tiles over the projects the user can see |
-| `GET` | `/dashboard/activity` | Daily non-PR evaluation counts of the last 370 days |
+| `GET` | `/dashboard/tasks` | Ranked task table with filter counts, paging and evaluation history |
+| `GET` | `/dashboard/activity` | Daily non-PR evaluation counts of the last 371 days |
 | `GET` | `/dashboard/rail` | Sidebar rail: ranked projects, readable caches, operations flag |
 | `GET` | `/search` | Command palette search: names, NAR hashes and commit prefixes; starred items when `q` is empty |
 

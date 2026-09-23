@@ -1388,7 +1388,7 @@ paths:
       description: |-
         Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).
         `builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median dispatch wait of the last 24 hours.
-        `cache_size_bytes` sums the files of caches the viewer created or reaches through a project membership.
+        `cache_size_bytes` sums the files of caches the viewer created or reaches through a project membership; all caches for a superuser.
         `workers` covers connected workers of visible projects only: `busy_pct` is assigned jobs over summed capacity, capped at 100.
       operationId: getDashboardStats
       responses:
@@ -1496,7 +1496,7 @@ paths:
         Projects: member projects plus starred public ones, sorted by tier (`starred_active`, `active`, `starred`, `member`), then name.
         Active means a non-PR evaluation in the last 14 days; `status` is the latest non-PR evaluation's status or `null`.
         `tasks` is present only on `starred_active` projects and omitted otherwise.
-        Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones (any starred cache for a superuser); starred first, then name.
+        Caches: those the viewer created, is a member of or reaches through a member project, plus starred public ones; starred first, then name. Superusers get no extra caches here.
         `operations` is true for a superuser or when a member project has a registered worker.
       operationId: getDashboardRail
       responses:
@@ -1594,8 +1594,8 @@ paths:
         - Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).
         - 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).
         - Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.
-        An empty `q` returns the user's starred projects, tasks and caches.
-        Visibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user; a superuser reads everything.
+        An empty `q` returns the user's starred projects, tasks and caches, labelled by display name like name hits.
+        Visibility matches the rest of the API: a project is readable when public or the user is a member; a cache when public, created by, shared with or subscribed to by a project of the user. There is no superuser bypass, so every hit opens a readable page.
         Results are ordered NAR hits, commit hits, then name hits (starred first, then kind, then name).
       operationId: getSearch
       parameters:
@@ -1658,7 +1658,7 @@ paths:
     get:
       tags: [user]
       summary: List starred projects, tasks and caches
-      description: Returns the names of everything the current user starred and can still read, each list sorted by name. A target the user lost access to is hidden, not unstarred.
+      description: Returns the names of everything the current user starred and can still read (the visibility of `/search`, no superuser bypass), each list sorted by name. A target the user lost access to is hidden, not unstarred.
       operationId: getUserStars
       responses:
         '200':
