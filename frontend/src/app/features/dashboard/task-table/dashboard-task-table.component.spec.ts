@@ -21,8 +21,6 @@ const row = (task: string): TaskRow => ({
   entry_points: { ok: 41, failing: 4, total: 45 },
   delta: 3,
   speed_ms: 840_000,
-  reliability: 0.82,
-  evaluations_per_week: 31,
   history: [],
 });
 
@@ -86,11 +84,11 @@ describe('DashboardTaskTableComponent', () => {
     expect(root.querySelector('tbody')?.textContent).not.toContain('stale');
   });
 
-  it('renders entry points, delta, speed, reliability and evaluations per week', () => {
+  it('renders entry points, change and speed', () => {
     const cells = Array.from(render(null, () => of(PAGE)).root.querySelectorAll('tbody td.num')).map((c) =>
       c.textContent?.trim(),
     );
-    expect(cells).toEqual(['41/45', '+3', '14m 00s', '82%', '31']);
+    expect(cells).toEqual(['41/45', '+3', '14m 00s']);
   });
 
   it('names the full project and task on a truncated task link', () => {

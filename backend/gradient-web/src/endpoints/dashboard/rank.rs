@@ -64,9 +64,6 @@ pub struct TaskFacts {
     pub latest: Option<Latest>,
     pub previous: Option<EvaluationId>,
     pub recent_14d: i64,
-    pub last_28d: i64,
-    pub completed_30d: i64,
-    pub failed_30d: i64,
     pub speed_ms: Option<i64>,
 }
 
@@ -88,8 +85,6 @@ pub struct TaskRow {
     pub entry_points: Option<Outcomes>,
     pub delta: Option<i64>,
     pub speed_ms: Option<i64>,
-    pub reliability: Option<f64>,
-    pub evaluations_per_week: f64,
     pub history: Vec<HistoryBar>,
     #[serde(skip)]
     failing: bool,
@@ -110,11 +105,8 @@ impl TaskRow {
             .as_ref()
             .is_some_and(|l| l.status == EvaluationStatus::Failed)
             || latest_outcomes.is_some_and(|o| o.failing > 0);
-        let judged = f.completed_30d + f.failed_30d;
         TaskRow {
             tier: Tier::of(f.starred, f.recent_14d > 0),
-            reliability: (judged > 0).then(|| f.completed_30d as f64 / judged as f64),
-            evaluations_per_week: f.last_28d as f64 / 4.0,
             entry_points: latest_outcomes,
             delta,
             failing,
@@ -218,9 +210,6 @@ mod tests {
             }),
             previous: Some(EvaluationId::now_v7()),
             recent_14d: recent,
-            last_28d: 8,
-            completed_30d: 9,
-            failed_30d: 1,
             speed_ms: Some(60_000),
         }
     }
@@ -406,13 +395,5 @@ mod tests {
         rank(&mut rows);
         let names: Vec<&str> = rows.iter().map(|r| r.task.as_str()).collect();
         assert_eq!(names, ["old", "never"]);
-    }
-
-    #[test]
-    fn reliability_ignores_empty_windows() {
-        let mut f = facts("a", false, 1, None);
-        f.completed_30d = 0;
-        f.failed_30d = 0;
-        assert_eq!(TaskRow::build(f, &HashMap::new()).reliability, None);
     }
 }

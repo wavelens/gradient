@@ -25,8 +25,6 @@ export interface TaskRow {
   entry_points: { ok: number; failing: number; total: number } | null;
   delta: number | null;
   speed_ms: number | null;
-  reliability: number | null;
-  evaluations_per_week: number;
   history: HistoryBar[];
 }
 

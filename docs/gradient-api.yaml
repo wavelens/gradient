@@ -1278,7 +1278,7 @@ paths:
                             type: array
                             items:
                               type: object
-                              required: [project, task, starred, tier, latest, entry_points, delta, speed_ms, reliability, evaluations_per_week, history]
+                              required: [project, task, starred, tier, latest, entry_points, delta, speed_ms, history]
                               properties:
                                 project:
                                   type: string
@@ -1328,13 +1328,6 @@ paths:
                                   type: integer
                                   nullable: true
                                   description: Mean duration of the last 30 terminal evaluations.
-                                reliability:
-                                  type: number
-                                  nullable: true
-                                  description: Completed / (completed + failed) over 30 days; `null` without data.
-                                evaluations_per_week:
-                                  type: number
-                                  description: Evaluations over 28 days divided by 4.
                                 history:
                                   type: array
                                   description: Recent non-PR evaluations up to the latest, oldest first.
@@ -1371,8 +1364,6 @@ paths:
                       entry_points: { ok: 12, failing: 0, total: 12 }
                       delta: 0
                       speed_ms: 540000
-                      reliability: 0.95
-                      evaluations_per_week: 6.5
                       history:
                         - id: "fe0d108b-d4b5-423e-9ba2-52a43179cf84"
                           status: Completed

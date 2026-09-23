@@ -51,9 +51,6 @@ fn to_facts(r: TaskFactsRow) -> TaskFacts {
         starred: r.starred,
         previous: r.previous,
         recent_14d: r.recent_14d,
-        last_28d: r.last_28d,
-        completed_30d: r.completed_30d,
-        failed_30d: r.failed_30d,
         speed_ms: r.speed_ms,
     }
 }
@@ -204,9 +201,6 @@ mod tests {
             ),
             ("previous_id", Value::Uuid(previous)),
             ("recent_14d", Value::BigInt(Some(0))),
-            ("last_28d", Value::BigInt(Some(0))),
-            ("completed_30d", Value::BigInt(Some(0))),
-            ("failed_30d", Value::BigInt(Some(0))),
             ("speed_ms", Value::BigInt(None)),
         ])
     }

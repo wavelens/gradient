@@ -166,9 +166,7 @@ fn task_facts_sql() -> String {
             EXISTS (SELECT 1 FROM user_task_star s WHERE s.\"user\" = $1 AND s.task = t.id) AS starred, \
             l.id AS latest_id, l.status AS latest_status, encode(c.hash, 'hex') AS latest_commit, \
             l.created_at AS latest_created_at, pv.id AS previous_id, \
-            coalesce(a.recent_14d, 0) AS recent_14d, coalesce(a.last_28d, 0) AS last_28d, \
-            coalesce(a.completed_30d, 0) AS completed_30d, coalesce(a.failed_30d, 0) AS failed_30d, \
-            sp.speed_ms \
+            coalesce(a.recent_14d, 0) AS recent_14d, sp.speed_ms \
         FROM viewer_tasks v JOIN task t ON t.id = v.id JOIN project p ON p.id = t.project \
         LEFT JOIN LATERAL (SELECT e.id, e.status, e.commit, e.created_at FROM evaluation e \
             LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" WHERE e.task = t.id AND {NON_PR} \
@@ -177,20 +175,14 @@ fn task_facts_sql() -> String {
         LEFT JOIN LATERAL (SELECT e.id FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
             WHERE e.task = t.id AND {NON_PR} AND e.status IN ({term}) AND e.created_at < l.created_at \
             ORDER BY e.created_at DESC LIMIT 1) pv ON true \
-        LEFT JOIN LATERAL (SELECT \
-            count(*) FILTER (WHERE e.created_at > now() - interval '14 days') AS recent_14d, \
-            count(*) FILTER (WHERE e.created_at > now() - interval '28 days') AS last_28d, \
-            count(*) FILTER (WHERE e.status = {completed}) AS completed_30d, \
-            count(*) FILTER (WHERE e.status = {failed}) AS failed_30d \
+        LEFT JOIN LATERAL (SELECT count(*) AS recent_14d \
             FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
-            WHERE e.task = t.id AND {NON_PR} AND e.created_at > now() - interval '30 days') a ON true \
+            WHERE e.task = t.id AND {NON_PR} AND e.created_at > now() - interval '14 days') a ON true \
         LEFT JOIN LATERAL (SELECT (avg(extract(epoch FROM (r.finished_at - r.created_at))) * 1000)::bigint AS speed_ms \
             FROM (SELECT e.created_at, e.finished_at FROM evaluation e LEFT JOIN task_trigger tt ON tt.id = e.\"trigger\" \
                 WHERE e.task = t.id AND {NON_PR} AND e.status IN ({term}) AND e.finished_at IS NOT NULL \
                 ORDER BY e.created_at DESC LIMIT 30) r) sp ON true",
         term = terminal(),
-        completed = crate::status_sql::eval(EvaluationStatus::Completed),
-        failed = crate::status_sql::eval(EvaluationStatus::Failed),
     )
 }
 
@@ -249,9 +241,6 @@ pub struct TaskFactsRow {
     pub latest: Option<(EvaluationId, EvaluationStatus, String, NaiveDateTime)>,
     pub previous: Option<EvaluationId>,
     pub recent_14d: i64,
-    pub last_28d: i64,
-    pub completed_30d: i64,
-    pub failed_30d: i64,
     pub speed_ms: Option<i64>,
 }
 
@@ -299,9 +288,6 @@ fn task_facts_row(r: &QueryResult) -> Result<TaskFactsRow, DbErr> {
             .try_get::<Option<Uuid>>("", "previous_id")?
             .map(EvaluationId::new),
         recent_14d: r.try_get("", "recent_14d")?,
-        last_28d: r.try_get("", "last_28d")?,
-        completed_30d: r.try_get("", "completed_30d")?,
-        failed_30d: r.try_get("", "failed_30d")?,
         speed_ms: r.try_get("", "speed_ms")?,
     })
 }

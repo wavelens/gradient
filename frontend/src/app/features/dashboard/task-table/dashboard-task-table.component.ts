@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { DecimalPipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -44,7 +43,7 @@ function parseFilter(value: string | null): DashboardFilter {
 @Component({
   selector: 'app-dashboard-task-table',
   standalone: true,
-  imports: [DecimalPipe, RouterLink, ButtonComponent, StarButtonComponent, EvaluationHistoryComponent],
+  imports: [RouterLink, ButtonComponent, StarButtonComponent, EvaluationHistoryComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './dashboard-task-table.component.html',
   styleUrl: './dashboard-task-table.component.scss',
@@ -122,7 +121,7 @@ export class DashboardTaskTableComponent implements OnInit {
 
   delta(d: number | null): string {
     if (d === null) return '-';
-    return d > 0 ? `+${d}` : d < 0 ? String(d) : '±0';
+    return d > 0 ? `+${d}` : d < 0 ? String(d) : '0';
   }
 
   load(): void {
