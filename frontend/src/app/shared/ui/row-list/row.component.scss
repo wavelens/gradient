@@ -61,6 +61,15 @@
   position: relative;
 }
 
+.row.is-link .row-info,
+.row.is-link .row-chevron {
+  pointer-events: none;
+}
+
+.row.is-link .row-info :is(a, button) {
+  pointer-events: auto;
+}
+
 .row-chevron {
   flex-shrink: 0;
   color: var(--gr-text-muted);
