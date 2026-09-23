@@ -1,0 +1,39 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+import type { BuildStatus, EvaluationStatus } from '@core/models';
+
+export type StatusPhase = 'queued' | 'waiting' | 'running' | 'success' | 'failure' | 'aborted';
+
+export function evaluationPhase(status: EvaluationStatus): StatusPhase {
+  switch (status) {
+    case 'Queued': return 'queued';
+    case 'Waiting': return 'waiting';
+    case 'Fetching':
+    case 'EvaluatingFlake':
+    case 'EvaluatingDerivation':
+    case 'Building': return 'running';
+    case 'Completed': return 'success';
+    case 'Failed': return 'failure';
+    case 'Aborted': return 'aborted';
+  }
+}
+
+export function buildPhase(status: BuildStatus): StatusPhase {
+  switch (status) {
+    case 'Created':
+    case 'Queued': return 'queued';
+    case 'Building': return 'running';
+    case 'Completed':
+    case 'Substituted': return 'success';
+    case 'FailedPermanent':
+    case 'FailedTransient':
+    case 'FailedTimeout': return 'failure';
+    case 'Aborted':
+    case 'DependencyFailed':
+    case 'Skipped': return 'aborted';
+  }
+}
