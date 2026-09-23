@@ -68,6 +68,8 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `PUT` / `DELETE` | `/user/stars/projects/{project}` | Star / unstar a project (idempotent) |
 | `PUT` / `DELETE` | `/user/stars/tasks/{project}/{task}` | Star / unstar a task (idempotent) |
 | `PUT` / `DELETE` | `/user/stars/caches/{cache}` | Star / unstar a cache (idempotent) |
+| `GET` | `/dashboard/stats` | Dashboard stat tiles over the projects the user can see |
+| `GET` | `/dashboard/activity` | Daily non-PR evaluation counts of the last 370 days |
 
 ### Configuring API-key options
 

@@ -109,7 +109,7 @@ tags:
   - name: user
     description: Current user profile, API keys, and settings
   - name: dashboard
-    description: Personal dashboard - the viewer's task table
+    description: Personal dashboard - the viewer's task table, stat tiles and activity heatmap
   - name: projects
     description: Project management, members, SSH keys, cache subscriptions
   - name: tasks
@@ -1378,6 +1378,113 @@ paths:
                           status: Completed
                           duration_ms: 510000
                           created_at: "2026-09-23T10:00:00"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard/stats:
+    get:
+      tags: [dashboard]
+      summary: Stat tiles of the current user
+      description: |-
+        Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).
+        `builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median dispatch wait of the last 24 hours.
+        `cache_size_bytes` sums the files of caches the viewer created or reaches through a project membership.
+        `workers` covers connected workers of visible projects only: `busy_pct` is assigned jobs over summed capacity, capped at 100.
+      operationId: getDashboardStats
+      responses:
+        '200':
+          description: Dashboard stat tiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [cpu_time_ms, cpu_time_ms_7d, builds_completed, cache_size_bytes, workers, queue_wait_p50_ms]
+                        properties:
+                          cpu_time_ms:
+                            type: integer
+                            format: int64
+                          cpu_time_ms_7d:
+                            type: integer
+                            format: int64
+                          builds_completed:
+                            type: integer
+                            format: int64
+                          cache_size_bytes:
+                            type: integer
+                            format: int64
+                          workers:
+                            type: object
+                            required: [online, busy_pct]
+                            properties:
+                              online:
+                                type: integer
+                              busy_pct:
+                                type: integer
+                                minimum: 0
+                                maximum: 100
+                          queue_wait_p50_ms:
+                            type: integer
+                            format: int64
+              example:
+                error: false
+                message:
+                  cpu_time_ms: 912345000
+                  cpu_time_ms_7d: 45678000
+                  builds_completed: 18234
+                  cache_size_bytes: 53687091200
+                  workers: { online: 3, busy_pct: 42 }
+                  queue_wait_p50_ms: 1800
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard/activity:
+    get:
+      tags: [dashboard]
+      summary: Daily evaluation activity of the current user
+      description: |-
+        One entry per day from 370 days ago through today, oldest first, days without evaluations included as zero.
+        Counts non-PR evaluations of the projects the viewer may see; `failed` counts evaluations with status `Failed`.
+      operationId: getDashboardActivity
+      responses:
+        '200':
+          description: Daily evaluation counts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [days]
+                        properties:
+                          days:
+                            type: array
+                            items:
+                              type: object
+                              required: [date, evaluations, failed]
+                              properties:
+                                date:
+                                  type: string
+                                  format: date
+                                evaluations:
+                                  type: integer
+                                  format: int64
+                                failed:
+                                  type: integer
+                                  format: int64
+              example:
+                error: false
+                message:
+                  days:
+                    - { date: "2026-09-22", evaluations: 14, failed: 2 }
+                    - { date: "2026-09-23", evaluations: 9, failed: 0 }
         '401':
           $ref: '#/components/responses/Unauthorized'
 

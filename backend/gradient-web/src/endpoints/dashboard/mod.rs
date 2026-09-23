@@ -4,5 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod activity;
 pub mod rank;
+pub mod stats;
 pub mod tasks;
