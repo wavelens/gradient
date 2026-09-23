@@ -93,6 +93,11 @@ describe('DashboardTaskTableComponent', () => {
     expect(cells).toEqual(['41/45', '+3', '14m 00s', '82%', '31']);
   });
 
+  it('names the full project and task on a truncated task link', () => {
+    const link = render(null, () => of(PAGE)).root.querySelector<HTMLAnchorElement>('tbody a.name')!;
+    expect(link.title).toBe('infra / hosts');
+  });
+
   it('offers Show all only when more rows exist, then pages by 25', () => {
     const { f, tasks, root } = render(null, () => of(PAGE));
     (root.querySelector('.show-all') as HTMLElement).click();

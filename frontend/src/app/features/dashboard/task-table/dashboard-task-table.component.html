@@ -40,7 +40,7 @@
                 <gr-star-button [target]="{ kind: 'task', project: t.project, task: t.task }" [(starred)]="t.starred" />
               </td>
               <td>
-                <a class="name" [routerLink]="['/project', t.project, 'task', t.task]">
+                <a class="name" [routerLink]="['/project', t.project, 'task', t.task]" [title]="t.project + ' / ' + t.task">
                   <span [class]="'dot dot--' + (t.latest?.status ?? 'none')"></span>
                   <span class="project">{{ t.project }} /</span> {{ t.task }}
                 </a>

@@ -57,6 +57,7 @@
     font-size: $font-size-xs;
     font-weight: 500;
     text-align: left;
+    white-space: nowrap;
   }
 
   td {
@@ -91,10 +92,16 @@
 }
 
 .name {
+  display: block;
+  overflow: hidden;
+  max-width: 22rem;
+  padding: 0;
   color: var(--gr-text-primary);
   text-decoration: none;
+  text-overflow: ellipsis;
 
   &:hover {
+    background: none;
     text-decoration: underline;
     text-underline-offset: 3px;
   }
