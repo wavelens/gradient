@@ -934,7 +934,20 @@ async fn a_lost_build_claim_hands_its_anchor_back_to_the_ready_set() {
     let peer = ProjectId::now_v7();
     let job = build_job(EvaluationId::now_v7(), peer, DerivationBuildId::now_v7());
     let derivation = job.derivation;
-    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    register(&scheduler, "w1", build_worker_caps(), HashSet::new()).await;
+    scheduler
+        .update_worker_capabilities(
+            "w1",
+            WorkerCapabilities {
+                architectures: vec![job.architecture.clone()],
+                system_features: vec![],
+                max_concurrent_builds: 1,
+                cpu_count: 8,
+                ram_total_mb: 16_000,
+                cpu_core_score: 100,
+            },
+        )
+        .await;
     scheduler
         .enqueue_build_job("jbuild".into(), job)
         .await
