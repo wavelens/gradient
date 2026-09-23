@@ -36,6 +36,8 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 pub const RPC_TIMEOUT: Duration = Duration::from_secs(600);
 /// A transaction past this is rolled back and its caller told.
 pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
+/// How many times a transaction aborted for a deadlock or serialization failure runs.
+pub const GRAPH_TX_ATTEMPTS: u32 = 3;
 /// Queued ingest batches are flushed early once they carry this many derivations.
 pub const INGEST_ROW_BUDGET: usize = 5000;
 pub const HEALTH_NAME: &str = "graph";
@@ -139,8 +141,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::UpstreamHits(hits, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    ingest::apply_upstream_hits(scoped, &hits).await
+                let hits = &hits;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    ingest::apply_upstream_hits(&scoped, hits).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -148,8 +151,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::UpstreamProbed(anchors, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    ingest::mark_probed(scoped, &anchors).await
+                let anchors = &anchors;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    ingest::mark_probed(&scoped, anchors).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -157,8 +161,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::CommitNar(commit, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    nar::commit(scoped, &commit).await
+                let commit = &commit;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    nar::commit(&scoped, commit).await
                 })
                 .await;
                 if let Ok(committed) = &result {
@@ -170,8 +175,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::ConfirmNar(confirm, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    nar::confirm(scoped, &confirm).await
+                let confirm = &confirm;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    nar::confirm(&scoped, confirm).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -179,8 +185,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::Transition(t, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    transition::apply(scoped, t).await
+                let t = &t;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    transition::apply(&scoped, t.clone()).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -188,8 +195,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::Requeue(scope, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    requeue::apply(scoped, scope).await
+                let scope = &scope;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    requeue::apply(&scoped, *scope).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -197,8 +205,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::Demote(demotion, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    demote::apply(scoped, demotion).await
+                let demotion = &demotion;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    demote::apply(&scoped, demotion.clone()).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -206,8 +215,9 @@ impl Actor for GraphActor {
             }
             GraphMsg::Gc(request, reply) => {
                 flush(&myself, st).await;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    gc::apply(scoped, request).await
+                let request = &request;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
+                    gc::apply(&scoped, request.clone()).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -240,10 +250,10 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
         std::mem::take(&mut st.queued).into_iter().unzip();
     st.queued_rows = 0;
     let batches_ref = &batches;
-    let written = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+    let written = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
         let mut outcomes = Vec::with_capacity(batches_ref.len());
         for batch in batches_ref {
-            outcomes.push(ingest_one(scoped, batch).await);
+            outcomes.push(ingest_one(&scoped, batch).await);
         }
 
         Ok(outcomes)
@@ -297,16 +307,56 @@ async fn ingest_one(scoped: &DbContext, batch: &IngestBatch) -> anyhow::Result<I
     }
 }
 
-/// `begin`, `work`, `commit`; a failure or a run past `budget` rolls back.
-pub async fn transact<T, F>(ctx: &DbContext, budget: Duration, work: F) -> anyhow::Result<T>
+/// `begin`, `work`, `commit`; a failure or a run past `budget` rolls back. A deadlock
+/// or serialization failure rolls back and runs `work` again, up to
+/// [`GRAPH_TX_ATTEMPTS`] times: the advisory anchor keys make two graph writers wait
+/// on each other instead of missing each other's rows, and Postgres breaks the rare
+/// cycle that creates by aborting one of them.
+pub async fn transact<T, F, Fut>(ctx: &DbContext, budget: Duration, work: F) -> anyhow::Result<T>
 where
-    F: AsyncFnOnce(&DbContext) -> anyhow::Result<T>,
+    F: Fn(DbContext) -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
+{
+    let mut attempt = 1;
+    loop {
+        match transact_once(ctx, budget, &work).await {
+            Err(e) if attempt < GRAPH_TX_ATTEMPTS && is_retryable(&e) => {
+                warn!(attempt, error = %e, "graph transaction retried");
+                attempt += 1;
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
+/// SQLSTATE `40P01` (deadlock detected) or `40001` (serialization failure) anywhere
+/// in the chain: the transaction was aborted for its timing, not its content.
+fn is_retryable(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let Some(
+            sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(e))
+            | sea_orm::DbErr::Query(sea_orm::RuntimeErr::SqlxError(e))
+            | sea_orm::DbErr::Conn(sea_orm::RuntimeErr::SqlxError(e)),
+        ) = cause.downcast_ref::<sea_orm::DbErr>()
+        else {
+            return false;
+        };
+
+        e.as_database_error()
+            .and_then(|d| d.code())
+            .is_some_and(|c| c == "40P01" || c == "40001")
+    })
+}
+
+async fn transact_once<T, F, Fut>(ctx: &DbContext, budget: Duration, work: &F) -> anyhow::Result<T>
+where
+    F: Fn(DbContext) -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
 {
     let tx = Arc::new(ctx.worker_db.begin().await.context("begin")?);
     let scoped = ctx.in_transaction(Arc::clone(&tx));
     let ready_set = scoped.ready_set.clone();
-    let outcome = tokio::time::timeout(budget, work(&scoped)).await;
-    drop(scoped);
+    let outcome = tokio::time::timeout(budget, work(scoped)).await;
     let tx =
         Arc::try_unwrap(tx).map_err(|_| anyhow!("a transaction handle escaped its message"))?;
     match outcome {
@@ -442,7 +492,7 @@ mod tests {
     #[tokio::test]
     async fn a_transaction_past_its_budget_is_rolled_back() {
         let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
-        let err = transact(&ctx, Duration::from_millis(20), async |_scoped| {
+        let err = transact(&ctx, Duration::from_millis(20), |_scoped| async {
             tokio::time::sleep(Duration::from_millis(200)).await;
             Ok(())
         })
@@ -459,6 +509,102 @@ mod tests {
             log.iter().any(|t| t.contains("ROLLBACK")) && log.iter().all(|t| !t.contains("COMMIT")),
             "rolled back, never committed: {log:?}"
         );
+    }
+
+    #[derive(Debug)]
+    struct Coded(&'static str);
+
+    impl std::fmt::Display for Coded {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for Coded {}
+
+    impl sea_orm::sqlx::error::DatabaseError for Coded {
+        fn message(&self) -> &str {
+            self.0
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some(std::borrow::Cow::Borrowed(self.0))
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sea_orm::sqlx::error::ErrorKind {
+            sea_orm::sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn coded(code: &'static str) -> anyhow::Error {
+        anyhow::Error::new(sea_orm::DbErr::Exec(sea_orm::RuntimeErr::SqlxError(
+            Arc::new(sea_orm::sqlx::Error::Database(Box::new(Coded(code)))),
+        )))
+    }
+
+    #[test]
+    fn a_deadlock_and_a_serialization_failure_retry_through_context() {
+        for code in ["40P01", "40001"] {
+            assert!(is_retryable(&coded(code).context("seed")), "{code}");
+        }
+    }
+
+    #[test]
+    fn anything_else_does_not_retry() {
+        assert!(!is_retryable(&coded("23505")));
+        assert!(!is_retryable(&anyhow!("graph transaction exceeded 120s")));
+    }
+
+    #[tokio::test]
+    async fn a_deadlocked_transaction_is_retried_and_its_second_attempt_commits() {
+        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
+        let attempts = &std::sync::atomic::AtomicU32::new(0);
+        let out = transact(&ctx, GRAPH_TX_BUDGET, move |_scoped| async move {
+            if attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                return Err(coded("40P01"));
+            }
+            Ok(7)
+        })
+        .await
+        .unwrap();
+        assert_eq!(out, 7);
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+        drop(ctx);
+        let log: Vec<String> = pool
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log.iter().any(|t| t.contains("ROLLBACK")) && log.iter().any(|t| t.contains("COMMIT")),
+            "the first attempt rolled back, the second committed: {log:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_unique_violation_is_not_retried() {
+        let (ctx, _pool) =
+            ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
+        let attempts = &std::sync::atomic::AtomicU32::new(0);
+        let err = transact(&ctx, GRAPH_TX_BUDGET, move |_scoped| async move {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            anyhow::Result::<()>::Err(coded("23505"))
+        })
+        .await;
+        assert!(err.is_err());
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
