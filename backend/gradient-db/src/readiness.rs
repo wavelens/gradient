@@ -49,10 +49,13 @@
 //!
 //! [`AnchorLock`] is how that is required rather than requested. [`lock_anchors`]
 //! takes the anchors `FOR UPDATE` in one `derivation`-ordered statement and returns
-//! the only proof [`seed_unready_deps`], [`became_fetchable`] and
-//! [`lost_fetchability`] accept, so none of them can run on a pooled handle, in
-//! another transaction, or over a row the lock did not name. A retry is then a retry
-//! of the whole flip.
+//! the only proof [`became_fetchable`] and [`lost_fetchability`] accept, so neither can
+//! run on a pooled handle, in another transaction, or over a row the lock did not
+//! name. A retry is then a retry of the whole flip. [`seed_unready_deps`] takes the
+//! stronger [`SeedLock`], which also holds the dependencies it counts under shared
+//! advisory keys while every flip holds its anchors' keys exclusively
+//! ([`crate::anchor_guard`]): an absolute count and a concurrent flip of what it
+//! counts then cannot both miss each other's uncommitted rows.
 //!
 //! The RIPPLES are outside that discipline, deliberately, and this is the one thing
 //! the proof does not cover: they write the flipped anchors' DEPENDENTS, which no
@@ -558,7 +561,7 @@ pub(crate) fn ids(derivations: &[DerivationId]) -> Value {
 /// than reading the `fetchable` column, because this is the first reader of a
 /// dependency's readiness and it runs strictly before any sweep could have corrected
 /// a stale flag. The module doc has the full argument and the cost.
-pub async fn seed_unready_deps(lock: &AnchorLock<'_>) -> Result<u64, DbErr> {
+pub async fn seed_unready_deps(lock: &SeedLock<'_>) -> Result<u64, DbErr> {
     if lock.derivations.is_empty() {
         return Ok(0);
     }
@@ -1352,7 +1355,7 @@ mod tests {
     async fn an_empty_batch_touches_the_database_not_at_all() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let txn = db.begin().await.unwrap();
-        let lock = lock_anchors(&txn, &[]).await.unwrap();
+        let lock = lock_seed_anchors(&txn, &[]).await.unwrap();
 
         assert_eq!(seed_unready_deps(&lock).await.unwrap(), 0);
         assert!(became_fetchable(&lock).await.unwrap().is_empty());

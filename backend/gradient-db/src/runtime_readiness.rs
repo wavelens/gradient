@@ -31,6 +31,11 @@
 //! Every pass locks the rows it will write through [`crate::readiness::lock_anchors`],
 //! which is `derivation`-ordered, and touches `derivation_build` alone: the third
 //! class in the lock order, so a caller that already holds `cached_path` may take it.
+//! The seed takes [`crate::readiness::lock_seed_anchors`] instead, which also holds
+//! the dependencies it counts under shared advisory keys, and every frontier a ripple
+//! reads the edges of is held under its exclusive keys by then; that pairing, not a
+//! single writer, is what keeps a seed and a concurrent flip from each missing the
+//! other's rows ([`crate::anchor_guard`]).
 
 use std::collections::BTreeMap;
 
@@ -257,7 +262,7 @@ pub async fn seed_runtime_deps(
 
     let sorted: Vec<DerivationId> = seed.keys().copied().collect();
     let fresh: Vec<bool> = seed.values().copied().collect();
-    let _lock = lock_anchors(txn, &sorted).await?;
+    let _lock = crate::readiness::lock_seed_anchors(txn, &sorted).await?;
     let rows = txn
         .query_all_raw(SEED_MISSING_RUNTIME_DEPS.bind([ids(&sorted), fresh.into()]))
         .await?;
@@ -472,7 +477,7 @@ async fn retire_anchors(
         );
         if !reset.is_empty() {
             let thawed: Vec<DerivationId> = reset.iter().map(|c| c.derivation).collect();
-            let thawed_lock = lock_anchors(txn, &thawed).await?;
+            let thawed_lock = crate::readiness::lock_seed_anchors(txn, &thawed).await?;
             crate::readiness::seed_unready_deps(&thawed_lock).await?;
         }
 
@@ -586,6 +591,18 @@ mod tests {
             .map(|s| format!("{:?}", s.values))
             .collect();
         assert_eq!(counts.len(), 2, "one dependents lookup per level: {log:?}");
+        let guard = log
+            .iter()
+            .position(|s| s.sql.contains("pg_advisory_xact_lock_shared(643, k)"))
+            .expect("the seed counts under its dependencies' shared keys");
+        let seed = log
+            .iter()
+            .position(|s| s.sql.contains("SET missing_runtime_deps = x.n"))
+            .expect("the seed");
+        assert!(
+            guard < seed,
+            "the keys are held before the count reads: {log:?}"
+        );
         assert!(
             counts[0].contains(&flipped.into_inner().to_string())
                 && !counts[0].contains(&settled.into_inner().to_string()),

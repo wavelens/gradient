@@ -682,7 +682,7 @@ impl BatchWriter<'_> {
             .begin()
             .await
             .context("begin the readiness transaction")?;
-        let lock = gradient_db::lock_anchors(&txn, &locked).await?;
+        let lock = gradient_db::lock_seed_anchors(&txn, &locked).await?;
         let mut changes = gradient_db::became_fetchable(&lock)
             .await
             .context("advance fetchable anchors")?;
