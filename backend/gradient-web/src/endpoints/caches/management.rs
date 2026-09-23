@@ -106,7 +106,8 @@ pub async fn get(
     let listing = crate::helpers::paginate(
         ECache::find()
             .filter(condition)
-            .order_by_asc(CCache::CreatedAt),
+            .order_by_asc(CCache::Name)
+            .order_by_asc(CCache::Id),
         &state.web_db,
         &params,
     )

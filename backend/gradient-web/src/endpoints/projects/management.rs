@@ -151,7 +151,8 @@ pub async fn get(
                     .into(),
             )
             .filter(CProjectUser::User.eq(user.id))
-            .order_by_asc(CProject::CreatedAt),
+            .order_by_asc(CProject::Name)
+            .order_by_asc(CProject::Id),
         &state.web_db,
         &params,
     )
@@ -285,7 +286,8 @@ pub async fn get_public_projects(
     let listing = paginate(
         EProject::find()
             .filter(CProject::Public.eq(true))
-            .order_by_asc(CProject::CreatedAt),
+            .order_by_asc(CProject::Name)
+            .order_by_asc(CProject::Id),
         &state.web_db,
         &params,
     )

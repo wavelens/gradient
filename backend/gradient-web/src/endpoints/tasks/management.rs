@@ -124,7 +124,8 @@ pub async fn get(
     let listing = paginate(
         ETask::find()
             .filter(CTask::Project.eq(project.id))
-            .order_by_asc(CTask::CreatedAt),
+            .order_by_asc(CTask::Name)
+            .order_by_asc(CTask::Id),
         &state.web_db,
         &params,
     )
