@@ -9,7 +9,6 @@ import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angul
 import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
 import { DashboardTaskTableComponent } from './dashboard-task-table.component';
 import { DashboardService } from '@core/services/dashboard.service';
-import { StarsService } from '@core/services/stars.service';
 import { TaskRow, TasksPage } from '@core/models';
 
 const row = (task: string): TaskRow => ({
@@ -34,7 +33,6 @@ function render(filter: string | null, page: () => Observable<TasksPage>) {
     providers: [
       provideRouter([]),
       { provide: DashboardService, useValue: { tasks } },
-      { provide: StarsService, useValue: { set: () => of(true) } },
       { provide: ActivatedRoute, useValue: { queryParamMap: params } },
     ],
   });

@@ -15,7 +15,7 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 - **Chips**: All, Failing, Got worse, Starred, each with its count over all of your tasks. The selected chip is kept in the URL (`?filter=`).
     - Failing: the latest evaluation failed or has failing entry points.
     - Got worse: more failing entry points than the previous evaluation.
-- **Task table**: the top 10 tasks. "Show all" lists every task, 25 per page. Each row shows the star, `project / task` with the latest commit and its age, the last evaluations, entry points ok/total, the change in failing entry points against the previous evaluation and speed.
+- **Task table**: the top 10 tasks. "Show all" lists every task, 25 per page. Each row shows `project / task` with the latest commit and its age, the last evaluations, entry points ok/total, the change in failing entry points against the previous evaluation and speed.
     - Bars show the last evaluations: height is the duration, color the status, hover for details. The number of bars follows the available width.
     - A row opens the task, a bar opens its evaluation.
 - **Activity**: a calendar of the last 371 days, switchable between evaluations and failures.
@@ -38,7 +38,7 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 
 ## Stars
 
-- Star a project, task or cache from its page header, the task table or the rail.
+- Star a project, task or cache from its page header, or a project or cache from the rail.
 - Stars are personal: they only rank and filter what you see. Task stars drive the task table and the Starred chip, project and cache stars order the rail, and all of them come first in palette results.
 - Stars are shown to signed-in users only.
 - A star on something you can no longer read is dropped from every list.

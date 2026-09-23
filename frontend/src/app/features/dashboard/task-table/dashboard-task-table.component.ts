@@ -20,7 +20,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { EMPTY, Observable, Subject, catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardFilter, TasksPage } from '@core/models';
-import { ButtonComponent, StarButtonComponent } from '@shared/ui';
+import { ButtonComponent } from '@shared/ui';
 import { formatDuration, relativeTime } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
 import { barsThatFit } from '../format';
@@ -43,7 +43,7 @@ function parseFilter(value: string | null): DashboardFilter {
 @Component({
   selector: 'app-dashboard-task-table',
   standalone: true,
-  imports: [RouterLink, ButtonComponent, StarButtonComponent, EvaluationHistoryComponent],
+  imports: [RouterLink, ButtonComponent, EvaluationHistoryComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   templateUrl: './dashboard-task-table.component.html',
   styleUrl: './dashboard-task-table.component.scss',

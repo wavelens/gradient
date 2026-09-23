@@ -6,6 +6,9 @@
 
 @use '../../../styles/variables' as *;
 
+$dot-size: 8px;
+$dot-gap: 6px;
+
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -72,17 +75,12 @@
   }
 }
 
-// The task link stretches over its row; the star and the history bars sit above it.
+// The task link stretches over its row; the history bars sit above it.
 .row {
   position: relative;
 
   &:hover td {
     background: var(--gr-surface-hover);
-  }
-
-  .star-col {
-    position: relative;
-    z-index: 1;
   }
 }
 
@@ -95,10 +93,6 @@
 .history-col {
   width: 40%;
   min-width: 90px;
-}
-
-.star-col {
-  width: 1%;
 }
 
 .num {
@@ -134,6 +128,7 @@
 
 .sub {
   margin-top: 2px;
+  padding-left: $dot-size + $dot-gap;
   font-size: $font-size-xs;
 
   code {
@@ -143,9 +138,9 @@
 
 .dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
+  width: $dot-size;
+  height: $dot-size;
+  margin-right: $dot-gap;
   border-radius: 50%;
   background: var(--gr-text-muted);
 
@@ -218,8 +213,8 @@
 }
 
 @media (max-width: $breakpoint-md) {
-  .ptable th:nth-child(n + 4),
-  .ptable td:nth-child(n + 4) {
+  .ptable th:nth-child(n + 3),
+  .ptable td:nth-child(n + 3) {
     display: none;
   }
 }
