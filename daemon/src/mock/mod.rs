@@ -5,6 +5,7 @@
  */
 
 pub mod artefact;
+pub mod build;
 pub mod ca_path;
 pub mod conn;
 pub mod ingest;

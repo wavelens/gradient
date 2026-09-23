@@ -10,7 +10,7 @@ use crate::mock::nar::{NarFile, encode};
 use crate::mock::spec::Timing;
 use crate::mock::store::{MockStore, Origin};
 use crate::mock::timing::chunk_delay;
-use crate::mock::{MockState, ca_path, ingest, store_path};
+use crate::mock::{MockState, build, ca_path, ingest, store_path};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use harmonia_file_nar::archive::NarByteStream;
 use harmonia_protocol::daemon::wire::types::Operation;
@@ -42,7 +42,7 @@ pub struct MockConn {
     pub conn: ConnInfo,
 }
 
-fn err(e: impl std::fmt::Display) -> DaemonError {
+pub(crate) fn err(e: impl std::fmt::Display) -> DaemonError {
     DaemonError::custom(e.to_string())
 }
 
@@ -387,11 +387,11 @@ impl DaemonStore for MockConn {
 
     fn build_derivation<'a>(
         &'a mut self,
-        _drv_path: &'a StorePath,
-        _drv: &'a BasicDerivation,
+        drv_path: &'a StorePath,
+        drv: &'a BasicDerivation,
         _mode: BuildMode,
     ) -> impl ResultLog<Output = DaemonResult<BuildResult>> + Send + 'a {
-        ready(Err(self.unimplemented(Operation::BuildDerivation))).empty_logs()
+        build::build_derivation(self.clone(), drv_path.clone(), drv.clone())
     }
 
     fn query_missing<'a>(
