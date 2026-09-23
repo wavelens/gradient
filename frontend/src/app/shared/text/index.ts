@@ -7,3 +7,4 @@
 export * from './permission-label';
 export * from './relative-time';
 export * from './slug';
+export * from './units';
