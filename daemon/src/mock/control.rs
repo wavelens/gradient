@@ -10,7 +10,9 @@ use crate::mock::{MockState, seed_node, store_path};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-const COMMANDS: &[&str] = &["snapshot", "valid", "outcome", "release", "seed", "forget"];
+const COMMANDS: &[&str] = &[
+    "snapshot", "valid", "running", "outcome", "release", "seed", "forget",
+];
 
 fn arg<'a>(args: &'a Value, key: &str) -> anyhow::Result<&'a str> {
     args.get(key)
@@ -34,6 +36,9 @@ pub fn dispatch(state: &Arc<MockState>, cmd: &str, args: &Value) -> Option<anyho
 fn run(state: &Arc<MockState>, cmd: &str, args: &Value) -> anyhow::Result<Value> {
     match cmd {
         "snapshot" => Ok(serde_json::to_value(state.store.snapshot())?),
+        "running" => Ok(serde_json::to_value(
+            &*state.running.lock().expect("running"),
+        )?),
         "valid" => {
             let path = store_path(arg(args, "path")?)?;
             Ok(json!(state.store.is_valid(&path)?))

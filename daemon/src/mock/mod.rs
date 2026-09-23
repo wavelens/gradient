@@ -20,7 +20,7 @@ use crate::backend::{Backend, ConnInfo};
 use crate::journal::Journal;
 use harmonia_store_path::StorePath;
 use spec::{DaemonConfig, Outcome};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use store::{MockStore, Origin};
@@ -33,6 +33,7 @@ pub struct MockState {
     pub overrides: Mutex<HashMap<String, Outcome>>,
     pub hangs: Mutex<HashMap<String, Arc<Notify>>>,
     pub attempts: Mutex<HashMap<String, u32>>,
+    pub running: Mutex<BTreeMap<String, u32>>,
 }
 
 pub struct MockBackend(pub Arc<MockState>);
@@ -92,6 +93,7 @@ impl MockBackend {
             overrides: Mutex::default(),
             hangs: Mutex::default(),
             attempts: Mutex::default(),
+            running: Mutex::default(),
         });
         seed_present(&state).await?;
         Ok(Arc::new(Self(state)))

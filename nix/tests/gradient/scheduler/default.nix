@@ -11,17 +11,22 @@ let
   daemon = self.packages.${pkgs.stdenv.hostPlatform.system}.gradient-daemon-mock;
   storeSpec = import ../../store-spec { inherit pkgs lib daemon; };
 
-  specs = map import [
-    ./specs/chain.nix
-    ./specs/diamond-fail.nix
-    ./specs/cross-worker.nix
-    ./specs/already-present.nix
-    ./specs/upstream-cached.nix
-  ];
+  # Keyed by file: chain-4 keeps the name chain-3, so it lands in chain-3's repo with c0-c2 unchanged.
+  specFiles = lib.mapAttrs (_: import) {
+    chain-3 = ./specs/chain.nix;
+    chain-4 = ./specs/chain-4.nix;
+    diamond-fail = ./specs/diamond-fail.nix;
+    cross-worker = ./specs/cross-worker.nix;
+    already-present = ./specs/already-present.nix;
+    upstream-cached = ./specs/upstream-cached.nix;
+    hang = ./specs/hang.nix;
+    stress = ./specs/stress.nix;
+  };
+  specs = lib.attrValues specFiles;
+  specNames = lib.unique (map (s: s.name) specs);
 
-  byName = f: lib.listToAttrs (map (s: lib.nameValuePair s.name (f s)) specs);
-  flakes = byName storeSpec.toFlake;
-  resolved = byName storeSpec.resolve;
+  flakes = lib.mapAttrs (_: storeSpec.toFlake) specFiles;
+  resolved = lib.mapAttrs (_: storeSpec.resolve) specFiles;
   upstream = storeSpec.toUpstreamCache specs;
 
   workerToken = "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
@@ -147,9 +152,9 @@ let
           };
 
           # No triggers: every phase starts its own evaluation through the API.
-          tasks = byName (s: {
+          tasks = lib.genAttrs specNames (name: {
             project = "project";
-            repository = "git://server/${s.name}";
+            repository = "git://server/${name}";
             created_by = "admin";
             triggers = [ ];
           });

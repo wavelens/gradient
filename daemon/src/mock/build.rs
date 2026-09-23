@@ -102,6 +102,7 @@ pub async fn run(
         .copied()
         .unwrap_or(node.build.outcome);
     let started = now_secs();
+    let _running = Running::start(state, id);
     start_activity(logs, &full, node);
     if outcome == Outcome::Hang {
         hang(state, id).notified().await;
@@ -131,6 +132,35 @@ fn missing_inputs(state: &MockState, drv: &BasicDerivation) -> Vec<String> {
         .filter(|p| !state.store.is_valid(p).unwrap_or(false))
         .map(|p| format!("/nix/store/{p}"))
         .collect()
+}
+
+struct Running<'a> {
+    state: &'a MockState,
+    id: &'a str,
+}
+
+impl<'a> Running<'a> {
+    fn start(state: &'a MockState, id: &'a str) -> Self {
+        *state
+            .running
+            .lock()
+            .expect("running")
+            .entry(id.to_owned())
+            .or_default() += 1;
+        Self { state, id }
+    }
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        let mut running = self.state.running.lock().expect("running");
+        if let Some(count) = running.get_mut(self.id) {
+            *count -= 1;
+            if *count == 0 {
+                running.remove(self.id);
+            }
+        }
+    }
 }
 
 fn next_attempt(state: &MockState, id: &str) -> u32 {
@@ -413,9 +443,12 @@ mod tests {
         });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert!(!handle.is_finished());
+        let running = backend.0.running.lock().expect("running").clone();
+        assert_eq!(running, BTreeMap::from([("t/app".to_owned(), 1)]));
         release(&backend.0, "t/app");
         let result = handle.await.expect("join").expect("build");
         assert!(result.success().is_some());
+        assert!(backend.0.running.lock().expect("running").is_empty());
     }
 
     #[tokio::test]

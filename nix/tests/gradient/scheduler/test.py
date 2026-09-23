@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
-# FLAKES and RESOLVED are prepended by default.nix: spec name -> flake dir / resolved store-spec.
+# FLAKES and RESOLVED are prepended by default.nix: spec file -> flake dir / resolved store-spec.
 import json
 
 WORKERS = [worker1, worker2]
@@ -37,19 +37,24 @@ def api(method, path, body=None):
     return json.loads(reply)["message"]
 
 
-def publish(name):
-    work = f"/tmp/spec-{name}"
+def repo_of(spec):
+    return RESOLVED[spec]["name"]
+
+
+def publish(spec):
+    work = f"/tmp/spec-{spec}"
+    repo = f"/var/lib/git/{repo_of(spec)}"
     server.succeed(
-        f"rm -rf {work} /var/lib/git/{name}"
-        f" && cp -r {FLAKES[name]} {work} && chmod -R u+w {work}"
+        f"rm -rf {work} {repo}"
+        f" && cp -r {FLAKES[spec]} {work} && chmod -R u+w {work}"
         f" && git -C {work} init -q && git -C {work} add -A"
-        f" && git -C {work} -c user.email=t@t -c user.name=t commit -qm spec"
-        f" && git clone -q --bare {work} /var/lib/git/{name}"
+        f" && git -C {work} -c user.email=t@t -c user.name=t commit -qm {spec}"
+        f" && git clone -q --bare {work} {repo}"
     )
 
 
-def evaluate(name):
-    return api("POST", f"/tasks/project/{name}/evaluate", {})
+def evaluate(spec):
+    return api("POST", f"/tasks/project/{repo_of(spec)}/evaluate", {})
 
 
 def wait_evaluation(eval_id, want, timeout=300):
@@ -96,10 +101,82 @@ def assert_clean():
         assert violations == [], f"{w.name}: {violations}"
 
 
-def phase(name):
-    banner(name)
-    publish(name)
-    return evaluate(name)
+def phase(spec):
+    banner(spec)
+    publish(spec)
+    return evaluate(spec)
+
+
+def merged_journal():
+    rows = []
+    for w in WORKERS:
+        rows += [dict(e, worker=w.name) for e in daemon(w, "journal")]
+    return sorted(rows, key=lambda e: e["at_us"])
+
+
+def pct(xs, q):
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(round((len(xs) - 1) * q)))] if xs else 0
+
+
+def spread(xs):
+    return {"p50": pct(xs, 0.5), "p95": pct(xs, 0.95), "max": max(xs or [0])}
+
+
+def critical_path_ms(nodes, build_ms):
+    memo = {}
+
+    def longest(node):
+        if node not in memo:
+            memo[node] = build_ms.get(node, 0) + max([longest(d) for d in nodes[node]["deps"]] or [0])
+        return memo[node]
+
+    return max([longest(n) for n in nodes] or [0])
+
+
+def latency_report(spec):
+    nodes = RESOLVED[spec]["derivations"]
+    journal = merged_journal()
+    valid_at = {}
+    for e in journal:
+        if e["ok"] and e["op"] in ("add_to_store_nar", "build_derivation"):
+            for p in e["paths"]:
+                valid_at.setdefault(p, e["at_us"] + e["duration_us"])
+    for name, node in nodes.items():
+        b = next((e for e in journal if e["op"] == "build_derivation" and node["drvPath"] in e["paths"]), None)
+        if b:
+            for out in node["outputs"].values():
+                valid_at.setdefault(out["path"], b["at_us"] + b["duration_us"])
+
+    ready_to_dispatch, build_ms, first, last = [], {}, None, None
+    for name, node in nodes.items():
+        b = next((e for e in journal if e["op"] == "build_derivation" and node["drvPath"] in e["paths"]), None)
+        if not b:
+            continue
+        inputs = [o["path"] for d in node["deps"] for o in nodes[d]["outputs"].values()]
+        ready = max([valid_at.get(i, b["at_us"]) for i in inputs] or [b["at_us"]])
+        ready_to_dispatch.append((b["at_us"] - ready) / 1000)
+        build_ms[name] = b["duration_us"] / 1000
+        first = b["at_us"] if first is None else min(first, b["at_us"])
+        last = max(last or 0, b["at_us"] + b["duration_us"])
+
+    wall_ms = ((last or 0) - (first or 0)) / 1000
+    critical = critical_path_ms(nodes, build_ms)
+    report = {
+        "spec": spec,
+        "builds": len(build_ms),
+        "wall_ms": wall_ms,
+        "critical_path_ms": critical,
+        "overhead_factor": wall_ms / critical if critical else None,
+        "ready_to_dispatch_ms": spread(ready_to_dispatch),
+        "build_ms": spread(list(build_ms.values())),
+        "ops": {w.name: daemon(w, "latency") for w in WORKERS},
+    }
+    print(json.dumps(report, indent=2))
+    server.succeed(f"mkdir -p /tmp/xchg-out && echo '{json.dumps(report)}' >> /tmp/xchg-out/latency.jsonl")
+    for w in WORKERS:
+        daemon(w, "reset-journal")
+    return report
 
 
 start_all()
@@ -120,12 +197,14 @@ for dep, top in zip(chain, chain[1:]):
 for n in ["c0", "c1", "c2"]:
     assert uploaded(out_of("chain-3", n)), n
 assert_clean()
+latency_report("chain-3")
 
 e = phase("diamond-fail")
 wait_evaluation(e, "Failed")
 assert builds_of("diamond-fail", "top") == []
 only_build("diamond-fail", "right")
 assert_clean()
+latency_report("diamond-fail")
 
 e = phase("cross-worker")
 wait_evaluation(e, "Completed")
@@ -134,18 +213,69 @@ top_build = builds_of("cross-worker", "top")
 assert [w.name for w, _ in dep_build] == ["worker1"], dep_build
 assert [w.name for w, _ in top_build] == ["worker2"], top_build
 dep_out = out_of("cross-worker", "dep")
-journal = daemon(worker2, "journal")
-imported = min(e["at_us"] + e["duration_us"] for e in journal if e["op"] == "add_to_store_nar" and dep_out in e["paths"])
+imported = min(
+    e["at_us"] + e["duration_us"]
+    for e in daemon(worker2, "journal")
+    if e["op"] == "add_to_store_nar" and dep_out in e["paths"]
+)
 assert imported <= top_build[0][1]["at_us"], "worker2 built top before it had dep"
 assert_clean()
+latency_report("cross-worker")
 
 e = phase("already-present")
 wait_evaluation(e, "Completed")
 assert all(builds_of("already-present", n) == [] for n in ["c0", "c1"])
 assert_clean()
+latency_report("already-present")
 
 e = phase("upstream-cached")
 wait_evaluation(e, "Completed")
 assert builds_of("upstream-cached", "lib") == []
 only_build("upstream-cached", "app")
 assert_clean()
+latency_report("upstream-cached")
+
+banner("unchanged commit")
+wait_evaluation(evaluate("chain-3"), "Completed")
+assert all(daemon(w, "builds") == [] for w in WORKERS), "an unchanged commit rebuilt something"
+assert_clean()
+
+banner("forgotten output")
+daemon(worker1, "forget", {"node": "chain-3/c0"})
+e = phase("chain-4")
+wait_evaluation(e, "Completed")
+assert builds_of("chain-4", "c0") == [], "a forgotten output was rebuilt instead of fetched"
+only_build("chain-4", "c3")
+assert_clean()
+latency_report("chain-4")
+
+banner("worker lost mid build")
+e = phase("hang")
+hanging = None
+for _ in range(300):
+    hanging = next((w for w in WORKERS if "hang/c1" in daemon(w, "running")), None)
+    if hanging:
+        break
+    server.sleep(1)
+assert hanging, "c1 never started building"
+survivor = next(w for w in WORKERS if w is not hanging)
+daemon(survivor, "outcome", {"node": "hang/c1", "outcome": "success"})
+hanging.succeed("systemctl stop gradient-worker")
+wait_evaluation(e, "Completed")
+assert [w.name for w, entry in builds_of("hang", "c1") if entry["ok"]] == [survivor.name]
+daemon(hanging, "release", {"node": "hang/c1"})
+hanging.succeed("systemctl start gradient-worker")
+hanging.wait_until_succeeds(
+    "journalctl -u gradient-worker --no-pager --since=-120s | grep -q 'handshake successful'", timeout=180
+)
+assert_clean()
+latency_report("hang")
+
+e = phase("stress")
+wait_evaluation(e, "Completed", timeout=900)
+assert_clean()
+report = latency_report("stress")
+assert report["builds"] == len(RESOLVED["stress"]["derivations"]), report["builds"]
+assert report["overhead_factor"] < 20, f"scheduling overhead {report['overhead_factor']:.1f}x the critical path"
+
+server.copy_from_vm("/tmp/xchg-out/latency.jsonl", "")
