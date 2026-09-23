@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ChangeDetectionStrategy, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
+import { AuthService } from '@core/services/auth.service';
 
 @Component({
   selector: 'app-board-layout',
@@ -26,7 +27,9 @@ import { RouterModule } from '@angular/router';
         <a routerLink="network" routerLinkActive="active">Network</a>
         <a routerLink="expensive" routerLinkActive="active">Jobs</a>
         <a routerLink="expensive-evals" routerLinkActive="active">Evals</a>
-        <a routerLink="health" routerLinkActive="active">System Health</a>
+        @if (superuser()) {
+          <a routerLink="health" routerLinkActive="active">System Health</a>
+        }
       </nav>
       <router-outlet></router-outlet>
     </div>
@@ -34,4 +37,7 @@ import { RouterModule } from '@angular/router';
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './board-layout.component.scss',
 })
-export class BoardLayoutComponent {}
+export class BoardLayoutComponent {
+  private auth = inject(AuthService);
+  protected superuser = computed(() => this.auth.user()?.superuser === true);
+}

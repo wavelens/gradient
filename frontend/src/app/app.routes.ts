@@ -346,6 +346,7 @@ export const routes: Routes = [
           },
           {
             path: 'health',
+            canActivate: [adminGuard],
             loadComponent: () =>
               import('./features/board/health/health.component').then(
                 (m) => m.BoardHealthComponent
