@@ -175,7 +175,11 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   gap: $space-block;
 }
 
-.panel-title { display: flex; align-items: center; gap: $spacing-sm; }
+.panel-head > div:first-child { min-width: 0; }
+
+.panel-title { display: flex; align-items: center; gap: $spacing-sm; min-width: 0; }
+
+.panel-title > div { min-width: 0; }
 
 .s-ico {
   width: 34px;
@@ -189,10 +193,16 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.panel-title h2 { font-size: $font-size-lg; margin: 0; }
+.panel-title h2 {
+  font-size: $font-size-lg;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .panel-title .sub { color: var(--gr-text-muted); font-size: $font-size-xs; margin-top: 2px; }
 .panel-actions { display: flex; gap: $space-pair; align-items: center; }
 

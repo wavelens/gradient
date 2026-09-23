@@ -319,6 +319,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   @HostListener('document:keydown', ['$event'])
   onKeydown(e: KeyboardEvent): void {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
     const list = this.evaluations();
@@ -521,7 +522,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
-    const canArtefacts = (ep.build_status === 'Completed' || ep.build_status === 'Substituted') && ep.has_artefacts;
+    const built = ep.build_status === 'Completed' || ep.build_status === 'Substituted';
+    const canArtefacts = built && ep.has_artefacts;
     return [
       {
         label: 'Artefacts', icon: 'download', disabled: !canArtefacts,
@@ -532,6 +534,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
         label: 'Dependency graph', icon: 'account_tree',
         routerLink: ['/project', this.projectName, 'graph', ep.build_id],
         queryParams: { evalId: evalId, task: this.taskName },
+      },
+      {
+        label: 'View closure', icon: 'hub', disabled: !built,
+        routerLink: built ? ['/project', this.projectName, 'closure', 'build', ep.build_id] : undefined,
       },
       {
         label: 'Entry-point metrics', icon: 'show_chart',
@@ -545,6 +551,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     event.stopPropagation();
     this.pkgMenuModel.set(this.buildPkgMenu(ep, evalId));
     menu.toggle(event);
+  }
+
+  openPkgContextMenu(event: MouseEvent, ep: EntryPointSummary, evalId: string, menu: { openAt: (e: MouseEvent) => void }): void {
+    this.pkgMenuModel.set(this.buildPkgMenu(ep, evalId));
+    menu.openAt(event);
   }
 
   doneCount(c: BuildStatusCounts): number {

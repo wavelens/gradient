@@ -581,3 +581,58 @@ describe('TaskDetailComponent - vertical fill', () => {
     expect(getComputedStyle(panel!).flexGrow).toBe('1');
   });
 });
+
+describe('TaskDetailComponent - #636 eval page', () => {
+  const access = { managed: false, canEdit: true, canTrigger: true };
+
+  it('steps the strip on a bare arrow but leaves modified arrows to the browser', () => {
+    const { fixture } = setup(access, { extraEvals: [evalSummary('e2', 'Completed')] });
+    const comp = fixture.componentInstance;
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockReturnValue(0);
+    const pressed = (init: KeyboardEventInit) => {
+      const e = new KeyboardEvent('keydown', { key: 'ArrowRight', cancelable: true, ...init });
+      comp.onKeydown(e);
+      return e.defaultPrevented;
+    };
+    expect(pressed({ altKey: true })).toBe(false);
+    expect(pressed({ ctrlKey: true })).toBe(false);
+    expect(comp.selected()?.id).toBe('e1');
+    expect(pressed({})).toBe(true);
+    expect(comp.selected()?.id).toBe('e2');
+    raf.mockRestore();
+  });
+
+  it('shows a waiting state instead of "No packages" while the evaluation runs', () => {
+    const { fixture } = setup(access, { primaryStatus: 'EvaluatingDerivation' });
+    expect(fixture.nativeElement.textContent).not.toContain('No packages');
+    expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeTruthy();
+  });
+
+  it('says "No packages" once a finished evaluation has none', () => {
+    const { fixture } = setup(access, { primaryStatus: 'Completed' });
+    expect(fixture.nativeElement.textContent).toContain('No packages');
+  });
+
+  it('offers the closure of a built entry point', () => {
+    const { fixture } = setup(access, {
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+    });
+    const comp = fixture.componentInstance;
+    comp.openPkgContextMenu(new MouseEvent('contextmenu'), epSummary('hello'), 'e1', { openAt: () => {} });
+    const closure = comp.pkgMenuModel().find(i => i.label === 'View closure');
+    expect(closure?.disabled).toBe(false);
+    expect(closure?.routerLink).toEqual(['/project', 'acme', 'closure', 'build', 'b-hello']);
+  });
+
+  it('opens the package menu on right-click', () => {
+    const { fixture } = setup(access, {
+      getEntryPoints: () => of({ entry_points: [epSummary('hello')], total: 1 }),
+    });
+    fixture.detectChanges();
+    const comp = fixture.componentInstance;
+    const spy = vi.spyOn(comp, 'openPkgContextMenu');
+    const row = fixture.nativeElement.querySelector('.pkg') as HTMLElement;
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    expect(spy).toHaveBeenCalled();
+  });
+});
