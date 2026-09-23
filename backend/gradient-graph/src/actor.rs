@@ -304,6 +304,7 @@ where
 {
     let tx = Arc::new(ctx.worker_db.begin().await.context("begin")?);
     let scoped = ctx.in_transaction(Arc::clone(&tx));
+    let ready_set = scoped.ready_set.clone();
     let outcome = tokio::time::timeout(budget, work(&scoped)).await;
     drop(scoped);
     let tx =
@@ -314,6 +315,7 @@ where
             // The transaction may have written outbox rows; the effects actor
             // claims them now rather than on its next tick.
             ctx.outbox_wake.notify_one();
+            ready_set.publish();
             Ok(value)
         }
         Ok(Err(e)) => {

@@ -94,6 +94,7 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
         return;
     }
 
+    ctx.ready_set.record(changes);
     announce(ctx, changes).await;
     let Moved {
         regated,
@@ -102,6 +103,7 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
     } = move_demand(ctx, changes).await;
     ctx.probe_requests.send(gained);
     if !regated.is_empty() {
+        ctx.ready_set.record(&regated);
         announce(ctx, &regated).await;
     }
     if !undemanded.is_empty()

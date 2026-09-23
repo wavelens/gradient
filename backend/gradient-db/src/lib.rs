@@ -36,6 +36,7 @@ pub mod project_workers;
 pub mod promotion;
 pub mod reachability;
 pub mod readiness;
+pub mod ready_set;
 pub mod reconcile;
 pub mod recovery;
 pub mod retention;
@@ -78,9 +79,10 @@ pub use self::dep_counts::*;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;
 pub use self::dispatch_record::{
-    BUILD_KEY_PREFIX, EVAL_KEY_PREFIX, abandon_all_open_dispatches, abandon_open_dispatch,
-    abandon_open_dispatches, abandon_open_dispatches_for_jobs, abandon_open_dispatches_for_worker,
-    build_job_key_sql, eval_job_key_sql, latest_eval_jobs, no_open_dispatch_predicate,
+    BUILD_KEY_PREFIX, ClaimGate, EVAL_KEY_PREFIX, abandon_all_open_dispatches,
+    abandon_open_dispatch, abandon_open_dispatches, abandon_open_dispatches_for_jobs,
+    abandon_open_dispatches_for_worker, build_job_key_sql, claim_dispatch, eval_job_key_sql,
+    latest_eval_jobs, no_open_dispatch_predicate,
 };
 pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::drv_output_spec::DrvOutputSpec;
@@ -99,12 +101,12 @@ pub use self::project_cache::project_has_writable_cache;
 pub use self::project_derivations::derivation_ids_for_project;
 pub use self::project_workers::project_has_eval_capable_worker_registration;
 pub use self::promotion::{
-    cascade_dependency_failed, find_ready_anchors, reconcile_cached_anchors_for_eval,
-    reconcile_dependency_failed, requeue_failed_anchors, requeue_failed_closure,
-    substitute_created_anchors,
+    cascade_dependency_failed, find_ready_anchors, find_ready_anchors_among,
+    reconcile_cached_anchors_for_eval, reconcile_dependency_failed, requeue_failed_anchors,
+    requeue_failed_closure, substitute_created_anchors,
 };
 pub use self::reachability::{
-    Adopted, adopt_pending_closure, adopt_pending_closures, anchor_dispatch_state, anchor_status,
+    Adopted, adopt_pending_closure, adopt_pending_closures, anchor_status,
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
     derivations_with_hashes, eval_any_anchor_failed, eval_blocked, evals_referencing_derivation,
     evals_referencing_derivations, inherit_names, pending_orphan_frontier, pending_orphans_among,
@@ -117,6 +119,7 @@ pub use self::readiness::{
     settle_skipped, skip_undemanded, thaw_demanded, unpromote_drv_owners, unpromote_ungated,
     unwalk_derivations,
 };
+pub use self::ready_set::{ReadyMoves, ReadySet};
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;

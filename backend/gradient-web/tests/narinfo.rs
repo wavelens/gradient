@@ -179,6 +179,7 @@ async fn narinfo_served_from_db_inner() {
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
 
@@ -326,6 +327,7 @@ async fn narinfo_unsigned_inner() {
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
 

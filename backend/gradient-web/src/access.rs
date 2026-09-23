@@ -803,6 +803,7 @@ mod tests {
             upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
             outbox_wake: Default::default(),
             probe_requests: Default::default(),
+            ready_set: Default::default(),
             graph: gradient_core::Graph::stub(),
         })
     }

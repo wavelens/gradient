@@ -95,6 +95,7 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         board_events: tokio::sync::broadcast::channel(16).0,
         outbox_wake: Default::default(),
         probe_requests: ProbeRequests::default(),
+        ready_set: Default::default(),
     };
 
     (ctx, worker_db)

@@ -264,8 +264,8 @@ crate::sql_fn! {
 /// The open-`dispatched_job` arm is a dispatch gate, not a readiness one, so it
 /// lives here and not in `readiness::promote`: an anchor that is already out is
 /// still perfectly promotable and must stay `Queued` for the report that closes
-/// it. The tracker's in-memory `untracked` filter is empty after a core respawn;
-/// the row is what survives, so the select carries the gate itself.
+/// it. The whole ready set is read only by the dispatcher's startup and periodic
+/// resync; between them it reads what moved, through [`find_ready_anchors_among`].
 pub async fn find_ready_anchors<C: ConnectionTrait>(
     db: &C,
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
@@ -276,7 +276,25 @@ pub async fn find_ready_anchors<C: ConnectionTrait>(
         .await
 }
 
-fn find_ready_anchors_sql() -> String {
+/// The same gate over the anchors of `derivations` alone: the ready-set moves
+/// one pass admits, so its cost follows what moved, not what is queued.
+pub async fn find_ready_anchors_among<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
+    use sea_orm::EntityTrait;
+    if derivations.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
+    gradient_types::EDerivationBuild::find()
+        .from_raw_sql(FIND_READY_ANCHORS_AMONG.bind([ids.into()]))
+        .all(db)
+        .await
+}
+
+fn ready_anchors_sql(scope: &str) -> String {
     let not_in_flight = crate::dispatch_record::no_open_dispatch_predicate(
         &crate::dispatch_record::build_job_key_sql("db.id"),
     );
@@ -286,6 +304,7 @@ fn find_ready_anchors_sql() -> String {
         SELECT db.*
         FROM derivation_build db
         WHERE db.status = {queued}
+          {scope}
           AND {not_in_flight}
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
@@ -299,10 +318,21 @@ fn find_ready_anchors_sql() -> String {
     )
 }
 
+fn find_ready_anchors_sql() -> String {
+    ready_anchors_sql("")
+}
+
+fn find_ready_anchors_among_sql() -> String {
+    ready_anchors_sql("AND db.derivation = ANY($1::uuid[])")
+}
+
 crate::sql_fn! {
     FIND_READY_ANCHORS = find_ready_anchors_sql,
         params = [],
         tier = Bulk;
+
+    FIND_READY_ANCHORS_AMONG = find_ready_anchors_among_sql,
+        params = [DerivationIds(64)];
 }
 
 /// SQL predicate: the `derivation_build` aliased `alias` has a recorded
@@ -825,5 +855,27 @@ mod tests {
         ));
 
         assert!(norm(find_ready_anchors_sql()).contains(&gate));
+    }
+
+    /// The delta is the resync's gate narrowed to what moved: a copy that
+    /// drifted would admit an anchor the resync then prunes, or the reverse.
+    #[test]
+    fn the_delta_is_the_ready_set_narrowed_to_what_moved() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let among = norm(find_ready_anchors_among_sql());
+        let scope = "AND db.derivation = ANY($1::uuid[]) ";
+
+        assert!(among.contains(scope), "{among}");
+        assert_eq!(among.replacen(scope, "", 1), norm(find_ready_anchors_sql()));
+    }
+
+    #[tokio::test]
+    async fn no_moves_means_no_statement() {
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
+
+        let anchors = find_ready_anchors_among(&db, &[]).await.expect("no-op");
+
+        assert!(anchors.is_empty());
+        assert!(db.into_transaction_log().is_empty());
     }
 }

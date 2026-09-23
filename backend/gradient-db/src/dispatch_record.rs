@@ -9,14 +9,18 @@
 //! and rebuilt in SQL by the dispatch gates, so the prefixes live here next to
 //! the SQL and a copy that drifts cannot silently open the gate.
 
+use gradient_entity::build::BuildStatus;
 use gradient_entity::dispatched_job::{
     Column as CDispatchedJob, DispatchedJobKind, DispatchedJobOutcome, Entity as EDispatchedJob,
+    Model as MDispatchedJob,
 };
-use gradient_entity::ids::{DispatchedJobId, EvaluationId};
-use sea_orm::sea_query::{Expr, Value};
+use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::ids::{DerivationBuildId, DispatchedJobId, EvaluationId};
+use gradient_types::{CDerivationBuild, CEvaluation};
+use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query, Value};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter, QueryOrder,
-    QuerySelect,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, IntoActiveModel,
+    Iterable, QueryFilter, QueryOrder, QuerySelect,
 };
 use std::collections::HashMap;
 
@@ -34,12 +38,91 @@ pub fn build_job_key_sql(id_expr: &str) -> String {
 }
 
 /// SQL predicate: no `dispatched_job` row for `job_key_sql` is still open.
-/// Served by `idx-dispatched_job-open-by-job-id`.
+/// Served by `idx-dispatched_job-open-job`.
 pub fn no_open_dispatch_predicate(job_key_sql: &str) -> String {
     format!(
         "NOT EXISTS (SELECT 1 FROM dispatched_job dj WHERE dj.job_id = {job_key_sql} \
          AND dj.finished_at IS NULL)"
     )
+}
+
+/// What a claim re-reads in the statement that writes its row: a job assembled
+/// from a snapshot goes out only while its subject still wants it.
+#[derive(Debug, Clone, Copy)]
+pub enum ClaimGate {
+    /// The anchor is still `Queued` in the relay mode the job was assembled for.
+    Build {
+        anchor: DerivationBuildId,
+        substitute: bool,
+    },
+    /// The evaluation has not finished.
+    Eval { evaluation: EvaluationId },
+}
+
+impl ClaimGate {
+    fn holds(self) -> Expr {
+        let subject = match self {
+            ClaimGate::Build { anchor, substitute } => Query::select()
+                .expr(Expr::val(1))
+                .from(gradient_entity::derivation_build::Entity)
+                .and_where(CDerivationBuild::Id.eq(anchor))
+                .and_where(CDerivationBuild::Status.eq(BuildStatus::Queued))
+                .and_where(CDerivationBuild::Substitutable.eq(substitute))
+                .to_owned(),
+            ClaimGate::Eval { evaluation } => Query::select()
+                .expr(Expr::val(1))
+                .from(gradient_entity::evaluation::Entity)
+                .and_where(CEvaluation::Id.eq(evaluation))
+                .and_where(CEvaluation::Status.is_not_in([
+                    EvaluationStatus::Completed,
+                    EvaluationStatus::Failed,
+                    EvaluationStatus::Aborted,
+                ]))
+                .to_owned(),
+        };
+
+        Expr::exists(subject)
+    }
+}
+
+/// Claim a job by writing its open `dispatched_job` row; `false` when the claim
+/// was lost. One statement, arbitrated by the unique open-row index
+/// `idx-dispatched_job-open-job`: of any number of instances claiming one job
+/// key, exactly one inserts, and a gate that no longer holds inserts nothing.
+pub async fn claim_dispatch<C: ConnectionTrait>(
+    db: &C,
+    row: MDispatchedJob,
+    gate: ClaimGate,
+) -> Result<bool, DbErr> {
+    let claimed = db.execute(&claim_statement(row, gate)?).await?;
+
+    Ok(claimed.rows_affected() == 1)
+}
+
+fn claim_statement(row: MDispatchedJob, gate: ClaimGate) -> Result<InsertStatement, DbErr> {
+    let row = row.into_active_model();
+    let (columns, values): (Vec<CDispatchedJob>, Vec<Expr>) = CDispatchedJob::iter()
+        .filter_map(|c| row.get(c).into_value().map(|v| (c, Expr::val(v))))
+        .unzip();
+
+    let gated = Query::select()
+        .exprs(values)
+        .and_where(gate.holds())
+        .to_owned();
+    let mut insert = Query::insert();
+    insert
+        .into_table(EDispatchedJob)
+        .columns(columns)
+        .select_from(gated)
+        .map_err(|e| DbErr::Custom(e.to_string()))?
+        .on_conflict(
+            OnConflict::column(CDispatchedJob::JobId)
+                .target_and_where(Expr::col(CDispatchedJob::FinishedAt).is_null())
+                .do_nothing()
+                .to_owned(),
+        );
+
+    Ok(insert)
 }
 
 /// The newest eval job of each evaluation, its Job Board entry. Served by
@@ -213,6 +296,87 @@ mod tests {
 
         let values = format!("{:?}", statement.values);
         assert!(values.contains(&abandoned_bound()), "{values}");
+    }
+
+    fn claim_row(job_id: &str) -> MDispatchedJob {
+        MDispatchedJob {
+            id: DispatchedJobId::now_v7(),
+            job_id: Some(job_id.to_owned()),
+            worker_id: "w1".into(),
+            ..Default::default()
+        }
+    }
+
+    async fn claimed(rows_affected: u64, gate: ClaimGate) -> (bool, Statement) {
+        let db = closed_rows(rows_affected).into_connection();
+        let won = claim_dispatch(&db, claim_row("build:x"), gate)
+            .await
+            .expect("claim");
+        let log = db.into_transaction_log();
+
+        (won, log[0].statements()[0].clone())
+    }
+
+    fn build_gate() -> ClaimGate {
+        ClaimGate::Build {
+            anchor: DerivationBuildId::now_v7(),
+            substitute: false,
+        }
+    }
+
+    /// The unique open-row index is the arbiter: the insert names it through
+    /// its `ON CONFLICT` target, so a rival's open row turns the claim into a
+    /// no-op instead of a second hand-out.
+    #[tokio::test]
+    async fn a_claim_inserts_its_row_unless_the_job_is_already_open() {
+        let (won, statement) = claimed(1, build_gate()).await;
+
+        assert!(won);
+        let sql = &statement.sql;
+        assert!(sql.starts_with("INSERT INTO \"dispatched_job\""), "{sql}");
+        assert!(
+            sql.contains("ON CONFLICT (\"job_id\") WHERE \"finished_at\" IS NULL DO NOTHING"),
+            "{sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_claim_that_inserted_nothing_is_lost() {
+        let (won, _) = claimed(0, build_gate()).await;
+
+        assert!(!won);
+    }
+
+    /// The anchor is re-read in the claim itself: a job assembled while it was
+    /// `Queued` as a build must not go out once it moved or became a relay.
+    #[tokio::test]
+    async fn a_build_claim_requires_the_anchor_queued_in_its_relay_mode() {
+        let (_, statement) = claimed(1, build_gate()).await;
+
+        let sql = &statement.sql;
+        assert!(sql.contains("WHERE EXISTS(SELECT"), "{sql}");
+        assert!(sql.contains("FROM \"derivation_build\""), "{sql}");
+        assert!(sql.contains("\"derivation_build\".\"status\" ="), "{sql}");
+        assert!(
+            sql.contains("\"derivation_build\".\"substitutable\" ="),
+            "{sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_eval_claim_requires_an_unfinished_evaluation() {
+        let (_, statement) = claimed(
+            1,
+            ClaimGate::Eval {
+                evaluation: EvaluationId::now_v7(),
+            },
+        )
+        .await;
+
+        let sql = &statement.sql;
+        assert!(sql.contains("FROM \"evaluation\""), "{sql}");
+        assert!(sql.contains("\"evaluation\".\"status\" NOT IN"), "{sql}");
+        assert!(!sql.contains("\"derivation_build\""), "{sql}");
     }
 
     #[tokio::test]

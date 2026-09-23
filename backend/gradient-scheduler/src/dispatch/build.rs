@@ -7,9 +7,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use crate::dispatch_mode::decide_build_spec_kind;
 use gradient_core::ServerState;
+use gradient_db::ReadyMoves;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::{RequeueScope, Transition};
 use gradient_sources::get_path_from_derivation_output;
@@ -27,12 +29,13 @@ use gradient_types::proto::{
     BuildJob, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, RequiredPath,
 };
 
-use super::{DISPATCH_BUDGET, DISPATCH_TICK};
+use super::{DISPATCH_BUDGET, DISPATCH_TICK, READY_RESYNC};
 
 /// One dispatch pass. A timer tick also advances the rescore clock; a kick runs
 /// only the dispatch half. Neither reconciles: every readiness counter is moved by
 /// the event that changes it, and the two remaining scopes are evaluation-driven.
-pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool) {
+/// Every pass admits what moved; only `resync` reads the whole ready set.
+pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool, resync: bool) {
     // rescore_count is an anti-starvation timeout measured in dispatch
     // intervals, so only the timer advances it - reactive kicks (which can
     // fire many times per interval) just run an extra dispatch pass.
@@ -50,8 +53,11 @@ pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool)
     {
         error!(error = %e, "transient retry requeue did not reach the graph actor");
     }
-    if let Err(e) = dispatch_ready_builds(scheduler).await {
-        error!(error = %e, "build dispatch error");
+    if let Err(e) = admit_ready_moves(scheduler).await {
+        error!(error = %e, "ready-set admission error");
+    }
+    if resync && let Err(e) = resync_ready_set(scheduler).await {
+        error!(error = %e, "ready-set resync error");
     }
     // After dispatching, reconcile each in-flight evaluation's
     // Building/Waiting state so the UI reflects "no worker can pick this
@@ -89,6 +95,7 @@ pub(crate) struct BuildDispatchState {
     scheduler: Arc<Scheduler>,
     ctx: ChildCtx,
     kicks_seen: u64,
+    resynced_at: Option<Instant>,
 }
 
 impl Actor for BuildDispatch {
@@ -106,6 +113,7 @@ impl Actor for BuildDispatch {
             scheduler,
             ctx,
             kicks_seen: 0,
+            resynced_at: None,
         })
     }
 
@@ -121,6 +129,10 @@ impl Actor for BuildDispatch {
             return Ok(());
         }
 
+        let resync = timer_tick
+            && state
+                .resynced_at
+                .is_none_or(|at| at.elapsed() >= READY_RESYNC);
         let scheduler = Arc::clone(&state.scheduler);
         let alive = run_pass(
             "build-dispatch",
@@ -128,12 +140,15 @@ impl Actor for BuildDispatch {
             &state.ctx.cancel,
             &state.ctx.health,
             Box::pin(async move {
-                build_dispatch_pass(&scheduler, timer_tick).await;
+                build_dispatch_pass(&scheduler, timer_tick, resync).await;
                 Ok(())
             }),
         )
         .await;
         state.kicks_seen = kick_gen;
+        if resync {
+            state.resynced_at = Some(Instant::now());
+        }
 
         if !alive {
             myself.stop(Some("shutdown".into()));
@@ -580,6 +595,7 @@ impl BuildDispatchMaps {
 
         let pending = PendingBuildJob {
             derivation_build: anchor.id,
+            derivation: anchor.derivation,
             evaluation_id: eval_id,
             project_id,
             job: build_job,
@@ -691,23 +707,66 @@ fn eval_is_terminal(status: EvaluationStatus) -> bool {
     )
 }
 
-pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
+/// Admit the anchors that entered `Queued` since the last pass and drop the
+/// pending jobs of those that left it, so a pass costs what moved. An entered
+/// anchor already pending is assembled afresh: its relay mode may have changed.
+pub(crate) async fn admit_ready_moves(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler.draining.load(Ordering::Relaxed) {
         return Ok(());
     }
 
-    let state = &scheduler.state;
+    let ReadyMoves { entered, left } = scheduler.state.ready_set.take();
+    if entered.is_empty() && left.is_empty() {
+        return Ok(());
+    }
 
-    // The select re-derives no readiness term: it trusts `Queued` to mean the gates
-    // held, which holds because of the one rule every writer of that status obeys.
-    // The rule is stated at `graph_sql::promotable_predicate`.
-    let started = std::time::Instant::now();
-    let anchors = gradient_db::find_ready_anchors(&state.worker_db).await?;
+    let derivations: Vec<DerivationId> = entered.iter().copied().collect();
+    scheduler
+        .prune_pending_builds(move |b| {
+            left.contains(&b.derivation) || entered.contains(&b.derivation)
+        })
+        .await;
+    let anchors =
+        gradient_db::find_ready_anchors_among(&scheduler.state.worker_db, &derivations).await?;
+
+    enqueue_ready_anchors(scheduler, anchors).await
+}
+
+/// The whole ready set, at startup and every [`READY_RESYNC`]: it admits what no
+/// move announced (a lost hint, another instance's promotion) and prunes the
+/// pending builds that stopped being dispatchable without a move this instance
+/// saw, such as one another instance claimed.
+pub(crate) async fn resync_ready_set(scheduler: &Scheduler) -> anyhow::Result<()> {
+    if scheduler.draining.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+
+    let anchors = gradient_db::find_ready_anchors(&scheduler.state.worker_db).await?;
+    let ready: HashSet<DerivationBuildId> = anchors.iter().map(|a| a.id).collect();
+    let pruned = scheduler
+        .prune_pending_builds(move |b| !ready.contains(&b.derivation_build))
+        .await;
+    if pruned > 0 {
+        debug!(pruned, "resync dropped pending builds no longer ready here");
+    }
+
+    enqueue_ready_anchors(scheduler, anchors).await
+}
+
+/// Assemble and enqueue the anchors the tracker does not hold yet. The select
+/// re-derives no readiness term: it trusts `Queued` to mean the gates held,
+/// which holds because of the one rule every writer of that status obeys, stated
+/// at `graph_sql::promotable_predicate`.
+async fn enqueue_ready_anchors(
+    scheduler: &Scheduler,
+    anchors: Vec<MDerivationBuild>,
+) -> anyhow::Result<()> {
     if anchors.is_empty() {
         return Ok(());
     }
 
-    // Filter out anchors already in the in-memory tracker.
+    let state = &scheduler.state;
+    let started = std::time::Instant::now();
     let ids: Vec<String> = anchors
         .iter()
         .map(|a| crate::jobs::build_job_key(a.id))
@@ -758,7 +817,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     debug!(
         enqueued,
         elapsed_ms = started.elapsed().as_millis() as u64,
-        "dispatch_ready_builds completed"
+        "ready anchors enqueued"
     );
 
     Ok(())

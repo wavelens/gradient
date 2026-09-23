@@ -198,6 +198,12 @@ impl Scheduler {
     ///
     /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {
+        let scheduler = Arc::downgrade(self);
+        self.state.ready_set.on_move(move || {
+            if let Some(scheduler) = scheduler.upgrade() {
+                scheduler.kick_dispatch();
+            }
+        });
         dispatch::start_dispatch_loops(Arc::clone(self));
     }
 
@@ -272,6 +278,17 @@ impl Scheduler {
     /// pass enqueues nothing rather than duplicating work.
     pub async fn untracked(&self, job_ids: Vec<String>) -> Vec<String> {
         self.call(|reply| SchedulerMsg::Untracked { job_ids, reply })
+            .await
+            .unwrap_or_default()
+    }
+
+    /// Drop the pending builds `stale` names; a core outage prunes nothing.
+    pub(crate) async fn prune_pending_builds(
+        &self,
+        stale: impl Fn(&jobs::PendingBuildJob) -> bool + Send + 'static,
+    ) -> usize {
+        let stale = Box::new(stale);
+        self.call(|reply| SchedulerMsg::PrunePendingBuilds { stale, reply })
             .await
             .unwrap_or_default()
     }

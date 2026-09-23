@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `dispatch_queued_evals` and `dispatch_ready_builds`.
+//! Integration tests for `dispatch_queued_evals`.
 //!
-//! Both functions are tested with a staged `MockDatabase` and a real `Scheduler`
-//! so we can assert on `scheduler.pending_job_count()` after dispatch.
+//! Tested with a staged `MockDatabase` and a real `Scheduler` so we can assert
+//! on `scheduler.pending_job_count()` after dispatch.
 //!
-//! ## DB call sequences
+//! ## DB call sequence
 //!
 //! `dispatch_queued_evals`:
 //!   1. `EEvaluation::find().filter(status=Queued).all()` → Q
@@ -17,12 +17,6 @@
 //!   3. Bulk sidecar `evaluation_input_update IN (...)` → Q (InputUpdate evals only)
 //!   4. Bulk `evaluation_flake_input_override IN (eval ids)` → Q
 //!   5. Bulk `ETask IN (task ids)` → Q (skipped when no eval has a task)
-//!
-//! `dispatch_ready_builds`:
-//!   1. `EBuild::find().from_raw_sql(ready_builds_query).all()` → Q
-//!   2. Per build: `EDerivation::find_by_id(drv_id).one()` → Q
-//!   3. `EEvaluation::find_by_id(eval_id).one()` → Q
-//!   4. `project_id_for_eval` (task lookup) → Q
 
 use std::sync::Arc;
 

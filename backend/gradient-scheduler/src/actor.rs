@@ -20,8 +20,8 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info};
 
 use crate::jobs::{
-    Assignment, BoardActiveJob, CandidateDetail, DispatchDecision, JobTracker, PendingJob,
-    PendingJobInfo, WorkerCaps,
+    Assignment, BoardActiveJob, CandidateDetail, DispatchDecision, JobTracker, PendingBuildJob,
+    PendingJob, PendingJobInfo, WorkerCaps,
 };
 use crate::worker_pool::{WorkerInfo, WorkerPool};
 
@@ -228,6 +228,10 @@ pub enum SchedulerMsg {
     Untracked {
         job_ids: Vec<String>,
         reply: RpcReplyPort<Vec<String>>,
+    },
+    PrunePendingBuilds {
+        stale: Box<dyn Fn(&PendingBuildJob) -> bool + Send>,
+        reply: RpcReplyPort<usize>,
     },
     HasIdleEvalOnlyWorker {
         reply: RpcReplyPort<bool>,
@@ -572,6 +576,9 @@ impl Actor for CoreActor {
                     .filter(|id| !core.tracker.contains_job(id))
                     .collect();
                 let _ = reply.send(unknown);
+            }
+            SchedulerMsg::PrunePendingBuilds { stale, reply } => {
+                let _ = reply.send(core.tracker.prune_pending_builds(stale));
             }
             SchedulerMsg::HasIdleEvalOnlyWorker { reply } => {
                 let _ = reply.send(core.pool.has_idle_eval_only_worker());

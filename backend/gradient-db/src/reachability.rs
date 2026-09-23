@@ -118,19 +118,6 @@ pub async fn anchor_status<C: ConnectionTrait>(
         .map(|a| a.status))
 }
 
-/// The anchor's status AND whether it is still a relay, in one read: the
-/// dispatcher assembles a job from a snapshot, and an upstream probe that lands
-/// before the hand-out changes which of the two a worker should be given.
-pub async fn anchor_dispatch_state<C: ConnectionTrait>(
-    db: &C,
-    anchor: DerivationBuildId,
-) -> Result<Option<(BuildStatus, bool)>, DbErr> {
-    Ok(EDerivationBuild::find_by_id(anchor)
-        .one(db)
-        .await?
-        .map(|a| (a.status, a.substitutable)))
-}
-
 /// Evaluations that reference `derivation` (via a `build_job`). Drives status
 /// fan-out: a single anchor transition updates every referencing eval's view.
 pub async fn evals_referencing_derivation<C: ConnectionTrait>(

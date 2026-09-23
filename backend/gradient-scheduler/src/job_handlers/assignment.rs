@@ -10,97 +10,64 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use sea_orm::EntityTrait;
-use sea_orm::IntoActiveModel;
 use tracing::{info, warn};
 
 use gradient_core::ServerState;
-use gradient_entity::build::BuildStatus;
+use gradient_db::ClaimGate;
 use gradient_graph::Transition;
 use gradient_types::proto::{CandidateScore, JobKind};
 use gradient_types::*;
 
 use crate::Scheduler;
 use crate::actor::{AssignOutcome, SchedulerMsg};
-use crate::dispatch;
 use crate::jobs::{Assignment, DispatchRecord};
 
-/// Whether a job assembled for an anchor now in `state` may still go out as a
-/// `substitute` (or not). `Queued` is an invariant the counters keep, and the
-/// relay mode is read again because the job was assembled from a snapshot.
-fn dispatchable(state: Option<(BuildStatus, bool)>, substitute: bool) -> bool {
-    matches!(state, Some((BuildStatus::Queued, relay)) if relay == substitute)
-}
+/// How many claims one `RequestJob` makes before it answers with no job: each
+/// lost claim drops its job from the tracker, so the next attempt scores what is
+/// left.
+const CLAIM_ATTEMPTS: usize = 3;
 
 impl Scheduler {
     // ── Scoring / assignment ──────────────────────────────────────────────────
 
-    /// Claim the best pending job of `kind` for the worker. When the tracker
-    /// has nothing for a build request, refresh from the DB once and retry.
+    /// Pick the best pending job of `kind` for the worker in the tracker and
+    /// claim it in Postgres. The tracker only proposes: a claim another instance
+    /// won, or one whose subject moved since the job was assembled, is dropped and
+    /// the next best is tried. Nothing here reads the ready set.
     pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
         let instance = self.instance.load_full();
-        for attempt in 0..3 {
-            match self.try_assign(worker_id, &kind, &instance).await {
-                AssignOutcome::Assigned(a) if self.still_queued(&a).await => {
-                    if let Err(e) =
-                        record_dispatch(&self.state, worker_id, &a.dispatch_record).await
-                    {
-                        warn!(error = format!("{e:#}"), %worker_id, job_id = %a.job_id(), "dispatch record not written; assignment withdrawn");
-                        self.job_rejected(worker_id, a.job_id()).await;
-                        return None;
-                    }
+        for attempt in 0..CLAIM_ATTEMPTS {
+            let a = match self.try_assign(worker_id, &kind, &instance).await {
+                AssignOutcome::Assigned(a) => a,
+                AssignOutcome::AtCapacity | AssignOutcome::Nothing => return None,
+            };
 
+            match claim(&self.state, worker_id, &a.dispatch_record).await {
+                Ok(true) => {
                     self.announce_dispatch(worker_id, &a.dispatch_record);
                     info!(%worker_id, job_id = %a.job_id(), ?kind, attempt, "job assigned via RequestJob");
                     return Some(a);
                 }
-                AssignOutcome::Assigned(a) => {
-                    self.drop_assignment(worker_id, a.job_id()).await;
-                    continue;
+                Ok(false) => self.claim_lost(worker_id, &a).await,
+                Err(e) => {
+                    warn!(error = format!("{e:#}"), %worker_id, job_id = %a.job_id(), "dispatch record not written; assignment withdrawn");
+                    self.job_rejected(worker_id, a.job_id()).await;
+                    return None;
                 }
-                AssignOutcome::AtCapacity => return None,
-                AssignOutcome::Nothing => {}
-            }
-
-            if attempt == 0 && matches!(kind, JobKind::Build) {
-                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
-                    warn!(error = %e, "on-demand dispatch_ready_builds failed");
-                }
-                self.kick_dispatch();
-            } else {
-                return None;
             }
         }
 
         None
     }
 
-    /// `Queued` is an invariant the counters keep; a job enqueued before a
-    /// gate regressed is still in the tracker and must not go out. The relay mode
-    /// is re-read with it: an upstream probe that lands after the job was
-    /// assembled turns a build into a relay, and handing out the stale build
-    /// rebuilds bytes the upstream already has (#593).
-    async fn still_queued(&self, a: &Assignment) -> bool {
-        let Some(anchor) = a.pending.derivation_build() else {
-            return true;
-        };
-
-        let substitute = matches!(&a.pending, crate::jobs::PendingJob::Build(b) if b.substitute);
-        match gradient_db::anchor_dispatch_state(&self.state.worker_db, anchor).await {
-            Ok(state) if dispatchable(state, substitute) => true,
-            Ok(state) => {
-                warn!(
-                    job_id = %a.job_id(),
-                    ?state,
-                    substitute,
-                    "queued job no longer dispatchable; dropped from the tracker"
-                );
-                false
-            }
-            Err(e) => {
-                warn!(job_id = %a.job_id(), error = %e, "anchor status lookup failed; dispatching anyway");
-                true
-            }
+    /// A lost claim leaves the tracker. A build's anchor is handed back to the
+    /// ready set to be read again: if it only changed relay mode it comes back
+    /// assembled for the new one, and if it is out elsewhere the read skips it.
+    async fn claim_lost(&self, worker_id: &str, a: &Assignment) {
+        info!(%worker_id, job_id = %a.job_id(), "claim lost; dropped from the tracker");
+        self.drop_assignment(worker_id, a.job_id()).await;
+        if let crate::jobs::PendingJob::Build(b) = &a.pending {
+            self.state.ready_set.enter([b.derivation]);
         }
     }
 
@@ -143,11 +110,10 @@ impl Scheduler {
         self.active_job(job_id).await.map(|j| j.project_id())
     }
 
-    /// One atomic claim in the actor. The `dispatched_job` row is
-    /// [`record_dispatch`]'s job and the board event
-    /// [`Self::announce_dispatch`]'s, both run by the caller once the claim
-    /// survives its re-check, so a vetoed claim leaves no trace of a hand-out
-    /// that never happened.
+    /// The tracker's pick, reserved in this instance only. The `dispatched_job`
+    /// row is [`claim`]'s job and the board event [`Self::announce_dispatch`]'s,
+    /// both run by the caller, so a lost claim leaves no trace of a hand-out that
+    /// never happened.
     async fn try_assign(
         &self,
         worker_id: &str,
@@ -199,7 +165,7 @@ const TRANSITION_CEILING_MS: u64 = 60_000;
 /// strictly inside even the tightest configurable deadline.
 const TRANSITION_FLOOR_MS: u64 = 500;
 
-/// How long `record_dispatch` waits on the `Dispatched` transition.
+/// How long `claim` waits on the `Dispatched` transition.
 ///
 /// The graph actor answers within 600 s, which is far longer than the session
 /// may spend on one frame: the worker's heartbeats queue behind it, and a
@@ -228,21 +194,22 @@ fn window_count(job_context: &serde_json::Value, key: &str) -> Option<i32> {
         .and_then(|n| i32::try_from(n).ok())
 }
 
-/// The `dispatched_job` row, then for a build the open `build_attempt` and the
-/// anchor's `dispatched_at` through the graph actor. Awaited before the
-/// assignment goes back to the session: the row is the only proof the job is
-/// out, so a worker's first report can never precede it, and an error here
-/// withdraws the claim instead of letting the job run unrecorded. The mirror
-/// holds too: a failed transition closes the row it just wrote, so a withdrawn
-/// claim never leaves an open row parking the anchor's dispatch gate. What the
-/// withdrawal cannot undo is a transition that merely ran late: `Dispatched`
-/// stamps `dispatched_at` once and only once, so a claim dropped on the budget
-/// can still spend it and leave the anchor's real dispatch untimestamped.
-async fn record_dispatch(
+/// Claim the job by writing its `dispatched_job` row, then for a build open the
+/// `build_attempt` and stamp the anchor's `dispatched_at` through the graph actor;
+/// `Ok(false)` when the claim was lost. Awaited before the assignment goes back
+/// to the session: the row is the only proof the job is out, so a worker's first
+/// report can never precede it, and an error here withdraws the claim instead of
+/// letting the job run unrecorded. The mirror holds too: a failed transition
+/// closes the row it just wrote, so a withdrawn claim never leaves an open row
+/// parking the job. What the withdrawal cannot undo is a transition that merely
+/// ran late: `Dispatched` stamps `dispatched_at` once and only once, so a claim
+/// dropped on the budget can still spend it and leave the anchor's real dispatch
+/// untimestamped.
+async fn claim(
     state: &Arc<ServerState>,
     worker_id: &str,
     rec: &DispatchRecord,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let now = now();
     let row = gradient_entity::dispatched_job::Model {
         id: rec.dispatch,
@@ -268,16 +235,13 @@ async fn record_dispatch(
         missing_count: window_count(&rec.job_context, "missing_count"),
         dependency_count: window_count(&rec.job_context, "dependency_count"),
         ..Default::default()
-    }
-    .into_active_model();
+    };
 
-    gradient_entity::dispatched_job::Entity::insert(row)
-        .exec_without_returning(&state.worker_db)
+    let won = gradient_db::claim_dispatch(&state.worker_db, row, claim_gate(rec))
         .await
-        .context("dispatched_job insert")?;
-
-    let Some(derivation_build) = rec.derivation_build else {
-        return Ok(());
+        .context("dispatched_job claim")?;
+    let Some(derivation_build) = rec.derivation_build.filter(|_| won) else {
+        return Ok(won);
     };
 
     let budget = transition_budget(state.config.proto.worker_heartbeat_timeout_secs);
@@ -306,41 +270,28 @@ async fn record_dispatch(
         warn!(error = %e, dispatch = %rec.dispatch, "dispatch row left open after a failed transition");
     }
 
-    moved.map(|_| ())
+    moved.map(|_| true)
+}
+
+/// What the claim re-reads: a build goes out only while its anchor is `Queued`
+/// in the relay mode it was assembled for, because an upstream probe that lands
+/// in between turns a build into a relay and the stale build would rebuild bytes
+/// the upstream already has (#593).
+fn claim_gate(rec: &DispatchRecord) -> ClaimGate {
+    match rec.derivation_build {
+        Some(anchor) => ClaimGate::Build {
+            anchor,
+            substitute: rec.substitute,
+        },
+        None => ClaimGate::Eval {
+            evaluation: rec.evaluation_id,
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The dispatcher assembles a job from a snapshot of the anchor. An upstream
-    /// probe that lands between that snapshot and the hand-out turns a build into
-    /// a relay, and a job assembled as a real build must not go out afterwards:
-    /// it would build a derivation whose bytes an upstream already has, and in an
-    /// offline fleet its inputs may not even be buildable (#593).
-    #[test]
-    fn a_job_whose_relay_mode_went_stale_is_not_handed_out() {
-        use gradient_entity::build::BuildStatus;
-
-        assert!(dispatchable(Some((BuildStatus::Queued, false)), false));
-        assert!(dispatchable(Some((BuildStatus::Queued, true)), true));
-        assert!(
-            !dispatchable(Some((BuildStatus::Queued, true)), false),
-            "the anchor became relayable after the job was assembled as a build"
-        );
-        assert!(
-            !dispatchable(Some((BuildStatus::Queued, false)), true),
-            "the relay was exhausted after the job was assembled as one"
-        );
-        assert!(
-            !dispatchable(Some((BuildStatus::Building, false)), false),
-            "the status gate still applies"
-        );
-        assert!(
-            !dispatchable(None, false),
-            "a vanished anchor never goes out"
-        );
-    }
 
     /// The session handles one frame at a time, so the wait on the graph actor
     /// is also how long the worker's next heartbeat goes unread. Every

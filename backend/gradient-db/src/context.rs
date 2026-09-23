@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use tokio::sync::{Notify, broadcast, mpsc};
 
 use super::pool::{WebDb, WorkerDb};
+use super::ready_set::ReadySet;
 use gradient_storage::StorageCtx;
 use gradient_types::{BoardEvent, DerivationId, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
@@ -78,13 +79,17 @@ pub struct DbContext {
     pub outbox_wake: Arc<Notify>,
     /// Where a demand recompute reports what it turned on, for the probe loop.
     pub probe_requests: ProbeRequests,
+    /// Where an anchor entering or leaving `Queued` is reported, for dispatch.
+    pub ready_set: ReadySet,
 }
 
 impl DbContext {
-    /// The same context with every statement bound to `tx`.
+    /// The same context with every statement bound to `tx`. Its ready-set
+    /// moves are staged until the owner of `tx` publishes them after the commit.
     pub fn in_transaction(&self, tx: Arc<sea_orm::DatabaseTransaction>) -> DbContext {
         DbContext {
             worker_db: self.worker_db.in_transaction(tx),
+            ready_set: self.ready_set.staged(),
             ..self.clone()
         }
     }
@@ -93,6 +98,7 @@ impl DbContext {
     pub fn detached(&self) -> DbContext {
         DbContext {
             worker_db: self.worker_db.detached(),
+            ready_set: self.ready_set.unstaged(),
             ..self.clone()
         }
     }

@@ -153,6 +153,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -209,6 +210,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -270,6 +272,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });
@@ -390,6 +393,7 @@ fn make_state(
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -477,6 +481,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -549,6 +554,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });

@@ -303,6 +303,7 @@ pub(crate) mod test_ctx {
             board_events: tokio::sync::broadcast::channel(16).0,
             outbox_wake: Default::default(),
             probe_requests: Default::default(),
+            ready_set: Default::default(),
         };
         (ctx, worker_db)
     }

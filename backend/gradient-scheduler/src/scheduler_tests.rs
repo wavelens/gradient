@@ -103,6 +103,7 @@ fn build_job(
 ) -> PendingBuildJob {
     PendingBuildJob {
         derivation_build,
+        derivation: DerivationId::now_v7(),
         evaluation_id,
         project_id: peer,
         job: BuildJob {
@@ -876,6 +877,195 @@ async fn the_dispatch_record_is_written_before_the_assignment_returns() {
     assert!(
         values.contains(&assigned.dispatch().to_string()),
         "{values}"
+    );
+}
+
+fn claim_results(won: &[bool]) -> sea_orm::DatabaseConnection {
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let registration = MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 0,
+    };
+    let claims = won.iter().map(|won| MockExecResult {
+        last_insert_id: 0,
+        rows_affected: u64::from(*won),
+    });
+    MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(std::iter::once(registration).chain(claims))
+        .into_connection()
+}
+
+/// The tracker only proposes. A claim another instance won inserts nothing, so
+/// the job leaves this tracker and the same request claims the next best one.
+#[tokio::test]
+async fn a_lost_claim_drops_the_job_and_claims_the_next() {
+    let scheduler = test_scheduler_with(claim_results(&[false, true])).await;
+    let peer = ProjectId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    for id in ["j1", "j2"] {
+        scheduler
+            .enqueue_eval_job(id.into(), eval_job(peer))
+            .await
+            .unwrap();
+    }
+
+    let assigned = scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("the second claim wins");
+
+    assert_eq!(assigned.job_id(), "j2");
+    assert!(scheduler.pending_job("j1").await.is_none());
+    assert!(scheduler.active_job("j1").await.is_none());
+}
+
+/// A build claim can lose to a gate that moved after the job was assembled,
+/// such as a probe turning it into a relay. Its anchor goes back to the ready
+/// set, so the dispatcher reads it again and assembles it for what it is now.
+#[tokio::test]
+async fn a_lost_build_claim_hands_its_anchor_back_to_the_ready_set() {
+    let scheduler = test_scheduler_with(claim_results(&[false])).await;
+    let peer = ProjectId::now_v7();
+    let job = build_job(EvaluationId::now_v7(), peer, DerivationBuildId::now_v7());
+    let derivation = job.derivation;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    scheduler
+        .enqueue_build_job("jbuild".into(), job)
+        .await
+        .unwrap();
+    scheduler
+        .record_scores(
+            "w1",
+            vec![CandidateScore {
+                job_id: "jbuild".into(),
+                missing_count: 0,
+                missing_nar_size: 0,
+            }],
+        )
+        .await;
+
+    assert!(scheduler.request_job("w1", JobKind::Build).await.is_none());
+
+    assert!(scheduler.active_job("jbuild").await.is_none());
+    assert!(scheduler.pending_job("jbuild").await.is_none());
+    assert_eq!(
+        scheduler.state.ready_set.take().entered,
+        HashSet::from([derivation])
+    );
+}
+
+/// A move out of `Queued` drops the pending build without reading anything:
+/// the pass costs what moved.
+#[tokio::test]
+async fn a_build_that_left_queued_leaves_the_tracker() {
+    use gradient_entity::build::BuildStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let job = build_job(
+        EvaluationId::now_v7(),
+        ProjectId::now_v7(),
+        DerivationBuildId::now_v7(),
+    );
+    let derivation = job.derivation;
+    scheduler
+        .enqueue_build_job("jbuild".into(), job)
+        .await
+        .unwrap();
+
+    scheduler
+        .state
+        .ready_set
+        .record(&[gradient_db::status::TransitionChange {
+            derivation,
+            from: BuildStatus::Queued,
+            to: BuildStatus::Created,
+        }]);
+    crate::dispatch::admit_ready_moves(&scheduler)
+        .await
+        .expect("admission");
+
+    assert!(scheduler.pending_job("jbuild").await.is_none());
+    assert!(log_db.into_transaction_log().is_empty());
+}
+
+/// An anchor that entered `Queued` is read by its derivation alone.
+#[tokio::test]
+async fn admission_reads_only_the_anchors_that_moved() {
+    use gradient_entity::build::BuildStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let derivation = DerivationId::now_v7();
+
+    scheduler
+        .state
+        .ready_set
+        .record(&[gradient_db::status::TransitionChange {
+            derivation,
+            from: BuildStatus::Created,
+            to: BuildStatus::Queued,
+        }]);
+    crate::dispatch::admit_ready_moves(&scheduler)
+        .await
+        .expect("admission");
+
+    let log = log_db.into_transaction_log();
+    let statements: Vec<_> = log.iter().flat_map(|t| t.statements()).collect();
+    assert_eq!(statements.len(), 1);
+    assert!(
+        statements[0]
+            .sql
+            .contains("db.derivation = ANY($1::uuid[])"),
+        "{}",
+        statements[0].sql
+    );
+    let values = format!("{:?}", statements[0].values);
+    assert!(values.contains(&derivation.to_string()), "{values}");
+}
+
+/// The resync is what keeps a per-instance cache honest: a pending build the
+/// whole ready set no longer holds (claimed by another instance, or moved
+/// without a hint this instance saw) is dropped.
+#[tokio::test]
+async fn the_resync_prunes_pending_builds_no_longer_ready() {
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
+        .into_connection();
+    let scheduler = test_scheduler_with(db).await;
+    scheduler
+        .enqueue_build_job(
+            "jbuild".into(),
+            build_job(
+                EvaluationId::now_v7(),
+                ProjectId::now_v7(),
+                DerivationBuildId::now_v7(),
+            ),
+        )
+        .await
+        .unwrap();
+    scheduler
+        .enqueue_eval_job("jeval".into(), eval_job(ProjectId::now_v7()))
+        .await
+        .unwrap();
+
+    crate::dispatch::resync_ready_set(&scheduler)
+        .await
+        .expect("resync");
+
+    assert!(scheduler.pending_job("jbuild").await.is_none());
+    assert!(
+        scheduler.pending_job("jeval").await.is_some(),
+        "evaluations are not the build ready set's to prune"
     );
 }
 

@@ -13,12 +13,12 @@
 //! Split across submodules by concern:
 //! - [`background`] - consistency sweep, worker liveness, lost-completion watchdog, and metrics passes
 //! - [`eval`] - `dispatch_queued_evals`: finds `Queued` evaluations and enqueues `FlakeJob`s
-//! - [`build`] - the build dispatch actor: finds ready `Queued` `derivation_build` anchors and enqueues `BuildJob`s
+//! - [`build`] - the build dispatch actor: admits the anchors that entered `Queued` (the ready-set moves) and enqueues `BuildJob`s, resyncing against every `Queued` anchor on a slow period
 //!
 //! `trigger_dispatch::dispatch_once` fires polling/time triggers and creates evaluations.
 //!
-//! The eval/build passes are idempotent: re-enqueueing the same job_id overwrites
-//! the existing entry in the `JobTracker` without harm.
+//! The tracker is a per-instance cache of candidates and scores. Nothing it holds
+//! decides a hand-out: the claim does, in Postgres (`gradient_db::claim_dispatch`).
 
 use std::future::Future;
 use std::sync::Arc;
@@ -33,7 +33,9 @@ mod background;
 mod build;
 mod eval;
 
-pub(crate) use build::{BuildMsg, dispatch_ready_builds};
+pub(crate) use build::BuildMsg;
+#[cfg(test)]
+pub(crate) use build::{admit_ready_moves, resync_ready_set};
 #[cfg(test)]
 pub(crate) use eval::dispatch_queued_evals;
 pub(crate) use eval::project_id_for_eval;
@@ -41,6 +43,8 @@ pub(crate) use eval::project_id_for_eval;
 /// Tick interval shared by the eval and build dispatch loops.
 pub(crate) const DISPATCH_TICK_SECS: u64 = 5;
 pub(super) const DISPATCH_TICK: Duration = Duration::from_secs(DISPATCH_TICK_SECS);
+/// How often the build dispatcher reads the whole ready set instead of what moved.
+pub(super) const READY_RESYNC: Duration = Duration::from_secs(60);
 /// A dispatch pass past this is cancelled and retried on the next tick.
 pub(super) const DISPATCH_BUDGET: Duration = Duration::from_secs(120);
 const METRICS_BUDGET: Duration = Duration::from_secs(60);

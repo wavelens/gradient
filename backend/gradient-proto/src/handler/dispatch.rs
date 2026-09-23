@@ -834,7 +834,9 @@ impl<'a> DispatchContext<'a> {
             }
 
             info!(%peer_id, %job_id, phases = spans.len(), "job completed");
-            scheduler.record_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans);
+            scheduler
+                .close_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans)
+                .await;
             if let Err(e) = scheduler.handle_job_completed(&peer_id, &job_id).await {
                 error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
             }

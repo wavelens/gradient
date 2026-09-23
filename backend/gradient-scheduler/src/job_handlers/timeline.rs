@@ -110,6 +110,18 @@ impl Scheduler {
         });
     }
 
+    /// [`Self::record_job_timeline`], awaited, for a caller whose next step
+    /// needs the row closed: a fetch job's cached follow-up reuses its job key,
+    /// and its claim loses to the fetch's own row while that is still open.
+    pub async fn close_job_timeline(
+        &self,
+        dispatch: DispatchedJobId,
+        outcome: DispatchedJobOutcome,
+        spans: Vec<JobPhaseSpan>,
+    ) {
+        let _ = self.persist_job_timeline(dispatch, outcome, spans).await;
+    }
+
     /// Reports what the terminal report found. The lookup is by dispatch id
     /// alone: an already closed row is routine, because registration, the
     /// orphan requeue, the abandoned sweep and a withdrawn claim all close a

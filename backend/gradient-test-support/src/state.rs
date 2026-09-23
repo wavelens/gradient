@@ -60,6 +60,7 @@ pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) ->
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -95,6 +96,7 @@ pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
@@ -131,6 +133,7 @@ pub fn test_state_with_log_storage(
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })

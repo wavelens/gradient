@@ -65,6 +65,7 @@ pub(crate) fn test_server_state_with_log(
         upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     })
 }

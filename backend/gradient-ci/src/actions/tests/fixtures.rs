@@ -182,6 +182,7 @@ pub fn make_ctx() -> crate::CiContext {
         board_events: tokio::sync::broadcast::channel(256).0,
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
+        ready_set: Default::default(),
     };
     CiContext {
         db,

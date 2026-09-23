@@ -160,6 +160,7 @@ mod tests {
         let now = gradient_types::now();
         PendingJob::Build(crate::jobs::PendingBuildJob {
             derivation_build: DerivationBuildId::now_v7(),
+            derivation: gradient_types::ids::DerivationId::now_v7(),
             evaluation_id: EvaluationId::now_v7(),
             project_id: ProjectId::now_v7(),
             job: BuildJob {

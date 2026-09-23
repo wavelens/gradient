@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_types::ids::{
-    CommitId, DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId, TaskId,
+    CommitId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId, ProjectId, TaskId,
 };
 use gradient_types::proto::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate, JobKind,
@@ -63,6 +63,8 @@ pub struct PendingBuildJob {
     /// Global build-once anchor (`derivation_build`) this job builds. Round-trips
     /// through the worker as the opaque `BuildSpec.build_id` string.
     pub derivation_build: DerivationBuildId,
+    /// The anchor's derivation, the key its ready-set moves arrive under.
+    pub derivation: DerivationId,
     pub evaluation_id: EvaluationId,
     /// Project (cache/proxy) that owns this job.
     pub project_id: ProjectId,
@@ -509,11 +511,9 @@ impl JobTracker {
 
     pub fn add_pending(&mut self, job_id: String, job: PendingJob) -> JobCandidate {
         let candidate = job.as_candidate(&job_id);
-        // Idempotent under the tracker write lock: two concurrent
-        // `dispatch_ready_builds` passes can both clear the `contains_job`
-        // filter before either enqueues, so a job already pending or in-flight
-        // (active) must not be re-queued - otherwise the same build is
-        // dispatched to the worker twice and the duplicate fails the eval.
+        // Idempotent under the tracker write lock: an eval pass and a cached
+        // follow-up can both clear the `contains_job` filter before either
+        // enqueues, so a job already pending or in-flight (active) is kept.
         if self.pending.contains_key(&job_id) || self.active.contains_key(&job_id) {
             return candidate;
         }
@@ -1063,6 +1063,23 @@ impl JobTracker {
         }
     }
 
+    /// Drop the pending builds `stale` names, with their recorded scores;
+    /// returns how many went. Assigned jobs are never touched.
+    pub fn prune_pending_builds(&mut self, stale: impl Fn(&PendingBuildJob) -> bool) -> usize {
+        let pruned: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(_, job)| matches!(job, PendingJob::Build(b) if stale(b)))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &pruned {
+            self.pending.remove(id);
+            self.forget_job_scores(id);
+        }
+
+        pruned.len()
+    }
+
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
@@ -1259,6 +1276,7 @@ mod tests {
         let derivation_build = DerivationBuildId::now_v7();
         PendingJob::Build(PendingBuildJob {
             derivation_build,
+            derivation: DerivationId::now_v7(),
             evaluation_id: EvaluationId::now_v7(),
             project_id: peer,
             job: BuildJob {
