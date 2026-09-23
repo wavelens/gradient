@@ -6,7 +6,9 @@
 
 //! Per-evaluation anchor counters. Triggers append signed deltas to an
 //! append-only ledger so no mover ever locks the evaluation row; the dispatch
-//! tick folds the ledger, and the consistency sweep recounts. The anchor trigger
+//! tick folds the ledger, and the consistency sweep recounts. No trigger locks
+//! an anchor, so a naming and a transition in flight together can miss each
+//! other; the exact reads that settle an evaluation arbitrate. The anchor trigger
 //! is per row behind a `WHEN`: a statement trigger's transition tables capture
 //! every row a readiness ripple writes, which measured 2.4x on a 100k ripple.
 
@@ -22,52 +24,72 @@ pub const ANCHOR_COUNTS_FN: &str = "CREATE OR REPLACE FUNCTION evaluation_anchor
      (evaluation_anchor_counts.status = 1)::int, \
      (evaluation_anchor_counts.status = 2)::int $$";
 
-const MOVED_FN: &str = "CREATE OR REPLACE FUNCTION evaluation_anchor_moved() RETURNS trigger \
+macro_rules! live {
+    () => {
+        "e.status IN (0, 8, 1, 2, 3, 4)"
+    };
+}
+
+const MOVED_FN: &str = concat!(
+    "CREATE OR REPLACE FUNCTION evaluation_anchor_moved() RETURNS trigger \
      LANGUAGE plpgsql AS $$ BEGIN \
      INSERT INTO evaluation_anchor_delta (evaluation, named, active, failed, queued, building) \
      SELECT bj.evaluation, 0, nc.active - oc.active, nc.failed - oc.failed, \
             nc.queued - oc.queued, nc.building - oc.building \
      FROM evaluation_anchor_counts(NEW.status, NEW.demanded) nc, \
-          evaluation_anchor_counts(OLD.status, OLD.demanded) oc, build_job bj \
-     WHERE bj.derivation_build = NEW.id \
-       AND (nc.active, nc.failed, nc.queued, nc.building) \
+          evaluation_anchor_counts(OLD.status, OLD.demanded) oc, \
+          build_job bj JOIN evaluation e ON e.id = bj.evaluation \
+     WHERE bj.derivation_build = NEW.id AND ",
+    live!(),
+    " AND (nc.active, nc.failed, nc.queued, nc.building) \
            IS DISTINCT FROM (oc.active, oc.failed, oc.queued, oc.building); \
-     RETURN NULL; END $$";
+     RETURN NULL; END $$"
+);
 
-const NAMED_FN: &str = "CREATE OR REPLACE FUNCTION evaluation_anchor_named() RETURNS trigger \
+const NAMED_FN: &str = concat!(
+    "CREATE OR REPLACE FUNCTION evaluation_anchor_named() RETURNS trigger \
      LANGUAGE plpgsql AS $$ BEGIN \
-     PERFORM 1 FROM derivation_build db \
-       WHERE db.id IN (SELECT derivation_build FROM new_rows) \
-       ORDER BY db.derivation FOR SHARE; \
      INSERT INTO evaluation_anchor_delta (evaluation, named, active, failed, queued, building) \
-     SELECT n.evaluation, count(*)::int, sum(c.active)::int, sum(c.failed)::int, sum(c.queued)::int, sum(c.building)::int \
-     FROM new_rows n JOIN derivation_build db ON db.id = n.derivation_build \
+     SELECT n.evaluation, count(*)::int, sum(c.active)::int, sum(c.failed)::int, \
+            sum(c.queued)::int, sum(c.building)::int \
+     FROM new_rows n JOIN evaluation e ON e.id = n.evaluation \
+     JOIN derivation_build db ON db.id = n.derivation_build \
      CROSS JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) c \
-     GROUP BY n.evaluation; \
-     RETURN NULL; END $$";
+     WHERE ",
+    live!(),
+    " GROUP BY n.evaluation; \
+     RETURN NULL; END $$"
+);
 
-const UNNAMED_FN: &str = "CREATE OR REPLACE FUNCTION evaluation_anchor_unnamed() RETURNS trigger \
+const UNNAMED_FN: &str = concat!(
+    "CREATE OR REPLACE FUNCTION evaluation_anchor_unnamed() RETURNS trigger \
      LANGUAGE plpgsql AS $$ BEGIN \
-     PERFORM 1 FROM derivation_build db \
-       WHERE db.id IN (SELECT derivation_build FROM old_rows) \
-       ORDER BY db.derivation FOR SHARE; \
      INSERT INTO evaluation_anchor_delta (evaluation, named, active, failed, queued, building) \
-     SELECT o.evaluation, -count(*)::int, -coalesce(sum(c.active), 0)::int, -coalesce(sum(c.failed), 0)::int, \
-            -coalesce(sum(c.queued), 0)::int, -coalesce(sum(c.building), 0)::int \
-     FROM old_rows o LEFT JOIN derivation_build db ON db.id = o.derivation_build \
+     SELECT o.evaluation, -count(*)::int, -coalesce(sum(c.active), 0)::int, \
+            -coalesce(sum(c.failed), 0)::int, -coalesce(sum(c.queued), 0)::int, \
+            -coalesce(sum(c.building), 0)::int \
+     FROM old_rows o JOIN evaluation e ON e.id = o.evaluation \
+     LEFT JOIN derivation_build db ON db.id = o.derivation_build \
      LEFT JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) c ON db.id IS NOT NULL \
-     GROUP BY o.evaluation; \
-     RETURN NULL; END $$";
+     WHERE ",
+    live!(),
+    " GROUP BY o.evaluation; \
+     RETURN NULL; END $$"
+);
 
-const BACKFILL: &str = "UPDATE evaluation e SET named_anchors = x.named, active_anchors = x.active, \
+const BACKFILL: &str = concat!(
+    "UPDATE evaluation e SET named_anchors = x.named, active_anchors = x.active, \
      failed_anchors = x.failed, queued_anchors = x.queued, building_anchors = x.building \
      FROM ( \
-       SELECT bj.evaluation, count(*)::int AS named, sum(c.active)::int AS active, sum(c.failed)::int AS failed, \
-              sum(c.queued)::int AS queued, sum(c.building)::int AS building \
+       SELECT bj.evaluation, count(*)::int AS named, sum(c.active)::int AS active, \
+              sum(c.failed)::int AS failed, sum(c.queued)::int AS queued, \
+              sum(c.building)::int AS building \
        FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build \
        CROSS JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) c \
        GROUP BY bj.evaluation \
-     ) x WHERE e.id = x.evaluation";
+     ) x WHERE e.id = x.evaluation AND ",
+    live!()
+);
 
 const UP: &[&str] = &[
     "ALTER TABLE evaluation \
@@ -138,6 +160,8 @@ impl MigrationTrait for Migration {
 mod tests {
     use super::*;
 
+    const LIVE: &str = live!();
+
     /// The backfill runs after the triggers exist and counts through the same
     /// function they call, so the two cannot disagree.
     #[test]
@@ -169,12 +193,24 @@ mod tests {
         );
     }
 
-    /// Both `build_job` triggers lock the anchors they read in `derivation`
-    /// order, the order `LOCK_ANCHORS` takes them in.
+    /// No trigger takes a row lock: a naming held `FOR SHARE` until the ingest
+    /// flush commits is a wait edge behind which that flush's own `lock_anchors`
+    /// deadlocks against a ripple. A race is settled by the exact reads instead.
     #[test]
-    fn the_naming_triggers_lock_in_derivation_order() {
-        for f in [NAMED_FN, UNNAMED_FN] {
-            assert!(f.contains("ORDER BY db.derivation FOR SHARE"), "{f}");
+    fn no_trigger_locks_an_anchor() {
+        for f in [MOVED_FN, NAMED_FN, UNNAMED_FN] {
+            assert!(!f.contains("FOR SHARE") && !f.contains("FOR UPDATE"), "{f}");
         }
+    }
+
+    /// A finished evaluation's counters are read by nothing, so every trigger and
+    /// the backfill write only for live ones: a shared anchor is named by every
+    /// retained evaluation, and a bulk move would otherwise write one row per.
+    #[test]
+    fn only_live_evaluations_are_counted() {
+        for f in [MOVED_FN, NAMED_FN, UNNAMED_FN, BACKFILL] {
+            assert!(f.contains(LIVE), "{f}");
+        }
+        assert!(LIVE.contains("status IN (0, 8, 1, 2, 3, 4)"), "{LIVE}");
     }
 }
