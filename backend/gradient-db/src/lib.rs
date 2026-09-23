@@ -23,6 +23,7 @@ pub mod derivation;
 pub mod dispatch_record;
 pub mod draining;
 pub mod drv_output_spec;
+pub mod eval_counters;
 pub mod eval_watchdog;
 pub mod gc;
 pub mod graph_sql;
@@ -83,6 +84,10 @@ pub use self::dispatch_record::{
 };
 pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::drv_output_spec::DrvOutputSpec;
+pub use self::eval_counters::{
+    EvalCounters, eval_counters, fold_anchor_deltas, in_flight_counters,
+    recount_eval_anchor_counters,
+};
 pub use self::eval_watchdog::{LostCompletion, lost_eval_completions};
 pub use self::gc::*;
 pub use self::graph_sql::{
