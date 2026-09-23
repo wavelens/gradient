@@ -1200,6 +1200,164 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /user/stars:
+    get:
+      tags: [user]
+      summary: List starred projects, tasks and caches
+      description: Returns the names of everything the current user starred and can still read, each list sorted by name. A target the user lost access to is hidden, not unstarred.
+      operationId: getUserStars
+      responses:
+        '200':
+          description: Starred names grouped by kind
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [projects, tasks, caches]
+                        properties:
+                          projects:
+                            type: array
+                            items:
+                              type: string
+                          tasks:
+                            type: array
+                            items:
+                              type: object
+                              required: [project, task]
+                              properties:
+                                project:
+                                  type: string
+                                task:
+                                  type: string
+                          caches:
+                            type: array
+                            items:
+                              type: string
+              example:
+                error: false
+                message:
+                  projects: [infra]
+                  tasks:
+                    - project: infra
+                      task: hosts
+                  caches: [main]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /user/stars/projects/{project}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectSlug'
+    put:
+      tags: [user]
+      summary: Star a project
+      description: Idempotent. `message` is `true`, the project is starred afterwards.
+      operationId: starProject
+      responses:
+        '200':
+          description: Project starred
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [user]
+      summary: Unstar a project
+      description: Idempotent, also for a project that was never starred. `message` is `false`.
+      operationId: unstarProject
+      responses:
+        '200':
+          description: Project unstarred
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /user/stars/tasks/{project}/{task}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
+    put:
+      tags: [user]
+      summary: Star a task
+      description: Idempotent. `message` is `true`, the task is starred afterwards.
+      operationId: starTask
+      responses:
+        '200':
+          description: Task starred
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [user]
+      summary: Unstar a task
+      description: Idempotent, also for a task that was never starred. `message` is `false`.
+      operationId: unstarTask
+      responses:
+        '200':
+          description: Task unstarred
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /user/stars/caches/{cache}:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    put:
+      tags: [user]
+      summary: Star a cache
+      description: Idempotent. `message` is `true`, the cache is starred afterwards.
+      operationId: starCache
+      responses:
+        '200':
+          description: Cache starred
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [user]
+      summary: Unstar a cache
+      description: Idempotent, also for a cache that was never starred. `message` is `false`.
+      operationId: unstarCache
+      responses:
+        '200':
+          description: Cache unstarred
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Projects ─────────────────────────────────────────────────────────────
 
   /projects:

@@ -64,6 +64,10 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `PATCH` | `/user/keys/{api_id}` | Update an API key's name / permissions / project pin |
 | `GET` | `/user/settings` | Get profile settings |
 | `PATCH` | `/user/settings` | Update profile settings |
+| `GET` | `/user/stars` | Starred projects, tasks and caches the user can still read |
+| `PUT` / `DELETE` | `/user/stars/projects/{project}` | Star / unstar a project (idempotent) |
+| `PUT` / `DELETE` | `/user/stars/tasks/{project}/{task}` | Star / unstar a task (idempotent) |
+| `PUT` / `DELETE` | `/user/stars/caches/{cache}` | Star / unstar a cache (idempotent) |
 
 ### Configuring API-key options
 

@@ -452,6 +452,19 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         )
         .route("/user", get(user::get).delete(user::delete))
         .route("/user/search", get(user::get_search))
+        .route("/user/stars", get(stars::get_stars))
+        .route(
+            "/user/stars/projects/{project}",
+            put(stars::put_project_star).delete(stars::delete_project_star),
+        )
+        .route(
+            "/user/stars/tasks/{project}/{task}",
+            put(stars::put_task_star).delete(stars::delete_task_star),
+        )
+        .route(
+            "/user/stars/caches/{cache}",
+            put(stars::put_cache_star).delete(stars::delete_cache_star),
+        )
         .route(
             "/user/keys",
             get(user::get_keys)

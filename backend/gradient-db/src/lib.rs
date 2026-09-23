@@ -16,6 +16,7 @@ pub mod closure;
 pub mod connection;
 pub mod consistency;
 pub mod context;
+pub mod dashboard;
 pub mod debug_info;
 pub mod dep_counts;
 pub mod dependency_graph;
