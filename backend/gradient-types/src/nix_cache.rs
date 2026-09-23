@@ -23,7 +23,9 @@ impl NixCacheInfo {
     pub fn to_nix_string(&self) -> String {
         format!(
             "WantMassQuery: {}\nStoreDir: {}\nPriority: {}",
-            self.want_mass_query, self.store_dir, self.priority
+            u8::from(self.want_mass_query),
+            self.store_dir,
+            self.priority
         )
     }
 }
@@ -208,7 +210,7 @@ mod tests {
         };
         assert_eq!(
             info.to_nix_string(),
-            "WantMassQuery: true\nStoreDir: /nix/store\nPriority: 40"
+            "WantMassQuery: 1\nStoreDir: /nix/store\nPriority: 40"
         );
     }
 
@@ -219,7 +221,7 @@ mod tests {
             store_dir: "/nix/store".to_string(),
             priority: 0,
         };
-        assert!(info.to_nix_string().contains("WantMassQuery: false"));
+        assert!(info.to_nix_string().contains("WantMassQuery: 0"));
         assert!(info.to_nix_string().contains("Priority: 0"));
     }
 
