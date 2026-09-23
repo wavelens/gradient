@@ -70,6 +70,7 @@ describe('gr-row', () => {
   template: `
     <gr-row icon="group" [link]="['/settings']">
       Members
+      <span slot="icon" class="lead"></span>
       <span slot="meta">Who can do what</span>
       <button slot="actions">Edit</button>
     </gr-row>
@@ -88,6 +89,8 @@ describe('gr-row projection into a linked row', () => {
     expect(root.querySelector('.row-name')?.textContent).toContain('Members');
     expect(root.querySelector('.row-meta')?.textContent).toContain('Who can do what');
     expect(root.querySelector('.row-actions button')?.textContent).toContain('Edit');
+    expect(root.querySelector('.row-info > .lead')).not.toBeNull();
+    expect(root.querySelector('.row-name .lead')).toBeNull();
   });
 });
 

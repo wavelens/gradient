@@ -6,6 +6,7 @@
     @if (icon()) {
       <gr-icon [name]="icon()!" />
     }
+    <ng-content select="[slot=icon]"></ng-content>
     <div class="row-text">
       <div class="row-name"><ng-content></ng-content></div>
       <div class="row-meta"><ng-content select="[slot=meta]"></ng-content></div>

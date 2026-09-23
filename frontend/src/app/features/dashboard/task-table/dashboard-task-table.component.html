@@ -19,7 +19,7 @@
         @for (t of d.tasks; track t.project + '/' + t.task) {
           <gr-row [link]="['/project', t.project, 'task', t.task]" [linkLabel]="t.project + ' / ' + t.task">
             @if (t.latest; as l) {
-              <gr-status-icon size="sm" [phase]="phase(l.status)" [label]="l.status" />
+              <gr-status-icon slot="icon" size="sm" [phase]="phase(l.status)" [label]="l.status" />
             }
             <span class="name" [title]="t.project + ' / ' + t.task"><span class="project">{{ t.project }} /</span> {{ t.task }}</span>
             <span slot="meta">
