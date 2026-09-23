@@ -9,7 +9,8 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
-import { BuildItem } from '@core/services/evaluations.service';
+import { BuildItem, EvaluationsService } from '@core/services/evaluations.service';
+import { of } from 'rxjs';
 import { Evaluation } from '@core/models';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
@@ -369,6 +370,17 @@ describe('EvaluationLogComponent', () => {
       const { cmp } = setup();
       cmp.access.set({ managed: false, canEdit: true, canTrigger: false });
       expect(cmp.triggerAccess().canEdit).toBe(false);
+    });
+
+    it('aborts only after the confirmation, then closes it', () => {
+      const { cmp } = setup();
+      const abort = vi.spyOn(TestBed.inject(EvaluationsService), 'abortEvaluation').mockReturnValue(of('ok') as never);
+      vi.spyOn(cmp, 'loadEvaluation').mockImplementation(() => {});
+      cmp.abortConfirmOpen.set(true);
+      expect(abort).not.toHaveBeenCalled();
+      cmp.abortEvaluation();
+      expect(abort).toHaveBeenCalledOnce();
+      expect(cmp.abortConfirmOpen()).toBe(false);
     });
   });
 });

@@ -26,7 +26,12 @@
           <a [routerLink]="['/project', projectName, 'task', ev.task_name]" class="breadcrumb-link">{{ ev.task_display_name || ev.task_name }}</a>
         }
         <span class="breadcrumb-sep">/</span>
-        <span class="breadcrumb-current" aria-current="page">Evaluation</span>
+        @if (ev.task_name) {
+          <a [routerLink]="['/project', projectName, 'task', ev.task_name]" [queryParams]="{ eval: ev.id }"
+             class="breadcrumb-link breadcrumb-current">Evaluation</a>
+        } @else {
+          <span class="breadcrumb-current" aria-current="page">Evaluation</span>
+        }
       </div>
 
       <div class="overview-block">
@@ -173,7 +178,7 @@
           @if (isRunning()) {
             <button *appWritable="triggerAccess()" grButton label="Abort" icon="close"
               severity="danger" size="small"
-              (click)="abortEvaluation()" [loading]="aborting()" [disabled]="aborting()"></button>
+              (click)="abortConfirmOpen.set(true)" [loading]="aborting()" [disabled]="aborting()"></button>
           }
         </div>
       </div>
@@ -338,3 +343,18 @@
     </main>
   </div>
 }
+
+<gr-dialog
+  header="Abort evaluation"
+  [visible]="abortConfirmOpen()"
+  (visibleChange)="!$event && !aborting() && abortConfirmOpen.set(false)"
+  width="400px"
+>
+  <p>Do you really want to abort the eval?</p>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
+            (click)="abortConfirmOpen.set(false)"></button>
+    <button grButton label="Abort" severity="danger" [loading]="aborting()"
+            [disabled]="aborting()" (click)="abortEvaluation()"></button>
+  </div>
+</gr-dialog>

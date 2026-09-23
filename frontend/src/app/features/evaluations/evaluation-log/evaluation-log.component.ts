@@ -44,6 +44,7 @@ import {
   BadgeComponent,
   BadgeSeverity,
   ButtonComponent,
+  DialogComponent,
   EvalStatusBadgeComponent,
   IconComponent,
   InputDirective,
@@ -58,7 +59,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MenuComponent, MessageBannerComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, DialogComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MenuComponent, MessageBannerComponent, WritableDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -92,6 +93,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   logLineCount = signal(0);
   logLoading = signal(true);
   aborting = signal(false);
+  abortConfirmOpen = signal(false);
   // The log page is reachable without the task route's access resolver, so the
   // owning task is asked directly: a viewer must not be offered an abort.
   access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
@@ -1341,6 +1343,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evalService.abortEvaluation(this.evaluationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.aborting.set(false);
+        this.abortConfirmOpen.set(false);
         this.loadEvaluation();
       },
       error: () => this.aborting.set(false),
