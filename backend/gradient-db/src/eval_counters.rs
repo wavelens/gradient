@@ -231,6 +231,21 @@ mod tests {
         );
     }
 
+    /// `derivation_build` is global, so an anchor a previous evaluation aborted
+    /// is terminal before the next evaluation ever dispatches it, and an abort
+    /// blocks nothing. Omitting `Aborted` from `failed` finalized such an
+    /// evaluation `Completed`: 26 of 26 anchors aborted, nothing built.
+    #[test]
+    fn an_aborted_anchor_counts_as_failed() {
+        assert!(BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted));
+        for ok in BuildStatus::TERMINAL_SUCCESS {
+            assert!(
+                !BuildStatus::REQUEUEABLE.contains(&ok),
+                "{ok:?} must not fail its evaluation"
+            );
+        }
+    }
+
     /// The fold deletes what it adds in one statement, so a delta is either
     /// folded or still in the ledger, never both and never neither.
     #[test]

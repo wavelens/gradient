@@ -16,20 +16,17 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::info;
 
-/// Settle `evaluation_id` if the build graph says it is done: no anchor it names
-/// still blocks it ([`crate::graph_sql::blocks_evaluation`]). `Failed` when any
-/// anchor terminally failed or the eval logged error-level messages (nix eval
-/// errors mean a partially-successful walk), else `Completed`. A no-op unless the
-/// evaluation is in its build phase.
+/// Settle `evaluation_id` once its counters say no anchor it names blocks it
+/// ([`crate::graph_sql::blocks_evaluation`]). `Failed` when any anchor ended
+/// unbuilt or the eval logged error-level messages (nix eval errors mean a
+/// partially-successful walk), else `Completed`. A no-op unless the evaluation
+/// is in its build phase.
 pub async fn check_evaluation_done(
     ctx: &DbContext,
     evaluation_id: EvaluationId,
 ) -> Result<(), DbErr> {
-    // The blocking question first, and as an EXISTS: it is asked on every terminal
-    // transition and the answer is almost always "yes" off the first blocking
-    // anchor, so neither the anchor set nor the evaluation row is worth reading
-    // until it comes back false.
-    if crate::reachability::eval_blocked(&ctx.worker_db, evaluation_id).await? {
+    let counters = crate::eval_counters::eval_counters(&ctx.worker_db, evaluation_id).await?;
+    if counters.active > 0 {
         return Ok(());
     }
 
@@ -44,8 +41,9 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    let any_failed =
-        crate::reachability::eval_any_anchor_failed(&ctx.worker_db, evaluation_id).await?;
+    // `Aborted` counts: `derivation_build` is global, so an anchor another
+    // evaluation aborted is already terminal here and blocks nothing.
+    let any_failed = counters.failed > 0;
 
     let eval_error_messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
@@ -113,12 +111,15 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 
-    /// The reply to either `EXISTS` read: one row, one boolean column.
-    fn flag(column: &str, value: bool) -> Vec<BTreeMap<String, Value>> {
-        vec![BTreeMap::from([(
-            column.to_owned(),
-            Value::Bool(Some(value)),
-        )])]
+    /// The reply to the counters read: the evaluation names two anchors.
+    fn counters(active: i64, failed: i64) -> Vec<BTreeMap<String, Value>> {
+        vec![BTreeMap::from([
+            ("named".to_owned(), Value::BigInt(Some(2))),
+            ("active".to_owned(), Value::BigInt(Some(active))),
+            ("failed".to_owned(), Value::BigInt(Some(failed))),
+            ("queued".to_owned(), Value::BigInt(Some(0))),
+            ("building".to_owned(), Value::BigInt(Some(0))),
+        ])]
     }
 
     fn building() -> MEvaluation {
@@ -129,15 +130,13 @@ mod tests {
         }
     }
 
-    /// Nothing blocking left settles the evaluation, and the failure question is
-    /// asked only then - it decides `Failed` over `Completed` and nothing else.
+    /// Nothing blocking left settles the evaluation.
     #[tokio::test]
     async fn an_evaluation_nothing_blocks_settles() {
         let eval = building();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([flag("blocked", false)])
+            .append_query_results([counters(0, 0)])
             .append_query_results([vec![eval.clone()]])
-            .append_query_results([flag("failed", false)])
             .append_query_results([Vec::<MEvaluationMessage>::new()])
             .append_exec_results(vec![
                 MockExecResult {
@@ -163,13 +162,13 @@ mod tests {
     }
 
     /// An anchor still blocking stops the pass at the one read. The emitter asks
-    /// this on every terminal transition, so the blocked answer must cost a single
-    /// `EXISTS` and must not read the anchor set or the evaluation row.
+    /// this on every terminal transition, so the blocked answer must cost the
+    /// counters row and must not read the anchor set or the evaluation row.
     #[tokio::test]
     async fn a_blocked_evaluation_costs_one_read() {
         let eval = building();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([flag("blocked", true)])
+            .append_query_results([counters(1, 0)])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -177,8 +176,44 @@ mod tests {
         drop(ctx);
 
         let log = crate::pool::statements(pool.into_transaction_log());
-        assert_eq!(log.len(), 1, "one EXISTS and nothing else: {log:?}");
-        assert!(log[0].contains("SELECT EXISTS"), "{log:?}");
+        assert_eq!(log.len(), 1, "one counters read and nothing else: {log:?}");
+        assert!(log[0].contains("evaluation_anchor_delta"), "{log:?}");
+    }
+
+    /// An anchor that ended unbuilt fails the evaluation: `Aborted` counts, so an
+    /// evaluation whose every anchor sat aborted is not a green check.
+    #[tokio::test]
+    async fn a_failed_anchor_fails_the_evaluation() {
+        let eval = building();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([counters(0, 1)])
+            .append_query_results([vec![eval.clone()]])
+            .append_query_results([Vec::<MEvaluationMessage>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                3
+            ])
+            .append_query_results([vec![eval.clone()]])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        check_evaluation_done(&ctx, eval.id).await.unwrap();
+        crate::test_ctx::settle(ctx).await;
+
+        let failed = format!("{:?}", Value::Int(Some(EvaluationStatus::Failed as i32)));
+        let log = pool.into_transaction_log();
+        let settled = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .find(|s| s.sql.starts_with(r#"UPDATE "evaluation""#))
+            .expect("the evaluation settles");
+        assert!(
+            format!("{:?}", settled.values).contains(&failed),
+            "{settled:?}"
+        );
     }
 
     /// A reply with no row is an error, not "nothing blocks": settling an

@@ -106,9 +106,8 @@ pub use self::promotion::{
 pub use self::reachability::{
     Adopted, adopt_pending_closure, adopt_pending_closures, anchor_dispatch_state, anchor_status,
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
-    derivations_with_hashes, eval_any_anchor_failed, eval_blocked, evals_referencing_derivation,
-    evals_referencing_derivations, inherit_names, pending_orphan_frontier, pending_orphans_among,
-    producers_of_hashes,
+    derivations_with_hashes, evals_referencing_derivation, evals_referencing_derivations,
+    inherit_names, pending_orphan_frontier, pending_orphans_among, producers_of_hashes,
 };
 pub use self::readiness::{
     AnchorLock, DemandMoved, Repaired, advance_fetchable, became_fetchable, lock_anchors,
