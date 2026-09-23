@@ -643,6 +643,113 @@ in {
       echo "lockrace: the unlocked arm committed; the driver checks what it wrote"
       """
 
+      # Phase 10i's two-session handshake, on the phase 10f scaffolding. It reads
+      # CR_EVAL and CR_ANCHOR from the environment and prints one line per order:
+      # the evaluation's counters (folded plus unfolded) and their recount.
+      COUNTER_RACE_SH = """
+      set -u
+      D=/tmp/counterrace
+      APID=""
+      BPID=""
+
+      cleanup() {
+        exec 3>&-
+        exec 4>&-
+        if [ -n "$APID" ]; then kill $APID 2>/dev/null || true; fi
+        if [ -n "$BPID" ]; then kill $BPID 2>/dev/null || true; fi
+        mkdir -p $D
+        printf '%s\\n' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name LIKE 'counterrace_%';" > $D/kill.sql
+        su postgres -c "psql -d gradient -At -q -f $D/kill.sql" >/dev/null 2>&1 || true
+        rm -rf $D
+      }
+      trap cleanup EXIT INT TERM
+
+      q() {
+        printf '%s\\n' "$1" > $D/q.sql
+        su postgres -c "psql -d gradient -At -q -f $D/q.sql"
+      }
+
+      wait_state() {
+        i=0
+        while [ $i -lt 60 ]; do
+          if [ "$(q "SELECT count(*) FROM pg_stat_activity WHERE $1")" = "1" ]; then
+            return 0
+          fi
+          i=$((i + 1))
+          sleep 1
+        done
+        echo "COUNTERRACE TIMEOUT: $2"
+        cat $D/a.out || true
+        cat $D/b.out || true
+        q "SELECT pid, application_name, state, wait_event_type, wait_event, left(query, 90) FROM pg_stat_activity WHERE datname = 'gradient' ORDER BY pid"
+        exit 1
+      }
+
+      send_a() { printf '%s\\n' "$1" >&3; }
+      send_b() { printf '%s\\n' "$1" >&4; }
+
+      counters() {
+        q "SELECT concat_ws(' ', e.named_anchors + coalesce(sum(d.named), 0), e.active_anchors + coalesce(sum(d.active), 0), e.failed_anchors + coalesce(sum(d.failed), 0), e.queued_anchors + coalesce(sum(d.queued), 0), e.building_anchors + coalesce(sum(d.building), 0)) FROM evaluation e LEFT JOIN evaluation_anchor_delta d ON d.evaluation = e.id WHERE e.id = '$CR_EVAL' GROUP BY e.id"
+      }
+
+      recount() {
+        q "SELECT concat_ws(' ', count(bj.id), coalesce(sum(x.active), 0), coalesce(sum(x.failed), 0), coalesce(sum(x.queued), 0), coalesce(sum(x.building), 0)) FROM evaluation e LEFT JOIN build_job bj ON bj.evaluation = e.id LEFT JOIN derivation_build db ON db.id = bj.derivation_build LEFT JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) x ON db.id IS NOT NULL WHERE e.id = '$CR_EVAL' GROUP BY e.id"
+      }
+
+      NAME="INSERT INTO build_job (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) SELECT uuidv7(), '$CR_EVAL', db.derivation, db.id, 0, '{}'::jsonb, now() AT TIME ZONE 'UTC' FROM derivation_build db WHERE db.id = '$CR_ANCHOR';"
+      MOVE="UPDATE derivation_build SET status = 3 WHERE id = '$CR_ANCHOR';"
+
+      rm -rf $D
+      mkdir -p $D
+      mkfifo $D/a.in
+      mkfifo $D/b.in
+      su postgres -c "psql -d gradient -At" < $D/a.in > $D/a.out 2>&1 &
+      APID=$!
+      su postgres -c "psql -d gradient -At" < $D/b.in > $D/b.out 2>&1 &
+      BPID=$!
+      exec 3> $D/a.in
+      exec 4> $D/b.in
+      send_a "SET application_name = 'counterrace_a';"
+      send_b "SET application_name = 'counterrace_b';"
+
+      # transition_first: the move holds the anchor, the naming waits on its
+      # FOR SHARE and must count the committed post-move row.
+      send_a "BEGIN;"
+      send_a "$MOVE"
+      wait_state "application_name = 'counterrace_a' AND state = 'idle in transaction'" "the move never held its row"
+      send_b "BEGIN;"
+      send_b "$NAME"
+      wait_state "application_name = 'counterrace_b' AND wait_event_type = 'Lock'" "the naming never blocked on the move"
+      send_a "COMMIT;"
+      wait_state "application_name = 'counterrace_a' AND state = 'idle'" "the move never committed"
+      send_b "COMMIT;"
+      wait_state "application_name = 'counterrace_b' AND state = 'idle'" "the naming never committed"
+      echo "transition_first $(counters) | $(recount)"
+
+      q "DELETE FROM build_job WHERE evaluation = '$CR_EVAL' AND derivation_build = '$CR_ANCHOR'; UPDATE derivation_build SET status = 0 WHERE id = '$CR_ANCHOR';" >/dev/null
+
+      # naming_first: the naming holds the anchor FOR SHARE, the move waits, and
+      # its trigger must see the committed build_job.
+      send_b "BEGIN;"
+      send_b "$NAME"
+      wait_state "application_name = 'counterrace_b' AND state = 'idle in transaction'" "the naming never held its lock"
+      send_a "BEGIN;"
+      send_a "$MOVE"
+      wait_state "application_name = 'counterrace_a' AND wait_event_type = 'Lock'" "the move never blocked on the naming"
+      send_b "COMMIT;"
+      wait_state "application_name = 'counterrace_b' AND state = 'idle'" "the naming never committed"
+      send_a "COMMIT;"
+      wait_state "application_name = 'counterrace_a' AND state = 'idle'" "the move never committed"
+      echo "naming_first $(counters) | $(recount)"
+
+      if grep -q ERROR $D/a.out $D/b.out; then
+        echo "COUNTERRACE: a session reported an error"
+        cat $D/a.out
+        cat $D/b.out
+        exit 1
+      fi
+      """
+
       start_all()
 
       # ── Phase 1: services come up and the worker authenticates ────────────
@@ -2311,6 +2418,50 @@ in {
       assert sql(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';") == "1", \
           "a path its own name still reaches left the cache with hello"
       assert runtime_drift() == 0, "wholeness disagrees with its recompute after the GC and the eviction"
+
+      # ── Phase 10i: a naming racing a transition counts once ───────────────
+      # `evaluation_anchor_named` reads the anchor under FOR SHARE and
+      # `evaluation_anchor_moved` reads build_job from a fresh snapshot: whichever
+      # commits second must see the first, or the evaluation keeps counting a
+      # blocking anchor that finished and never settles. Both orders, one script,
+      # the phase 10f handshake. The evaluation is a finished one, so the server
+      # never acts on the anchor we name into it; the fixture leaves with the phase.
+      banner("Phase 10i: a naming racing a transition counts once (#640)")
+      CR_DRV = "[uuid6]"
+      cr_drv_hash = "counterrc".ljust(32, "0")
+      cr_eval = sql(
+          "SELECT id FROM evaluation WHERE status IN (5, 6, 7) ORDER BY created_at LIMIT 1;"
+      )
+      assert cr_eval, "no finished evaluation to name the race fixture into"
+      sql(
+          f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
+          f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
+          f"('{CR_DRV}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{cr_drv_hash}', "
+          f"'counterrace', false, true, false, false);\n"
+          f"INSERT INTO derivation_build (id, derivation, status, substitutable, substituted, "
+          f"fetchable, unready_deps, attempt, demanded, created_at, updated_at) VALUES "
+          f"(uuidv7(), '{CR_DRV}', 0, false, false, false, 0, 0, true, "
+          f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
+      )
+      cr_anchor = sql(f"SELECT id FROM derivation_build WHERE derivation = '{CR_DRV}';")
+
+      server.succeed(f"cat > /tmp/counterrace.sh <<'COUNTERRACE'\n{COUNTER_RACE_SH}\nCOUNTERRACE")
+      out = server.succeed(f"CR_EVAL={cr_eval} CR_ANCHOR={cr_anchor} sh /tmp/counterrace.sh")
+      print(out)
+
+      sql(
+          f"DELETE FROM build_job WHERE derivation_build = '{cr_anchor}';\n"
+          f"DELETE FROM derivation_build WHERE id = '{cr_anchor}';\n"
+          f"DELETE FROM derivation WHERE id = '{CR_DRV}';"
+      )
+
+      for order in ("transition_first", "naming_first"):
+          line = next(l for l in out.splitlines() if l.startswith(order + " "))
+          counted, recounted = (part.strip() for part in line[len(order):].split("|"))
+          assert counted == recounted, (
+              f"{order}: the evaluation counts {counted!r} but its build_job rows recount to "
+              f"{recounted!r}: a naming and a transition on one anchor did not see each other"
+          )
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
