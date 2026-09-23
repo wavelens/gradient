@@ -4,25 +4,25 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.filter-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 200px auto;
+@use '../../../styles/variables' as *;
+
+.nar-stats {
   gap: $spacing-md;
-  align-items: flex-end;
   margin-bottom: $spacing-lg;
 }
 
-.filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-xs;
-
-  label { font-size: $font-size-xs; color: var(--gr-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
-}
-
-.filter-actions {
+.filter-row {
   display: flex;
   gap: $spacing-sm;
+  align-items: center;
+  margin-bottom: $spacing-lg;
+
+  input { flex: 1; min-width: 0; }
+}
+
+.size-col {
+  white-space: nowrap;
+  min-width: 7.5rem;
 }
 
 .pagination {

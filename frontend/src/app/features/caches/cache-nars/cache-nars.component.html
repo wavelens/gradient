@@ -6,29 +6,29 @@
 
 <gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheDisplayName || cacheName, link: ['/caches', cacheName] }, { label: 'NARs' }]" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
   @if (stats(); as s) {
-    <gr-card-grid min="220px">
-      <gr-stat-card label="Total NARs" [value]="s.total_nars" />
-      <gr-stat-card label="NAR size" [value]="formatBytes(s.total_nar_size)" />
-      <gr-stat-card label="File size" [value]="formatBytes(s.total_file_size)" />
-      <gr-stat-card label="Last uploaded" [value]="relativeTime(s.last_uploaded_at)" />
-      <gr-stat-card label="Oldest fetched" [value]="relativeTime(s.oldest_fetched_at)" />
+    <gr-card-grid class="nar-stats" min="150px">
+      <gr-stat-card compact label="Total NARs" [value]="formatCount(s.total_nars)" />
+      <gr-stat-card compact label="NAR size" [value]="formatBytes(s.total_nar_size)" />
+      <gr-stat-card compact label="File size" [value]="formatBytes(s.total_file_size)" />
+      <gr-stat-card compact label="Last uploaded" [value]="relativeTime(s.last_uploaded_at)" />
+      <gr-stat-card compact label="Oldest fetched" [value]="relativeTime(s.oldest_fetched_at)" />
     </gr-card-grid>
   }
 
-  <div class="filter-row">
-    <div class="filter-group">
-      <label for="filter-hash">Hash</label>
-      <input grInput id="filter-hash" [ngModel]="hash()" (ngModelChange)="hash.set($event)" placeholder="store hash prefix" class="w-full" (keydown.enter)="applyFilters()" />
-    </div>
-    <div class="filter-group">
-      <label for="filter-package">Package</label>
-      <input grInput id="filter-package" [ngModel]="package()" (ngModelChange)="package.set($event)" placeholder="package name" class="w-full" (keydown.enter)="applyFilters()" />
-    </div>
-    <div class="filter-actions">
-      <button grButton type="button" label="Apply" icon="filter_alt" (click)="applyFilters()"></button>
-      <button grButton type="button" label="Reset" severity="secondary" (click)="reset()"></button>
-    </div>
-  </div>
+  <form class="filter-row" role="search" (ngSubmit)="applyFilters()">
+    <input
+      grInput
+      type="search"
+      aria-label="Search NARs"
+      [ngModel]="search()"
+      (ngModelChange)="search.set($event)"
+      name="search"
+      placeholder="Store path, hash or package name"
+      class="w-full"
+    />
+    <button grButton type="submit" label="Search" icon="search"></button>
+    <button grButton type="button" label="Reset" severity="secondary" (click)="reset()"></button>
+  </form>
 
   @if (loadError()) {
     <div class="inline-error">
@@ -47,7 +47,7 @@
         <tr>
           <th>Hash</th>
           <th>Package</th>
-          <th [attr.aria-sort]="ariaSort('nar_size')">
+          <th class="size-col" [attr.aria-sort]="ariaSort('nar_size')">
             <button class="gr-th-sort" type="button" (click)="sortBy('nar_size')">
               NAR size
               @if (sort() === 'nar_size') {
@@ -55,7 +55,7 @@
               }
             </button>
           </th>
-          <th>Compressed</th>
+          <th class="size-col">Compressed</th>
           <th [attr.aria-sort]="ariaSort('created_at')">
             <button class="gr-th-sort" type="button" (click)="sortBy('created_at')">
               Created
@@ -80,8 +80,8 @@
           <tr class="is-clickable" (click)="show(row)">
             <td><code class="mono">{{ row.hash }}</code></td>
             <td>{{ row.package }}</td>
-            <td>{{ formatBytes(row.nar_size) }}</td>
-            <td>{{ formatBytes(row.file_size) }}</td>
+            <td class="size-col">{{ formatBytes(row.nar_size) }}</td>
+            <td class="size-col">{{ formatBytes(row.file_size) }}</td>
             <td class="text-secondary">{{ relativeTime(row.created_at) }}</td>
             <td class="text-secondary">{{ relativeTime(row.last_fetched_at) }}</td>
             <td class="nar-actions" (click)="$event.stopPropagation()">

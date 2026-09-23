@@ -50,3 +50,17 @@
   font-size: $font-size-sm;
   color: var(--gr-text-secondary);
 }
+
+.stat-card.compact {
+  padding: $spacing-md;
+
+  .stat-content { min-width: 0; }
+
+  .stat-value {
+    font-size: $font-size-xl;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}

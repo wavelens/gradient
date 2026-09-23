@@ -40,6 +40,11 @@ describe('gr-stat-card', () => {
     expect(root.querySelector('.material-symbols-outlined')?.textContent).toContain('inbox');
   });
 
+  it('marks the card compact on request', async () => {
+    expect((await render({ value: 1, label: 'A' })).querySelector('.stat-card.compact')).toBeNull();
+    expect((await render({ value: 1, label: 'A', compact: true })).querySelector('.stat-card.compact')).not.toBeNull();
+  });
+
 
 });
 

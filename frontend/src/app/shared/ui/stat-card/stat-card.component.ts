@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, booleanAttribute, input, ChangeDetectionStrategy } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 
@@ -20,5 +20,6 @@ export class StatCardComponent {
   icon = input<string>();
   value = input.required<number | string>();
   label = input.required<string>();
+  compact = input(false, { transform: booleanAttribute });
 
 }

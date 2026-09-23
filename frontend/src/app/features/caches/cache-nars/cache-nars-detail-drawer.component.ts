@@ -25,6 +25,7 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
 } from '@shared/ui';
+import { formatBytes } from '@shared/text';
 
 @Component({
   selector: 'app-cache-nars-detail-drawer',
@@ -81,10 +82,5 @@ export class CacheNarsDetailDrawerComponent implements OnChanges {
     });
   }
 
-  formatBytes(bytes: number | null | undefined): string {
-    if (bytes === null || bytes === undefined || bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024)));
-    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
-  }
+  readonly formatBytes = formatBytes;
 }

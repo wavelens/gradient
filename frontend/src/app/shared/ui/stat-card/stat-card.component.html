@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="stat-card">
+<div class="stat-card" [class.compact]="compact()">
   @if (icon(); as name) {
     <div class="stat-icon">
       <gr-icon [name]="name" size="xl" />

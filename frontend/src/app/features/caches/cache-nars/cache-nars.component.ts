@@ -29,7 +29,8 @@ import {
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
-import { relativeTime } from '@shared/text';
+import { formatBytes, formatCount, relativeTime } from '@shared/text';
+import { narSearchText, parseNarSearch } from './nar-search';
 
 type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
 type SortOrder = 'asc' | 'desc';
@@ -70,8 +71,8 @@ export class CacheNarsComponent implements OnInit {
   cacheName = '';
   cacheDisplayName = '';
 
-  hash = signal('');
-  package = signal('');
+  search = signal('');
+  private filter = computed(() => parseNarSearch(this.search()));
   sort = signal<SortKey>('created_at');
   order = signal<SortOrder>('desc');
   page = signal(1);
@@ -100,8 +101,7 @@ export class CacheNarsComponent implements OnInit {
       error: () => {},
     });
     this.route.queryParamMap.subscribe((q) => {
-      this.hash.set(q.get('hash') ?? '');
-      this.package.set(q.get('package') ?? '');
+      this.search.set(narSearchText({ hash: q.get('hash') ?? undefined, package: q.get('package') ?? undefined }));
       this.sort.set((q.get('sort') as SortKey) ?? 'created_at');
       this.order.set((q.get('order') as SortOrder) ?? 'desc');
       const p = Number(q.get('page') ?? 1);
@@ -115,8 +115,7 @@ export class CacheNarsComponent implements OnInit {
     this.loading.set(true);
     this.loadError.set(null);
     this.cachesService.getCacheNars(this.cacheName, {
-      hash: this.hash() || undefined,
-      package: this.package() || undefined,
+      ...this.filter(),
       sort: this.sort(),
       order: this.order(),
       page: this.page(),
@@ -146,8 +145,8 @@ export class CacheNarsComponent implements OnInit {
     this.router.navigate([], {
       relativeTo: this.route,
       queryParams: {
-        hash: this.hash() || null,
-        package: this.package() || null,
+        hash: this.filter().hash ?? null,
+        package: this.filter().package ?? null,
         sort: this.sort(),
         order: this.order(),
         page: 1,
@@ -157,8 +156,7 @@ export class CacheNarsComponent implements OnInit {
   }
 
   reset(): void {
-    this.hash.set('');
-    this.package.set('');
+    this.search.set('');
     this.sort.set('created_at');
     this.order.set('desc');
     this.router.navigate([], { relativeTo: this.route, queryParams: {} });
@@ -228,12 +226,7 @@ export class CacheNarsComponent implements OnInit {
     });
   }
 
-  relativeTime = relativeTime;
-
-  formatBytes(bytes: number | null | undefined): string {
-    if (bytes === null || bytes === undefined || bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024)));
-    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
-  }
+  readonly relativeTime = relativeTime;
+  readonly formatBytes = formatBytes;
+  readonly formatCount = formatCount;
 }
