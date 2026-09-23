@@ -226,9 +226,9 @@ drifted under a lost move, and the only one.
 When a gate regresses (an output retired, a producer demoted, a dependency
 deleted by the GC) the same ripple runs in reverse, and the statement that
 raises a dependent's `unready_deps` demotes it to `Created` inline, so no queued
-anchor outlives the counter that gated it. The dispatcher re-reads the anchor's
-status once more at hand-out, so a job the tracker still holds from before the
-regression is dropped instead of dispatched.
+anchor outlives the counter that gated it. The claim re-reads the anchor's
+status in the statement that writes its dispatch row, so a job the tracker still
+holds from before the regression is dropped instead of dispatched.
 
 Reachability is one of the four gates: an anchor is queued and dispatched only
 while some `build_job` references its derivation. A batch names what it walked
@@ -437,36 +437,60 @@ the transition. The grace sits above the graph actor's 600s RPC timeout so a slo
 transition is never mistaken for a lost one, and `EvalStreamCompleted` is
 idempotent, so re-driving one that did land changes nothing.
 
-The dispatch record is the one proof that a job is out. The `dispatched_job` row
-is written inside `RequestJob`, before the assignment is handed back to the
-session, so no report can precede its own row; a claim whose record cannot be
-written is released to pending and the worker asks again; a record that is
-written but whose anchor transition then fails is closed as `Abandoned` on the
-way out, so a withdrawn claim never leaves an open row shutting the gate. A
-build's `Dispatched` transition is awaited on that same path, but the open
-`build_attempt` and the anchor's `dispatched_at` it writes are warn-only inside
-it, so the row is what gates the hand-out and those two are not. That await is
-capped at half the heartbeat deadline: the session handles one frame at a time,
-so a graph actor merely queued behind an ingest burst would otherwise hold the
-worker's next heartbeat unread past `worker_heartbeat_timeout_secs` and get a
-healthy worker unregistered mid-assignment. Expiry takes the same withdrawal
-path as a failure, with one thing it cannot undo - a transition that lands late
-still spends the anchor's one-and-only `dispatched_at`. Both dispatch
-selections refuse work with an open row: `find_ready_anchors` and the
-queued-evaluation select carry a `NOT EXISTS` over `dispatched_job` keyed on the
-scheduler's job key (`build:<anchor>` / `eval:<evaluation>`, whose prefixes live
-in `gradient_db::dispatch_record` next to the SQL that rebuilds them), which is
-what stops a core rebuilt with an empty tracker, or a worker slow to report it
-started, from being handed the same evaluation twice. The tracker's `untracked`
-filter stays as the in-memory fast path; the row is the durable one.
+The build dispatcher reads what moved, not what is queued. Every anchor that
+enters or leaves `Queued` already fans out through `emit_transition_effects`,
+which records it in the `ReadySet` (`gradient_db::ready_set`); a move made inside
+a graph transaction is staged and published only after the commit, because the
+dispatcher reads on its own connection and would find a promotion it heard of
+early still `Created`. A published move wakes the dispatcher, whose pass admits
+the entered anchors through `find_ready_anchors_among` (the ready-set gate
+narrowed to those derivations) and drops the pending jobs of the ones that left,
+so a pass costs what moved and a `RequestJob` reads nothing at all. The whole
+ready set (`find_ready_anchors`) is read only at startup and every 60 s: that
+resync admits what no move announced (a lost hint, another instance's promotion)
+and prunes pending builds that stopped being dispatchable without a move this
+instance saw. Moves are hints, never claims, so a lost or duplicated one costs
+latency and nothing else.
 
-The gate is a check-then-act, not an enforced invariant: the partial index it
-reads is not unique, and two rows for one key are reachable today, because a
-fetch-only completion re-enqueues `eval:<id>` while the fetch row's close is
-still on a detached task and a worker re-adopts a job under a new dispatch id.
-What makes it sound is that exactly one scheduler core writes: `assign_pending`
-serialises every claim in the actor, so the window between the select and the
-insert is never open to a second claimer.
+The tracker is a per-instance cache of candidates and scores, and nothing it
+holds decides a hand-out. Scores come from the workers (what each would have to
+fetch), so the tracker picks the winner, and the claim decides it in Postgres:
+one `INSERT ... SELECT ... WHERE EXISTS (<gate>) ON CONFLICT (job_id) WHERE
+finished_at IS NULL DO NOTHING` (`gradient_db::claim_dispatch`). The unique
+partial index `idx-dispatched_job-open-job` is the arbiter: of any number of
+instances claiming one job key (`build:<anchor>` / `eval:<evaluation>`, whose
+prefixes live in `gradient_db::dispatch_record` next to the SQL that rebuilds
+them), exactly one inserts and the others block on the index until it commits,
+then insert nothing. A row lock on the anchor would not do: a rival that commits
+after this statement's snapshot leaves nothing a `NOT EXISTS` could see. The gate
+re-reads the subject in the same statement: a build goes out only while its
+anchor is `Queued` in the relay mode the job was assembled for (an upstream probe
+that lands in between turns a build into a relay, #593), an eval job only while
+its evaluation has not finished. A lost claim drops the job from the tracker and
+the same request tries the next best one; a build's anchor goes back to the
+ready set, so it returns assembled for its new relay mode or, when it is out
+elsewhere, not at all.
+
+The claim is the dispatch record, the one proof that a job is out. It is
+written inside `RequestJob`, before the assignment is handed back to the
+session, so no report can precede its own row; a claim that errors is released
+to pending and the worker asks again; a claim whose anchor transition then fails
+is closed as `Abandoned` on the way out, so a withdrawn claim never leaves an
+open row shutting the gate. A build's `Dispatched` transition is awaited on that
+same path, but the open `build_attempt` and the anchor's `dispatched_at` it
+writes are warn-only inside it, so the row is what gates the hand-out and those
+two are not. That await is capped at half the heartbeat deadline: the session
+handles one frame at a time, so a graph actor merely queued behind an ingest
+burst would otherwise hold the worker's next heartbeat unread past
+`worker_heartbeat_timeout_secs` and get a healthy worker unregistered
+mid-assignment. Expiry takes the same withdrawal path as a failure, with one
+thing it cannot undo - a transition that lands late still spends the anchor's
+one-and-only `dispatched_at`. Both dispatch selections also refuse work with an
+open row (a `NOT EXISTS` over `dispatched_job` keyed on the job key), so a core
+rebuilt with an empty tracker does not assemble jobs that are already out. A
+fetch-only completion closes its row before it enqueues the cached follow-up,
+which reuses the `eval:<id>` key and would otherwise lose its claim to its own
+predecessor.
 
 Six paths close a row. The worker's own terminal report stamps `finished_at`
 and the outcome, matched on the dispatch id the report carries; a report whose

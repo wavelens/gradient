@@ -732,6 +732,89 @@ in {
       echo "counterrace: raced and released"
       """
 
+      # Phase 10j's two-session claim race. It reads CL_ANCHOR, CL_EVAL and
+      # CL_PROJECT from the environment and runs the claim of
+      # `gradient_db::claim_dispatch` for one job key in two sessions at once: the
+      # second must block on the unique open-row index and insert nothing.
+      CLAIM_RACE_SH = """
+      set -u
+      D=/tmp/claimrace
+      APID=""
+      BPID=""
+
+      cleanup() {
+        exec 3>&-
+        exec 4>&-
+        if [ -n "$APID" ]; then kill $APID 2>/dev/null || true; fi
+        if [ -n "$BPID" ]; then kill $BPID 2>/dev/null || true; fi
+        mkdir -p $D
+        printf '%s\\n' "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name LIKE 'claimrace_%';" > $D/kill.sql
+        su postgres -c "psql -d gradient -At -q -f $D/kill.sql" >/dev/null 2>&1 || true
+        rm -rf $D
+      }
+      trap cleanup EXIT INT TERM
+
+      q() {
+        printf '%s\\n' "$1" > $D/q.sql
+        su postgres -c "psql -d gradient -At -q -v ON_ERROR_STOP=1 -f $D/q.sql"
+      }
+
+      wait_state() {
+        i=0
+        while [ $i -lt 60 ]; do
+          if [ "$(q "SELECT count(*) FROM pg_stat_activity WHERE $1")" = "1" ]; then
+            return 0
+          fi
+          i=$((i + 1))
+          sleep 1
+        done
+        echo "CLAIMRACE TIMEOUT: $2"
+        cat $D/a.out || true
+        cat $D/b.out || true
+        exit 1
+      }
+
+      claim() {
+        echo "INSERT INTO dispatched_job (id, kind, evaluation_id, project, worker_id, job_id, score, queued_at, dispatched_at, score_breakdown, worker_context, job_context, created_at) SELECT uuidv7(), 1, '$CL_EVAL', '$CL_PROJECT', '$1', 'build:$CL_ANCHOR', 0, now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, now() AT TIME ZONE 'UTC' WHERE EXISTS (SELECT 1 FROM derivation_build WHERE id = '$CL_ANCHOR' AND status = 1 AND substitutable = false) ON CONFLICT (job_id) WHERE finished_at IS NULL DO NOTHING;"
+      }
+
+      rm -rf $D
+      mkdir -p $D
+      mkfifo $D/a.in
+      mkfifo $D/b.in
+      su postgres -c "psql -d gradient -At" < $D/a.in > $D/a.out 2>&1 &
+      APID=$!
+      su postgres -c "psql -d gradient -At" < $D/b.in > $D/b.out 2>&1 &
+      BPID=$!
+      exec 3>$D/a.in
+      exec 4>$D/b.in
+
+      printf '%s\\n' "SET application_name = 'claimrace_a';" >&3
+      printf '%s\\n' "SET application_name = 'claimrace_b';" >&4
+
+      printf '%s\\n' "BEGIN;" >&3
+      printf '%s\\n' "$(claim instance-a)" >&3
+      wait_state "application_name = 'claimrace_a' AND state = 'idle in transaction'" "the first claim never inserted"
+      printf '%s\\n' "BEGIN;" >&4
+      printf '%s\\n' "$(claim instance-b)" >&4
+      wait_state "application_name = 'claimrace_b' AND wait_event_type = 'Lock'" "the second claim did not wait on the open-row index"
+      printf '%s\\n' "COMMIT;" >&3
+      wait_state "application_name = 'claimrace_a' AND state = 'idle'" "the first claim never committed"
+      wait_state "application_name = 'claimrace_b' AND state = 'idle in transaction'" "the second claim never finished"
+      printf '%s\\n' "COMMIT;" >&4
+      wait_state "application_name = 'claimrace_b' AND state = 'idle'" "the second claim never committed"
+
+      if grep -q ERROR $D/a.out $D/b.out; then
+        echo "CLAIMRACE: a session reported an error"
+        cat $D/a.out
+        cat $D/b.out
+        exit 1
+      fi
+
+      echo "claimrace_a $(grep INSERT $D/a.out)"
+      echo "claimrace_b $(grep INSERT $D/b.out)"
+      """
+
       start_all()
 
       # ── Phase 1: services come up and the worker authenticates ────────────
@@ -2459,6 +2542,48 @@ in {
           f"DELETE FROM derivation WHERE id IN ('{CR_DRV}', '{CR_HOLD_DRV}');"
       )
       assert agree == "t", "the evaluation settled but its counters still disagree with their recount"
+
+      # ── Phase 10j: two instances claiming one job, one wins ──────────────
+      # Scores come from the workers, so each instance's tracker proposes a
+      # winner on its own; the claim decides it in Postgres. Two sessions stand
+      # in for two instances claiming the same anchor: the unique index on the
+      # open job key makes the second wait for the first and insert nothing, so
+      # the job is out exactly once. The anchor has no build_job, so the running
+      # server never dispatches it.
+      banner("Phase 10j: two instances claiming one job, one wins (#641)")
+      CL_DRV = "[uuid13]"
+      cl_owner = sql("SELECT evaluation_id || ' ' || project FROM dispatched_job LIMIT 1;")
+      assert cl_owner, "no dispatched job to borrow an evaluation and project from"
+      cl_eval, cl_project = cl_owner.split()
+      sql(
+          f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
+          f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
+          f"('{CL_DRV}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{'claimrace'.ljust(32, '0')}', "
+          f"'claimrace', false, true, false, true);\n"
+          f"INSERT INTO derivation_build (id, derivation, status, substitutable, substituted, "
+          f"fetchable, unready_deps, attempt, demanded, created_at, updated_at) VALUES "
+          f"(uuidv7(), '{CL_DRV}', 1, false, false, false, 0, 0, true, "
+          f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
+      )
+      cl_anchor = sql(f"SELECT id FROM derivation_build WHERE derivation = '{CL_DRV}';")
+
+      server.succeed(f"cat > /tmp/claimrace.sh <<'CLAIMRACE'\n{CLAIM_RACE_SH}\nCLAIMRACE")
+      out = server.succeed(
+          f"CL_ANCHOR={cl_anchor} CL_EVAL={cl_eval} CL_PROJECT={cl_project} sh /tmp/claimrace.sh"
+      )
+      print(out)
+      open_rows = sql(
+          f"SELECT count(*) FROM dispatched_job WHERE job_id = 'build:{cl_anchor}' AND finished_at IS NULL;"
+      )
+
+      sql(
+          f"DELETE FROM dispatched_job WHERE job_id = 'build:{cl_anchor}';\n"
+          f"DELETE FROM derivation_build WHERE id = '{cl_anchor}';\n"
+          f"DELETE FROM derivation WHERE id = '{CL_DRV}';"
+      )
+      assert "claimrace_a INSERT 0 1" in out, f"the first claim did not win: {out}"
+      assert "claimrace_b INSERT 0 0" in out, f"the second claim inserted a duplicate: {out}"
+      assert open_rows == "1", f"{open_rows} open rows for one job key"
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
