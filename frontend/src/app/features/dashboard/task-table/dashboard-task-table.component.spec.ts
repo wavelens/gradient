@@ -98,6 +98,14 @@ describe('DashboardTaskTableComponent', () => {
     expect(link.title).toBe('infra / hosts');
   });
 
+  it('stretches one link over the row that opens the task', () => {
+    const tr = render(null, () => of(PAGE)).root.querySelector('tbody tr')!;
+    const links = tr.querySelectorAll<HTMLAnchorElement>('a.row-link');
+    expect(links.length).toBe(1);
+    expect(links[0].getAttribute('href')).toBe('/project/infra/task/hosts');
+    expect(tr.classList).toContain('row');
+  });
+
   it('offers Show all only when more rows exist, then pages by 25', () => {
     const { f, tasks, root } = render(null, () => of(PAGE));
     (root.querySelector('.show-all') as HTMLElement).click();

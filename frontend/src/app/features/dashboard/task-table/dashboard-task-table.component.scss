@@ -72,6 +72,26 @@
   }
 }
 
+// The task link stretches over its row; the star and the history bars sit above it.
+.row {
+  position: relative;
+
+  &:hover td {
+    background: var(--gr-surface-hover);
+  }
+
+  .star-col {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+.row-link::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+
 .history-col {
   width: 40%;
   min-width: 90px;
