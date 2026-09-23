@@ -16,6 +16,7 @@ the catalogue, and a per-test list goes stale and collides on every merge.
 | Report inspector | `nix/tools/report-inspector/tests/` | the inspector's commands over a report fixture the test builds |
 | NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
 | SQL plan gate | `backend/src/sql_gate/`, run by the e2e VM test | every registered statement's plan at production scale |
+| Mock daemon | `daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/` | the scheduler and workers against a scripted Nix store, at synthetic speed |
 
 The inspector's fixture is built in the test rather than committed as a `.db`,
 because a checked-in binary drifts silently from the schema it stands for. Its
@@ -33,6 +34,7 @@ entry point (an HTTP route, a CLI invocation). Everything else belongs in a
 ```sh
 cargo test --workspace --tests          # backend, from backend/
 cargo test --manifest-path cli/Cargo.toml --tests
+cargo test --manifest-path daemon/Cargo.toml --features mock --tests
 pnpm -C frontend exec ng test --watch=false
 nix flake check                         # every check below
 ```
@@ -191,6 +193,42 @@ scaffolding opts out per file with an explicit reason:
 
 Bare `#[allow(unused)]`, `#[allow(dead_code)]` and `#[allow(unused_imports)]` are
 rejected by CI everywhere, tests included.
+
+## Mock daemon VM tests
+
+`gradient-scheduler` runs the real server and workers, but every worker's
+`nix-daemon` is replaced by `gradient-daemon serve --backend mock` on the stock
+socket. The daemon is its own cargo workspace under `daemon/` (harmonia's store
+DB pins a SQLite the backend lock cannot share); its checks are `daemon-clippy`
+and `daemon-unittest`.
+
+- **Store spec.** A test declares its graph in a plain attrset (`name`,
+  `derivations.<id>` with `deps`, `outputs.<o>.references` as `"<node>.<output>"`,
+  `build.outcome` `success | fail | hang`, `present.workers`, `present.cache`);
+  `nix/tests/store-spec/default.nix` holds the defaults and the invariants.
+  Presets: `chain n`, `diamond`, `fanOut n`, `wide depth width`.
+- **One source for paths.** `derivations.nix` is copied into the flake the test
+  publishes and also computes the daemon's config, so drv and output paths agree
+  by construction; the `store-spec` check asserts it.
+- **Presence.** `present.workers` is seeded into that worker's store at boot,
+  `present.cache` is exported as a signed file cache the server uses as upstream.
+  Everything else exists only once a worker builds or imports it.
+- **Timing.** Builds and NAR chunks take seeded random time (lognormal, median
+  40 ms), so a run is fast and a slow scheduler stands out. `GRADIENT_DAEMON_SEED`
+  replaces the seed at boot to replay a run.
+- **Violations.** The daemon records everything a real store would refuse or a
+  correct scheduler never does: a build with a missing input, a rebuild of a
+  valid output, an unknown derivation, an unmodelled protocol op. Every phase
+  ends with `violations == []`.
+- **Control socket.** `gradient-daemon ctl <cmd>` reads the journal (`journal`,
+  `builds`, `latency`, `violations`, `running`) and scripts the store (`seed`,
+  `forget`, `outcome`, `release`).
+- **Latency report.** Each phase appends ready-to-dispatch and build spreads,
+  the critical path and the overhead factor to `latency.jsonl` in the test's
+  output.
+- **Replaying production.** `gradient-report <report.db> store-spec -o spec.nix`
+  turns a completed evaluation's report into a store spec with its edges,
+  references, sizes and (scaled) build durations.
 
 ## Conventions
 
