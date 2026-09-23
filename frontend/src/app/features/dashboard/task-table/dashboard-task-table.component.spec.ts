@@ -23,7 +23,7 @@ const row = (task: string): TaskRow => ({
   history: [],
 });
 
-const PAGE: TasksPage = { counts: { all: 12, failing: 3, worse: 1, starred: 0 }, total: 12, tasks: [row('hosts')] };
+const PAGE: TasksPage = { counts: { all: 12, failing: 3, starred: 0 }, total: 12, tasks: [row('hosts')] };
 
 function render(filter: string | null, page: () => Observable<TasksPage>) {
   const tasks = vi.fn(page);
@@ -55,7 +55,7 @@ describe('DashboardTaskTableComponent', () => {
     await settle(f);
     expect(tasks).toHaveBeenCalledWith('failing', 1, 10, 30);
     const chips = Array.from(root.querySelectorAll('gr-tab-switch button')).map((c) => c.textContent?.replace(/\s+/g, ' ').trim());
-    expect(chips).toEqual(['All 12', 'Failing 3', 'Got worse 1', 'Starred 0']);
+    expect(chips).toEqual(['All 12', 'Failing 3', 'Starred 0']);
     expect(root.querySelector('gr-tab-switch button.is-selected')?.textContent).toContain('Failing');
   });
 
@@ -63,7 +63,7 @@ describe('DashboardTaskTableComponent', () => {
     const { tasks, root } = render(null, () => of(PAGE));
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     (root.querySelectorAll('gr-tab-switch button')[2] as HTMLElement).click();
-    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'worse' } }));
+    expect(navigate).toHaveBeenCalledWith([], expect.objectContaining({ queryParams: { filter: 'starred' } }));
     expect(tasks).toHaveBeenCalledTimes(1);
   });
 

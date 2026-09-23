@@ -12,9 +12,8 @@ The dashboard routes you to what needs attention. Its sections follow your data 
 
 - **Stats**: CPU time, builds, cache size, workers busy and queue wait across your projects and public projects (all projects for superusers).
 - **Search**: opens the [command palette](#command-palette).
-- **Filter**: All, Failing, Got worse, Starred, each with its count over all of your tasks. The selected filter is kept in the URL (`?filter=`).
+- **Filter**: All, Failing, Starred, each with its count over all of your tasks. The selected filter is kept in the URL (`?filter=`).
     - Failing: the latest evaluation failed or has failing entry points.
-    - Got worse: more failing entry points than the previous evaluation.
 - **Task list**: the top 10 tasks. "Show all" lists every task, 25 per page. Each row shows `project / task` with the latest commit and its age, the last evaluations, and labelled values for entry points ok/total, the change in failing entry points against the previous evaluation and speed. Narrow screens drop the values.
     - Bars show the last evaluations: height is the duration, color the status, hover for details. The number of bars follows the available width.
     - A row opens the task, a bar opens its evaluation.

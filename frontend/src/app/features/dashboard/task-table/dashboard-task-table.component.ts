@@ -38,7 +38,6 @@ import { barsThatFit } from '../format';
 const FILTERS: { key: DashboardFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'failing', label: 'Failing' },
-  { key: 'worse', label: 'Got worse' },
   { key: 'starred', label: 'Starred' },
 ];
 const HISTORY_COLUMN_PX = 210;

@@ -1217,9 +1217,9 @@ paths:
           required: false
           schema:
             type: string
-            enum: [all, failing, worse, starred]
+            enum: [all, failing, starred]
             default: all
-          description: '`failing`: latest evaluation failed or has failing entry points. `worse`: `delta > 0`.'
+          description: '`failing`: latest evaluation failed or has failing entry points.'
         - name: page
           in: query
           required: false
@@ -1262,13 +1262,11 @@ paths:
                         properties:
                           counts:
                             type: object
-                            required: [all, failing, worse, starred]
+                            required: [all, failing, starred]
                             properties:
                               all:
                                 type: integer
                               failing:
-                                type: integer
-                              worse:
                                 type: integer
                               starred:
                                 type: integer
@@ -1349,7 +1347,7 @@ paths:
               example:
                 error: false
                 message:
-                  counts: { all: 1, failing: 0, worse: 0, starred: 1 }
+                  counts: { all: 1, failing: 0, starred: 1 }
                   total: 1
                   tasks:
                     - project: infra

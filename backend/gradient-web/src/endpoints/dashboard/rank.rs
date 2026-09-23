@@ -37,7 +37,6 @@ pub enum Filter {
     #[default]
     All,
     Failing,
-    Worse,
     Starred,
 }
 
@@ -123,7 +122,6 @@ impl TaskRow {
         match filter {
             Filter::All => true,
             Filter::Failing => self.failing,
-            Filter::Worse => self.delta.is_some_and(|d| d > 0),
             Filter::Starred => self.starred,
         }
     }
@@ -133,7 +131,6 @@ impl TaskRow {
 pub struct Counts {
     pub all: usize,
     pub failing: usize,
-    pub worse: usize,
     pub starred: usize,
 }
 
@@ -142,7 +139,6 @@ pub fn counts(rows: &[TaskRow]) -> Counts {
     Counts {
         all: rows.len(),
         failing: n(Filter::Failing),
-        worse: n(Filter::Worse),
         starred: n(Filter::Starred),
     }
 }
@@ -292,13 +288,6 @@ mod tests {
     }
 
     #[test]
-    fn worse_means_positive_delta() {
-        let f = facts("a", false, 1, Some((EvaluationStatus::Completed, 20)));
-        let o = outcomes(&f, 1, 3);
-        assert!(!TaskRow::build(f, &o).matches(Filter::Worse));
-    }
-
-    #[test]
     fn rank_orders_tier_then_newest() {
         let mut rows: Vec<TaskRow> = vec![
             facts("member", false, 0, Some((EvaluationStatus::Completed, 21))),
@@ -342,7 +331,6 @@ mod tests {
             Counts {
                 all: 2,
                 failing: 1,
-                worse: 0,
                 starred: 1
             }
         );

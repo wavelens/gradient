@@ -23,7 +23,7 @@ function render(rail: RailStub | Observable<RailStub>) {
       { provide: DashboardService, useValue: {
         rail: () => (rail instanceof Observable ? rail : of(rail)),
         stats: () => of({ cpu_time_ms: 0, cpu_time_ms_7d: 0, builds_completed: 0, cache_size_bytes: 0, workers: { online: 0, busy_pct: 0 }, queue_wait_p50_ms: 0 }),
-        tasks: () => of({ counts: { all: 0, failing: 0, worse: 0, starred: 0 }, total: 0, tasks: [] }),
+        tasks: () => of({ counts: { all: 0, failing: 0, starred: 0 }, total: 0, tasks: [] }),
         activity: () => of({ days: [] }),
       } },
     ],
