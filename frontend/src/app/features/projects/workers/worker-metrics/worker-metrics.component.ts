@@ -16,6 +16,7 @@ import {
   StatCardComponent,
   TableComponent,
 } from '@shared/ui';
+import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
 
 @Component({
   selector: 'app-worker-metrics',
@@ -48,10 +49,10 @@ import {
       </gr-card-grid>
 
       <gr-card-grid min="380px">
-        <gr-metric-chart title="CPU usage (%)" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']"></gr-metric-chart>
-        <gr-metric-chart title="RAM free (MB)" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['#28a745']"></gr-metric-chart>
-        <gr-metric-chart title="Network speed (Mbps)" type="line" [series]="netSeries()" [categories]="times()" [colors]="['#6f42c1']"></gr-metric-chart>
-        <gr-metric-chart title="Disk speed (Mbps)" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['#fd7e14']"></gr-metric-chart>
+        <gr-metric-chart title="CPU usage" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']" [valueFormatter]="percent"></gr-metric-chart>
+        <gr-metric-chart title="RAM free" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['#28a745']" [valueFormatter]="megabytes"></gr-metric-chart>
+        <gr-metric-chart title="Network speed" type="line" [series]="netSeries()" [categories]="times()" [colors]="['#6f42c1']" [valueFormatter]="mbps"></gr-metric-chart>
+        <gr-metric-chart title="Disk speed" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['#fd7e14']" [valueFormatter]="mbps"></gr-metric-chart>
         <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['#e83e8c']"></gr-metric-chart>
       </gr-card-grid>
 
@@ -86,6 +87,10 @@ export class WorkerMetricsComponent implements OnInit {
 
   /// The id is the last resort: history outlives the registration that named it.
   workerName = computed(() => this.displayName() || this.workerId);
+
+  readonly percent = (value: number) => formatPercent(value / 100);
+  readonly megabytes = formatMegabytes;
+  readonly mbps = (value: number) => formatQuantity(value, 'Mbps');
 
   times = computed(() => this.samples().map((s) => s.at.slice(11, 16)));
   cpuSeries = computed(() => [{ name: 'cpu', data: this.samples().map((s) => s.cpu_usage_pct ?? 0) }]);

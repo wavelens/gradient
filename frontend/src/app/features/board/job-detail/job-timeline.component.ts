@@ -13,6 +13,7 @@ import { SVGRenderer } from 'echarts/renderers';
 import { JobPhase } from '@core/services/board.service';
 import { EmptyStateComponent, resolveChartTheme } from '@shared/ui';
 import { ThemeService } from '@core/services/theme.service';
+import { formatBytes, formatCount, formatDuration } from '@shared/text';
 
 echarts.use([CustomChart, GridComponent, TooltipComponent, SVGRenderer]);
 
@@ -94,17 +95,17 @@ export function phaseLabel(phase: string): string {
 
       <table class="phases">
         <thead>
-          <tr><th>Phase</th><th class="num">Start</th><th class="num">Duration</th><th>Share</th><th class="num">Paths</th><th class="num">Bytes</th></tr>
+          <tr><th>Phase</th><th class="num">Start</th><th class="num">Duration</th><th>Share</th><th class="num">Paths</th><th class="num">Size</th></tr>
         </thead>
         <tbody>
           @for (r of rows(); track r.seq) {
             <tr>
               <td class="name" [style.padding-left.px]="8 + r.depth * 16">{{ label(r.phase) }}</td>
-              <td class="num mono">{{ r.startMs | number }} ms</td>
-              <td class="num mono">{{ r.durationMs | number }} ms</td>
+              <td class="num mono">+{{ duration(r.startMs) }}</td>
+              <td class="num mono">{{ duration(r.durationMs) }}</td>
               <td class="bar-cell"><div class="bar" [style.width.%]="r.share * 100"></div></td>
-              <td class="num mono">{{ r.paths || '-' }}</td>
-              <td class="num mono">{{ r.bytes ? (r.bytes | number) : '-' }}</td>
+              <td class="num mono">{{ r.paths ? count(r.paths) : '-' }}</td>
+              <td class="num mono">{{ r.bytes ? bytes(r.bytes) : '-' }}</td>
             </tr>
           }
         </tbody>
@@ -123,6 +124,9 @@ export class JobTimelineComponent implements OnDestroy {
   private chart: echarts.ECharts | null = null;
 
   readonly rows = computed(() => phaseRows(this.phases()));
+  readonly duration = formatDuration;
+  readonly bytes = formatBytes;
+  readonly count = formatCount;
   readonly chartHeight = computed(() => Math.min(24 * this.rows().length + 48, 520));
 
   constructor() {
@@ -158,7 +162,7 @@ export class JobTimelineComponent implements OnDestroy {
         type: 'value',
         min: 0,
         max: total,
-        axisLabel: { color: t.text, formatter: (v: number) => `${v} ms` },
+        axisLabel: { color: t.text, formatter: (v: number) => formatDuration(v) },
         splitLine: { lineStyle: { color: t.grid } },
       },
       yAxis: {
@@ -176,10 +180,10 @@ export class JobTimelineComponent implements OnDestroy {
         formatter: (p: { dataIndex: number }) => {
           const r = rows[p.dataIndex];
           const detail = [
-            r.paths ? `${r.paths} paths` : null,
-            r.bytes ? `${r.bytes} bytes` : null,
+            r.paths ? `${formatCount(r.paths)} paths` : null,
+            r.bytes ? formatBytes(r.bytes) : null,
           ].filter(Boolean).join(', ');
-          return `${phaseLabel(r.phase)}<br/>${r.durationMs} ms at +${r.startMs} ms${detail ? `<br/>${detail}` : ''}`;
+          return `${phaseLabel(r.phase)}<br/>${formatDuration(r.durationMs)} at +${formatDuration(r.startMs)}${detail ? `<br/>${detail}` : ''}`;
         },
       },
       series: [{

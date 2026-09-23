@@ -36,7 +36,7 @@
                 }
               </td>
               <td>{{ d.response_status ?? '-' }}</td>
-              <td>{{ d.duration_ms }} ms</td>
+              <td>{{ duration(d.duration_ms) }}</td>
               <td>
                 <button type="button" class="toggle-btn" (click)="toggleRow(d.id)">
                   @if (expanded().has(d.id)) { Hide } @else { Show }

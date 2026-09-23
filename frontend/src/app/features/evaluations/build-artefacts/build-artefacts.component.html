@@ -27,7 +27,7 @@
           <gr-badge>{{ fileTypeLabel(artefact) }}</gr-badge>
           {{ artefact.name }}
           @if (artefact.size !== undefined) {
-            <span slot="meta">{{ formatSize(artefact.size) }}</span>
+            <span slot="meta">{{ formatBytes(artefact.size) }}</span>
           }
           <a
             slot="actions"

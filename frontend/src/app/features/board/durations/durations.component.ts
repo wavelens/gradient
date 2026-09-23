@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { BoardService, MetricPoint, DurationsHeatmap } from '@core/services/board.service';
 import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
+import { formatDuration } from '@shared/text';
 
 @Component({
   selector: 'app-board-durations',
@@ -27,19 +28,21 @@ import { firstLoad } from '../first-load';
       ></gr-metric-chart>
 
       <gr-metric-chart
-        title="Build duration (s, hourly avg vs max)"
+        title="Build duration (hourly avg vs max)"
         type="area"
         [series]="buildSeries()"
         [categories]="buildCategories()"
         [colors]="['#17a2b8', '#dc3545']"
+        [valueFormatter]="duration"
       ></gr-metric-chart>
 
       <gr-metric-chart
-        title="Wait (s, hourly avg): queue (excl. deps) vs dependency"
+        title="Wait (hourly avg): queue (excl. deps) vs dependency"
         type="area"
         [series]="waitSeries()"
         [categories]="waitCategories()"
         [colors]="['#6f42c1', '#fd7e14']"
+        [valueFormatter]="duration"
       ></gr-metric-chart>
     }
   `,
@@ -55,6 +58,8 @@ export class BoardDurationsComponent implements OnInit {
   private deps = signal<MetricPoint[]>([]);
   private heatmap = signal<DurationsHeatmap | null>(null);
 
+  readonly duration = formatDuration;
+
   heatmapSeries = computed(() => {
     const h = this.heatmap();
     if (!h) return [];
@@ -67,15 +72,15 @@ export class BoardDurationsComponent implements OnInit {
 
   buildCategories = computed(() => this.build().map((p) => p.bucket_start.slice(11, 16)));
   buildSeries = computed(() => [
-    { name: 'avg', data: this.build().map((p) => +(p.avg / 1000).toFixed(1)) },
-    { name: 'max', data: this.build().map((p) => +(p.max / 1000).toFixed(1)) },
+    { name: 'avg', data: this.build().map((p) => p.avg) },
+    { name: 'max', data: this.build().map((p) => p.max) },
   ]);
 
   waitCategories = computed(() => this.wait().map((p) => p.bucket_start.slice(11, 16)));
   waitSeries = computed(() => {
-    const depMap = new Map(this.deps().map((p) => [p.bucket_start, +(p.avg / 1000).toFixed(2)]));
+    const depMap = new Map(this.deps().map((p) => [p.bucket_start, p.avg]));
     return [
-      { name: 'queue wait (excl. deps)', data: this.wait().map((p) => +(p.avg / 1000).toFixed(2)) },
+      { name: 'queue wait (excl. deps)', data: this.wait().map((p) => p.avg) },
       { name: 'dependency wait', data: this.wait().map((p) => depMap.get(p.bucket_start) ?? 0) },
     ];
   });

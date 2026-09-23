@@ -16,6 +16,7 @@ import {
 } from '@shared/ui';
 import { TasksService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { formatBytes, formatCount, formatDuration } from '@shared/text';
 
 const CHART_COLORS = {
   buildTime: '#17a2b8',
@@ -76,7 +77,7 @@ export class EntryPointMetricsComponent implements OnInit {
   buildTimeSeries = computed(() => [
     {
       name: 'Build time',
-      data: this.points().map((p) => (p.build_time_ms !== null ? Math.round(p.build_time_ms / 1000) : null)),
+      data: this.points().map((p) => p.build_time_ms),
     },
   ]);
   outputSizeSeries = computed(() => [
@@ -95,9 +96,9 @@ export class EntryPointMetricsComponent implements OnInit {
   readonly closureSizeColors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
   readonly depsColor = [CHART_COLORS.deps];
 
-  readonly formatSeconds = (v: number) => this.formatDuration(v * 1000);
-  readonly formatSize = (v: number) => this.formatBytes(v);
-  readonly formatDeps = (v: number) => `${Math.round(v)} deps`;
+  readonly formatDuration = formatDuration;
+  readonly formatBytes = formatBytes;
+  readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
 
   latestBuildId = computed(() => {
     const pts = this.points();
@@ -108,23 +109,6 @@ export class EntryPointMetricsComponent implements OnInit {
   failedCount = computed(() => this.points().filter((p) => p.build_status === 'FailedPermanent' || p.build_status === 'FailedTimeout').length);
   substitutedCount = computed(() => this.points().filter((p) => p.build_status === 'Substituted').length);
   skippedCount = computed(() => this.points().filter((p) => p.build_status === 'Skipped').length);
-
-  formatBytes(bytes: number): string {
-    if (!bytes || bytes === 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
-  }
-
-  formatDuration(ms: number): string {
-    const s = Math.round(ms / 1000);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    if (h > 0) return `${h}h ${m}m ${sec}s`;
-    if (m > 0) return `${m}m ${sec}s`;
-    return `${sec}s`;
-  }
 
   private formatDate(iso: string): string {
     const d = new Date(iso.includes('Z') || iso.includes('+') ? iso : iso + 'Z');

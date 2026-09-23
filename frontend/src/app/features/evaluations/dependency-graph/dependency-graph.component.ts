@@ -30,6 +30,7 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
 } from '@shared/ui';
+import { formatDuration } from '@shared/text';
 
 const CARD_W = 200;
 const CARD_H = 78;
@@ -590,11 +591,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const toUtc = (s: string) => new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime();
     const startMs = toUtc(node.created_at);
     const endMs = isActive ? Date.now() : toUtc(node.updated_at);
-    const s = Math.floor((endMs - startMs) / 1000);
-    if (isNaN(s) || s < 0) return '';
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    return `${m}m ${s % 60}s`;
+    const elapsed = endMs - startMs;
+    return Number.isNaN(elapsed) || elapsed < 0 ? '' : formatDuration(elapsed);
   }
 
   nodeColor(status: string): string {

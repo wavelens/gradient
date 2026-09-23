@@ -31,7 +31,7 @@
       <gr-loading-spinner message="Loading stats..." />
     } @else {
       <gr-card-grid min="220px">
-        <gr-stat-card label="Packages stored" [value]="stats()?.total_packages ?? 0" />
+        <gr-stat-card label="Packages stored" [value]="formatCount(stats()?.total_packages ?? 0)" />
         <gr-stat-card label="Uncompressed size" [value]="formatBytes(stats()?.total_nar_bytes ?? 0)" />
         <gr-stat-card label="Compressed stored" [value]="formatBytes(stats()?.total_bytes ?? 0)" />
       </gr-card-grid>
@@ -42,9 +42,8 @@
         [series]="storageSeries()"
         [categories]="storageCategories()"
         [colors]="storageColors"
-        [valueFormatter]="formatSize"
+        [valueFormatter]="formatBytes"
         [secondary]="storageSecondary"
-        yAxisTitle="Bytes"
       >
         <gr-tab-switch
           slot="actions"
@@ -66,7 +65,7 @@
       <gr-loading-spinner message="Loading stats..." />
     } @else {
       <gr-card-grid min="220px">
-        <gr-stat-card label="Requests (last hour)" [value]="$any(stats()?.hours | slice:-1)[0]?.requests ?? 0" />
+        <gr-stat-card label="Requests (last hour)" [value]="formatCount($any(stats()?.hours | slice:-1)[0]?.requests ?? 0)" />
         <gr-stat-card label="Traffic (last hour)" [value]="formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
       </gr-card-grid>
 
@@ -76,9 +75,8 @@
         [series]="trafficSeries()"
         [categories]="trafficCategories()"
         [colors]="trafficColors"
-        [valueFormatter]="formatSize"
+        [valueFormatter]="formatBytes"
         [secondary]="trafficSecondary"
-        yAxisTitle="Bytes"
       >
         <gr-tab-switch
           slot="actions"

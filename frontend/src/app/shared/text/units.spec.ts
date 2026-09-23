@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { formatBytes, formatCount, formatDuration, formatMegabytes, formatPercent } from './units';
+import { formatBytes, formatCount, formatDuration, formatMegabytes, formatPercent, formatQuantity } from './units';
 
 describe('formatBytes', () => {
   it('picks the largest binary unit that keeps the number readable', () => {
@@ -58,5 +58,19 @@ describe('formatPercent', () => {
   it('rounds a ratio to a readable share', () => {
     expect(formatPercent(0.1234)).toBe('12.3 %');
     expect(formatPercent(null)).toBe('-');
+  });
+});
+
+describe('formatQuantity', () => {
+  it('routes each reported unit to its formatter', () => {
+    expect(formatQuantity(2 * 1024 ** 3, 'bytes')).toBe('2.0 GiB');
+    expect(formatQuantity(2048, 'MB')).toBe('2.0 GiB');
+    expect(formatQuantity(90_000, 'ms')).toBe('1m 30s');
+    expect(formatQuantity(12_300, 'count')).toBe('12.3k');
+  });
+
+  it('keeps an unknown unit as a suffix', () => {
+    expect(formatQuantity(93.25, 'Mbps')).toBe('93.3 Mbps');
+    expect(formatQuantity(null, 'Mbps')).toBe('-');
   });
 });

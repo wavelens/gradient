@@ -53,3 +53,19 @@ export function formatCount(n: Maybe): string {
 export function formatPercent(ratio: Maybe): string {
   return ratio == null || !Number.isFinite(ratio) ? '-' : `${(ratio * 100).toFixed(1)} %`;
 }
+
+/// A value tagged with the unit string the board API reports alongside it.
+export function formatQuantity(value: Maybe, unit: string): string {
+  switch (unit) {
+    case 'bytes':
+      return formatBytes(value);
+    case 'MB':
+      return formatMegabytes(value);
+    case 'ms':
+      return formatDuration(value);
+    case 'count':
+      return formatCount(value);
+    default:
+      return value == null || !Number.isFinite(value) ? '-' : `${value.toFixed(1)} ${unit}`;
+  }
+}

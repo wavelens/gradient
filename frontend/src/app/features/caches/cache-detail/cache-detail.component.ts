@@ -25,6 +25,7 @@ import {
   StatCardComponent,
 } from '@shared/ui';
 import { Cache } from '@core/models';
+import { formatBytes, formatCount } from '@shared/text';
 import { FormsModule } from '@angular/forms';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
@@ -135,9 +136,10 @@ export class CacheDetailComponent implements OnInit {
   readonly trafficColors = [CHART_COLORS.bytes, CHART_COLORS.requests];
   readonly storageColors = [CHART_COLORS.storageBytes, CHART_COLORS.storagePackages];
 
-  readonly formatSize = (v: number) => this.formatBytes(v);
-  readonly trafficSecondary = { title: 'Requests', valueFormatter: (v: number) => `${v} req` };
-  readonly storageSecondary = { title: 'Packages', valueFormatter: (v: number) => `${v} pkg` };
+  readonly formatBytes = formatBytes;
+  readonly formatCount = formatCount;
+  readonly trafficSecondary = { title: 'Requests', valueFormatter: (v: number) => `${formatCount(v)} req` };
+  readonly storageSecondary = { title: 'Packages', valueFormatter: (v: number) => `${formatCount(v)} pkg` };
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
@@ -170,13 +172,6 @@ export class CacheDetailComponent implements OnInit {
       },
       error: () => this.statsLoading.set(false),
     });
-  }
-
-  formatBytes(bytes: number): string {
-    if (bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024)));
-    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
   }
 
   private formatTime(iso: string, window: Window): string {

@@ -14,6 +14,7 @@ import {
   WorkerLoad,
 } from '@core/services/board.service';
 import { firstLoad } from '../first-load';
+import { formatMegabytes, formatPercent } from '@shared/text';
 import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@shared/ui';
 
 @Component({
@@ -48,6 +49,7 @@ import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@
           [series]="capLoad().series"
           [categories]="capLoad().cats"
           [colors]="['#17a2b8']"
+          [valueFormatter]="percent"
         ></gr-metric-chart>
         <gr-metric-chart
           title="Load by architecture (busy %)"
@@ -56,6 +58,7 @@ import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@
           [series]="archLoad().series"
           [categories]="archLoad().cats"
           [colors]="['#28a745']"
+          [valueFormatter]="percent"
         ></gr-metric-chart>
       </div>
 
@@ -66,6 +69,7 @@ import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@
         [series]="featLoad().series"
         [categories]="featLoad().cats"
         [colors]="['#e83e8c']"
+        [valueFormatter]="percent"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -75,11 +79,12 @@ import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@
         [series]="utilSeries()"
         [categories]="workerCats()"
         [colors]="['#6f42c1']"
+        [valueFormatter]="percent"
       ></gr-metric-chart>
 
       <gr-table class="workers">
         <thead>
-          <tr><th>Worker</th><th>Project</th><th>State</th><th>Load</th><th>CPU%</th><th>RAM free</th><th>Arch</th></tr>
+          <tr><th>Worker</th><th>Project</th><th>State</th><th>Load</th><th>CPU</th><th>RAM free</th><th>Arch</th></tr>
         </thead>
         <tbody>
           @for (w of workers(); track $index) {
@@ -88,8 +93,8 @@ import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@
               <td class="mono">{{ w.project ?? '-' }}</td>
               <td>{{ w.draining ? 'draining' : 'active' }}</td>
               <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
-              <td>{{ w.cpu_usage_pct !== null ? (w.cpu_usage_pct | number: '1.0-0') : '-' }}</td>
-              <td>{{ w.ram_free_mb !== null ? w.ram_free_mb + ' MB' : '-' }}</td>
+              <td>{{ w.cpu_usage_pct !== null ? percent(w.cpu_usage_pct) : '-' }}</td>
+              <td>{{ megabytes(w.ram_free_mb) }}</td>
               <td class="mono">{{ w.architectures.join(', ') || '-' }}</td>
             </tr>
           } @empty {
@@ -108,6 +113,9 @@ export class BoardWorkersComponent implements OnInit {
   workers = signal<BoardWorker[]>([]);
   fleet = signal<BoardFleetPoint[]>([]);
   load = signal<WorkerLoad | null>(null);
+
+  readonly megabytes = formatMegabytes;
+  readonly percent = (value: number) => formatPercent(value / 100);
 
   fleetCats = computed(() => this.fleet().map((p) => p.bucket_start.slice(11, 16)));
   fleetSeries = computed(() => [

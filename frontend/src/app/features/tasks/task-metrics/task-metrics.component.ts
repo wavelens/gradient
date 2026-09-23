@@ -15,6 +15,7 @@ import {
 } from '@shared/ui';
 import { TasksService, TaskMetricPoint, TaskMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { formatBytes, formatCount, formatDuration } from '@shared/text';
 
 const CHART_COLORS = {
   buildTime: '#17a2b8',
@@ -70,10 +71,10 @@ export class TaskMetricsComponent implements OnInit {
   labels = computed(() => this.metrics().map((p) => this.formatDate(p.created_at)));
 
   buildTimeSeries = computed(() => [
-    { name: 'Build time', data: this.metrics().map((p) => Math.round(p.build_time_total_ms / 1000)) },
+    { name: 'Build time', data: this.metrics().map((p) => p.build_time_total_ms) },
   ]);
   evalTimeSeries = computed(() => [
-    { name: 'Eval time', data: this.metrics().map((p) => Math.round(p.eval_time_ms / 1000)) },
+    { name: 'Eval time', data: this.metrics().map((p) => p.eval_time_ms) },
   ]);
   outputSizeSeries = computed(() => [
     { name: 'Output size', data: this.metrics().map((p) => p.output_size_bytes) },
@@ -92,26 +93,9 @@ export class TaskMetricsComponent implements OnInit {
   readonly closureSizeColors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
   readonly depsColor = [CHART_COLORS.deps];
 
-  readonly formatSeconds = (v: number) => this.formatDuration(v * 1000);
-  readonly formatSize = (v: number) => this.formatBytes(v);
-  readonly formatDeps = (v: number) => `${Math.round(v)} deps`;
-
-  formatBytes(bytes: number): string {
-    if (!bytes || bytes === 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
-  }
-
-  formatDuration(ms: number): string {
-    const s = Math.round(ms / 1000);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    if (h > 0) return `${h}h ${m}m ${sec}s`;
-    if (m > 0) return `${m}m ${sec}s`;
-    return `${sec}s`;
-  }
+  readonly formatDuration = formatDuration;
+  readonly formatBytes = formatBytes;
+  readonly formatDeps = (v: number) => `${formatCount(v)} deps`;
 
   private formatDate(iso: string): string {
     const d = new Date(iso.includes('Z') || iso.includes('+') ? iso : iso + 'Z');

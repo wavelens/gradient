@@ -20,8 +20,7 @@
         [series]="buildTimeSeries()"
         [categories]="labels()"
         [colors]="buildTimeColor"
-        [valueFormatter]="formatSeconds"
-        yAxisTitle="seconds"
+        [valueFormatter]="formatDuration"
       />
 
       <gr-metric-chart
@@ -32,8 +31,7 @@
         [series]="evalTimeSeries()"
         [categories]="labels()"
         [colors]="evalTimeColor"
-        [valueFormatter]="formatSeconds"
-        yAxisTitle="seconds"
+        [valueFormatter]="formatDuration"
       />
 
       <gr-metric-chart
@@ -44,7 +42,7 @@
         [series]="outputSizeSeries()"
         [categories]="labels()"
         [colors]="outputSizeColor"
-        [valueFormatter]="formatSize"
+        [valueFormatter]="formatBytes"
       />
 
       <gr-metric-chart
@@ -55,7 +53,7 @@
         [series]="closureSizeSeries()"
         [categories]="labels()"
         [colors]="closureSizeColors"
-        [valueFormatter]="formatSize"
+        [valueFormatter]="formatBytes"
       />
 
       <gr-metric-chart

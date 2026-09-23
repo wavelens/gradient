@@ -19,6 +19,7 @@ import {
   RowListComponent,
 } from '@shared/ui';
 import { environment } from '@environments/environment';
+import { formatBytes } from '@shared/text';
 
 @Component({
   selector: 'app-build-artefacts',
@@ -85,16 +86,10 @@ export class BuildArtefactsComponent implements OnInit {
     else this.router.navigate(['/project', this.projectName]);
   }
 
+  readonly formatBytes = formatBytes;
+
   buildShortId(): string {
     return this.buildId.slice(0, 8);
-  }
-
-  formatSize(bytes: number | undefined): string {
-    if (bytes === undefined || bytes === null) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
   /** True when the artefact should open inline in a browser tab. */

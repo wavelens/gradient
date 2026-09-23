@@ -11,8 +11,7 @@ import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
 import { BoardService, BoardHealth } from '@core/services/board.service';
 import { AdminService, AdminTask } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';
-
-const MIB = 1024 ** 2;
+import { formatBytes, formatDuration } from '@shared/text';
 
 @Component({
   selector: 'app-board-health',
@@ -25,7 +24,7 @@ const MIB = 1024 ** 2;
       }
       <div class="kpis">
         <div class="kpi"><span class="label">Version</span><span class="value sm">{{ h.version }}</span></div>
-        <div class="kpi"><span class="label">Uptime</span><span class="value sm">{{ uptime(h.uptime_seconds) }}</span></div>
+        <div class="kpi"><span class="label">Uptime</span><span class="value sm">{{ seconds(h.uptime_seconds) }}</span></div>
         <div class="kpi"><span class="label">Workers</span><span class="value">{{ h.workers_connected }}</span></div>
         <div class="kpi"><span class="label">Jobs pending / active</span><span class="value sm">{{ h.jobs_pending }} / {{ h.jobs_active }}</span></div>
         <div class="kpi"><span class="label">Sessions</span><span class="value">{{ h.proto_sessions }}</span></div>
@@ -33,18 +32,18 @@ const MIB = 1024 ** 2;
 
       <h2>Process</h2>
       <div class="grid">
-        <div class="cell"><span class="label">RSS</span><span>{{ mib(h.process.resident_memory_bytes) }} MiB</span></div>
-        <div class="cell"><span class="label">Virtual</span><span>{{ mib(h.process.virtual_memory_bytes) }} MiB</span></div>
+        <div class="cell"><span class="label">RSS</span><span>{{ bytes(h.process.resident_memory_bytes) }}</span></div>
+        <div class="cell"><span class="label">Virtual</span><span>{{ bytes(h.process.virtual_memory_bytes) }}</span></div>
         <div class="cell"><span class="label">Open fds</span><span>{{ h.process.open_fds }} / {{ h.process.max_fds }}</span></div>
         <div class="cell"><span class="label">Threads</span><span>{{ h.process.threads }}</span></div>
-        <div class="cell"><span class="label">CPU seconds</span><span>{{ h.process.cpu_seconds_total | number: '1.0-0' }}</span></div>
+        <div class="cell"><span class="label">CPU time</span><span>{{ seconds(h.process.cpu_seconds_total) }}</span></div>
       </div>
 
       <h2>Pipeline</h2>
       <div class="grid">
-        <div class="cell"><span class="label">Rollup lag</span><span [class.bad]="(h.rollup_lag_seconds ?? 0) > 300">{{ h.rollup_lag_seconds !== null ? (h.rollup_lag_seconds | number: '1.0-0') + ' s' : 'no data' }}</span></div>
+        <div class="cell"><span class="label">Rollup lag</span><span [class.bad]="(h.rollup_lag_seconds ?? 0) > 300">{{ h.rollup_lag_seconds !== null ? seconds(h.rollup_lag_seconds) : 'no data' }}</span></div>
         <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | date: 'short') : '-' }}</span></div>
-        <div class="cell"><span class="label">Cache size</span><span>{{ (h.cache_bytes / (1024*1024*1024)) | number: '1.2-2' }} GiB</span></div>
+        <div class="cell"><span class="label">Cache size</span><span>{{ bytes(h.cache_bytes) }}</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
         <div class="cell"><span class="label">Effects pending</span><span>{{ h.outbox_pending }}</span></div>
         <div class="cell"><span class="label">Effects dead-lettered</span><span [class.bad]="h.outbox_failed > 0">{{ h.outbox_failed }}</span></div>
@@ -60,7 +59,7 @@ const MIB = 1024 ** 2;
               <td [class.bad]="l.restarts > 0">{{ l.restarts }}</td>
               <td [class.bad]="l.pass_errors > 0">{{ l.pass_errors }}</td>
               <td [class.bad]="l.pass_timeouts > 0">{{ l.pass_timeouts }}</td>
-              <td>{{ l.last_ok_seconds_ago !== null ? (l.last_ok_seconds_ago | number: '1.0-0') + ' s ago' : 'never' }}</td>
+              <td>{{ l.last_ok_seconds_ago !== null ? seconds(l.last_ok_seconds_ago) + ' ago' : 'never' }}</td>
               <td [class.bad]="!!l.last_error">{{ l.last_error ?? '' }}</td>
             </tr>
           } @empty {
@@ -115,14 +114,10 @@ export class BoardHealthComponent implements OnInit {
   gcNotice = signal<string | null>(null);
   drainBusy = signal(false);
 
-  mib(bytes: number): string {
-    return (bytes / MIB).toFixed(0);
-  }
+  readonly bytes = formatBytes;
 
-  uptime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  seconds(value: number): string {
+    return formatDuration(value * 1000);
   }
 
   private loadTasks(): void {

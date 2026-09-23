@@ -14,6 +14,7 @@ import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrate
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';
 import { ActionDelivery, ActionDeliveryDetail } from '../../../core/models/action.model';
+import { formatDuration } from '@shared/text';
 
 @Component({
   selector: 'app-action-deliveries',
@@ -31,6 +32,7 @@ export class ActionDeliveriesComponent implements OnInit {
   actionId = input.required<string>();
   closed = output<void>();
 
+  readonly duration = formatDuration;
   visible = signal(true);
   deliveries = signal<ActionDelivery[]>([]);
   loading = signal(true);

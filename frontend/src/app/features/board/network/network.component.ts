@@ -9,8 +9,7 @@ import { CommonModule } from '@angular/common';
 import { BoardService, BoardNetworkStats, HttpRouteStat } from '@core/services/board.service';
 import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
-
-const GIB = 1024 ** 3;
+import { formatBytes, formatCount, formatDuration, formatQuantity } from '@shared/text';
 
 type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg_ms' | 'errors'>;
 
@@ -23,27 +22,30 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
       <gr-loading-spinner message="Loading network stats..." />
     } @else {
       <gr-metric-chart
-        title="NAR egress (GiB served per hour)"
+        title="NAR egress (served per hour)"
         type="area"
         [series]="egressSeries()"
         [categories]="egressCats()"
         [colors]="['#17a2b8']"
+        [valueFormatter]="bytes"
       ></gr-metric-chart>
 
       <gr-metric-chart
-        title="Worker network speed (Mbps, latest sample)"
+        title="Worker network speed (latest sample)"
         type="bar"
         [series]="netSeries()"
         [categories]="workerCats()"
         [colors]="['#6f42c1']"
+        [valueFormatter]="mbps"
       ></gr-metric-chart>
 
       <gr-metric-chart
-        title="Worker disk speed (Mbps, latest sample)"
+        title="Worker disk speed (latest sample)"
         type="bar"
         [series]="diskSeries()"
         [categories]="workerCats()"
         [colors]="['#fd7e14']"
+        [valueFormatter]="mbps"
       ></gr-metric-chart>
 
       <h2>HTTP routes @if (!stats()?.http?.length) {<span class="muted">(superuser-only)</span>}</h2>
@@ -62,8 +64,8 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
             <tr>
               <td>{{ r.method }}</td>
               <td class="mono">{{ r.route }}</td>
-              <td class="num">{{ r.count }}</td>
-              <td class="num">{{ r.avg_ms | number: '1.1-1' }}</td>
+              <td class="num">{{ count(r.count) }}</td>
+              <td class="num">{{ duration(r.avg_ms) }}</td>
               <td class="num" [class.bad]="r.errors > 0">{{ r.errors }}</td>
             </tr>
           } @empty {
@@ -84,9 +86,14 @@ export class BoardNetworkComponent implements OnInit {
     { key: 'method', label: 'Method', numeric: false },
     { key: 'route', label: 'Route', numeric: false },
     { key: 'count', label: 'Requests', numeric: true },
-    { key: 'avg_ms', label: 'Avg ms', numeric: true },
+    { key: 'avg_ms', label: 'Avg time', numeric: true },
     { key: 'errors', label: 'Errors', numeric: true },
   ];
+  readonly bytes = formatBytes;
+  readonly count = formatCount;
+  readonly duration = formatDuration;
+  readonly mbps = (value: number) => formatQuantity(value, 'Mbps');
+
   stats = signal<BoardNetworkStats | null>(null);
   sortKey = signal<HttpSortKey>('count');
   sortAsc = signal(false);
@@ -121,7 +128,7 @@ export class BoardNetworkComponent implements OnInit {
 
   egressCats = computed(() => (this.stats()?.nar_egress ?? []).map((p) => p.bucket_start.slice(11, 16)));
   egressSeries = computed(() => [
-    { name: 'egress', data: (this.stats()?.nar_egress ?? []).map((p) => +(p.sum / GIB).toFixed(3)) },
+    { name: 'egress', data: (this.stats()?.nar_egress ?? []).map((p) => p.sum) },
   ]);
   workerCats = computed(() =>
     (this.stats()?.workers ?? []).map((w) => (w.worker_id ?? '-').slice(0, 12))

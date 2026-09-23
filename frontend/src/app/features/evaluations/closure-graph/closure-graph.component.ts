@@ -18,6 +18,7 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
 } from '@shared/ui';
+import { formatBytes } from '@shared/text';
 import { buildClosureSankey, SankeyNode, SankeyLink } from './closure-aggregate';
 
 const TOP_N = 500;
@@ -96,7 +97,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       next: (g) => {
         this.nodeCount.set(g.node_count);
         this.truncated.set(g.truncated);
-        this.totalLabel.set(this.formatBytes(g.total_size_bytes ?? 0));
+        this.totalLabel.set(formatBytes(g.total_size_bytes ?? 0));
         const rootNode = g.nodes.find((n) => g.roots.includes(n.id));
         this.rootName.set(rootNode?.name ?? '');
         this.loading.set(false);
@@ -172,7 +173,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       path.setAttribute('stroke', this.fill(l.source));
       path.setAttribute('stroke-width', `${Math.max(1, l.width ?? 1)}`);
       path.setAttribute('stroke-opacity', '0.35');
-      path.appendChild(this.titleEl(`${l.source.name} → ${l.target.name}\n${this.formatBytes(l.value)}`));
+      path.appendChild(this.titleEl(`${l.source.name} → ${l.target.name}\n${formatBytes(l.value)}`));
       linkLayer.appendChild(path);
     }
     group.appendChild(linkLayer);
@@ -198,7 +199,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
       text.setAttribute('text-anchor', leftHalf ? 'start' : 'end');
       text.setAttribute('fill', '#e5e7eb');
       text.setAttribute('font-size', '11');
-      text.textContent = `${this.shortName(n.name)} · ${this.formatBytes(n.value)}`;
+      text.textContent = `${this.shortName(n.name)} · ${formatBytes(n.value)}`;
       nodeLayer.appendChild(text);
     }
     group.appendChild(nodeLayer);
@@ -209,8 +210,8 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   }
 
   private nodeTooltip(n: SankeyNode): string {
-    if (n.bucketedCount) return `${n.name}\nclosure ${this.formatBytes(n.value)}`;
-    return `${n.name}\nclosure ${this.formatBytes(n.value)} · own ${this.formatBytes(n.ownSize)}`;
+    if (n.bucketedCount) return `${n.name}\nclosure ${formatBytes(n.value)}`;
+    return `${n.name}\nclosure ${formatBytes(n.value)} · own ${formatBytes(n.ownSize)}`;
   }
 
   private titleEl(text: string): SVGTitleElement {
@@ -280,13 +281,6 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
 
   private shortName(name: string): string {
     return name.length > 28 ? name.slice(0, 27) + '…' : name;
-  }
-
-  formatBytes(bytes: number): string {
-    if (!bytes || bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
   }
 
   goBack(): void {

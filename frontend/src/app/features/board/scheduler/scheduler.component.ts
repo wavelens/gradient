@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { BoardService, MetricPoint, RuleDescription, ScoringSummary } from '@core/services/board.service';
 import { LoadingSpinnerComponent, MetricChartComponent, PopoverComponent, TableComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
+import { formatDuration } from '@shared/text';
 
 @Component({
   selector: 'app-board-scheduler',
@@ -25,11 +26,12 @@ import { firstLoad } from '../first-load';
       </div>
 
       <gr-metric-chart
-        title="Wait breakdown (ms, hourly avg): queue (excl. deps) vs dependency"
+        title="Wait breakdown (hourly avg): queue (excl. deps) vs dependency"
         type="line"
         [series]="waitSeries()"
         [categories]="waitCategories()"
         [colors]="['#17a2b8', '#fd7e14']"
+        [valueFormatter]="duration"
       ></gr-metric-chart>
 
       <gr-metric-chart
@@ -82,6 +84,8 @@ export class BoardSchedulerComponent implements OnInit {
   summary = signal<ScoringSummary | null>(null);
   private descriptions = signal<Map<string, string>>(new Map());
   activeRule = signal<RuleDescription | null>(null);
+
+  readonly duration = formatDuration;
 
   waitCategories = computed(() => this.wait().map((p) => p.bucket_start.slice(11, 16)));
   waitSeries = computed(() => {

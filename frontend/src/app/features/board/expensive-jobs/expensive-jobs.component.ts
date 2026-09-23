@@ -14,6 +14,7 @@ import {
 } from '@core/services/board.service';
 import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
+import { formatDuration, formatQuantity } from '@shared/text';
 
 type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
 
@@ -46,7 +47,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
           <thead><tr><th>#</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
           <tbody>
             @for (b of builds(); track b.build_id; let i = $index) {
-              <tr><td>{{ i + 1 }}</td><td class="mono">{{ b.name }}</td><td>{{ formatMs(b.build_time_ms) }}</td><td class="mono">{{ b.worker ?? '-' }}</td></tr>
+              <tr><td>{{ i + 1 }}</td><td class="mono">{{ b.name }}</td><td>{{ duration(b.build_time_ms) }}</td><td class="mono">{{ b.worker ?? '-' }}</td></tr>
             } @empty {
               <tr><td colspan="4" class="muted">No builds in this window.</td></tr>
             }
@@ -60,7 +61,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
           <thead><tr><th>#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
           <tbody>
             @for (r of resources(); track r.derivation; let i = $index) {
-              <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ formatValue(r) }}</td><td class="mono">{{ r.worker || '-' }}</td></tr>
+              <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ quantity(r.value, r.unit) }}</td><td class="mono">{{ r.worker || '-' }}</td></tr>
             } @empty {
               <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs cgroup metrics enabled on workers).</td></tr>
             }
@@ -77,6 +78,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
           [series]="topProjectSeries()"
           [categories]="topProjectCategories()"
           [colors]="['#fd7e14']"
+          [valueFormatter]="duration"
         ></gr-metric-chart>
       }
     }
@@ -101,10 +103,13 @@ export class BoardExpensiveJobsComponent implements OnInit {
     { key: 'network', label: 'Network' },
   ];
 
+  readonly duration = formatDuration;
+  readonly quantity = formatQuantity;
+
   valueHeader = computed(() => this.tabs.find((t) => t.key === this.tab())?.label ?? '');
   topProjectCategories = computed(() => this.topProjects().map((o) => o.project.slice(0, 8)));
   topProjectSeries = computed(() => [
-    { name: 'build hours', data: this.topProjects().map((o) => +(o.total_build_ms / 3_600_000).toFixed(2)) },
+    { name: 'build time', data: this.topProjects().map((o) => o.total_build_ms) },
   ]);
 
   ngOnInit(): void {
@@ -134,22 +139,5 @@ export class BoardExpensiveJobsComponent implements OnInit {
   setWindow(e: Event): void {
     this.windowDays = Number((e.target as HTMLSelectElement).value);
     this.load();
-  }
-
-  formatMs(ms: number): string {
-    const s = Math.round(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
-  }
-
-  formatValue(r: ExpensiveResource): string {
-    if (r.unit === 'bytes') {
-      const gib = r.value / 1024 ** 3;
-      return gib >= 1 ? `${gib.toFixed(2)} GiB` : `${(r.value / 1024 ** 2).toFixed(1)} MiB`;
-    }
-    if (r.unit === 'ms') return this.formatMs(r.value);
-    if (r.unit === 'MB') return `${(r.value / 1024).toFixed(2)} GiB`;
-    return `${r.value.toFixed(1)} ${r.unit}`;
   }
 }
