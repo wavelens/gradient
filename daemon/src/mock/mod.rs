@@ -7,7 +7,9 @@
 pub mod artefact;
 pub mod build;
 pub mod ca_path;
+pub mod cache_export;
 pub mod conn;
+pub mod control;
 pub mod ingest;
 pub mod nar;
 pub mod spec;
@@ -151,9 +153,9 @@ impl Backend for MockBackend {
 
     fn control(
         &self,
-        _cmd: &str,
-        _args: &serde_json::Value,
+        cmd: &str,
+        args: &serde_json::Value,
     ) -> Option<anyhow::Result<serde_json::Value>> {
-        None
+        control::dispatch(&self.0, cmd, args)
     }
 }

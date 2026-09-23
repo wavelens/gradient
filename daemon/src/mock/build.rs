@@ -61,6 +61,7 @@ pub fn build_derivation(
 }
 
 pub fn release(state: &MockState, id: &str) {
+    state.overrides.lock().expect("overrides").remove(id);
     hang(state, id).notify_one();
 }
 
