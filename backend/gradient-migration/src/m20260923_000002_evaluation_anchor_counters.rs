@@ -6,7 +6,9 @@
 
 //! Per-evaluation anchor counters. Triggers append signed deltas to an
 //! append-only ledger so no mover ever locks the evaluation row; the dispatch
-//! tick folds the ledger, and the consistency sweep recounts.
+//! tick folds the ledger, and the consistency sweep recounts. The anchor trigger
+//! is per row behind a `WHEN`: a statement trigger's transition tables capture
+//! every row a readiness ripple writes, which measured 2.4x on a 100k ripple.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -23,18 +25,13 @@ pub const ANCHOR_COUNTS_FN: &str = "CREATE OR REPLACE FUNCTION evaluation_anchor
 const MOVED_FN: &str = "CREATE OR REPLACE FUNCTION evaluation_anchor_moved() RETURNS trigger \
      LANGUAGE plpgsql AS $$ BEGIN \
      INSERT INTO evaluation_anchor_delta (evaluation, named, active, failed, queued, building) \
-     SELECT bj.evaluation, 0, sum(d.active)::int, sum(d.failed)::int, sum(d.queued)::int, sum(d.building)::int \
-     FROM ( \
-       SELECT n.id, nc.active - oc.active AS active, nc.failed - oc.failed AS failed, \
-              nc.queued - oc.queued AS queued, nc.building - oc.building AS building \
-       FROM new_rows n JOIN old_rows o ON o.id = n.id \
-       CROSS JOIN LATERAL evaluation_anchor_counts(n.status, n.demanded) nc \
-       CROSS JOIN LATERAL evaluation_anchor_counts(o.status, o.demanded) oc \
-       WHERE n.status IS DISTINCT FROM o.status OR n.demanded IS DISTINCT FROM o.demanded \
-     ) d \
-     JOIN build_job bj ON bj.derivation_build = d.id \
-     WHERE d.active <> 0 OR d.failed <> 0 OR d.queued <> 0 OR d.building <> 0 \
-     GROUP BY bj.evaluation; \
+     SELECT bj.evaluation, 0, nc.active - oc.active, nc.failed - oc.failed, \
+            nc.queued - oc.queued, nc.building - oc.building \
+     FROM evaluation_anchor_counts(NEW.status, NEW.demanded) nc, \
+          evaluation_anchor_counts(OLD.status, OLD.demanded) oc, build_job bj \
+     WHERE bj.derivation_build = NEW.id \
+       AND (nc.active, nc.failed, nc.queued, nc.building) \
+           IS DISTINCT FROM (oc.active, oc.failed, oc.queued, oc.building); \
      RETURN NULL; END $$";
 
 const NAMED_FN: &str = "CREATE OR REPLACE FUNCTION evaluation_anchor_named() RETURNS trigger \
@@ -89,9 +86,9 @@ const UP: &[&str] = &[
     MOVED_FN,
     NAMED_FN,
     UNNAMED_FN,
-    "CREATE TRIGGER evaluation_anchor_moved AFTER UPDATE ON derivation_build \
-     REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows \
-     FOR EACH STATEMENT EXECUTE FUNCTION evaluation_anchor_moved()",
+    "CREATE TRIGGER evaluation_anchor_moved AFTER UPDATE OF status, demanded ON derivation_build \
+     FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status OR OLD.demanded IS DISTINCT FROM NEW.demanded) \
+     EXECUTE FUNCTION evaluation_anchor_moved()",
     "CREATE TRIGGER evaluation_anchor_named AFTER INSERT ON build_job \
      REFERENCING NEW TABLE AS new_rows \
      FOR EACH STATEMENT EXECUTE FUNCTION evaluation_anchor_named()",
@@ -151,6 +148,25 @@ mod tests {
                 < position("UPDATE evaluation e SET")
         );
         assert!(BACKFILL.contains("evaluation_anchor_counts(db.status, db.demanded)"));
+    }
+
+    /// A ripple that writes neither column never reaches the function.
+    #[test]
+    fn the_anchor_trigger_fires_only_on_a_membership_column_change() {
+        let trigger = UP
+            .iter()
+            .find(|s| s.contains("CREATE TRIGGER evaluation_anchor_moved"))
+            .unwrap();
+        assert!(
+            trigger.contains("AFTER UPDATE OF status, demanded"),
+            "{trigger}"
+        );
+        assert!(
+            trigger.contains(
+                "WHEN (OLD.status IS DISTINCT FROM NEW.status OR OLD.demanded IS DISTINCT FROM NEW.demanded)"
+            ),
+            "{trigger}"
+        );
     }
 
     /// Both `build_job` triggers lock the anchors they read in `derivation`
