@@ -53,4 +53,10 @@ describe('DashboardStatsComponent', () => {
     const { root } = render(() => throwError(() => ({ status: 403 })));
     expect(root.textContent!.trim()).toBe('');
   });
+
+  it('shows a dash for workers busy when no worker is online', () => {
+    const text = render(() => of({ ...STATS, workers: { online: 0, busy_pct: 0 } })).root.textContent!.replace(/\s+/g, ' ');
+    expect(text).toContain('- workers busy');
+    expect(text).not.toContain('0% workers busy');
+  });
 });

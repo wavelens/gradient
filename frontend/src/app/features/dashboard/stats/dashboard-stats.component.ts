@@ -22,7 +22,7 @@ import { formatCpuTime } from '../format';
         <span><b>{{ cpu(s.cpu_time_ms) }}</b> CPU time</span>
         <span><b>{{ count(s.builds_completed) }}</b> builds</span>
         <span><b>{{ bytes(s.cache_size_bytes) }}</b> cache size</span>
-        <span><b>{{ s.workers.busy_pct }}%</b> workers busy</span>
+        <span><b>{{ s.workers.online ? s.workers.busy_pct + '%' : '-' }}</b> workers busy</span>
         <span><b>{{ wait(s.queue_wait_p50_ms) }}</b> queue wait</span>
       </div>
     } @else if (failed()) {
