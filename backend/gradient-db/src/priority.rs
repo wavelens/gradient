@@ -7,7 +7,7 @@
 //! User-requested prioritization (#530). An evaluation carries the flag for its
 //! whole tree, read at dispatch, so derivations it resolves later inherit it; a
 //! build writes it onto every open anchor of its dependency closure. The
-//! database clears either flag once its row fails for good.
+//! database clears either flag once its row fails for good or is aborted.
 
 use crate::{DbContext, status_sql, transitive_closure_reachable};
 use gradient_entity::build::BuildStatus;
@@ -130,6 +130,7 @@ mod tests {
     fn prioritizable_excludes_every_state_the_database_unprioritizes() {
         for status in [
             BuildStatus::FailedPermanent,
+            BuildStatus::Aborted,
             BuildStatus::DependencyFailed,
             BuildStatus::FailedTimeout,
             BuildStatus::Skipped,

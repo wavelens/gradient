@@ -3799,7 +3799,7 @@ paths:
       tags: [evals]
       summary: Prioritize evaluation
       description: |-
-        Dispatches every build of a running evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires project membership. A finished evaluation is left unchanged; a failed one loses its priority.
+        Dispatches every build of a running evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires project membership. A finished evaluation is left unchanged; a failed or aborted one loses its priority.
       operationId: prioritizeEvaluation
       responses:
         '200':
@@ -4604,7 +4604,7 @@ paths:
       tags: [builds]
       summary: Prioritize build
       description: |-
-        Dispatches the build and every open build of its dependency closure ahead of unprioritized work. Requires project membership. A build loses its priority when it fails permanently, dependency-fails, times out or is skipped.
+        Dispatches the build and every open build of its dependency closure ahead of unprioritized work. Requires project membership. A build loses its priority when it fails permanently, dependency-fails, times out, is aborted or is skipped.
       operationId: prioritizeBuild
       responses:
         '200':
@@ -9906,7 +9906,7 @@ components:
       type: object
       required: [id, repository, commit, wildcard, status, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The evaluation's whole build tree dispatches ahead of unprioritized work. Cleared when the evaluation fails." }
+        prioritized: { type: boolean, description: "The evaluation's whole build tree dispatches ahead of unprioritized work. Cleared when the evaluation fails or is aborted." }
         id:
           type: string
           format: uuid
@@ -10181,7 +10181,7 @@ components:
       type: object
       required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out or is skipped." }
+        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
         id:
           type: string
           format: uuid
@@ -10469,7 +10469,7 @@ components:
       type: object
       required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out or is skipped." }
+        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
         id:
           type: string
           format: uuid

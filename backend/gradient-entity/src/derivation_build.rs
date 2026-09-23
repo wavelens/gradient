@@ -47,7 +47,7 @@ pub struct Model {
     /// the promotion gate reads it.
     pub demanded: bool,
     /// Dispatches ahead of unprioritized work. Cleared by the database when the
-    /// anchor fails permanently, dependency-fails, times out or is skipped.
+    /// anchor fails permanently, dependency-fails, times out, is aborted or is skipped.
     pub prioritized: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,

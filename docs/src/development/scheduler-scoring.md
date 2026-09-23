@@ -86,8 +86,8 @@ running evaluation naming it does (`POST /evals/{id}/prioritize`, read at
 dispatch so derivations the evaluation resolves later inherit it). An eval job
 reads its own evaluation's flag. The bonus outranks the `WaitTimeRule` cap, so
 a fresh prioritized job beats any unprioritized one. Postgres triggers clear the
-flag when an anchor fails permanently, dependency-fails, times out or is
-skipped, and when an evaluation fails.
+flag when an anchor fails permanently, dependency-fails, times out, is aborted
+or is skipped, and when an evaluation fails or is aborted.
 
 ### `FairShareRule`
 
