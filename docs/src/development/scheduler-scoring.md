@@ -77,6 +77,18 @@ Wait is measured from `ready_at` (when the job's dependencies cleared), not
 `queued_at`, so dependency wait is excluded. The bonus grows with wait, scaled
 by the instance average wait, and saturates at the rule cap for anti-starvation.
 
+### `QosRule`
+
+Quality of service: `+5000` for a prioritized job, `0` otherwise. A build is
+prioritized when its `derivation_build` anchor carries the flag (set on the
+anchor and its build-time closure by `POST /builds/{id}/prioritize`) or when a
+running evaluation naming it does (`POST /evals/{id}/prioritize`, read at
+dispatch so derivations the evaluation resolves later inherit it). An eval job
+reads its own evaluation's flag. The bonus outranks the `WaitTimeRule` cap, so
+a fresh prioritized job beats any unprioritized one. Postgres triggers clear the
+flag when an anchor fails permanently, dependency-fails, times out or is
+skipped, and when an evaluation fails.
+
 ### `FairShareRule`
 
 Penalty proportional to the owning project's share of in-flight **work** -
@@ -94,6 +106,7 @@ count - so a few long builds and many short ones are balanced fairly.
 | `RescoreWaitRule` | disqualifier | `-1000` for a build with no reported `missing_nar_size`, until `rescore_count` hits 4; never penalizes eval. |
 | `BuiltinDeprioritizeRule` | soft | `+50` bonus for real-architecture build jobs, `0` for `builtin` builds so they yield their slot, and `+100` for a `builtin` build on a worker reporting no architectures so that arch-less worker is not left idle. |
 | `ReserveFetchWorkersRule` | disqualifier | Penalty when a fetch-capable worker is offered a cached-eval job, relaxed as idle capacity grows. |
+| `QosRule` | soft | `+5000` for a prioritized job, see above. |
 
 ## `resource-aware` policy rules
 

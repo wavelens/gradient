@@ -1132,6 +1132,7 @@ mod assignment_response_tests {
             rescore_count: 0,
             history: Default::default(),
             walk_mode: Default::default(),
+            prioritized: false,
         })
     }
 

@@ -43,6 +43,7 @@ pub struct PendingEvalJob {
     /// Per-task predicted peak eval RSS, fed into `ResourceFitRule`.
     pub history: gradient_score::HistoryPrediction,
     pub walk_mode: WalkMode,
+    pub prioritized: bool,
 }
 
 impl PendingEvalJob {
@@ -101,6 +102,8 @@ pub struct PendingBuildJob {
     /// Number of dispatch ticks this job has waited while pending. Bumped once
     /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
     pub rescore_count: u32,
+    /// The anchor, or a live evaluation naming it, was prioritized (#530).
+    pub prioritized: bool,
     /// `derivation.pname`, surfaced for the serialized dispatch view.
     pub pname: Option<String>,
     /// True when the build's output is already available from cache; the job can
@@ -271,6 +274,13 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.rescore_count,
             PendingJob::Eval(j) => j.rescore_count,
+        }
+    }
+
+    pub fn prioritized(&self) -> bool {
+        match self {
+            PendingJob::Build(j) => j.prioritized,
+            PendingJob::Eval(j) => j.prioritized,
         }
     }
 
@@ -738,6 +748,7 @@ impl JobTracker {
                     queued_at: job.queued_at(),
                     ready_at: job.ready_at(),
                     project_work_share: shares.share(job.project_id()),
+                    prioritized: job.prioritized(),
                     rescore_count: job.rescore_count(),
                     now,
                 };
@@ -1070,6 +1081,26 @@ impl JobTracker {
         }
     }
 
+    /// Lift the tracked jobs a prioritization reached: `evaluation`'s own eval
+    /// job and the builds of `anchors`, so they outscore the queue from the
+    /// next assignment on instead of from their next dispatch pass.
+    pub fn prioritize(
+        &mut self,
+        evaluation: Option<EvaluationId>,
+        anchors: &HashSet<DerivationBuildId>,
+    ) {
+        let active = self.active.values_mut().map(|(_, job)| job);
+        for job in self.pending.values_mut().chain(active) {
+            match job {
+                PendingJob::Eval(e) if Some(e.evaluation_id) == evaluation => e.prioritized = true,
+                PendingJob::Build(b) if anchors.contains(&b.derivation_build) => {
+                    b.prioritized = true
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Drop the pending builds `stale` names, with their recorded scores;
     /// returns how many went. Assigned jobs are never touched.
     pub fn prune_pending_builds(&mut self, stale: impl Fn(&PendingBuildJob) -> bool) -> usize {
@@ -1196,6 +1227,34 @@ mod tests {
     }
 
     #[test]
+    fn prioritize_lifts_the_evaluations_eval_job_and_the_named_builds_only() {
+        let peer = ProjectId::now_v7();
+        let eval = eval_job(peer);
+        let other_eval = eval_job(peer);
+        let named = build_job(peer, vec![]);
+        let unnamed = build_job(peer, vec![]);
+        let evaluation = eval.evaluation_id();
+        let anchor = named.derivation_build().expect("build");
+
+        let mut tracker = JobTracker::new();
+        for (key, job) in [
+            ("e1", eval),
+            ("e2", other_eval),
+            ("b1", named),
+            ("b2", unnamed),
+        ] {
+            tracker.add_pending(key.into(), job);
+        }
+        tracker.prioritize(Some(evaluation), &HashSet::from([anchor]));
+
+        let lifted = |key: &str| tracker.pending_job(key).expect("pending").prioritized();
+        assert!(lifted("e1"));
+        assert!(!lifted("e2"));
+        assert!(lifted("b1"));
+        assert!(!lifted("b2"));
+    }
+
+    #[test]
     fn only_a_pruned_evaluation_prunes_its_walk() {
         let peer = ProjectId::now_v7();
         let mut full = eval_job(peer);
@@ -1230,6 +1289,7 @@ mod tests {
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
+            prioritized: false,
             history: Default::default(),
             walk_mode: Default::default(),
         })
@@ -1261,6 +1321,7 @@ mod tests {
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
+            prioritized: false,
             history: Default::default(),
             walk_mode: Default::default(),
         })
@@ -1323,6 +1384,7 @@ mod tests {
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
+            prioritized: false,
             pname: None,
             substitute: false,
         })

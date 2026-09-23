@@ -276,6 +276,8 @@ pub struct Model {
     pub finished_at: Option<NaiveDateTime>,
     pub graph_version: i64,
     pub walk_mode: WalkMode,
+    /// Every build this evaluation names dispatches ahead of unprioritized work.
+    pub prioritized: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

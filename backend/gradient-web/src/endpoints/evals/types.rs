@@ -31,6 +31,7 @@ pub struct BuildItem {
     /// list depends on). Secondary sort key after build status, and the key the
     /// client re-sorts locally added builds by.
     pub depth: u32,
+    pub prioritized: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -78,6 +79,7 @@ pub struct EvaluationResponse {
     /// second round-trip to the messages endpoint.
     pub error: Option<String>,
     pub entry_points: Vec<EntryPointBrief>,
+    pub prioritized: bool,
     /// `null` for manually-triggered evaluations (Web UI / API), populated for
     /// evaluations that fired from a task trigger (polling, schedule,
     /// reporter push/PR). Mirrors `EvaluationSummary::trigger` on the task

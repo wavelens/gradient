@@ -171,11 +171,21 @@ pub enum Transition {
     AbortEvaluationAnchors {
         evaluation: EvaluationId,
     },
+    /// Prioritize a live evaluation's whole tree, including anchors it has not
+    /// resolved yet.
+    PrioritizeEvaluation {
+        evaluation: EvaluationId,
+    },
+    /// Prioritize an anchor and the open anchors of its build-time closure.
+    PrioritizeBuild {
+        anchor: DerivationBuildId,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TransitionReport {
     pub aborted_anchors: Vec<DerivationBuildId>,
+    pub prioritized_anchors: Vec<DerivationBuildId>,
     pub already_aborted: bool,
     pub substitute_log: Option<SubstituteLog>,
 }

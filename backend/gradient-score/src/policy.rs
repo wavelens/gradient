@@ -11,8 +11,8 @@ use crate::rules::builtin::{
     RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
 };
 use crate::rules::{
-    DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
-    ResourceSaturationRule,
+    DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, QosRule,
+    ResourceFitRule, ResourceSaturationRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -136,6 +136,7 @@ fn simple_table() -> Vec<RuleSpec> {
         spec(true, Box::new(WaitTimeRule::default())),
         spec(true, Box::new(BuiltinDeprioritizeRule::default())),
         spec(true, Box::new(ReserveFetchWorkersRule::default())),
+        spec(true, Box::new(QosRule::default())),
     ]
 }
 
@@ -282,6 +283,7 @@ mod tests {
             queued_at: now(),
             ready_at: now(),
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: now(),
         };
@@ -295,6 +297,7 @@ mod tests {
             queued_at: now() - chrono::Duration::seconds(3600),
             ready_at: now() - chrono::Duration::seconds(3600),
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: now(),
         };
@@ -332,6 +335,7 @@ mod tests {
             queued_at: now(),
             ready_at: now(),
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: now(),
         };
@@ -376,6 +380,7 @@ mod tests {
             queued_at: n,
             ready_at: n,
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: now(),
         };
@@ -389,6 +394,7 @@ mod tests {
             queued_at: n,
             ready_at: n,
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: now(),
         };
@@ -414,6 +420,7 @@ mod tests {
             queued_at: now(),
             ready_at: now(),
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: now(),
         };
@@ -477,6 +484,7 @@ mod tests {
             queued_at: now(),
             ready_at: now(),
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: now(),
         };

@@ -9,8 +9,9 @@
 //! scattered magic numbers. Scores are additive; a job dispatches to a worker
 //! only when its summed total reaches [`DISPATCH_FLOOR`] and no rule vetoed.
 //!
-//! Relative scale (largest first): anti-starvation WAIT_TIME_CAP (4000)
-//! out-budgets everything so nothing waits forever; the resource penalties
+//! Relative scale (largest first): a prioritized job's QOS_PRIORITIZED (5000)
+//! outranks any unprioritized wait; anti-starvation WAIT_TIME_CAP (4000)
+//! out-budgets everything else so nothing waits forever; the resource penalties
 //! (RESOURCE_SATURATION_PENALTY 5000, stackable to 10000; RAM overshoot up to
 //! RESOURCE_FIT_RAM_PENALTY x MAX_OVERSHOOT = 800 before OOM factors) keep
 //! doomed placements out; cache-warmth bonuses (MISSING_NAR_SIZE_CAP 500,
@@ -92,3 +93,6 @@ pub const DISK_REFERENCE_MBPS: f64 = 500.0;
 
 /// FairShareRule: penalty scale per unit of a project's active-build share.
 pub const FAIR_SHARE_WEIGHT: f64 = 500.0;
+
+/// QosRule: quality-of-service bonus for a prioritized job.
+pub const QOS_PRIORITIZED: f64 = 5000.0;

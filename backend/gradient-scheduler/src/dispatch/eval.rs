@@ -126,6 +126,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             queued_at: eval.updated_at,
             ready_at: eval.updated_at,
             rescore_count: 0,
+            prioritized: eval.prioritized,
             history,
             walk_mode: eval.walk_mode,
         };

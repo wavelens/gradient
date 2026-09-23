@@ -85,6 +85,7 @@ pub struct EntryPointSummary {
     /// evaluation: the sum of `deps` over every status, substituted and aborted
     /// included.
     pub deps_total: i64,
+    pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
 }
 
@@ -122,6 +123,7 @@ pub struct EvaluationSummary {
     /// The evaluation's latest eval job on the Job Board; `None` until an eval
     /// worker picked it up.
     pub dispatched_job: Option<DispatchedJobId>,
+    pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
     /// When it left the queue and started fetching; the duration counts from here.
     pub started_at: Option<chrono::NaiveDateTime>,

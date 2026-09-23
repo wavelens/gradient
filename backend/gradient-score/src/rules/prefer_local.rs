@@ -84,6 +84,7 @@ mod tests {
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             project_work_share: None,
+            prioritized: false,
             rescore_count: 0,
             now: gradient_types::now(),
         }

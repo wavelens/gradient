@@ -151,6 +151,7 @@ pub async fn get_evaluation(
             warning_count,
             error,
             entry_points,
+            prioritized: evaluation.prioritized,
             trigger,
             triggered_by,
             waiting_reason,
@@ -346,6 +347,7 @@ pub async fn get_evaluation_builds(
             build_started_at: attempt.and_then(|a| a.build_started_at),
             dispatched_job: attempt.map(|a| a.dispatched_job),
             depth: *layer,
+            prioritized: anchor.prioritized,
         });
     }
 

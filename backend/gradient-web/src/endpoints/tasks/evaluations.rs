@@ -178,6 +178,7 @@ pub(super) async fn evaluations_to_summaries(
             errors,
             warnings,
             dispatched_job: eval_jobs.get(&evaluation.id).copied(),
+            prioritized: evaluation.prioritized,
             created_at: evaluation.created_at,
             started_at: evaluation.fetch_started_at,
             finished_at: evaluation.finished_at,
@@ -879,6 +880,10 @@ impl EntryPointRelatedData {
                 build_started_at: attempt.and_then(|a| a.build_started_at),
                 deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
                 deps_total: self.deps_total.get(&ep.id).copied().unwrap_or(0),
+                prioritized: self
+                    .anchors
+                    .get(&ep.derivation)
+                    .is_some_and(|a| a.prioritized),
                 created_at: ep.created_at,
             });
         }

@@ -46,6 +46,9 @@ pub struct Model {
     /// `readiness::recompute_demand` on the events that change it; every arm of
     /// the promotion gate reads it.
     pub demanded: bool,
+    /// Dispatches ahead of unprioritized work. Cleared by the database when the
+    /// anchor fails permanently, dependency-fails, times out or is skipped.
+    pub prioritized: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,
     pub max_silent_secs: Option<i64>,

@@ -217,6 +217,9 @@ struct BuildDispatchMaps {
     /// derivation_build → the evaluation driving this anchor's dispatch (used for
     /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
+    /// Anchors named by a live prioritized evaluation, on top of the anchors
+    /// flagged themselves.
+    prioritized_by_eval: HashSet<DerivationBuildId>,
     config: DispatchConfig,
 }
 
@@ -310,6 +313,8 @@ impl BuildDispatchMaps {
                 driving_eval.insert(*anchor_id, *e);
             }
         }
+
+        let prioritized_by_eval = prioritized_by_eval(&jobs_by_anchor, &evaluations);
 
         // project_id resolution: every evaluation must belong to a task.
         let task_ids: Vec<TaskId> = evaluations
@@ -490,6 +495,7 @@ impl BuildDispatchMaps {
             computed_sizes,
             histories,
             driving_eval,
+            prioritized_by_eval,
             config: DispatchConfig::from_state(state),
         })
     }
@@ -593,6 +599,7 @@ impl BuildDispatchMaps {
                 .unwrap_or_default()
         };
 
+        let prioritized = anchor.prioritized || self.prioritized_by_eval.contains(&anchor.id);
         let pending = PendingBuildJob {
             derivation_build: anchor.id,
             derivation: anchor.derivation,
@@ -622,6 +629,7 @@ impl BuildDispatchMaps {
             queued_at: anchor.updated_at,
             ready_at: now(),
             rescore_count: 0,
+            prioritized,
             pname: derivation.pname.clone(),
             substitute,
         };
@@ -697,6 +705,23 @@ async fn load_sizes_and_histories(
     }
 
     (closure_sizes, histories, computed)
+}
+
+fn prioritized_by_eval(
+    jobs_by_anchor: &HashMap<DerivationBuildId, Vec<EvaluationId>>,
+    evaluations: &HashMap<EvaluationId, MEvaluation>,
+) -> HashSet<DerivationBuildId> {
+    jobs_by_anchor
+        .iter()
+        .filter(|(_, evals)| {
+            evals.iter().any(|e| {
+                evaluations
+                    .get(e)
+                    .is_some_and(|ev| ev.prioritized && !eval_is_terminal(ev.status))
+            })
+        })
+        .map(|(anchor, _)| *anchor)
+        .collect()
 }
 
 /// Whether an evaluation has reached a terminal status (won't drive new builds).
@@ -855,5 +880,43 @@ mod limit_tests {
     fn falls_back_to_default_when_absent() {
         assert_eq!(resolve_limit(None, Some(3600)), Some(3600));
         assert_eq!(resolve_limit(None, None), None);
+    }
+}
+
+#[cfg(test)]
+mod priority_tests {
+    use super::*;
+
+    fn eval(status: EvaluationStatus, prioritized: bool) -> MEvaluation {
+        MEvaluation {
+            id: EvaluationId::now_v7(),
+            status,
+            prioritized,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_a_live_prioritized_evaluation_lifts_the_anchors_it_names() {
+        let live = eval(EvaluationStatus::Building, true);
+        let finished = eval(EvaluationStatus::Completed, true);
+        let plain = eval(EvaluationStatus::Building, false);
+        let (shared, stale, unflagged) = (
+            DerivationBuildId::now_v7(),
+            DerivationBuildId::now_v7(),
+            DerivationBuildId::now_v7(),
+        );
+        let jobs_by_anchor = HashMap::from([
+            (shared, vec![plain.id, live.id]),
+            (stale, vec![finished.id]),
+            (unflagged, vec![plain.id]),
+        ]);
+        let evaluations =
+            HashMap::from([(live.id, live), (finished.id, finished), (plain.id, plain)]);
+
+        assert_eq!(
+            prioritized_by_eval(&jobs_by_anchor, &evaluations),
+            HashSet::from([shared])
+        );
     }
 }

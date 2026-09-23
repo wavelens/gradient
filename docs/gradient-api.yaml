@@ -3792,6 +3792,30 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /evals/{evaluation}/prioritize:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    post:
+      tags: [evals]
+      summary: Prioritize evaluation
+      description: |-
+        Dispatches every build of a running evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires project membership. A finished evaluation is left unchanged; a failed one loses its priority.
+      operationId: prioritizeEvaluation
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "Success"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /evals/{evaluation}/builds:
     parameters:
       - $ref: '#/components/parameters/EvaluationId'
@@ -4568,6 +4592,30 @@ paths:
                     properties:
                       message:
                         $ref: '#/components/schemas/BuildWithOutputs'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/prioritize:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    post:
+      tags: [builds]
+      summary: Prioritize build
+      description: |-
+        Dispatches the build and every open build of its dependency closure ahead of unprioritized work. Requires project membership. A build loses its priority when it fails permanently, dependency-fails, times out or is skipped.
+      operationId: prioritizeBuild
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "Success"
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -9518,8 +9566,9 @@ components:
 
     EntryPointSummary:
       type: object
-      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, deps_total, created_at]
+      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, deps_total, created_at, prioritized]
       properties:
+        prioritized: { type: boolean, description: "The entry point's build dispatches ahead of unprioritized work." }
         id: { type: string, format: uuid }
         build_id: { type: string, format: uuid }
         derivation_path: { type: string, description: "Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)" }
@@ -9594,8 +9643,9 @@ components:
 
     EvaluationSummary:
       type: object
-      required: [id, commit, status, wildcard, total_builds, builds, errors, warnings, created_at, updated_at]
+      required: [id, commit, status, wildcard, total_builds, builds, errors, warnings, created_at, updated_at, prioritized]
       properties:
+        prioritized: { type: boolean, description: "The evaluation's whole build tree dispatches ahead of unprioritized work." }
         id:
           type: string
           format: uuid
@@ -9854,8 +9904,9 @@ components:
 
     Evaluation:
       type: object
-      required: [id, repository, commit, wildcard, status, created_at, updated_at]
+      required: [id, repository, commit, wildcard, status, created_at, updated_at, prioritized]
       properties:
+        prioritized: { type: boolean, description: "The evaluation's whole build tree dispatches ahead of unprioritized work. Cleared when the evaluation fails." }
         id:
           type: string
           format: uuid
@@ -10128,8 +10179,9 @@ components:
 
     BuildItem:
       type: object
-      required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth]
+      required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth, prioritized]
       properties:
+        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out or is skipped." }
         id:
           type: string
           format: uuid
@@ -10415,8 +10467,9 @@ components:
 
     BuildWithOutputs:
       type: object
-      required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at]
+      required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at, prioritized]
       properties:
+        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out or is skipped." }
         id:
           type: string
           format: uuid

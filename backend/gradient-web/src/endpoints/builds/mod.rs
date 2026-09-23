@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod actions;
 pub mod closure;
 pub mod downloads;
 pub mod graph;
@@ -11,6 +12,7 @@ pub mod log;
 pub mod log_chunks;
 pub mod query;
 
+pub use self::actions::post_build_prioritize;
 pub use self::closure::{
     ClosureEdge, ClosureGraph, ClosureNode, build_closure_graph, build_runtime_closure_graph,
     derivation_closure_reachable, get_build_closure, get_build_runtime_closure, get_eval_closure,

@@ -175,6 +175,23 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 ..Default::default()
             })
         }
+        Transition::PrioritizeEvaluation { evaluation } => Ok(TransitionReport {
+            prioritized_anchors: gradient_db::prioritize_evaluation(ctx, evaluation).await?,
+            ..Default::default()
+        }),
+        Transition::PrioritizeBuild { anchor } => {
+            let Some(row) = EDerivationBuild::find_by_id(anchor)
+                .one(&ctx.worker_db)
+                .await?
+            else {
+                return Ok(TransitionReport::default());
+            };
+
+            Ok(TransitionReport {
+                prioritized_anchors: gradient_db::prioritize_build_closure(ctx, &row).await?,
+                ..Default::default()
+            })
+        }
     }
 }
 

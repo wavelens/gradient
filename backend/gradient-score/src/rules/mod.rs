@@ -8,6 +8,7 @@ pub mod affinity;
 pub mod builtin;
 pub mod fair_share;
 pub mod prefer_local;
+pub mod qos;
 pub mod resource;
 
 pub use affinity::{DiskAffinityRule, NetworkAffinityRule};
@@ -17,4 +18,5 @@ pub use builtin::{
 };
 pub use fair_share::FairShareRule;
 pub use prefer_local::PreferLocalBuildRule;
+pub use qos::QosRule;
 pub use resource::{ResourceFitRule, ResourceSaturationRule};

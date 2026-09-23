@@ -346,6 +346,14 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/evals/{evaluation}/report",
             get(evals::get_evaluation_report),
         )
+        .route(
+            "/evals/{evaluation}/prioritize",
+            post(evals::post_evaluation_prioritize),
+        )
+        .route(
+            "/builds/{build}/prioritize",
+            post(builds::post_build_prioritize),
+        )
         .route("/builds/{build}/log", post(builds::post_build_log))
         .route(
             "/builds/{build}/download-token",

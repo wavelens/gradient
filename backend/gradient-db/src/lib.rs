@@ -32,6 +32,7 @@ pub mod graph_sql;
 pub mod outbox;
 pub mod permissions;
 pub mod pool;
+pub mod priority;
 pub mod project_cache;
 pub mod project_derivations;
 pub mod project_workers;
@@ -99,6 +100,7 @@ pub use self::graph_sql::{
     reachable_derivations_cte,
 };
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
+pub use self::priority::{prioritize_build_closure, prioritize_evaluation};
 pub use self::project_cache::project_has_writable_cache;
 pub use self::project_derivations::derivation_ids_for_project;
 pub use self::project_workers::project_has_eval_capable_worker_registration;

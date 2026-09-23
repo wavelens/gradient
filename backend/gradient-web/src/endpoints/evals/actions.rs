@@ -40,3 +40,25 @@ pub async fn post_evaluation(
 
     Ok(ok_json("Success".to_string()))
 }
+
+pub async fn post_evaluation_prioritize(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Extension(scheduler): Extension<Arc<gradient_scheduler::Scheduler>>,
+    Path(evaluation_id): Path<EvaluationId>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let api_key_ref = api_key.as_ref();
+    let ctx =
+        EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
+    if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
+        return Err(WebError::not_found("Evaluation"));
+    }
+
+    scheduler
+        .prioritize_evaluation(ctx.evaluation.id)
+        .await
+        .map_err(|e| WebError::internal(e.to_string()))?;
+
+    Ok(ok_json("Success".to_string()))
+}

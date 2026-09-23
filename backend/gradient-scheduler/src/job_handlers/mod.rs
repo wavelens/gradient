@@ -14,6 +14,7 @@
 //! - [`build_status`] - build status transitions, job completion/failure
 //! - [`logs`] - log streaming
 //! - [`abort`] - evaluation abort
+//! - [`priority`] - evaluation and build prioritization
 //! - [`timeline`] - worker phase spans and the job's finish mark
 
 mod abort;
@@ -21,5 +22,6 @@ mod assignment;
 mod build_status;
 mod eval_status;
 mod logs;
+mod priority;
 mod queue;
 pub(crate) mod timeline;

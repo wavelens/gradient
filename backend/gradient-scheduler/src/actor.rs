@@ -213,6 +213,11 @@ pub enum SchedulerMsg {
         aborted_anchors: Vec<DerivationBuildId>,
         reply: RpcReplyPort<Vec<(String, String)>>,
     },
+    Prioritize {
+        evaluation: Option<EvaluationId>,
+        anchors: Vec<DerivationBuildId>,
+        reply: RpcReplyPort<()>,
+    },
     RemoveJobs {
         job_ids: Vec<String>,
         reply: RpcReplyPort<()>,
@@ -557,6 +562,15 @@ impl Actor for CoreActor {
                 }
                 core.tracker.remove_pending_for_evaluation(evaluation_id);
                 let _ = reply.send(to_abort);
+            }
+            SchedulerMsg::Prioritize {
+                evaluation,
+                anchors,
+                reply,
+            } => {
+                core.tracker
+                    .prioritize(evaluation, &anchors.into_iter().collect());
+                let _ = reply.send(());
             }
             SchedulerMsg::RemoveJobs { job_ids, reply } => {
                 for id in &job_ids {

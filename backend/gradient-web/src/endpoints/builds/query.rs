@@ -35,6 +35,7 @@ pub struct BuildWithOutputs {
     /// entry. `None` until the build has been dispatched at least once.
     pub dispatched_job: Option<DispatchedJobId>,
     pub output: HashMap<String, String>,
+    pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
@@ -93,6 +94,7 @@ pub async fn get_build(
         worker,
         dispatched_job: attempt.map(|a| a.dispatched_job),
         output: outputs,
+        prioritized: anchor.prioritized,
         created_at: build_job.created_at,
         updated_at: anchor.updated_at,
     };

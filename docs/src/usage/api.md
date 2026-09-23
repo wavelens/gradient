@@ -285,6 +285,7 @@ on first use, so no task is created per job.
 |---|---|---|
 | `GET` | `/evals/{id}` | Get evaluation |
 | `POST` | `/evals/{id}` | Abort (`{"method":"abort"}`) |
+| `POST` | `/evals/{id}/prioritize` | Prioritize the evaluation's whole build tree |
 | `GET` | `/evals/{id}/builds` | List builds |
 | `POST` | `/evals/{id}/builds` | Stream all build logs (NDJSON) |
 
@@ -295,6 +296,7 @@ on first use, so no task is created per job.
 | `POST` | `/builds` | Submit direct build (multipart) |
 | `GET` | `/builds/direct/recent` | Recent direct builds |
 | `GET` | `/builds/{id}` | Build with outputs |
+| `POST` | `/builds/{id}/prioritize` | Prioritize the build and its dependency closure |
 | `GET/POST` | `/builds/{id}/log` | Get full log / stream live log |
 | `GET` | `/builds/{id}/log/chunks` | Chunk index of a finalized log |
 | `GET` | `/builds/{id}/log/chunk/{index}` | One decompressed chunk (plaintext) |

@@ -37,7 +37,7 @@ message is one transaction:
 | `UpstreamProbed` | the anchors a probe round answered for, hit or miss, and the demand a miss opens below them |
 | `KnownDerivations` | nothing; a read answered after every batch queued before it |
 | `CommitNar` | the `cached_path` row, its references, signature placeholders and the outputs it backs |
-| `Transition` | an anchor or evaluation state change: build started, output, completed, failed, dispatched, orphaned, ready, a reconcile scope, an abort |
+| `Transition` | an anchor or evaluation state change: build started, output, completed, failed, dispatched, orphaned, ready, a reconcile scope, an abort, a prioritization |
 | `Requeue` | transient retries whose backoff elapsed |
 | `Demote` | a missing or invalidated NAR, a cache dropping its claim, the unbacked-output sweep |
 
