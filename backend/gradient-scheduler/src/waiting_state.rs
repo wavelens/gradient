@@ -344,7 +344,8 @@ fn lock(memo: &Mutex<AssessmentMemo>) -> std::sync::MutexGuard<'_, AssessmentMem
 
 /// Decide `Building` vs `Waiting` for an eval's current blocking anchors. The
 /// anchors are read only when the counters cannot decide and `memo` holds no
-/// assessment for the same counters and pool; `None` forces the read.
+/// assessment for the same counters and pool; `None` forces the read. A read
+/// that finds nothing blocking overrules counters that drifted high.
 async fn assess_buildability(
     state: &Arc<ServerState>,
     memo: Option<&Mutex<AssessmentMemo>>,
@@ -369,6 +370,13 @@ async fn assess_buildability(
     }
 
     let pending = eval_blocking_anchors(state, evaluation_id).await?;
+    if pending.is_empty() {
+        gradient_db::recount_evaluations(&state.worker_db, &[evaluation_id])
+            .await
+            .context("recount counters the anchors contradict")?;
+        return Ok(BuildPhase::Settled);
+    }
+
     let checker = BuildabilityChecker::load(state, &pending).await?;
     let target = if checker.any_buildable(&pending, worker_caps) {
         EvaluationStatus::Building
@@ -425,7 +433,8 @@ async fn attempt_graph_unstick(
 
     let counters = gradient_db::eval_counters(&state.worker_db, evaluation_id)
         .await
-        .context("read evaluation anchor counters after the heal")?;
+        .context("read evaluation anchor counters after the heal")?
+        .unwrap_or_default();
     let blocked =
         match assess_buildability(state, None, evaluation_id, counters, worker_caps).await? {
             BuildPhase::Pending(a) if a.target == EvaluationStatus::Building => {
@@ -884,8 +893,6 @@ mod tests {
         assert_eq!(connected, 5);
     }
 
-    /// The heal is not a tick: it runs once per stuck state, and again only
-    /// when the pending set moved.
     /// The three verdicts the counters decide alone, without reading an anchor:
     /// the tick is proportional to in-flight evaluations, not to their anchors.
     #[test]
@@ -915,6 +922,8 @@ mod tests {
         assert!(phase_from_counters(c(4, 2, 0)).is_none());
     }
 
+    /// The heal is not a tick: it runs once per stuck state, and again only
+    /// when the pending set moved.
     #[test]
     fn the_graph_stuck_heal_runs_on_entry_and_on_change_only() {
         assert!(unstick_due(None, 3));
