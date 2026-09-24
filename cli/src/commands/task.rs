@@ -326,7 +326,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             let client = client_from_config(out);
-            match client.tasks().evaluate(&project, &task).await {
+            match client.tasks().evaluate(&project, &task, None).await {
                 Ok(eval_id) => {
                     out.ok(&serde_json::json!({"evaluation_id": eval_id}));
                     out.human("Task evaluation started.");

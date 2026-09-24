@@ -109,7 +109,7 @@ impl EvalsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn restart(&self, id: &str) -> Result<String, ConnectorError> {
+    pub async fn abort(&self, id: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -117,7 +117,8 @@ impl EvalsApi<'_> {
             Method::POST,
             &format!("evals/{id}"),
             true,
-        )?;
+        )?
+        .json(&serde_json::json!({ "method": "abort" }));
         http::decode(req.send().await?).await
     }
 

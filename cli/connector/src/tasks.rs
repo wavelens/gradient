@@ -86,6 +86,7 @@ pub struct EntryPoint {
     pub build_id: String,
     pub eval: String,
     pub derivation_path: String,
+    pub build_status: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -241,10 +242,15 @@ impl TasksApi<'_> {
         &self,
         project: &str,
         proj: &str,
+        evaluation_id: Option<&str>,
         limit: Option<u64>,
         offset: Option<u64>,
     ) -> Result<EntryPointPage, ConnectorError> {
         let mut query: Vec<String> = Vec::new();
+        if let Some(evaluation_id) = evaluation_id {
+            query.push(format!("evaluation_id={evaluation_id}"));
+        }
+
         if let Some(limit) = limit {
             query.push(format!("limit={limit}"));
         }
@@ -285,7 +291,12 @@ impl TasksApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn evaluate(&self, project: &str, proj: &str) -> Result<String, ConnectorError> {
+    pub async fn evaluate(
+        &self,
+        project: &str,
+        proj: &str,
+        commit: Option<&str>,
+    ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
@@ -294,6 +305,10 @@ impl TasksApi<'_> {
             &format!("tasks/{project}/{proj}/evaluate"),
             true,
         )?;
+        let req = match commit {
+            Some(commit) => req.json(&serde_json::json!({ "commit": commit })),
+            None => req,
+        };
         http::decode(req.send().await?).await
     }
 
