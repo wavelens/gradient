@@ -59,17 +59,19 @@ fn run(state: &Arc<MockState>, cmd: &str, args: &Value) -> anyhow::Result<Value>
         }
         "seed" => {
             let id = node(state, args)?;
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(seed_node(state, id))
-            })?;
+            blocking(seed_node(state, id))?;
             Ok(Value::Null)
         }
-        "forget" => forget(state, args),
+        "forget" => blocking(forget(state, args)),
         other => anyhow::bail!("unknown mock command {other}"),
     }
 }
 
-fn forget(state: &MockState, args: &Value) -> anyhow::Result<Value> {
+fn blocking<F: Future>(future: F) -> F::Output {
+    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
+}
+
+async fn forget(state: &MockState, args: &Value) -> anyhow::Result<Value> {
     let paths: Vec<String> = match args.get("path").and_then(Value::as_str) {
         Some(path) => vec![path.to_owned()],
         None => state.config.derivations[node(state, args)?]
@@ -79,7 +81,7 @@ fn forget(state: &MockState, args: &Value) -> anyhow::Result<Value> {
             .collect(),
     };
     for path in &paths {
-        state.store.forget(&store_path(path)?)?;
+        state.store.forget(&store_path(path)?).await?;
     }
     Ok(json!(paths))
 }

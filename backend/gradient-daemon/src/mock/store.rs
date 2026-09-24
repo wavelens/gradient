@@ -150,14 +150,21 @@ impl MockStore {
             }
         }
 
-        let dest = self.real_path(path);
-        self.write_tree(&dest, nar).await?;
-        self.forgotten.write().expect("forgotten").remove(path);
-        self.overlay
-            .write()
-            .expect("overlay")
-            .insert(path.clone(), Entry { info, origin });
+        if !self.unmask_base(path)? {
+            self.write_tree(&self.real_path(path), nar).await?;
+            self.overlay
+                .write()
+                .expect("overlay")
+                .insert(path.clone(), Entry { info, origin });
+        }
         Ok(Registered::New)
+    }
+
+    fn unmask_base(&self, path: &StorePath) -> anyhow::Result<bool> {
+        if !self.forgotten.write().expect("forgotten").remove(path) {
+            return Ok(false);
+        }
+        self.is_valid(path)
     }
 
     async fn write_tree(&self, dest: &Path, nar: &[u8]) -> anyhow::Result<()> {
@@ -174,7 +181,8 @@ impl MockStore {
         Ok(())
     }
 
-    pub fn forget(&self, p: &StorePath) -> anyhow::Result<()> {
+    pub async fn forget(&self, p: &StorePath) -> anyhow::Result<()> {
+        let _serial = self.registering.lock().await;
         let was_overlay = self.overlay.write().expect("overlay").remove(p).is_some();
         if was_overlay {
             remove_tree(&self.real_path(p))?;
@@ -377,7 +385,7 @@ mod tests {
         s.register(&p, &bytes, plain(&bytes), Origin::Built)
             .await
             .expect("reg");
-        s.forget(&p).expect("forget");
+        s.forget(&p).await.expect("forget");
         assert!(!s.is_valid(&p).expect("valid"));
         assert!(!s.real_path(&p).exists());
         s.register(&p, &bytes, plain(&bytes), Origin::Imported)
@@ -396,9 +404,33 @@ mod tests {
         std::fs::write(dir.path().join("nix/store").join(p.to_string()), b"image").expect("write");
         let s = MockStore::open(dir.path().to_path_buf(), Some(&db), journal).expect("open");
         assert!(s.is_valid(&p).expect("valid"));
-        s.forget(&p).expect("forget");
+        s.forget(&p).await.expect("forget");
         assert!(!s.is_valid(&p).expect("masked"));
         assert!(s.real_path(&p).exists());
+    }
+
+    #[tokio::test]
+    async fn re_registering_a_forgotten_base_path_unmasks_it_without_touching_disk() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let db = dir.path().join("db.sqlite");
+        let p = sp('9', "base");
+        seed_base_db(&db, &p);
+        std::fs::create_dir_all(dir.path().join("nix/store")).expect("mkdir");
+        std::fs::write(dir.path().join("nix/store").join(p.to_string()), b"image").expect("write");
+        let s = MockStore::open(
+            dir.path().to_path_buf(),
+            Some(&db),
+            Arc::new(Journal::new()),
+        )
+        .expect("open");
+        s.forget(&p).await.expect("forget");
+        let bytes = nar("imported");
+        s.register(&p, &bytes, plain(&bytes), Origin::Imported)
+            .await
+            .expect("re-add");
+        assert!(s.is_valid(&p).expect("valid"));
+        assert_eq!(std::fs::read(s.real_path(&p)).expect("read"), b"image");
+        assert!(s.snapshot().is_empty());
     }
 
     fn seed_base_db(db: &Path, p: &StorePath) {
