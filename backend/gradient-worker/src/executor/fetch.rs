@@ -21,28 +21,8 @@ use tempfile::NamedTempFile;
 use tokio::sync::watch;
 use tracing::{debug, info, trace, warn};
 
+use super::abort_true;
 use crate::proto::credentials::CredentialStore;
-
-/// Future that resolves only when the abort signal becomes `true`.
-///
-/// Uses `changed()` + `borrow()` (not `wait_for`) to avoid holding a
-/// non-`Send` `Ref<'_, bool>` guard across an await point.
-///
-/// If the sender is dropped (e.g. in tests using a receiver without a sender),
-/// the future parks forever instead of treating the drop as an abort.
-async fn abort_true(abort: &mut watch::Receiver<bool>) {
-    loop {
-        match abort.changed().await {
-            Ok(()) => {
-                if *abort.borrow() {
-                    return;
-                }
-            }
-            // Sender dropped - treat as "no abort", park forever.
-            Err(_) => std::future::pending::<()>().await,
-        }
-    }
-}
 
 /// Outcome of a successful `fetch_repository` call.
 ///

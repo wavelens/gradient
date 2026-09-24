@@ -7,6 +7,7 @@
 //! Pending and active job tracking.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::WalkMode;
@@ -511,12 +512,30 @@ pub struct CandidateDetail {
 const DECISION_RING_CAP: usize = 200;
 const CANDIDATES_PER_DECISION: usize = 64;
 
+/// A job a worker runs; `aborted_at` is when the scheduler first told it to stop.
+#[derive(Debug)]
+struct ActiveJob {
+    worker: String,
+    job: PendingJob,
+    aborted_at: Option<Instant>,
+}
+
+impl ActiveJob {
+    fn new(worker: &str, job: PendingJob) -> Self {
+        Self {
+            worker: worker.to_owned(),
+            job,
+            aborted_at: None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct JobTracker {
     pending: HashMap<String, PendingJob>,
     /// Per-worker, per-job scores: `worker_id → job_id → score`.
     scores: HashMap<String, HashMap<String, WorkerJobScore>>,
-    active: HashMap<String, (String, PendingJob)>,
+    active: HashMap<String, ActiveJob>,
     /// Bounded ring of recent dispatch decisions for the Live Jobs view.
     decisions: VecDeque<DispatchDecision>,
 }
@@ -785,7 +804,7 @@ impl JobTracker {
         let mut by_project: HashMap<ProjectId, f64> = HashMap::new();
         let mut total: f64 = 0.0;
         if policy.uses_project_work_share() {
-            for (_, job) in self.active.values() {
+            for ActiveJob { job, .. } in self.active.values() {
                 if let PendingJob::Build(b) = job {
                     let w = if b.history.build_time_ms > 0 {
                         b.history.build_time_ms as f64
@@ -916,7 +935,7 @@ impl JobTracker {
             pending: job.clone(),
         };
         self.active
-            .insert(job_id.to_owned(), (worker_id.to_owned(), job));
+            .insert(job_id.to_owned(), ActiveJob::new(worker_id, job));
         Some(assignment)
     }
 
@@ -926,18 +945,18 @@ impl JobTracker {
             return;
         }
         self.pending.remove(&job_id);
-        self.active.insert(job_id, (worker_id.to_owned(), job));
+        self.active.insert(job_id, ActiveJob::new(worker_id, job));
     }
 
     pub fn release_to_pending(&mut self, job_id: &str) {
-        if let Some((_, job)) = self.active.remove(job_id) {
-            self.pending.insert(job_id.to_owned(), job);
+        if let Some(active) = self.active.remove(job_id) {
+            self.pending.insert(job_id.to_owned(), active.job);
         }
     }
 
     pub fn remove_active(&mut self, job_id: &str) -> Option<PendingJob> {
         self.forget_job_scores(job_id);
-        self.active.remove(job_id).map(|(_, j)| j)
+        self.active.remove(job_id).map(|a| a.job)
     }
 
     /// Drop a job's recorded scores from every worker's map. Called on every
@@ -950,7 +969,7 @@ impl JobTracker {
     }
 
     pub fn active_job(&self, job_id: &str) -> Option<&PendingJob> {
-        self.active.get(job_id).map(|(_, j)| j)
+        self.active.get(job_id).map(|a| &a.job)
     }
 
     /// The active eval job for `job_id`, if any.
@@ -984,12 +1003,12 @@ impl JobTracker {
         let to_requeue: Vec<String> = self
             .active
             .iter()
-            .filter(|(_, (w, job))| w == worker_id && revoked_peers.contains(&job.project_id()))
+            .filter(|(_, a)| a.worker == worker_id && revoked_peers.contains(&a.job.project_id()))
             .map(|(id, _)| id.clone())
             .collect();
         for job_id in &to_requeue {
-            if let Some((_, job)) = self.active.remove(job_id) {
-                self.pending.insert(job_id.clone(), job);
+            if let Some(active) = self.active.remove(job_id) {
+                self.pending.insert(job_id.clone(), active.job);
             }
         }
         to_requeue
@@ -1002,14 +1021,14 @@ impl JobTracker {
         let orphaned: Vec<String> = self
             .active
             .iter()
-            .filter(|(_, (w, _))| w == worker_id)
+            .filter(|(_, a)| a.worker == worker_id)
             .map(|(id, _)| id.clone())
             .collect();
         let mut requeued = Vec::with_capacity(orphaned.len());
         for job_id in &orphaned {
-            if let Some((_, job)) = self.active.remove(job_id) {
-                requeued.push(job.clone());
-                self.pending.insert(job_id.clone(), job);
+            if let Some(active) = self.active.remove(job_id) {
+                requeued.push(active.job.clone());
+                self.pending.insert(job_id.clone(), active.job);
             }
         }
         requeued
@@ -1025,11 +1044,41 @@ impl JobTracker {
         self.active.remove(job_id);
     }
 
+    /// Start the abort deadline of an active job; a repeat abort keeps the first.
+    pub fn mark_aborting(&mut self, job_id: &str, now: Instant) {
+        if let Some(active) = self.active.get_mut(job_id) {
+            active.aborted_at.get_or_insert(now);
+        }
+    }
+
+    /// Drop the active jobs told to stop at least `grace` before `now`,
+    /// returning their `(worker, job_id)`.
+    pub fn take_overdue_aborts(&mut self, now: Instant, grace: Duration) -> Vec<(String, String)> {
+        let overdue: Vec<String> = self
+            .active
+            .iter()
+            .filter(|(_, a)| {
+                a.aborted_at
+                    .is_some_and(|at| now.duration_since(at) >= grace)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        overdue
+            .into_iter()
+            .filter_map(|job_id| {
+                self.forget_job_scores(&job_id);
+                let active = self.active.remove(&job_id)?;
+                Some((active.worker, job_id))
+            })
+            .collect()
+    }
+
     /// Iterate over active jobs: yields `(job_id, worker_id, &PendingJob)`.
     pub fn active_jobs(&self) -> impl Iterator<Item = (&str, &str, &PendingJob)> {
         self.active
             .iter()
-            .map(|(job_id, (worker_id, job))| (job_id.as_str(), worker_id.as_str(), job))
+            .map(|(job_id, a)| (job_id.as_str(), a.worker.as_str(), &a.job))
     }
 
     /// Per-capability / per-architecture / per-feature classification of every
@@ -1089,7 +1138,7 @@ impl JobTracker {
         evaluation: Option<EvaluationId>,
         anchors: &HashSet<DerivationBuildId>,
     ) {
-        let active = self.active.values_mut().map(|(_, job)| job);
+        let active = self.active.values_mut().map(|a| &mut a.job);
         for job in self.pending.values_mut().chain(active) {
             match job {
                 PendingJob::Eval(e) if Some(e.evaluation_id) == evaluation => e.prioritized = true,
@@ -1157,7 +1206,7 @@ impl JobTracker {
         let active = self
             .active
             .values()
-            .filter(|(_, j)| matches!(j, PendingJob::Build(_)))
+            .filter(|a| matches!(a.job, PendingJob::Build(_)))
             .count() as u32;
         let pending = self
             .pending
@@ -1506,6 +1555,72 @@ mod tests {
             "active job must not be re-queued"
         );
         assert_eq!(tracker.active_count(), 1);
+    }
+
+    fn assigned(tracker: &mut JobTracker, job_id: &str) {
+        tracker.add_pending(job_id.into(), build_job(ProjectId::now_v7(), vec![]));
+        let record = record_for(tracker, job_id);
+        tracker
+            .assign_pending("w1", job_id, record)
+            .expect("the job assigns");
+    }
+
+    /// A worker that never answers an abort would otherwise hold the job, and
+    /// with it the open dispatch row and the worker's slot, until it
+    /// disconnects: the tracker gives it the grace and then lets go.
+    #[test]
+    fn an_abort_the_worker_never_confirms_is_dropped_after_the_grace() {
+        let mut tracker = JobTracker::new();
+        assigned(&mut tracker, "build:1");
+        assigned(&mut tracker, "build:2");
+        let (t0, grace) = (Instant::now(), Duration::from_secs(300));
+
+        tracker.mark_aborting("build:1", t0);
+
+        assert!(
+            tracker
+                .take_overdue_aborts(t0 + grace - Duration::from_secs(1), grace)
+                .is_empty(),
+            "the worker still has time to confirm"
+        );
+        assert_eq!(
+            tracker.take_overdue_aborts(t0 + grace, grace),
+            vec![("w1".to_owned(), "build:1".to_owned())]
+        );
+        assert!(!tracker.contains_job("build:1"));
+        assert!(
+            tracker.contains_job("build:2"),
+            "a job nobody aborted is never overdue"
+        );
+    }
+
+    /// The mark belongs to the dispatch that was told to stop: a job id handed
+    /// out again after that dispatch ended must not inherit its deadline.
+    #[test]
+    fn a_job_dispatched_again_after_an_abort_starts_without_a_deadline() {
+        let mut tracker = JobTracker::new();
+        let (t0, grace) = (Instant::now(), Duration::from_secs(300));
+        assigned(&mut tracker, "build:1");
+        tracker.mark_aborting("build:1", t0);
+        tracker.remove_active("build:1");
+
+        assigned(&mut tracker, "build:1");
+
+        assert!(tracker.take_overdue_aborts(t0 + grace, grace).is_empty());
+        assert!(tracker.contains_job("build:1"));
+    }
+
+    /// Only the first abort starts the clock; a repeat must not push it back.
+    #[test]
+    fn a_repeated_abort_keeps_the_first_deadline() {
+        let mut tracker = JobTracker::new();
+        let (t0, grace) = (Instant::now(), Duration::from_secs(300));
+        assigned(&mut tracker, "build:1");
+
+        tracker.mark_aborting("build:1", t0);
+        tracker.mark_aborting("build:1", t0 + grace);
+
+        assert_eq!(tracker.take_overdue_aborts(t0 + grace, grace).len(), 1);
     }
 
     #[test]

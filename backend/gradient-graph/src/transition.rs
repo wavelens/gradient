@@ -41,20 +41,6 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             eval_failed(ctx, evaluation, &error, kind, &missing_paths).await?;
             Ok(TransitionReport::default())
         }
-        Transition::AbortEvaluation { evaluation } => {
-            let Some(eval) = EEvaluation::find_by_id(evaluation)
-                .one(&ctx.worker_db)
-                .await?
-            else {
-                return Ok(TransitionReport::default());
-            };
-
-            let aborted_anchors = gradient_db::abort_evaluation(ctx, eval).await;
-            Ok(TransitionReport {
-                aborted_anchors,
-                ..Default::default()
-            })
-        }
         Transition::BuildStarted { anchor } => {
             let Some(row) = EDerivationBuild::find_by_id(anchor)
                 .one(&ctx.worker_db)

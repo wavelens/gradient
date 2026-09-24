@@ -119,10 +119,6 @@ pub enum Transition {
         kind: BuildFailureKind,
         missing_paths: Vec<String>,
     },
-    /// Mark the evaluation aborted and abort every anchor only it still needs.
-    AbortEvaluation {
-        evaluation: EvaluationId,
-    },
     /// The worker reported `Building`; `already_aborted` in the report means
     /// the worker must be told to stop instead.
     BuildStarted {

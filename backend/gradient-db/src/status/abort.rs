@@ -4,67 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::evaluation_status::update_evaluation_status;
 use super::logging::{PhaseSubjectKind, record_phase_events};
 use crate::state_machine::EvalStateMachine;
 use crate::{DbContext, fetch_in_chunks, for_each_chunk};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptOutcome, Column as CAttempt, Entity as EAttempt};
-use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::collections::HashSet;
-use tracing::error;
-
-/// Abort an evaluation's in-flight builds. Anchors are global, so this only
-/// aborts the anchors this evaluation needs that no other live evaluation also
-/// needs; anchors still wanted elsewhere keep running for those evaluations.
-pub async fn abort_evaluation(ctx: &DbContext, evaluation: MEvaluation) -> Vec<DerivationBuildId> {
-    if EvalStateMachine::is_terminal(&evaluation.status) {
-        return Vec::new();
-    }
-
-    // Park the evaluation first: the dispatcher skips Waiting evaluations, so
-    // this stops new work being handed out while we abort. The terminal
-    // transition to Aborted below carries the user-facing side effects.
-    gate_evaluation_aborting(ctx, evaluation.id).await;
-
-    let aborted = match abort_eval_anchors(ctx, &evaluation).await {
-        Ok(aborted) => aborted,
-        Err(e) => {
-            error!(error = %e, evaluation_id = %evaluation.id, "Failed to abort evaluation anchors");
-            Vec::new()
-        }
-    };
-
-    update_evaluation_status(ctx, evaluation, EvaluationStatus::Aborted).await;
-    aborted
-}
-
-/// Park the evaluation as `Waiting` with the `Aborting` reason via a direct
-/// filtered update; the eventual transition to `Aborted` carries the side effects.
-async fn gate_evaluation_aborting(ctx: &DbContext, evaluation_id: EvaluationId) {
-    let res = EEvaluation::update_many()
-        .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Waiting))
-        .col_expr(
-            CEvaluation::WaitingReason,
-            Expr::value(WaitingReason::Aborting.to_json()),
-        )
-        .col_expr(CEvaluation::UpdatedAt, Expr::value(gradient_types::now()))
-        .filter(CEvaluation::Id.eq(evaluation_id))
-        .filter(CEvaluation::Status.is_not_in([
-            EvaluationStatus::Completed,
-            EvaluationStatus::Failed,
-            EvaluationStatus::Aborted,
-        ]))
-        .exec(&ctx.worker_db)
-        .await;
-
-    if let Err(e) = res {
-        error!(error = %e, %evaluation_id, "Failed to park evaluation for abort");
-    }
-}
 
 /// Abort every anchor only `evaluation` still needs, returning the ids it moved.
 pub async fn abort_eval_anchors(
@@ -220,6 +168,7 @@ mod tests {
     use super::*;
     use crate::WorkerDb;
     use crate::test_ctx::ctx;
+    use gradient_entity::evaluation::EvaluationStatus;
     use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 

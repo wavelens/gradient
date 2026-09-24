@@ -476,6 +476,161 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
     );
 }
 
+/// The abort button waits for this call. The anchors belong to the graph actor,
+/// whose queue can run minutes behind, so the evaluation is marked and its
+/// eval job told to stop here; nothing the request waits on goes through it.
+#[tokio::test]
+async fn aborting_an_evaluation_marks_it_and_stops_its_eval_job_itself() {
+    use gradient_entity::evaluation::EvaluationStatus;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let ok = MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(vec![ok; 16])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let peer = ProjectId::now_v7();
+    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    let job = eval_job(peer);
+    let evaluation = gradient_types::MEvaluation {
+        id: job.evaluation_id,
+        status: EvaluationStatus::EvaluatingDerivation,
+        ..Default::default()
+    };
+    scheduler.enqueue_eval_job("j1".into(), job).await.unwrap();
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
+    scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("assigned");
+
+    scheduler.abort_evaluation(evaluation).await;
+
+    assert_eq!(
+        signals.recv().await,
+        Some(SessionSignal::Abort {
+            job_id: "j1".into(),
+            reason: "evaluation aborted".into()
+        })
+    );
+    let log = log_db.into_transaction_log();
+    let mark = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .find(|s| s.sql.starts_with("UPDATE \"evaluation\" SET \"status\""))
+        .expect("the evaluation is marked by the abort itself");
+    assert!(
+        format!("{:?}", mark.values).contains(&format!(
+            "Int(Some({}))",
+            i32::from(EvaluationStatus::Aborted)
+        )),
+        "{:?}",
+        mark.values
+    );
+}
+
+/// A finished evaluation keeps its verdict: an abort that arrives late must not
+/// stop the jobs of anchors it no longer owns.
+#[tokio::test]
+async fn aborting_a_finished_evaluation_stops_nothing() {
+    use gradient_entity::evaluation::EvaluationStatus;
+
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    let job = eval_job(peer);
+    let evaluation = gradient_types::MEvaluation {
+        id: job.evaluation_id,
+        status: EvaluationStatus::Completed,
+        ..Default::default()
+    };
+    scheduler.enqueue_eval_job("j1".into(), job).await.unwrap();
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
+    scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("assigned");
+
+    scheduler.abort_evaluation(evaluation).await;
+
+    assert!(signals.try_recv().is_err(), "no AbortJob was sent");
+    assert_eq!(scheduler.counts().await.active, 1);
+}
+
+/// A worker stuck inside a step never confirms the abort, so it would hold the
+/// job, its slot and the open dispatch row until it disconnects. Past the grace
+/// the scheduler lets go of the job and closes the row itself.
+#[tokio::test]
+async fn an_abort_the_worker_never_confirms_is_reaped_after_the_grace() {
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let ok = MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(vec![ok; 3])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let peer = ProjectId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    let job = eval_job(peer);
+    let eval_id = job.evaluation_id;
+    scheduler.enqueue_eval_job("j1".into(), job).await.unwrap();
+    scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("assigned");
+    scheduler.abort_evaluation_jobs(eval_id, vec![]).await;
+
+    let reaped = scheduler
+        .reap_overdue_aborts(std::time::Duration::ZERO)
+        .await;
+
+    assert_eq!(reaped, vec!["j1".to_owned()]);
+    assert_eq!(scheduler.counts().await.active, 0);
+    assert_eq!(scheduler.workers_info().await[0].assigned_job_count, 0);
+    let log = log_db.into_transaction_log();
+    let close = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .filter(|s| s.sql.starts_with("UPDATE \"dispatched_job\""))
+        .find(|s| format!("{:?}", s.values).contains("\"j1\""))
+        .expect("the reaped job's dispatch row is closed");
+    assert!(
+        close.sql.contains("\"finished_at\" IS NULL"),
+        "{}",
+        close.sql
+    );
+}
+
+#[tokio::test]
+async fn a_running_job_nobody_aborted_is_never_reaped() {
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(peer))
+        .await
+        .unwrap();
+    scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("assigned");
+
+    let reaped = scheduler
+        .reap_overdue_aborts(std::time::Duration::ZERO)
+        .await;
+
+    assert!(reaped.is_empty());
+    assert_eq!(scheduler.counts().await.active, 1);
+}
+
 /// Two live evaluations building the same derivation share its global anchor.
 /// The database abort spares an anchor another live evaluation still holds a
 /// `build_job` on and reports only the anchors it moved, so the scheduler must

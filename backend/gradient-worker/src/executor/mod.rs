@@ -691,6 +691,27 @@ impl JobExecutor {
     }
 }
 
+/// Future that resolves only when the abort signal becomes `true`.
+///
+/// Uses `changed()` + `borrow()` (not `wait_for`) to avoid holding a
+/// non-`Send` `Ref<'_, bool>` guard across an await point.
+///
+/// If the sender is dropped (e.g. in tests using a receiver without a sender),
+/// the future parks forever instead of treating the drop as an abort.
+pub(crate) async fn abort_true(abort: &mut watch::Receiver<bool>) {
+    loop {
+        match abort.changed().await {
+            Ok(()) => {
+                if *abort.borrow() {
+                    return;
+                }
+            }
+            // Sender dropped - treat as "no abort", park forever.
+            Err(_) => std::future::pending::<()>().await,
+        }
+    }
+}
+
 /// Propagate a server-side `AbortJob` as an error so the surrounding job
 /// resolves to `JobFailed` instead of `JobCompleted`. Typed so the failure
 /// classifier reports `BuildFailureKind::Aborted` rather than treating it as an

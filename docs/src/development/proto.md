@@ -1417,13 +1417,15 @@ Credentials are encrypted in transit (TLS). Workers MUST:
 
 Either side can abort a job:
 
-**Server-initiated:** `AbortJob { job_id, reason }` -> worker stops current step, cleans up, responds `JobFailed { kind: Aborted }` with the abort reason. The abort is its own `BuildFailureKind`: a `Permanent` build failure is stored as `build_attempt.reason = BuilderNonzero`, which the requeue predicate reads as a reproducible builder exit and excludes from every future thaw, so an aborted derivation could never be rebuilt. `Aborted` is recorded as `AttemptOutcome::Aborted` with no reason, leaves the anchor on the requeueable `Aborted` status, and cascades no `DependencyFailed`. The server sends `AbortJob` when an evaluation is aborted via the API (`POST /evals/{id}` with `method: "abort"`). The scheduler finds which worker holds the active job and delivers the message through a per-worker channel. Pending (unassigned) jobs for the aborted evaluation are removed from the in-memory tracker.
+**Server-initiated:** `AbortJob { job_id, reason }` -> worker stops current step, cleans up, responds `JobFailed { kind: Aborted }` with the abort reason. The abort is its own `BuildFailureKind`: a `Permanent` build failure is stored as `build_attempt.reason = BuilderNonzero`, which the requeue predicate reads as a reproducible builder exit and excludes from every future thaw, so an aborted derivation could never be rebuilt. `Aborted` is recorded as `AttemptOutcome::Aborted` with no reason, leaves the anchor on the requeueable `Aborted` status, and cascades no `DependencyFailed`. The server sends `AbortJob` when an evaluation is aborted via the API (`POST /evals/{id}` with `method: "abort"`). The request marks the evaluation `Aborted`, sends `AbortJob` for its eval job and drops its pending jobs before it returns; the anchors only this evaluation needed are aborted by the graph actor afterwards, and their builds get `AbortJob` once that write lands.
+
+A flake job stops the moment `AbortJob` arrives, even inside a long nix evaluation: the job future is dropped, which kills its eval subprocesses. A job whose worker has not confirmed an abort within 5 minutes is dropped from the scheduler and its `dispatched_job` row is closed as `Abandoned`, so a stuck worker cannot hold the slot until it disconnects.
 
 **Worker-initiated:** worker sends `JobFailed` at any time.
 
 **Disconnect:** server marks all in-progress jobs for the disconnected worker as `Failed`. Downstream builds get `DependencyFailed`.
 
-Workers should finish the current atomic operation (e.g. a single NarPush) before aborting, but must not start new steps.
+Build jobs finish the current atomic operation (e.g. a single NarPush) before aborting, but must not start new steps.
 
 ---
 

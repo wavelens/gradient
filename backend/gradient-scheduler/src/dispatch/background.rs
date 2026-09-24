@@ -38,6 +38,12 @@ const ABANDONED_DISPATCH_GRACE_SECS: i64 = 1800;
 /// crowd a window this size.
 const ABANDONED_DISPATCH_SWEEP_LIMIT: u64 = 10_000;
 
+/// How long a worker has to confirm an `AbortJob` before the scheduler drops the
+/// job itself. An abort lands within seconds; one still unanswered after this is
+/// stuck in a step that never checks, and would otherwise hold its slot and its
+/// open dispatch row until the worker disconnects.
+const ABORT_CONFIRM_GRACE: Duration = Duration::from_secs(300);
+
 /// Liveness poll period, or `None` when the watchdog is disabled by config.
 pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
@@ -191,6 +197,8 @@ fn plan_abandoned_reap(
 pub(super) async fn abandoned_dispatch_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+
+    scheduler.reap_overdue_aborts(ABORT_CONFIRM_GRACE).await;
 
     let cutoff = gradient_types::now() - chrono::Duration::seconds(ABANDONED_DISPATCH_GRACE_SECS);
     let stale: Vec<(DispatchedJobId, Option<String>)> = EDispatchedJob::find()

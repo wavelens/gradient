@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gradient_score::{InstanceContext, ScoringPolicy};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId};
@@ -200,6 +200,10 @@ pub enum SchedulerMsg {
         job_id: String,
         reason: String,
         reply: RpcReplyPort<bool>,
+    },
+    ReapOverdueAborts {
+        grace: Duration,
+        reply: RpcReplyPort<Vec<String>>,
     },
     AbortEvaluation {
         evaluation_id: EvaluationId,
@@ -527,7 +531,20 @@ impl Actor for CoreActor {
                 reason,
                 reply,
             } => {
-                let _ = reply.send(core.pool.send_abort(&worker, job_id, reason));
+                let sent = core.pool.send_abort(&worker, job_id.clone(), reason);
+                if sent {
+                    core.tracker.mark_aborting(&job_id, Instant::now());
+                }
+
+                let _ = reply.send(sent);
+            }
+            SchedulerMsg::ReapOverdueAborts { grace, reply } => {
+                let reaped = core.tracker.take_overdue_aborts(Instant::now(), grace);
+                for (worker, job_id) in &reaped {
+                    core.pool.release_job(worker, job_id);
+                }
+
+                let _ = reply.send(reaped.into_iter().map(|(_, job_id)| job_id).collect());
             }
             SchedulerMsg::AbortEvaluation {
                 evaluation_id,
@@ -549,9 +566,11 @@ impl Actor for CoreActor {
                     })
                     .map(|(job_id, worker, _)| (worker.to_owned(), job_id.to_owned()))
                     .collect();
+                let now = Instant::now();
                 for (worker, job_id) in &to_abort {
                     core.pool
                         .send_abort(worker, job_id.clone(), "evaluation aborted".to_owned());
+                    core.tracker.mark_aborting(job_id, now);
                 }
                 core.tracker.remove_pending_for_evaluation(evaluation_id);
                 let _ = reply.send(to_abort);

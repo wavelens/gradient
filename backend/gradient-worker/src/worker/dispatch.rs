@@ -25,6 +25,8 @@ use tracing::{debug, error, info, warn};
 use crate::config::WorkerConfig;
 use crate::connection::{ProtoReader, ProtoWriter};
 use crate::executor::JobExecutor;
+use crate::executor::abort_true;
+use crate::executor::failure::JobAborted;
 use crate::executor::timeline::JobTimeline;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::{CacheWaiters, DispatchHandle, JobUpdater, KnownDerivationWaiters};
@@ -896,14 +898,33 @@ async fn run_job(
 ) -> Result<()> {
     match job {
         Job::Flake(flake_job) => {
-            executor
-                .execute_flake_job(flake_job, updater, credentials, abort)
-                .await
+            let run = executor.execute_flake_job(flake_job, updater, credentials, abort.clone());
+            until_aborted(run, abort).await
         }
         Job::Build(build_job) => {
             executor
                 .execute_build_job(build_job, updater, credentials, abort)
                 .await
+        }
+    }
+}
+
+/// Run `job` until it ends or the server aborts it. Dropping a flake job is
+/// safe at any await: its eval subprocesses are `kill_on_drop` and the pool
+/// discards a worker whose request is still in flight.
+async fn until_aborted(
+    job: impl std::future::Future<Output = Result<()>>,
+    mut abort: watch::Receiver<bool>,
+) -> Result<()> {
+    if *abort.borrow() {
+        return Err(JobAborted("evaluation aborted by server".to_owned()).into());
+    }
+
+    tokio::select! {
+        biased;
+        result = job => result,
+        () = abort_true(&mut abort) => {
+            Err(JobAborted("evaluation aborted by server".to_owned()).into())
         }
     }
 }
@@ -965,5 +986,53 @@ mod tests {
         assert_eq!(job.dispatch.get(), "dispatch-2");
         assert!(jobs.is_idle());
         assert!(jobs.finish("job-1").is_none());
+    }
+
+    /// An evaluation spends nearly all its time inside one nix call, not at a
+    /// checkpoint between steps, so the abort has to stop the job itself: a
+    /// job that only notices at its next checkpoint keeps its slot, its open
+    /// dispatch row and its eval subprocesses for as long as that call runs.
+    #[tokio::test]
+    async fn an_aborted_job_stops_without_reaching_a_checkpoint() {
+        let (abort, abort_rx) = watch::channel(false);
+        abort.send(true).expect("the job listens");
+
+        let err = until_aborted(std::future::pending(), abort_rx)
+            .await
+            .expect_err("an aborted job fails");
+
+        assert!(
+            err.downcast_ref::<JobAborted>().is_some(),
+            "reported as an abort, not a failure: {err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_job_nobody_aborts_reports_its_own_result() {
+        let (_abort, abort_rx) = watch::channel(false);
+
+        let result = until_aborted(async { Err(anyhow::anyhow!("nix failed")) }, abort_rx).await;
+
+        assert_eq!(
+            format!("{:#}", result.expect_err("its own error")),
+            "nix failed"
+        );
+    }
+
+    /// The sender lives in the registry and goes when the job is finished or
+    /// the session ends; a closed channel is not a request to stop.
+    #[tokio::test]
+    async fn a_closed_abort_channel_does_not_stop_the_job() {
+        let (abort, abort_rx) = watch::channel(false);
+        drop(abort);
+
+        let job = async {
+            tokio::task::yield_now().await;
+            Ok(())
+        };
+
+        until_aborted(job, abort_rx)
+            .await
+            .expect("the job runs to its end");
     }
 }
