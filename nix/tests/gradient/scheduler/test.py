@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
 # FLAKES and RESOLVED are prepended by default.nix: spec file -> flake dir / resolved store-spec.
+# Build order is checked by each mock daemon (BuildWithMissingInput), never across VM clocks.
 
 WORKERS = [worker1, worker2]
 API = "http://gradient.local/api/v1"
@@ -200,10 +201,8 @@ login()
 
 e = phase("chain-3")
 wait_evaluation(e, "Completed")
-chain = [only_build("chain-3", n) for n in ["c0", "c1", "c2"]]
-for dep, top in zip(chain, chain[1:]):
-    assert top["at_us"] >= dep["at_us"] + dep["duration_us"], "a build started before its input was built"
 for n in ["c0", "c1", "c2"]:
+    only_build("chain-3", n)
     assert uploaded(out_of("chain-3", n)), n
 assert_clean()
 latency_report("chain-3")
@@ -319,11 +318,6 @@ for n, builds in built.items():
         assert builds == [], f"{n} built although a dependency failed"
     else:
         assert [entry["ok"] for _, entry in builds] == [True], f"{n} built {len(builds)} times"
-starts = {n: b[0][1]["at_us"] for n, b in built.items() if b}
-ends = {n: b[0][1]["at_us"] + b[0][1]["duration_us"] for n, b in built.items() if b}
-for n, start in starts.items():
-    late = [d for d in nodes[n]["deps"] if d in ends and ends[d] > start]
-    assert late == [], f"{n} started before {late} finished"
 assert_clean()
 latency_report("replay")
 
