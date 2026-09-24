@@ -278,7 +278,7 @@ for _ in range(300):
 assert hanging, "c1 never started building"
 survivor = next(w for w in WORKERS if w is not hanging)
 daemon(survivor, "outcome", {"node": "hang/c1", "outcome": "success"})
-hanging.succeed("systemctl stop gradient-worker")
+hanging.succeed("systemctl kill --signal=KILL gradient-worker && systemctl stop gradient-worker")
 wait_evaluation(e, "Completed")
 assert [w.name for w, entry in builds_of("hang", "c1") if entry["ok"]] == [survivor.name]
 daemon(hanging, "release", {"node": "hang/c1"})
