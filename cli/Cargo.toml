@@ -32,7 +32,7 @@ tokio   = { version = "1.50", features = ["macros", "process", "rt-multi-thread"
 
 # HTTP / TLS
 reqwest              = { version = "0.13", features = ["multipart"] }
-reqwest-streams      = { version = "0.19", features = ["json"] }
+reqwest-streams      = { version = "0.20", features = ["json"] }
 rustls               = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }
 rustls-native-certs  = { version = "0.8" }
 webpki-roots         = { version = "1.0", default-features = false }
@@ -49,7 +49,7 @@ harmonia-file-nar    = { git = "https://github.com/nix-community/harmonia.git", 
 harmonia-store-path  = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-store-remote = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
 harmonia-utils-hash  = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
-zstd                 = { version = "0.13", default-features = false }
+zstd                 = { version = "0.14", default-features = false, features = ["zstdmt"] }
 
 # CLI surface
 clap          = { version = "4.6", features = ["derive", "unstable-ext"] }
