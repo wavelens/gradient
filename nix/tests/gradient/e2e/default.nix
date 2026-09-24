@@ -373,7 +373,7 @@ in {
 
       def sql(query):
           server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
-          return server.succeed("su postgres -c 'psql -d gradient -At -f /tmp/q.sql'").strip()
+          return server.succeed("su postgres -c 'psql -v ON_ERROR_STOP=1 -d gradient -At -f /tmp/q.sql'").strip()
 
       def api_get(token, path):
           """GET ``API/<path>``, return the parsed `.message` field as text."""
@@ -2009,7 +2009,7 @@ in {
 
       def psql_table(query):
           server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
-          return server.succeed("su postgres -c 'psql -d gradient -f /tmp/q.sql'")
+          return server.succeed("su postgres -c 'psql -v ON_ERROR_STOP=1 -d gradient -f /tmp/q.sql'")
 
       # The test's own psql connects as postgres; only the server's statements are
       # Gradient's bill, and excluding ours also keeps these polls out of the shares.

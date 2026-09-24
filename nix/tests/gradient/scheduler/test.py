@@ -13,7 +13,7 @@ def banner(msg):
 
 def sql(query):
     server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
-    return server.succeed("su postgres -c 'psql -d gradient -At -f /tmp/q.sql'").strip()
+    return server.succeed("su postgres -c 'psql -v ON_ERROR_STOP=1 -d gradient -At -f /tmp/q.sql'").strip()
 
 
 def daemon(node, cmd, args=None):
