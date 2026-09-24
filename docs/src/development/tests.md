@@ -196,8 +196,8 @@ rejected by CI everywhere, tests included.
 ## Mock daemon VM tests
 
 `gradient-scheduler` runs the real server and workers, but every worker's
-`nix-daemon` is replaced by `gradient-daemon serve --backend mock` on the stock
-socket. The daemon is the `gradient-daemon` backend crate; its `mock` feature
+`nix-daemon` is replaced by `gradient-daemon serve --backend mock`, socket
+activated on the stock socket like `nix-daemon`. The daemon is the `gradient-daemon` backend crate; its `mock` feature
 builds the binary into the `daemon` output of the `gradient` package, and the
 `clippy` and `unittest` checks cover it.
 

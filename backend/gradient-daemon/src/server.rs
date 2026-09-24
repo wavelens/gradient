@@ -40,9 +40,18 @@ pub async fn bind(path: &Path) -> anyhow::Result<UnixListener> {
     Ok(listener)
 }
 
-pub async fn serve<B: Backend>(backend: Arc<B>, socket: &Path) -> anyhow::Result<()> {
-    let listener = bind(socket).await?;
-    tracing::info!(socket = %socket.display(), "listening");
+pub fn systemd_listener() -> anyhow::Result<UnixListener> {
+    let listener = listenfd::ListenFd::from_env()
+        .take_unix_listener(0)?
+        .ok_or_else(|| {
+            anyhow::anyhow!("no socket passed by systemd, start through gradient-daemon.socket")
+        })?;
+    listener.set_nonblocking(true)?;
+    Ok(UnixListener::from_std(listener)?)
+}
+
+pub async fn serve<B: Backend>(backend: Arc<B>, listener: UnixListener) -> anyhow::Result<()> {
+    tracing::info!("listening on the systemd socket");
     accept_each(listener, |stream| {
         let uid = stream.peer_cred().ok().map(|c| c.uid());
         serve_stream(backend.clone(), next_conn(uid), stream)

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ config, lib, pkgs, ... }:
+{ config, lib, ... }:
 let
   cfg = config.services.gradient-daemon-mock;
 in
@@ -24,14 +24,22 @@ in
     environment.variables.NIX_REMOTE = "daemon";
     environment.systemPackages = [ cfg.package ];
 
-    systemd.services.gradient-daemon = {
-      wantedBy = [ "multi-user.target" ];
+    systemd.sockets.gradient-daemon = {
+      wantedBy = [ "sockets.target" ];
       before = [ "gradient-worker.service" ];
       requiredBy = [ "gradient-worker.service" ];
+      socketConfig = {
+        ListenStream = "/nix/var/nix/daemon-socket/socket";
+        SocketMode = "0666";
+      };
+    };
+
+    systemd.services.gradient-daemon = {
+      wantedBy = [ "multi-user.target" ];
+      requires = [ "gradient-daemon.socket" ];
       environment.RUST_LOG = "info";
       serviceConfig = {
         ExecStart = "${lib.getExe' cfg.package "gradient-daemon"} serve --backend mock --spec ${cfg.config}";
-        ExecStartPost = "${pkgs.bash}/bin/bash -c 'until [ -S /nix/var/nix/daemon-socket/socket ]; do sleep 0.1; done'";
         # NixOS binds /nix/store read-only; nix-daemon remounts it in its own namespace, so must we.
         ReadWritePaths = [ "/nix/store" ];
         Restart = "on-failure";

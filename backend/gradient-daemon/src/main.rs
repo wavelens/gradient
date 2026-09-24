@@ -29,8 +29,6 @@ enum Command {
         backend: BackendKind,
         #[arg(long)]
         spec: PathBuf,
-        #[arg(long, default_value = "/nix/var/nix/daemon-socket/socket")]
-        socket: PathBuf,
         #[arg(long, default_value = CONTROL_SOCKET)]
         control: PathBuf,
         #[arg(long, default_value = "/")]
@@ -65,15 +63,15 @@ enum MockCommand {
 
 async fn serve_mock(
     spec: PathBuf,
-    socket: PathBuf,
     control_path: PathBuf,
     root: PathBuf,
     base_db: PathBuf,
 ) -> anyhow::Result<()> {
+    let listener = server::systemd_listener()?;
     let config = mock::spec::DaemonConfig::load(&spec)?;
     let backend = mock::MockBackend::new(config, root, Some(&base_db)).await?;
     tokio::select! {
-        served = server::serve(backend.clone(), &socket) => served,
+        served = server::serve(backend.clone(), listener) => served,
         controlled = control::serve_control(backend, &control_path) => controlled,
     }
 }
@@ -95,11 +93,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Serve {
             backend: BackendKind::Mock,
             spec,
-            socket,
             control,
             root,
             base_db,
-        } => serve_mock(spec, socket, control, root, base_db).await,
+        } => serve_mock(spec, control, root, base_db).await,
         Command::Ctl { cmd, args, control } => ctl(cmd, args, control).await,
         Command::Mock {
             command:

@@ -136,6 +136,7 @@ tower_governor       = { version = "0.8", default-features = false, features = [
 # Object store / git
 git2         = { version = "0.21", default-features = false, features = ["https", "ssh"] }
 libc         = { version = "0.2", default-features = false }
+listenfd     = { version = "1.0", default-features = false }
 object_store = { version = "0.14", default-features = false, features = ["aws", "fs"] }
 
 # Harmonia (git deps)
