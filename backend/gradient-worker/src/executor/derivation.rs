@@ -136,12 +136,7 @@ pub(super) async fn get_basic_derivation(
     // to the wire - only `env` is sent. The `__json` key in env is what the Nix
     // daemon reads for structured-attrs derivations, so leave it in place.
 
-    // Extract the name from the drv path ("hash-name.drv" → "name.drv").
-    let base = strip_nix_store_prefix(full_drv_path);
-    let drv_name = base
-        .find('-')
-        .map(|i| base[i + 1..].to_owned())
-        .unwrap_or_else(|| base.to_owned());
+    let drv_name = derivation_name(full_drv_path);
 
     Ok(DerivationT {
         name: drv_name
@@ -159,6 +154,14 @@ pub(super) async fn get_basic_derivation(
             .collect(),
         structured_attrs: None,
     })
+}
+
+/// Nix's `nameFromPath`: a fixed output's path is computed from this name, so a
+/// `.drv` suffix left on it sends a path the daemon rejects.
+fn derivation_name(full_drv_path: &str) -> String {
+    let base = strip_nix_store_prefix(full_drv_path);
+    let name = base.split_once('-').map_or(base.as_str(), |(_, name)| name);
+    name.strip_suffix(".drv").unwrap_or(name).to_owned()
 }
 
 /// Build a `DerivationOutput::CAFixed(...)` from a `.drv`'s `outputHashAlgo`
@@ -203,6 +206,14 @@ fn ca_fixed_output(hash_algo: &str, hash_hex: &str) -> Result<DerivationOutput> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_derivation_name_drops_the_drv_suffix() {
+        assert_eq!(
+            derivation_name("/nix/store/abc-hello-2.12.drv"),
+            "hello-2.12"
+        );
+    }
 
     #[test]
     fn ca_fixed_flat_sha256() {
