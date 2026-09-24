@@ -18,6 +18,8 @@ use rmcp::transport::stdio;
 use rmcp::{ErrorData, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
+use std::path::PathBuf;
 
 const INSTRUCTIONS: &str = "Read-only access to a Gradient CI instance. Start from `list_projects` \
 or `list_tasks`, drill into a task with `list_evaluations`, then `list_builds` on an evaluation. \
@@ -25,6 +27,8 @@ To diagnose a failure, fetch the derivation's output with `get_build_log`, or lo
 a long log with `search_build_log`. Arguments named `project`, `task`, `evaluation` and `build` \
 take the name or UUID as shown by the listing tools; `project` defaults to the project selected in \
 the user's Gradient CLI configuration.";
+
+const INLINE_LOG_LINES: usize = 10;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ProjectArgs {
@@ -93,12 +97,36 @@ fn to_result<T: Serialize>(value: Result<T, ConnectorError>) -> Result<CallToolR
     }
 }
 
-/// Build output is read as text, not as a JSON-quoted string.
-fn to_text_result(value: Result<String, ConnectorError>) -> Result<CallToolResult, ErrorData> {
-    Ok(match value {
-        Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
-        Err(e) => to_error(e),
-    })
+/// Build output is read as text, not as a JSON-quoted string; a log longer than
+/// `INLINE_LOG_LINES` goes to a temp file so it does not flood the client's context.
+fn to_log_result(value: Result<String, ConnectorError>, start: u64) -> CallToolResult {
+    let log = match value {
+        Ok(log) => log,
+        Err(e) => return to_error(e),
+    };
+
+    let lines = log.lines().count();
+    if lines <= INLINE_LOG_LINES {
+        return CallToolResult::success(vec![ContentBlock::text(log)]);
+    }
+
+    match save_log(&log) {
+        Ok(path) => CallToolResult::success(vec![ContentBlock::text(format!(
+            "{lines} log lines starting at line {start} saved to {}",
+            path.display()
+        ))]),
+        Err(e) => CallToolResult::error(vec![ContentBlock::text(format!("save log: {e}"))]),
+    }
+}
+
+fn save_log(log: &str) -> std::io::Result<PathBuf> {
+    let mut file = tempfile::Builder::new()
+        .prefix("gradient-build-")
+        .suffix(".log")
+        .tempfile()?;
+    file.write_all(log.as_bytes())?;
+    let (_, path) = file.keep()?;
+    Ok(path)
 }
 
 fn to_error(e: ConnectorError) -> CallToolResult {
@@ -176,20 +204,20 @@ impl GradientMcp {
     }
 
     #[tool(
-        description = "Read a build's log. Returns the whole log unless a line range is given; \
-                       prefer a range for long logs."
+        description = "Read a build's log, whole or by line range. Up to 10 lines come back \
+                       inline; a longer log is saved to a temp file whose path is returned."
     )]
     async fn get_build_log(
         &self,
         Parameters(args): Parameters<BuildLogArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         let start = args.start.unwrap_or(1);
-        to_text_result(
-            self.client
-                .builds()
-                .log_lines(&args.build, start, args.end)
-                .await,
-        )
+        let log = self
+            .client
+            .builds()
+            .log_lines(&args.build, start, args.end)
+            .await;
+        Ok(to_log_result(log, start))
     }
 
     #[tool(

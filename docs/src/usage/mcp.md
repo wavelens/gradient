@@ -52,7 +52,7 @@ For a client configured through JSON:
 | `get_evaluation` | One evaluation: commit, status, and error if it failed |
 | `list_builds` | The builds of an evaluation |
 | `get_build` | One build: status, derivation path, architecture, outputs |
-| `get_build_log` | A build's log, whole or by line range |
+| `get_build_log` | A build's log, whole or by line range; over 10 lines it is saved to a temp file and the path is returned |
 | `search_build_log` | Matching log lines with their line numbers |
 
 The usual path from a red pipeline to a cause is `list_evaluations` on the task,

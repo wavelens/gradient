@@ -59,6 +59,7 @@ fn session(home: &TempDir, requests: &[Value]) -> Vec<Value> {
         .unwrap()
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
+        .env("TMPDIR", home.path())
         .arg("mcp")
         .write_stdin(frames(requests))
         .output()
@@ -207,6 +208,48 @@ async fn mcp_get_build_log_sends_the_configured_token() {
             .contains("error: builder failed"),
         "log not returned: {result:#}"
     );
+}
+
+#[tokio::test]
+async fn mcp_get_build_log_saves_a_long_log_to_a_temp_file() {
+    let log = (1..=11).map(|n| format!("line {n}\n")).collect::<String>();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/builds/build-1/log/lines"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(log.clone()))
+        .mount(&server)
+        .await;
+
+    let home = TempDir::new().unwrap();
+    write_config(
+        &home,
+        &format!("Server = '{}'\nAuthToken = 'seeded-token'\n", server.uri()),
+    );
+
+    let mut requests = initialize();
+    requests.push(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "get_build_log", "arguments": {"build": "build-1"}}
+    }));
+
+    let responses = session(&home, &requests);
+    let result = &response(&responses, 2)["result"];
+    let text = result["content"][0]["text"].as_str().unwrap();
+
+    assert_eq!(result["isError"], json!(false), "{result:#}");
+    assert!(!text.contains("line 1\n"), "log inlined: {text}");
+    let saved = fs::read_dir(home.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|ext| ext == "log"))
+        .unwrap_or_else(|| panic!("no log file saved: {text}"));
+    assert!(
+        text.contains(saved.to_str().unwrap()),
+        "path not returned: {text}"
+    );
+    assert_eq!(fs::read_to_string(saved).unwrap(), log);
 }
 
 // The selected project in config.toml is the default, so an agent does not have
