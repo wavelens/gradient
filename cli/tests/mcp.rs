@@ -18,7 +18,7 @@ use predicates::prelude::*;
 use serde_json::{Value, json};
 use std::fs;
 use tempfile::TempDir;
-use wiremock::matchers::{header, method, path, query_param};
+use wiremock::matchers::{body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn write_config(home: &TempDir, body: &str) {
@@ -52,15 +52,19 @@ fn initialize() -> Vec<Value> {
     ]
 }
 
+fn session(home: &TempDir, requests: &[Value]) -> Vec<Value> {
+    session_with(home, &["mcp"], requests)
+}
+
 /// Run a session to completion: stdin is closed after the last frame, which
 /// ends the server, so the responses are whatever landed on stdout.
-fn session(home: &TempDir, requests: &[Value]) -> Vec<Value> {
+fn session_with(home: &TempDir, args: &[&str], requests: &[Value]) -> Vec<Value> {
     let output = Command::cargo_bin("gradient")
         .unwrap()
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .env("TMPDIR", home.path())
-        .arg("mcp")
+        .args(args)
         .write_stdin(frames(requests))
         .output()
         .unwrap();
@@ -87,6 +91,36 @@ fn response(responses: &[Value], id: u64) -> &Value {
         .iter()
         .find(|r| r["id"] == json!(id))
         .unwrap_or_else(|| panic!("no response for id {id}: {responses:#?}"))
+}
+
+fn tool_names(responses: &[Value]) -> Vec<String> {
+    response(responses, 2)["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn call(name: &str, arguments: Value) -> Vec<Value> {
+    let mut requests = initialize();
+    requests.push(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments}
+    }));
+    requests
+}
+
+fn server_config(home: &TempDir, server: &MockServer) {
+    write_config(
+        home,
+        &format!(
+            "Server = '{}'\nAuthToken = 'seeded-token'\nSelectedProject = 'proj'\n",
+            server.uri()
+        ),
+    );
 }
 
 fn offline_config(home: &TempDir) {
@@ -338,4 +372,83 @@ fn mcp_without_a_server_url_exits_with_a_usage_error() {
         .failure()
         .code(2)
         .stderr(predicate::str::contains("gradient login"));
+}
+
+const CONTROL_TOOLS: [&str; 3] = ["start_evaluation", "abort_evaluation", "watch_evaluation"];
+
+#[test]
+fn mcp_control_tools_are_opt_in() {
+    let home = TempDir::new().unwrap();
+    offline_config(&home);
+    let mut requests = initialize();
+    requests.push(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}));
+
+    let plain = tool_names(&session(&home, &requests));
+    let control = tool_names(&session_with(&home, &["mcp", "--control"], &requests));
+
+    for tool in CONTROL_TOOLS {
+        assert!(
+            !plain.contains(&tool.to_string()),
+            "{tool} without --control"
+        );
+        assert!(
+            control.contains(&tool.to_string()),
+            "{tool} missing with --control"
+        );
+    }
+    assert!(control.contains(&"get_build_log".to_string()));
+}
+
+#[tokio::test]
+async fn mcp_start_evaluation_returns_the_new_evaluation() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/tasks/proj/nightly/evaluate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "error": false, "message": "eval-9"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call("start_evaluation", json!({"task": "nightly"})),
+    );
+    let result = &response(&responses, 2)["result"];
+
+    assert_eq!(result["isError"], json!(false), "{result:#}");
+    assert!(
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("eval-9")
+    );
+}
+
+#[tokio::test]
+async fn mcp_abort_evaluation_sends_the_abort_method() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/evals/eval-1"))
+        .and(body_json(json!({"method": "abort"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "error": false, "message": "Success"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call("abort_evaluation", json!({"evaluation": "eval-1"})),
+    );
+
+    assert_eq!(response(&responses, 2)["result"]["isError"], json!(false));
 }

@@ -28,6 +28,10 @@ a long log with `search_build_log`. Arguments named `project`, `task`, `evaluati
 take the name or UUID as shown by the listing tools; `project` defaults to the project selected in \
 the user's Gradient CLI configuration.";
 
+const CONTROL_INSTRUCTIONS: &str = " Control tools are enabled: `start_evaluation` queues a \
+run and returns its UUID, `watch_evaluation` blocks until the run finishes or times out and \
+returns each entry point's build status, `abort_evaluation` cancels a run.";
+
 const INLINE_LOG_LINES: usize = 10;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -42,6 +46,16 @@ pub struct TaskArgs {
     task: String,
     /// Project name or UUID. Defaults to the selected project.
     project: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StartArgs {
+    /// Task name.
+    task: String,
+    /// Project name or UUID. Defaults to the selected project.
+    project: Option<String>,
+    /// Exact 40-character commit to evaluate. Defaults to the branch head.
+    commit: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -82,6 +96,7 @@ pub struct LogSearchArgs {
 pub struct GradientMcp {
     client: Client,
     selected_project: Option<String>,
+    control: bool,
     tool_router: ToolRouter<Self>,
 }
 
@@ -135,11 +150,17 @@ fn to_error(e: ConnectorError) -> CallToolResult {
 
 #[tool_router(router = tool_router)]
 impl GradientMcp {
-    pub fn new(client: Client, selected_project: Option<String>) -> Self {
+    pub fn new(client: Client, selected_project: Option<String>, control: bool) -> Self {
+        let mut tool_router = Self::tool_router();
+        if control {
+            tool_router += Self::control_router();
+        }
+
         Self {
             client,
             selected_project,
-            tool_router: Self::tool_router(),
+            control,
+            tool_router,
         }
     }
 
@@ -251,19 +272,50 @@ impl GradientMcp {
     }
 }
 
+#[tool_router(router = control_router)]
+impl GradientMcp {
+    #[tool(description = "Start an evaluation of a task and return its UUID.")]
+    async fn start_evaluation(
+        &self,
+        Parameters(args): Parameters<StartArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let project = self.project(args.project)?;
+        to_result(
+            self.client
+                .tasks()
+                .evaluate(&project, &args.task, args.commit.as_deref())
+                .await,
+        )
+    }
+
+    #[tool(description = "Abort an evaluation: cancels its in-progress and queued builds.")]
+    async fn abort_evaluation(
+        &self,
+        Parameters(args): Parameters<EvaluationArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        to_result(self.client.evals().abort(&args.evaluation).await)
+    }
+}
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for GradientMcp {
     fn get_info(&self) -> ServerInfo {
+        let instructions = if self.control {
+            format!("{INSTRUCTIONS}{CONTROL_INSTRUCTIONS}")
+        } else {
+            INSTRUCTIONS.to_string()
+        };
+
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::LATEST)
             .with_server_info(Implementation::new("gradient", env!("CARGO_PKG_VERSION")))
-            .with_instructions(INSTRUCTIONS)
+            .with_instructions(instructions)
     }
 }
 
 /// Serves MCP over stdio, where stdout carries the JSON-RPC frames: diagnostics
 /// go to stderr unconditionally, so `--json` must not reach `Output` here.
-pub async fn run() -> std::io::Result<()> {
+pub async fn run(control: bool) -> std::io::Result<()> {
     let out = Output::new(false);
     let client = client_from_config(out);
     let selected_project = load_config()
@@ -271,7 +323,7 @@ pub async fn run() -> std::io::Result<()> {
         .and_then(|v| v.clone())
         .filter(|p| !p.is_empty());
 
-    let service = GradientMcp::new(client, selected_project)
+    let service = GradientMcp::new(client, selected_project, control)
         .serve(stdio())
         .await
         .map_err(std::io::Error::other)?;

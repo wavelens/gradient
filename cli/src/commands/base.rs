@@ -152,7 +152,11 @@ enum MainCommands {
     #[cfg(feature = "eval")]
     Eval(eval::EvalArgs),
     /// Serve this Gradient instance to MCP clients over stdio
-    Mcp,
+    Mcp {
+        /// Also expose tools that start, abort and watch evaluations
+        #[arg(long)]
+        control: bool,
+    },
     /// Hash a password as an argon2id PHC string for use in
     /// `services.gradient.state.users.<name>.password_file`.
     Hash,
@@ -374,8 +378,8 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,
         #[cfg(feature = "eval")]
         MainCommands::Eval(_) => unreachable!("eval is dispatched before the runtime starts"),
-        MainCommands::Mcp => {
-            if let Err(e) = mcp::run().await {
+        MainCommands::Mcp { control } => {
+            if let Err(e) = mcp::run(control).await {
                 out.err(ExitKind::Api, format!("mcp server failed: {e}"));
             }
         }
