@@ -247,24 +247,14 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_BUILD_METRICS", default_value = "false")]
     pub build_metrics: bool,
 
-    /// Cgroup-v2 mount root searched for per-build cgroups when
-    /// `--build-metrics` is enabled.
+    /// The nix daemon's cgroup, in which it creates each build's
+    /// `nix-build@<drv-hash>-<uid>` cgroup when `--build-metrics` is enabled.
     #[arg(
         long,
         env = "GRADIENT_WORKER_BUILD_CGROUP_ROOT",
-        default_value = "/sys/fs/cgroup"
+        default_value = "/sys/fs/cgroup/system.slice/nix-daemon.service"
     )]
     pub build_cgroup_root: String,
-
-    /// Nix's `<state-dir>/cgroups` directory, where the daemon records each
-    /// build's cgroup path (`<uid>` files). The worker reads the newest entry
-    /// to locate a running build's cgroup for metrics.
-    #[arg(
-        long,
-        env = "GRADIENT_WORKER_BUILD_CGROUP_STATE_DIR",
-        default_value = "/nix/var/nix/cgroups"
-    )]
-    pub build_cgroup_state_dir: String,
 
     // ── Log limits ────────────────────────────────────────────────────────────
     /// Burst bucket: max log bytes forwarded to the server per build in any
@@ -466,8 +456,7 @@ mod tests {
             system_features: None,
             cpu_core_score: None,
             build_metrics: true,
-            build_cgroup_root: "/sys/fs/cgroup".to_owned(),
-            build_cgroup_state_dir: "/nix/var/nix/cgroups".to_owned(),
+            build_cgroup_root: "/sys/fs/cgroup/system.slice/nix-daemon.service".to_owned(),
             log_burst_bytes_per_min: 8 * 1024 * 1024,
             log_sustained_bytes_per_hour: 64 * 1024 * 1024,
             log_fetch_from_store: true,
@@ -580,8 +569,7 @@ mod tests {
             system_features: None,
             cpu_core_score: None,
             build_metrics: true,
-            build_cgroup_root: "/sys/fs/cgroup".to_owned(),
-            build_cgroup_state_dir: "/nix/var/nix/cgroups".to_owned(),
+            build_cgroup_root: "/sys/fs/cgroup/system.slice/nix-daemon.service".to_owned(),
             log_burst_bytes_per_min: 8 * 1024 * 1024,
             log_sustained_bytes_per_hour: 64 * 1024 * 1024,
             log_fetch_from_store: true,
@@ -657,8 +645,7 @@ mod tests {
             system_features: None,
             cpu_core_score: None,
             build_metrics: true,
-            build_cgroup_root: "/sys/fs/cgroup".to_owned(),
-            build_cgroup_state_dir: "/nix/var/nix/cgroups".to_owned(),
+            build_cgroup_root: "/sys/fs/cgroup/system.slice/nix-daemon.service".to_owned(),
             log_burst_bytes_per_min: 8 * 1024 * 1024,
             log_sustained_bytes_per_hour: 64 * 1024 * 1024,
             log_fetch_from_store: true,

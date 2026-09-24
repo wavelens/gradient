@@ -57,33 +57,21 @@ fn raw_to_build_metrics(
     }
 }
 
-/// Locate a running build's cgroup via nix's `<state-dir>/cgroups/` map.
-///
-/// Nix can't be asked which build user / cgroup it assigned, but on each build
-/// it writes the build's absolute cgroup path to `<state-dir>/cgroups/<uid>`.
-/// Those files persist after the build (pointing at a since-destroyed cgroup),
-/// so we only consider entries modified at/after `since` (the build's start)
-/// and return the newest. Returns `None` when nothing is newer than `since`
-/// (idle, daemon not using cgroups, or concurrent starts we won't guess at).
-fn newest_build_cgroup(state_dir: &Path, since: std::time::SystemTime) -> Option<PathBuf> {
-    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-    for entry in std::fs::read_dir(state_dir).ok()?.flatten() {
-        let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else {
-            continue;
-        };
-        if mtime < since {
-            continue;
-        }
-        if newest.as_ref().is_none_or(|(t, _)| mtime > *t)
-            && let Ok(contents) = std::fs::read_to_string(entry.path())
-        {
-            let path = PathBuf::from(contents.trim());
-            if !path.as_os_str().is_empty() {
-                newest = Some((mtime, path));
-            }
-        }
-    }
-    newest.map(|(_, p)| p)
+/// The cgroup nix creates for `drv_path`'s build: `nix-build@<drv-hash>-<uid>`
+/// directly under the daemon's cgroup `root`. The build user's uid is not
+/// known up front, so the entry is matched by its `nix-build@<drv-hash>-` prefix.
+fn build_cgroup(root: &Path, drv_path: &str) -> Option<PathBuf> {
+    let (hash, _) = Path::new(drv_path).file_name()?.to_str()?.split_once('-')?;
+    let prefix = format!("nix-build@{hash}-");
+    std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix))
+        })
 }
 
 /// Total CPU microseconds from the daemon's `BuildResult` (cgroup-derived,
@@ -103,7 +91,7 @@ pub(super) fn daemon_cpu_usec(
 /// Assemble per-build metrics from the live-sampled cgroup snapshot (peak RAM /
 /// disk, captured before teardown) and the daemon-reported CPU time. Always
 /// reports `build_time_ms`; cgroup fields stay `None` when no cgroup was
-/// sampled (metrics disabled, idle map, or ambiguous concurrent starts).
+/// sampled (metrics disabled, or the build cgroup never appeared).
 pub(super) fn assemble_build_metrics(
     sampled: Option<BuildMetricsRaw>,
     cpu_usec: Option<u64>,
@@ -185,21 +173,22 @@ impl NetworkPeakSampler {
 
 /// Samples a daemon build's cgroup `memory.peak` / `io.stat` *while it runs*,
 /// because nix destroys the cgroup as soon as the build finishes. It locates
-/// the cgroup via [`newest_build_cgroup`] (entries written after `start` was
-/// called), locks onto it, and keeps the last good reading - the high-water
-/// `memory.peak` and cumulative `io.stat` just before teardown.
+/// the cgroup via [`build_cgroup`], locks onto it, and keeps the last good
+/// reading - the high-water `memory.peak` and cumulative `io.stat` just before
+/// teardown.
 pub(super) struct CgroupSampler {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: tokio::task::JoinHandle<Option<BuildMetricsRaw>>,
 }
 
 impl CgroupSampler {
-    pub(super) fn start(state_dir: String, cgroup_root: String) -> Self {
+    pub(super) fn start(cgroup_root: &str, drv_path: &str) -> Self {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
         let stop = Arc::new(AtomicBool::new(false));
-        let since = std::time::SystemTime::now();
         let s = stop.clone();
+        let root = PathBuf::from(cgroup_root);
+        let drv_path = drv_path.to_owned();
         #[expect(
             clippy::disallowed_methods,
             reason = "stopped through the flag when the build ends"
@@ -207,34 +196,26 @@ impl CgroupSampler {
         let handle = tokio::spawn(async move {
             let mut cgroup: Option<PathBuf> = None;
             let mut last: Option<BuildMetricsRaw> = None;
-            let mut logged = false;
             while !s.load(Ordering::Relaxed) {
-                let state_dir = state_dir.clone();
-                let cgroup_root = cgroup_root.clone();
+                let root = root.clone();
+                let drv_path = drv_path.clone();
                 let known = cgroup.clone();
                 // The cgroup lookup + read are blocking fs syscalls; run them
                 // off the async runtime thread so a slow/contended /sys read
                 // never stalls other tasks sharing this worker thread.
-                let sample = tokio::task::spawn_blocking(
-                    move || -> Option<(PathBuf, Option<BuildMetricsRaw>)> {
-                        let dir = Path::new(&state_dir);
-                        // Trust only paths under the configured cgroup root.
-                        let cgroup = known.or_else(|| {
-                            newest_build_cgroup(dir, since).filter(|p| p.starts_with(&cgroup_root))
-                        })?;
-                        let raw = read_build_cgroup(&cgroup);
-                        Some((cgroup, raw))
-                    },
-                )
+                let sample = tokio::task::spawn_blocking(move || {
+                    let cgroup = known.or_else(|| build_cgroup(&root, &drv_path))?;
+                    let raw = read_build_cgroup(&cgroup);
+                    Some((cgroup, raw))
+                })
                 .await
                 .ok()
                 .flatten();
 
                 match sample {
                     Some((dir, Some(cur))) => {
-                        if !logged {
+                        if cgroup.is_none() {
                             debug!(cgroup = %dir.display(), "sampling build cgroup for metrics");
-                            logged = true;
                         }
                         cgroup = Some(dir);
                         last = Some(merge_cgroup_sample(last, cur));
@@ -274,44 +255,33 @@ fn merge_cgroup_sample(prev: Option<BuildMetricsRaw>, cur: BuildMetricsRaw) -> B
 mod tests {
     use super::*;
 
+    const DRV: &str = "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-hello.drv";
+
     #[test]
-    fn newest_build_cgroup_ignores_entries_older_than_since() {
-        // Stale `<uid>` files (from finished builds) must not be picked: their
-        // cgroups are already gone. Only an entry written at/after the build
-        // started counts. Explicit mtimes keep this independent of filesystem
-        // timestamp granularity.
-        use std::fs::FileTimes;
-        use std::time::Duration;
-        let set_mtime = |path: &Path, t: std::time::SystemTime| {
-            std::fs::File::options()
-                .write(true)
-                .open(path)
-                .unwrap()
-                .set_times(FileTimes::new().set_modified(t))
-                .unwrap();
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let since = std::time::SystemTime::now();
-
-        let stale = dir.path().join("30001");
-        std::fs::write(&stale, "/sys/fs/cgroup/nix-build-uid-30001\n").unwrap();
-        set_mtime(&stale, since - Duration::from_secs(60));
-        assert!(newest_build_cgroup(dir.path(), since).is_none());
-
-        let fresh = dir.path().join("30002");
-        std::fs::write(&fresh, "/sys/fs/cgroup/nix-build-uid-30002\n").unwrap();
-        set_mtime(&fresh, since + Duration::from_secs(60));
+    fn build_cgroup_matches_the_derivation_among_siblings() {
+        let root = tempfile::tempdir().unwrap();
+        for name in [
+            "nix-daemon",
+            "nix-build@zyxwvsrqpnmlkjihgfdcba9876543210-30001",
+            "nix-build@0123456789abcdfghijklmnpqrsvwxyz-30002",
+        ] {
+            std::fs::create_dir(root.path().join(name)).unwrap();
+        }
         assert_eq!(
-            newest_build_cgroup(dir.path(), since),
-            Some(PathBuf::from("/sys/fs/cgroup/nix-build-uid-30002")),
+            build_cgroup(root.path(), DRV),
+            Some(
+                root.path()
+                    .join("nix-build@0123456789abcdfghijklmnpqrsvwxyz-30002")
+            ),
         );
     }
 
     #[test]
-    fn newest_build_cgroup_none_for_missing_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("cgroups");
-        assert!(newest_build_cgroup(&missing, std::time::SystemTime::UNIX_EPOCH).is_none());
+    fn build_cgroup_none_before_the_build_starts() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("nix-daemon")).unwrap();
+        assert!(build_cgroup(root.path(), DRV).is_none());
+        assert!(build_cgroup(&root.path().join("missing"), DRV).is_none());
     }
 
     #[test]

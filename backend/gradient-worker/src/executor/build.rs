@@ -344,7 +344,6 @@ pub async fn build_derivation(
     abort: &mut watch::Receiver<bool>,
     build_metrics: bool,
     cgroup_root: &str,
-    cgroup_state_dir: &str,
     log_limits: crate::executor::log_limit::LogRateLimits,
     log_fetch_from_store: bool,
     build_cores: u32,
@@ -370,8 +369,7 @@ pub async fn build_derivation(
     );
 
     let net_sampler = build_metrics.then(NetworkPeakSampler::start);
-    let cgroup_sampler = build_metrics
-        .then(|| CgroupSampler::start(cgroup_state_dir.to_string(), cgroup_root.to_string()));
+    let cgroup_sampler = build_metrics.then(|| CgroupSampler::start(cgroup_root, &task.drv_path));
     let started = std::time::Instant::now();
     let realize_result: Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> =
         match task.timeout_secs.map(std::time::Duration::from_secs) {
