@@ -135,11 +135,11 @@
           } @else if (entryPoints().length > 0) {
             <div class="pkg-list">
               @for (ep of entryPoints(); track ep.id) {
-                <div class="pkg" [attr.data-phase]="buildPhase(ep.build_status)" [style.animation-delay.ms]="$index * 18"
+                <div class="pkg" [attr.data-phase]="entryPointPhase(ep)" [style.animation-delay.ms]="$index * 18"
                      (contextmenu)="openPkgContextMenu($event, ep, sel.id, pkgMenu)">
                   <a class="pkg-link" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }"
                      [title]="ep.eval + ' - ' + ep.derivation_path" [attr.aria-label]="attrLabel(ep.eval)"></a>
-                  <gr-status-icon class="si" [phase]="buildPhase(ep.build_status)" size="sm" />
+                  <gr-status-icon class="si" [phase]="entryPointPhase(ep)" size="sm" />
                   <span class="pkg-name">{{ attrLabel(ep.eval) }}</span>
                   <span class="chip-arch mono">{{ ep.architecture }}</span>
                   <app-segmented-bar class="pkg-bar" [counts]="barCounts(ep)" />

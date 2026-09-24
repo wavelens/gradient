@@ -5,7 +5,7 @@
  */
 
 import type { BuildStatus, EvaluationStatus } from '@core/models';
-import { buildPhase, evaluationPhase, isPendingBuildStatus, type StatusPhase } from './status-phase';
+import { buildPhase, entryPointPhase, evaluationPhase, isPendingBuildStatus, type StatusPhase } from './status-phase';
 
 describe('evaluationPhase', () => {
   it.each<[EvaluationStatus, StatusPhase]>([
@@ -56,5 +56,21 @@ describe('isPendingBuildStatus', () => {
     ['Skipped', false],
   ])('treats %s as pending: %s', (status, pending) => {
     expect(isPendingBuildStatus(status)).toBe(pending);
+  });
+});
+
+describe('entryPointPhase', () => {
+  const deps = (building: number) => ({ completed: 0, failed: 0, building, queued: 0, substituted: 0, aborted: 0 });
+
+  it.each<[BuildStatus, number, StatusPhase]>([
+    ['Queued', 1, 'running'],
+    ['Created', 2, 'running'],
+    ['Queued', 0, 'queued'],
+    ['Building', 0, 'running'],
+    ['Completed', 1, 'success'],
+    ['FailedPermanent', 1, 'failure'],
+    ['DependencyFailed', 1, 'aborted'],
+  ])('maps %s with %i building deps to %s', (build_status, building, phase) => {
+    expect(entryPointPhase({ build_status, deps: deps(building) })).toBe(phase);
   });
 });

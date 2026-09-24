@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import type { BuildStatus, EvaluationStatus } from '@core/models';
+import type { BuildStatus, EntryPointSummary, EvaluationStatus } from '@core/models';
 
 export type StatusPhase = 'queued' | 'waiting' | 'running' | 'success' | 'failure' | 'aborted';
 
@@ -36,6 +36,12 @@ export function buildPhase(status: BuildStatus): StatusPhase {
     case 'DependencyFailed':
     case 'Skipped': return 'aborted';
   }
+}
+
+/// An entry point still waiting on its own build reads as running while any of its dependencies build.
+export function entryPointPhase(ep: Pick<EntryPointSummary, 'build_status' | 'deps'>): StatusPhase {
+  const phase = buildPhase(ep.build_status);
+  return phase === 'queued' && ep.deps.building > 0 ? 'running' : phase;
 }
 
 const PENDING_BUILD_STATUSES: ReadonlySet<string> = new Set<BuildStatus>(['Created', 'Queued', 'Building']);

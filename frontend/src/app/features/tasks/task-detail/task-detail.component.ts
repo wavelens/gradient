@@ -20,7 +20,7 @@ import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponen
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';
-import { buildDuration, buildPhase, commitLabel, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
+import { buildDuration, commitLabel, entryPointPhase, evaluationDuration, evaluationPhase, evaluationTitle, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
@@ -430,7 +430,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   }
 
   protected readonly evaluationPhase = evaluationPhase;
-  protected readonly buildPhase = buildPhase;
+  protected readonly entryPointPhase = entryPointPhase;
 
   pkgMenuModel = signal<MenuItem[]>([]);
 
