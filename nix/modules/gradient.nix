@@ -1084,7 +1084,10 @@ in {
       requires = lib.optional localWorker "gradient-local-worker-token.service";
 
       serviceConfig = {
+        Type = "notify";
         ExecStart = lib.getExe cfg.packages.server;
+        # Ready only after migrations, which can run for hours; a crash still fails the start at once.
+        TimeoutStartSec = "infinity";
         StateDirectory = "gradient";
         User = "gradient";
         Group = "gradient";

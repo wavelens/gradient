@@ -46,6 +46,7 @@ harmonia-utils-signature       = { workspace = true }
 listenfd                       = { workspace = true }
 serde                          = { workspace = true }
 serde_json                     = { workspace = true }
+sd-notify                      = { workspace = true }
 thiserror                      = { workspace = true }
 tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tracing                        = { workspace = true }

@@ -420,6 +420,7 @@ in {
         ];
 
         serviceConfig = {
+          Type = "notify";
           ExecStart = lib.getExe' cfg.packages.gradient "gradient-worker";
           StateDirectory = "gradient-worker";
           User = "gradient-worker";

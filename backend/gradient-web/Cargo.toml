@@ -53,6 +53,7 @@ reqwest       = { workspace = true, features = ["multipart"] }
 sea-orm       = { workspace = true }
 serde         = { workspace = true }
 serde_json    = { workspace = true }
+sd-notify     = { workspace = true }
 sha2          = { workspace = true }
 subtle        = { workspace = true }
 tempfile      = { workspace = true }

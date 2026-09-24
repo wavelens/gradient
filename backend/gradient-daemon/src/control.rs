@@ -5,13 +5,13 @@
  */
 
 use crate::backend::Backend;
-use crate::server::{accept_each, bind};
+use crate::server::accept_each;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
-use tokio::net::UnixStream;
+use tokio::net::{UnixListener, UnixStream};
 
 #[derive(Deserialize)]
 struct Request {
@@ -61,8 +61,11 @@ fn generic<B: Backend>(backend: &B, req: &Request) -> Option<anyhow::Result<Valu
     Some(value.map_err(Into::into))
 }
 
-pub async fn serve_control<B: Backend>(backend: Arc<B>, path: &Path) -> anyhow::Result<()> {
-    accept_each(bind(path).await?, |stream| answer(backend.clone(), stream)).await
+pub async fn serve_control<B: Backend>(
+    backend: Arc<B>,
+    listener: UnixListener,
+) -> anyhow::Result<()> {
+    accept_each(listener, |stream| answer(backend.clone(), stream)).await
 }
 
 async fn answer<B: Backend>(backend: Arc<B>, stream: UnixStream) {

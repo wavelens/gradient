@@ -954,6 +954,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             e
         })?;
     let listener = tuned_listener(listener);
+    sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
 
     let shutdown = state.shutdown.clone();
     install_signal_handler(shutdown.clone());

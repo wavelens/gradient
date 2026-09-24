@@ -39,10 +39,10 @@ in
       requires = [ "gradient-daemon.socket" ];
       environment.RUST_LOG = "info";
       serviceConfig = {
+        Type = "notify";
         ExecStart = "${lib.getExe' cfg.package "gradient-daemon"} serve --backend mock --spec ${cfg.config}";
         # NixOS binds /nix/store read-only; nix-daemon remounts it in its own namespace, so must we.
         ReadWritePaths = [ "/nix/store" ];
-        Restart = "on-failure";
       };
     };
   };

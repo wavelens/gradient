@@ -70,9 +70,11 @@ async fn serve_mock(
     let listener = server::systemd_listener()?;
     let config = mock::spec::DaemonConfig::load(&spec)?;
     let backend = mock::MockBackend::new(config, root, Some(&base_db)).await?;
+    let control_listener = server::bind(&control_path).await?;
+    sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
     tokio::select! {
         served = server::serve(backend.clone(), listener) => served,
-        controlled = control::serve_control(backend, &control_path) => controlled,
+        controlled = control::serve_control(backend, control_listener) => controlled,
     }
 }
 

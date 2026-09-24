@@ -138,6 +138,7 @@ fn main() -> Result<()> {
             });
         }
 
+        sd_notify::notify(&[sd_notify::NotifyState::Ready])?;
         let mut backoff = INITIAL_BACKOFF;
 
         // Initial connection - abandon retries if shutdown fires.
