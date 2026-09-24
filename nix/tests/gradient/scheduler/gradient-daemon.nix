@@ -32,6 +32,8 @@ in
       serviceConfig = {
         ExecStart = "${lib.getExe' cfg.package "gradient-daemon"} serve --backend mock --spec ${cfg.config}";
         ExecStartPost = "${pkgs.bash}/bin/bash -c 'until [ -S /nix/var/nix/daemon-socket/socket ]; do sleep 0.1; done'";
+        # NixOS binds /nix/store read-only; nix-daemon remounts it in its own namespace, so must we.
+        ReadWritePaths = [ "/nix/store" ];
         Restart = "on-failure";
       };
     };
