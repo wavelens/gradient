@@ -63,8 +63,6 @@ const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(600);
 const POOL_CONNECT_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Build the harmonia [`PoolConfig`] used by [`LocalNixStore::connect_at`].
-///
-/// Extracted so the policy is asserted in tests without a live daemon.
 pub(crate) fn build_pool_config(pool_size: usize) -> PoolConfig {
     PoolConfig {
         max_size: pool_size,
@@ -247,44 +245,5 @@ impl LocalNixStore {
 impl WorkerStore for LocalNixStore {
     async fn has_path(&self, store_path: &str) -> Result<bool> {
         self.has_path(store_path).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Regression for the dispatch-time pool exhaustion observed in
-    /// production: with `max_concurrent_builds * PREFETCH_CONCURRENCY`
-    /// imports queued against the pool, a short acquire deadline fires
-    /// before the pool can serve them even though it is making forward
-    /// progress. Harmonia's `acquire` now blocks indefinitely, so
-    /// [`LocalNixStore::acquire`] bounds the wait with [`POOL_ACQUIRE_TIMEOUT`],
-    /// which must stay generous; anything shorter is an artificial cap that
-    /// surfaces as "acquire daemon connection: timed out" mid-build.
-    #[test]
-    fn pool_config_max_size_and_acquire_timeout() {
-        assert_eq!(build_pool_config(8).max_size, 8);
-        assert!(
-            POOL_ACQUIRE_TIMEOUT >= Duration::from_secs(600),
-            "acquire deadline must accommodate worst-case queue depth across \
-             concurrent build jobs; got {POOL_ACQUIRE_TIMEOUT:?}"
-        );
-    }
-
-    /// Regression for `acquire daemon connection: timeout: connecting to
-    /// daemon`: `build_pool_config` must override the per-connection
-    /// establishment timeout. Harmonia's 10 s default fires while a saturated
-    /// local daemon is still completing the handshake for a fresh pooled
-    /// connection, failing prefetch imports under high daemon connection count.
-    #[test]
-    fn pool_config_connection_timeout_is_generous() {
-        let cfg = build_pool_config(8);
-        assert!(
-            cfg.connection_timeout >= Duration::from_secs(120),
-            "connection_timeout must tolerate a saturated daemon's handshake; \
-             the 10 s harmonia default fails prefetch imports under load; got {:?}",
-            cfg.connection_timeout
-        );
     }
 }

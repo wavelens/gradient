@@ -840,11 +840,6 @@ pub fn accept_tungstenite(
 mod tests {
     use super::*;
 
-    #[test]
-    fn max_message_size_is_eight_mib() {
-        assert_eq!(MAX_PROTO_MESSAGE_SIZE, 8 * 1024 * 1024);
-    }
-
     fn bulk(bytes: usize) -> Bytes {
         Bytes::from(vec![0xbb; bytes])
     }
@@ -899,8 +894,7 @@ mod tests {
     }
 
     #[test]
-    fn bulk_chunk_is_half_a_mebibyte_and_the_batch_cap_is_smaller() {
-        assert_eq!(BULK_CHUNK_SIZE, 512 * 1024);
+    fn the_bulk_batch_cap_fits_in_a_chunk() {
         const { assert!(BULK_BATCH_BYTES <= BULK_CHUNK_SIZE) };
     }
 

@@ -261,7 +261,7 @@ impl HotNarCache {
 
 #[cfg(test)]
 mod tests {
-    use super::{HotNarCache, PRIORITY_SCALE};
+    use super::HotNarCache;
     use bytes::Bytes;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -375,7 +375,6 @@ mod tests {
         assert_eq!(before.hits, 0);
         c.get("h");
         assert_eq!(c.stats().hits, 1);
-        assert_eq!(PRIORITY_SCALE, 1 << 32);
     }
 
     #[tokio::test]

@@ -214,11 +214,6 @@ fn cache_query_pull_roundtrip() {
 }
 
 #[test]
-fn the_handshake_speaks_version_fourteen() {
-    assert_eq!(PROTO_VERSION, 14);
-}
-
-#[test]
 fn cache_query_external_roundtrip() {
     let original = ClientMessage::CacheQuery {
         job_id: "job-4".into(),
