@@ -2530,8 +2530,12 @@ in {
       poll(relay_attempts(busybox), "2",
            "a demanded relay was not re-dispatched after its NAR was retired",
            timeout=600)
-      poll(anchor_column(busywrap, "db.status::text"), "3",
-           "busywrap was not rebuilt once its input was relayed again", timeout=600)
+      # The worker still holds busywrap's output, so it may push that back
+      # (Substituted) instead of rebuilding: either way the cache serves it again.
+      poll(anchor_column(busywrap, "(db.status IN (3, 7))::text"), "true",
+           "busywrap did not come back once its input was relayed again", timeout=600)
+      poll(f"SELECT count(*) FROM cached_path WHERE hash = '{bw_hash}' AND file_hash IS NOT NULL;", "1",
+           "busywrap's output was not pushed back to the cache")
       assert output_missing(busybox) == "0", (
           f"the second relay left closure members behind: {output_missing(busybox)}"
       )
