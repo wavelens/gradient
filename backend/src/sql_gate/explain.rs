@@ -29,15 +29,9 @@ use sea_orm::{
 use crate::report::Outcome;
 use crate::sample::Sampler;
 
-const STATEMENT_TIMEOUT: &str = "SET LOCAL statement_timeout = '30s'";
-const LOCK_TIMEOUT: &str = "SET LOCAL lock_timeout = '2s'";
 const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
 
 pub async fn run_all(db: &DatabaseConnection) -> Result<Vec<(&'static Query, Outcome)>> {
-    db.execute_unprepared("ANALYZE")
-        .await
-        .context("ANALYZE before measuring")?;
-
     let relation_rows = relation_rows(db).await?;
     let mut sampler = Sampler::default();
     let mut queries: Vec<&'static Query> = registry().collect();
@@ -45,6 +39,7 @@ pub async fn run_all(db: &DatabaseConnection) -> Result<Vec<(&'static Query, Out
 
     let mut rows = Vec::with_capacity(queries.len());
     for query in queries {
+        eprintln!("measuring {} ({})", query.name, query.location());
         let outcome = run_one(db, query, &relation_rows, &mut sampler).await?;
         rows.push((query, outcome));
     }
@@ -73,9 +68,14 @@ async fn run_one(
 
     let mut values = Vec::with_capacity(query.params.len());
     for param in query.params {
-        match sampler.value(db, param).await? {
-            Some(value) => values.push(value),
-            None => return Ok(Outcome::Unmeasured(format!("no {param:?} to draw"))),
+        match sampler.value(db, param).await {
+            Ok(Some(value)) => values.push(value),
+            Ok(None) => return Ok(Outcome::Unmeasured(format!("no {param:?} to draw"))),
+            Err(err) => {
+                return Ok(Outcome::Unmeasured(format!(
+                    "drawing {param:?} failed: {err}"
+                )));
+            }
         }
     }
 
@@ -106,9 +106,6 @@ async fn measure_in(
     sql: &str,
     values: Vec<Value>,
 ) -> Result<serde_json::Value> {
-    txn.execute_unprepared(STATEMENT_TIMEOUT).await?;
-    txn.execute_unprepared(LOCK_TIMEOUT).await?;
-
     if query.flags.contains(&Flag::Walk) {
         txn.execute_unprepared(WALK_WORK_MEM).await?;
     }

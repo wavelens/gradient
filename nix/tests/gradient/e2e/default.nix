@@ -2964,7 +2964,7 @@ in {
       print(server.succeed(
           "${pkgs.gradient.gate}/bin/gradient-sql-gate "
           "--database-url postgresql://postgres@127.0.0.1/gradient "
-          "--max-unmeasured 40 2>&1"
+          "--max-unmeasured 40 2>/dev/console"
       ))
 
       banner("E2E test PASSED")

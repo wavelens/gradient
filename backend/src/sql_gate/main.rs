@@ -16,7 +16,7 @@ mod sample;
 use anyhow::{Context, Result};
 use clap::Parser;
 use gradient_db::sql::registry;
-use sea_orm::Database;
+use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 
 /// Every crate that declares statements, with the anchor that pulls it in. A
 /// linker drops an rlib the binary never mentions, so without these calls that
@@ -90,10 +90,25 @@ async fn main() -> Result<()> {
         amplify::run(&db, cli.scale).await?;
     }
 
-    let rows = explain::run_all(&db).await?;
+    db.execute_unprepared("ANALYZE")
+        .await
+        .context("ANALYZE before measuring")?;
+
+    let rows = explain::run_all(&bounded(&url).await?).await?;
     print!("{}", report::render(&rows));
 
     std::process::exit(report::exit_code(&rows, cli.max_unmeasured));
+}
+
+/// Every statement the measuring pass sends, its samplers and generic plans
+/// included, is cut off server-side, so none can hang the gate without a word.
+async fn bounded(url: &str) -> Result<DatabaseConnection> {
+    let mut options = ConnectOptions::new(url);
+    options.map_sqlx_postgres_opts(|pg| {
+        pg.options([("statement_timeout", "30s"), ("lock_timeout", "2s")])
+    });
+
+    Ok(Database::connect(options).await?)
 }
 
 /// Every statement the macro registered, without a database. It is also the
