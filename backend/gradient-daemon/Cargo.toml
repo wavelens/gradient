@@ -44,6 +44,7 @@ harmonia-store-path-info       = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 harmonia-utils-signature       = { workspace = true }
 listenfd                       = { workspace = true }
+nix                            = { workspace = true }
 serde                          = { workspace = true }
 serde_json                     = { workspace = true }
 sd-notify                      = { workspace = true }

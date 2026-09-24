@@ -2323,6 +2323,7 @@ dependencies = [
  "harmonia-utils-hash",
  "harmonia-utils-signature",
  "listenfd",
+ "nix 0.31.3",
  "sd-notify",
  "serde",
  "serde_json",

@@ -5,7 +5,7 @@
  */
 
 use clap::{Parser, Subcommand, ValueEnum};
-use gradient_daemon::{control, mock, server};
+use gradient_daemon::{control, mock, server, store};
 use std::path::PathBuf;
 
 const CONTROL_SOCKET: &str = "/run/gradient-daemon/control.sock";
@@ -85,13 +85,23 @@ async fn ctl(cmd: String, args: String, path: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .init();
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    if let Command::Serve { root, .. } = &cli.command {
+        store::make_writable(&root.join("nix/store"))?;
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(cli))
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
+    match cli.command {
         Command::Serve {
             backend: BackendKind::Mock,
             spec,

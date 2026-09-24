@@ -8,6 +8,7 @@ pub mod backend;
 pub mod control;
 pub mod journal;
 pub mod server;
+pub mod store;
 
 #[cfg(feature = "mock")]
 pub mod mock;
