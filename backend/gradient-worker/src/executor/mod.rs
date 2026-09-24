@@ -292,8 +292,8 @@ fn named_outputs(task: &BuildSpec) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Split what the local store already holds out of what a Substitute or a Download
-/// would go and get. An output on disk is already realised, so fetching it again
+/// Split what the local store already holds out of what a job
+/// would go and get or build. An output on disk is already realised, so producing it again
 /// costs a round trip to answer a question the store answers for free - and on a
 /// host with no route out, the fetch is not an answer at all. A worker with no
 /// daemon errors on every ask and fetches everything, exactly as before.
@@ -312,6 +312,10 @@ async fn split_already_realised<S: WorkerStore + ?Sized>(
     }
 
     (realised, fetch)
+}
+
+fn fully_realised(realised: &[(String, String)], missing: &[(String, String)]) -> bool {
+    missing.is_empty() && !realised.is_empty()
 }
 
 /// The report for an output nobody had to fetch. Sizes stay `None` for the compress
@@ -489,6 +493,37 @@ impl JobExecutor {
     /// this, the daemon would fail with "1 dependency failed" the moment it
     /// tries to build a derivation whose inputs were produced on a different
     /// worker.
+    async fn adopt_realised<'a>(
+        &'a self,
+        build_id: &str,
+        realised: Vec<(String, String)>,
+        updater: &mut JobUpdater,
+        gc_handles: &mut Vec<GcRootHandle>,
+        outputs: &mut Vec<compress::OutputNar<'a>>,
+    ) -> Result<()> {
+        for (_, path) in &realised {
+            gc_handles.push(self.gcroots.add(path).await);
+        }
+        let reported = realised
+            .iter()
+            .map(|(name, path)| realised_output(name, path))
+            .collect();
+        updater
+            .report_build_output(build_id.to_owned(), reported, None, true)
+            .await?;
+        outputs.extend(
+            realised
+                .into_iter()
+                .map(|(_, store_path)| compress::OutputNar {
+                    store_path,
+                    source: nar::NarSource::Path {
+                        store: Some(&self.store),
+                    },
+                }),
+        );
+        Ok(())
+    }
+
     #[instrument(skip_all)]
     pub async fn execute_build_job(
         &self,
@@ -510,9 +545,21 @@ impl JobExecutor {
             // would show the build hanging in `Queued` forever.
             updater.report_building(build_task.build_id.clone()).await?;
 
+            let (realised, missing) =
+                split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
+            if fully_realised(&realised, &missing) {
+                self.adopt_realised(
+                    &build_task.build_id,
+                    realised,
+                    updater,
+                    &mut gc_handles,
+                    &mut outputs,
+                )
+                .await?;
+                continue;
+            }
+
             if build_task.kind == BuildSpecKind::Substitute {
-                let (realised, missing) =
-                    split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
                 // What the store already held is pinned before the fetch that runs
                 // beside it; what an upstream serves never lands there, so it needs
                 // no root.
@@ -572,27 +619,6 @@ impl JobExecutor {
             }
 
             if build_task.kind == BuildSpecKind::Download {
-                let (realised, _) =
-                    split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
-                if let Some((name, store_path)) = realised.into_iter().next() {
-                    gc_handles.push(self.gcroots.add(&store_path).await);
-                    updater
-                        .report_build_output(
-                            build_task.build_id.clone(),
-                            vec![realised_output(&name, &store_path)],
-                            None,
-                            true,
-                        )
-                        .await?;
-                    outputs.push(compress::OutputNar {
-                        store_path,
-                        source: nar::NarSource::Path {
-                            store: Some(&self.store),
-                        },
-                    });
-                    continue;
-                }
-
                 let (store_path, raw) = {
                     let _phase = updater.phase(JobPhase::Download);
                     download::download_output(&mut download::JobUpdaterIo(updater), build_task)
@@ -836,6 +862,18 @@ mod tests {
 
         assert!(realised.is_empty());
         assert_eq!(missing, wanted);
+    }
+
+    /// A Build whose outputs are all on disk has nothing to build; handing it to the
+    /// daemon anyway costs a round trip, and a partial or pathless one still builds.
+    #[test]
+    fn only_a_build_with_every_output_on_disk_is_skipped() {
+        let out = || ("out".to_owned(), "/nix/store/a-out".to_owned());
+        let dev = || ("dev".to_owned(), "/nix/store/b-dev".to_owned());
+
+        assert!(fully_realised(&[out(), dev()], &[]));
+        assert!(!fully_realised(&[out()], &[dev()]));
+        assert!(!fully_realised(&[], &[]));
     }
 
     /// The sizes are left for the compress step, the way a real build reports the

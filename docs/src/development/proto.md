@@ -824,11 +824,13 @@ BuildSpec {
 | `Substitute` | Fetch each output's NAR from an upstream cache and repack it. No nix store, no dependency, nothing below an output. | Any worker. |
 | `Download` | Execute `builtin:fetchurl` directly: fetch the URL, verify the fixed output hash, pack the result as a one-file NAR. No nix store, no dependency. | Any worker. |
 
-Both fetching kinds ask the local store first. An output already on disk is
-already realised: it is packed from there and reported as substituted, and no
-upstream or URL is contacted for it. The ask is best-effort, because a worker
-without nix is exactly what these two kinds are for - a store that cannot answer
-is read as "not here", and every path is fetched as before.
+Every kind asks the local store first. An output already on disk is already
+realised: it is packed from there and reported as substituted, and no upstream
+or URL is contacted for it. A `Build` whose every output is on disk never
+reaches the daemon; one with only some of them builds as usual, since the
+builder produces them together. The ask is best-effort, because a worker without
+nix is exactly what the fetching kinds are for - a store that cannot answer is
+read as "not here", and every path is fetched as before.
 
 Every kind ends in the same push: the outputs it produced, and only those.
 
