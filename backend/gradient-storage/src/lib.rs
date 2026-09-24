@@ -11,6 +11,7 @@ pub mod hot;
 mod layout;
 pub mod log;
 pub mod log_chunk;
+mod multipart;
 pub mod nar;
 pub mod nar_extract;
 pub mod partial;

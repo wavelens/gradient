@@ -2693,6 +2693,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "wiremock",
  "zstd",
 ]
 

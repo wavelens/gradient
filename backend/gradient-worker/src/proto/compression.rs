@@ -481,6 +481,7 @@ mod tests {
             file_size: None,
             nar_size: Some(123),
             url: None,
+            multipart: None,
             nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
             file_hash: None,
             references: None,
@@ -506,6 +507,7 @@ mod tests {
             file_size: None,
             nar_size: Some(0),
             url: None,
+            multipart: None,
             nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
             file_hash: None,
             references: Some(vec![
@@ -536,6 +538,7 @@ mod tests {
             file_size: None,
             nar_size: Some(0),
             url: None,
+            multipart: None,
             nar_hash: None,
             file_hash: None,
             references: None,

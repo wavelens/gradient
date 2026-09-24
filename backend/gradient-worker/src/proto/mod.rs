@@ -12,6 +12,7 @@ pub mod eval_cache_recv;
 pub mod job;
 pub mod nar;
 pub(crate) mod nar_daemon_import;
+pub(crate) mod nar_multipart;
 pub mod nar_recv;
 pub(crate) mod prefetch;
 pub mod scorer;

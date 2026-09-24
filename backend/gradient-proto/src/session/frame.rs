@@ -970,6 +970,7 @@ mod tests {
                 references: Vec::new(),
                 deriver: None,
                 ca: None,
+                multipart: None,
             }
             .is_bulk(),
             "the frames it must stay behind ride it too"
@@ -1113,6 +1114,7 @@ mod tests {
                 nar_size: Some(1),
                 // Presigned PUT URLs are the largest field a reply can carry.
                 url: Some(format!("https://s3.example.com{p}?{}", "x".repeat(512))),
+                multipart: None,
                 nar_hash: Some(format!("sha256:{}", "y".repeat(52))),
                 file_hash: Some(format!("sha256:{}", "z".repeat(52))),
                 references: None,
@@ -1242,6 +1244,31 @@ mod codec_tests {
             references: vec![],
             deriver: None,
             ca: Some("text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944".into()),
+            multipart: None,
+        };
+        let decoded = ClientMessage::decode(original.encode().expect("encodes"))
+            .expect("decodes")
+            .into_message()
+            .expect("deserialises");
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn nar_uploaded_round_trips_multipart_receipt() {
+        let original = ClientMessage::NarUploaded {
+            job_id: "job-1".into(),
+            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-huge".into(),
+            file_hash: "sha256:abc".into(),
+            file_size: 10,
+            nar_size: 20,
+            nar_hash: "sha256:def".into(),
+            references: vec![],
+            deriver: None,
+            ca: None,
+            multipart: Some(Box::new(gradient_types::proto::CompletedMultipart {
+                upload_id: "up-1".into(),
+                etags: vec!["\"e1\"".into(), "\"e2\"".into()],
+            })),
         };
         let decoded = ClientMessage::decode(original.encode().expect("encodes"))
             .expect("decodes")

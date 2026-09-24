@@ -102,7 +102,7 @@ pub struct NarStore {
 /// Slowest write we are willing to wait out. Sets how [`single_write_budget`]
 /// scales with payload size; well under any healthy link, since the budget only
 /// has to separate "slow" from "wedged forever".
-const MIN_WRITE_THROUGHPUT_BYTES_PER_SEC: u64 = 256 * 1024;
+pub(crate) const MIN_WRITE_THROUGHPUT_BYTES_PER_SEC: u64 = 256 * 1024;
 
 /// Ceiling for one single-shot object write. A whole payload goes out as one
 /// request with no progress signal to watch, so the bound has to be a duration -
@@ -603,6 +603,39 @@ impl NarStore {
     ) -> Result<Option<String>> {
         self.presign_object(reqwest::Method::PUT, &self.object_path(hash), expires_in)
             .await
+    }
+
+    /// Open a multipart upload for the NAR `hash` and presign its parts, or
+    /// `None` on a store that cannot presign.
+    pub async fn presigned_multipart(
+        &self,
+        hash: &str,
+        nar_size: u64,
+    ) -> Result<Option<gradient_types::proto::PresignedMultipart>> {
+        let Some(s3) = &self.s3_signer else {
+            return Ok(None);
+        };
+        crate::multipart::presign(s3, &self.object_path(hash), nar_size)
+            .await
+            .map(Some)
+    }
+
+    pub async fn complete_multipart(
+        &self,
+        hash: &str,
+        receipt: &gradient_types::proto::CompletedMultipart,
+    ) -> Result<()> {
+        let s3 = self
+            .s3_signer
+            .as_ref()
+            .context("multipart upload reported to a store without S3")?;
+        crate::multipart::complete(s3, &self.object_path(hash), receipt).await
+    }
+
+    pub async fn abort_multipart(&self, hash: &str, upload_id: &str) {
+        if let Some(s3) = &self.s3_signer {
+            crate::multipart::abort(s3, &self.object_path(hash), upload_id).await;
+        }
     }
 
     /// Object-store path for a fleet-shared eval-cache blob keyed by flake

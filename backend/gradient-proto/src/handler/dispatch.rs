@@ -294,10 +294,11 @@ impl<'a> DispatchContext<'a> {
                 references,
                 deriver,
                 ca,
+                multipart,
             } => {
                 self.on_nar_uploaded(
                     job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
-                    deriver, ca, nar,
+                    deriver, ca, multipart, nar,
                 )
                 .await;
                 true

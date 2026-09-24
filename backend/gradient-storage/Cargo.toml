@@ -42,3 +42,6 @@ zstd                           = { workspace = true }
 
 async-compression = { workspace = true }
 tar               = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }

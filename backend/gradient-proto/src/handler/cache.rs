@@ -257,13 +257,27 @@ pub(crate) enum Transport {
     Presigned,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PushTransport {
+    Relay,
+    Put,
+    Multipart,
+}
+
 /// Upload transport for an uncached path: relay unless the store can presign
-/// and the NAR is over the small-NAR threshold.
-pub(crate) fn push_transport(nar_size: u64, small_nar_bytes: u64, presigner: bool) -> Transport {
-    if presigner && nar_size > small_nar_bytes {
-        Transport::Presigned
+/// and the NAR is over the small-NAR threshold; past `MULTIPART_NAR_BYTES` a
+/// single PUT could hit S3's 5 GiB cap, so the upload goes in parts.
+pub(crate) fn push_transport(
+    nar_size: u64,
+    small_nar_bytes: u64,
+    presigner: bool,
+) -> PushTransport {
+    if !presigner || nar_size <= small_nar_bytes {
+        PushTransport::Relay
+    } else if nar_size > gradient_types::constants::MULTIPART_NAR_BYTES {
+        PushTransport::Multipart
     } else {
-        Transport::Relay
+        PushTransport::Put
     }
 }
 
@@ -323,6 +337,7 @@ async fn build_cached_entry(
             file_size: None,
             nar_size: None,
             url: None,
+            multipart: None,
             nar_hash: None,
             file_hash: None,
             references: None,
@@ -365,6 +380,7 @@ async fn build_cached_entry(
         file_size: file_size.map(|v| v as u64),
         nar_size: nar_size.map(|v| v as u64),
         url,
+        multipart: None,
         nar_hash: fields.nar_hash,
         file_hash: fields.file_hash,
         references: fields.references,
@@ -392,21 +408,22 @@ async fn build_uncached_push_entry(
         state.config.storage.small_nar_bytes,
         state.nar_storage.presigner_available(),
     );
-    let url = match transport {
-        Transport::Relay => None,
-        Transport::Presigned => match state.nar_storage.presigned_put_url(hash, expire).await {
-            Ok(u) => u,
-            Err(e) => {
-                error!(
-                    %hash,
-                    error = %e,
-                    "S3 presigned PUT URL generation failed; worker will fall back to \
-                     direct NarPush (this defeats S3 - check S3 credentials / endpoint / \
-                     region config)"
-                );
-                None
-            }
-        },
+    let (url, multipart) = match transport {
+        PushTransport::Relay => (None, None),
+        PushTransport::Put => (
+            presign_or_relay(
+                hash,
+                state.nar_storage.presigned_put_url(hash, expire).await,
+            ),
+            None,
+        ),
+        PushTransport::Multipart => (
+            None,
+            presign_or_relay(
+                hash,
+                state.nar_storage.presigned_multipart(hash, nar_size).await,
+            ),
+        ),
     };
 
     CachedPath {
@@ -415,6 +432,7 @@ async fn build_uncached_push_entry(
         file_size: None,
         nar_size: None,
         url,
+        multipart,
         nar_hash: None,
         file_hash: None,
         references: None,
@@ -422,6 +440,19 @@ async fn build_uncached_push_entry(
         deriver: None,
         ca: None,
     }
+}
+
+/// A failed presign degrades to the relay rather than failing the query.
+fn presign_or_relay<T>(hash: &str, grant: anyhow::Result<Option<T>>) -> Option<T> {
+    grant.unwrap_or_else(|e| {
+        error!(
+            %hash,
+            error = %e,
+            "S3 presigned upload grant failed; worker will fall back to direct NarPush \
+             (this defeats S3 - check S3 credentials / endpoint / region config)"
+        );
+        None
+    })
 }
 
 /// Serve upstream availability resolved once at eval time and persisted onto
@@ -469,6 +500,7 @@ async fn extend_with_persisted_upstream(
             file_size: row.file_size.map(|v| v as u64),
             nar_size: row.nar_size.map(|v| v as u64),
             url: Some(url),
+            multipart: None,
             nar_hash: row.nar_hash.clone(),
             file_hash: row.file_hash.clone(),
             references: expand_references(row.references.as_deref()),
@@ -946,18 +978,29 @@ mod tests {
 
     #[test]
     fn push_transport_relays_small_nars_and_presigns_large_ones() {
+        use gradient_types::constants::MULTIPART_NAR_BYTES;
         let threshold = 1024 * 1024;
-        assert_eq!(push_transport(1024, threshold, true), Transport::Relay);
-        assert_eq!(push_transport(threshold, threshold, true), Transport::Relay);
+        assert_eq!(push_transport(1024, threshold, true), PushTransport::Relay);
+        assert_eq!(
+            push_transport(threshold, threshold, true),
+            PushTransport::Relay
+        );
         assert_eq!(
             push_transport(threshold + 1, threshold, true),
-            Transport::Presigned
+            PushTransport::Put
         );
         assert_eq!(
-            push_transport(u64::MAX, threshold, true),
-            Transport::Presigned
+            push_transport(MULTIPART_NAR_BYTES, threshold, true),
+            PushTransport::Put
         );
-        assert_eq!(push_transport(u64::MAX, threshold, false), Transport::Relay);
+        assert_eq!(
+            push_transport(MULTIPART_NAR_BYTES + 1, threshold, true),
+            PushTransport::Multipart
+        );
+        assert_eq!(
+            push_transport(u64::MAX, threshold, false),
+            PushTransport::Relay
+        );
     }
 
     #[test]

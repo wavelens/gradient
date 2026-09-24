@@ -41,7 +41,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      or under `smallNarBytes` and pulls small or unconfirmed ones over the stream.
 /// v14: BuildSpec.kind (BuildSpecKind) replaces external_cached; CacheQuery.external;
 ///      QueryMode::PullClosure removed.
-pub const PROTO_VERSION: u16 = 14;
+/// v15: CachedPath.multipart grants a presigned multipart upload; NarUploaded.multipart
+///      returns its part ETags.
+pub const PROTO_VERSION: u16 = 15;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

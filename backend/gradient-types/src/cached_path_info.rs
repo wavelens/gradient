@@ -14,7 +14,18 @@
 //! preventing callers from accidentally reading metadata fields on uncached
 //! paths.
 
-use super::proto::CachedPath;
+use super::proto::{CachedPath, PresignedMultipart};
+
+/// Where an uncached path's NAR goes, as granted by a `CacheQuery {Push}`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UploadTarget<'a> {
+    /// No presigner: chunked `NarPush` over the WebSocket.
+    Relay,
+    /// One presigned S3 PUT.
+    Put(&'a str),
+    /// A presigned S3 multipart upload.
+    Multipart(&'a PresignedMultipart),
+}
 
 /// A zero-copy view of a [`CachedPath`] with the cached/uncached state
 /// encoded in the enum variant.
@@ -24,13 +35,11 @@ use super::proto::CachedPath;
 pub enum CachedPathInfo<'a> {
     /// The path is **not** present in the Gradient cache.
     ///
-    /// In [`QueryMode::Push`] contexts, `upload_url` holds a presigned S3 PUT
-    /// URL when the server uses object storage, or `None` when the server
-    /// expects a WebSocket direct `NarPush` transfer.
+    /// In [`QueryMode::Push`] contexts, `upload` says how the server wants
+    /// the NAR delivered.
     Uncached {
         path: &'a str,
-        /// Presigned PUT URL for S3-backed upload, or `None` for direct WS transfer.
-        upload_url: Option<&'a str>,
+        upload: UploadTarget<'a>,
     },
 
     /// The path **is** present in the Gradient cache.
@@ -77,7 +86,11 @@ impl CachedPath {
         } else {
             CachedPathInfo::Uncached {
                 path: &self.path,
-                upload_url: self.url.as_deref(),
+                upload: match (&self.multipart, &self.url) {
+                    (Some(multipart), _) => UploadTarget::Multipart(multipart),
+                    (None, Some(url)) => UploadTarget::Put(url),
+                    (None, None) => UploadTarget::Relay,
+                },
             }
         }
     }
@@ -96,6 +109,7 @@ mod tests {
             file_size: None,
             nar_size: None,
             url: Some("https://s3.example.com/put-url".into()),
+            multipart: None,
             nar_hash: None,
             file_hash: None,
             references: None,
@@ -112,6 +126,7 @@ mod tests {
             file_size: Some(1024),
             nar_size: Some(4096),
             url: Some("https://s3.example.com/get-url".into()),
+            multipart: None,
             nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
             file_hash: Some("sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf".into()),
             references: Some(vec!["/nix/store/cccc-dep".into()]),
@@ -125,9 +140,9 @@ mod tests {
     fn as_info_uncached_has_upload_url() {
         let cp = uncached_path();
         match cp.as_info() {
-            CachedPathInfo::Uncached { path, upload_url } => {
+            CachedPathInfo::Uncached { path, upload } => {
                 assert_eq!(path, "/nix/store/aaaa-pkg");
-                assert_eq!(upload_url, Some("https://s3.example.com/put-url"));
+                assert_eq!(upload, UploadTarget::Put("https://s3.example.com/put-url"));
             }
             other => panic!("expected Uncached, got {:?}", other),
         }
@@ -140,8 +155,28 @@ mod tests {
             ..uncached_path()
         };
         match cp.as_info() {
-            CachedPathInfo::Uncached { upload_url, .. } => {
-                assert_eq!(upload_url, None);
+            CachedPathInfo::Uncached { upload, .. } => {
+                assert_eq!(upload, UploadTarget::Relay);
+            }
+            other => panic!("expected Uncached, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn as_info_uncached_prefers_the_multipart_grant() {
+        let grant = PresignedMultipart {
+            upload_id: "up-1".into(),
+            part_size: 64,
+            part_urls: vec!["https://s3.example.com/part-1".into()],
+        };
+        let cp = CachedPath {
+            url: None,
+            multipart: Some(grant.clone()),
+            ..uncached_path()
+        };
+        match cp.as_info() {
+            CachedPathInfo::Uncached { upload, .. } => {
+                assert_eq!(upload, UploadTarget::Multipart(&grant));
             }
             other => panic!("expected Uncached, got {:?}", other),
         }

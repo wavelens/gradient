@@ -174,6 +174,7 @@ mod tests {
             file_size: None,
             nar_size: Some(nar().len() as u64),
             url: Some(format!("https://cache.example/{path}.nar.zst")),
+            multipart: None,
             nar_hash: Some(nar_hash.to_owned()),
             file_hash: None,
             references: Some(references.iter().map(|r| (*r).to_owned()).collect()),

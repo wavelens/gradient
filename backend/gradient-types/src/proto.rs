@@ -305,6 +305,26 @@ pub enum QueryMode {
     Push,
 }
 
+/// A presigned S3 multipart upload for one NAR. The worker PUTs part `i + 1`
+/// to `part_urls[i]`, each `part_size` compressed bytes except the last, and
+/// reports every part's `ETag` back in a [`CompletedMultipart`].
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct PresignedMultipart {
+    pub upload_id: String,
+    pub part_size: u64,
+    pub part_urls: Vec<String>,
+}
+
+/// The worker's receipt for a [`PresignedMultipart`]: the server completes the
+/// upload from these `ETag`s, given in part order.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct CompletedMultipart {
+    pub upload_id: String,
+    pub etags: Vec<String>,
+}
+
 /// A store path entry returned in [`CacheStatus`].
 ///
 /// `cached` indicates whether the path is already in the Gradient cache.
@@ -332,8 +352,12 @@ pub struct CachedPath {
     /// - [`QueryMode::Pull`]: GET URL to download the NAR from S3.
     /// - [`QueryMode::Push`]: PUT URL to upload the NAR to S3 (only set when
     ///   `cached` is `false`).
-    /// - `None`: use WebSocket direct transfer (`NarRequest` or `NarPush`).
+    /// - `None`: use WebSocket direct transfer (`NarRequest` or `NarPush`),
+    ///   unless `multipart` is set.
     pub url: Option<String>,
+    /// [`QueryMode::Push`] only: a presigned multipart upload, granted instead
+    /// of `url` for a NAR too large for a single PUT.
+    pub multipart: Option<PresignedMultipart>,
     /// SHA-256 of the uncompressed NAR in `sha256:<nix32>` format.
     /// Populated for cached paths in [`QueryMode::Pull`].
     pub nar_hash: Option<String>,

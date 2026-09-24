@@ -266,6 +266,7 @@ fn cache_status_roundtrip() {
                 file_size: Some(1024),
                 nar_size: Some(4096),
                 url: None,
+                multipart: None,
                 nar_hash: Some(
                     "sha256:0000000000000000000000000000000000000000000000000000".into(),
                 ),
@@ -283,6 +284,7 @@ fn cache_status_roundtrip() {
                 file_size: None,
                 nar_size: None,
                 url: Some("https://s3.example.com/nars/bb/bb.nar.zst".into()),
+                multipart: None,
                 nar_hash: None,
                 file_hash: None,
                 references: None,
@@ -317,6 +319,7 @@ fn cached_path_not_cached_no_url() {
         file_size: None,
         nar_size: None,
         url: None,
+        multipart: None,
         nar_hash: None,
         file_hash: None,
         references: None,

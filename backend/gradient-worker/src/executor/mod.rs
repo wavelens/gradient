@@ -65,6 +65,7 @@ async fn query_fetched_paths(
                     file_size: None,
                     nar_size: None,
                     url: None,
+                    multipart: None,
                     nar_hash: None,
                     file_hash: None,
                     references: None,
@@ -211,12 +212,12 @@ pub(crate) async fn upload_one_nar(
             tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
             Ok(())
         }
-        CachedPathInfo::Uncached { path, upload_url } => {
+        CachedPathInfo::Uncached { path, upload } => {
             nar::upload_nar(
                 &updater.job_id,
                 path,
                 source,
-                nar::NarSink::from_upload_url(upload_url, &updater.nar_recv),
+                nar::NarSink::from_upload_target(upload, &updater.nar_recv),
                 &updater.writer,
             )
             .await

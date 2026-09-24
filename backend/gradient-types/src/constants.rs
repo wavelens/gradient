@@ -23,3 +23,6 @@ pub const BULK_CHUNK_SIZE: usize = 512 * 1024;
 pub const NAR_EXTRACT_MAX_PREALLOC: usize = 16 * 1024 * 1024;
 /// Lifetime of presigned GET/PUT URLs handed to workers and cache clients.
 pub const PRESIGN_TTL: Duration = Duration::from_secs(3600);
+/// NARs above this size are pushed as a presigned multipart upload, since a
+/// single S3 PUT is capped at 5 GiB.
+pub const MULTIPART_NAR_BYTES: u64 = 1024 * 1024 * 1024;

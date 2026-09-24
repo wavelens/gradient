@@ -11,8 +11,10 @@
 //! - **Relay**: chunked [`ClientMessage::NarPush`] frames over the WebSocket
 //!   with the resume handshake (issue #225); used when the server's cache is
 //!   local-disk and the `CacheQuery{Push}` reply carries no URL.
-//! - **Presigned**: HTTP PUT to the URL from the `CacheQuery{Push}` reply's
+//! - **Put**: HTTP PUT to the URL from the `CacheQuery{Push}` reply's
 //!   `CachedPath.url` (S3-backed cache).
+//! - **Multipart**: presigned S3 multipart upload from `CachedPath.multipart`,
+//!   for NARs too large for one PUT.
 //!
 //! Every transfer confirms with [`ClientMessage::NarUploaded`].
 
@@ -32,7 +34,10 @@ use gradient_sources::{nix_store_path, strip_store_prefix};
 
 use crate::connection::ProtoWriter;
 use crate::nix::store::LocalNixStore;
+use crate::proto::nar_multipart::{PartSink, PartUploader};
 use crate::proto::nar_recv::NarReceiver;
+use gradient_types::UploadTarget;
+use gradient_types::proto::{CompletedMultipart, PresignedMultipart};
 
 /// `sha256:<nix32>` of `data` - the wire format for NAR and file hashes.
 pub(crate) fn sha256_nix32(data: &[u8]) -> String {
@@ -150,27 +155,21 @@ pub enum NarSource<'a> {
 
 /// Where the NAR bytes go.
 pub enum NarSink<'a> {
-    /// HTTP PUT to a presigned URL (S3-backed cache).
-    Presigned {
-        url: &'a str,
-        method: &'a str,
-        headers: &'a [(String, String)],
-    },
+    /// One HTTP PUT to a presigned URL (S3-backed cache).
+    Put { url: &'a str },
+    /// Parts PUT to presigned `UploadPart` URLs (S3-backed cache, large NARs).
+    Multipart { grant: &'a PresignedMultipart },
     /// Chunked `NarPush` frames over the WebSocket with resume handshake.
     Relay { nar_recv: &'a NarReceiver },
 }
 
 impl<'a> NarSink<'a> {
-    /// The transport decision made by the server: a `CacheQuery{Push}` reply
-    /// with a URL means presigned PUT, without one means WebSocket relay.
-    pub fn from_upload_url(url: Option<&'a str>, nar_recv: &'a NarReceiver) -> Self {
-        match url {
-            Some(url) => NarSink::Presigned {
-                url,
-                method: "PUT",
-                headers: &[],
-            },
-            None => NarSink::Relay { nar_recv },
+    /// The transport decision the server made in its `CacheQuery{Push}` reply.
+    pub fn from_upload_target(target: UploadTarget<'a>, nar_recv: &'a NarReceiver) -> Self {
+        match target {
+            UploadTarget::Put(url) => NarSink::Put { url },
+            UploadTarget::Multipart(grant) => NarSink::Multipart { grant },
+            UploadTarget::Relay => NarSink::Relay { nar_recv },
         }
     }
 }
@@ -205,28 +204,36 @@ pub async fn upload_nar(
             // a NAR the server can never confirm - wasted bandwidth and an
             // orphan object or half-written upload it has to garbage-collect.
             let path_meta = resolve_path_meta(store, store_path).await?;
-            let meta = match sink {
+            let threads = compression_threads(path_meta.nar_size);
+            let (meta, multipart) = match sink {
                 NarSink::Relay { nar_recv } => {
                     debug!(store_path, "NAR direct push");
-                    stream_path_to_relay(
-                        job_id,
-                        store_path,
-                        writer,
-                        nar_recv,
-                        compression_threads(path_meta.nar_size),
-                    )
-                    .await?
+                    let meta =
+                        stream_path_to_relay(job_id, store_path, writer, nar_recv, threads).await?;
+                    (meta, None)
                 }
-                NarSink::Presigned {
-                    url,
-                    method,
-                    headers,
-                } => {
-                    debug!(store_path, method, "presigned NAR upload");
+                NarSink::Put { url } => {
+                    debug!(store_path, "presigned NAR upload");
                     let (compressed, meta) =
                         pack_compress_path(store_path, path_meta.nar_size).await?;
-                    http_put(url, method, headers, compressed).await?;
-                    meta
+                    http_put(url, compressed).await?;
+                    (meta, None)
+                }
+                NarSink::Multipart { grant } => {
+                    debug!(
+                        store_path,
+                        parts = grant.part_urls.len(),
+                        "presigned multipart NAR upload"
+                    );
+                    let mut uploader = PartUploader::new(grant);
+                    let meta = pack_path_in_parts(
+                        store_path,
+                        threads,
+                        uploader.part_size(),
+                        &mut uploader,
+                    )
+                    .await?;
+                    (meta, Some(uploader.finish().await?))
                 }
             };
             send_nar_uploaded(
@@ -237,6 +244,7 @@ pub async fn upload_nar(
                 path_meta.references,
                 path_meta.deriver,
                 path_meta.ca,
+                multipart,
             )
             .await
         }
@@ -249,7 +257,7 @@ pub async fn upload_nar(
             let (compressed, meta) = tokio::task::spawn_blocking(move || compress_nar(&nar))
                 .await
                 .context("compress task panicked")??;
-            match sink {
+            let multipart = match sink {
                 NarSink::Relay { nar_recv } => {
                     debug!(store_path, bytes = compressed.len(), "raw NAR direct push");
                     let mut relay = RelayStream::open(
@@ -264,17 +272,26 @@ pub async fn upload_nar(
                         relay.send_part(part.to_vec()).await?;
                     }
                     relay.finish().await?;
+                    None
                 }
-                NarSink::Presigned {
-                    url,
-                    method,
-                    headers,
-                } => {
-                    debug!(store_path, method, "raw presigned NAR upload");
-                    http_put(url, method, headers, compressed).await?;
+                NarSink::Put { url } => {
+                    debug!(store_path, "raw presigned NAR upload");
+                    http_put(url, compressed).await?;
+                    None
                 }
-            }
-            send_nar_uploaded(writer, job_id, store_path, meta, references, deriver, ca).await
+                NarSink::Multipart { grant } => {
+                    debug!(store_path, "raw presigned multipart NAR upload");
+                    let mut uploader = PartUploader::new(grant);
+                    for part in compressed.chunks(uploader.part_size()) {
+                        uploader.send_part(part.to_vec()).await?;
+                    }
+                    Some(uploader.finish().await?)
+                }
+            };
+            send_nar_uploaded(
+                writer, job_id, store_path, meta, references, deriver, ca, multipart,
+            )
+            .await
         }
     }
 }
@@ -323,23 +340,6 @@ impl<'a> RelayStream<'a> {
         })
     }
 
-    async fn send_part(&mut self, part: Vec<u8>) -> Result<()> {
-        let part_len = part.len() as u64;
-        if let Some((offset, data)) = part_to_send(part, self.produced, self.resume_from) {
-            self.writer
-                .send(ClientMessage::NarPush {
-                    job_id: self.job_id.to_owned(),
-                    store_path: self.store_path.to_owned(),
-                    data,
-                    offset,
-                    is_final: false,
-                })
-                .await?;
-        }
-        self.produced += part_len;
-        Ok(())
-    }
-
     /// Empty final chunk signals end-of-path; `offset` is the full size.
     /// Returns `(produced, resume_from)`.
     async fn finish(self) -> Result<(u64, u64)> {
@@ -356,27 +356,43 @@ impl<'a> RelayStream<'a> {
     }
 }
 
-/// Pack + compress `store_path` on `threads` zstd workers and stream the
-/// compressed parts to the relay, hashing as they go so nothing is buffered
-/// beyond one chunk. The encoder's final flush is split the same way: a
-/// multithreaded encoder holds whole jobs back until `finish`, so that tail runs
-/// to tens of MiB on a large source, and one frame over `MAX_PROTO_MESSAGE_SIZE`
-/// closes the session and fails the job.
-async fn stream_path_to_relay(
-    job_id: &str,
-    store_path: &str,
-    writer: &ProtoWriter,
-    nar_recv: &NarReceiver,
-    threads: u32,
-) -> Result<CompressedNarMeta> {
-    let mut relay = RelayStream::open(job_id, store_path, writer, nar_recv, None).await?;
+impl PartSink for RelayStream<'_> {
+    async fn send_part(&mut self, part: Vec<u8>) -> Result<()> {
+        let part_len = part.len() as u64;
+        if let Some((offset, data)) = part_to_send(part, self.produced, self.resume_from) {
+            self.writer
+                .send(ClientMessage::NarPush {
+                    job_id: self.job_id.to_owned(),
+                    store_path: self.store_path.to_owned(),
+                    data,
+                    offset,
+                    is_final: false,
+                })
+                .await?;
+        }
+        self.produced += part_len;
+        Ok(())
+    }
+}
 
+/// Pack + compress `store_path` on `threads` zstd workers into `part_size`
+/// pieces for `sink`, hashing as they go so nothing is buffered beyond one
+/// part. The encoder's final flush is split the same way: a multithreaded
+/// encoder holds whole jobs back until `finish`, so that tail runs to tens of
+/// MiB on a large source, and one relay frame over `MAX_PROTO_MESSAGE_SIZE`
+/// closes the session and fails the job.
+async fn pack_path_in_parts(
+    store_path: &str,
+    threads: u32,
+    part_size: usize,
+    sink: &mut impl PartSink,
+) -> Result<CompressedNarMeta> {
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
-    let mut encoder = nar_encoder(Vec::with_capacity(BULK_CHUNK_SIZE * 2), threads)?;
+    let mut encoder = nar_encoder(Vec::with_capacity(part_size * 2), threads)?;
     let mut file_hasher = Sha256::new();
     let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
-    let started = std::time::Instant::now();
+    let mut file_size: u64 = 0;
 
     while let Some(chunk_result) = nar_stream.next().await {
         let chunk = chunk_result.context("NAR stream error")?;
@@ -387,19 +403,39 @@ async fn stream_path_to_relay(
             .context("zstd compression failed")?;
 
         let buf = encoder.get_mut();
-        while buf.len() >= BULK_CHUNK_SIZE {
-            let part: Vec<u8> = buf.drain(..BULK_CHUNK_SIZE).collect();
+        while buf.len() >= part_size {
+            let part: Vec<u8> = buf.drain(..part_size).collect();
             file_hasher.update(&part);
-            relay.send_part(part).await?;
+            file_size += part.len() as u64;
+            sink.send_part(part).await?;
         }
     }
 
     let remaining = encoder.finish().context("failed to finish zstd encoder")?;
-    for part in remaining.chunks(BULK_CHUNK_SIZE) {
+    for part in remaining.chunks(part_size) {
         file_hasher.update(part);
-        relay.send_part(part.to_vec()).await?;
+        file_size += part.len() as u64;
+        sink.send_part(part.to_vec()).await?;
     }
 
+    Ok(CompressedNarMeta {
+        file_hash: finalize_nix32(file_hasher),
+        file_size,
+        nar_hash: finalize_nix32(nar_hasher),
+        nar_size,
+    })
+}
+
+async fn stream_path_to_relay(
+    job_id: &str,
+    store_path: &str,
+    writer: &ProtoWriter,
+    nar_recv: &NarReceiver,
+    threads: u32,
+) -> Result<CompressedNarMeta> {
+    let mut relay = RelayStream::open(job_id, store_path, writer, nar_recv, None).await?;
+    let started = std::time::Instant::now();
+    let meta = pack_path_in_parts(store_path, threads, BULK_CHUNK_SIZE, &mut relay).await?;
     let (produced, resume_from) = relay.finish().await?;
 
     let sent = produced.saturating_sub(resume_from);
@@ -412,13 +448,7 @@ async fn stream_path_to_relay(
         resumed_from = resume_from,
         "direct NAR push complete"
     );
-
-    Ok(CompressedNarMeta {
-        file_hash: finalize_nix32(file_hasher),
-        file_size: produced,
-        nar_hash: finalize_nix32(nar_hasher),
-        nar_size,
-    })
+    Ok(meta)
 }
 
 // ── Presigned transport ───────────────────────────────────────────────────────
@@ -453,23 +483,11 @@ async fn pack_compress_path(
     Ok((compressed, meta))
 }
 
-async fn http_put(
-    url: &str,
-    method: &str,
-    headers: &[(String, String)],
-    body: Vec<u8>,
-) -> Result<()> {
-    let client = crate::http::client();
-    let http_method = reqwest::Method::from_bytes(method.as_bytes())
-        .with_context(|| format!("invalid HTTP method: {method}"))?;
-    let mut req = client
-        .request(http_method, url)
+async fn http_put(url: &str, body: Vec<u8>) -> Result<()> {
+    let resp = crate::http::client()
+        .put(url)
         .header("Content-Type", "application/x-nix-nar")
-        .body(body);
-    for (name, value) in headers {
-        req = req.header(name.as_str(), value.as_str());
-    }
-    let resp = req
+        .body(body)
         .send()
         .await
         .context("HTTP request to presigned URL failed")?;
@@ -483,6 +501,10 @@ async fn http_put(
 
 // ── Confirmation ──────────────────────────────────────────────────────────────
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mirrors the NarUploaded wire fields; refactor tracked in #503"
+)]
 async fn send_nar_uploaded(
     writer: &ProtoWriter,
     job_id: &str,
@@ -491,6 +513,7 @@ async fn send_nar_uploaded(
     references: Vec<String>,
     deriver: Option<String>,
     ca: Option<String>,
+    multipart: Option<CompletedMultipart>,
 ) -> Result<()> {
     debug!(
         store_path,
@@ -510,6 +533,7 @@ async fn send_nar_uploaded(
             references,
             deriver,
             ca,
+            multipart: multipart.map(Box::new),
         })
         .await
 }
@@ -1018,17 +1042,79 @@ mod tests {
             "job-xyz",
             &store_path_str,
             NarSource::Path { store: None },
-            NarSink::Presigned {
-                url: &http_url,
-                method: "PUT",
-                headers: &[],
-            },
+            NarSink::Put { url: &http_url },
             &writer,
         )
         .await
         .unwrap();
 
         server_task.await.unwrap();
+        let _ = std::fs::remove_dir_all(&store_path);
+    }
+
+    #[tokio::test]
+    async fn path_multipart_uploads_parts_and_reports_their_etags() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+
+        let store_path = make_temp_store_path();
+        let store_path_str = store_path.to_str().unwrap().to_owned();
+
+        let s3 = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .respond_with(|req: &Request| {
+                ResponseTemplate::new(200).insert_header("ETag", format!("\"{}\"", req.url.path()))
+            })
+            .mount(&s3)
+            .await;
+        let grant = PresignedMultipart {
+            upload_id: "up-1".into(),
+            part_size: 16,
+            part_urls: (1..=4096).map(|i| format!("{}/{i:05}", s3.uri())).collect(),
+        };
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            match sc.recv().await.unwrap() {
+                ClientMessage::NarUploaded {
+                    file_hash,
+                    file_size,
+                    multipart: Some(receipt),
+                    ..
+                } => (file_hash, file_size, receipt),
+                msg => panic!("expected a multipart NarUploaded, got {msg:?}"),
+            }
+        });
+
+        let conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader, _flush) = conn.split();
+        upload_nar(
+            "job-multipart",
+            &store_path_str,
+            NarSource::Path { store: None },
+            NarSink::Multipart { grant: &grant },
+            &writer,
+        )
+        .await
+        .unwrap();
+
+        let (file_hash, file_size, receipt) = server_task.await.unwrap();
+        let mut parts = s3.received_requests().await.unwrap();
+        parts.sort_by(|a, b| a.url.path().cmp(b.url.path()));
+        let expected_etags: Vec<String> = parts
+            .iter()
+            .map(|r| format!("\"{}\"", r.url.path()))
+            .collect();
+        assert_eq!(receipt.upload_id, "up-1");
+        assert_eq!(receipt.etags, expected_etags);
+        assert!(parts.len() > 1, "a 16-byte part size must split the NAR");
+        let object: Vec<u8> = parts.iter().flat_map(|r| r.body.clone()).collect();
+        assert_eq!(object.len() as u64, file_size);
+        assert_eq!(sha256_nix32(&object), file_hash);
         let _ = std::fs::remove_dir_all(&store_path);
     }
 
@@ -1106,11 +1192,7 @@ mod tests {
             NarSource::Path {
                 store: Some(&store),
             },
-            NarSink::Presigned {
-                url: &http_url,
-                method: "PUT",
-                headers: &[],
-            },
+            NarSink::Put { url: &http_url },
             &writer,
         )
         .await
@@ -1232,11 +1314,7 @@ mod tests {
                 deriver: None,
                 ca: Some(ca.to_string()),
             },
-            NarSink::Presigned {
-                url: &http_url,
-                method: "PUT",
-                headers: &[],
-            },
+            NarSink::Put { url: &http_url },
             &writer,
         )
         .await
@@ -1282,11 +1360,7 @@ mod tests {
                 deriver: None,
                 ca: None,
             },
-            NarSink::Presigned {
-                url: &http_url,
-                method: "PUT",
-                headers: &[],
-            },
+            NarSink::Put { url: &http_url },
             &writer,
         )
         .await

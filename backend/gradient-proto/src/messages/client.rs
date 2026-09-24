@@ -5,8 +5,8 @@
  */
 
 use gradient_types::proto::{
-    BuildFailureKind, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
-    JobPhaseSpan, JobUpdateKind, QueryMode,
+    BuildFailureKind, CandidateScore, CompletedMultipart, EvalMessageLevel, GradientCapabilities,
+    JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -168,6 +168,9 @@ pub enum ClientMessage {
         /// (`text:sha256:<b32>` / `fixed:[r:]sha256:<b32>`), when the path is
         /// content-addressed. `None` for input-addressed paths.
         ca: Option<String>,
+        /// Set when the bytes went up as a presigned multipart upload, which
+        /// the server completes before verifying the object.
+        multipart: Option<Box<CompletedMultipart>>,
     },
 
     /// Opens a push stream for `store_path`; sent before the first `NarPush`.

@@ -17,6 +17,7 @@ use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_scheduler::Scheduler;
 use gradient_storage::{NarSource, PartialWriter, StagedFile};
+use gradient_types::proto::CompletedMultipart;
 use gradient_util::shutdown::Shutdown;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, trace, warn};
@@ -759,6 +760,7 @@ impl<'a> DispatchContext<'a> {
         references: Vec<String>,
         deriver: Option<String>,
         ca: Option<String>,
+        multipart: Option<Box<CompletedMultipart>>,
         nar: &mut NarReceiveStore,
     ) {
         trace!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, ?ca, "NarUploaded");
@@ -838,6 +840,7 @@ impl<'a> DispatchContext<'a> {
                 references,
                 deriver,
                 ca,
+                multipart,
                 staged,
                 guard,
             })
@@ -871,6 +874,7 @@ struct CommitUploadedNar {
     references: Vec<String>,
     deriver: Option<String>,
     ca: Option<String>,
+    multipart: Option<Box<CompletedMultipart>>,
     staged: Option<StagedNar>,
     /// Released when this task ends, however it ends.
     guard: CommitGuard,
@@ -921,6 +925,7 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
                 &c.hash,
                 &c.file_hash,
                 c.file_size,
+                c.multipart.as_deref(),
             )
             .await
             {
@@ -1101,8 +1106,8 @@ async fn discard_staged(path: &std::path::Path) {
     }
 }
 
-/// Commit a presigned (S3) upload: the worker already PUT the bytes directly,
-/// so [`NarStore::verify`] confirms the object exists at the reported
+/// Commit a presigned (S3) upload: the worker already PUT the bytes directly
+/// (completing a multipart upload first), so [`NarStore::verify`] confirms the object exists at the reported
 /// `file_size`; with `nar_verify_digest` enabled it also rehashes the object
 /// against `file_hash`. Returns `false` (after failing the build transiently)
 /// on any mismatch.
@@ -1120,7 +1125,20 @@ async fn commit_presigned(
     hash: &str,
     file_hash: &str,
     file_size: u64,
+    multipart: Option<&CompletedMultipart>,
 ) -> bool {
+    if let Some(receipt) = multipart
+        && let Err(e) = state.nar_storage.complete_multipart(hash, receipt).await
+    {
+        state
+            .nar_storage
+            .abort_multipart(hash, &receipt.upload_id)
+            .await;
+        let reason = format!("presigned multipart NAR upload could not be completed: {e:#}");
+        error!(%peer_id, %job_id, %store_path, %reason, "presigned multipart NAR upload failed");
+        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+        return false;
+    }
     let rehash = state.config.storage.nar_verify_digest;
     match state
         .nar_storage
