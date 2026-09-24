@@ -23,7 +23,7 @@ import { formatCpuTime } from '../format';
         <gr-stat-card compact label="Builds" [value]="count(s.builds_completed)" />
         <gr-stat-card compact label="Cache size" [value]="bytes(s.cache_size_bytes)" />
         <gr-stat-card compact label="Workers busy" [value]="s.workers.online ? s.workers.busy_pct + '%' : '-'" />
-        <gr-stat-card compact label="Queue wait" [value]="wait(s.queue_wait_p50_ms)" />
+        <gr-stat-card compact label="Avg. Queue wait" [value]="wait(s.queue_wait_p50_ms)" />
       </gr-card-grid>
     } @else if (failed()) {
       <gr-message-banner type="error">

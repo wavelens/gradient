@@ -44,7 +44,7 @@ describe('DashboardStatsComponent', () => {
       Builds: '1.28M',
       'Cache size': '2.4 TiB',
       'Workers busy': '72%',
-      'Queue wait': '38.0 s',
+      'Avg. Queue wait': '38.0 s',
     });
   });
 

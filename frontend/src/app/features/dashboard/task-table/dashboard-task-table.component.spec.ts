@@ -94,7 +94,7 @@ describe('DashboardTaskTableComponent', () => {
       c.querySelector('b')?.textContent?.trim(),
       c.querySelector('small')?.textContent?.trim(),
     ]);
-    expect(values).toEqual([['41/45', 'entry points'], ['+3', 'change'], ['14m 00s', 'speed']]);
+    expect(values).toEqual([['41/45', 'entry points'], ['+3', 'change'], ['14m 00s', 'duration']]);
   });
 
   it('names the full project and task on a truncated task name', () => {
