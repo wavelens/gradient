@@ -62,11 +62,12 @@
 }
 
 .row.is-link .row-info,
+.row.is-link .row-actions,
 .row.is-link .row-chevron {
   pointer-events: none;
 }
 
-.row.is-link .row-info :is(a, button) {
+.row.is-link :is(.row-info, .row-actions) :is(a, button) {
   pointer-events: auto;
 }
 
@@ -77,6 +78,7 @@
 
 .row-info {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: $spacing-md;
   min-width: 0;
