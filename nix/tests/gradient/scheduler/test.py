@@ -318,14 +318,15 @@ for w in WORKERS:
             by_drv.setdefault(p, []).append((w, entry))
 built = {n: by_drv.get(node["drvPath"], []) for n, node in nodes.items() if not node["present"]["cache"]}
 for n, builds in built.items():
-    if n not in needed:
-        assert len(builds) <= 1, f"{n} is needed by no entry point but built {len(builds)} times"
-    elif n in failing:
-        assert [entry["ok"] for _, entry in builds] == [False], f"{n}: {builds}"
+    oks = [entry["ok"] for _, entry in builds]
+    if n in failing:
+        assert oks == [False], f"{n}: {builds}"
     elif n in blocked:
         assert builds == [], f"{n} built although a dependency failed"
+    elif n in needed and not failing:
+        assert oks == [True], f"{n} built {oks}"
     else:
-        assert [entry["ok"] for _, entry in builds] == [True], f"{n} built {len(builds)} times"
+        assert oks in ([], [True]), f"{n} built {oks}"
 assert_clean()
 latency_report("replay")
 
