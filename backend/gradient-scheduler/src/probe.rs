@@ -26,7 +26,7 @@ use gradient_core::ServerState;
 use gradient_entity::StorePath;
 use gradient_types::*;
 use gradient_util::supervision::ChildSpec;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::debug;
@@ -94,7 +94,8 @@ async fn probe_pass(
     }
 
     while !requested.is_empty() {
-        probe_round(state, fresh(requested, seen).await).await?;
+        let unanswered = probe_round(state, fresh(requested, seen).await).await?;
+        forget(seen, &unanswered).await;
         if started.elapsed() > PROBE_DESCENT {
             break;
         }
@@ -106,14 +107,19 @@ async fn probe_pass(
 }
 
 /// Ask for one level and record its answer: the hits go to the graph actor, then
-/// the whole level is marked answered, which is what lets demand descend past a
-/// miss. The recompute that follows reports the next level through the channel.
-async fn probe_round(state: &Arc<ServerState>, anchors: Vec<DerivationId>) -> Result<()> {
+/// the anchors the plan could answer for are marked, which is what lets demand
+/// descend past a miss. The recompute that follows reports the next level through
+/// the channel. Returns the anchors left unanswered.
+async fn probe_round(
+    state: &Arc<ServerState>,
+    anchors: Vec<DerivationId>,
+) -> Result<Vec<DerivationId>> {
     if anchors.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
-    for (evaluation, targets) in plan_probes(state, &anchors).await? {
+    let plan = plan_probes(state, &anchors).await?;
+    for (evaluation, targets) in plan.rounds {
         for chunk in targets.chunks(PROBE_BATCH) {
             let hits = crate::eval::probe_outputs(state, &evaluation, chunk.to_vec()).await;
             // Logged before the miss returns: a round that asks and finds nothing is
@@ -134,14 +140,19 @@ async fn probe_round(state: &Arc<ServerState>, anchors: Vec<DerivationId>) -> Re
         }
     }
 
-    // Last, and for the whole level including what was never asked: an anchor with
-    // no output left to ask about has its answer too, and demand stops at an
-    // unanswered anchor.
+    // Last, and including what was never asked: an anchor whose every output is
+    // already cached has its answer too, and demand stops at an unanswered anchor.
     state
         .graph
-        .upstream_probed(anchors)
+        .upstream_probed(plan.answered.clone())
         .await
-        .context("record the anchors this round answered for")
+        .context("record the anchors this round answered for")?;
+
+    let answered: HashSet<DerivationId> = plan.answered.into_iter().collect();
+    Ok(anchors
+        .into_iter()
+        .filter(|a| !answered.contains(a))
+        .collect())
 }
 
 /// Everything the channel holds: the anchors some commit reported as newly
@@ -177,16 +188,27 @@ async fn sweep_due(swept: &Mutex<Instant>) -> bool {
 /// [`PROBE_SWEEP`]; the two columns are the partial index's, so a healthy server's
 /// empty answer is free.
 async fn unanswered_demand(state: &Arc<ServerState>) -> Result<Vec<DerivationId>> {
-    Ok(EDerivationBuild::find()
-        .filter(CDerivationBuild::Probed.eq(false))
-        .filter(CDerivationBuild::Demanded.eq(true))
-        .limit(PROBE_BATCH as u64)
+    Ok(unanswered_demand_query()
         .all(&state.worker_db)
         .await
         .context("find demand the upstream probe was never asked about")?
         .into_iter()
         .map(|a| a.derivation)
         .collect())
+}
+
+/// Demanded, unanswered and walked. A stub is waiting for the walk, which hands it
+/// to the probe when its record lands.
+fn unanswered_demand_query() -> sea_orm::Select<EDerivationBuild> {
+    EDerivationBuild::find()
+        .join(
+            JoinType::InnerJoin,
+            gradient_entity::derivation_build::Relation::Derivation.def(),
+        )
+        .filter(CDerivationBuild::Probed.eq(false))
+        .filter(CDerivationBuild::Demanded.eq(true))
+        .filter(CDerivation::Walked.eq(true))
+        .limit(PROBE_BATCH as u64)
 }
 
 /// The anchors of `requested` not asked for inside [`PROBE_MEMORY`], recorded as
@@ -216,16 +238,54 @@ async fn fresh(
     fresh
 }
 
+/// Lets an anchor left unanswered through [`fresh`] again, since the walk resends
+/// it once its record lands.
+async fn forget(seen: &Mutex<HashMap<DerivationId, Instant>>, unanswered: &[DerivationId]) {
+    if unanswered.is_empty() {
+        return;
+    }
+
+    let mut seen = seen.lock().await;
+    for d in unanswered {
+        seen.remove(d);
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ProbePlan {
+    /// What to ask, grouped by an evaluation naming the anchor.
+    pub rounds: Vec<(MEvaluation, Vec<(String, String)>)>,
+    /// The anchors this round answers for: demanded, with their outputs recorded.
+    pub answered: Vec<DerivationId>,
+}
+
 /// What one round will ask, grouped by an evaluation that names the anchor: the
 /// upstreams are the project's and a project is only reachable through an
 /// evaluation. An output already cached anywhere is skipped - we either hold it or
-/// already know where it is.
+/// already know where it is. An anchor nothing demands, or one the walk has only
+/// named and whose outputs are unknown, is neither asked nor answered.
 pub(crate) async fn plan_probes(
     state: &Arc<ServerState>,
     anchors: &[DerivationId],
-) -> Result<Vec<(MEvaluation, Vec<(String, String)>)>> {
+) -> Result<ProbePlan> {
     let db = &state.worker_db;
-    let outputs = gradient_db::fetch_in_chunks(anchors, |chunk| async move {
+    let demanded: Vec<DerivationId> = gradient_db::fetch_in_chunks(anchors, |chunk| async move {
+        EDerivationBuild::find()
+            .filter(CDerivationBuild::Derivation.is_in(chunk))
+            .filter(CDerivationBuild::Demanded.eq(true))
+            .all(db)
+            .await
+    })
+    .await
+    .context("load which requested anchors are demanded")?
+    .into_iter()
+    .map(|a| a.derivation)
+    .collect();
+    if demanded.is_empty() {
+        return Ok(ProbePlan::default());
+    }
+
+    let outputs = gradient_db::fetch_in_chunks(&demanded, |chunk| async move {
         EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(chunk))
             .all(db)
@@ -233,8 +293,13 @@ pub(crate) async fn plan_probes(
     })
     .await
     .context("load the outputs of the anchors that gained demand")?;
+    let recorded: HashSet<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
+    let answered: Vec<DerivationId> = demanded
+        .into_iter()
+        .filter(|d| recorded.contains(d))
+        .collect();
 
-    let jobs = gradient_db::fetch_in_chunks(anchors, |chunk| async move {
+    let jobs = gradient_db::fetch_in_chunks(&answered, |chunk| async move {
         EBuildJob::find()
             .filter(CBuildJob::Derivation.is_in(chunk))
             .all(db)
@@ -261,7 +326,10 @@ pub(crate) async fn plan_probes(
             .insert(o.hash.clone(), sp.full());
     }
     if by_evaluation.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ProbePlan {
+            rounds: Vec::new(),
+            answered,
+        });
     }
 
     let ids: Vec<EvaluationId> = by_evaluation.keys().copied().collect();
@@ -274,14 +342,16 @@ pub(crate) async fn plan_probes(
     .await
     .context("load the evaluations the probe reads its upstreams through")?;
 
-    Ok(evaluations
+    let rounds = evaluations
         .into_iter()
         .filter_map(|e| {
             by_evaluation
                 .remove(&e.id)
                 .map(|targets| (e, targets.into_iter().collect()))
         })
-        .collect())
+        .collect();
+
+    Ok(ProbePlan { rounds, answered })
 }
 
 #[cfg(test)]
@@ -304,6 +374,15 @@ mod tests {
         }
     }
 
+    fn demanded(derivation: DerivationId) -> MDerivationBuild {
+        MDerivationBuild {
+            id: gradient_types::ids::DerivationBuildId::now_v7(),
+            derivation,
+            demanded: true,
+            ..Default::default()
+        }
+    }
+
     /// The probe asks for what we do not have. An output already in our cache, or
     /// already resolved on an upstream, costs a narinfo round trip and can only
     /// answer what the row already says.
@@ -312,6 +391,7 @@ mod tests {
         let derivation = DerivationId::now_v7();
         let evaluation = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![demanded(derivation)]])
             .append_query_results([vec![
                 output(derivation, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false),
                 output(derivation, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true),
@@ -330,7 +410,8 @@ mod tests {
 
         let planned = plan_probes(&test_state(db), &[derivation])
             .await
-            .expect("the plan is read");
+            .expect("the plan is read")
+            .rounds;
 
         assert_eq!(planned.len(), 1, "{planned:?}");
         let (_, targets) = &planned[0];
@@ -396,6 +477,7 @@ mod tests {
     async fn an_unnamed_anchor_is_not_probed() {
         let derivation = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![demanded(derivation)]])
             .append_query_results([vec![output(
                 derivation,
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -408,7 +490,88 @@ mod tests {
             plan_probes(&test_state(db), &[derivation])
                 .await
                 .expect("the plan is read")
+                .rounds
                 .is_empty()
         );
+    }
+
+    /// A stub the walk has only named has no output rows yet, so nothing was asked
+    /// for it. Answering it anyway recorded a miss for every output an upstream
+    /// serves, and the build that followed the walk was never undone: the anchor
+    /// stays unanswered until its record lands.
+    #[tokio::test]
+    async fn an_unwalked_anchor_is_left_unanswered() {
+        let walked = DerivationId::now_v7();
+        let stub = DerivationId::now_v7();
+        let evaluation = EvaluationId::now_v7();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![demanded(walked), demanded(stub)]])
+            .append_query_results([vec![output(
+                walked,
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                false,
+            )]])
+            .append_query_results([vec![MBuildJob {
+                id: gradient_types::ids::BuildJobId::now_v7(),
+                evaluation,
+                derivation: walked,
+                ..Default::default()
+            }]])
+            .append_query_results([vec![MEvaluation {
+                id: evaluation,
+                ..Default::default()
+            }]])
+            .into_connection();
+
+        let plan = plan_probes(&test_state(db), &[walked, stub])
+            .await
+            .expect("the plan is read");
+
+        assert_eq!(plan.answered, vec![walked]);
+    }
+
+    /// The walk hands every anchor it records to the probe, demanded or not. One
+    /// nothing wants is neither asked nor answered: demand arriving later sends it
+    /// again, and lazy probing exists to keep the rest off the upstreams.
+    #[tokio::test]
+    async fn an_undemanded_anchor_is_left_unanswered() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .into_connection();
+
+        let plan = plan_probes(&test_state(db), &[DerivationId::now_v7()])
+            .await
+            .expect("the plan is read");
+
+        assert!(
+            plan.rounds.is_empty() && plan.answered.is_empty(),
+            "{plan:?}"
+        );
+    }
+
+    /// The memory is of answers. An anchor left unanswered is sent again once its
+    /// record lands, usually inside the five minutes, and a remembered request
+    /// would drop it for good.
+    #[tokio::test]
+    async fn an_unanswered_anchor_is_asked_again() {
+        let seen = Mutex::new(HashMap::new());
+        let anchor = DerivationId::now_v7();
+        assert_eq!(fresh(HashSet::from([anchor]), &seen).await, vec![anchor]);
+
+        forget(&seen, &[anchor]).await;
+
+        assert_eq!(fresh(HashSet::from([anchor]), &seen).await, vec![anchor]);
+    }
+
+    /// Unwalked demand is not lost, it is waiting for the walk. The sweep reads a
+    /// page of it at a time, so a page of stubs would hide every walked anchor
+    /// behind it.
+    #[test]
+    fn the_sweep_reads_only_walked_anchors() {
+        use sea_orm::QueryTrait as _;
+        let sql = unanswered_demand_query()
+            .build(DatabaseBackend::Postgres)
+            .to_string();
+        assert!(sql.contains(r#""derivation"."walked" = TRUE"#), "{sql}");
     }
 }

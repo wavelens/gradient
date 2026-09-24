@@ -34,7 +34,7 @@ message is one transaction:
 |---|---|
 | `Ingest` | one worker batch: derivations, outputs, input sources, anchors, build jobs, features, messages, entry points, and the edges that resolve so far |
 | `UpstreamHits` | what the probe found: the narinfo, the runtime edges it names, the relay flag and the demand all of it moves |
-| `UpstreamProbed` | the anchors a probe round answered for, hit or miss, and the demand a miss opens below them |
+| `UpstreamProbed` | the walked, demanded anchors a probe round answered for, hit or miss, and the demand a miss opens below them |
 | `KnownDerivations` | nothing; a read answered after every batch queued before it |
 | `CommitNar` | the `cached_path` row, its references, signature placeholders and the outputs it backs |
 | `Transition` | an anchor or evaluation state change: build started, output, completed, failed, dispatched, orphaned, ready, a reconcile scope, an abort, a prioritization |
@@ -806,15 +806,20 @@ special-cased.
 An output is probed when its anchor gains demand, never when its batch lands. The
 `upstream-probe` loop takes the gained sets the ingest commit and the transition
 emitter hand it, a fresh evaluation's demand coming from the walk and a later move
-from a status change, drops what it asked for in the last five minutes, skips
+from a status change, plus every anchor a batch walked. It drops anchors nothing
+demands, and anchors it answered in the last five minutes, then skips
 every output already cached anywhere, and asks each output's `.narinfo` across
 the upstreams of the project whose evaluation names the anchor. A hit makes the
 anchor a relay and demands what its narinfo references; a miss leaves it a
 builder and demands its build inputs.
 
-Demand waits for that answer. `derivation_build.probed` is set for the whole
-round once its hits are applied, and an anchor that is not yet probed is not a
-builder, so nothing below it is demanded and nothing below it is dispatched.
+Demand waits for that answer. `derivation_build.probed` is set once the round's
+hits are applied, for every demanded anchor with recorded outputs. An anchor that
+is not yet probed is not a builder, so nothing below it is demanded and nothing
+below it is dispatched. A stub the walk has only named has no outputs to ask
+about, so it stays unprobed until the batch that walks it hands it back to the
+loop. Answering it with nothing asked recorded a miss for outputs an upstream
+serves, and they were built.
 Without it, the walk read "no upstream answer yet" as "will be built" and queued
 the build closure of every output an upstream serves; the relay that followed
 withdrew the demand, but a job already handed to a worker cannot be recalled, and
@@ -822,8 +827,8 @@ a source it cannot fetch fails the evaluation that no longer needed it.
 A round's answer demands the next level and hands it straight back, so one pass
 follows the closure down rather than descending a level a tick, and stops after
 half the supervision budget with whatever is left going to the next tick.
-The request channel is in memory, so the loop also sweeps for demanded anchors
-that are still unprobed once a minute on an idle tick: a process that stops
+The request channel is in memory, so the loop also sweeps for demanded, walked
+anchors that are still unprobed once a minute on an idle tick: a process that stops
 between the commit and the send would otherwise leave a stall nothing recovers
 from.
 

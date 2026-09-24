@@ -985,9 +985,14 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             }
             None => Vec::new(),
         };
-        report.gained_demand = writer
+        report.to_probe = writer
             .advance_readiness(batch, &resolved, &newly_walked, &grew, &report.entry_points)
             .await?;
+        report.to_probe.extend(
+            newly_walked
+                .iter()
+                .filter_map(|h| resolved.by_hash.get(h).copied()),
+        );
 
         gradient_db::bump_graph_version(writer.db(), &[evaluation_id])
             .await
@@ -1260,7 +1265,7 @@ pub(crate) async fn after_commit(
         }
     }
 
-    ctx.probe_requests.send(report.gained_demand.clone());
+    ctx.probe_requests.send(report.to_probe.clone());
 
     let _ = ctx.board_events.send(BoardEvent::EvaluationProgress {
         task: batch.task.map(|t| t.into_inner()),
@@ -1300,7 +1305,9 @@ mod tests {
     use super::*;
     use crate::test_ctx::ctx;
     use gradient_entity::evaluation::EvaluationStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement, Value};
+    use sea_orm::{
+        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement, Value,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -1348,7 +1355,7 @@ mod tests {
                 ..Default::default()
             },
             &IngestReport {
-                gained_demand: vec![gained],
+                to_probe: vec![gained],
                 ..Default::default()
             },
         )
@@ -1477,15 +1484,9 @@ mod tests {
         (eval, derivation_row(A, true), derivation_row(B, false))
     }
 
-    /// A dependency the batch only names gets a stub row before the edge that
-    /// points at it, never a walked one, and the batch reports one walked
-    /// derivation: the one whose record it carried. The readiness pass closes the
-    /// batch: it seeds from edges that exist, so it can only run once they do.
-    #[tokio::test]
-    async fn a_named_dependency_gets_a_stub_before_its_edge() {
-        let evaluation = EvaluationId::now_v7();
-        let (eval, a, b) = scripted(evaluation);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+    /// The query script `apply_batch` replays for `a` walked, naming `b`.
+    fn walk_of_a(eval: MEvaluation, a: &MDerivation, b: &MDerivation) -> DatabaseConnection {
+        MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![eval]])
             .append_query_results([vec![hash_row(&a.hash)]])
             .append_query_results([vec![a.clone(), b.clone()]])
@@ -1500,7 +1501,42 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 6])
-            .into_connection();
+            .into_connection()
+    }
+
+    /// A walked record is what the probe asks about, and the walk is the only one
+    /// that knows when it lands: an anchor demanded while it was a stub gains no
+    /// demand here, so nothing else would ever ask about it again.
+    #[tokio::test]
+    async fn a_walked_anchor_reaches_the_upstream_probe() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let (ctx, _pool) = ctx(walk_of_a(eval, &a, &b)).await;
+
+        let report = apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(report.to_probe.contains(&a.id), "{report:?}");
+        assert!(!report.to_probe.contains(&b.id), "{report:?}");
+    }
+
+    /// A dependency the batch only names gets a stub row before the edge that
+    /// points at it, never a walked one, and the batch reports one walked
+    /// derivation: the one whose record it carried. The readiness pass closes the
+    /// batch: it seeds from edges that exist, so it can only run once they do.
+    #[tokio::test]
+    async fn a_named_dependency_gets_a_stub_before_its_edge() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = walk_of_a(eval, &a, &b);
         let (ctx, pool) = ctx(db).await;
 
         let report = apply_batch(
