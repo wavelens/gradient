@@ -49,4 +49,5 @@ unknown-git      = "deny"
 allow-git = [
     "https://github.com/nix-community/harmonia",
     "https://github.com/DerDennisOP/nix-bindings",
+    "https://github.com/launchbadge/sqlx",
 ]

@@ -95,7 +95,7 @@ bzip2             = { version = "0.6" } # defaults: pure-Rust backend is only re
 flate2            = { version = "1", default-features = false, features = ["rust_backend"] }
 tar               = { version = "0.4", default-features = false }
 xz2               = { version = "0.1", default-features = false }
-zstd              = { version = "0.13", default-features = false, features = ["zstdmt"] }
+zstd              = { version = "0.14", default-features = false, features = ["zstdmt"] }
 
 # Bytes / buffers
 bytes = { version = "1.11", default-features = false, features = ["std"] }
@@ -119,7 +119,7 @@ sea-orm-migration = { version = "2.0", default-features = false, features = ["cl
 # HTTP / networking
 async-ssh2-lite      = { version = "0.5", default-features = false, features = ["tokio"] }
 axum                 = { version = "0.8", default-features = false }
-axum-streams         = { version = "0.29", default-features = false, features = ["json"] }
+axum-streams         = { version = "0.30", default-features = false, features = ["json"] }
 axum_typed_multipart = { version = "0.16", default-features = false, features = ["tempfile_3"] }
 badgelib             = { version = "0.5.0", default-features = false }
 email_address        = { version = "0.2", default-features = false }
@@ -156,16 +156,16 @@ harmonia-utils-signature       = { git = "https://github.com/nix-community/harmo
 
 # Nix bindings. The version tracks the FORK below, not upstream: the patch
 # replaces the source, so only the requirement is resolved against the index.
-nix-bindings = { version = "0.2347", default-features = false }
+nix-bindings = { version = "0.2352", default-features = false }
 
 # Shared utilities promoted from member crates
 git-url-parse = { version = "0.6" } # defaults: re-exports the `url` crate
 ipnet         = { version = "2.10", default-features = false, features = ["std"] }
 password-auth = { version = "1.0", default-features = false, features = ["argon2"] }
 prometheus    = { version = "0.14", default-features = false, features = ["process"] }
-opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
-opentelemetry_sdk = { version = "0.32", default-features = false, features = ["metrics"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client", "reqwest-rustls"] }
+opentelemetry = { version = "0.33", default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["metrics"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client", "reqwest-rustls"] }
 rustls        = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs", "tls12"] }
 rustls-native-certs = { version = "0.8", default-features = false }
 subtle        = { version = "2.6", default-features = false }
