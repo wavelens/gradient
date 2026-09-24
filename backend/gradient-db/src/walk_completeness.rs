@@ -69,8 +69,8 @@ pub(crate) const RECOUNT_WALK_COMPLETENESS_SQL: &str = r#"
 WITH RECURSIVE incomplete(id) AS (
     SELECT id FROM derivation WHERE NOT walked
     UNION
-    SELECT e.derivation FROM derivation_dependency e JOIN incomplete i ON i.id = e.dependency
-     WHERE e.kind IN (0, 2)),
+    SELECT s.id FROM incomplete i, LATERAL (SELECT e.derivation AS id FROM derivation_dependency e
+     WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s),
 counts AS (
     SELECT e.derivation AS id, count(*)::int AS n FROM derivation_dependency e
     JOIN incomplete i ON i.id = e.dependency
@@ -515,6 +515,13 @@ mod tests {
         );
         assert!(
             sql.contains("JOIN incomplete i ON i.id = e.dependency"),
+            "{sql}"
+        );
+        // A joined step merge-joins every edge once per level, ~190 s on prod; the
+        // fenced probe reads only the edges into the frontier.
+        assert!(
+            sql.contains("SELECT s.id FROM incomplete i, LATERAL (SELECT e.derivation AS id")
+                && sql.contains("WHERE e.dependency = i.id AND e.kind IN (0, 2) OFFSET 0) s"),
             "{sql}"
         );
         assert!(
