@@ -162,7 +162,11 @@ mod tests {
             .with_bucket_name("bucket")
             .with_region("us-east-1")
             .with_access_key_id("key")
-            .with_secret_access_key("secret");
+            .with_secret_access_key("secret")
+            .with_http_connector(crate::nar::SharedHttpConnector {
+                read_timeout: std::time::Duration::from_secs(5),
+                allow_http: endpoint.is_some(),
+            });
         if let Some(endpoint) = endpoint {
             builder = builder.with_endpoint(endpoint).with_allow_http(true);
         }

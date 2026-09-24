@@ -56,9 +56,9 @@ const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// encoding, because compression rewrites the `Content-Length` object sizes are
 /// read from.
 #[derive(Debug)]
-struct SharedHttpConnector {
-    read_timeout: std::time::Duration,
-    allow_http: bool,
+pub(crate) struct SharedHttpConnector {
+    pub(crate) read_timeout: std::time::Duration,
+    pub(crate) allow_http: bool,
 }
 
 impl object_store::client::HttpConnector for SharedHttpConnector {
