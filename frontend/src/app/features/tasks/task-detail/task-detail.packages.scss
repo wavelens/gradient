@@ -31,7 +31,7 @@
 
   &:hover { border-color: var(--gr-text-muted); border-left-color: var(--rail-c, var(--idle)); }
 
-  .si { width: 24px; height: 24px; border-radius: $border-radius-sm; justify-content: center; flex-shrink: 0; }
+  .si { width: 24px; height: 24px; }
 
   .pkg-name {
     font-weight: 600;
@@ -102,6 +102,8 @@
   &[data-phase='waiting'] { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
   &[data-phase='aborted'] { color: var(--gr-text-muted); background: var(--gr-surface-hover); }
 }
+
+.si { border-radius: 50%; flex-shrink: 0; }
 
 .eval-card,
 .pkg {
