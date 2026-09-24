@@ -2781,7 +2781,7 @@ in {
       agree = sql(
           "SELECT (e.named_anchors + coalesce((SELECT sum(d.named) FROM evaluation_anchor_delta d WHERE d.evaluation = e.id), 0), "
           "e.active_anchors + coalesce((SELECT sum(d.active) FROM evaluation_anchor_delta d WHERE d.evaluation = e.id), 0)) "
-          "= (SELECT (count(*), coalesce(sum(x.active), 0)) FROM build_job bj "
+          "= (SELECT count(*), coalesce(sum(x.active), 0) FROM build_job bj "
           "JOIN derivation_build db ON db.id = bj.derivation_build "
           "CROSS JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) x "
           f"WHERE bj.evaluation = e.id) FROM evaluation e WHERE e.id = '{cr_eval}';"
