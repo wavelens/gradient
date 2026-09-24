@@ -371,7 +371,7 @@ impl GradientMcp {
 
         self.client
             .tasks()
-            .entry_points(&project, &args.task, Some(&evaluation), Some(1), None)
+            .entry_points(&project, &args.task, Some(&evaluation), Some(1), Some(0))
             .await
             .map_err(to_error)?;
         let eval = self
