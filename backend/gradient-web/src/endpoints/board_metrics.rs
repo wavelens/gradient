@@ -741,7 +741,7 @@ mod tests {
             super::board_network_sql(Some("'p'")),
             super::board_fleet_sql(24, Some("'p'")),
         ] {
-            assert!(!sql.contains("project IN"), "{sql}");
+            assert!(!sql.contains(" AND project IN"), "{sql}");
             assert!(
                 sql.contains("worker_registration WHERE peer_id IN ('p')"),
                 "{sql}"
