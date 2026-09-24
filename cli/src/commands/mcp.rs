@@ -7,6 +7,8 @@
 use crate::config::{ConfigKey, load_config};
 use crate::input::client_from_config;
 use crate::output::Output;
+use crate::tui::watch::eval_is_terminal;
+use connector::evals::EvaluationResponse;
 use connector::{Client, ConnectorError};
 use futures::StreamExt;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -20,6 +22,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
+use std::time::Duration;
+use tokio::time::Instant;
 
 const INSTRUCTIONS: &str = "Read-only access to a Gradient CI instance. Start from `list_projects` \
 or `list_tasks`, drill into a task with `list_evaluations`, then `list_builds` on an evaluation. \
@@ -33,6 +37,9 @@ run and returns its UUID, `watch_evaluation` blocks until the run finishes or ti
 returns each entry point's build status, `abort_evaluation` cancels a run.";
 
 const INLINE_LOG_LINES: usize = 10;
+const WATCH_POLL: Duration = Duration::from_secs(5);
+const WATCH_TIMEOUT_SECONDS: u64 = 600;
+const ENTRY_POINT_PAGE: u64 = 500;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ProjectArgs {
@@ -90,6 +97,34 @@ pub struct LogSearchArgs {
     case_sensitive: Option<bool>,
     /// Maximum number of hits to return. Defaults to 100.
     limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WatchArgs {
+    /// Task name; entry points are looked up through it.
+    task: String,
+    /// Project name or UUID. Defaults to the selected project.
+    project: Option<String>,
+    /// Evaluation UUID. Defaults to the task's latest evaluation.
+    evaluation: Option<String>,
+    /// Seconds to wait for the evaluation to finish. Defaults to 600.
+    timeout_seconds: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct WatchReport {
+    evaluation: String,
+    status: String,
+    error: Option<String>,
+    finished: bool,
+    entry_points: Vec<EntryPointStatus>,
+}
+
+#[derive(Serialize)]
+struct EntryPointStatus {
+    attr: String,
+    build_id: String,
+    build_status: String,
 }
 
 #[derive(Clone)]
@@ -294,6 +329,117 @@ impl GradientMcp {
         Parameters(args): Parameters<EvaluationArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         to_result(self.client.evals().abort(&args.evaluation).await)
+    }
+
+    #[tool(
+        description = "Wait until an evaluation finishes (or `timeout_seconds` passes) and \
+                       return its status with each entry point's build status. \
+                       `finished: false` means it timed out; call again to keep waiting."
+    )]
+    async fn watch_evaluation(
+        &self,
+        Parameters(args): Parameters<WatchArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let project = self.project(args.project.clone())?;
+        match self.watch(project, args).await {
+            Ok(report) => to_result(Ok::<_, ConnectorError>(report)),
+            Err(failed) => Ok(failed),
+        }
+    }
+}
+
+impl GradientMcp {
+    async fn watch(&self, project: String, args: WatchArgs) -> Result<WatchReport, CallToolResult> {
+        let evaluation = match args.evaluation {
+            Some(evaluation) => evaluation,
+            None => self.latest_evaluation(&project, &args.task).await?,
+        };
+        let timeout = Duration::from_secs(args.timeout_seconds.unwrap_or(WATCH_TIMEOUT_SECONDS));
+
+        let eval = self
+            .await_terminal(&evaluation, Instant::now() + timeout)
+            .await
+            .map_err(to_error)?;
+        let entry_points = self
+            .entry_point_statuses(&project, &args.task, &evaluation)
+            .await
+            .map_err(to_error)?;
+
+        Ok(WatchReport {
+            finished: eval_is_terminal(&eval.status),
+            evaluation,
+            status: eval.status,
+            error: eval.error,
+            entry_points,
+        })
+    }
+
+    async fn latest_evaluation(&self, project: &str, task: &str) -> Result<String, CallToolResult> {
+        let evaluations = self
+            .client
+            .tasks()
+            .evaluations(project, task)
+            .await
+            .map_err(to_error)?;
+        evaluations.into_iter().next().map(|e| e.id).ok_or_else(|| {
+            CallToolResult::error(vec![ContentBlock::text("task has no evaluations")])
+        })
+    }
+
+    async fn await_terminal(
+        &self,
+        evaluation: &str,
+        deadline: Instant,
+    ) -> Result<EvaluationResponse, ConnectorError> {
+        let mut last_read = None;
+        loop {
+            let polled = self.client.evals().get(evaluation).await;
+            if let Ok(eval) = &polled
+                && eval_is_terminal(&eval.status)
+            {
+                return polled;
+            }
+
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return polled.or_else(|e| last_read.ok_or(e));
+            }
+            if let Ok(eval) = polled {
+                last_read = Some(eval);
+            }
+            tokio::time::sleep(left.min(WATCH_POLL)).await;
+        }
+    }
+
+    async fn entry_point_statuses(
+        &self,
+        project: &str,
+        task: &str,
+        evaluation: &str,
+    ) -> Result<Vec<EntryPointStatus>, ConnectorError> {
+        let mut statuses = Vec::new();
+        loop {
+            let page = self
+                .client
+                .tasks()
+                .entry_points(
+                    project,
+                    task,
+                    Some(evaluation),
+                    Some(ENTRY_POINT_PAGE),
+                    Some(statuses.len() as u64),
+                )
+                .await?;
+            let fetched = page.entry_points.len();
+            statuses.extend(page.entry_points.into_iter().map(|ep| EntryPointStatus {
+                attr: ep.eval,
+                build_id: ep.build_id,
+                build_status: ep.build_status,
+            }));
+            if fetched == 0 || statuses.len() as u64 >= page.total {
+                return Ok(statuses);
+            }
+        }
     }
 }
 

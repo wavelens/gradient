@@ -452,3 +452,129 @@ async fn mcp_abort_evaluation_sends_the_abort_method() {
 
     assert_eq!(response(&responses, 2)["result"]["isError"], json!(false));
 }
+
+fn eval_body(status: &str) -> Value {
+    json!({"error": false, "message": {
+        "id": "eval-1", "task": "t", "repository": "r", "commit": "c",
+        "wildcard": "*", "status": status, "created_at": "2026-01-01T00:00:00Z",
+        "error": null
+    }})
+}
+
+fn entry_point(attr: &str, status: &str) -> Value {
+    json!({
+        "id": format!("ep-{attr}"), "build_id": format!("b-{attr}"), "eval": attr,
+        "derivation_path": format!("abc-{attr}.drv"), "build_status": status
+    })
+}
+
+async fn mount_eval(server: &MockServer, status: &str) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/evals/eval-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(eval_body(status)))
+        .mount(server)
+        .await;
+}
+
+async fn mount_entry_points(server: &MockServer, offset: &str, items: Vec<Value>, total: u64) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tasks/proj/nightly/entry-points"))
+        .and(query_param("evaluation_id", "eval-1"))
+        .and(query_param("offset", offset))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "error": false,
+            "message": {"entry_points": items, "total": total}
+        })))
+        .mount(server)
+        .await;
+}
+
+fn watch_report(home: &TempDir, arguments: Value) -> Value {
+    let responses = session_with(
+        home,
+        &["mcp", "--control"],
+        &call("watch_evaluation", arguments),
+    );
+    let result = &response(&responses, 2)["result"];
+    assert_eq!(result["isError"], json!(false), "{result:#}");
+    serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn mcp_watch_evaluation_reports_entry_points_of_a_finished_run() {
+    let server = MockServer::start().await;
+    mount_eval(&server, "Failed").await;
+    mount_entry_points(
+        &server,
+        "0",
+        vec![entry_point("hello", "FailedPermanent")],
+        1,
+    )
+    .await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let report = watch_report(&home, json!({"task": "nightly", "evaluation": "eval-1"}));
+
+    assert_eq!(report["finished"], json!(true), "{report:#}");
+    assert_eq!(report["status"], "Failed");
+    assert_eq!(report["entry_points"][0]["attr"], "hello");
+    assert_eq!(report["entry_points"][0]["build_status"], "FailedPermanent");
+}
+
+#[tokio::test]
+async fn mcp_watch_evaluation_returns_unfinished_on_timeout() {
+    let server = MockServer::start().await;
+    mount_eval(&server, "Building").await;
+    mount_entry_points(&server, "0", vec![entry_point("hello", "Building")], 1).await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let report = watch_report(
+        &home,
+        json!({"task": "nightly", "evaluation": "eval-1", "timeout_seconds": 1}),
+    );
+
+    assert_eq!(report["finished"], json!(false), "{report:#}");
+    assert_eq!(report["status"], "Building");
+}
+
+#[tokio::test]
+async fn mcp_watch_evaluation_pages_through_entry_points() {
+    let server = MockServer::start().await;
+    mount_eval(&server, "Completed").await;
+    let first = (0..500)
+        .map(|n| entry_point(&format!("p{n}"), "Completed"))
+        .collect();
+    mount_entry_points(&server, "0", first, 501).await;
+    mount_entry_points(&server, "500", vec![entry_point("last", "Completed")], 501).await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let report = watch_report(&home, json!({"task": "nightly", "evaluation": "eval-1"}));
+
+    assert_eq!(report["entry_points"].as_array().unwrap().len(), 501);
+    assert_eq!(report["entry_points"][500]["attr"], "last");
+}
+
+#[tokio::test]
+async fn mcp_watch_evaluation_without_evaluations_is_a_tool_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tasks/proj/nightly/evaluations"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "error": false, "message": []
+        })))
+        .mount(&server)
+        .await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call("watch_evaluation", json!({"task": "nightly"})),
+    );
+
+    assert_eq!(response(&responses, 2)["result"]["isError"], json!(true));
+}
