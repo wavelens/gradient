@@ -73,9 +73,6 @@ impl std::fmt::Debug for WorkerSlot {
 #[derive(Debug, Default)]
 pub struct WorkerPool {
     workers: HashMap<String, WorkerSlot>,
-    /// Owning project per worker, resolved from `worker_registration` at
-    /// connect time. Used to attribute worker_sample / worker_connection rows.
-    worker_projects: HashMap<String, ProjectId>,
 }
 
 impl WorkerPool {
@@ -138,11 +135,6 @@ impl WorkerPool {
         let last_seen = Arc::clone(&worker.last_seen);
         self.workers.insert(id, WorkerSlot::Active(worker));
         last_seen
-    }
-
-    /// Record the owning project for a connected worker.
-    pub fn set_worker_project(&mut self, id: &str, project: ProjectId) {
-        self.worker_projects.insert(id.to_owned(), project);
     }
 
     pub fn request_reauth(&self, worker_id: &str) {
@@ -272,7 +264,6 @@ impl WorkerPool {
     /// learn it was evicted, never reconnect, and the pool would stay empty
     /// while the socket kept talking.
     pub fn unregister(&mut self, id: &str) -> Vec<String> {
-        self.worker_projects.remove(id);
         self.workers
             .remove(id)
             .map(|slot| {
@@ -399,7 +390,6 @@ impl WorkerPool {
             assigned_job_count: s.assigned_jobs.len(),
             draining: slot.is_draining(),
             authorized_peers: s.peer_auth.as_filter().cloned(),
-            project: self.worker_projects.get(id).copied(),
             cpu_usage_pct: s.cpu_usage_pct,
             ram_free_mb: s.ram_free_mb,
             ram_total_mb: s.ram_total_mb,
@@ -447,8 +437,6 @@ pub struct WorkerInfo {
     pub authorized_peers: Option<HashSet<ProjectId>>,
     /// Internal sampling fields (skipped in API output - surfaced via the
     /// access-controlled Job Board APIs, not the existing workers endpoint).
-    #[serde(skip)]
-    pub project: Option<ProjectId>,
     #[serde(skip)]
     pub cpu_usage_pct: Option<f32>,
     #[serde(skip)]

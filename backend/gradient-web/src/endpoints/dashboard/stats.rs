@@ -15,7 +15,6 @@ use gradient_scheduler::Scheduler;
 use gradient_types::*;
 use serde::Serialize;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct WorkerLoad {
@@ -53,11 +52,7 @@ async fn visible_slots(scheduler: &Scheduler, scope: &MetricsScope) -> Vec<(i64,
         .board_workers()
         .await
         .into_iter()
-        .filter(|w| {
-            w.project
-                .map(|p| scope.allows(&Uuid::from(p)))
-                .unwrap_or_else(|| scope.is_all())
-        })
+        .filter(|w| scope.worker_projects(w.authorized_peers.as_ref()).is_some())
         .map(|w| (w.assigned_job_count as i64, w.max_concurrent_builds as i64))
         .collect()
 }

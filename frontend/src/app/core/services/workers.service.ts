@@ -28,8 +28,7 @@ export interface WorkerConnectionEntry {
 
 export interface WorkerMetricsResponse {
   worker_id: string;
-  /** Null once neither a registration nor a base worker carries the id. */
-  display_name: string | null;
+  display_name: string;
   samples: WorkerSamplePoint[];
   connections: WorkerConnectionEntry[];
   jobs_dispatched: number;

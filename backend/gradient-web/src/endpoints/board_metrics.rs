@@ -313,6 +313,17 @@ pub struct BoardNetworkStats {
     pub http: Vec<HttpRouteStat>,
 }
 
+/// Worker telemetry carries no project; it belongs to every project the worker
+/// is registered in or that opted into it as a base worker.
+fn workers_serving(project_list: &str) -> String {
+    format!(
+        " AND worker_id IN (\
+         SELECT worker_id FROM worker_registration WHERE peer_id IN ({project_list}) \
+         UNION SELECT b.worker_id FROM base_worker b \
+         JOIN project_base_worker p ON p.base_worker = b.id WHERE p.project IN ({project_list}))"
+    )
+}
+
 fn board_network_sql(project_filter: Option<&str>) -> String {
     let mut sql = String::from(
         "SELECT DISTINCT ON (worker_id) worker_id, network_speed_mbps, disk_speed_mbps \
@@ -321,7 +332,7 @@ fn board_network_sql(project_filter: Option<&str>) -> String {
     );
 
     if let Some(list) = project_filter {
-        sql.push_str(&format!(" AND project IN ({list})"));
+        sql.push_str(&workers_serving(list));
     }
 
     sql.push_str(" ORDER BY worker_id, at DESC");
@@ -403,7 +414,7 @@ fn board_fleet_sql(window_hours: i64, project_filter: Option<&str>) -> String {
     );
 
     if let Some(list) = project_filter {
-        sql.push_str(&format!(" AND project IN ({list})"));
+        sql.push_str(&workers_serving(list));
     }
 
     sql.push_str(" GROUP BY bucket ORDER BY bucket");
@@ -721,6 +732,23 @@ pub async fn get_board_health(
 #[cfg(test)]
 mod tests {
     use super::upstream_host;
+
+    /// Worker telemetry carries no project (#587); a scoped read reaches it
+    /// through the workers that serve the caller's projects.
+    #[test]
+    fn worker_telemetry_is_scoped_through_the_workers_serving_the_projects() {
+        for sql in [
+            super::board_network_sql(Some("'p'")),
+            super::board_fleet_sql(24, Some("'p'")),
+        ] {
+            assert!(!sql.contains("project IN"), "{sql}");
+            assert!(
+                sql.contains("worker_registration WHERE peer_id IN ('p')"),
+                "{sql}"
+            );
+            assert!(sql.contains("project_base_worker"), "{sql}");
+        }
+    }
 
     #[test]
     fn upstream_host_strips_scheme_and_path() {

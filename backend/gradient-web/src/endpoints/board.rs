@@ -591,9 +591,10 @@ async fn eval_job_evaluation<C: ConnectionTrait>(
 
 #[derive(Serialize)]
 pub struct BoardWorker {
-    /// `None` when the worker belongs to a project the caller can't see.
+    /// `None` when the worker serves no project the caller can see.
     pub id: Option<String>,
-    pub project: Option<Uuid>,
+    /// The served projects visible to the caller.
+    pub projects: Vec<Uuid>,
     pub draining: bool,
     pub assigned_jobs: i64,
     pub max_concurrent_builds: i64,
@@ -617,14 +618,12 @@ pub async fn get_board_workers(
         .await
         .into_iter()
         .map(|w| {
-            let accessible = w
-                .project
-                .map(|o| scope.allows(&Uuid::from(o)))
-                .unwrap_or_else(|| scope.is_all());
+            let projects = scope.worker_projects(w.authorized_peers.as_ref());
+            let accessible = projects.is_some();
 
             BoardWorker {
                 id: accessible.then(|| w.id.clone()),
-                project: accessible.then(|| w.project.map(Into::into)).flatten(),
+                projects: projects.unwrap_or_default(),
                 draining: w.draining,
                 assigned_jobs: w.assigned_job_count as i64,
                 max_concurrent_builds: w.max_concurrent_builds as i64,
@@ -776,11 +775,7 @@ pub async fn get_board_worker_load(
 
     let visible_workers: Vec<&gradient_scheduler::WorkerInfo> = workers
         .iter()
-        .filter(|w| {
-            w.project
-                .map(|o| scope.allows(&Uuid::from(o)))
-                .unwrap_or_else(|| scope.is_all())
-        })
+        .filter(|w| scope.worker_projects(w.authorized_peers.as_ref()).is_some())
         .collect();
     let visible_jobs: Vec<&gradient_scheduler::BoardActiveJob> = jobs
         .iter()
@@ -1323,7 +1318,7 @@ fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
     let visible = match ev {
         BoardEvent::QueueDepth { .. } => true,
         BoardEvent::JobDispatched { project, .. } => scope.allows(project),
-        BoardEvent::WorkerConnected { project, .. } => scope.allows(project),
+        BoardEvent::WorkerConnected { projects, .. } => projects.iter().any(|p| scope.allows(p)),
         BoardEvent::WorkerDisconnected { .. } => scope.is_all(),
         // Resource-scoped events are served by the per-resource /live channels.
         BoardEvent::EvaluationStatusChanged { .. }
@@ -1515,13 +1510,35 @@ mod tests {
             assigned_job_count: 0,
             draining: false,
             authorized_peers: None,
-            project: None,
             cpu_usage_pct: None,
             ram_free_mb: None,
             ram_total_mb: 0,
             disk_speed_mbps: None,
             network_speed_mbps: None,
         }
+    }
+
+    /// A worker serves every project it is authorized for, and the event must
+    /// not tell one project which others share it (#587).
+    #[test]
+    fn a_worker_connection_reaches_each_served_project_without_naming_the_others() {
+        let mine = uuid::Uuid::now_v7();
+        let other = uuid::Uuid::now_v7();
+        let ev = BoardEvent::WorkerConnected {
+            projects: vec![other, mine],
+            worker_id: "w".into(),
+        };
+
+        let text = mask_event(&ev, &MetricsScope::Projects(vec![mine.to_string()]))
+            .expect("a member of a served project sees the connection");
+        assert!(!text.contains(&other.to_string()), "{text}");
+        assert!(
+            mask_event(
+                &ev,
+                &MetricsScope::Projects(vec![uuid::Uuid::now_v7().to_string()])
+            )
+            .is_none()
+        );
     }
 
     fn build_job(arch: &str, features: &[&str]) -> BoardActiveJob {

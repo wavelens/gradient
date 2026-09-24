@@ -21,7 +21,9 @@ use rusqlite::Connection;
 ///
 /// 16 carries derivation_build.probed: without it a bundle cannot say whether
 /// demand stopped at an anchor because the upstream probe had not answered yet.
-pub const SCHEMA_VERSION: i64 = 16;
+/// 17 drops `project` from worker_connection / worker_sample and
+/// `display_name` from worker_connection: telemetry describes the worker.
+pub const SCHEMA_VERSION: i64 = 17;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {

@@ -77,6 +77,7 @@ mod m20260923_000006_user_stars;
 mod m20260923_000007_evaluation_walk_mode;
 mod m20260923_000008_evaluation_task_commit_index;
 mod m20260923_000009_prioritized;
+mod m20260924_000001_worker_telemetry_without_project;
 
 pub struct Migrator;
 
@@ -150,6 +151,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260923_000007_evaluation_walk_mode::Migration),
             Box::new(m20260923_000008_evaluation_task_commit_index::Migration),
             Box::new(m20260923_000009_prioritized::Migration),
+            Box::new(m20260924_000001_worker_telemetry_without_project::Migration),
         ]
     }
 }

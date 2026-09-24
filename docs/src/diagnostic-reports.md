@@ -119,10 +119,11 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
     GROUP BY 1, 2 HAVING misses > 2 ORDER BY misses DESC'
 ```
 
-A worker only opens a `worker_connection` row once it has a
-`worker_registration`, so on an instance whose fleet is base workers those two
-tables and `worker_sample` come back empty. Read `base_worker` before concluding
-an evaluation had no workers to run on.
+`worker_connection` and `worker_sample` carry no project: a worker's telemetry
+describes the worker, whichever project it served. On an instance whose fleet is
+base workers `worker_registration` is empty, so read `base_worker` for the names.
+Reports older than schema 17 were written while base workers recorded no
+telemetry at all.
 
 ## Reading one
 

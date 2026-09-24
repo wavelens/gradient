@@ -60,9 +60,7 @@ pub fn redact_value(
         | ("worker_connection", "worker_id")
         | ("worker_sample", "worker_id")
         | ("worker_registration", "worker_id") => r.identity(&v, "worker"),
-        ("worker_connection", "display_name") | ("worker_registration", "display_name") => {
-            r.identity(&v, "worker")
-        }
+        ("worker_registration", "display_name") => r.identity(&v, "worker"),
         ("base_worker", "worker_id") | ("base_worker", "display_name") => r.identity(&v, "worker"),
         ("worker_registration", "url") | ("cache_upstream", "url") | ("base_worker", "url") => {
             r.identity(&v, "url")
@@ -534,14 +532,12 @@ pub fn instance_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "worker_connection",
-            "CREATE TABLE worker_connection (id TEXT, worker_id TEXT, project TEXT, display_name TEXT, connected_at TEXT, disconnected_at TEXT, capabilities TEXT, reason INTEGER)",
-            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT c.id::text, c.worker_id::text, c.project::text, c.display_name::text, c.connected_at::text, c.disconnected_at::text, c.capabilities::text, c.reason::text FROM worker_connection c, w WHERE c.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND c.connected_at <= w.ended AND (c.disconnected_at IS NULL OR c.disconnected_at >= w.started)",
+            "CREATE TABLE worker_connection (id TEXT, worker_id TEXT, connected_at TEXT, disconnected_at TEXT, capabilities TEXT, reason INTEGER)",
+            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT c.id::text, c.worker_id::text, c.connected_at::text, c.disconnected_at::text, c.capabilities::text, c.reason::text FROM worker_connection c, w WHERE c.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND c.connected_at <= w.ended AND (c.disconnected_at IS NULL OR c.disconnected_at >= w.started)",
             "the workers that ran this evaluation, while it ran",
             [
                 "id",
                 "worker_id",
-                "project",
-                "display_name",
                 "connected_at",
                 "disconnected_at",
                 "capabilities",
@@ -550,13 +546,12 @@ pub fn instance_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "worker_sample",
-            "CREATE TABLE worker_sample (id TEXT, worker_id TEXT, project TEXT, at TEXT, cpu_usage_pct REAL, ram_free_mb INTEGER, ram_total_mb INTEGER, disk_speed_mbps REAL, network_speed_mbps REAL, assigned_jobs INTEGER, max_concurrent_builds INTEGER, state INTEGER, capabilities TEXT)",
-            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT s.id::text, s.worker_id::text, s.project::text, s.at::text, s.cpu_usage_pct::text, s.ram_free_mb::text, s.ram_total_mb::text, s.disk_speed_mbps::text, s.network_speed_mbps::text, s.assigned_jobs::text, s.max_concurrent_builds::text, s.state::text, s.capabilities::text FROM worker_sample s, w WHERE s.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND s.at BETWEEN w.started AND w.ended",
+            "CREATE TABLE worker_sample (id TEXT, worker_id TEXT, at TEXT, cpu_usage_pct REAL, ram_free_mb INTEGER, ram_total_mb INTEGER, disk_speed_mbps REAL, network_speed_mbps REAL, assigned_jobs INTEGER, max_concurrent_builds INTEGER, state INTEGER, capabilities TEXT)",
+            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT s.id::text, s.worker_id::text, s.at::text, s.cpu_usage_pct::text, s.ram_free_mb::text, s.ram_total_mb::text, s.disk_speed_mbps::text, s.network_speed_mbps::text, s.assigned_jobs::text, s.max_concurrent_builds::text, s.state::text, s.capabilities::text FROM worker_sample s, w WHERE s.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND s.at BETWEEN w.started AND w.ended",
             "the workers that ran this evaluation, while it ran",
             [
                 "id",
                 "worker_id",
-                "project",
                 "at",
                 "cpu_usage_pct",
                 "ram_free_mb",
@@ -939,10 +934,8 @@ mod tests {
         }
     }
 
-    /// `record_worker_connection` only opens a row for a worker that has a
-    /// `worker_registration`, so on an instance running base workers all three
-    /// worker tables are empty and the report reads as "no workers at all".
-    /// The fleet itself has to be exported for that to be distinguishable.
+    /// On an instance running only base workers `worker_registration` is empty,
+    /// so the fleet itself has to be exported for a report to name its workers.
     #[test]
     fn the_base_worker_fleet_is_exported() {
         let spec = spec_named("base_worker");

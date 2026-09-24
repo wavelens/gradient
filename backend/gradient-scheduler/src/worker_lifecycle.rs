@@ -27,18 +27,14 @@ use crate::build;
 use crate::jobs::PendingJob;
 
 /// Insert a `worker_sample` time-series row for a connected worker. Best-effort;
-/// skipped when the worker's owning project is unknown. Called from the heartbeat loop.
+/// called from the heartbeat loop.
 pub(crate) async fn record_worker_sample(
     db: &impl sea_orm::ConnectionTrait,
     info: &crate::WorkerInfo,
 ) {
-    let Some(project) = info.project else {
-        return;
-    };
     let sample = gradient_entity::worker_sample::Model {
         id: gradient_entity::ids::WorkerSampleId::now_v7(),
         worker_id: info.id.clone(),
-        project,
         at: gradient_types::now(),
         cpu_usage_pct: info.cpu_usage_pct,
         ram_free_mb: info.ram_free_mb.map(|v| v as i64),
@@ -99,6 +95,7 @@ impl Scheduler {
         session: Arc<dyn SessionPort>,
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
+        let projects = authorized_peers.iter().copied().map(Into::into).collect();
         let registered = self
             .reattach_worker(
                 worker_id,
@@ -110,6 +107,13 @@ impl Scheduler {
             .await?;
         self.close_unclaimed_dispatches(worker_id).await;
         self.record_worker_connection(worker_id, caps_json).await;
+        let _ = self
+            .state
+            .board_events
+            .send(crate::BoardEvent::WorkerConnected {
+                projects,
+                worker_id: worker_id.to_owned(),
+            });
         Ok(registered)
     }
 
@@ -163,28 +167,10 @@ impl Scheduler {
             .await
     }
 
-    /// Resolve the worker's owning project from `worker_registration`, record it
-    /// for sample attribution, and open a `worker_connection` row.
     async fn record_worker_connection(&self, worker_id: &str, capabilities: serde_json::Value) {
-        let reg = gradient_entity::worker_registration::Entity::find()
-            .filter(gradient_entity::worker_registration::Column::WorkerId.eq(worker_id))
-            .order_by_asc(gradient_entity::worker_registration::Column::CreatedAt)
-            .one(&self.state.worker_db)
-            .await;
-        let Ok(Some(reg)) = reg else {
-            return;
-        };
-        let _ = self
-            .cast(SchedulerMsg::SetWorkerProject {
-                worker: worker_id.to_owned(),
-                project: reg.peer_id,
-            })
-            .await;
         let conn = gradient_entity::worker_connection::Model {
             id: gradient_entity::ids::WorkerConnectionId::now_v7(),
             worker_id: worker_id.to_string(),
-            project: reg.peer_id,
-            display_name: reg.display_name,
             connected_at: gradient_types::now(),
             capabilities,
             ..Default::default()
@@ -197,13 +183,6 @@ impl Scheduler {
         {
             warn!(error = %e, %worker_id, "failed to insert worker_connection");
         }
-        let _ = self
-            .state
-            .board_events
-            .send(crate::BoardEvent::WorkerConnected {
-                project: reg.peer_id.into(),
-                worker_id: worker_id.to_owned(),
-            });
     }
 
     /// Stamp `disconnected_at` on the worker's latest open `worker_connection`.

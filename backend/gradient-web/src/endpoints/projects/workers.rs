@@ -377,23 +377,22 @@ pub struct WorkerConnectionEntry {
 #[derive(Serialize)]
 pub struct WorkerMetricsResponse {
     pub worker_id: String,
-    /// None when neither a registration nor a base worker carries the id, which
-    /// is how history outlives the worker that produced it.
-    pub display_name: Option<String>,
+    pub display_name: String,
     pub samples: Vec<WorkerSamplePoint>,
     pub connections: Vec<WorkerConnectionEntry>,
     pub jobs_dispatched: u64,
 }
 
 /// A project's own registration shadows a base worker of the same `worker_id`,
-/// exactly as it does in the worker list.
+/// exactly as it does in the worker list; `None` means the worker does not
+/// serve the project, so its telemetry is not the project's to read.
 fn worker_display_name(registration: Option<String>, base: Option<String>) -> Option<String> {
     registration.or(base)
 }
 
 /// Full metrics for one worker: the live-metric sample time-series, the
 /// connect/disconnect history, and the total dispatched-job count. Scoped to
-/// members of the worker's owning project.
+/// members of a project the worker serves.
 pub async fn get_project_worker_metrics(
     state: State<Arc<ServerState>>,
     Path((project, worker_id)): Path<(String, String)>,
@@ -411,9 +410,31 @@ pub async fn get_project_worker_metrics(
     )
     .await?;
 
+    let registration_name = EWorkerRegistration::find()
+        .filter(worker_registration::Column::PeerId.eq(project.id))
+        .filter(worker_registration::Column::WorkerId.eq(&worker_id))
+        .one(&state.web_db)
+        .await?
+        .map(|r| r.display_name);
+    let base_name = EBaseWorker::find()
+        .filter(base_worker::Column::WorkerId.eq(&worker_id))
+        .filter(
+            base_worker::Column::Id.in_subquery(
+                sea_orm::sea_query::Query::select()
+                    .column(project_base_worker::Column::BaseWorker)
+                    .from(project_base_worker::Entity)
+                    .and_where(project_base_worker::Column::Project.eq(project.id))
+                    .to_owned(),
+            ),
+        )
+        .one(&state.web_db)
+        .await?
+        .map(|bw| bw.display_name);
+    let display_name = worker_display_name(registration_name, base_name)
+        .ok_or_else(|| WebError::not_found("worker"))?;
+
     let samples = gradient_entity::worker_sample::Entity::find()
         .filter(gradient_entity::worker_sample::Column::WorkerId.eq(&worker_id))
-        .filter(gradient_entity::worker_sample::Column::Project.eq(project.id))
         .order_by_asc(gradient_entity::worker_sample::Column::At)
         .limit(2000)
         .all(&state.web_db)
@@ -434,7 +455,6 @@ pub async fn get_project_worker_metrics(
 
     let connections = gradient_entity::worker_connection::Entity::find()
         .filter(gradient_entity::worker_connection::Column::WorkerId.eq(&worker_id))
-        .filter(gradient_entity::worker_connection::Column::Project.eq(project.id))
         .order_by_desc(gradient_entity::worker_connection::Column::ConnectedAt)
         .limit(100)
         .all(&state.web_db)
@@ -452,23 +472,8 @@ pub async fn get_project_worker_metrics(
         .count(&state.web_db)
         .await?;
 
-    let registration_name = EWorkerRegistration::find()
-        .filter(worker_registration::Column::PeerId.eq(project.id))
-        .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .one(&state.web_db)
-        .await?
-        .map(|r| r.display_name);
-
-    // Not filtered by `enabled`: a base worker switched off after it served this
-    // project still named the samples below, and a name is not a secret.
-    let base_name = EBaseWorker::find()
-        .filter(base_worker::Column::WorkerId.eq(&worker_id))
-        .one(&state.web_db)
-        .await?
-        .map(|bw| bw.display_name);
-
     Ok(ok_json(WorkerMetricsResponse {
-        display_name: worker_display_name(registration_name, base_name),
+        display_name,
         worker_id,
         samples,
         connections,
@@ -734,7 +739,6 @@ mod tests {
             assigned_job_count: 0,
             draining: false,
             authorized_peers: authorized.map(|v| v.into_iter().collect::<HashSet<_>>()),
-            project: None,
             cpu_usage_pct: None,
             ram_free_mb: None,
             ram_total_mb: 0,
@@ -867,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unnamed_worker_resolves_to_nothing_rather_than_an_id() {
+    fn a_worker_serving_neither_way_is_not_the_projects() {
         assert_eq!(worker_display_name(None, None), None);
     }
 

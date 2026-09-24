@@ -79,7 +79,7 @@ The board reads from dedicated tables populated as the scheduler runs:
 - `dispatched_job` - one row per dispatch with the winning score, per-rule breakdown, and job/worker context (the scoring-debug substrate).
 - `phase_event` + per-phase timestamp columns on `build`/`evaluation` - accurate phase timing. The build lifecycle is `created_at → queued_at → ready_at → dispatched_at → build_started_at → build_finished_at`, where `queued_at→ready_at` is **dependency wait** (`deps.wait_ms`) and `ready_at→dispatched_at` is **queue wait excluding dependency wait** (`dispatch.wait_ms`).
 - `dispatched_job_phase` - one row per worker phase span, nested via `parent_seq` and cascade-deleted with its job. Written when the job reports its terminal message, alongside `dispatched_job.finished_at` and `outcome`.
-- `worker_connection` / `worker_sample` - worker sessions and a periodic live-metric time-series.
+- `worker_connection` / `worker_sample` - worker sessions and a periodic live-metric time-series. Both describe the worker, not a project: a worker is visible in every project it is registered in or that enabled it as a base worker.
 - `derivation_metric` - per-build resource usage captured by the worker from the build's cgroup (peak RAM, CPU time, disk read/write, OOM) plus a host network peak; powers the Expensive Jobs resource tabs. Requires cgroup metrics enabled on the worker.
 - `metric_rollup` - time-bucketed aggregates (minute → hour → day → week) produced by a background aggregator, queried via `GET /api/v1/metrics/query` (catalog at `GET /api/v1/metrics/catalog`).
 

@@ -24,7 +24,8 @@ pub enum BoardEvent {
         evaluation_id: Uuid,
     },
     WorkerConnected {
-        project: Uuid,
+        #[serde(skip)]
+        projects: Vec<Uuid>,
         worker_id: String,
     },
     WorkerDisconnected {

@@ -1318,3 +1318,76 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
         "the lookup must see a closed row too, or the already-closed path is unreachable: {lookup}"
     );
 }
+
+fn statements(log: &[sea_orm::Transaction]) -> Vec<String> {
+    log.iter()
+        .flat_map(|t| t.statements())
+        .map(|s| s.sql.clone())
+        .collect()
+}
+
+/// A base worker has no `worker_registration` row, and a shared one has many;
+/// neither decides whether the connection is recorded, and the announcement
+/// names every project the session is authorized for (#587).
+#[tokio::test]
+async fn registering_opens_a_connection_row_without_a_worker_registration() {
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let mut events = scheduler.state.board_events.subscribe();
+    let peers = HashSet::from([ProjectId::now_v7(), ProjectId::now_v7()]);
+
+    register(&scheduler, "w1", eval_worker_caps(), peers.clone()).await;
+
+    let sql = statements(&log_db.into_transaction_log());
+    assert!(
+        sql.iter()
+            .any(|s| s.starts_with("INSERT INTO \"worker_connection\"")),
+        "{sql:#?}"
+    );
+    assert!(
+        !sql.iter().any(|s| s.contains("worker_registration")),
+        "{sql:#?}"
+    );
+    let announced = std::iter::from_fn(|| events.try_recv().ok())
+        .find_map(|ev| match ev {
+            crate::BoardEvent::WorkerConnected { projects, .. } => Some(projects),
+            _ => None,
+        })
+        .expect("the connection is announced");
+    let expected: HashSet<uuid::Uuid> = peers.into_iter().map(Into::into).collect();
+    assert_eq!(announced.into_iter().collect::<HashSet<_>>(), expected);
+}
+
+/// Samples describe the worker, so every connected worker is sampled whether
+/// or not any project registered it (#587).
+#[tokio::test]
+async fn every_connected_worker_is_sampled() {
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    let workers = scheduler.board_workers().await;
+    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let log_db = db.clone();
+
+    for info in &workers {
+        crate::worker_lifecycle::record_worker_sample(&db, info).await;
+    }
+
+    let sql = statements(&log_db.into_transaction_log());
+    assert_eq!(
+        sql.iter()
+            .filter(|s| s.starts_with("INSERT INTO \"worker_sample\""))
+            .count(),
+        1,
+        "{sql:#?}"
+    );
+}

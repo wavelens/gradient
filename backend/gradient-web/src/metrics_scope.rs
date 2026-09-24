@@ -12,7 +12,9 @@
 
 use crate::error::WebError;
 use gradient_types::MUser;
+use gradient_types::ids::ProjectId;
 use sea_orm::{ConnectionTrait, Value};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 gradient_db::sql! {
@@ -67,6 +69,21 @@ impl MetricsScope {
         }
     }
 
+    /// The projects of a connected worker the caller may see, or `None` when the
+    /// worker serves none of them. A worker with no authorization filter (open
+    /// mode) is superuser-only.
+    pub fn worker_projects(&self, authorized: Option<&HashSet<ProjectId>>) -> Option<Vec<Uuid>> {
+        let Some(peers) = authorized else {
+            return self.is_all().then(Vec::new);
+        };
+        let visible: Vec<Uuid> = peers
+            .iter()
+            .map(|&p| Uuid::from(p))
+            .filter(|p| self.allows(p))
+            .collect();
+        (self.is_all() || !visible.is_empty()).then_some(visible)
+    }
+
     /// SQL `IN (...)` fragment of accessible project UUID literals, or `None` for
     /// the unrestricted (superuser) scope. Values are DB-sourced UUIDs.
     pub fn project_in_list(&self) -> Option<String> {
@@ -80,5 +97,35 @@ impl MetricsScope {
                     .join(","),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A worker shared by several projects, or a base worker, has no single
+    /// owner; a member sees it through whichever project they belong to (#587).
+    #[test]
+    fn a_worker_is_seen_through_any_project_it_serves_and_names_only_those() {
+        let mine = ProjectId::now_v7();
+        let other = ProjectId::now_v7();
+        let peers = HashSet::from([mine, other]);
+        let member = MetricsScope::Projects(vec![Uuid::from(mine).to_string()]);
+
+        assert_eq!(
+            member.worker_projects(Some(&peers)),
+            Some(vec![Uuid::from(mine)])
+        );
+        assert_eq!(
+            MetricsScope::Projects(vec![Uuid::now_v7().to_string()]).worker_projects(Some(&peers)),
+            None
+        );
+    }
+
+    #[test]
+    fn an_open_mode_worker_is_superuser_only() {
+        assert_eq!(MetricsScope::All.worker_projects(None), Some(vec![]));
+        assert_eq!(MetricsScope::Projects(vec![]).worker_projects(None), None);
     }
 }

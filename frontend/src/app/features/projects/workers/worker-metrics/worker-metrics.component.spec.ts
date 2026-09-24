@@ -15,7 +15,7 @@ import { ProjectsService } from '@core/services/projects.service';
 
 const WORKER_ID = 'a0000000-0000-0000-0000-000000000001';
 
-function setup(displayName: string | null): ComponentFixture<WorkerMetricsComponent> {
+function setup(displayName: string): ComponentFixture<WorkerMetricsComponent> {
   TestBed.configureTestingModule({
     imports: [WorkerMetricsComponent],
     providers: [
@@ -71,12 +71,6 @@ describe('WorkerMetricsComponent', () => {
     const fixture = setup('builder-1');
     await settled(fixture);
     expect((fixture.nativeElement as HTMLElement).textContent).toContain(WORKER_ID);
-  });
-
-  it('falls back to the id when nothing names the worker any more', async () => {
-    const fixture = setup(null);
-    await settled(fixture);
-    expect((fixture.nativeElement.querySelector('h1') as HTMLElement).textContent).toContain(WORKER_ID);
   });
 
   it('walks back through breadcrumbs rather than a lone back arrow', async () => {

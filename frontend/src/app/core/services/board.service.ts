@@ -183,7 +183,7 @@ export interface DispatchedJobDetail extends Omit<DispatchedJobSummary, 'subject
 
 export interface BoardWorker {
   id: string | null;
-  project: string | null;
+  projects: string[];
   draining: boolean;
   assigned_jobs: number;
   max_concurrent_builds: number;

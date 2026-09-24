@@ -124,10 +124,6 @@ pub struct Counts {
 )]
 pub enum SchedulerMsg {
     Register(Registration, RpcReplyPort<Registered>),
-    SetWorkerProject {
-        worker: String,
-        project: ProjectId,
-    },
     Unregister {
         worker: String,
         reply: RpcReplyPort<Vec<PendingJob>>,
@@ -387,9 +383,6 @@ impl Actor for CoreActor {
                 }
                 info!(worker = %reg.worker, "worker registered");
                 let _ = reply.send(Registered { last_seen });
-            }
-            SchedulerMsg::SetWorkerProject { worker, project } => {
-                core.pool.set_worker_project(&worker, project);
             }
             SchedulerMsg::Unregister { worker, reply } => {
                 let orphaned = core.pool.unregister(&worker);

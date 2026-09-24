@@ -7641,7 +7641,10 @@ paths:
     get:
       tags: [board]
       summary: Connected workers
-      description: Connected workers with capability and live load; foreign-project worker identity and metrics are masked for non-superusers.
+      description: >-
+        Connected workers with capability and live load. `projects` lists the
+        served projects visible to the caller; a worker serving none of them has
+        its identity and metrics masked for non-superusers.
       operationId: getBoardWorkers
       responses:
         '200':
@@ -7701,7 +7704,8 @@ paths:
       description: |-
         Upgrades to a WebSocket streaming JSON board events (`queue_depth`,
         `job_dispatched`, `worker_connected`, `worker_disconnected`). Per-project
-        events are masked to the caller's scope.
+        events are masked to the caller's scope; `worker_connected` reaches members
+        of any project the worker serves and names none of them.
       operationId: boardLive
       responses:
         '101':
@@ -7873,7 +7877,7 @@ paths:
     get:
       tags: [board]
       summary: Per-worker metrics
-      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total dispatched-job count for one worker. Project members only.
+      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total dispatched-job count for one worker. Project members only, and only for a worker registered in the project or enabled for it as a base worker; the telemetry covers everything the worker did, not only this project's jobs.
       operationId: getProjectWorkerMetrics
       parameters:
         - { name: project, in: path, required: true, schema: { type: string } }
@@ -7896,11 +7900,9 @@ paths:
                             description: The worker's own id, as used on every sample and job row.
                           display_name:
                             type: string
-                            nullable: true
                             description: >-
                               Human-readable name, taken from this project's registration
-                              or, failing that, from a base worker of the same id. Null once
-                              neither exists, since the history outlives the worker.
+                              or, failing that, from the base worker it enabled.
                           samples:
                             type: array
                             items: { type: object }
@@ -7910,7 +7912,7 @@ paths:
                           jobs_dispatched:
                             type: integer
         '404':
-          description: Project or worker not found
+          description: Project not found, or the worker does not serve it
 
   # ── SCIM 2.0 ─────────────────────────────────────────────────────────────────
   # Instance-level provisioning (RFC 7643/7644), mounted at /scim/v2 only when
