@@ -28,7 +28,7 @@ use gradient_sources::{nix_store_path, strip_store_prefix};
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use gradient_proto::traits::WorkerStore;
 
@@ -128,15 +128,16 @@ impl LocalNixStore {
             .map_err(|e| anyhow::anyhow!("is_valid_path failed for {store_path}: {e}"))
     }
 
-    /// The uncompressed NAR size of each path, `u64::MAX` when the daemon cannot
-    /// report one, so an unknown size routes as a large NAR instead of relaying.
-    pub async fn nar_sizes(&self, store_paths: &[String]) -> Vec<u64> {
+    /// The uncompressed NAR size of each path, `None` when the daemon cannot
+    /// report one (a build output before it is built, a path to be fetched).
+    pub async fn nar_sizes(&self, store_paths: &[String]) -> Vec<Option<u64>> {
         let mut sizes = Vec::with_capacity(store_paths.len());
         for path in store_paths {
-            let size = self.nar_size(path).await.unwrap_or_else(|e| {
-                warn!(path = %path, error = %e, "nar size unknown; routing as large");
-                u64::MAX
-            });
+            let size = self
+                .nar_size(path)
+                .await
+                .inspect_err(|e| debug!(path = %path, error = %e, "nar size unknown"))
+                .ok();
             sizes.push(size);
         }
 

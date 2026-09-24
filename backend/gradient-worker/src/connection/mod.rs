@@ -115,6 +115,13 @@ impl WriterFlush {
             );
         }
     }
+
+    /// Drop the socket now. Background tasks may still hold writer clones, and
+    /// while they do the session would stay open with nobody reading it, so the
+    /// server keeps the dead session and refuses the reconnect.
+    pub fn close(self) {
+        self.0.abort();
+    }
 }
 
 /// Cloneable write handle over the shared bounded writer queue.
@@ -144,5 +151,34 @@ impl ProtoReader {
     /// Next inbound frame; `None` on close or a malformed frame.
     pub async fn recv(&mut self) -> Option<Inbound<ServerMessage>> {
         self.inner.recv().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_test_support::prelude::MockProtoServer;
+
+    #[tokio::test]
+    async fn closing_the_writer_drops_the_socket_while_a_background_clone_lives() {
+        let server = MockProtoServer::bind().await;
+        let (mut sc, conn) = tokio::join!(server.accept(), ProtoConnection::open(server.url()));
+        let conn = conn.unwrap();
+
+        let (writer, reader, flush) = conn.split();
+        let background = writer.clone();
+        drop((writer, reader));
+        flush.close();
+
+        let seen = tokio::time::timeout(Duration::from_secs(5), sc.recv())
+            .await
+            .expect("the server must see the socket close, not wait on a dead session");
+        assert!(seen.is_err());
+        assert!(
+            background
+                .send(ClientMessage::RequestJobList)
+                .await
+                .is_err()
+        );
     }
 }

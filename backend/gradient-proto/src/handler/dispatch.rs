@@ -419,7 +419,7 @@ impl<'a> DispatchContext<'a> {
         job_id: String,
         query_id: String,
         paths: Vec<String>,
-        nar_sizes: Vec<u64>,
+        nar_sizes: Vec<Option<u64>>,
         mode: QueryMode,
         external: bool,
     ) {
@@ -967,7 +967,7 @@ impl RpcContext {
         job_id: String,
         query_id: String,
         paths: Vec<String>,
-        nar_sizes: Vec<u64>,
+        nar_sizes: Vec<Option<u64>>,
         mode: gradient_types::proto::QueryMode,
         external: bool,
     ) {

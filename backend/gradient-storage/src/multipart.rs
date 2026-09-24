@@ -39,7 +39,7 @@ pub(crate) fn layout(nar_size: u64) -> Layout {
 }
 
 fn compressed_bound(nar_size: u64) -> u64 {
-    nar_size + nar_size / 128 + MIB
+    nar_size.saturating_add(nar_size / 128).saturating_add(MIB)
 }
 
 fn part_ttl(nar_size: u64) -> Duration {
@@ -148,6 +148,13 @@ mod tests {
         assert!(l.part_size > MIN_PART_BYTES);
         assert_eq!(l.part_size % MIB, 0);
         assert!(l.part_size * l.part_count >= compressed_bound(2048 * GIB));
+    }
+
+    #[test]
+    fn layout_saturates_at_the_part_cap_instead_of_wrapping() {
+        let l = layout(u64::MAX);
+        assert!(l.part_count <= MAX_PARTS);
+        assert!(u128::from(l.part_size) * u128::from(l.part_count) >= u128::from(u64::MAX));
     }
 
     #[test]

@@ -381,12 +381,12 @@ impl JobUpdater {
     ) -> Result<Vec<CachedPath>> {
         let from_store = match &self.store {
             Some(store) => store.nar_sizes(&paths).await,
-            None => vec![u64::MAX; paths.len()],
+            None => vec![None; paths.len()],
         };
-        let nar_sizes: Vec<u64> = from_store
+        let nar_sizes: Vec<Option<u64>> = from_store
             .into_iter()
             .enumerate()
-            .map(|(i, stored)| sizes.get(i).copied().flatten().unwrap_or(stored))
+            .map(|(i, stored)| sizes.get(i).copied().flatten().or(stored))
             .collect();
 
         let mut guard = self.phase(JobPhase::CacheQueryWait);
@@ -657,17 +657,17 @@ async fn cache_query_with_timeout(
     writer: &ProtoWriter,
     cache_waiters: &CacheWaiters,
     paths: Vec<String>,
-    nar_sizes: Vec<u64>,
+    nar_sizes: Vec<Option<u64>>,
     mode: QueryMode,
     external: bool,
 ) -> Result<Vec<CachedPath>> {
     // A Push carries one size per path or the server rejects it. A caller that
-    // cannot know them yet says so with the unknown sentinel rather than nothing.
+    // cannot know them yet says so per path rather than sending none.
     let nar_sizes = match mode {
-        QueryMode::Push if nar_sizes.len() != paths.len() => vec![u64::MAX; paths.len()],
+        QueryMode::Push if nar_sizes.len() != paths.len() => vec![None; paths.len()],
         _ => nar_sizes,
     };
-    let chunks: Vec<(Vec<String>, Vec<u64>)> = paths
+    let chunks: Vec<(Vec<String>, Vec<Option<u64>>)> = paths
         .chunks(CACHE_QUERY_MAX_PATHS)
         .enumerate()
         .map(|(i, chunk)| {
@@ -698,7 +698,7 @@ async fn cache_query_chunk(
     writer: &ProtoWriter,
     cache_waiters: &CacheWaiters,
     paths: Vec<String>,
-    nar_sizes: Vec<u64>,
+    nar_sizes: Vec<Option<u64>>,
     mode: QueryMode,
     external: bool,
 ) -> Result<Vec<CachedPath>> {
@@ -1240,8 +1240,8 @@ mod tests {
         pump.abort();
     }
 
-    /// Without a local store no size is known, and an unknown size must route
-    /// as a large NAR: `u64::MAX`, never `0`.
+    /// Without a local store no size is known, and an unknown size travels as
+    /// `None`, never as a number the server could size an upload by.
     #[tokio::test]
     async fn a_push_query_without_a_store_marks_every_size_unknown() {
         use gradient_proto::messages::ServerMessage;
@@ -1258,7 +1258,7 @@ mod tests {
                 panic!("expected a CacheQuery");
             };
             assert_eq!(mode, QueryMode::Push);
-            assert_eq!(nar_sizes, vec![u64::MAX; paths.len()]);
+            assert_eq!(nar_sizes, vec![None; paths.len()]);
             let cached = paths.iter().map(|p| cached(p)).collect();
             sc.send(ServerMessage::CacheStatus { query_id, cached })
                 .await
@@ -1301,7 +1301,7 @@ mod tests {
                 panic!("expected a CacheQuery");
             };
             assert_eq!(mode, QueryMode::Push);
-            assert_eq!(nar_sizes, vec![u64::MAX; paths.len()]);
+            assert_eq!(nar_sizes, vec![None; paths.len()]);
             let cached = paths.iter().map(|p| cached(p)).collect();
             sc.send(ServerMessage::CacheStatus { query_id, cached })
                 .await

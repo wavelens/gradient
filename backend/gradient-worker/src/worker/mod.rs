@@ -212,10 +212,11 @@ impl Worker<Connected> {
 
         // The loop owned the writer, so by now only background tasks can still
         // hold a clone. A worker on its way out has to see its last reports
-        // leave the queue; a session that ends to be reconnected does not, the
-        // writer task finishes on its own.
+        // leave the queue; a session that ends to be reconnected closes at once.
         if shutdown.is_stopping() {
             flush.flush(WRITER_FLUSH_BUDGET).await;
+        } else {
+            flush.close();
         }
 
         let disconnected = Worker {

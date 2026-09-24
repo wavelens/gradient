@@ -261,23 +261,25 @@ pub(crate) enum Transport {
 pub(crate) enum PushTransport {
     Relay,
     Put,
-    Multipart,
+    Multipart(u64),
 }
 
 /// Upload transport for an uncached path: relay unless the store can presign
 /// and the NAR is over the small-NAR threshold; past `MULTIPART_NAR_BYTES` a
-/// single PUT could hit S3's 5 GiB cap, so the upload goes in parts.
+/// single PUT could hit S3's 5 GiB cap, so the upload goes in parts. Parts are
+/// sized from the NAR, so an unknown size gets a single PUT.
 pub(crate) fn push_transport(
-    nar_size: u64,
+    nar_size: Option<u64>,
     small_nar_bytes: u64,
     presigner: bool,
 ) -> PushTransport {
-    if !presigner || nar_size <= small_nar_bytes {
-        PushTransport::Relay
-    } else if nar_size > gradient_types::constants::MULTIPART_NAR_BYTES {
-        PushTransport::Multipart
-    } else {
-        PushTransport::Put
+    match nar_size {
+        _ if !presigner => PushTransport::Relay,
+        Some(size) if size <= small_nar_bytes => PushTransport::Relay,
+        Some(size) if size > gradient_types::constants::MULTIPART_NAR_BYTES => {
+            PushTransport::Multipart(size)
+        }
+        _ => PushTransport::Put,
     }
 }
 
@@ -398,7 +400,7 @@ async fn build_uncached_push_entry(
     state: &ServerState,
     hash: &str,
     path: &str,
-    nar_size: u64,
+    nar_size: Option<u64>,
     expire: std::time::Duration,
 ) -> gradient_types::proto::CachedPath {
     use gradient_types::proto::CachedPath;
@@ -417,7 +419,7 @@ async fn build_uncached_push_entry(
             ),
             None,
         ),
-        PushTransport::Multipart => (
+        PushTransport::Multipart(nar_size) => (
             None,
             presign_or_relay(
                 hash,
@@ -639,7 +641,7 @@ async fn query(
     state: &ServerState,
     project_id: Option<ProjectId>,
     paths: &[String],
-    nar_sizes: &[u64],
+    nar_sizes: &[Option<u64>],
     mode: gradient_types::proto::QueryMode,
     external: bool,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
@@ -677,7 +679,7 @@ async fn query(
     }
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
-    let size_by_path: HashMap<&str, u64> = paths
+    let size_by_path: HashMap<&str, Option<u64>> = paths
         .iter()
         .map(String::as_str)
         .zip(nar_sizes.iter().copied())
@@ -733,7 +735,7 @@ async fn query(
                 .await,
             );
         } else if matches!(mode, QueryMode::Push) {
-            let nar_size = size_by_path.get(*path).copied().unwrap_or(u64::MAX);
+            let nar_size = size_by_path.get(*path).copied().flatten();
             result.push(build_uncached_push_entry(state, hash, path, nar_size, expire).await);
         }
     }
@@ -934,7 +936,7 @@ pub(super) async fn handle_cache_query(
     state: &ServerState,
     project_id: Option<ProjectId>,
     paths: &[String],
-    nar_sizes: &[u64],
+    nar_sizes: &[Option<u64>],
     mode: gradient_types::proto::QueryMode,
     external: bool,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
@@ -980,27 +982,33 @@ mod tests {
     fn push_transport_relays_small_nars_and_presigns_large_ones() {
         use gradient_types::constants::MULTIPART_NAR_BYTES;
         let threshold = 1024 * 1024;
-        assert_eq!(push_transport(1024, threshold, true), PushTransport::Relay);
         assert_eq!(
-            push_transport(threshold, threshold, true),
+            push_transport(Some(1024), threshold, true),
             PushTransport::Relay
         );
         assert_eq!(
-            push_transport(threshold + 1, threshold, true),
-            PushTransport::Put
-        );
-        assert_eq!(
-            push_transport(MULTIPART_NAR_BYTES, threshold, true),
-            PushTransport::Put
-        );
-        assert_eq!(
-            push_transport(MULTIPART_NAR_BYTES + 1, threshold, true),
-            PushTransport::Multipart
-        );
-        assert_eq!(
-            push_transport(u64::MAX, threshold, false),
+            push_transport(Some(threshold), threshold, true),
             PushTransport::Relay
         );
+        assert_eq!(
+            push_transport(Some(threshold + 1), threshold, true),
+            PushTransport::Put
+        );
+        assert_eq!(
+            push_transport(Some(MULTIPART_NAR_BYTES), threshold, true),
+            PushTransport::Put
+        );
+        assert_eq!(
+            push_transport(Some(MULTIPART_NAR_BYTES + 1), threshold, true),
+            PushTransport::Multipart(MULTIPART_NAR_BYTES + 1)
+        );
+        assert_eq!(push_transport(None, threshold, false), PushTransport::Relay);
+    }
+
+    #[test]
+    fn an_unknown_size_gets_a_single_put_never_a_multipart_upload() {
+        let threshold = 1024 * 1024;
+        assert_eq!(push_transport(None, threshold, true), PushTransport::Put);
     }
 
     #[test]
@@ -1061,7 +1069,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-small".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-large".to_string(),
         ];
-        let sizes = [1024, 8 * 1024 * 1024];
+        let sizes = [Some(1024), Some(8 * 1024 * 1024)];
         let result = query(&state, None, &paths, &sizes, QueryMode::Push, false)
             .await
             .unwrap();
@@ -1175,7 +1183,7 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push, false)
+            query(&state, None, &paths, &[None; 2], QueryMode::Push, false)
                 .await
                 .unwrap()
                 .is_empty()
@@ -1229,7 +1237,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push, false)
+        let result = query(&state, None, &paths, &[None; 2], QueryMode::Push, false)
             .await
             .unwrap();
         assert_eq!(result.len(), 2, "Push should return all queried paths");
@@ -1260,8 +1268,8 @@ mod tests {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
-            let sizes: &[u64] = if matches!(mode, QueryMode::Push) {
-                &[u64::MAX]
+            let sizes: &[Option<u64>] = if matches!(mode, QueryMode::Push) {
+                &[None]
             } else {
                 &[]
             };
@@ -1279,7 +1287,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
         ];
-        let result = query(&state, None, &paths, &[u64::MAX; 2], QueryMode::Push, false)
+        let result = query(&state, None, &paths, &[None; 2], QueryMode::Push, false)
             .await
             .unwrap();
         for cp in &result {

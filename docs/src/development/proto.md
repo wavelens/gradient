@@ -614,7 +614,7 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 |------|----------|----------------|
 | `Normal` | Is this path already in the cache? | Only cached paths (`cached: true`). A local hit answers presence alone, with no URL and no import metadata; an upstream hit carries that upstream's NAR URL and the narinfo fields behind it, since that is all the server has to offer for it. |
 | `Pull` | Build: fetch required store paths | The queried paths the cache can serve, each with full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL for a confirmed object over `smallNarBytes`, else `url: None`: the worker pulls over `NarRequest` and the server answers from its hot RAM cache, its staged file or storage. A path the reply omits is one the server has nothing to offer for; the worker hard-fails on it before importing a dependent with an unsatisfiable reference. |
-| `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` - a presigned S3 PUT URL when the store can presign and the reported `nar_sizes[i]` is over `smallNarBytes`, or a presigned `multipart` upload over 1 GiB; otherwise neither and the worker relays over `NarPush`. No other metadata, no upstream lookup. |
+| `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` - a presigned S3 PUT URL when the store can presign and the reported `nar_sizes[i]` is over `smallNarBytes`, or a presigned `multipart` upload when the size is known and over 1 GiB (an unknown size gets a single PUT); otherwise neither and the worker relays over `NarPush`. No other metadata, no upstream lookup. |
 
 Only a query with `external: true` may be answered from an upstream, and it names exactly one path. Every other query answers from our cache alone: a build's inputs are here or it fails `InputsUnavailable`, and putting them here is a Substitute's job.
 
@@ -625,7 +625,7 @@ CacheQuery {
     query_id: String,                   // echoed in CacheStatus / CacheError
     paths: Vec<String>,                 // store paths to query
     mode: QueryMode,                    // default: Normal
-    nar_sizes: Vec<u64>,                // Push: uncompressed NAR size per path, u64::MAX when unknown
+    nar_sizes: Vec<Option<u64>>,        // Push: uncompressed NAR size per path, None when unknown
     external: bool,                     // may the server consult its upstreams? then exactly one path
 }
 
@@ -1557,7 +1557,7 @@ decommission a worker it does not own.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `15`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `16`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
@@ -1580,6 +1580,8 @@ decommission a worker it does not own.
    `QueryMode::PullClosure`.
  - v15 added `CachedPath.multipart` (presigned S3 multipart upload for NARs
    over 1 GiB) and `NarUploaded.multipart` (its part ETags).
+ - v16 made `CacheQuery.nar_sizes` entries `Option<u64>`, so an unknown size is
+   never granted a multipart upload.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---

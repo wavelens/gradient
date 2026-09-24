@@ -190,7 +190,7 @@ fn cache_query_push_roundtrip() {
         query_id: "query-2".into(),
         paths: vec!["/nix/store/aaaa-foo".into(), "/nix/store/bbbb-bar".into()],
         mode: QueryMode::Push,
-        nar_sizes: vec![4096, u64::MAX],
+        nar_sizes: vec![Some(4096), None],
         external: false,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();

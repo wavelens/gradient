@@ -319,7 +319,7 @@ impl ProtoSocket {
                     Ok(AxumMessage::Close(_)) => return None,
                     Ok(_) => continue,
                     Err(e) => {
-                        debug!(error = %e, "WebSocket recv error");
+                        warn!(error = %e, "WebSocket recv error");
                         return None;
                     }
                 }
@@ -331,7 +331,7 @@ impl ProtoSocket {
                     Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
                     Ok(_) => continue,
                     Err(e) => {
-                        debug!(error = %e, "WebSocket recv error");
+                        warn!(error = %e, "WebSocket recv error");
                         return None;
                     }
                 }
@@ -525,7 +525,7 @@ impl ReaderInner {
                     Ok(AxumMessage::Close(_)) => return None,
                     Ok(_) => continue,
                     Err(e) => {
-                        debug!(error = %e, "WebSocket recv error");
+                        warn!(error = %e, "WebSocket recv error");
                         return None;
                     }
                 },
@@ -535,7 +535,7 @@ impl ReaderInner {
                     Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
                     Ok(_) => continue,
                     Err(e) => {
-                        debug!(error = %e, "WebSocket recv error");
+                        warn!(error = %e, "WebSocket recv error");
                         return None;
                     }
                 },
@@ -1095,7 +1095,7 @@ mod tests {
             query_id: "6c1a5e2c-0f52-4f9e-9a0e-2f1b7c4d8e90".to_owned(),
             paths: paths.clone(),
             mode: gradient_types::proto::QueryMode::Push,
-            nar_sizes: vec![u64::MAX; paths.len()],
+            nar_sizes: vec![Some(u64::MAX); paths.len()],
             external: false,
         };
 

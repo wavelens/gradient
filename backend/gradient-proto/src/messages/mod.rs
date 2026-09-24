@@ -43,7 +43,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      QueryMode::PullClosure removed.
 /// v15: CachedPath.multipart grants a presigned multipart upload; NarUploaded.multipart
 ///      returns its part ETags.
-pub const PROTO_VERSION: u16 = 15;
+/// v16: `CacheQuery.nar_sizes` entries are `Option<u64>`; an unknown size is never
+///      granted a multipart upload.
+pub const PROTO_VERSION: u16 = 16;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 
