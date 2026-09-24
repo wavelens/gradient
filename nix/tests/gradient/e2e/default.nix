@@ -1688,23 +1688,23 @@ in {
       # than as an error anywhere. A build is dispatched once per anchor and its
       # record names whichever evaluation first named the derivation, so find it
       # through the evaluation's own build jobs, not through that attribution.
-      # Only a Completed one ran the builder: a job whose outputs were already on
-      # the worker's disk is reported Substituted and has no build span.
+      # The builder holds hello's whole closure, so its jobs are mostly adopted
+      # from disk (Substituted): those still compress and push, but only a
+      # Completed one ran the builder and has a build span.
       banner("Phase 10b: the completed build job has worker phase spans")
-      job_id = sql(
-          f"SELECT dj.id FROM dispatched_job dj "
+      job_id, build_status = sql(
+          f"SELECT dj.id, db.status FROM dispatched_job dj "
           f"JOIN build_job bj ON dj.job_id = 'build:' || bj.derivation_build::text "
           f"JOIN derivation_build db ON db.id = bj.derivation_build "
           f"WHERE bj.evaluation = '{eval_id}' AND dj.kind = 1 AND dj.finished_at IS NOT NULL "
-          f"AND db.status = 3 "
           f"ORDER BY dj.dispatched_at DESC LIMIT 1;"
-      )
-      assert job_id, "no finished daemon-built job was recorded for the evaluation"
+      ).partition("|")[::2]
+      assert job_id, "no finished build job was recorded for the evaluation"
 
       job = json.loads(api_get(token, f"board/jobs/{job_id}"))["message"]
       phases = {p["phase"] for p in job["phases"]}
-      print(f"job {job_id} phases: {sorted(phases)}")
-      assert "build" in phases, f"no build span in {sorted(phases)}"
+      print(f"job {job_id} (status {build_status}) phases: {sorted(phases)}")
+      assert ("build" in phases) == (build_status == "3"), f"status {build_status} with {sorted(phases)}"
       assert "nar_push" in phases, f"no nar push span in {sorted(phases)}"
       assert all(p["end_ms"] >= p["start_ms"] for p in job["phases"]), job["phases"]
       assert job["outcome"] == "completed", job["outcome"]
