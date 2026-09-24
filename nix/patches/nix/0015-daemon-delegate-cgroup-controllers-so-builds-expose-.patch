@@ -1,0 +1,71 @@
+From 68d4049ceaf4d37837d3c2fdfe415f48737d1f64 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Tue, 16 Jun 2026 12:11:59 +0200
+Subject: [PATCH 15/16] daemon: delegate cgroup controllers so builds expose
+ memory/io stats
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+After moving its own process into the nix-daemon leaf cgroup,
+the daemon now enables the cpu/memory/io/pids controllers in the service cgroup's cgroup.subtree_control.
+Previously per-build cgroups inherited no controllers (cgroup-v2 no-internal-process rule),
+so only cpu.stat was readable and memory.peak/io.stat/memory.events were absent (#9675).
+
+Co-Authored-By: Jörg Thalheim <Mic92@users.noreply.github.com>
+Co-Authored-By: Sergei Zimmerman <sergei@zimmerman.foo>
+---
+ src/nix/unix/daemon.cc | 27 ++++++++++++++++++++++++---
+ 1 file changed, 24 insertions(+), 3 deletions(-)
+
+diff --git a/src/nix/unix/daemon.cc b/src/nix/unix/daemon.cc
+index 42cae6de2..a45c44d8a 100644
+--- a/src/nix/unix/daemon.cc
++++ b/src/nix/unix/daemon.cc
+@@ -9,6 +9,7 @@
+ #include "nix/store/remote-store-connection.hh"
+ #include "nix/store/store-open.hh"
+ #include "nix/util/serialise.hh"
++#include "nix/util/strings.hh"
+ #include "nix/store/globals.hh"
+ #include "nix/util/config-global.hh"
+ #include "nix/store/derivations.hh"
+@@ -272,12 +273,32 @@ static void daemonLoop(
+         auto rootCgroupPath = *cgroupFS / rootCgroup.rel();
+         if (!pathExists(rootCgroupPath))
+             throw Error("expected cgroup directory %s", PathFmt(rootCgroupPath));
+-        auto daemonCgroupPath = rootCgroupPath + "/nix-daemon";
++        auto daemonCgroupPath = rootCgroupPath / "nix-daemon";
+         //  Create new sub-cgroup for the daemon.
+         if (mkdir(daemonCgroupPath.c_str(), 0755) != 0 && errno != EEXIST)
+-            throw SysError("creating cgroup '%s'", daemonCgroupPath);
++            throw SysError("creating cgroup %s", PathFmt(daemonCgroupPath));
+         //  Move daemon into the new cgroup.
+-        writeFile(daemonCgroupPath + "/cgroup.procs", fmt("%d", getpid()));
++        writeFile(daemonCgroupPath / "cgroup.procs", fmt("%d", getpid()));
++
++        /* Now that the root cgroup has no processes, enable controllers
++           for the per-build sibling cgroups so they get memory/io stats. */
++        try {
++            auto available = tokenizeString<StringSet>(readFile(rootCgroupPath / "cgroup.controllers"));
++            Strings enable;
++            for (auto & c : {"cpu", "memory", "io", "pids"})
++                if (available.count(c))
++                    enable.push_back(fmt("+%s", c));
++            if (!enable.empty())
++                writeFile(rootCgroupPath / "cgroup.subtree_control", concatStringsSep(" ", enable));
++        } catch (SystemError & e) {
++            /* This is what we get when trying to violate the "no internal processes" rule. */
++            if (e.is(std::errc::device_or_resource_busy))
++                warn(
++                    "could not enable cgroup controllers because current cgroup (%s) is not process-free",
++                    PathFmt(rootCgroupPath));
++            else
++                warn("could not enable cgroup controllers for builds: %s", e.ec().message());
++        }
+     }
+ #endif
+ 
+-- 
+2.55.0
+
