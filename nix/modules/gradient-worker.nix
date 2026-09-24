@@ -292,29 +292,18 @@ in {
           daemon, and delegating the cgroup-v2 controllers to `nix-daemon.service`
           (`Delegate=yes`) so per-build `memory.peak`/`io.stat` are exposed. CPU
           time comes from the daemon build result; peak RAM and disk I/O are
-          sampled live from the build's cgroup (located via `buildCgroupStateDir`),
-          reliable at concurrency 1 and best-effort above. Wall-clock build time
-          is always reported.
+          sampled live from the build's `nix-build@<drv-hash>-<uid>` cgroup, which
+          needs the gradient nix fork on the daemon, so `nix.package` defaults to
+          `packages.nix`. Wall-clock build time is always reported.
         '';
         type = lib.types.bool;
         default = false;
       };
 
       buildCgroupRoot = lib.mkOption {
-        description = "Cgroup-v2 mount root searched for per-build cgroups when `buildMetrics` is enabled.";
+        description = "The nix daemon's cgroup, in which it creates each build's cgroup when `buildMetrics` is enabled.";
         type = lib.types.str;
-        default = "/sys/fs/cgroup";
-      };
-
-      buildCgroupStateDir = lib.mkOption {
-        description = ''
-          Nix's `<nix-state-dir>/cgroups` directory, where the daemon records
-          each build's cgroup path (`<uid>` files). The worker reads the newest
-          entry to locate a running build's cgroup for metrics. Granted read
-          access via `ReadOnlyPaths`.
-        '';
-        type = lib.types.str;
-        default = "/nix/var/nix/cgroups";
+        default = "/sys/fs/cgroup/system.slice/nix-daemon.service";
       };
 
       logBurstBytesPerMin = lib.mkOption {
@@ -434,11 +423,6 @@ in {
           ProtectProc = "invisible";
           ProtectSystem = "strict";
           ReadWritePaths = lib.optionals (cfg.settings.gcrootsDir != "") [ cfg.settings.gcrootsDir ];
-          # Build metrics read the daemon's cgroup-path map and the cgroup-v2
-          # stat files. ProtectSystem=strict already leaves /sys and /nix
-          # readable; this makes the cgroup map explicitly available (the dir may
-          # not exist until the first cgroup build, hence the `-` prefix).
-          ReadOnlyPaths = lib.optionals cfg.settings.buildMetrics [ "-${cfg.settings.buildCgroupStateDir}" ];
           Restart = "on-failure";
           RestartSec = 10;
           # SIGTERM drains: the worker finishes its in-flight jobs before it
@@ -494,7 +478,6 @@ in {
           GRADIENT_WORKER_GCROOTS_DIR                 = cfg.settings.gcrootsDir;
           GRADIENT_WORKER_BUILD_METRICS               = lib.boolToString cfg.settings.buildMetrics;
           GRADIENT_WORKER_BUILD_CGROUP_ROOT           = cfg.settings.buildCgroupRoot;
-          GRADIENT_WORKER_BUILD_CGROUP_STATE_DIR      = cfg.settings.buildCgroupStateDir;
           GRADIENT_LOG_BURST_BYTES_PER_MIN            = toString cfg.settings.logBurstBytesPerMin;
           GRADIENT_LOG_SUSTAINED_BYTES_PER_HOUR       = toString cfg.settings.logSustainedBytesPerHour;
           GRADIENT_LOG_FETCH_FROM_STORE               = lib.boolToString cfg.settings.logFetchFromStore;
@@ -526,6 +509,8 @@ in {
         };
       };
     };
+
+    nix.package = lib.mkIf cfg.settings.buildMetrics (lib.mkDefault cfg.packages.nix);
 
     nix.settings = {
       trusted-users = [ "gradient-worker" ];

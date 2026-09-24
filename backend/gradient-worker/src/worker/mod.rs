@@ -278,7 +278,6 @@ impl Worker<Connected> {
             config.binpath_ssh.clone(),
             config.build_metrics,
             config.build_cgroup_root.clone(),
-            config.build_cgroup_state_dir.clone(),
             crate::executor::log_limit::LogRateLimits {
                 burst_bytes_per_min: config.log_burst_bytes_per_min,
                 sustained_bytes_per_hour: config.log_sustained_bytes_per_hour,
@@ -288,7 +287,6 @@ impl Worker<Connected> {
         );
         if config.build_metrics {
             tracing::info!(
-                cgroup_state_dir = %config.build_cgroup_state_dir,
                 cgroup_root = %config.build_cgroup_root,
                 "build metrics enabled: CPU from daemon build result, peak RAM/disk sampled from the build cgroup"
             );
