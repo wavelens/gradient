@@ -331,10 +331,13 @@ fn unpromote_sql(reason: &str) -> String {
         "UPDATE derivation_build db \
          SET status = {created}, updated_at = (now() AT TIME ZONE 'UTC') \
          FROM derivation_build old \
-         WHERE old.id = db.id AND db.status = {queued} AND {reason} \
+         WHERE old.id = db.id AND db.status = {queued} AND {not_in_flight} AND {reason} \
          RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
         created = status_sql::build(BuildStatus::Created),
         queued = status_sql::build(BuildStatus::Queued),
+        not_in_flight = crate::dispatch_record::no_open_dispatch_predicate(
+            &crate::dispatch_record::build_job_key_sql("db.id")
+        ),
     )
 }
 
@@ -1613,6 +1616,23 @@ mod tests {
             log[0].contains("AND db.demanded"),
             "the embedded gate reads the demand column: {log:?}"
         );
+    }
+
+    /// A dispatched job keeps its anchor `Queued` until the worker reports, so an
+    /// un-promote that reached it would skip a build already running and reject
+    /// the `Building` that follows.
+    #[test]
+    fn no_unpromote_takes_an_anchor_out_from_under_its_job() {
+        let gate = norm(&crate::dispatch_record::no_open_dispatch_predicate(
+            &crate::dispatch_record::build_job_key_sql("db.id"),
+        ));
+        for sql in [
+            &*UNPROMOTE_UNGATED,
+            &*UNPROMOTE_UNGATED_IN,
+            &*UNPROMOTE_DRV_OWNERS,
+        ] {
+            assert!(norm(sql).contains(&gate), "{sql}");
+        }
     }
 
     /// Both recounts are bounded by the chunk their lock named, never by a subquery a
