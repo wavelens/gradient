@@ -106,31 +106,36 @@ mod tests {
         assert!(nar.len() as u64 >= app.size);
     }
 
+    async fn file_sizes(nar: Bytes) -> Vec<u64> {
+        let mut events = std::pin::pin!(parse_nar(std::io::Cursor::new(nar)));
+        let mut sizes = Vec::new();
+        while let Some(event) = events.try_next().await.expect("parse") {
+            if let NarEvent::File {
+                size, mut reader, ..
+            } = event
+            {
+                tokio::io::copy(&mut reader, &mut tokio::io::sink())
+                    .await
+                    .expect("file contents");
+                sizes.push(size);
+            }
+        }
+        sizes
+    }
+
     #[tokio::test]
     async fn fixed_output_is_exactly_the_fod_content() {
         let mut node = config().derivations["t/lib"].clone();
         node.fixed_output = true;
         node.fod_content = Some("gradient-daemon fod t/lib\n".into());
         let nar = render("t/lib", &node, "out").expect("render");
-        let events: Vec<_> = parse_nar(std::io::Cursor::new(nar))
-            .try_collect()
-            .await
-            .expect("parse");
-        assert!(matches!(&events[0], NarEvent::File { size, .. } if *size == 26));
+        assert_eq!(file_sizes(nar).await, vec![26]);
     }
 
     #[tokio::test]
     async fn rendered_tree_parses_as_a_nar() {
         let c = config();
         let nar = render("t/app", &c.derivations["t/app"], "out").expect("render");
-        let events: Vec<_> = parse_nar(std::io::Cursor::new(nar))
-            .try_collect()
-            .await
-            .expect("parse");
-        let files = events
-            .iter()
-            .filter(|e| matches!(e, NarEvent::File { .. }))
-            .count();
-        assert_eq!(files, 3);
+        assert_eq!(file_sizes(nar).await.len(), 3);
     }
 }

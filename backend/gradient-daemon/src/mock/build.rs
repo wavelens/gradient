@@ -457,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_dropped_connection_aborts_its_build() {
-        let (backend, mut client, _dir) = setup().await;
+        let (backend, mut client, (_dir, server)) = setup().await;
         seed(&backend, "t/lib").await;
         hang(&backend, "t/app");
         let (drv_path, drv) = (node_path("t/app"), app_basic());
@@ -465,7 +465,7 @@ mod tests {
         let pending = tokio::time::timeout(std::time::Duration::from_millis(100), build).await;
         assert!(pending.is_err(), "a hanging build returned");
         assert_eq!(running(&backend), BTreeMap::from([("t/app".to_owned(), 1)]));
-        drop(client);
+        drop(server);
         for _ in 0..100 {
             if running(&backend).is_empty() {
                 return;
