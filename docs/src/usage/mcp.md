@@ -5,8 +5,8 @@ Protocol](https://modelcontextprotocol.io) client over stdio, so an assistant
 can read your CI: which evaluations ran, which builds failed, and what the
 failing derivation printed.
 
-Access is read-only. The server exposes no tool that dispatches an evaluation,
-edits a project, or aborts a build.
+Access is read-only unless the server is started with `--control` (see
+[Control](#control)). It never exposes a tool that edits a project.
 
 ## Setup
 
@@ -58,6 +58,23 @@ For a client configured through JSON:
 The usual path from a red pipeline to a cause is `list_evaluations` on the task,
 `list_builds` on the failed evaluation, then `get_build_log` on the build that
 failed. For long logs, `search_build_log` finds the line number to read around.
+
+## Control
+
+`gradient mcp --control` also exposes tools that act on the CI, limited by the
+user's project permissions:
+
+| Tool | Does |
+|---|---|
+| `start_evaluation` | Queues an evaluation of a task, optionally at an exact commit, and returns its UUID |
+| `abort_evaluation` | Cancels an evaluation's in-progress and queued builds |
+| `watch_evaluation` | Waits until an evaluation finishes or `timeout_seconds` (default 600) passes, then returns each entry point's build status; `finished: false` means it timed out |
+
+For Claude Code:
+
+```sh
+claude mcp add gradient -- gradient mcp --control
+```
 
 ## Troubleshooting
 

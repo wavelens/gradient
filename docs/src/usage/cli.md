@@ -338,6 +338,8 @@ nix run github:wavelens/gradient#gradient-cli-full -- eval 'packages.x86_64-linu
 ```sh
 # Serve this instance to MCP clients over stdio (read-only)
 gradient mcp
+# Also allow starting, aborting and watching evaluations
+gradient mcp --control
 ```
 
 Reuses the stored login, so an assistant can list evaluations and read build
