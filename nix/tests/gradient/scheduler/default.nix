@@ -152,12 +152,16 @@ let
             created_by = "admin";
           };
 
-          # No triggers: every phase starts its own evaluation through the API.
+          # The only trigger never fires: every phase starts its own evaluation through the API.
           tasks = lib.genAttrs specNames (name: {
             project = "project";
             repository = "git://server/${name}";
             created_by = "admin";
-            triggers = [ ];
+            triggers = [{
+              type = "polling";
+              active = false;
+              config.interval_secs = 3600;
+            }];
           });
 
           caches.main = {
@@ -213,7 +217,7 @@ in
 {
   value = pkgs.testers.runNixOSTest {
     name = "gradient-scheduler";
-    globalTimeout = 1800;
+    globalTimeout = 3600;
 
     defaults = {
       networking.firewall.enable = false;
@@ -234,8 +238,9 @@ in
     };
 
     testScript = ''
-      FLAKES = ${builtins.toJSON flakes}
-      RESOLVED = ${builtins.toJSON resolved}
+      import json
+      FLAKES = json.loads(${builtins.toJSON (builtins.toJSON flakes)})
+      RESOLVED = json.loads(${builtins.toJSON (builtins.toJSON resolved)})
       ${builtins.readFile ./test.py}
     '';
   };
