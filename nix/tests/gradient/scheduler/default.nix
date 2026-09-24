@@ -32,8 +32,8 @@ let
 
   workerToken = "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
   workerIds = {
-    worker1 = "[uuid15]";
-    worker2 = "[uuid16]";
+    worker1 = "dd9324a5-959e-40ee-82cc-df8dd880fa0b";
+    worker2 = "3cd98f6a-c560-4617-8a61-1226859764af";
   };
 
   workerNode = name: features: { ... }: {
@@ -50,11 +50,6 @@ let
 
     nix.settings.system-features = features;
 
-    systemd.tmpfiles.rules = [
-      "d /var/lib/gradient-worker 0755 gradient-worker gradient-worker"
-      "f /var/lib/gradient-worker/worker-id 0644 gradient-worker gradient-worker - ${workerIds.${name}}"
-    ];
-
     environment.etc."gradient/secrets/worker_peers" = {
       mode = "0600";
       user = "gradient-worker";
@@ -65,6 +60,7 @@ let
     services.gradient.worker = {
       enable = true;
       serverUrl = "ws://server/proto";
+      workerId = workerIds.${name};
       peersFile = "/etc/gradient/secrets/worker_peers";
       settings.systemFeatures = features;
       capabilities = {
