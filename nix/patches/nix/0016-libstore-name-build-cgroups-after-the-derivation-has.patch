@@ -1,29 +1,28 @@
-From 87fd052604027f4bc4de51e03bf1e5c501498cc1 Mon Sep 17 00:00:00 2001
+From 2cfc71ed05efe7544e194ec6c2f6e223f34e4653 Mon Sep 17 00:00:00 2001
 From: Dennis Wuitz <dennish@wuitz.de>
-Date: Fri, 25 Sep 2026 00:38:50 +0200
+Date: Fri, 25 Sep 2026 00:45:06 +0200
 Subject: [PATCH] libstore: name build cgroups after the derivation hash
 
-Port of lix 63871751ce20ab7f3e017d800149432741aec40b, extended to the
-pid-based cgroups used without a build user.
+Build-user cgroups are named nix-build@<hash-part>-<uid> instead of
+nix-build-uid-<uid>, so a build's cgroup can be located from its
+derivation path. Port of lix 63871751ce20ab7f3e017d800149432741aec40b.
 ---
- src/libstore/linux/build/linux-derivation-builder.cc | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ src/libstore/linux/build/linux-derivation-builder.cc | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/libstore/linux/build/linux-derivation-builder.cc b/src/libstore/linux/build/linux-derivation-builder.cc
-index ed40351c2..bc26ecfd3 100644
+index ed40351c2..d983ff0c0 100644
 --- a/src/libstore/linux/build/linux-derivation-builder.cc
 +++ b/src/libstore/linux/build/linux-derivation-builder.cc
-@@ -466,8 +466,8 @@ void ChrootLinuxDerivationBuilder::prepareUser()
+@@ -466,7 +466,7 @@ void ChrootLinuxDerivationBuilder::prepareUser()
          static std::atomic<unsigned int> counter{0};
  
          cgroup = rootCgroupPath
 -                 / (buildUser ? fmt("nix-build-uid-%d", buildUser->getUID())
--                              : fmt("nix-build-pid-%d-%d", getpid(), counter++));
 +                 / (buildUser ? fmt("nix-build@%s-%d", drvPath.hashPart(), buildUser->getUID())
-+                              : fmt("nix-build@%s-pid-%d-%d", drvPath.hashPart(), getpid(), counter++));
+                               : fmt("nix-build-pid-%d-%d", getpid(), counter++));
  
          debug("using cgroup %s", PathFmt(*cgroup));
- 
 -- 
 2.55.0
 
