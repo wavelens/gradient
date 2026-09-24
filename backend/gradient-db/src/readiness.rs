@@ -842,20 +842,20 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
         "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
         "",
     );
-    // The parent lookup is fenced with `OFFSET 0` so it stays correlated to the
-    // region member. Unfenced, the planner hoists the whole EXISTS out and answers
-    // it standalone - a sequential scan of every anchor filtered on `demanded`,
-    // which reads the graph to find the parents of a region of a few dozen. It
-    // demands what the walk's own step would: an open, demanded parent outside the
-    // region, over a runtime edge from anything and over any edge from a builder.
+    // Both halves of the parent lookup are fenced with `OFFSET 0` so each stays a
+    // keyed probe per region member: unfenced, the edges are hoisted into a scan of
+    // every demanded anchor, and the parent row is merge-joined against a scan of
+    // every open one. It demands what the walk's own step would: an open, demanded
+    // parent outside the region, over a runtime edge from anything and over any
+    // edge from a builder.
     let parent = format!(
         "EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent, e.kind FROM derivation_dependency e \
-                                WHERE e.dependency = r.derivation OFFSET 0) pe \
-                 JOIN derivation_build p ON p.derivation = pe.parent \
-                 JOIN derivation pw ON pw.id = p.derivation \
-                 WHERE p.demanded AND {open} \
-                   AND p.derivation NOT IN (SELECT derivation FROM region) \
-                   AND (({builder}) OR pe.kind IN (1, 2)))",
+                                WHERE e.dependency = r.derivation OFFSET 0) pe, \
+                 LATERAL (SELECT 1 FROM derivation_build p \
+                          JOIN derivation pw ON pw.id = p.derivation \
+                          WHERE p.derivation = pe.parent AND p.demanded AND {open} \
+                            AND (({builder}) OR pe.kind IN (1, 2)) OFFSET 0) q \
+                 WHERE pe.parent NOT IN (SELECT derivation FROM region))",
         open = open_predicate("p"),
         builder = builder_predicate("p", "pw"),
     );
@@ -868,10 +868,12 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
         builder = builder_predicate("rb", "w"),
         open = open_predicate("rb"),
     );
+    // Double negation keeps the region a hashed subplan built once; `IN` is pulled
+    // up into a semi-join that re-aggregates the region per demanded row.
     let demanded = crate::graph_sql::open_closure_cte_body(
         "demanded",
         &seed,
-        "e.dependency IN (SELECT derivation FROM region)",
+        "NOT (e.dependency NOT IN (SELECT derivation FROM region))",
     );
 
     format!(
@@ -1880,8 +1882,21 @@ mod tests {
             "{walk}"
         );
         assert!(
-            walk.contains("p.derivation NOT IN (SELECT derivation FROM region)"),
+            walk.contains("pe.parent NOT IN (SELECT derivation FROM region)"),
             "the seed must come from demanders OUTSIDE the region: {walk}"
+        );
+        // Both region tests are hashed subplans built once: a semi-join re-aggregates
+        // the region per demanded row, and an unfenced parent merge-joins a scan of
+        // every open anchor per region member. A nixos closure ran past 170 s either way.
+        assert!(
+            walk.contains(
+                "AND NOT (e.dependency NOT IN (SELECT derivation FROM region)) OFFSET 0) s"
+            ),
+            "the demanded step probes the region as a hashed subplan: {walk}"
+        );
+        assert!(
+            !walk.contains("JOIN derivation_build p ON"),
+            "the parent is looked up by its key, not joined: {walk}"
         );
         // The seed is a second expression of the walk's own step, so it stops
         // where the walk stops and nowhere else: an open, demanded parent, over a
@@ -1890,13 +1905,14 @@ mod tests {
         // a `Completed` anchor whose closure has a hole.
         assert!(
             walk.contains(
-                "WHERE e.dependency = r.derivation OFFSET 0) pe \
-                 JOIN derivation_build p ON p.derivation = pe.parent \
+                "WHERE e.dependency = r.derivation OFFSET 0) pe, \
+                 LATERAL (SELECT 1 FROM derivation_build p \
                  JOIN derivation pw ON pw.id = p.derivation \
-                 WHERE p.demanded AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
-                 AND p.derivation NOT IN (SELECT derivation FROM region) \
+                 WHERE p.derivation = pe.parent AND p.demanded \
+                 AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND ((pw.walked AND p.probed AND NOT p.substitutable \
-                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2)))"
+                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2)) OFFSET 0) q \
+                 WHERE pe.parent NOT IN (SELECT derivation FROM region))"
             ),
             "{walk}"
         );
