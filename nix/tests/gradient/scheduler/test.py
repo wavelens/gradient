@@ -59,12 +59,19 @@ def evaluate(spec):
 def wait_evaluation(eval_id, want, timeout=300):
     status = ""
     for _ in range(timeout):
-        status = api("GET", f"/evals/{eval_id}")["status"]
+        seen, status = status, api("GET", f"/evals/{eval_id}")["status"]
+        if status != seen:
+            print(f"evaluation {eval_id}: {status}")
         if status == want:
             return
         if status in ("Completed", "Failed", "Aborted"):
             break
         server.sleep(1)
+    print(sql(
+        "SELECT d.name, db.status FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
+        f"JOIN derivation d ON d.id = db.derivation WHERE bj.evaluation = '{eval_id}' ORDER BY d.name"
+    ))
+    print(server.succeed("journalctl -u gradient-server --no-pager -n 120"))
     for w in WORKERS:
         print(w.succeed("journalctl -u gradient-daemon -u gradient-worker --no-pager -n 80"))
     raise Exception(f"evaluation {eval_id} is {status}, wanted {want}")
