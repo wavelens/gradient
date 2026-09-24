@@ -578,3 +578,72 @@ async fn mcp_watch_evaluation_without_evaluations_is_a_tool_error() {
 
     assert_eq!(response(&responses, 2)["result"]["isError"], json!(true));
 }
+
+#[tokio::test]
+async fn mcp_watch_evaluation_caps_a_huge_timeout() {
+    let server = MockServer::start().await;
+    mount_eval(&server, "Completed").await;
+    mount_entry_points(&server, "0", vec![entry_point("hello", "Completed")], 1).await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let report = watch_report(
+        &home,
+        json!({"task": "nightly", "evaluation": "eval-1", "timeout_seconds": u64::MAX}),
+    );
+
+    assert_eq!(report["finished"], json!(true), "{report:#}");
+}
+
+// Without failing fast these block for the default 600 s watch timeout.
+#[tokio::test]
+async fn mcp_watch_evaluation_fails_fast_on_an_unknown_evaluation() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/evals/eval-1"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "error": true, "message": "Evaluation not found"
+        })))
+        .mount(&server)
+        .await;
+    mount_entry_points(&server, "0", vec![entry_point("hello", "Queued")], 1).await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call(
+            "watch_evaluation",
+            json!({"task": "nightly", "evaluation": "eval-1"}),
+        ),
+    );
+
+    assert_eq!(response(&responses, 2)["result"]["isError"], json!(true));
+}
+
+#[tokio::test]
+async fn mcp_watch_evaluation_fails_fast_on_a_task_that_does_not_own_the_evaluation() {
+    let server = MockServer::start().await;
+    mount_eval(&server, "Building").await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tasks/proj/other/entry-points"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "error": true, "message": "Evaluation not found"
+        })))
+        .mount(&server)
+        .await;
+    let home = TempDir::new().unwrap();
+    server_config(&home, &server);
+
+    let responses = session_with(
+        &home,
+        &["mcp", "--control"],
+        &call(
+            "watch_evaluation",
+            json!({"task": "other", "evaluation": "eval-1"}),
+        ),
+    );
+
+    assert_eq!(response(&responses, 2)["result"]["isError"], json!(true));
+}

@@ -68,7 +68,7 @@ user's project permissions:
 |---|---|
 | `start_evaluation` | Queues an evaluation of a task, optionally at an exact commit, and returns its UUID |
 | `abort_evaluation` | Cancels an evaluation's in-progress and queued builds |
-| `watch_evaluation` | Waits until an evaluation finishes or `timeout_seconds` (default 600) passes, then returns each entry point's build status; `finished: false` means it timed out |
+| `watch_evaluation` | Waits until an evaluation finishes or `timeout_seconds` (default 600, at most 3600) passes, then returns each entry point's build status; `finished: false` means it timed out |
 
 For Claude Code:
 

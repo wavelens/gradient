@@ -39,6 +39,7 @@ returns each entry point's build status, `abort_evaluation` cancels a run.";
 const INLINE_LOG_LINES: usize = 10;
 const WATCH_POLL: Duration = Duration::from_secs(5);
 const WATCH_TIMEOUT_SECONDS: u64 = 600;
+const WATCH_MAX_TIMEOUT_SECONDS: u64 = 3600;
 const ENTRY_POINT_PAGE: u64 = 500;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -107,7 +108,7 @@ pub struct WatchArgs {
     project: Option<String>,
     /// Evaluation UUID. Defaults to the task's latest evaluation.
     evaluation: Option<String>,
-    /// Seconds to wait for the evaluation to finish. Defaults to 600.
+    /// Seconds to wait for the evaluation to finish. Defaults to 600, at most 3600.
     timeout_seconds: Option<u64>,
 }
 
@@ -177,6 +178,14 @@ fn save_log(log: &str) -> std::io::Result<PathBuf> {
     file.write_all(log.as_bytes())?;
     let (_, path) = file.keep()?;
     Ok(path)
+}
+
+fn is_transient(e: &ConnectorError) -> bool {
+    match e {
+        ConnectorError::Transport(_) => true,
+        ConnectorError::Api { status, .. } => status.is_server_error(),
+        _ => false,
+    }
 }
 
 fn to_error(e: ConnectorError) -> CallToolResult {
@@ -354,8 +363,17 @@ impl GradientMcp {
             Some(evaluation) => evaluation,
             None => self.latest_evaluation(&project, &args.task).await?,
         };
-        let timeout = Duration::from_secs(args.timeout_seconds.unwrap_or(WATCH_TIMEOUT_SECONDS));
+        let timeout = Duration::from_secs(
+            args.timeout_seconds
+                .unwrap_or(WATCH_TIMEOUT_SECONDS)
+                .min(WATCH_MAX_TIMEOUT_SECONDS),
+        );
 
+        self.client
+            .tasks()
+            .entry_points(&project, &args.task, Some(&evaluation), Some(1), None)
+            .await
+            .map_err(to_error)?;
         let eval = self
             .await_terminal(&evaluation, Instant::now() + timeout)
             .await
@@ -394,10 +412,10 @@ impl GradientMcp {
         let mut last_read = None;
         loop {
             let polled = self.client.evals().get(evaluation).await;
-            if let Ok(eval) = &polled
-                && eval_is_terminal(&eval.status)
-            {
-                return polled;
+            match &polled {
+                Ok(eval) if eval_is_terminal(&eval.status) => return polled,
+                Err(e) if !is_transient(e) => return polled,
+                _ => {}
             }
 
             let left = deadline.saturating_duration_since(Instant::now());
