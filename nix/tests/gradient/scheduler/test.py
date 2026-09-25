@@ -288,6 +288,33 @@ hanging.wait_until_succeeds(
 assert_clean()
 latency_report("hang")
 
+banner("worker frozen mid build")
+e = phase("frozen")
+frozen = None
+for _ in range(300):
+    frozen = next((w for w in WORKERS if "frozen/c1" in daemon(w, "running")), None)
+    if frozen:
+        break
+    server.sleep(1)
+assert frozen, "c1 never started building"
+survivor = next(w for w in WORKERS if w is not frozen)
+daemon(survivor, "outcome", {"node": "frozen/c1", "outcome": "success"})
+since = frozen.succeed("date +%s").strip()
+server_since = server.succeed("date +%s").strip()
+frozen.succeed("systemctl kill --signal=STOP gradient-worker")
+server.wait_until_succeeds(
+    f"journalctl -u gradient-server --no-pager --since=@{server_since} | grep -q 'presumed dead'", timeout=120
+)
+wait_evaluation(e, "Completed")
+frozen.succeed("systemctl kill --signal=CONT gradient-worker")
+frozen.wait_until_succeeds(
+    f"journalctl -u gradient-worker --no-pager --since=@{since} | grep -q 'reconnected successfully'", timeout=120
+)
+assert [w.name for w, entry in builds_of("frozen", "c1") if entry["ok"]] == [survivor.name]
+daemon(frozen, "release", {"node": "frozen/c1"})
+assert_clean()
+latency_report("frozen")
+
 e = phase("stress")
 wait_evaluation(e, "Completed", timeout=900)
 assert_clean()
