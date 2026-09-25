@@ -10,6 +10,7 @@ mod cache_consumer;
 mod cache_session;
 mod dispatch;
 mod eval_cache;
+mod job_events;
 mod limiter;
 mod nar;
 mod nar_transfer;

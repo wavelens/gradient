@@ -14,11 +14,11 @@ use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_sources::strip_nix_store_prefix;
 use gradient_types::ids::{DispatchedJobId, ProjectId};
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::messages::{
-    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind,
-    JobPhaseSpan, JobUpdateKind, QueryMode, ServerMessage,
+    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, QueryMode,
+    ServerMessage,
 };
 use crate::session::frame::{Frame, Inbound};
 use gradient_scheduler::Scheduler;
@@ -33,10 +33,10 @@ use super::eval_cache::{
     EvalCacheReceiveStore, handle_eval_cache_chunk, handle_eval_cache_pull, handle_eval_cache_push,
     handle_eval_cache_push_done,
 };
-use super::nar_transfer::{CommitTracker, NarReceiveStore, serve_nar_request};
+use super::job_events::{JobEvent, JobEvents};
+use super::nar_transfer::{NarReceiveStore, serve_nar_request};
 use super::socket::{
-    JOB_OFFER_CHUNK_SIZE, ProtoWriter, push_pending_candidates, send_credentials_for_job,
-    send_error, send_server_msg,
+    JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
 };
 
 // ── Dispatch context ──────────────────────────────────────────────────────────
@@ -81,6 +81,7 @@ pub(super) struct DispatchContext<'a> {
     /// Jobs this session currently runs, kept so a core restart can re-register
     /// them without a DB round-trip.
     pub active: &'a mut HashMap<String, ActiveJob>,
+    pub job_events: &'a JobEvents,
 }
 
 impl<'a> DispatchContext<'a> {
@@ -221,7 +222,10 @@ impl<'a> DispatchContext<'a> {
                 update,
             } => {
                 if self.owns(&job_id, &dispatch) {
-                    self.on_job_update(job_id, update).await;
+                    debug!(peer_id = %self.peer_id, %job_id, ?update, "JobUpdate");
+                    self.job_events
+                        .push(JobEvent::Update { job_id, update })
+                        .await;
                 }
                 true
             }
@@ -233,7 +237,14 @@ impl<'a> DispatchContext<'a> {
                 let commits = nar.commits();
                 nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
-                    self.on_job_completed(job_id, dispatch, spans, commits)
+                    self.active.remove(&job_id);
+                    self.job_events
+                        .push(JobEvent::Completed {
+                            job_id,
+                            dispatch,
+                            spans,
+                            commits,
+                        })
                         .await;
                 }
                 true
@@ -251,7 +262,20 @@ impl<'a> DispatchContext<'a> {
                 // streams will never be finished.
                 nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
-                    self.on_job_failed(job_id, dispatch, error, kind, missing_paths, spans)
+                    warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
+                    self.active.remove(&job_id);
+                    self.scheduler.record_job_timeline(
+                        dispatch,
+                        DispatchedJobOutcome::Failed,
+                        spans,
+                    );
+                    self.job_events
+                        .push(JobEvent::Failed {
+                            job_id,
+                            error,
+                            kind,
+                            missing_paths,
+                        })
                         .await;
                 }
                 true
@@ -709,165 +733,6 @@ impl<'a> DispatchContext<'a> {
         }
     }
 
-    // ── Progress updates ──────────────────────────────────────────────────────
-
-    async fn on_job_update(&mut self, job_id: String, update: JobUpdateKind) {
-        debug!(peer_id = %self.peer_id, %job_id, ?update, "JobUpdate");
-        match update {
-            JobUpdateKind::Fetching => {
-                self.scheduler
-                    .handle_eval_status_update(
-                        &job_id,
-                        gradient_entity::evaluation::EvaluationStatus::Fetching,
-                    )
-                    .await;
-            }
-            JobUpdateKind::FetchResult { flake_source } => {
-                debug!(peer_id = %self.peer_id, %job_id, ?flake_source, "FetchResult");
-                self.scheduler
-                    .persist_flake_source(&job_id, flake_source)
-                    .await;
-            }
-            JobUpdateKind::EvaluatingFlake => {
-                self.scheduler
-                    .handle_eval_status_update(
-                        &job_id,
-                        gradient_entity::evaluation::EvaluationStatus::EvaluatingFlake,
-                    )
-                    .await;
-            }
-            JobUpdateKind::EvaluatingDerivations => {
-                self.scheduler
-                    .handle_eval_status_update(
-                        &job_id,
-                        gradient_entity::evaluation::EvaluationStatus::EvaluatingDerivation,
-                    )
-                    .await;
-            }
-            JobUpdateKind::EvalResult {
-                derivations,
-                warnings,
-                errors,
-            } => {
-                if let Err(e) = self
-                    .scheduler
-                    .handle_eval_result(&job_id, derivations, warnings, errors)
-                    .await
-                {
-                    error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_eval_result failed");
-                }
-                push_pending_candidates(self.writer, self.scheduler, self.peer_id).await;
-            }
-            JobUpdateKind::Building { build_id } => {
-                self.scheduler
-                    .handle_build_status_update(&build_id, self.peer_id)
-                    .await;
-            }
-            JobUpdateKind::BuildOutput {
-                build_id,
-                outputs,
-                metrics,
-                substituted,
-            } => {
-                if let Err(e) = self
-                    .scheduler
-                    .handle_build_output(&job_id, &build_id, outputs, metrics, substituted)
-                    .await
-                {
-                    error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_build_output failed");
-                }
-            }
-            JobUpdateKind::Compressing => {}
-            JobUpdateKind::EvalStats(report) => {
-                if let Err(e) = self.scheduler.record_eval_metrics(&job_id, report).await {
-                    error!(peer_id = %self.peer_id, %job_id, error = %e, "record_eval_metrics failed");
-                }
-            }
-            JobUpdateKind::InputUpdateResult {
-                candidate_lock,
-                bumped,
-            } => {
-                self.scheduler
-                    .persist_input_update_result(&job_id, candidate_lock, bumped)
-                    .await;
-            }
-            JobUpdateKind::InputUpdateExpansion { matched } => {
-                self.scheduler
-                    .persist_input_update_expansion(&job_id, matched)
-                    .await;
-            }
-        }
-    }
-
-    // ── Job terminal states ───────────────────────────────────────────────────
-
-    /// A job is completed only once the NARs it pushed are in the index.
-    ///
-    /// The worker sends `JobCompleted` after its last push, but the commits run
-    /// detached from this read loop and the control lane is drained first, so the
-    /// completion arrives ahead of them. Marking the build terminal there is what
-    /// makes terminal success mean "the worker said so" instead of "the cache has
-    /// the outputs": a commit that then fails cannot move the anchor back, because
-    /// the build state machine refuses to leave a terminal status, and the graph
-    /// is left trusting an output nothing serves (#654).
-    ///
-    /// So the completion waits for [`CommitTracker::settle`] first - off the loop,
-    /// because waiting on it here would stall every other transfer on the
-    /// connection, which is why the commits were detached in the first place. Only
-    /// the session's own bookkeeping stays inline. A commit that failed has already
-    /// failed the build; the completion is dropped rather than overwriting that.
-    async fn on_job_completed(
-        &mut self,
-        job_id: String,
-        dispatch: DispatchedJobId,
-        spans: Vec<JobPhaseSpan>,
-        commits: Arc<CommitTracker>,
-    ) {
-        self.active.remove(&job_id);
-
-        let writer = self.writer.clone();
-        let scheduler = Arc::clone(self.scheduler);
-        let peer_id = self.peer_id.to_owned();
-        self.state.shutdown.spawn(async move {
-            if !commits.settle(&job_id).await {
-                warn!(%peer_id, %job_id, "a NAR this job pushed never reached the index; the build was failed, not completed");
-                return;
-            }
-
-            info!(%peer_id, %job_id, phases = spans.len(), "job completed");
-            scheduler
-                .close_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans)
-                .await;
-            if let Err(e) = scheduler.handle_job_completed(&peer_id, &job_id).await {
-                error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
-            }
-            push_pending_candidates(&writer, &scheduler, &peer_id).await;
-        });
-    }
-
-    async fn on_job_failed(
-        &mut self,
-        job_id: String,
-        dispatch: DispatchedJobId,
-        error: String,
-        kind: gradient_types::proto::BuildFailureKind,
-        missing_paths: Vec<String>,
-        spans: Vec<JobPhaseSpan>,
-    ) {
-        warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
-        self.active.remove(&job_id);
-        self.scheduler
-            .record_job_timeline(dispatch, DispatchedJobOutcome::Failed, spans);
-        if let Err(e) = self
-            .scheduler
-            .handle_job_failed(self.peer_id, &job_id, &error, kind, &missing_paths)
-            .await
-        {
-            error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_job_failed failed");
-        }
-        push_pending_candidates(self.writer, self.scheduler, self.peer_id).await;
-    }
-
     // ── Worker draining ───────────────────────────────────────────────────────
 
     async fn on_draining(&mut self) {
@@ -1100,6 +965,7 @@ mod dispatch_id_tests {
 #[cfg(test)]
 mod assignment_response_tests {
     use super::*;
+    use crate::handler::job_events::SchedulerJobEvents;
     use crate::session::frame::MsgWriter;
     use gradient_scheduler::jobs::PendingEvalJob;
     use gradient_test_support::prelude::*;
@@ -1165,6 +1031,16 @@ mod assignment_response_tests {
         scheduler.spawn_core(None).await.expect("core actor");
         let writer = detached_writer();
         let semaphore = Arc::new(Semaphore::new(1));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                shutdown: state.shutdown.clone(),
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: "w1".into(),
+            },
+        );
         let dispatch = DispatchedJobId::now_v7();
         let mut active = HashMap::from([(
             "j1".to_owned(),
@@ -1181,6 +1057,7 @@ mod assignment_response_tests {
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
             active: &mut active,
+            job_events: &job_events,
         };
         ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()))
             .await;
@@ -1214,6 +1091,16 @@ mod assignment_response_tests {
         scheduler.spawn_core(None).await.expect("core actor");
         let writer = detached_writer();
         let semaphore = Arc::new(Semaphore::new(1));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                shutdown: state.shutdown.clone(),
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: "w1".into(),
+            },
+        );
         let mut active = HashMap::from([(
             "j1".to_owned(),
             ActiveJob {
@@ -1229,6 +1116,7 @@ mod assignment_response_tests {
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
             active: &mut active,
+            job_events: &job_events,
         };
         ctx.on_assign_job_response("j1".into(), true, None).await;
 

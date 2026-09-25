@@ -28,6 +28,7 @@ use tracing::{debug, error, info, warn};
 
 use super::dispatch::{ActiveJob, DispatchContext};
 use super::eval_cache::EvalCacheReceiveStore;
+use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::nar_transfer::NarReceiveStore;
 use super::session::on_reauth_notify;
 use super::socket::{
@@ -77,6 +78,7 @@ pub struct SessionState {
     nar_serve_semaphore: Arc<Semaphore>,
     offers_seen: u64,
     active: HashMap<String, ActiveJob>,
+    job_events: JobEvents,
     draining: bool,
     reader: JoinHandle<()>,
 }
@@ -152,6 +154,16 @@ impl Actor for SessionActor {
         let reader = state
             .shutdown
             .spawn(read_loop(reader, myself, registered.last_seen));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            &peer_id,
+            SchedulerJobEvents {
+                shutdown: state.shutdown.clone(),
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: peer_id.clone(),
+            },
+        );
 
         Ok(SessionState {
             peer_id,
@@ -165,6 +177,7 @@ impl Actor for SessionActor {
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
             offers_seen: 0,
             active: HashMap::new(),
+            job_events,
             draining: false,
             reader,
         })
@@ -186,6 +199,7 @@ impl Actor for SessionActor {
                         peer_id: &st.peer_id,
                         nar_serve_semaphore: &st.nar_serve_semaphore,
                         active: &mut st.active,
+                        job_events: &st.job_events,
                     };
 
                     ctx.dispatch(inbound, &mut st.nar, &mut st.eval_cache).await
@@ -275,6 +289,7 @@ impl Actor for SessionActor {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         st.reader.abort();
+        st.job_events.finish().await;
         st.scheduler.unregister_worker(&st.peer_id).await;
         info!(peer_id = %st.peer_id, "WebSocket connection closed");
         Ok(())
