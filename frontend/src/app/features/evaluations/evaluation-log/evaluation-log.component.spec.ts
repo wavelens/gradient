@@ -136,7 +136,7 @@ describe('EvaluationLogComponent', () => {
       const { cmp } = setup();
       cmp.visibleBuilds.set([build('a', '/nix/store/aaa-hello'), build('b', '/nix/store/bbb-world')]);
       cmp.sidebarSearchQuery.set('HELLO');
-      const names = cmp.groupedBuilds().flatMap((g) => g.builds.map((x) => x.build.name));
+      const names = cmp.groupedBuilds().flatMap((g) => g.builds.map((b) => b.name));
       expect(names).toEqual(['/nix/store/aaa-hello']);
     });
 
@@ -144,16 +144,49 @@ describe('EvaluationLogComponent', () => {
       const { cmp } = setup();
       cmp.visibleBuilds.set([build('a', 'aaa'), build('b', 'bbb')]);
       cmp.sidebarSearchQuery.set('');
-      const names = cmp.groupedBuilds().flatMap((g) => g.builds.map((x) => x.build.name));
+      const names = cmp.groupedBuilds().flatMap((g) => g.builds.map((b) => b.name));
       expect(names).toEqual(['aaa', 'bbb']);
     });
 
-    it('preserves visibleBuilds index for matched builds (arrow-nav stays correct)', () => {
+    it('arrow navigation skips builds the query filters out', () => {
       const { cmp } = setup();
-      cmp.visibleBuilds.set([build('a', 'aaa'), build('b', 'bbb'), build('c', 'ccc')]);
-      cmp.sidebarSearchQuery.set('ccc');
-      const indices = cmp.groupedBuilds().flatMap((g) => g.builds.map((x) => x.index));
-      expect(indices).toEqual([2]);
+      cmp.visibleBuilds.set([build('a', 'app'), build('b', 'bbb'), build('c', 'apt')]);
+      cmp.sidebarSearchQuery.set('ap');
+      cmp.selectAdjacentBuild('a', 1);
+      expect(cmp.selectedBuildId()).toBe('c');
+    });
+  });
+
+  // #676: status sections collapse from their header; a collapsed section keeps
+  // its count but hides its builds from the list and from arrow navigation.
+  describe('collapsible sections', () => {
+    const builds = () => [build('b1', 'b1', 'Building'), build('f1', 'f1', 'Failed'), build('c1', 'c1', 'Completed')];
+
+    it('starts with every section expanded', () => {
+      const { cmp } = setup();
+      cmp.visibleBuilds.set(builds());
+      expect(cmp.groupedBuilds().map((g) => g.collapsed)).toEqual([false, false, false]);
+    });
+
+    it('toggling a section collapses it and keeps its count', () => {
+      const { cmp } = setup();
+      cmp.visibleBuilds.set(builds());
+      cmp.toggleGroup('failed');
+      const failed = cmp.groupedBuilds().find((g) => g.key === 'failed')!;
+      expect(failed.collapsed).toBe(true);
+      expect(failed.builds.length).toBe(1);
+      cmp.toggleGroup('failed');
+      expect(cmp.groupedBuilds().find((g) => g.key === 'failed')!.collapsed).toBe(false);
+    });
+
+    it('arrow navigation skips builds in a collapsed section', () => {
+      const { cmp } = setup();
+      cmp.visibleBuilds.set(builds());
+      cmp.toggleGroup('failed');
+      cmp.selectAdjacentBuild('b1', 1);
+      expect(cmp.selectedBuildId()).toBe('c1');
+      cmp.selectAdjacentBuild('c1', -1);
+      expect(cmp.selectedBuildId()).toBe('b1');
     });
   });
 

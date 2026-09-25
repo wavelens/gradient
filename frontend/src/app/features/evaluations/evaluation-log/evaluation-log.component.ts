@@ -315,22 +315,36 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     { key: 'skipped', label: 'Skipped', members: ['skipped'] },
   ];
 
+  collapsedGroups = signal<ReadonlySet<string>>(new Set());
+
   /// `visibleBuilds` bucketed into the status sections above (only non-empty
-  /// ones). Each entry keeps its index in `visibleBuilds` so keyboard
-  /// navigation still walks the flat, status-sorted order across sections.
+  /// ones), in the flat status-sorted order keyboard navigation walks.
   groupedBuilds = computed(() => {
     const indexByGroup = new Map<string, number>();
     this.buildGroups.forEach((g, i) => g.members.forEach((m) => indexByGroup.set(m, i)));
-    const buckets: { build: BuildItem; index: number }[][] = this.buildGroups.map(() => []);
-    this.visibleBuilds().forEach((build, index) => {
-      if (!matchesBuildSearch(build.name, this.sidebarSearchQuery())) return;
+    const buckets: BuildItem[][] = this.buildGroups.map(() => []);
+    for (const build of this.visibleBuilds()) {
+      if (!matchesBuildSearch(build.name, this.sidebarSearchQuery())) continue;
       const gi = indexByGroup.get(this.statusClass(build.status));
-      if (gi !== undefined) buckets[gi].push({ build, index });
-    });
+      if (gi !== undefined) buckets[gi].push(build);
+    }
+    const collapsed = this.collapsedGroups();
     return this.buildGroups
-      .map((g, i) => ({ key: g.key, label: g.label, builds: buckets[i] }))
+      .map((g, i) => ({ key: g.key, label: g.label, builds: buckets[i], collapsed: collapsed.has(g.key) }))
       .filter((g) => g.builds.length > 0);
   });
+
+  private navigableBuilds = computed(() =>
+    this.groupedBuilds().flatMap((g) => (g.collapsed ? [] : g.builds)),
+  );
+
+  toggleGroup(key: string): void {
+    this.collapsedGroups.update((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
 
   /// Maps every BuildStatus variant onto the canonical token used by the SCSS
   /// status classes (status-failed, status-completed, …). The three failed
@@ -1417,11 +1431,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
-  selectAdjacentBuild(index: number): void {
-    const list = this.visibleBuilds();
-    if (index < 0 || index >= list.length) return;
-    this.selectBuild(list[index], true);
-    const targetId = list[index].id;
+  selectAdjacentBuild(fromId: string, step: 1 | -1): void {
+    const list = this.navigableBuilds();
+    const target = list[list.findIndex((b) => b.id === fromId) + step];
+    if (!target) return;
+    this.selectBuild(target, true);
+    const targetId = target.id;
     setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`.build-item[data-build-id="${targetId}"]`);
       el?.scrollIntoView({ block: 'nearest' });

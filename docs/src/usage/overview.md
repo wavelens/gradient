@@ -62,7 +62,8 @@ An evaluation skips every dependency subtree Gradient has already recorded. If a
 
 The evaluation log page shows per-build status, combined ANSI build output, and an **Abort** button.
 Builds are grouped by status, and within a group listed in dependency order - the entry point first,
-then each dependency layer sorted by name - so a build appears above the builds it needs.
+then each dependency layer sorted by name - so a build appears above the builds it needs. Clicking a
+section header collapses it; arrow keys then skip its builds.
 
 Right-clicking a build in the list opens its actions: **Graph** (the dependency graph), **Show Job**
 (the Job Board entry for the dispatch that ran it), **Artefacts**, and **Download Log**, which saves
