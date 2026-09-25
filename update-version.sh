@@ -22,20 +22,20 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-# ── Cargo crates ──────────────────────────────────────────────────────────────
+# ── TOML manifests ────────────────────────────────────────────────────────────
 # Only files that define a literal `version = "X.Y.Z"` are listed. Backend
 # sub-crates inherit `version.workspace = true` from backend/Cargo.toml, except
 # gradient-eval, which is self-contained so the separate cli workspace can path-
 # depend on it without the backend workspace root.
 
-CARGO_FILES=(
+TOML_FILES=(
     backend/Cargo.toml
     backend/gradient-eval/Cargo.toml
     cli/Cargo.toml
-    cli/connector/Cargo.toml
+    nix/tools/report-inspector/pyproject.toml
 )
 
-for f in "${CARGO_FILES[@]}"; do
+for f in "${TOML_FILES[@]}"; do
     path="$REPO_ROOT/$f"
     sed -i -E "0,/^version[[:space:]]*=[[:space:]]*\"[^\"]*\"/{s/^(version[[:space:]]*=[[:space:]]*)\"[^\"]*\"/\\1\"$VERSION\"/}" "$path"
     echo "updated $f"
@@ -53,6 +53,7 @@ NIX_FILES=(
     nix/packages/gradient.nix
     nix/packages/gradient-frontend.nix
     nix/packages/gradient-cli.nix
+    nix/tools/report-inspector/default.nix
 )
 
 for f in "${NIX_FILES[@]}"; do

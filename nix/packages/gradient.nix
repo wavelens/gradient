@@ -109,10 +109,10 @@ let
     buildPhaseCargoCommand = "cargoWithProfile build $cargoExtraArgs";
   });
 in
-craneLib.buildPackage (commonArgs // {
+craneLib.buildPackage (commonArgs // rec {
   inherit cargoArtifacts;
   pname = "gradient";
-  version = "1.3.0";
+  version = "1.4.0";
   separateDebugInfo = true;
 
   # `separateDebugInfo` exports `NIX_RUSTFLAGS=-g -C strip=none` for the whole
@@ -142,8 +142,8 @@ craneLib.buildPackage (commonArgs // {
   });
 
   passthru.tests = craneLib.cargoNextest (commonArgs // {
+    inherit version;
     cargoArtifacts = testArtifacts;
-    version = "1.3.0";
     CARGO_PROFILE = "test";
 
     nativeCheckInputs = [ git ];

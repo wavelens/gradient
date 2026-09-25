@@ -12,7 +12,7 @@
 , stdenv
 }: stdenv.mkDerivation rec {
   pname = "gradient-frontend";
-  version = "1.3.0";
+  version = "1.4.0";
 
   src = lib.cleanSourceWith {
     filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) [".github" "target" "node_modules" "dist" ".angular"]);
@@ -22,7 +22,7 @@
   pnpmDeps = fetchPnpmDeps {
     inherit pnpm pname version src;
     fetcherVersion = 4;
-    hash = "sha256-IbFS4FWq9JtWjvF1JIPdpdhuZAehHS/gMD7mkwGq500=";
+    hash = "sha256-LRsZX9yJJ5v6etIWN2+j7Vr8IkeXydtQOuYumL3P70s=";
   };
 
   nativeBuildInputs = [
@@ -30,6 +30,9 @@
     pnpm
     pnpmConfigHook
   ];
+
+  # The prebuilt `sass-embedded` Dart binary cannot run in the sandbox; use the pure-JS compiler.
+  env.NG_BUILD_SASS_EMBEDDED = "0";
 
   buildPhase = ''
     runHook preBuild

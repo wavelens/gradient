@@ -101,10 +101,10 @@ let
     '';
   });
 in
-craneLib.buildPackage (commonArgs // {
+craneLib.buildPackage (commonArgs // rec {
   inherit cargoArtifacts;
   pname = "gradient-cli";
-  version = "1.3.0";
+  version = "1.4.0";
   separateDebugInfo = true;
 
   # Same split as the server: the binary keeps the debug output, the suite runs
@@ -118,8 +118,7 @@ craneLib.buildPackage (commonArgs // {
   });
 
   passthru.tests = craneLib.cargoNextest (commonArgs // {
-    inherit cargoArtifacts;
-    version = "1.3.0";
+    inherit cargoArtifacts version;
   });
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
