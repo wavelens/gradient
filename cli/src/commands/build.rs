@@ -406,12 +406,12 @@ const REMOTE_OVERRIDE_SCHEMES: &[&str] = &[
 /// Parse `--override-input INPUT FLAKE` pairs. gradient evaluates on the server,
 /// so only remote flake refs (and `/nix/store` paths it can fetch) are accepted.
 pub(crate) fn parse_overrides(raw: &[String]) -> Result<Vec<(String, String)>, String> {
-    if !raw.len().is_multiple_of(2) {
+    let (pairs, []) = raw.as_chunks::<2>() else {
         return Err("--override-input needs INPUT and FLAKE".into());
-    }
-    let mut out = Vec::with_capacity(raw.len() / 2);
-    for pair in raw.chunks_exact(2) {
-        let (name, ref_) = (pair[0].clone(), pair[1].clone());
+    };
+    let mut out = Vec::with_capacity(pairs.len());
+    for [name, ref_] in pairs {
+        let (name, ref_) = (name.clone(), ref_.clone());
         let mut name_chars = name.chars();
         let name_ok = matches!(name_chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
             && name_chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');

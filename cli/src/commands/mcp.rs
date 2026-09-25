@@ -14,7 +14,7 @@ use futures::StreamExt;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
+    CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities, ServerConfig,
 };
 use rmcp::transport::stdio;
 use rmcp::{ErrorData, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
@@ -463,14 +463,14 @@ impl GradientMcp {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for GradientMcp {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let instructions = if self.control {
             format!("{INSTRUCTIONS}{CONTROL_INSTRUCTIONS}")
         } else {
             INSTRUCTIONS.to_string()
         };
 
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::LATEST)
             .with_server_info(Implementation::new("gradient", env!("CARGO_PKG_VERSION")))
             .with_instructions(instructions)
