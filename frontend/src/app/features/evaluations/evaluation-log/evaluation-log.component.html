@@ -91,34 +91,41 @@
         <div class="builds-list" (scroll)="onBuildsViewportScroll($event)">
           @for (group of groupedBuilds(); track group.key) {
             <div class="build-group">
-              <div class="build-group-header">
+              <button
+                type="button"
+                class="build-group-header"
+                [class.collapsed]="group.collapsed"
+                [attr.aria-expanded]="!group.collapsed"
+                (click)="toggleGroup(group.key)"
+              >
+                <gr-icon name="expand_more" size="sm" class="build-group-chevron" />
                 <span class="build-dot status-{{ group.key }}"></span>
                 {{ group.label }}
                 <span class="build-group-count">{{ group.builds.length }}</span>
-              </div>
-              @for (item of group.builds; track item.build.id) {
+              </button>
+              @for (build of group.collapsed ? [] : group.builds; track build.id) {
                 <div
-                  class="build-item status-{{ statusClass(item.build.status) }}"
-                  [class.selected]="selectedBuildId() === item.build.id"
-                  [attr.data-build-id]="item.build.id"
-                  (click)="selectBuild(item.build, true)"
-                  (keydown.enter)="selectBuild(item.build, true)"
-                  (keydown.space)="$event.preventDefault(); selectBuild(item.build, true)"
-                  (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(item.index + 1)"
-                  (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(item.index - 1)"
-                  (contextmenu)="openBuildMenu($event, item.build, buildMenu)"
-                  [title]="item.build.name"
+                  class="build-item status-{{ statusClass(build.status) }}"
+                  [class.selected]="selectedBuildId() === build.id"
+                  [attr.data-build-id]="build.id"
+                  (click)="selectBuild(build, true)"
+                  (keydown.enter)="selectBuild(build, true)"
+                  (keydown.space)="$event.preventDefault(); selectBuild(build, true)"
+                  (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(build.id, 1)"
+                  (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(build.id, -1)"
+                  (contextmenu)="openBuildMenu($event, build, buildMenu)"
+                  [title]="build.name"
                   tabindex="0"
                   role="option"
-                  [attr.aria-selected]="selectedBuildId() === item.build.id"
+                  [attr.aria-selected]="selectedBuildId() === build.id"
                 >
-                  <span class="build-dot status-{{ statusClass(item.build.status) }}"></span>
-                  <span class="build-name">{{ buildDisplayName(item.build.name) }}</span>
-                  @if (getBuildElapsed(item.build)) {
-                    <span class="build-elapsed" [class.build-elapsed--running]="item.build.status === 'Building'">{{ getBuildElapsed(item.build) }}</span>
+                  <span class="build-dot status-{{ statusClass(build.status) }}"></span>
+                  <span class="build-name">{{ buildDisplayName(build.name) }}</span>
+                  @if (getBuildElapsed(build)) {
+                    <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
                   }
                   <button type="button" class="build-kebab" aria-label="Build actions" tabindex="-1"
-                          (click)="toggleBuildMenu($event, item.build, buildMenu)">
+                          (click)="toggleBuildMenu($event, build, buildMenu)">
                     <gr-icon name="more_vert" size="sm" />
                   </button>
                 </div>

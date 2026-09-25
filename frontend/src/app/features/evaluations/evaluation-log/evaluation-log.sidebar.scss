@@ -158,6 +158,11 @@
 // Status sections (issue #32): the labelled, sticky header names the status so
 // it no longer relies on the dot colour alone.
 .build-group-header {
+  width: 100%;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
   position: sticky;
   top: 0;
   z-index: 1;
@@ -179,6 +184,11 @@
     color: var(--gr-text-muted);
     font-weight: 500;
   }
+
+  &:hover { color: var(--gr-text-primary); }
+
+  .build-group-chevron { transition: transform $transition-fast; }
+  &.collapsed .build-group-chevron { transform: rotate(-90deg); }
 }
 
 .build-name {
