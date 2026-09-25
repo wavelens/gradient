@@ -448,8 +448,9 @@ impl<'a> DispatchContext<'a> {
         external: bool,
     ) {
         let rpc = self.rpc();
+        let project = self.active.get(&job_id).map(|a| a.pending.project_id());
         self.state.shutdown.spawn(async move {
-            rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode, external)
+            rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode, external, project)
                 .await
         });
     }
@@ -816,7 +817,7 @@ impl<'a> DispatchContext<'a> {
 
 /// Owned handles for the order-independent request/response RPCs, spawned off
 /// the per-connection dispatch loop so a slow upstream probe or NAR transfer
-/// can't head-of-line-block a worker's `CacheQuery` (its 120s `CacheStatus`
+/// can't head-of-line-block a worker's `CacheQuery` (its 75 s `CacheStatus`
 /// deadline). Replies travel the cloneable writer, so out-of-order completion
 /// is safe.
 pub(super) struct RpcContext {
@@ -827,6 +828,10 @@ pub(super) struct RpcContext {
 }
 
 impl RpcContext {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the wire-protocol message fields; refactor tracked in #503"
+    )]
     async fn on_cache_query(
         &self,
         job_id: String,
@@ -835,20 +840,22 @@ impl RpcContext {
         nar_sizes: Vec<Option<u64>>,
         mode: gradient_types::proto::QueryMode,
         external: bool,
+        project: Option<ProjectId>,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
-        let project_id = self.scheduler.project_for_job(&job_id).await;
+        let answer = async {
+            let project_id = match project {
+                Some(project_id) => Some(project_id),
+                None => self.scheduler.project_for_job(&job_id).await,
+            };
+            handle_cache_query(&self.state, project_id, &paths, &nar_sizes, mode, external).await
+        };
 
         // A DB error or an over-budget handler is *indeterminate*, never
         // "absent": reply `CacheError` so the worker retries transiently instead
         // of taking a fully-cached input as a missing one (terminal
         // `InputsUnavailable`, which fails the whole eval).
-        let reply = match tokio::time::timeout(
-            CACHE_QUERY_BUDGET,
-            handle_cache_query(&self.state, project_id, &paths, &nar_sizes, mode, external),
-        )
-        .await
-        {
+        let reply = match tokio::time::timeout(CACHE_QUERY_BUDGET, answer).await {
             Ok(Ok(cached)) => {
                 debug!(peer_id = %self.peer_id, %job_id, %query_id, entries = cached.len(), "CacheStatus");
                 ServerMessage::CacheStatus { query_id, cached }
@@ -966,7 +973,7 @@ mod dispatch_id_tests {
 mod assignment_response_tests {
     use super::*;
     use crate::handler::job_events::SchedulerJobEvents;
-    use crate::session::frame::MsgWriter;
+    use crate::session::frame::{MsgWriter, WireMessage as _};
     use gradient_scheduler::jobs::PendingEvalJob;
     use gradient_test_support::prelude::*;
     use gradient_types::ids::{CommitId, EvaluationId};
@@ -1122,5 +1129,73 @@ mod assignment_response_tests {
 
         assert!(active.contains_key("j1"));
         assert!(log_db.into_transaction_log().is_empty());
+    }
+
+    /// The session already knows the project of a job it runs, so a cache query
+    /// never waits on the scheduler core for it: here there is no core at all.
+    #[tokio::test]
+    async fn a_cache_query_for_an_owned_job_is_answered_without_the_scheduler() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        let (tx, mut sent) = tokio::sync::mpsc::channel(8);
+        let writer = MsgWriter {
+            control_tx: tx.clone(),
+            tx,
+            send_chunk_timeout: Duration::from_secs(1),
+            _direction: PhantomData,
+        };
+        let semaphore = Arc::new(Semaphore::new(1));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                shutdown: state.shutdown.clone(),
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: "w1".into(),
+            },
+        );
+        let mut active = HashMap::from([(
+            "j1".to_owned(),
+            ActiveJob {
+                dispatch: DispatchedJobId::now_v7(),
+                pending: pending_eval(),
+            },
+        )]);
+
+        let ctx = DispatchContext {
+            writer: &writer,
+            state: &state,
+            scheduler: &scheduler,
+            peer_id: "w1",
+            nar_serve_semaphore: &semaphore,
+            active: &mut active,
+            job_events: &job_events,
+        };
+        ctx.spawn_cache_query(
+            "j1".into(),
+            "q1".into(),
+            vec!["/nix/store/00000000000000000000000000000000-a".into()],
+            vec![None],
+            QueryMode::Pull,
+            false,
+        );
+
+        let reply = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+            .await
+            .expect("answered before the scheduler's call timeout")
+            .expect("reply sent");
+        let reply = ServerMessage::decode(reply)
+            .expect("decode")
+            .into_message()
+            .expect("deserialise");
+        assert!(
+            matches!(
+                &reply,
+                ServerMessage::CacheStatus { query_id, .. } | ServerMessage::CacheError { query_id, .. }
+                    if query_id == "q1"
+            ),
+            "{reply:?}"
+        );
     }
 }
