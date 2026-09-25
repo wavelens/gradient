@@ -7,9 +7,10 @@
 //! One actor per worker connection. The reader task delivers each inbound
 //! frame with a call and reads the next only after the reply, so the mailbox
 //! never holds more than one frame plus signals and TCP backpressure holds.
-//! Liveness is therefore the reader's to stamp, not the handler's: with one
-//! frame in flight at a time, a handler waiting on a slow actor would read as
-//! a silent worker and get a healthy connection unregistered mid-assignment.
+//! Liveness is therefore the reader's to stamp, not the handler's, and it keeps
+//! stamping while a frame is in flight: the heartbeat behind that frame sits
+//! unread in the socket, so a handler waiting on a slow graph would otherwise
+//! read as a silent worker and get a healthy connection unregistered.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -39,6 +40,10 @@ use crate::session::frame::{Inbound, ProtoReader};
 
 /// How long a draining session waits for its in-flight jobs before closing.
 pub const SESSION_DRAIN_BUDGET: Duration = Duration::from_secs(20);
+
+/// How often the reader re-stamps liveness while the handler holds a frame;
+/// well inside the worker's 10 s heartbeat.
+const IN_FLIGHT_STAMP: Duration = Duration::from_secs(5);
 
 pub enum SessionMsg {
     Frame(Inbound<ClientMessage>, RpcReplyPort<bool>),
@@ -151,9 +156,12 @@ impl Actor for SessionActor {
             .expect("temp partial dir must be creatable")
         });
         let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
-        let reader = state
-            .shutdown
-            .spawn(read_loop(reader, myself, registered.last_seen));
+        let reader = state.shutdown.spawn(read_loop(
+            reader,
+            myself,
+            registered.last_seen,
+            IN_FLIGHT_STAMP,
+        ));
         let job_events = JobEvents::spawn(
             &state.shutdown,
             &peer_id,
@@ -321,25 +329,36 @@ async fn offer_jobs(st: &mut SessionState) -> bool {
     true
 }
 
-/// Deliver frames one at a time, stamping the worker's liveness on receipt.
-/// A worker that is talking is alive whether or not the server has finished
-/// answering it, so the stamp belongs here rather than in the handler.
+/// Deliver frames one at a time, stamping the worker's liveness on receipt and
+/// every `stamp_every` until the handler answers. A worker that is talking is
+/// alive whether or not the server has finished answering it, so the stamp
+/// belongs here rather than in the handler.
 async fn read_loop(
     mut reader: ProtoReader,
     session: ActorRef<SessionMsg>,
     last_seen: Arc<AtomicI64>,
+    stamp_every: Duration,
 ) {
-    while let Some(inbound) = recv_client_msg(&mut reader).await {
+    let stamp = || {
         last_seen.store(
             gradient_types::now().and_utc().timestamp_millis(),
             Ordering::Relaxed,
-        );
-        match session
-            .call(|reply| SessionMsg::Frame(inbound, reply), None)
-            .await
-        {
-            Ok(CallResult::Success(true)) => {}
-            _ => return,
+        )
+    };
+    while let Some(inbound) = recv_client_msg(&mut reader).await {
+        stamp();
+        let handled = session.call(|reply| SessionMsg::Frame(inbound, reply), None);
+        tokio::pin!(handled);
+        let mut in_flight =
+            tokio::time::interval_at(tokio::time::Instant::now() + stamp_every, stamp_every);
+        let result = loop {
+            tokio::select! {
+                result = &mut handled => break result,
+                _ = in_flight.tick() => stamp(),
+            }
+        };
+        if !matches!(result, Ok(CallResult::Success(true))) {
+            return;
         }
     }
 
@@ -354,6 +373,7 @@ mod tests {
     use gradient_test_support::prelude::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::Notify;
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
@@ -382,6 +402,46 @@ mod tests {
         ) -> Result<(), ActorProcessingErr> {
             if let SessionMsg::Frame(_, reply) = msg {
                 let _ = reply.send(false);
+            }
+
+            Ok(())
+        }
+    }
+
+    /// Stands in for a session whose handler is stuck on a slow graph: it
+    /// holds the frame's reply until `DrainDeadline` releases it.
+    struct HoldingSession;
+
+    impl Actor for HoldingSession {
+        type Msg = SessionMsg;
+        type State = (Arc<Notify>, Option<RpcReplyPort<bool>>);
+        type Arguments = Arc<Notify>;
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            received: Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            Ok((received, None))
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            msg: Self::Msg,
+            (received, held): &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            match msg {
+                SessionMsg::Frame(_, reply) => {
+                    *held = Some(reply);
+                    received.notify_one();
+                }
+                SessionMsg::DrainDeadline => {
+                    if let Some(reply) = held.take() {
+                        let _ = reply.send(false);
+                    }
+                }
+                _ => {}
             }
 
             Ok(())
@@ -475,13 +535,60 @@ mod tests {
             ))
             .await
             .unwrap();
-        read_loop(reader, session.clone(), Arc::clone(&last_seen)).await;
+        read_loop(
+            reader,
+            session.clone(),
+            Arc::clone(&last_seen),
+            IN_FLIGHT_STAMP,
+        )
+        .await;
         session.stop(None);
         join.await.unwrap();
 
         assert!(
             last_seen.load(Ordering::Relaxed) > 0,
             "the reader, not the handler, stamps the frame it just received"
+        );
+    }
+
+    // Regression: a gluon worker building a VM test was unregistered as dead
+    // while its session waited on a saturated graph actor, heartbeats unread.
+    #[tokio::test]
+    async fn the_reader_keeps_stamping_while_a_frame_is_in_flight() {
+        let (socket, mut client) = connected_pair().await;
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let received = Arc::new(Notify::new());
+        let (session, join) = Actor::spawn(None, HoldingSession, Arc::clone(&received))
+            .await
+            .unwrap();
+        let last_seen = Arc::new(AtomicI64::new(0));
+
+        client
+            .send(Message::Binary(
+                ClientMessage::ReauthRequest.encode().unwrap(),
+            ))
+            .await
+            .unwrap();
+        let reading = state.shutdown.spawn(read_loop(
+            reader,
+            session.clone(),
+            Arc::clone(&last_seen),
+            Duration::from_millis(20),
+        ));
+        received.notified().await;
+        last_seen.store(0, Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let stamped = last_seen.load(Ordering::Relaxed);
+
+        session.send_message(SessionMsg::DrainDeadline).unwrap();
+        reading.await.unwrap();
+        session.stop(None);
+        join.await.unwrap();
+
+        assert!(
+            stamped > 0,
+            "a worker whose frame is still being handled is not silent"
         );
     }
 }
