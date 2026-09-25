@@ -130,6 +130,12 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_BUILDS", default_value_t = 1)]
     pub max_concurrent_builds: u32,
 
+    /// Maximum number of PUTs to object storage (presigned NAR uploads,
+    /// multipart parts, eval-cache blobs) in flight at once across all jobs.
+    /// Throttled or failed PUTs retry with backoff and count only while sending.
+    #[arg(long, env = "GRADIENT_MAX_CONCURRENT_UPLOADS", default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    pub max_concurrent_uploads: u32,
+
     /// Cap on CPU cores a single build may use (nix `--cores` / `NIX_BUILD_CORES`).
     /// Unset (the default) passes `0` to the daemon, meaning all available cores.
     #[arg(long, env = "GRADIENT_WORKER_MAX_BUILD_CORES")]
@@ -437,6 +443,7 @@ mod tests {
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_concurrent_uploads: 8,
             max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
@@ -550,6 +557,7 @@ mod tests {
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_concurrent_uploads: 8,
             max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
@@ -626,6 +634,7 @@ mod tests {
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_concurrent_uploads: 8,
             max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,

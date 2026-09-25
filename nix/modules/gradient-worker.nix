@@ -179,6 +179,16 @@ in {
         default = 32;
       };
 
+      maxConcurrentUploads = lib.mkOption {
+        description = ''
+          Maximum number of PUTs to object storage (presigned NAR uploads,
+          multipart parts, eval-cache blobs) in flight at once across all
+          jobs. Throttled PUTs (503/429) retry with backoff.
+        '';
+        type = lib.types.ints.positive;
+        default = 8;
+      };
+
       maxBuildCores = lib.mkOption {
         description = ''
           Cap on CPU cores a single build may use (nix `--cores` /
@@ -466,6 +476,7 @@ in {
           GRADIENT_WORKER_PORT                        = toString cfg.port;
           GRADIENT_MAX_CONCURRENT_EVALUATIONS         = toString cfg.settings.maxConcurrentEvaluations;
           GRADIENT_MAX_CONCURRENT_BUILDS              = toString cfg.settings.maxConcurrentBuilds;
+          GRADIENT_MAX_CONCURRENT_UPLOADS             = toString cfg.settings.maxConcurrentUploads;
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
           GRADIENT_NAR_PARTIAL_TTL_SECS               = toString cfg.settings.narPartialTtlSecs;
           GRADIENT_WORKER_DRAIN_TIMEOUT_SECS          = toString cfg.settings.drainTimeoutSecs;

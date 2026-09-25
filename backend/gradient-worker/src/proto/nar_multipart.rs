@@ -8,16 +8,12 @@
 //! storage while the next part is still being packed, so a NAR past S3's 5 GiB
 //! single-PUT cap is never held whole in memory.
 
-use std::time::Duration;
-
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use gradient_types::proto::{CompletedMultipart, PresignedMultipart};
 use tokio::task::JoinSet;
 
 const MAX_INFLIGHT_PARTS: usize = 2;
-const PART_ATTEMPTS: u32 = 3;
-const PART_RETRY_BASE: Duration = Duration::from_secs(1);
 
 /// Something that takes a NAR's compressed bytes one part at a time.
 pub(crate) trait PartSink {
@@ -87,49 +83,9 @@ impl PartSink for PartUploader<'_> {
 }
 
 async fn put_part(url: String, body: Bytes) -> Result<String> {
-    let mut attempt = 1;
-    loop {
-        match try_put_part(&url, body.clone()).await {
-            Ok(etag) => return Ok(etag),
-            Err(PartError::Retryable(e)) if attempt < PART_ATTEMPTS => {
-                tracing::warn!(attempt, error = %e, "multipart part upload failed; retrying");
-                tokio::time::sleep(PART_RETRY_BASE * 2u32.pow(attempt - 1)).await;
-                attempt += 1;
-            }
-            Err(PartError::Retryable(e) | PartError::Fatal(e)) => return Err(e),
-        }
-    }
-}
-
-enum PartError {
-    Retryable(anyhow::Error),
-    Fatal(anyhow::Error),
-}
-
-async fn try_put_part(url: &str, body: Bytes) -> std::result::Result<String, PartError> {
-    let resp = crate::http::client()
-        .put(url)
-        .body(body)
-        .send()
-        .await
-        .map_err(|e| {
-            PartError::Retryable(anyhow::Error::new(e).context("multipart part PUT failed"))
-        })?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        let e = anyhow::anyhow!("multipart part upload returned {status}: {body}");
-        return Err(if status.is_server_error() || status.as_u16() == 429 {
-            PartError::Retryable(e)
-        } else {
-            PartError::Fatal(e)
-        });
-    }
-    resp.headers()
-        .get(reqwest::header::ETAG)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned)
-        .ok_or_else(|| PartError::Fatal(anyhow::anyhow!("multipart part response carried no ETag")))
+    super::object_put::put_object(&url, body, None)
+        .await?
+        .context("multipart part response carried no ETag")
 }
 
 #[cfg(test)]

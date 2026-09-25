@@ -484,18 +484,7 @@ async fn pack_compress_path(
 }
 
 async fn http_put(url: &str, body: Vec<u8>) -> Result<()> {
-    let resp = crate::http::client()
-        .put(url)
-        .header("Content-Type", "application/x-nix-nar")
-        .body(body)
-        .send()
-        .await
-        .context("HTTP request to presigned URL failed")?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("presigned upload returned {}: {}", status, body);
-    }
+    super::object_put::put_object(url, body.into(), Some("application/x-nix-nar")).await?;
     Ok(())
 }
 

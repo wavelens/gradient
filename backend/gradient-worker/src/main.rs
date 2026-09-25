@@ -68,6 +68,7 @@ fn main() -> Result<()> {
     // the first thing the runtime does and rustls 0.23 panics if no provider
     // is installed (see issue #232).
     gradient_util::http::init_crypto_provider();
+    proto::object_put::limit_concurrent_puts(config.max_concurrent_uploads as usize);
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {

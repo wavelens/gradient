@@ -285,14 +285,9 @@ impl JobUpdater {
         match pending.await_grant().await? {
             EvalCachePushMode::Skip => Ok(()),
             EvalCachePushMode::Presigned { url } => {
-                crate::http::client()
-                    .put(&url)
-                    .body(bytes)
-                    .send()
+                super::object_put::put_object(&url, bytes.into(), None)
                     .await
-                    .with_context(|| format!("eval-cache PUT {url}"))?
-                    .error_for_status()
-                    .with_context(|| format!("eval-cache PUT {url} returned non-2xx"))?;
+                    .with_context(|| format!("eval-cache PUT {url}"))?;
                 self.writer
                     .send(ClientMessage::EvalCachePushDone {
                         job_id: self.job_id.clone(),

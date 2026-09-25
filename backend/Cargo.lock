@@ -2884,6 +2884,7 @@ dependencies = [
  "harmonia-utils-signature",
  "hex",
  "libc",
+ "rand 0.10.3",
  "reqwest",
  "rkyv",
  "sd-notify",
