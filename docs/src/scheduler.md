@@ -456,6 +456,15 @@ the transition. The grace sits above the graph actor's 600s RPC timeout so a slo
 transition is never mistaken for a lost one, and `EvalStreamCompleted` is
 idempotent, so re-driving one that did land changes nothing.
 
+A build anchor has the same dead zone. The orphan re-queue moves it from
+`Building` back to `Queued` once, through the graph actor; a transaction that
+rolls back, or a `Dispatched` transition that lands after its claim already
+gave up, leaves it `Building` with nobody building it. The `stranded-build-sweep`
+pass (60s) finds `Building` anchors whose newest attempt's dispatch closed as
+`Abandoned` and that have not been written for 900s, confirms the scheduler holds
+no job for them, and re-sends `OrphanedBuilds`, which moves only rows still
+`Building`.
+
 The build dispatcher reads what moved, not what is queued. Every anchor that
 enters or leaves `Queued` already fans out through `emit_transition_effects`,
 which records it in the `ReadySet` (`gradient_db::ready_set`); a move made inside

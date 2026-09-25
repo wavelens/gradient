@@ -8,6 +8,7 @@ pub mod admin_tasks;
 pub mod anchor_guard;
 pub mod base_workers;
 pub mod build_attempt;
+pub mod build_watchdog;
 pub mod cache_metric;
 pub mod cache_reach;
 pub mod cache_storage;
@@ -58,6 +59,7 @@ pub mod walk_completeness;
 pub(crate) mod test_ctx;
 
 pub use self::build_attempt::*;
+pub use self::build_watchdog::stranded_building_anchors;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
     MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, UnconfirmedPath, cache_used_bytes,

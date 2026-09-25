@@ -11,9 +11,9 @@ use std::time::Duration;
 use gradient_db::LostCompletion;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::Transition;
-use gradient_types::EvaluationId;
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::proto::BuildFailureKind;
+use gradient_types::{DerivationBuildId, EvaluationId};
 use tracing::{debug, info, warn};
 
 use crate::Scheduler;
@@ -331,6 +331,62 @@ pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> 
     Ok(())
 }
 
+/// Keep only the anchors whose build job the tracker no longer holds: a job it
+/// still knows is out on a worker, whatever its dispatch row says.
+fn plan_stranded_requeue(
+    stranded: &[DerivationBuildId],
+    untracked: &HashSet<String>,
+) -> Vec<DerivationBuildId> {
+    stranded
+        .iter()
+        .copied()
+        .filter(|a| untracked.contains(&crate::jobs::build_job_key(*a)))
+        .collect()
+}
+
+/// Re-queue anchors left `Building` behind a dispatch that will never report,
+/// the build half of the completion watchdog. `OrphanedBuilds` moves only rows
+/// still `Building`, so re-sending a re-queue that did land changes nothing.
+pub(super) async fn stranded_build_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+    let stranded = gradient_db::stranded_building_anchors(
+        &scheduler.state.worker_db,
+        LOST_COMPLETION_GRACE_SECS,
+    )
+    .await?;
+    if stranded.is_empty() {
+        debug!("stranded build sweep clean");
+        return Ok(());
+    }
+
+    let untracked: HashSet<String> = scheduler
+        .untracked(
+            stranded
+                .iter()
+                .map(|a| crate::jobs::build_job_key(*a))
+                .collect(),
+        )
+        .await
+        .into_iter()
+        .collect();
+    let anchors = plan_stranded_requeue(&stranded, &untracked);
+    if anchors.is_empty() {
+        return Ok(());
+    }
+
+    warn!(
+        anchors = anchors.len(),
+        grace_secs = LOST_COMPLETION_GRACE_SECS,
+        "anchors stranded in Building behind an abandoned dispatch - re-queuing"
+    );
+    scheduler
+        .state
+        .graph
+        .transition(Transition::OrphanedBuilds { anchors })
+        .await?;
+    scheduler.kick_dispatch();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +455,23 @@ mod tests {
             .collect();
 
         assert!(plan_eval_repairs(&rows, &untracked).is_empty());
+    }
+
+    // A stranded anchor the tracker still holds is a build out on a worker;
+    // re-queuing it would dispatch the same derivation twice.
+    #[test]
+    fn a_tracked_stranded_anchor_is_left_alone() {
+        let anchor = DerivationBuildId::now_v7();
+
+        assert!(plan_stranded_requeue(&[anchor], &HashSet::new()).is_empty());
+    }
+
+    #[test]
+    fn an_untracked_stranded_anchor_is_requeued() {
+        let anchor = DerivationBuildId::now_v7();
+        let untracked = HashSet::from([crate::jobs::build_job_key(anchor)]);
+
+        assert_eq!(plan_stranded_requeue(&[anchor], &untracked), vec![anchor]);
     }
 
     #[test]

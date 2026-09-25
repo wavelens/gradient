@@ -25,6 +25,7 @@ root
 ├── worker-sample, instance-metrics      periodic passes
 ├── worker-liveness, graph-consistency   periodic passes, absent when disabled
 ├── eval-completion-watchdog,
+│   stranded-build-sweep,
 │   abandoned-dispatch-sweep             periodic passes (60s)
 ├── cache-maintenance, sign-sweep,
 │   debug-index, eval-cache-sweep        cache sweeps

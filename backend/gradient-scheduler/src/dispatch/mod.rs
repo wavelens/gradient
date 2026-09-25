@@ -121,6 +121,13 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         ),
         periodic(
             scheduler,
+            "stranded-build-sweep",
+            EVAL_WATCHDOG_TICK,
+            CONSISTENCY_BUDGET,
+            background::stranded_build_pass,
+        ),
+        periodic(
+            scheduler,
             "abandoned-dispatch-sweep",
             EVAL_WATCHDOG_TICK,
             CONSISTENCY_BUDGET,
