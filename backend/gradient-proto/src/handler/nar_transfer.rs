@@ -1248,7 +1248,7 @@ async fn fail_transfer(
 ///   open timeout.
 /// - The chunked send path uses [`ProtoWriter`], which bounds per-chunk send
 ///   waits via the queue + `send_chunk_timeout` configured at split time.
-///   A stalled peer is detected as `Err(())` from `send_server_msg` and
+///   A stalled peer is detected as `SendError::Stalled` from `send_server_msg` and
 ///   triggers a best-effort `NarAbort`.
 /// - The body is read from `object_store`'s streaming API - no full file is
 ///   ever held in memory. Chunks are coalesced/split to `BULK_CHUNK_SIZE`.

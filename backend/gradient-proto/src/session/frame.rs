@@ -32,6 +32,17 @@ use gradient_util::shutdown::Shutdown;
 
 use crate::messages::{ArchivedClientMessage, ArchivedServerMessage, ClientMessage, ServerMessage};
 
+/// Why a frame never reached the peer's socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SendError {
+    #[error("message failed to encode")]
+    Encode,
+    #[error("WebSocket closed")]
+    Closed,
+    #[error("WS writer queue full beyond send timeout - peer TCP stalled")]
+    Stalled,
+}
+
 type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -339,7 +350,7 @@ impl ProtoSocket {
         }
     }
 
-    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ()> {
+    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), SendError> {
         match self {
             Self::Axum(ws) => ws
                 .send(AxumMessage::Binary(bytes))
@@ -350,6 +361,7 @@ impl ProtoSocket {
                 .await
                 .map_err(|e| debug!(error = %e, "WebSocket send error")),
         }
+        .map_err(|()| SendError::Closed)
     }
 
     /// Receive and deserialise the next [`ServerMessage`] (peer-role read).
@@ -381,8 +393,8 @@ impl ProtoSocket {
     }
 
     /// Serialise and send a [`ClientMessage`] (peer-role write).
-    pub async fn send_client_msg(&mut self, msg: &ClientMessage) -> Result<(), ()> {
-        let bytes = msg.encode().ok_or(())?;
+    pub async fn send_client_msg(&mut self, msg: &ClientMessage) -> Result<(), SendError> {
+        let bytes = msg.encode().ok_or(SendError::Encode)?;
         trace!(?msg, bytes = bytes.len(), "send ClientMessage");
         self.send_bytes(bytes).await
     }
@@ -418,8 +430,8 @@ impl ProtoSocket {
     }
 
     /// Serialise and send a [`ServerMessage`].
-    pub async fn send_msg(&mut self, msg: &ServerMessage) -> Result<(), ()> {
-        let bytes = msg.encode().ok_or(())?;
+    pub async fn send_msg(&mut self, msg: &ServerMessage) -> Result<(), SendError> {
+        let bytes = msg.encode().ok_or(SendError::Encode)?;
         trace!(?msg, bytes = bytes.len(), "send ServerMessage");
         self.send_bytes(bytes).await
     }
@@ -602,22 +614,22 @@ impl<M> Clone for MsgWriter<M> {
 }
 
 impl<M: WireMessage> MsgWriter<M> {
-    pub async fn send_msg(&self, msg: &M) -> Result<(), ()> {
-        let Some(bytes) = msg.encode() else {
-            return Err(());
-        };
+    pub async fn send_msg(&self, msg: &M) -> Result<(), SendError> {
+        let bytes = msg.encode().ok_or(SendError::Encode)?;
         trace!(?msg, bytes = bytes.len(), "send message");
         let bulk = msg.is_bulk();
         let lane = if bulk { &self.tx } else { &self.control_tx };
         match tokio::time::timeout(self.send_chunk_timeout, lane.send(bytes)).await {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(_)) => Err(()),
+            Ok(Err(_)) => Err(SendError::Closed),
             Err(_) => {
                 warn!(
                     timeout_secs = self.send_chunk_timeout.as_secs(),
-                    bulk, "WS writer queue full beyond send timeout - peer TCP stalled"
+                    bulk,
+                    "{}",
+                    SendError::Stalled
                 );
-                Err(())
+                Err(SendError::Stalled)
             }
         }
     }
@@ -801,7 +813,7 @@ pub async fn recv_client_msg(reader: &mut ProtoReader) -> Option<Inbound<ClientM
     reader.recv().await
 }
 
-pub async fn send_server_msg(writer: &ProtoWriter, msg: &ServerMessage) -> Result<(), ()> {
+pub async fn send_server_msg(writer: &ProtoWriter, msg: &ServerMessage) -> Result<(), SendError> {
     writer.send_msg(msg).await
 }
 
@@ -1299,7 +1311,7 @@ mod writer_tests {
         )
     }
 
-    /// A backed-up writer queue must surface as `Err(())` from `send_msg`
+    /// A backed-up writer queue must surface as `SendError::Stalled` from `send_msg`
     /// after the configured timeout - never hang. This is what makes a
     /// stalled peer detectable on the server side instead of waiting for
     /// the worker's 600 s receive ceiling.
@@ -1316,10 +1328,10 @@ mod writer_tests {
             code: 400,
             reason: "stalled".into(),
         };
-        let res = writer.send_msg(&msg).await;
-        assert!(
-            res.is_err(),
-            "send_msg must report failure when the writer queue stays full past send_chunk_timeout",
+        assert_eq!(
+            writer.send_msg(&msg).await,
+            Err(SendError::Stalled),
+            "send_msg must report a stall when the writer queue stays full past send_chunk_timeout",
         );
     }
 
