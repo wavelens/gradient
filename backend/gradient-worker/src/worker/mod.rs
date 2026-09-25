@@ -129,27 +129,17 @@ impl Worker<Connected> {
 // ── Reconnect (Worker<Disconnected> → Worker<Connected>) ─────────────────────
 
 impl Worker<Disconnected> {
-    /// Re-open the connection to the server and return a `Worker<Connected>`.
-    ///
-    /// Preserves the executor, scorer, credentials, and job caches from the
-    /// previous connection so reconnects are cheap.
-    ///
-    /// On failure, returns the original `Worker<Disconnected>` alongside the
-    /// error so the caller can retry with backoff without losing the cached
-    /// executor/scorer/credentials state.
-    pub async fn reconnect(self) -> std::result::Result<Worker<Connected>, (anyhow::Error, Self)> {
-        let mut conn = match ProtoConnection::open(&self.config.server_url).await {
-            Ok(c) => c,
-            Err(e) => return Err((e, self)),
-        };
-        // Reuse the same handshake + capability-advertise + initial-request
-        // sequence as a fresh connect - the server has no prior state for
-        // this worker after a restart, so reconnect must re-publish
-        // architectures, system_features, and max_concurrent_builds.
-        if let Err(e) = perform_setup(&mut conn, &self.config, "reconnect").await {
-            return Err((e, self));
-        }
+    /// Re-open the connection to the server, re-running the same handshake,
+    /// capability advertisement and initial request as a fresh connect: the
+    /// server holds no state for this worker after a restart. Borrows `self`
+    /// so a failed attempt keeps the cached executor, scorer and credentials.
+    pub async fn reconnect(&self) -> Result<ProtoConnection> {
+        let mut conn = ProtoConnection::open(&self.config.server_url).await?;
+        perform_setup(&mut conn, &self.config, "reconnect").await?;
+        Ok(conn)
+    }
 
+    pub fn into_connected(self, conn: ProtoConnection) -> Worker<Connected> {
         let Worker {
             config,
             executor,
@@ -160,7 +150,7 @@ impl Worker<Disconnected> {
             ..
         } = self;
 
-        Ok(Worker {
+        Worker {
             config,
             executor,
             scorer,
@@ -169,7 +159,7 @@ impl Worker<Disconnected> {
             last_scores,
             conn_state: Connected { conn },
             _marker: PhantomData,
-        })
+        }
     }
 }
 

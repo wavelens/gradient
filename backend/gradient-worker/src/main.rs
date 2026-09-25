@@ -216,24 +216,20 @@ fn main() -> Result<()> {
 
             // Reconnect with exponential backoff, but bail out if shutdown
             // fires while we're waiting. Never give up otherwise - a transient
-            // network blip must not kill the worker. The disconnected handle
-            // is consumed by retry_reconnect; if shutdown cancels the future
-            // mid-attempt the cached `executor_handle` still drives the
-            // graceful pool shutdown.
+            // network blip must not kill the worker.
             let reconnected = tokio::select! {
                 _ = shutdown.drain_requested() => None,
-                w = retry_reconnect(
-                    disconnected,
-                    |d| async move { d.reconnect().await },
+                conn = retry_reconnect(
+                    async || disconnected.reconnect().await,
                     |delay| tokio::time::sleep(delay),
                     backoff,
                     MAX_BACKOFF,
-                ) => Some(w),
+                ) => Some(conn),
             };
             match reconnected {
-                Some(w) => {
+                Some(conn) => {
                     info!("reconnected successfully");
-                    worker = w;
+                    worker = disconnected.into_connected(conn);
                     // Reconnecting only proves the transport works. A session
                     // the server refuses or drains is not a served one, so its
                     // delay keeps escalating instead of dropping to the floor.
