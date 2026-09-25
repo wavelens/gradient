@@ -51,6 +51,12 @@ fn commit_subject(commit: &WebhookCommit) -> Option<String> {
     (!subject.is_empty()).then(|| subject.to_string())
 }
 
+/// The pushed commit. For an annotated tag `after` is the tag object, which no
+/// fetch resolves as a commit, so the forge's peeled SHA wins.
+fn head_commit_id(head: Option<&WebhookCommit>) -> Option<&str> {
+    head.and_then(|c| c.id.as_deref())
+}
+
 #[derive(Deserialize)]
 pub struct GitHubPushPayload {
     #[serde(rename = "ref")]
@@ -96,6 +102,8 @@ pub struct GitLabPushPayload {
     #[serde(rename = "ref")]
     pub git_ref: String,
     pub after: String,
+    #[serde(default)]
+    pub checkout_sha: Option<String>,
     pub project: GitLabProject,
     #[serde(default)]
     pub commits: Vec<WebhookCommit>,
@@ -513,10 +521,11 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let Some(pc) = decode_push_commit(&payload.git_ref, &payload.after, "github") else {
+        let head = payload.head_commit.as_ref();
+        let sha = head_commit_id(head).unwrap_or(&payload.after);
+        let Some(pc) = decode_push_commit(&payload.git_ref, sha, "github") else {
             return Some(PushOutcome::Ignored);
         };
-        let head = payload.head_commit.as_ref();
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
@@ -537,7 +546,9 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let Some(pc) = decode_push_commit(&payload.git_ref, &payload.after, "gitea") else {
+        let head = payload.head_commit.as_ref();
+        let sha = head_commit_id(head).unwrap_or(&payload.after);
+        let Some(pc) = decode_push_commit(&payload.git_ref, sha, "gitea") else {
             return Some(PushOutcome::Ignored);
         };
         let mut urls = vec![payload.repository.clone_url];
@@ -545,7 +556,6 @@ impl ParsedPushEvent {
             urls.push(ssh);
         }
 
-        let head = payload.head_commit.as_ref();
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
             repository_urls: urls,
@@ -566,7 +576,8 @@ impl ParsedPushEvent {
                 return None;
             }
         };
-        let Some(pc) = decode_push_commit(&payload.git_ref, &payload.after, "gitlab") else {
+        let sha = payload.checkout_sha.as_deref().unwrap_or(&payload.after);
+        let Some(pc) = decode_push_commit(&payload.git_ref, sha, "gitlab") else {
             return Some(PushOutcome::Ignored);
         };
         let mut urls = vec![payload.project.http_url];
@@ -577,7 +588,7 @@ impl ParsedPushEvent {
         let head = payload
             .commits
             .iter()
-            .find(|c| c.id.as_deref() == Some(payload.after.as_str()))
+            .find(|c| c.id.as_deref() == Some(sha))
             .or_else(|| payload.commits.last());
         Some(PushOutcome::Build(Self {
             commit_hash: pc.hash,
@@ -1458,6 +1469,70 @@ mod tests {
         let ev = build(ParsedPushEvent::from_gitlab(body.as_bytes()));
         assert_eq!(ev.commit_message.as_deref(), Some("fix: the bug"));
         assert_eq!(ev.author_name.as_deref(), Some("Dev"));
+    }
+
+    const TAG_OBJECT_SHA: &str = "ef0fe4434c157e48287c7c4dc4424ad33334695b";
+
+    #[test]
+    fn github_annotated_tag_push_builds_the_tagged_commit() {
+        let body = format!(
+            r#"{{
+                "ref": "refs/tags/v1.4.0",
+                "after": "{TAG_OBJECT_SHA}",
+                "repository": {{ "clone_url": "https://github.com/org/repo.git", "ssh_url": "git@github.com:org/repo.git" }},
+                "head_commit": {{ "id": "{VALID_SHA}", "message": "version bump" }}
+            }}"#
+        );
+        let ev = build(ParsedPushEvent::from_github(body.as_bytes()));
+        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+        assert!(ev.is_tag);
+    }
+
+    #[test]
+    fn gitea_annotated_tag_push_builds_the_tagged_commit() {
+        let body = format!(
+            r#"{{
+                "ref": "refs/tags/v1.4.0",
+                "after": "{TAG_OBJECT_SHA}",
+                "repository": {{ "clone_url": "https://gitea.example.com/org/repo.git" }},
+                "head_commit": {{ "id": "{VALID_SHA}", "message": "version bump" }}
+            }}"#
+        );
+        let ev = build(ParsedPushEvent::from_gitea(body.as_bytes()));
+        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+    }
+
+    #[test]
+    fn gitlab_annotated_tag_push_builds_the_checkout_sha() {
+        let body = format!(
+            r#"{{
+                "ref": "refs/tags/v1.4.0",
+                "after": "{TAG_OBJECT_SHA}",
+                "checkout_sha": "{VALID_SHA}",
+                "project": {{ "http_url": "https://gitlab.example.com/org/repo.git" }},
+                "commits": []
+            }}"#
+        );
+        let ev = build(ParsedPushEvent::from_gitlab(body.as_bytes()));
+        assert_eq!(ev.commit_hash, hex::decode(VALID_SHA).unwrap());
+        assert!(ev.is_tag);
+    }
+
+    #[test]
+    fn gitlab_tag_deletion_is_ignored() {
+        let body = format!(
+            r#"{{
+                "ref": "refs/tags/v1.4.0",
+                "after": "{ZERO_SHA}",
+                "checkout_sha": null,
+                "project": {{ "http_url": "https://gitlab.example.com/org/repo.git" }},
+                "commits": []
+            }}"#
+        );
+        assert!(matches!(
+            ParsedPushEvent::from_gitlab(body.as_bytes()),
+            Some(PushOutcome::Ignored)
+        ));
     }
 
     #[test]
