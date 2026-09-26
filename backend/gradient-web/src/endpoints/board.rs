@@ -1094,10 +1094,7 @@ fn top_projects_by_buildtime_sql(window_days: i64) -> String {
 gradient_db::sql_fn! {
     TOP_PROJECTS_BY_BUILDTIME = || top_projects_by_buildtime_sql(30),
         params = [],
-        tier = Bulk,
-        budget = gradient_db::sql::Budget::bulk().buffers(300_000).because(
-            "one attempt lookup per job in the window; only a rollup would cut it",
-        );
+        tier = Bulk;
 }
 
 /// Top projects by cumulative build time in a window (superuser-only),
