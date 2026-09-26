@@ -739,7 +739,7 @@ side: a `build_job` is how an evaluation names what it waits on and deleting an
 evaluation cascades its names, so before that GC settles the queue the live
 evaluations adopt the pending anchors they reach through builders
 (`reachability::adopt_pending_closures`), which is what keeps a pruned interior
-queued, attributable and built once its walker is gone (#663). The orphan-NAR keep-set (`active_hashes`) likewise pins
+queued, attributable and built once its walker is gone (#663). The orphan-NAR pass (`unreferenced_hashes`) likewise keeps
 the input sources and `.drv` hashes of every derivation with a build anchor - not
 just outputs, and *regardless of build status*. These are producerless (only an eval
 re-pushes them), so a terminal-failed anchor a later eval requeues must still find
@@ -760,7 +760,10 @@ tick) removes every path outside that set whose last fetch or commit is older th
 wholeness and any producer's `fetchable` follow. Derivation rows outside the reachable set are collected
 separately after `keepOrphanDerivationsHours`; nothing else reclaims a NAR.
 
-The keep-set is built from committed DB rows, so it cannot reference a NAR that is
+The orphan-NAR pass never materialises that keep-set: it lists storage, then probes
+each listed hash in batches of 5000 against the four keep clauses (one index lookup
+each), so its cost follows the listing rather than every table the clauses name.
+It reads committed DB rows, so it cannot see a NAR that is
 already on disk but whose `derivation`/`cached_path` rows have not been written yet
 - the in-eval window between the worker's presigned `.drv` PUT and the server
 processing its `NarUploaded`. The orphan-files pass therefore **spares any NAR

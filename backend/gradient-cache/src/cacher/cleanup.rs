@@ -166,29 +166,31 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
 }
 
 gradient_db::sql! {
-    /// Keep-set query for the orphan-files pass. Outputs (clause 1) stay gated on
-    /// build status - they are rebuildable and evicted by `evict_stale_cached_paths`.
-    /// The `.drv` (clause 4) and input sources (clause 3) are producerless and kept
-    /// for any anchor regardless of status; only `gc_orphan_derivations` reclaims them.
-    ACTIVE_HASHES_SELECT = r#"
-    SELECT DISTINCT dout.hash AS hash
-    FROM derivation_output dout
-    JOIN derivation_build b ON b.derivation = dout.derivation
-    WHERE b.status NOT IN ($1, $2, $3, $4)
-    UNION
-    SELECT cp.hash AS hash
-    FROM cached_path cp
-    WHERE cp.file_hash IS NOT NULL
-    UNION
-    SELECT s.hash AS hash
-    FROM derivation_input_source s
-    JOIN derivation_build b ON b.derivation = s.derivation
-    UNION
-    SELECT d.hash AS hash
-    FROM derivation d
-    JOIN derivation_build b ON b.derivation = d.id
+    /// The candidates no row keeps, probed one index lookup per clause. Outputs stay
+    /// gated on build status - they are rebuildable and evicted by
+    /// `evict_stale_cached_paths`. The `.drv` and input sources are producerless and
+    /// kept for any anchor regardless of status; only `gc_orphan_derivations`
+    /// reclaims them.
+    UNREFERENCED_HASHES = r#"
+    SELECT h.hash AS hash
+    FROM unnest($1::text[]) AS h(hash)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM cached_path cp
+        WHERE cp.hash = h.hash AND cp.file_hash IS NOT NULL)
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_output dout
+        JOIN derivation_build b ON b.derivation = dout.derivation
+        WHERE dout.hash = h.hash AND b.status NOT IN ($2, $3, $4, $5))
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_input_source s
+        JOIN derivation_build b ON b.derivation = s.derivation
+        WHERE s.hash = h.hash)
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation d
+        JOIN derivation_build b ON b.derivation = d.id
+        WHERE d.hash = h.hash)
 "#,
-        params = [Int(4), Int(5), Int(6), Int(9)],
+        params = [CachedPathHashes(UNREFERENCED_PROBE_BATCH), Int(4), Int(5), Int(6), Int(9)],
         tier = Sweep;
 }
 
@@ -258,8 +260,6 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
 }
 
 pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<CleanupReport> {
-    let keep = active_hashes(&state).await?;
-
     let on_disk = state
         .nar_storage
         .list_hashes_with_modified()
@@ -267,32 +267,16 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<Cle
         .context("Failed to list NAR store")?;
     let on_disk_set: HashSet<String> = on_disk.iter().map(|(h, _)| h.clone()).collect();
 
-    // Spare NARs younger than the upload grace window. A freshly-uploaded NAR is
-    // on disk before the eval has committed its `derivation`/`cached_path` rows,
-    // so the keep-set does not yet reference it; reclaiming it here strands a
-    // zombie `cached_path` (row created moments later, object gone) that the
-    // dispatch gate trusts as the cached `.drv` - the in-eval `.drv` push race
-    // that fails dependents `InputsUnavailable`. `<= 0` disables it (tests only).
-    let grace_secs = state.config.storage.nar_upload_grace_hours.max(0) * 3600;
-    let cutoff = if grace_secs > 0 {
-        now().and_utc().timestamp() - grace_secs
-    } else {
-        i64::MAX
-    };
-
     let mut report = CleanupReport {
         orphan_nars_scanned: on_disk.len() as u64,
         ..Default::default()
     };
-    for (hash, modified) in &on_disk {
-        if keep.contains(hash) || *modified >= cutoff {
-            continue;
-        }
-        if let Err(e) = state.nar_storage.delete(hash).await {
-            error!(hash = %hash, error = %e, "Failed to remove orphaned NAR");
-        } else {
-            debug!(hash = %hash, "Removed orphaned NAR");
-            report.orphan_nars_removed += 1;
+    let candidates = past_upload_grace(&state, &on_disk);
+    for chunk in candidates.chunks(UNREFERENCED_PROBE_BATCH) {
+        for hash in unreferenced_hashes(&state, chunk).await? {
+            if remove_orphan_nar(&state, &hash).await {
+                report.orphan_nars_removed += 1;
+            }
         }
     }
 
@@ -408,48 +392,61 @@ async fn purge_zombie_cached_paths(
     Ok(purged)
 }
 
-/// Returns the set of NAR-storage hashes that must NOT be garbage-collected by
-/// the orphan-files pass. A hash is kept when either:
-///
-/// 1. it belongs to a `derivation_output` whose `derivation` has a
-///    `derivation_build` anchor whose status is not a terminal failure
-///    (`Failed`, `Aborted`, `DependencyFailed`). This covers Substituted,
-///    Completed, and any in-flight build (Created/Queued/Building) - including
-///    the upload race window where the NAR is on disk before `is_cached=true`
-///    is flipped.
-/// 2. it belongs to a `cached_path` row with `file_hash IS NOT NULL` -
-///    typically `.drv` files that have no `derivation_output` of their own.
-/// 3. it is a build-time **input source** or the **`.drv`** of any derivation
-///    with a build anchor, regardless of status. These have no `derivation_output`
-///    and no producer (only an eval re-pushes them), so a terminal-failed anchor a
-///    later eval requeues must still find them - gating this clause on status
-///    purged the `.drv`/sources of a failed-but-requeueable build, dead-ending its
-///    retry on `InputsUnavailable`. Genuinely dead ones are reclaimed by
-///    `gc_orphan_derivations` when the derivation row goes orphan.
-///
-/// Note: this is intentionally more permissive than the old `is_cached=true`
-/// check. `evict_stale_cached_paths` is the pass that actively removes NARs
-/// once no retained evaluation reaches them; this pass is a safety net for
-/// stray files only.
-async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
+const UNREFERENCED_PROBE_BATCH: usize = 5000;
+
+/// The listed NARs older than the upload grace. A freshly-uploaded NAR is on disk
+/// before the eval has committed its `derivation`/`cached_path` rows, so no row
+/// references it yet; reclaiming it strands a zombie `cached_path` that the
+/// dispatch gate trusts as the cached `.drv` and fails dependents
+/// `InputsUnavailable`. `<= 0` disables the grace (tests only).
+fn past_upload_grace(state: &ServerState, on_disk: &[(String, i64)]) -> Vec<String> {
+    let grace_secs = state.config.storage.nar_upload_grace_hours.max(0) * 3600;
+    let cutoff = if grace_secs > 0 {
+        now().and_utc().timestamp() - grace_secs
+    } else {
+        i64::MAX
+    };
+    on_disk
+        .iter()
+        .filter(|(_, modified)| *modified < cutoff)
+        .map(|(hash, _)| hash.clone())
+        .collect()
+}
+
+/// The candidates no row keeps. A hash is kept by an output of a derivation whose
+/// anchor has not failed terminally, by a `cached_path` with `file_hash`, or as the
+/// `.drv` or input source of any anchored derivation regardless of status: those
+/// are producerless, so a requeued failed build must still find them. This pass
+/// is a safety net for stray files; `evict_stale_cached_paths` is the eviction.
+async fn unreferenced_hashes(state: &ServerState, candidates: &[String]) -> Result<Vec<String>> {
     let rows = state
         .worker_db
-        .query_all_raw(ACTIVE_HASHES_SELECT.bind([
+        .query_all_raw(UNREFERENCED_HASHES.bind([
+            candidates.to_vec().into(),
             sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),
             sea_orm::Value::Int(Some(BuildStatus::Aborted as i32)),
             sea_orm::Value::Int(Some(BuildStatus::DependencyFailed as i32)),
             sea_orm::Value::Int(Some(BuildStatus::FailedTimeout as i32)),
         ]))
         .await
-        .context("Failed to query active NAR hashes")?;
+        .context("Failed to probe NAR hashes for references")?;
 
-    let mut set: HashSet<String> = HashSet::with_capacity(rows.len());
-    for row in rows {
-        if let Ok(h) = row.try_get::<String>("", "hash") {
-            set.insert(h);
+    rows.iter()
+        .map(|row| row.try_get::<String>("", "hash").map_err(Into::into))
+        .collect()
+}
+
+async fn remove_orphan_nar(state: &ServerState, hash: &str) -> bool {
+    match state.nar_storage.delete(hash).await {
+        Ok(()) => {
+            debug!(hash, "Removed orphaned NAR");
+            true
+        }
+        Err(e) => {
+            error!(hash, error = %e, "Failed to remove orphaned NAR");
+            false
         }
     }
-    Ok(set)
 }
 
 #[cfg(test)]
@@ -480,51 +477,40 @@ mod tests {
         m
     }
 
-    fn make_state(base: &Path, kept: Vec<&str>) -> Arc<ServerState> {
+    fn make_state(base: &Path, unreferenced: Vec<&str>) -> Arc<ServerState> {
         let nar_storage = NarStore::local(base.to_str().unwrap()).unwrap();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([kept.into_iter().map(hash_row).collect::<Vec<_>>()])
-            // `purge_zombie_cached_paths` follows the active-hashes query with a
-            // load of cached_path rows. None of these tests exercise that path,
-            // so feed it an empty result set.
+            .append_query_results([unreferenced.into_iter().map(hash_row).collect::<Vec<_>>()])
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         test_server_state(nar_storage, db, |config| {
-            // Disable the orphan-file grace window so these tests' freshly
-            // written NARs are eligible for reclamation immediately.
             config.storage.nar_upload_grace_hours = 0;
         })
     }
 
-    /// A NAR for a derivation with an active build (Substituted/Completed/etc.)
-    /// must be kept; a NAR with no DB references must be removed.
     #[tokio::test]
-    async fn keeps_active_drops_orphan() {
+    async fn removes_only_what_the_probe_names_unreferenced() {
         let tmp = tempfile::tempdir().unwrap();
         let active = "aabbccdd11111111111111111111111111";
         let orphan = "eeff001122222222222222222222222222";
         write_nar_file(tmp.path(), active);
         write_nar_file(tmp.path(), orphan);
 
-        let state = make_state(tmp.path(), vec![active]);
-        cleanup_orphaned_cache_files(state).await.unwrap();
+        let state = make_state(tmp.path(), vec![orphan]);
+        let report = cleanup_orphaned_cache_files(state).await.unwrap();
 
-        assert!(
-            nar_file_exists(tmp.path(), active),
-            "active NAR must survive"
-        );
-        assert!(
-            !nar_file_exists(tmp.path(), orphan),
-            "orphan NAR must be removed"
-        );
+        assert!(nar_file_exists(tmp.path(), active));
+        assert!(!nar_file_exists(tmp.path(), orphan));
+        assert_eq!(report.orphan_nars_scanned, 2);
+        assert_eq!(report.orphan_nars_removed, 1);
     }
 
     /// Only the outputs clause may gate on build status. The `.drv` and
     /// input-source clauses keep a derivation's build closure for ANY anchor, so a
     /// requeued terminal-failed build can still fetch its `.drv`.
     #[test]
-    fn keep_set_protects_drv_and_sources_for_any_anchor() {
-        let sql = ACTIVE_HASHES_SELECT
+    fn keep_clauses_protect_drv_and_sources_for_any_anchor() {
+        let sql = UNREFERENCED_HASHES
             .text()
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -535,24 +521,34 @@ mod tests {
             "only the outputs clause may gate on build status: {sql}"
         );
         assert!(
-            sql.contains("FROM derivation_input_source s JOIN derivation_build b ON b.derivation = s.derivation UNION"),
+            sql.contains(
+                "JOIN derivation_build b ON b.derivation = s.derivation WHERE s.hash = h.hash)"
+            ),
             "input sources kept for any anchor (no status gate): {sql}"
         );
         assert!(
-            sql.contains("FROM derivation d JOIN derivation_build b ON b.derivation = d.id"),
+            sql.contains("JOIN derivation_build b ON b.derivation = d.id WHERE d.hash = h.hash)"),
             "drv kept for any anchor (no status gate): {sql}"
         );
     }
 
-    /// A NAR referenced only by a `cached_path` row (e.g. a `.drv` file) must
-    /// be kept - exercises the UNION branch of the keep query.
+    /// The pass never materialises the keep-set: every clause is probed per
+    /// candidate the listing handed it.
+    #[test]
+    fn the_probe_is_driven_by_the_listed_candidates() {
+        let sql = UNREFERENCED_HASHES.text();
+        assert!(sql.contains("FROM unnest($1::text[]) AS h(hash)"), "{sql}");
+        assert_eq!(sql.matches("NOT EXISTS").count(), 4, "{sql}");
+        assert!(!sql.contains("UNION"), "{sql}");
+    }
+
     #[tokio::test]
-    async fn keeps_cached_path_only() {
+    async fn a_referenced_nar_survives() {
         let tmp = tempfile::tempdir().unwrap();
         let drv = "ddeeffaa33333333333333333333333333";
         write_nar_file(tmp.path(), drv);
 
-        let state = make_state(tmp.path(), vec![drv]);
+        let state = make_state(tmp.path(), vec![]);
         cleanup_orphaned_cache_files(state).await.unwrap();
 
         assert!(nar_file_exists(tmp.path(), drv));
@@ -566,39 +562,56 @@ mod tests {
         assert_eq!(keep_hours(336, 24), 336);
     }
 
-    /// Empty keep set ⇒ every on-disk NAR is removed.
     #[tokio::test]
-    async fn drops_everything_when_no_keep() {
+    async fn every_unreferenced_candidate_is_removed() {
         let tmp = tempfile::tempdir().unwrap();
         let h1 = "1111aaaa44444444444444444444444444";
         let h2 = "2222bbbb55555555555555555555555555";
         write_nar_file(tmp.path(), h1);
         write_nar_file(tmp.path(), h2);
 
-        let state = make_state(tmp.path(), vec![]);
+        let state = make_state(tmp.path(), vec![h1, h2]);
         cleanup_orphaned_cache_files(state).await.unwrap();
 
         assert!(!nar_file_exists(tmp.path(), h1));
         assert!(!nar_file_exists(tmp.path(), h2));
     }
 
-    /// A NAR younger than the orphan grace window is spared even with an empty
-    /// keep set: it may be a just-uploaded `.drv` whose `derivation`/`cached_path`
-    /// rows have not committed yet, so the keep-set does not reference it. Without
-    /// the grace it would be reclaimed and strand a zombie `cached_path`.
+    /// A NAR younger than the upload grace is never a candidate: it may be a
+    /// just-uploaded `.drv` whose rows have not committed yet.
+    #[test]
+    fn only_nars_past_the_upload_grace_are_candidates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = make_state(tmp.path(), vec![]);
+        Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config)
+            .storage
+            .nar_upload_grace_hours = 24;
+        let fresh = now().and_utc().timestamp();
+        let listed = vec![
+            ("old".to_owned(), fresh - 25 * 3600),
+            ("fresh".to_owned(), fresh),
+        ];
+
+        assert_eq!(past_upload_grace(&state, &listed), vec!["old".to_owned()]);
+    }
+
     #[tokio::test]
     async fn fresh_orphan_nar_spared_within_grace() {
         let tmp = tempfile::tempdir().unwrap();
         let orphan = "ddccbbaa99999999999999999999999999";
         write_nar_file(tmp.path(), orphan);
 
-        // make_state disables the grace; re-enable the default 24h window.
-        let mut state = make_state(tmp.path(), vec![]);
-        Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config)
-            .storage
-            .nar_upload_grace_hours = 24;
+        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let only_the_zombie_load = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .into_connection();
+        let state = test_server_state(nar_storage, only_the_zombie_load, |config| {
+            config.storage.nar_upload_grace_hours = 24;
+        });
 
-        cleanup_orphaned_cache_files(state).await.unwrap();
+        cleanup_orphaned_cache_files(state)
+            .await
+            .expect("a pass with no candidate issues no probe");
         assert!(
             nar_file_exists(tmp.path(), orphan),
             "freshly written orphan NAR must be spared within the grace window"
