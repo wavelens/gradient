@@ -4,7 +4,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, load_cache};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::ok_json;
@@ -17,6 +17,8 @@ use axum::response::IntoResponse;
 use gradient_core::ServerState;
 use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar_reader};
 use gradient_storage::PartialStore;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use serde::Deserialize;
 use serde_json::json;
@@ -160,9 +162,13 @@ pub async fn nars_upload(
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_NAR_UPLOAD,
+        Action::CacheNarUpload,
+        EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(json!({
             "cache_id": cache.id.to_string(),
@@ -399,9 +405,13 @@ pub async fn nar_finalize(
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_NAR_UPLOAD,
+        Action::CacheNarUpload,
+        EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(json!({
             "cache_id": cache.id.to_string(),

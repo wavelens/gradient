@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
@@ -16,6 +16,8 @@ use crate::permissions::{
 use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 
 use chrono::Duration;
 use gradient_core::ServerState;
@@ -235,9 +237,10 @@ pub async fn delete(
     auser.delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user_id),
-        events::USER_DELETE,
+        Action::UserDelete,
+        EventOwner::default(),
         &info,
         None,
     )
@@ -468,9 +471,10 @@ pub async fn post_keys(
     let inserted = api_key.insert(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::API_KEY_CREATE,
+        Action::ApiKeyCreate,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({
             "api_key_id": inserted.id.to_string(),
@@ -556,9 +560,10 @@ pub async fn patch_key(
     let updated = active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::API_KEY_UPDATE,
+        Action::ApiKeyUpdate,
+        EventOwner::default(),
         &request_info,
         Some(serde_json::json!({
             "api_key_id": api_id.to_string(),
@@ -606,9 +611,10 @@ pub async fn delete_keys(
     aapi_key.delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::API_KEY_DELETE,
+        Action::ApiKeyDelete,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({
             "api_key_id": api_key_id.to_string(),
@@ -656,9 +662,10 @@ pub async fn post_key_revoke(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::API_KEY_REVOKE,
+        Action::ApiKeyRevoke,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "api_key_id": api_id.to_string() })),
     )
@@ -723,9 +730,10 @@ pub async fn delete_session(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::SESSION_REVOKE,
+        Action::SessionRevoke,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "session_id": session_id.to_string() })),
     )

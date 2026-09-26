@@ -5,7 +5,7 @@
  */
 
 use crate::access::{Caller, ProjectAccess, load_project};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
@@ -15,6 +15,8 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -187,9 +189,13 @@ pub async fn post_project_users(
         .await?;
 
         audit_record(
-            &state.web_db,
+            &state,
             Some(user.id),
-            events::PROJECT_MEMBER_ADD,
+            Action::ProjectMemberAdd,
+            EventOwner {
+                project: Some(project.id),
+                ..Default::default()
+            },
             &info,
             Some(serde_json::json!({
                 "project_id": project.id.to_string(),
@@ -242,9 +248,13 @@ pub async fn post_project_users(
     }
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::PROJECT_INVITATION_CREATE,
+        Action::ProjectInvitationCreate,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project.id.to_string(),
@@ -300,9 +310,13 @@ pub async fn patch_project_users(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::PROJECT_MEMBER_ROLE_CHANGE,
+        Action::ProjectMemberRoleChange,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project.id.to_string(),
@@ -345,9 +359,13 @@ pub async fn delete_project_users(
     active.delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::PROJECT_MEMBER_REMOVE,
+        Action::ProjectMemberRemove,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project.id.to_string(),

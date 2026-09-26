@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, load_cache};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
@@ -18,6 +18,8 @@ use gradient_core::ServerState;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_sources::{format_cache_public_key, generate_signing_key};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -416,18 +418,14 @@ pub async fn delete_cache(
     let acache: ACache = cache.into();
     acache.delete(&state.web_db).await?;
 
-    audit_record(
-        &state.web_db,
-        Some(user.id),
-        events::CACHE_DELETE,
+    audit_record(&state, Some(user.id), Action::CacheDelete, EventOwner { cache: Some(cache_id), ..Default::default() },
         &info,
         Some(serde_json::json!({
             "cache_id": cache_id.to_string(),
             "cache_name": cache_name,
             "subscribing_projects": subscribing_projects.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
         })),
-    )
-    .await;
+    ).await;
 
     Ok(ok_json("Cache deleted".to_string()))
 }

@@ -15,59 +15,13 @@ use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use gradient_core::ServerState;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::{Action, Audited};
 use gradient_types::*;
-use sea_orm::{ConnectionTrait, EntityTrait, IntoActiveModel};
+use sea_orm::{EntityTrait, IntoActiveModel};
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-
-/// Audit event identifiers. Stored as plain strings so adding new variants
-/// never requires a DB migration.
-pub mod events {
-    pub const LOGIN_SUCCESS: &str = "login.success";
-    pub const LOGIN_FAILURE: &str = "login.failure";
-    pub const LOGOUT: &str = "logout";
-    pub const REGISTER: &str = "register";
-    pub const USER_DELETE: &str = "user.delete";
-    pub const API_KEY_CREATE: &str = "api_key.create";
-    pub const API_KEY_UPDATE: &str = "api_key.update";
-    pub const API_KEY_REVOKE: &str = "api_key.revoke";
-    pub const API_KEY_DELETE: &str = "api_key.delete";
-    pub const SESSION_REVOKE: &str = "session.revoke";
-    pub const AUTH_DENY: &str = "auth.deny";
-    pub const CLI_DEVICE_START: &str = "cli.device.start";
-    pub const CLI_DEVICE_AUTHORIZE: &str = "cli.device.authorize";
-    pub const CLI_DEVICE_DENY: &str = "cli.device.deny";
-    pub const PROJECT_DELETE: &str = "project.delete";
-    pub const PROJECT_MEMBER_ADD: &str = "project.member.add";
-    pub const PROJECT_MEMBER_REMOVE: &str = "project.member.remove";
-    pub const PROJECT_MEMBER_ROLE_CHANGE: &str = "project.member.role_change";
-    pub const PROJECT_INVITATION_CREATE: &str = "project.invitation.create";
-    pub const PROJECT_INVITATION_REVOKE: &str = "project.invitation.revoke";
-    pub const PROJECT_INVITATION_ACCEPT: &str = "project.invitation.accept";
-    pub const PROJECT_INVITATION_DECLINE: &str = "project.invitation.decline";
-    pub const PROJECT_ROLE_CREATE: &str = "project.role.create";
-    pub const PROJECT_ROLE_UPDATE: &str = "project.role.update";
-    pub const PROJECT_ROLE_DELETE: &str = "project.role.delete";
-    pub const TASK_DELETE: &str = "task.delete";
-    pub const CACHE_DELETE: &str = "cache.delete";
-    pub const CACHE_NAR_DELETE: &str = "cache.nar.delete";
-    pub const CACHE_NAR_UPLOAD: &str = "cache.nar.upload";
-    pub const CACHE_ROLE_CREATE: &str = "cache.role.create";
-    pub const CACHE_ROLE_UPDATE: &str = "cache.role.update";
-    pub const CACHE_ROLE_DELETE: &str = "cache.role.delete";
-    pub const CACHE_MEMBER_CREATE: &str = "cache.member.create";
-    pub const CACHE_MEMBER_UPDATE: &str = "cache.member.update";
-    pub const CACHE_MEMBER_DELETE: &str = "cache.member.delete";
-    pub const CACHE_INVITATION_CREATE: &str = "cache.invitation.create";
-    pub const CACHE_INVITATION_REVOKE: &str = "cache.invitation.revoke";
-    pub const CACHE_INVITATION_ACCEPT: &str = "cache.invitation.accept";
-    pub const CACHE_INVITATION_DECLINE: &str = "cache.invitation.decline";
-    pub const CACHE_SUBSCRIPTION_REQUEST: &str = "cache.subscription.request";
-    pub const CACHE_SUBSCRIPTION_APPROVE: &str = "cache.subscription.approve";
-    pub const CACHE_SUBSCRIPTION_DENY: &str = "cache.subscription.deny";
-    pub const CACHE_SUBSCRIPTION_CANCEL: &str = "cache.subscription.cancel";
-}
 
 /// Caller context derived from the inbound HTTP request - used to enrich
 /// audit log rows and `session` rows with IP and user-agent for the
@@ -119,17 +73,19 @@ impl FromRequestParts<Arc<ServerState>> for RequestInfo {
     }
 }
 
-/// Insert an `audit_log` row and emit a structured tracing event. DB errors
-/// are warned and dropped; the tracing event always fires so operators
-/// tailing the live log see security-relevant activity even if the DB
-/// insert is failing.
-pub async fn record<C: ConnectionTrait>(
-    db: &C,
+/// Insert an `audit_log` row, emit a structured tracing event and record the
+/// durable `Audited` event. DB errors are warned and dropped; the tracing event
+/// always fires so operators tailing the live log see security-relevant
+/// activity even if the DB insert is failing.
+pub async fn record(
+    state: &ServerState,
     user_id: Option<UserId>,
-    event: &str,
+    action: Action,
+    owner: EventOwner,
     info: &RequestInfo,
     metadata: Option<serde_json::Value>,
 ) {
+    let event = action.name();
     tracing::info!(
         target: "audit",
         event,
@@ -143,15 +99,66 @@ pub async fn record<C: ConnectionTrait>(
     let row = MAuditLog {
         id: AuditLogId::now_v7(),
         user_id,
-        event: event.to_string(),
+        event: event.to_owned(),
         ip: info.ip.clone(),
         user_agent: info.user_agent.clone(),
-        metadata,
+        metadata: metadata.clone(),
         created_at: gradient_types::now(),
     }
     .into_active_model();
 
-    if let Err(e) = EAuditLog::insert(row).exec(db).await {
+    if let Err(e) = EAuditLog::insert(row).exec(&state.web_db).await {
         tracing::warn!(event, error = %e, "failed to write audit_log entry");
+    }
+
+    state
+        .record(Audited {
+            action,
+            user: user_id,
+            owner,
+            metadata,
+        })
+        .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_types::Event;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    #[tokio::test]
+    async fn audit_record_publishes_the_typed_event_with_its_owner() {
+        let worker_db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let state = gradient_test_support::state::test_state(worker_db);
+        let mut rx = state.events.subscribe();
+        let user = UserId::now_v7();
+        let owner = EventOwner {
+            project: Some(ProjectId::now_v7()),
+            ..Default::default()
+        };
+
+        record(
+            &state,
+            Some(user),
+            Action::ProjectDelete,
+            owner,
+            &RequestInfo::default(),
+            None,
+        )
+        .await;
+
+        let envelope = rx.try_recv().expect("audit event published");
+        let Event::Audit(audited) = &envelope.event else {
+            panic!("expected an audit event, got {}", envelope.event.name());
+        };
+        assert_eq!(audited.action, Action::ProjectDelete);
+        assert_eq!(audited.user, Some(user));
+        assert_eq!(audited.owner, owner);
     }
 }

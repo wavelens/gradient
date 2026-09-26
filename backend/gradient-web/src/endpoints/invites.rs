@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{ok_json, role_names};
 use crate::invite_policy::{
@@ -13,6 +13,8 @@ use crate::invite_policy::{
 use axum::extract::State;
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
@@ -208,7 +210,7 @@ pub async fn post_accept_invite(
     let invitation = claim_invitation(&state, &user, &body.token).await?;
     let tx = state.web_db.inner().begin().await?;
 
-    let (event, payload) = match invitation {
+    let (action, owner, payload) = match invitation {
         Invitation::Project(inv) => {
             let already = EProjectUser::find()
                 .filter(CProjectUser::Project.eq(inv.project))
@@ -238,7 +240,14 @@ pub async fn post_accept_invite(
                 .await?;
             }
 
-            (events::PROJECT_INVITATION_ACCEPT, payload)
+            (
+                Action::ProjectInvitationAccept,
+                EventOwner {
+                    project: Some(project),
+                    ..Default::default()
+                },
+                payload,
+            )
         }
         Invitation::Cache(inv) => {
             let already = ECacheUser::find()
@@ -269,12 +278,19 @@ pub async fn post_accept_invite(
                 .await?;
             }
 
-            (events::CACHE_INVITATION_ACCEPT, payload)
+            (
+                Action::CacheInvitationAccept,
+                EventOwner {
+                    cache: Some(cache),
+                    ..Default::default()
+                },
+                payload,
+            )
         }
     };
 
     tx.commit().await?;
-    audit_record(&state.web_db, Some(user.id), event, &info, Some(payload)).await;
+    audit_record(&state, Some(user.id), action, owner, &info, Some(payload)).await;
 
     Ok(ok_json("Invitation accepted".to_string()))
 }
@@ -287,20 +303,28 @@ pub async fn post_decline_invite(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let invitation = claim_invitation(&state, &user, &body.token).await?;
 
-    let (event, payload) = match invitation {
+    let (action, owner, payload) = match invitation {
         Invitation::Project(inv) => {
+            let owner = EventOwner {
+                project: Some(inv.project),
+                ..Default::default()
+            };
             let payload = serde_json::json!({ "project_id": inv.project.to_string() });
             inv.into_active_model().delete(&state.web_db).await?;
-            (events::PROJECT_INVITATION_DECLINE, payload)
+            (Action::ProjectInvitationDecline, owner, payload)
         }
         Invitation::Cache(inv) => {
+            let owner = EventOwner {
+                cache: Some(inv.cache),
+                ..Default::default()
+            };
             let payload = serde_json::json!({ "cache_id": inv.cache.to_string() });
             inv.into_active_model().delete(&state.web_db).await?;
-            (events::CACHE_INVITATION_DECLINE, payload)
+            (Action::CacheInvitationDecline, owner, payload)
         }
     };
 
-    audit_record(&state.web_db, Some(user.id), event, &info, Some(payload)).await;
+    audit_record(&state, Some(user.id), action, owner, &info, Some(payload)).await;
 
     Ok(ok_json("Invitation declined".to_string()))
 }

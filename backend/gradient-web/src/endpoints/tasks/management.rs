@@ -7,13 +7,15 @@
 use super::TaskResponse;
 use super::auto_attach;
 use crate::access::{Caller, ProjectAccess, TaskAccess, has_permission, load_project, load_task};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
 use gradient_db::get_any_project_by_name;
@@ -532,9 +534,14 @@ pub async fn delete_task(
     atask.delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::TASK_DELETE,
+        Action::TaskDelete,
+        EventOwner {
+            project: Some(project_row.id),
+            task: Some(task_id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project_row.id.to_string(),

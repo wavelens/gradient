@@ -13,7 +13,7 @@
 //! and are tagged `builtin: false` in API responses.
 
 use crate::access::{Caller, ProjectAccess, load_project};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -24,6 +24,8 @@ use crate::permissions::{
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::input::check_index_name;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -209,9 +211,13 @@ pub async fn post_project_role(
     .await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::PROJECT_ROLE_CREATE,
+        Action::ProjectRoleCreate,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project.id.to_string(),
@@ -317,9 +323,13 @@ pub async fn patch_project_role(
     let updated = active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::PROJECT_ROLE_UPDATE,
+        Action::ProjectRoleUpdate,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project.id.to_string(),
@@ -388,9 +398,13 @@ pub async fn delete_project_role(
     role.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::PROJECT_ROLE_DELETE,
+        Action::ProjectRoleDelete,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project.id.to_string(),

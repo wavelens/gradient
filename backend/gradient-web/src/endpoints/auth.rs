@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{
     create_session_and_token, oidc_login_create, oidc_login_verify, update_last_login,
 };
@@ -16,6 +16,8 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 
 use chrono::Duration;
 use email_address::EmailAddress;
@@ -147,9 +149,10 @@ pub async fn post_basic_register(
     }
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::REGISTER,
+        Action::Register,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "username": user.username })),
     )
@@ -217,9 +220,10 @@ pub async fn post_basic_login(
         Some(u) => u,
         None => {
             audit_record(
-                &state.web_db,
+                &state,
                 None,
-                events::LOGIN_FAILURE,
+                Action::LoginFailure,
+                EventOwner::default(),
                 &info,
                 Some(serde_json::json!({ "loginname": body.loginname })),
             )
@@ -232,9 +236,10 @@ pub async fn post_basic_login(
 
     if verify_password(body.password, &user_password).is_err() {
         audit_record(
-            &state.web_db,
+            &state,
             Some(user.id),
-            events::LOGIN_FAILURE,
+            Action::LoginFailure,
+            EventOwner::default(),
             &info,
             None,
         )
@@ -275,9 +280,10 @@ pub async fn post_basic_login(
         .map_err(|_| WebError::failed_to_update_user())?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user_id),
-        events::LOGIN_SUCCESS,
+        Action::LoginSuccess,
+        EventOwner::default(),
         &info,
         None,
     )
@@ -371,9 +377,10 @@ pub async fn get_oauth_authorize(
     .map_err(|_| WebError::failed_to_generate_token())?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::LOGIN_SUCCESS,
+        Action::LoginSuccess,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "method": "oidc" })),
     )
@@ -477,9 +484,10 @@ pub async fn get_oidc_callback(
     .map_err(|_| WebError::failed_to_generate_token())?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::LOGIN_SUCCESS,
+        Action::LoginSuccess,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "method": "oidc" })),
     )
@@ -532,9 +540,10 @@ pub async fn post_logout(
         }
 
         audit_record(
-            &state.web_db,
+            &state,
             Some(user_id),
-            events::LOGOUT,
+            Action::Logout,
+            EventOwner::default(),
             &info,
             Some(serde_json::json!({ "session_id": session_id.to_string() })),
         )
@@ -808,9 +817,10 @@ pub async fn post_cli_device_start(
     row.insert(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         None,
-        events::CLI_DEVICE_START,
+        Action::CliDeviceStart,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "user_code": user_code })),
     )
@@ -937,9 +947,10 @@ pub async fn post_cli_device_authorize(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CLI_DEVICE_AUTHORIZE,
+        Action::CliDeviceAuthorize,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "user_code": body.user_code })),
     )
@@ -962,9 +973,10 @@ pub async fn post_cli_device_deny(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CLI_DEVICE_DENY,
+        Action::CliDeviceDeny,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({ "user_code": body.user_code })),
     )

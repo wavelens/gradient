@@ -5,13 +5,15 @@
  */
 
 use crate::access::{Caller, ProjectAccess, load_project};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate, role_names};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
@@ -436,9 +438,13 @@ pub async fn delete_project(
     aproject.delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::PROJECT_DELETE,
+        Action::ProjectDelete,
+        EventOwner {
+            project: Some(project_id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "project_id": project_id.to_string(),

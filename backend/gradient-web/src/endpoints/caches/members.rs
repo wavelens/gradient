@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, load_cache};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -16,6 +16,8 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -195,9 +197,13 @@ pub async fn post_cache_member(
         .await?;
 
         audit_record(
-            &state.web_db,
+            &state,
             Some(user.id),
-            events::CACHE_MEMBER_CREATE,
+            Action::CacheMemberCreate,
+            EventOwner {
+                cache: Some(cache.id),
+                ..Default::default()
+            },
             &info,
             Some(serde_json::json!({
                 "cache_id": cache.id.to_string(),
@@ -250,9 +256,13 @@ pub async fn post_cache_member(
     }
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_INVITATION_CREATE,
+        Action::CacheInvitationCreate,
+        EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "cache_id": cache.id.to_string(),
@@ -310,9 +320,13 @@ pub async fn patch_cache_member(
     active.update(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_MEMBER_UPDATE,
+        Action::CacheMemberUpdate,
+        EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "cache_id": cache.id.to_string(),
@@ -368,9 +382,13 @@ pub async fn delete_cache_member(
     active.delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_MEMBER_DELETE,
+        Action::CacheMemberDelete,
+        EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "cache_id": cache.id.to_string(),

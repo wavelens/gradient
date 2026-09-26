@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, load_cache, project_admin_emails};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::endpoints::projects::settings::mode_label;
 use crate::error::{WebError, WebResult};
@@ -17,6 +17,8 @@ use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_notify::{SubscriptionEvent, SubscriptionMail};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
@@ -210,9 +212,14 @@ pub async fn post_approve_subscription_request(
     }
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_SUBSCRIPTION_APPROVE,
+        Action::CacheSubscriptionApprove,
+        EventOwner {
+            project: Some(project.id),
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "cache_id": cache.id.to_string(),
@@ -258,9 +265,14 @@ pub async fn delete_subscription_request(
     request.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_SUBSCRIPTION_DENY,
+        Action::CacheSubscriptionDeny,
+        EventOwner {
+            project: Some(project.id),
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "cache_id": cache.id.to_string(),

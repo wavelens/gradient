@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, load_cache};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -14,6 +14,8 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
@@ -132,9 +134,13 @@ pub async fn delete_cache_invitation(
     invitation.into_active_model().delete(&state.web_db).await?;
 
     audit_record(
-        &state.web_db,
+        &state,
         Some(user.id),
-        events::CACHE_INVITATION_REVOKE,
+        Action::CacheInvitationRevoke,
+        EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
         &info,
         Some(serde_json::json!({
             "cache_id": cache.id.to_string(),

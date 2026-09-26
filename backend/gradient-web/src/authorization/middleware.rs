@@ -18,10 +18,12 @@ use std::sync::Arc;
 
 use super::api_key::MaybeApiKey;
 use super::jwt::{decode_jwt, extract_bearer_or_cookie, token_from_cookie};
-use crate::audit::{RequestInfo, events, record as audit_record};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::client_ip::{ClientIp, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::ip_allowlist::is_allowed as ip_allowed;
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 
 /// Extension type for optional authentication.
 /// Inserted by `authorize_optional` into every request regardless of whether
@@ -38,9 +40,10 @@ async fn audit_deny(
     reason: &'static str,
 ) {
     audit_record(
-        &state.web_db,
+        state,
         user_id,
-        events::AUTH_DENY,
+        Action::AuthDeny,
+        EventOwner::default(),
         &info,
         Some(serde_json::json!({
             "reason": reason,
