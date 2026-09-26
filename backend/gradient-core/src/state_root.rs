@@ -112,7 +112,7 @@ pub fn last_used_stamps() -> Debounce<Uuid> {
 }
 
 /// A download whose worker reported nothing for this long has stopped.
-pub const DOWNLOAD_PROGRESS_TTL: Duration = Duration::from_secs(10);
+pub const DOWNLOAD_PROGRESS_TTL: Duration = Duration::from_secs(15);
 
 pub fn download_progress() -> Arc<Latest<DerivationBuildId, DownloadProgress>> {
     Arc::new(Latest::new(DOWNLOAD_PROGRESS_TTL))

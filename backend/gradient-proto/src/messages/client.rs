@@ -124,8 +124,8 @@ pub enum ClientMessage {
     /// Server stops assigning new jobs to this peer.
     Draining,
 
-    /// Bytes fetched so far for a Substitute or Download build, sent at most
-    /// once per [`crate::messages::BUILD_PROGRESS_INTERVAL`] and once at the end.
+    /// Bytes fetched so far for a Substitute or Download build, sent every
+    /// [`crate::messages::BUILD_PROGRESS_INTERVAL`] in which bytes arrived and once at the end.
     /// Fire-and-forget; `total` is `None` when the source announced no size.
     BuildProgress {
         job_id: String,

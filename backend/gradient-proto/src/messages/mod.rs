@@ -48,8 +48,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 /// v17: `BuildProgress` reports the bytes a Substitute or Download has fetched.
 pub const PROTO_VERSION: u16 = 17;
 
-/// How often a worker reports a running download's progress.
-pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+/// How often a worker reports a running download's progress, skipping an
+/// interval in which no bytes arrived.
+pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

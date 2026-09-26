@@ -216,7 +216,7 @@ mod tests {
             self.downloads.push(upstream.path.clone());
             let body = self.bodies.get(&upstream.path).cloned();
             if let Some(body) = &body {
-                progress.at(body.len() as u64).await;
+                progress.at(body.len() as u64);
             }
             Ok(body)
         }

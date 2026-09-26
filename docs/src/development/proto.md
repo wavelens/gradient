@@ -1407,10 +1407,10 @@ A Substitute or Download build produces no log; its worker reports the bytes fet
 BuildProgress { job_id: Uuid, dispatch: Uuid, build_id: Uuid, downloaded: u64, total: Option<u64> }
 ```
 
-- Sent at most once per `BUILD_PROGRESS_INTERVAL` (1 s), plus once when the fetch ends. Fire-and-forget.
+- Sent every `BUILD_PROGRESS_INTERVAL` (5 s) in which bytes arrived, plus once when the fetch ends; a stalled fetch sends nothing. Fire-and-forget.
 - `downloaded` counts compressed bytes over every output of the build; a retried transfer does not count twice.
 - `total` is the sum of the upstream `FileSize`s for a Substitute, the `Content-Length` for a Download, and `None` when any is unknown.
-- The server handles it on the control lane, never in the job-event queue. It keeps the latest value per `derivation_build` in memory (`AppState::download_progress`, forgotten 10 s after the last report) and broadcasts `BoardEvent::BuildProgress`. Nothing is written to the database.
+- The server handles it on the control lane, never in the job-event queue. It keeps the latest value per `derivation_build` in memory (`AppState::download_progress`, forgotten 15 s after the last report) and broadcasts `BoardEvent::BuildProgress`. Nothing is written to the database.
 
 ---
 

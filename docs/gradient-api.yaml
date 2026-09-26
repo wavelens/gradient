@@ -10513,7 +10513,7 @@ components:
           description: |-
             Bytes a running Substitute or Download has fetched, held in server
             memory only. Null unless the build is `Building` and its worker
-            reported within the last 10 s.
+            reported within the last 15 s.
           allOf:
             - $ref: '#/components/schemas/DownloadProgress'
 

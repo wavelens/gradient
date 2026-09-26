@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! A download's running byte count, reported at most once per
-//! [`BUILD_PROGRESS_INTERVAL`]. The count spans every transfer of one build;
-//! a retried transfer restarts from where the finished ones left off.
+//! A download's running byte count, reported at each [`BUILD_PROGRESS_INTERVAL`]
+//! deadline by which bytes arrived, and once more when it finishes. The count
+//! spans every transfer of one build; a retried transfer restarts from where
+//! the finished ones left off.
 
 use gradient_proto::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
 use tokio::time::Instant;
@@ -53,7 +54,8 @@ pub(crate) struct Progress<S> {
     total: Option<u64>,
     finished: u64,
     current: u64,
-    last_report: Instant,
+    reported: u64,
+    deadline: Instant,
 }
 
 impl Progress<()> {
@@ -69,7 +71,8 @@ impl<S: ProgressSink> Progress<S> {
             total: None,
             finished: 0,
             current: 0,
-            last_report: Instant::now(),
+            reported: 0,
+            deadline: Instant::now() + BUILD_PROGRESS_INTERVAL,
         }
     }
 
@@ -78,18 +81,27 @@ impl<S: ProgressSink> Progress<S> {
     }
 
     /// The running transfer has fetched `bytes` so far.
-    pub(crate) async fn at(&mut self, bytes: u64) {
+    pub(crate) fn at(&mut self, bytes: u64) {
         self.current = bytes;
-        let now = Instant::now();
-        if now.duration_since(self.last_report) >= BUILD_PROGRESS_INTERVAL {
-            self.last_report = now;
-            self.sink.report(self.downloaded(), self.total).await;
-        }
     }
 
     pub(crate) fn transfer_done(&mut self) {
         self.finished += self.current;
         self.current = 0;
+    }
+
+    pub(crate) fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    /// Reports what arrived since the last report, if anything did.
+    pub(crate) async fn tick(&mut self) {
+        self.deadline = Instant::now() + BUILD_PROGRESS_INTERVAL;
+        let downloaded = self.downloaded();
+        if downloaded != self.reported {
+            self.reported = downloaded;
+            self.sink.report(downloaded, self.total).await;
+        }
     }
 
     pub(crate) async fn finish(&mut self) {
@@ -105,18 +117,25 @@ impl<S: ProgressSink> Progress<S> {
 /// A size a remote declared is a hint, never a reason to reserve unbounded memory.
 const MAX_PREALLOCATION: u64 = 64 << 20;
 
-/// Read a response body whole, reporting each chunk to `progress`.
+/// Read a response body whole, ticking `progress` at each of its deadlines.
 pub(crate) async fn read_body(
     mut response: reqwest::Response,
     size_hint: Option<u64>,
     progress: &mut Progress<impl ProgressSink>,
 ) -> reqwest::Result<Vec<u8>> {
     let mut body = Vec::with_capacity(size_hint.unwrap_or(0).min(MAX_PREALLOCATION) as usize);
-    while let Some(chunk) = response.chunk().await? {
-        body.extend_from_slice(&chunk);
-        progress.at(body.len() as u64).await;
+    loop {
+        tokio::select! {
+            chunk = response.chunk() => match chunk? {
+                Some(chunk) => {
+                    body.extend_from_slice(&chunk);
+                    progress.at(body.len() as u64);
+                }
+                None => return Ok(body),
+            },
+            _ = tokio::time::sleep_until(progress.deadline()) => progress.tick().await,
+        }
     }
-    Ok(body)
 }
 
 #[cfg(test)]
@@ -133,22 +152,38 @@ impl ProgressSink for &mut Recorded {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[tokio::test(start_paused = true)]
-    async fn reports_are_throttled_and_the_last_count_always_goes_out() {
+    async fn a_deadline_reports_only_when_bytes_arrived_and_the_end_always_does() {
         let mut sent = Recorded::default();
         let mut progress = Progress::new(&mut sent);
         progress.set_total(Some(100));
 
-        progress.at(10).await;
-        tokio::time::advance(BUILD_PROGRESS_INTERVAL).await;
-        progress.at(40).await;
-        tokio::time::advance(Duration::from_millis(10)).await;
-        progress.at(90).await;
+        progress.at(10);
+        progress.tick().await;
+        progress.tick().await;
+        progress.at(40);
+        progress.tick().await;
+        progress.at(90);
         progress.finish().await;
 
-        assert_eq!(sent.0, vec![(40, Some(100)), (90, Some(100))]);
+        assert_eq!(
+            sent.0,
+            vec![(10, Some(100)), (40, Some(100)), (90, Some(100))]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tick_moves_the_deadline_one_interval_on() {
+        let mut progress = Progress::silent();
+        tokio::time::advance(BUILD_PROGRESS_INTERVAL * 3).await;
+
+        progress.tick().await;
+
+        assert_eq!(
+            progress.deadline(),
+            Instant::now() + BUILD_PROGRESS_INTERVAL
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -156,15 +191,14 @@ mod tests {
         let mut sent = Recorded::default();
         let mut progress = Progress::new(&mut sent);
 
-        progress.at(30).await;
+        progress.at(30);
         progress.transfer_done();
-        progress.at(50).await;
-        progress.at(5).await;
-        tokio::time::advance(BUILD_PROGRESS_INTERVAL).await;
-        progress.at(20).await;
+        progress.at(50);
+        progress.at(5);
+        progress.at(20);
         progress.finish().await;
 
-        assert_eq!(sent.0, vec![(50, None), (50, None)]);
+        assert_eq!(sent.0, vec![(50, None)]);
     }
 
     #[tokio::test]
@@ -188,6 +222,6 @@ mod tests {
         progress.finish().await;
 
         assert_eq!(body.len(), 300_000);
-        assert_eq!(sent.0.last(), Some(&(300_000, None)));
+        assert_eq!(sent.0, vec![(300_000, None)]);
     }
 }

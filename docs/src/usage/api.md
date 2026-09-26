@@ -348,8 +348,8 @@ is a content-free ping emitted as builds and entry-points are persisted during
 the evaluation phase - before any build changes status - so the build and
 dependency totals grow live instead of only appearing once evaluation finishes.
 `build_progress` (`{"type":"build_progress","derivation_build":"…","downloaded":1048576,"total":4194304}`)
-carries the bytes a running Substitute or Download has fetched, at most once a
-second; `total` is `null` when the source announced no size. It lives in server
+carries the bytes a running Substitute or Download has fetched, every 5 s in
+which bytes arrived; `total` is `null` when the source announced no size. It lives in server
 memory only: `GET /builds/{id}` returns the latest value as `download_progress`
 while the build is `Building`, and nothing after a server restart until the
 worker's next report.
