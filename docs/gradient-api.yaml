@@ -7405,6 +7405,57 @@ paths:
       | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
       | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`). Serves this cache's own log for any build that produced one, successful or failed; otherwise asks the cache's upstreams in order and proxies the first hit, so a pull-through cache exposes logs for paths it substituted rather than built. `X-Cache: HIT` (ours) or `MISS` (upstream). Rate-limited at ~300 req/min. |
 
+  /metrics/events:
+    get:
+      tags: [board]
+      summary: Stream every event (websocket, debug only)
+      description: |-
+        Should not be used for production! Best-effort, in-process, per server
+        instance, drops on lag. Use webhooks.
+
+        Upgrades to a websocket that sends one `EventEnvelope` JSON object per
+        text frame. A subscriber that falls behind receives
+        `{"event":"stream.lagged","content":{"skipped":N}}` and keeps streaming.
+        Superuser only.
+      operationId: getEventsFirehose
+      parameters:
+        - name: events
+          in: query
+          required: false
+          description: Comma-separated globs, e.g. `build.*,proto.client.*`. Empty streams everything.
+          schema: { type: string }
+      responses:
+        '101':
+          description: Switching to websocket; every frame is an `EventEnvelope`.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /events/catalog:
+    get:
+      tags: [board]
+      summary: List every event name
+      description: |-
+        Every event Gradient emits. `durable` events are delivered to webhooks and
+        task actions; the others only reach `/metrics/events`. Names ending in
+        `*` are families (`proto.client.*`).
+      operationId: getEventsCatalog
+      responses:
+        '200':
+          description: Event catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message:
+                    type: array
+                    items: { $ref: '#/components/schemas/EventCatalogEntry' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /metrics/catalog:
     get:
       tags: [board]
@@ -8333,6 +8384,26 @@ components:
             $ref: '#/components/schemas/ScimError'
 
   schemas:
+
+    # ── Events ────────────────────────────────────────────────────────────────
+
+    EventEnvelope:
+      type: object
+      required: [event, at, content]
+      description: One event, as a firehose frame and as a webhook or task action body.
+      properties:
+        event: { type: string, example: build.completed }
+        at: { type: string, format: date-time }
+        content: { type: object, additionalProperties: true }
+
+    EventCatalogEntry:
+      type: object
+      required: [name, durable]
+      properties:
+        name: { type: string, example: task.star }
+        durable:
+          type: boolean
+          description: Delivered to webhooks and task actions when true.
 
     # ── Admin ─────────────────────────────────────────────────────────────────
 

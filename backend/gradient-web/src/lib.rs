@@ -512,6 +512,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/auth/cli/info", get(auth::get_cli_device_info))
         .route("/auth/cli/authorize", post(auth::post_cli_device_authorize))
         .route("/auth/cli/deny", post(auth::post_cli_device_deny))
+        .route("/metrics/events", get(endpoints::events::firehose_ws))
+        .route("/events/catalog", get(endpoints::events::get_catalog))
         .nest("/admin", admin::admin_router())
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
