@@ -205,7 +205,9 @@ builds the binary into the `daemon` output of the `gradient` package, and the
   `derivations.<id>` with `deps`, `outputs.<o>.references` as `"<node>.<output>"`,
   `build.outcome` `success | fail | hang`, `present.workers`, `present.cache`);
   `nix/tests/store-spec/default.nix` holds the defaults and the invariants.
-  Presets: `chain n`, `diamond`, `fanOut n`, `wide depth width`.
+  A drv requests the outputs of each dep its node references (the dep's first
+  output otherwise), and like Nix, every reference must lie in the runtime
+  closure of those requested inputs. Presets: `chain n`, `diamond`, `fanOut n`, `wide depth width`.
 - **One source for paths.** `derivations.nix` is copied into the flake the test
   publishes and also computes the daemon's config, so drv and output paths agree
   by construction; the `store-spec` check asserts it.

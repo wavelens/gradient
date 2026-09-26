@@ -6,7 +6,13 @@
 
 spec:
 let
-  inherit (builtins) mapAttrs attrNames hashString concatStringsSep;
+  inherit (builtins) mapAttrs attrNames attrValues hashString concatStringsSep concatMap filter head elemAt split;
+  part = i: r: elemAt (split "\\." r) (i * 2);
+  requestedOutputs = node: d:
+    let
+      referenced = map (part 1) (filter (r: part 0 r == d) (concatMap (o: o.references) (attrValues node.outputs)));
+    in
+    if referenced == [ ] then [ (head (attrNames spec.derivations.${d}.outputs)) ] else referenced;
   fodContent = id: "gradient-daemon fod ${spec.name}/${id}\n";
   drvs = mapAttrs (id: node:
     derivation ({
@@ -16,7 +22,7 @@ let
       args = [ "-c" "exit 1" ];
       gradientSpec = spec.name;
       gradientNode = id;
-      deps = concatStringsSep " " (map (d: "${drvs.${d}}") node.deps);
+      deps = concatStringsSep " " (concatMap (d: map (o: "${drvs.${d}.${o}}") (requestedOutputs node d)) node.deps);
       inherit (node) requiredSystemFeatures preferLocalBuild allowSubstitutes;
     } // (if node.fixedOutput then {
       outputHashMode = "flat";
@@ -27,5 +33,5 @@ let
     }))) spec.derivations;
 in
 {
-  inherit drvs fodContent;
+  inherit drvs fodContent requestedOutputs;
 }

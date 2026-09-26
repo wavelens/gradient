@@ -45,12 +45,22 @@ let
 
   references = node: concatMap (o: o.references) (attrValues node.outputs);
 
+  inputClosure = spec: node:
+    let
+      inherit (import ./derivations.nix spec) requestedOutputs;
+      refsOf = r: let parts = splitString "." r; in spec.derivations.${builtins.elemAt parts 0}.outputs.${builtins.elemAt parts 1}.references;
+    in
+    map (e: e.key) (builtins.genericClosure {
+      startSet = map (key: { inherit key; }) (concatMap (d: map (o: "${d}.${o}") (requestedOutputs node d)) node.deps);
+      operator = e: map (key: { inherit key; }) (refsOf e.key);
+    });
+
   checkNode = spec: id: node:
     let
       ids = attrNames spec.derivations;
-      buildClosure = closure spec id;
+      inputs = inputClosure spec node;
       depsKnown = all (d: elem d ids || fail "${id}: unknown dep ${d}") node.deps;
-      refsInClosure = all (r: elem (refNode r) buildClosure || fail "${id}: reference ${r} is outside its build closure") (references node);
+      refsInClosure = all (r: refNode r == id || elem r inputs || fail "${id}: reference ${r} is outside the closure of its inputs") (references node);
       fodShape = !node.fixedOutput
         || (attrNames node.outputs == [ "out" ] && node.outputs.out.references == [ ] && node.outputs.out.products == [ ])
         || fail "${id}: a FOD has one output `out` without references or products";
