@@ -316,6 +316,30 @@ pub enum ClientMessage {
 }
 
 impl ClientMessage {
+    pub fn job_id(&self) -> Option<&str> {
+        match self {
+            ClientMessage::AssignJobResponse { job_id, .. }
+            | ClientMessage::JobUpdate { job_id, .. }
+            | ClientMessage::JobCompleted { job_id, .. }
+            | ClientMessage::JobFailed { job_id, .. }
+            | ClientMessage::BuildProgress { job_id, .. }
+            | ClientMessage::LogChunk { job_id, .. }
+            | ClientMessage::NarRequest { job_id, .. }
+            | ClientMessage::NarPush { job_id, .. }
+            | ClientMessage::NarUploaded { job_id, .. }
+            | ClientMessage::NarStreamHeader { job_id, .. }
+            | ClientMessage::NarRequestResume { job_id, .. }
+            | ClientMessage::EvalCachePull { job_id, .. }
+            | ClientMessage::EvalCachePush { job_id, .. }
+            | ClientMessage::EvalCacheChunk { job_id, .. }
+            | ClientMessage::EvalCachePushDone { job_id, .. }
+            | ClientMessage::CacheQuery { job_id, .. }
+            | ClientMessage::EvalMessage { job_id, .. }
+            | ClientMessage::QueryKnownDerivations { job_id, .. } => Some(job_id),
+            _ => None,
+        }
+    }
+
     /// Static name of the variant. Used for log messages where dumping the
     /// full Debug-formatted message would be unsafe (e.g. `NarPush` carries
     /// up to 64 KiB of binary chunk data).
@@ -351,5 +375,20 @@ impl ClientMessage {
             ClientMessage::EvalMessage { .. } => "EvalMessage",
             ClientMessage::QueryKnownDerivations { .. } => "QueryKnownDerivations",
         }
+    }
+}
+
+#[cfg(test)]
+mod job_id_tests {
+    use super::*;
+
+    #[test]
+    fn job_scoped_messages_name_their_job() {
+        let m = ClientMessage::NarRequest {
+            job_id: "j1".into(),
+            paths: vec![],
+        };
+        assert_eq!(m.job_id(), Some("j1"));
+        assert_eq!(ClientMessage::RequestJobList.job_id(), None);
     }
 }

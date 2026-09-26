@@ -13,6 +13,7 @@
 //! handling, and lets concurrent NAR-serving tasks share the wire safely.
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{Message as AxumMessage, WebSocket};
@@ -136,6 +137,16 @@ pub enum Inbound<M> {
 pub struct Frame<M> {
     bytes: Bytes,
     _direction: PhantomData<M>,
+}
+
+impl<M> Frame<M> {
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
 }
 
 impl<M: WireMessage> Inbound<M> {
@@ -496,6 +507,7 @@ impl ProtoSocket {
             tx,
             control_tx,
             send_chunk_timeout,
+            observer: None,
             _direction: PhantomData,
         };
         let lanes = WriterLanes::new(control_rx, bulk_rx);
@@ -592,10 +604,16 @@ impl<M: WireMessage> MsgReader<M> {
 /// Producer-observable back-pressure is bounded by `send_chunk_timeout`:
 /// queue full for longer than this is treated as a peer stall and surfaced
 /// as an error.
+/// Sees every message a writer sends, after encoding and before it is queued.
+pub trait MsgObserver<M>: Send + Sync {
+    fn sent(&self, msg: &M, len: usize);
+}
+
 pub struct MsgWriter<M> {
     pub(crate) tx: mpsc::Sender<Bytes>,
     pub(crate) control_tx: mpsc::Sender<Bytes>,
     pub(crate) send_chunk_timeout: Duration,
+    pub(crate) observer: Option<Arc<dyn MsgObserver<M>>>,
     pub(crate) _direction: PhantomData<M>,
 }
 
@@ -608,12 +626,18 @@ impl<M> Clone for MsgWriter<M> {
             tx: self.tx.clone(),
             control_tx: self.control_tx.clone(),
             send_chunk_timeout: self.send_chunk_timeout,
+            observer: self.observer.clone(),
             _direction: PhantomData,
         }
     }
 }
 
 impl<M> MsgWriter<M> {
+    pub fn with_observer(mut self, observer: Arc<dyn MsgObserver<M>>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
     /// A writer with no socket behind it: both lanes feed the returned
     /// receiver, so a test sees every frame in send order.
     #[cfg(any(test, feature = "testing"))]
@@ -623,6 +647,7 @@ impl<M> MsgWriter<M> {
             control_tx: tx.clone(),
             tx,
             send_chunk_timeout,
+            observer: None,
             _direction: PhantomData,
         };
         (writer, rx)
@@ -633,6 +658,9 @@ impl<M: WireMessage> MsgWriter<M> {
     pub async fn send_msg(&self, msg: &M) -> Result<(), SendError> {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
         trace!(?msg, bytes = bytes.len(), "send message");
+        if let Some(observer) = &self.observer {
+            observer.sent(msg, bytes.len());
+        }
         let bulk = msg.is_bulk();
         let lane = if bulk { &self.tx } else { &self.control_tx };
         match tokio::time::timeout(self.send_chunk_timeout, lane.send(bytes)).await {
@@ -1320,6 +1348,7 @@ mod writer_tests {
                 tx,
                 control_tx,
                 send_chunk_timeout: timeout,
+                observer: None,
                 _direction: PhantomData,
             },
             control_rx,

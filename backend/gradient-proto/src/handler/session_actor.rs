@@ -156,6 +156,10 @@ impl Actor for SessionActor {
             .expect("temp partial dir must be creatable")
         });
         let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
+        let writer = writer.with_observer(Arc::new(super::tap::ServerTap {
+            bus: state.events.clone(),
+            worker_id: peer_id.clone(),
+        }));
         let reader = state.shutdown.spawn(read_loop(
             reader,
             myself,

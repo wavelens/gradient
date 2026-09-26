@@ -96,6 +96,7 @@ impl<'a> DispatchContext<'a> {
         nar: &mut NarReceiveStore,
         eval_cache: &mut EvalCacheReceiveStore,
     ) -> bool {
+        super::tap::publish_inbound(&self.state.events, self.peer_id, &inbound);
         match inbound {
             Inbound::Bulk(frame) => {
                 self.dispatch_bulk(frame, nar, eval_cache).await;

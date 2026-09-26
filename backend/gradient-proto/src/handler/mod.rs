@@ -17,6 +17,7 @@ mod session;
 mod session_actor;
 mod sessions;
 mod socket;
+mod tap;
 
 use std::sync::Arc;
 

@@ -212,6 +212,22 @@ pub enum ServerMessage {
 }
 
 impl ServerMessage {
+    pub fn job_id(&self) -> Option<&str> {
+        match self {
+            ServerMessage::AssignJob { job_id, .. }
+            | ServerMessage::AbortJob { job_id, .. }
+            | ServerMessage::NarPush { job_id, .. }
+            | ServerMessage::NarUnavailable { job_id, .. }
+            | ServerMessage::NarAbort { job_id, .. }
+            | ServerMessage::NarStreamHeader { job_id, .. }
+            | ServerMessage::NarPushResume { job_id, .. }
+            | ServerMessage::EvalCachePullResult { job_id, .. }
+            | ServerMessage::EvalCacheChunk { job_id, .. }
+            | ServerMessage::EvalCachePushGrant { job_id, .. } => Some(job_id),
+            _ => None,
+        }
+    }
+
     /// Static name of the variant. Used for log messages where dumping the
     /// full Debug-formatted message would be unsafe (e.g. `NarPush` carries
     /// megabytes of binary chunk data).
