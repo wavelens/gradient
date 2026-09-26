@@ -82,5 +82,6 @@ The board reads from dedicated tables populated as the scheduler runs:
 - `worker_connection` / `worker_sample` - worker sessions and a periodic live-metric time-series. Both describe the worker, not a project: a worker is visible in every project it is registered in or that enabled it as a base worker.
 - `derivation_metric` - per-build resource usage captured by the worker from the build's cgroup (peak RAM, CPU time, disk read/write, OOM) plus a host network peak; powers the Expensive Jobs resource tabs. Requires cgroup metrics enabled on the worker.
 - `metric_rollup` - time-bucketed aggregates (minute → hour → day → week) produced by a background aggregator, queried via `GET /api/v1/metrics/query` (catalog at `GET /api/v1/metrics/catalog`).
+- `cache_usage` - stored bytes per cache, recounted by the same aggregator so the dashboard never sums cached paths per request.
 
 Retention and aggregation intervals are configurable - see [Configuration](../configuration.md#metrics-pipeline--retention).

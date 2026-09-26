@@ -33,6 +33,7 @@ pub enum Param {
     ProjectId,
     UserId,
     CacheId,
+    CacheIds(usize),
     TaskId,
     TaskActionId,
     IntegrationId,

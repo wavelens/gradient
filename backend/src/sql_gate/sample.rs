@@ -59,6 +59,7 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
         Param::ProjectId => "SELECT id AS v FROM project LIMIT 1",
         Param::UserId => r#"SELECT id AS v FROM "user" LIMIT 1"#,
         Param::CacheId => "SELECT id AS v FROM cache LIMIT 1",
+        Param::CacheIds(_) => "SELECT array_agg(id) AS v FROM (SELECT id FROM cache LIMIT $1) s",
         Param::TaskId => "SELECT id AS v FROM task LIMIT 1",
         Param::TaskActionId => "SELECT id AS v FROM task_action LIMIT 1",
         Param::IntegrationId => "SELECT id AS v FROM integration LIMIT 1",
@@ -106,7 +107,8 @@ fn shape(param: &Param) -> Option<Shape> {
         | Param::OrphanDerivationIds(n)
         | Param::AnchorIds(n)
         | Param::EvaluationIds(n)
-        | Param::EntryPointIds(n) => Shape::Uuids(*n),
+        | Param::EntryPointIds(n)
+        | Param::CacheIds(n) => Shape::Uuids(*n),
         Param::DerivationHash
         | Param::CachedPathHash
         | Param::CommitPrefixLow

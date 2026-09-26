@@ -13,6 +13,7 @@ pub mod cache_metric;
 pub mod cache_reach;
 pub mod cache_storage;
 pub mod cache_upstream;
+pub mod cache_usage;
 pub mod chunked;
 pub mod closure;
 pub mod connection;

@@ -425,12 +425,11 @@ crate::sql_fn! {
 }
 
 crate::sql! {
-    CACHE_SIZE = "SELECT coalesce(sum(cp.file_size), 0)::bigint AS bytes FROM cached_path cp \
-        WHERE EXISTS (SELECT 1 FROM cached_path_signature s JOIN cache c ON c.id = s.cache \
-        WHERE s.cached_path = cp.id AND ($2 OR c.created_by = $1 OR EXISTS (SELECT 1 FROM project_cache pc \
-        JOIN project_user pu ON pu.project = pc.project WHERE pc.cache = c.id AND pu.\"user\" = $1)))",
-        params = [UserId, Bool(false)],
-        tier = Bulk;
+    CACHE_SIZE = "SELECT coalesce(sum(u.bytes), 0)::bigint AS bytes FROM cache_usage u \
+        JOIN cache c ON c.id = u.cache \
+        WHERE $2 OR c.created_by = $1 OR EXISTS (SELECT 1 FROM project_cache pc \
+        JOIN project_user pu ON pu.project = pc.project WHERE pc.cache = c.id AND pu.\"user\" = $1)",
+        params = [UserId, Bool(false)];
 }
 
 fn no_projects(filter: Option<&str>) -> bool {
@@ -799,6 +798,15 @@ mod tests {
     #[test]
     fn ilike_wildcards_in_the_query_match_literally() {
         assert_eq!(ilike_contains(r"50%_a\b"), r"%50\%\_a\\b%");
+    }
+
+    /// The tile is read on every dashboard load, so it sums one recounted row per
+    /// visible cache and never the cached paths behind them.
+    #[test]
+    fn the_cache_size_tile_reads_the_recounted_usage() {
+        let sql = CACHE_SIZE.text();
+        assert!(sql.contains("FROM cache_usage u"), "{sql}");
+        assert!(!sql.contains("cached_path"), "{sql}");
     }
 
     #[tokio::test]

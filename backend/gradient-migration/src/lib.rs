@@ -80,6 +80,7 @@ mod m20260923_000009_prioritized;
 mod m20260924_000001_worker_telemetry_without_project;
 mod m20260926_000001_events_outbox;
 mod m20260926_000003_webhook;
+mod m20260926_000002_cache_usage;
 
 pub struct Migrator;
 
@@ -155,6 +156,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260923_000009_prioritized::Migration),
             Box::new(m20260924_000001_worker_telemetry_without_project::Migration),
             Box::new(m20260926_000001_events_outbox::Migration),
+            Box::new(m20260926_000002_cache_usage::Migration),
             Box::new(m20260926_000003_webhook::Migration),
         ]
     }

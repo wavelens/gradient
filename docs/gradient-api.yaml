@@ -1379,7 +1379,7 @@ paths:
       description: |-
         Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).
         `builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median dispatch wait of the last 24 hours.
-        `cache_size_bytes` sums the files of caches the viewer created or reaches through a project membership; all caches for a superuser.
+        `cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.
         `workers` covers connected workers of visible projects only: `busy_pct` is assigned jobs over summed capacity, capped at 100.
       operationId: getDashboardStats
       responses:
