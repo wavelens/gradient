@@ -8,7 +8,6 @@ use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::outbox::OutboxKind;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, warn};
@@ -100,28 +99,20 @@ pub async fn update_evaluation_status(
             e
         });
 
-    ctx.events
-        .publish(gradient_types::events::evaluation::Reported {
+    if let Err(e) = crate::events::record(
+        &ctx.worker_db,
+        &ctx.events,
+        gradient_types::events::evaluation::Reported {
             evaluation_id: updated_eval.id,
             phase: gradient_types::events::evaluation::Phase::of_status(event_status),
             status: i32::from(event_status) as i16,
             task: updated_eval.task,
             ..Default::default()
-        });
-
-    if let Err(e) = crate::outbox::enqueue(
-        &ctx.worker_db,
-        OutboxKind::EvaluationStatus,
-        format!("{}:{}", updated_eval.id, i32::from(event_status)),
-        serde_json::json!({
-            "evaluation": updated_eval.id,
-            "task": updated_eval.task,
-            "status": i32::from(event_status),
-        }),
+        },
     )
     .await
     {
-        error!(error = %e, evaluation_id = %updated_eval.id, "failed to enqueue an evaluation status report");
+        error!(error = %e, evaluation_id = %updated_eval.id, "failed to record an evaluation report");
     }
     ctx.outbox_wake.notify_one();
 

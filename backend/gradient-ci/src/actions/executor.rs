@@ -26,7 +26,7 @@ pub async fn execute_action(
     ctx: &CiContext,
     action: MTaskAction,
     event: &str,
-    payload: JsonValue,
+    envelope: JsonValue,
 ) -> Result<()> {
     let cfg: ActionConfig =
         serde_json::from_value(action.config.clone()).context("decoding action config")?;
@@ -34,9 +34,10 @@ pub async fn execute_action(
     let task_for_pr = action.task;
     let started = Instant::now();
     let request_body = truncate(
-        serde_json::to_string(&payload).unwrap_or_default(),
+        serde_json::to_string(&envelope).unwrap_or_default(),
         MAX_BODY_BYTES,
     );
+    let content = envelope.get("content").cloned().unwrap_or(JsonValue::Null);
 
     let result = match cfg {
         ActionConfig::SendMail {
@@ -46,17 +47,17 @@ pub async fn execute_action(
             execute_send_mail(
                 ctx,
                 event,
-                &payload,
+                &content,
                 &recipients,
                 subject_template.as_deref(),
             )
             .await
         }
         ActionConfig::SendWebRequest { url, token } => {
-            execute_send_web_request(ctx, event, &payload, &url, token.as_deref()).await
+            execute_send_web_request(ctx, event, &envelope, &url, token.as_deref()).await
         }
         ActionConfig::ForgeStatusReport { integration_id } => {
-            execute_forge_status_report(ctx, event, &payload, integration_id).await
+            execute_forge_status_report(ctx, event, &content, integration_id).await
         }
         ActionConfig::OpenPr {
             integration_id,
@@ -69,7 +70,7 @@ pub async fn execute_action(
             execute_open_pr(
                 ctx,
                 event,
-                &payload,
+                &content,
                 action_id_for_pr,
                 task_for_pr,
                 integration_id,

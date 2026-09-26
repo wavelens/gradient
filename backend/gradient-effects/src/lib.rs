@@ -14,6 +14,7 @@
 pub mod actor;
 pub mod consume;
 pub mod deliver;
+pub mod enrich;
 
 use std::sync::Arc;
 use std::time::Duration;

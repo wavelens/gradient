@@ -26,6 +26,7 @@ pub mod dispatch_record;
 pub mod draining;
 pub mod eval_counters;
 pub mod eval_watchdog;
+pub mod events;
 pub mod gc;
 pub mod graph_sql;
 pub mod outbox;

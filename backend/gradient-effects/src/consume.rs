@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What one outbox row owes. The three event kinds expand into the deliveries
-//! they imply and write them back as rows, so an expansion that half-succeeds
-//! costs a retry of the expansion and never a duplicated external call; an
-//! `ActionDelivery` row is exactly one external call.
+//! What one outbox row owes. An event expands into the deliveries it implies
+//! and writes them back as rows, so an expansion that half-succeeds costs a
+//! retry of the expansion and never a duplicated external call; a delivery row
+//! is exactly one external call.
 //!
 //! Every consumer is idempotent on its natural key, which is what makes
 //! at-least-once delivery safe: a forge status is keyed by commit plus check
@@ -16,14 +16,10 @@
 use anyhow::{Context, Result, anyhow};
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
-use gradient_ci::reporting::eval_kind_str;
 use gradient_db::outbox::{OutboxKind, OutboxRow, Outcome, enqueue};
-use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::events::build::Reported;
-use gradient_types::events::evaluation::Phase;
-use gradient_types::ids::{BuildAttemptId, BuildJobId, EvaluationId, TaskActionId};
-use gradient_types::waiting_reason::WaitingReason;
+use gradient_types::events::{Envelope, Event, evaluation};
+use gradient_types::ids::{BuildAttemptId, TaskActionId};
 use gradient_types::*;
 use sea_orm::{EntityTrait, TransactionTrait};
 use serde_json::Value as JsonValue;
@@ -33,10 +29,10 @@ use crate::deliver::EffectsCtx;
 
 pub async fn consume(ctx: &EffectsCtx, row: &OutboxRow) -> Outcome {
     let result = match row.kind {
-        OutboxKind::BuildStatus => expand_build_status(ctx, row).await,
-        OutboxKind::EvaluationStatus => expand_evaluation_status(ctx, row).await,
+        OutboxKind::Event => expand_event(ctx, row).await,
         OutboxKind::LogFinalize => finalize(ctx, row).await,
         OutboxKind::ActionDelivery => deliver_action(ctx, row).await,
+        OutboxKind::WebhookDelivery => deliver_webhook(ctx, row).await,
     };
 
     match result {
@@ -58,165 +54,94 @@ fn uuid_field(row: &OutboxRow, name: &str) -> Result<uuid::Uuid> {
         .ok_or_else(|| anyhow!("outbox payload {name} is not a uuid"))
 }
 
-fn i32_field(row: &OutboxRow, name: &str) -> Result<i32> {
-    field(row, name)?
-        .as_i64()
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or_else(|| anyhow!("outbox payload {name} is not an i32"))
-}
-
-/// An entry point's build reached a status the forges report. Expands into one
-/// delivery per matching action, with the same payload the status reactor built.
-async fn expand_build_status(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
-    let db = ctx.db();
-    let status = BuildStatus::try_from(i32_field(row, "status")?)
-        .map_err(|_| anyhow!("outbox build status out of range"))?;
-    let Some(event) = Reported::reports(status) else {
+async fn expand_event(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
+    let event: Event =
+        serde_json::from_value(row.payload.clone()).context("decoding a stored event")?;
+    let Some(event) = crate::enrich::enrich(&ctx.db(), event).await? else {
         return Ok(());
     };
-
-    let evaluation_id = EvaluationId::new(uuid_field(row, "evaluation")?);
-    let Some(evaluation) = EEvaluation::find_by_id(evaluation_id)
-        .one(&db.worker_db)
-        .await
-        .context("looking up the evaluation of a build report")?
-    else {
-        // Its evaluation was collected while the row waited; nobody is left to
-        // report to, and the row is settled rather than retried to the cap.
-        return Ok(());
-    };
-    let Some(task) = evaluation.task else {
-        return Ok(());
-    };
-
-    let derivation = DerivationId::new(uuid_field(row, "derivation")?);
-    let derivation_path = EDerivation::find_by_id(derivation)
-        .one(&db.worker_db)
-        .await
-        .context("looking up the derivation of a build report")?
-        .map(|d| d.store_path());
-
-    let payload = serde_json::json!({
-        "build_id": BuildJobId::new(uuid_field(row, "build_job")?),
-        "evaluation_id": evaluation_id,
-        "derivation_path": derivation_path,
-        "status": event,
-        "evaluation_kind": eval_kind_str(evaluation.kind),
-    });
-
-    fan_out(ctx, task, event, &payload, &row.key).await
-}
-
-/// An evaluation changed status, or was just created. Both expand the same way;
-/// a creation carries the description its first forge check shows.
-async fn expand_evaluation_status(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
-    let db = ctx.db();
-    let evaluation_id = EvaluationId::new(uuid_field(row, "evaluation")?);
-    let Some(evaluation) = EEvaluation::find_by_id(evaluation_id)
-        .one(&db.worker_db)
-        .await
-        .context("looking up the evaluation of a status report")?
-    else {
-        return Ok(());
-    };
-    let Some(task) = evaluation.task else {
-        return Ok(());
-    };
-
-    // An event named outright is one no status maps to (the approval gate
-    // clearing), so it is reported as written and settles no reaction.
-    if let Some(event) = row.payload.get("event").and_then(JsonValue::as_str) {
-        let payload = serde_json::json!({
-            "evaluation_id": evaluation_id,
-            "task_id": task,
-            "status": event,
-            "evaluation_kind": eval_kind_str(evaluation.kind),
-        });
-
-        return fan_out(ctx, task, event, &payload, &row.key).await;
+    let envelope = Envelope::now(event);
+    fan_out_actions(ctx, &envelope, &row.key).await?;
+    fan_out_webhooks(ctx, &envelope, &row.key).await?;
+    if let Event::EvaluationReported(reported) = &envelope.event {
+        react_on_terminal(ctx, reported).await;
     }
-
-    let status = EvaluationStatus::try_from(i32_field(row, "status")?)
-        .map_err(|_| anyhow!("outbox evaluation status out of range"))?;
-    let created = row
-        .payload
-        .get("created")
-        .and_then(JsonValue::as_bool)
-        .unwrap_or_default();
-
-    let (event, description) = if created {
-        let reason = evaluation
-            .waiting_reason
-            .as_ref()
-            .and_then(WaitingReason::from_json);
-        match Phase::of_created(status, reason) {
-            Some((phase, description)) => (phase.name(), description),
-            None => return Ok(()),
-        }
-    } else {
-        (Phase::of_status(status).name(), None)
-    };
-
-    let mut payload = serde_json::json!({
-        "evaluation_id": evaluation_id,
-        "task_id": task,
-        "repository": evaluation.repository,
-        "status": event,
-        "evaluation_kind": eval_kind_str(evaluation.kind),
-    });
-    if let Some(text) = description {
-        payload["description"] = JsonValue::String(text.to_owned());
-    }
-
-    fan_out(ctx, task, event, &payload, &row.key).await?;
-
-    if !created {
-        react_to_source_comment_on_terminal(&ctx.ci(), task, &evaluation, status).await;
-    }
-
     Ok(())
+}
+
+pub(crate) fn action_delivery_payload(action: TaskActionId, envelope: &Envelope) -> JsonValue {
+    serde_json::json!({
+        "action": action,
+        "event": envelope.event.name(),
+        "envelope": envelope.to_json(),
+    })
 }
 
 /// One delivery row per matching action, in the transaction that settles the
 /// event: either every delivery this event owes is queued or none is, so a
 /// crash mid-expansion replays the whole expansion.
-async fn fan_out(
-    ctx: &EffectsCtx,
-    task: TaskId,
-    event: &str,
-    payload: &JsonValue,
-    parent: &str,
-) -> Result<()> {
+async fn fan_out_actions(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<()> {
+    let Some(task) = envelope.event.owner().task else {
+        return Ok(());
+    };
     let ci = ctx.ci();
     let actions = active_actions_for_task(&ci, task)
         .await
         .context("loading the task's actions")?;
+    let name = envelope.event.name();
+    let content = envelope.event.content();
 
     let txn = ci
         .db
         .worker_db
         .begin()
         .await
-        .context("begin the delivery expansion")?;
-    for action in matching_actions(actions, event, payload) {
+        .context("begin the action expansion")?;
+    for action in matching_actions(actions, &name, &content) {
         enqueue(
             &txn,
             OutboxKind::ActionDelivery,
-            format!("{}:{event}:{parent}", action.id),
-            serde_json::json!({
-                "action": action.id,
-                "event": event,
-                "payload": payload,
-            }),
+            format!("{}:{name}:{parent}", action.id),
+            action_delivery_payload(action.id, envelope),
         )
         .await
         .context("enqueue an action delivery")?;
     }
-    txn.commit()
-        .await
-        .context("commit the delivery expansion")?;
+    txn.commit().await.context("commit the action expansion")?;
 
     Ok(())
+}
+
+async fn fan_out_webhooks(_ctx: &EffectsCtx, _envelope: &Envelope, _parent: &str) -> Result<()> {
+    Ok(())
+}
+
+async fn deliver_webhook(_ctx: &EffectsCtx, _row: &OutboxRow) -> Result<()> {
+    Ok(())
+}
+
+/// A terminal evaluation reacts on the comment that triggered it; a creation
+/// or an approval is not a transition and settles no reaction.
+async fn react_on_terminal(ctx: &EffectsCtx, reported: &evaluation::Reported) {
+    if reported.created || reported.phase == evaluation::Phase::ApprovalGranted {
+        return;
+    }
+    let (Some(task), Ok(status)) = (
+        reported.task,
+        EvaluationStatus::try_from(i32::from(reported.status)),
+    ) else {
+        return;
+    };
+    match EEvaluation::find_by_id(reported.evaluation_id)
+        .one(&ctx.db().worker_db)
+        .await
+    {
+        Ok(Some(evaluation)) => {
+            react_to_source_comment_on_terminal(&ctx.ci(), task, &evaluation, status).await;
+        }
+        Ok(None) => {}
+        Err(e) => warn!(error = %e, "looking up the evaluation of a terminal reaction"),
+    }
 }
 
 /// Compress a finished build's log into chunks. Its own storage failure is a
@@ -236,7 +161,7 @@ async fn deliver_action(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
         .as_str()
         .ok_or_else(|| anyhow!("outbox payload event is not a string"))?
         .to_owned();
-    let payload = field(row, "payload")?.clone();
+    let envelope = field(row, "envelope")?.clone();
 
     let Some(action) = ETaskAction::find_by_id(action_id)
         .one(&ci.db.worker_db)
@@ -250,7 +175,7 @@ async fn deliver_action(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
         return Ok(());
     }
 
-    execute_action(&ci, action, &event, payload).await
+    execute_action(&ci, action, &event, envelope).await
 }
 
 #[cfg(test)]
@@ -289,15 +214,18 @@ mod tests {
         );
     }
 
-    /// Statuses ride as their integer discriminant, so the consumer must read
-    /// back exactly what the emitter wrote.
     #[test]
-    fn a_status_round_trips_through_its_discriminant() {
-        let r = row(serde_json::json!({"status": i32::from(BuildStatus::Completed)}));
-
-        assert_eq!(
-            BuildStatus::try_from(i32_field(&r, "status").unwrap()).unwrap(),
-            BuildStatus::Completed
+    fn action_delivery_carries_the_envelope() {
+        let env = Envelope::now(
+            evaluation::Reported {
+                phase: evaluation::Phase::Completed,
+                ..Default::default()
+            }
+            .into(),
         );
+        let payload = action_delivery_payload(TaskActionId::nil(), &env);
+        assert_eq!(payload["event"], "evaluation.completed");
+        assert_eq!(payload["envelope"]["event"], "evaluation.completed");
+        assert!(payload["envelope"]["content"].is_object());
     }
 }

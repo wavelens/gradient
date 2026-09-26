@@ -16,6 +16,7 @@ use gradient_ci::{APPROVAL_ACTION_ID, find_approval_gated_eval, unpark_approval}
 use gradient_core::ServerState;
 use gradient_forge::ParsedPullRequestReviewEvent;
 use gradient_scheduler::Scheduler;
+use gradient_types::events::evaluation;
 use gradient_types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
@@ -121,20 +122,16 @@ pub(super) async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &M
     let Some(task_id) = eval.task else {
         return;
     };
-    if let Err(e) = gradient_db::outbox::enqueue_evaluation_event(
-        &state.worker_db,
-        eval.id,
-        task_id,
-        "evaluation.approval_granted",
-    )
-    .await
-    {
-        tracing::error!(error = %e, evaluation_id = %eval.id, "failed to enqueue the approval-granted report");
-    }
-    if let Err(e) = gradient_db::outbox::enqueue_evaluation_created(&state.worker_db, eval).await {
-        tracing::error!(error = %e, evaluation_id = %eval.id, "failed to re-enqueue the evaluation check");
-    }
-    state.outbox_wake.notify_one();
+    state
+        .record(evaluation::Reported {
+            evaluation_id: eval.id,
+            phase: evaluation::Phase::ApprovalGranted,
+            status: i32::from(eval.status) as i16,
+            task: Some(task_id),
+            ..Default::default()
+        })
+        .await;
+    state.record_evaluation_created(eval).await;
 }
 
 gradient_db::sql! {

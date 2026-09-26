@@ -15,7 +15,6 @@ use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::outbox::OutboxKind;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -220,16 +219,16 @@ pub async fn announce_entry_point_statuses(
             continue;
         };
 
-        if let Err(e) = crate::outbox::enqueue(
+        if let Err(e) = crate::events::record(
             db,
-            OutboxKind::BuildStatus,
-            format!("{}:{}", job.id, i32::from(status)),
-            serde_json::json!({
-                "build_job": job.id,
-                "evaluation": job.evaluation,
-                "derivation": job.derivation,
-                "status": i32::from(status),
-            }),
+            &ctx.events,
+            gradient_types::events::build::Reported {
+                build_id: job.id,
+                evaluation_id: job.evaluation,
+                derivation: job.derivation,
+                status: i32::from(status) as i16,
+                ..Default::default()
+            },
         )
         .await
         {

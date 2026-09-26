@@ -16,7 +16,6 @@
 use std::time::Duration;
 
 pub use gradient_entity::outbox::OutboxKind;
-use gradient_types::MEvaluation;
 use gradient_types::ids::OutboxId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
 
@@ -147,54 +146,6 @@ pub async fn enqueue_many<C: ConnectionTrait>(
     .await?;
 
     Ok(())
-}
-
-/// The first forge report for a freshly inserted evaluation, which never
-/// transitions through `update_evaluation_status` and so is never announced by
-/// the transition emitter.
-pub async fn enqueue_evaluation_created<C: ConnectionTrait>(
-    db: &C,
-    eval: &MEvaluation,
-) -> Result<(), DbErr> {
-    let Some(task) = eval.task else {
-        return Ok(());
-    };
-
-    enqueue(
-        db,
-        OutboxKind::EvaluationStatus,
-        format!("{}:{}", eval.id, i32::from(eval.status)),
-        serde_json::json!({
-            "evaluation": eval.id,
-            "task": task,
-            "status": i32::from(eval.status),
-            "waiting_reason": eval.waiting_reason,
-            "repository": eval.repository,
-            "created": true,
-        }),
-    )
-    .await
-}
-
-/// An evaluation event that is not a status transition, such as the approval
-/// gate clearing. The consumer reports `event` verbatim instead of deriving one.
-pub async fn enqueue_evaluation_event<C: ConnectionTrait>(
-    db: &C,
-    evaluation: gradient_types::EvaluationId,
-    task: gradient_types::TaskId,
-    event: &str,
-) -> Result<(), DbErr> {
-    enqueue(
-        db,
-        OutboxKind::EvaluationStatus,
-        format!("{evaluation}:{event}"),
-        serde_json::json!({
-            "evaluation": evaluation,
-            "task": task,
-            "event": event,
-        }),
-    )
-    .await
 }
 
 pub async fn claim_due<C: ConnectionTrait>(db: &C, limit: usize) -> Result<Vec<OutboxRow>, DbErr> {
@@ -380,14 +331,9 @@ mod tests {
             }])
             .into_connection();
 
-        enqueue(
-            &db,
-            OutboxKind::BuildStatus,
-            "j:3".into(),
-            serde_json::json!({}),
-        )
-        .await
-        .unwrap();
+        enqueue(&db, OutboxKind::Event, "j:3".into(), serde_json::json!({}))
+            .await
+            .unwrap();
 
         let sql = norm(&db.into_transaction_log()[0].statements()[0].sql);
         assert!(
@@ -396,18 +342,5 @@ mod tests {
             ),
             "{sql}"
         );
-    }
-
-    /// An evaluation with no task has no forge to report to, so it enqueues
-    /// nothing rather than a row every consumer would drop.
-    #[tokio::test]
-    async fn a_taskless_evaluation_enqueues_nothing() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-
-        enqueue_evaluation_created(&db, &MEvaluation::default())
-            .await
-            .unwrap();
-
-        assert!(db.into_transaction_log().is_empty());
     }
 }

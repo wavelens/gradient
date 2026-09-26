@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{EventKind, firehose};
+use super::firehose;
 use crate::ids::{DerivationBuildId, EvaluationId, ProjectId};
 use serde::{Deserialize, Serialize};
 
@@ -14,20 +14,14 @@ pub struct Connected {
     pub projects: Vec<ProjectId>,
 }
 
-impl EventKind for Connected {
-    const NAME: &'static str = "worker.connected";
-    const DURABLE: bool = true;
-}
+firehose!(Connected, "worker.connected");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Disconnected {
     pub worker_id: String,
 }
 
-impl EventKind for Disconnected {
-    const NAME: &'static str = "worker.disconnected";
-    const DURABLE: bool = true;
-}
+firehose!(Disconnected, "worker.disconnected");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct JobDispatched {

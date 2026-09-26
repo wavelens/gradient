@@ -373,12 +373,7 @@ async fn apply_and_record(
                 evaluation_id = %eval.id,
                 "forge webhook trigger fired"
             );
-            if let Err(e) =
-                gradient_db::outbox::enqueue_evaluation_created(&state.worker_db, &eval).await
-            {
-                tracing::error!(error = %e, "failed to enqueue an evaluation's first report");
-            }
-            state.outbox_wake.notify_one();
+            state.record_evaluation_created(&eval).await;
             outcome.queued.push(QueuedEvaluation {
                 task_id: task.id,
                 task_name: task.name.clone(),

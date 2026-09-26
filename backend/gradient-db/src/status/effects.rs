@@ -262,16 +262,16 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
             // build owes no row rather than a row every consumer drops.
             if ci_reports(c.to)
                 && entry_keys.contains(&(job.evaluation, job.derivation))
-                && let Err(e) = crate::outbox::enqueue(
+                && let Err(e) = crate::events::record(
                     db,
-                    OutboxKind::BuildStatus,
-                    format!("{}:{}", job.id, i32::from(c.to)),
-                    serde_json::json!({
-                        "build_job": job.id,
-                        "evaluation": job.evaluation,
-                        "derivation": job.derivation,
-                        "status": i32::from(c.to),
-                    }),
+                    &ctx.events,
+                    gradient_types::events::build::Reported {
+                        build_id: job.id,
+                        evaluation_id: job.evaluation,
+                        derivation: job.derivation,
+                        status: i32::from(c.to) as i16,
+                        ..Default::default()
+                    },
                 )
                 .await
             {

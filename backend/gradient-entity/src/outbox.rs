@@ -11,9 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::OutboxId;
 
-/// What a row owes. The first three are *events*: the effects actor expands one
-/// into the per-action deliveries it implies. `ActionDelivery` is one external
-/// call and nothing else.
+/// What a row owes. An `Event` expands into the deliveries it implies;
+/// `ActionDelivery` and `WebhookDelivery` are one external call each.
 #[repr(i16)]
 #[derive(
     Debug,
@@ -32,15 +31,15 @@ use crate::ids::OutboxId;
 #[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
 #[serde(rename_all = "snake_case")]
 pub enum OutboxKind {
-    #[default]
-    #[sea_orm(num_value = 0)]
-    BuildStatus = 0,
-    #[sea_orm(num_value = 1)]
-    EvaluationStatus = 1,
     #[sea_orm(num_value = 2)]
     LogFinalize = 2,
     #[sea_orm(num_value = 3)]
     ActionDelivery = 3,
+    #[default]
+    #[sea_orm(num_value = 4)]
+    Event = 4,
+    #[sea_orm(num_value = 5)]
+    WebhookDelivery = 5,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

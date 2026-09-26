@@ -367,10 +367,7 @@ pub async fn post_task_evaluate(
     )
     .await?;
     let eval = gradient_ci::park_if_no_workers(&state.web_db, eval, task.project).await?;
-    if let Err(e) = gradient_db::outbox::enqueue_evaluation_created(&state.worker_db, &eval).await {
-        tracing::error!(error = %e, "failed to enqueue an evaluation's first report");
-    }
-    state.outbox_wake.notify_one();
+    state.record_evaluation_created(&eval).await;
 
     Ok(ok_json(eval.id.to_string()))
 }

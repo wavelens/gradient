@@ -446,12 +446,7 @@ pub async fn fire_now(
                 scheduler.cancel_evaluation_jobs(aborted_id, &anchors).await;
             }
 
-            if let Err(e) =
-                gradient_db::outbox::enqueue_evaluation_created(&state.worker_db, &eval).await
-            {
-                tracing::error!(error = %e, "failed to enqueue an evaluation's first report");
-            }
-            state.outbox_wake.notify_one();
+            state.record_evaluation_created(&eval).await;
             serde_json::json!({
                 "outcome": "Created",
                 "evaluation_id": eval.id,

@@ -149,4 +149,20 @@ impl AppState {
             email: self.email.clone(),
         }
     }
+
+    /// Record a durable event and wake the outbox; a failed write is logged, never propagated.
+    pub async fn record(&self, event: impl Into<gradient_types::Event>) {
+        let event = event.into();
+        let name = event.name();
+        if let Err(e) = gradient_db::events::record(&self.worker_db, &self.events, event).await {
+            tracing::error!(error = %e, event = %name, "failed to record an event");
+        }
+        self.outbox_wake.notify_one();
+    }
+
+    pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
+        if let Some(event) = gradient_db::events::evaluation_created(eval) {
+            self.record(event).await;
+        }
+    }
 }

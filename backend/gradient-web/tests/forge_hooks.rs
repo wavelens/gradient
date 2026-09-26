@@ -418,7 +418,7 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]) // enqueue_evaluation_created: INSERT INTO outbox
+        }]) // record_evaluation_created: INSERT INTO outbox
 }
 
 // ── Test 1: Generic forge - no matching trigger (Gitea) ───────────────────────

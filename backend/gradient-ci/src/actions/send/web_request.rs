@@ -14,13 +14,13 @@ use serde_json::Value as JsonValue;
 pub(crate) async fn execute_send_web_request(
     ctx: &CiContext,
     event: &str,
-    payload: &JsonValue,
+    envelope: &JsonValue,
     url: &str,
     token: Option<&str>,
 ) -> Result<ExecutorOk> {
     gradient_util::http_validation::validate_webhook_url(url)
         .map_err(|e| anyhow!("URL rejected: {}", e))?;
-    let body = serde_json::to_string(payload).context("serializing webhook payload")?;
+    let body = serde_json::to_string(envelope).context("serializing webhook envelope")?;
     let mut req = ctx
         .http
         .post(url)

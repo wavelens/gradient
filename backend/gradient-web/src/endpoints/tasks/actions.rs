@@ -562,7 +562,7 @@ pub async fn test_action(
         .to_string();
 
     let now = chrono::Utc::now();
-    let payload = serde_json::json!({
+    let content = serde_json::json!({
         "synthetic": true,
         "event": event,
         "project": project,
@@ -577,7 +577,12 @@ pub async fn test_action(
         "context": "gradient/test-fire",
     });
 
-    gradient_ci::actions::execute_action(&state.ci(), action, &event, payload)
+    let envelope = serde_json::json!({
+        "event": event,
+        "at": now.to_rfc3339(),
+        "content": content,
+    });
+    gradient_ci::actions::execute_action(&state.ci(), action, &event, envelope)
         .await
         .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
 

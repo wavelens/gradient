@@ -563,13 +563,7 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
         match gradient_ci::trigger_drv_recovery(&state.worker_db, &task, &eval).await {
             Ok(new_eval) => {
                 info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
-                if let Err(e) =
-                    gradient_db::outbox::enqueue_evaluation_created(&state.worker_db, &new_eval)
-                        .await
-                {
-                    tracing::error!(error = %e, "failed to enqueue an evaluation's first report");
-                }
-                state.outbox_wake.notify_one();
+                state.record_evaluation_created(&new_eval).await;
             }
             Err(e) => {
                 warn!(evaluation_id = %eval.id, error = %e, "failed to trigger .drv recovery")
