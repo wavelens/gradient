@@ -8,56 +8,32 @@ use clap::Parser;
 use gradient_core::init_state;
 use gradient_types::Cli;
 use gradient_types::cli::LoggingArgs;
+use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS};
 use std::sync::Arc;
 use tracing::info;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Dependency targets pinned to `warn` so a plain `info` server log stays
-/// readable. `RUST_LOG` still overrides them.
-const NOISY_DEPS: &[&str] = &[
-    "hyper", "h2", "sqlx", "sea_orm", "tower", "reqwest", "rustls",
-];
-
-/// Build an `EnvFilter` directive from the global default, baked-in dependency
-/// noise suppression, and optional per-component overrides targeting the
-/// `gradient_*` crate names. Example:
-/// `info,hyper=warn,...,gradient_web=debug,gradient_scheduler=trace`.
-fn build_filter_directive(logging: &LoggingArgs) -> String {
-    let mut parts = vec![logging.log_level.clone()];
-    for dep in NOISY_DEPS {
-        parts.push(format!("{dep}=warn"));
-    }
-
-    let overrides = [
-        ("gradient_web", &logging.web_log_level),
-        ("gradient_cache", &logging.cache_log_level),
-        ("gradient_proto", &logging.proto_log_level),
-        ("gradient_scheduler", &logging.scheduler_log_level),
-    ];
-    for (target, level) in overrides {
-        if let Some(level) = level {
-            parts.push(format!("{target}={level}"));
-        }
-    }
-
-    parts.join(",")
+/// Per-component overrides of the server's log level, keyed by the crates
+/// each component lives in.
+fn log_overrides(logging: &LoggingArgs) -> [(&'static str, Option<&str>); 6] {
+    [
+        ("gradient_web", logging.web_log_level.as_deref()),
+        ("gradient_cache", logging.cache_log_level.as_deref()),
+        ("gradient_proto", logging.proto_log_level.as_deref()),
+        ("gradient_wire", logging.proto_log_level.as_deref()),
+        ("gradient_scheduler", logging.scheduler_log_level.as_deref()),
+        ("gradient_pool", logging.scheduler_log_level.as_deref()),
+    ]
 }
 
 fn init_logging(logging: &LoggingArgs) {
-    // `RUST_LOG` fully overrides the synthesized directive when set; we only
-    // warn when it is set but unparseable, never when it is simply absent.
-    let env_filter = match std::env::var("RUST_LOG") {
-        Ok(rust_log) => EnvFilter::try_new(&rust_log).unwrap_or_else(|e| {
-            eprintln!("Warning: invalid RUST_LOG ({e}), using configured log levels");
-            EnvFilter::new(build_filter_directive(logging))
-        }),
-        Err(_) => EnvFilter::new(build_filter_directive(logging)),
-    };
-
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_target(true).with_thread_ids(true))
-        .with(env_filter)
-        .init();
+    let overrides = log_overrides(logging);
+    gradient_util::logging::init(&LogSetup {
+        level: &logging.log_level,
+        overrides: &overrides,
+        quiet: NOISY_DEPS,
+        honor_rust_log: true,
+        writer: LogWriter::Stdout,
+    });
 }
 
 pub fn main() -> std::io::Result<()> {
@@ -160,6 +136,17 @@ fn validate_state_and_exit(state_file: Option<&str>) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    fn server_directive(logging: &LoggingArgs) -> String {
+        let overrides = log_overrides(logging);
+        gradient_util::logging::directive(&LogSetup {
+            level: &logging.log_level,
+            overrides: &overrides,
+            quiet: NOISY_DEPS,
+            honor_rust_log: true,
+            writer: LogWriter::Stdout,
+        })
+    }
+
     #[test]
     fn directive_targets_gradient_crates_and_suppresses_noise() {
         let logging = LoggingArgs {
@@ -168,18 +155,19 @@ mod tests {
             scheduler_log_level: Some("trace".into()),
             ..Default::default()
         };
-        let d = build_filter_directive(&logging);
+        let d = server_directive(&logging);
         assert!(d.starts_with("info,"));
         assert!(d.contains("hyper=warn"));
         assert!(d.contains("sqlx=warn"));
         assert!(d.contains("gradient_web=debug"));
         assert!(d.contains("gradient_scheduler=trace"));
+        assert!(d.contains("gradient_pool=trace"));
         assert!(!d.contains("builder="));
     }
 
     #[test]
     fn directive_without_overrides_is_global_plus_noise() {
-        let d = build_filter_directive(&LoggingArgs::default());
+        let d = server_directive(&LoggingArgs::default());
         assert!(d.starts_with("info,"));
         assert!(d.contains("rustls=warn"));
         assert!(!d.contains("gradient_web="));

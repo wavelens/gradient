@@ -2613,7 +2613,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -2780,6 +2779,7 @@ dependencies = [
  "base64 0.23.1",
  "futures",
  "hex",
+ "prometheus",
  "ractor",
  "reqwest",
  "rustls",
@@ -2788,6 +2788,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "url",
  "webpki-roots",
 ]
@@ -2934,7 +2935,6 @@ dependencies = [
  "tokio-tungstenite 0.30.0",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "uuid",
  "wiremock",
  "xz2",

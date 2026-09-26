@@ -23,16 +23,18 @@ use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_scheduler::Scheduler;
+use gradient_util::metrics::{
+    PROMETHEUS_CONTENT_TYPE, encode_text, register_labelled_counter, register_labelled_gauge,
+    register_process_collector,
+};
 use prometheus::{
-    Encoder, Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
-    Opts, Registry, TextEncoder,
+    Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+    Registry,
 };
 use sea_orm::{FromQueryResult, Iterable};
 use subtle::ConstantTimeEq;
 
 use crate::error::{WebError, WebResult};
-
-pub(crate) const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4";
 
 #[derive(Debug, FromQueryResult)]
 struct CountRow {
@@ -88,29 +90,37 @@ pub(crate) fn render(obs: &Observations) -> String {
         &registry,
         "gradient_builds_total",
         "Total builds that have reached a terminal status, by status.",
+        "status",
         &obs.builds_total,
-    );
+    )
+    .expect("register");
 
     register_labelled_gauge(
         &registry,
         "gradient_builds_in_state",
         "Current count of non-terminal builds, by status.",
+        "status",
         &obs.builds_in_state,
-    );
+    )
+    .expect("register");
 
     register_labelled_counter(
         &registry,
         "gradient_evaluations_total",
         "Total evaluations that have reached a terminal status, by status.",
+        "status",
         &obs.evaluations_total,
-    );
+    )
+    .expect("register");
 
     register_labelled_gauge(
         &registry,
         "gradient_evaluations_in_state",
         "Current count of non-terminal evaluations, by status.",
+        "status",
         &obs.evaluations_in_state,
-    );
+    )
+    .expect("register");
 
     let workers =
         IntGauge::new("gradient_workers_connected", "Connected workers.").expect("metric");
@@ -187,20 +197,8 @@ pub(crate) fn render(obs: &Observations) -> String {
     reqs.inc_by(obs.cache_nar_requests_total.max(0) as u64);
     registry.register(Box::new(reqs)).expect("register reqs");
 
-    // Process/runtime metrics (RSS, open fds, CPU) on Linux via the prometheus
-    // process collector. No-op on other platforms.
-    #[cfg(target_os = "linux")]
-    {
-        let pc = prometheus::process_collector::ProcessCollector::for_self();
-        let _ = registry.register(Box::new(pc));
-    }
-
-    let mut buf = Vec::new();
-    TextEncoder::new()
-        .encode(&registry.gather(), &mut buf)
-        .expect("encode");
-
-    String::from_utf8(buf).expect("utf-8")
+    register_process_collector(&registry);
+    encode_text(&registry)
 }
 
 /// Persistent per-route HTTP metrics, accumulated across requests by
@@ -250,9 +248,7 @@ static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| {
 });
 
 fn gather_http() -> String {
-    let mut buf = Vec::new();
-    let _ = TextEncoder::new().encode(&HTTP_METRICS.registry.gather(), &mut buf);
-    String::from_utf8(buf).unwrap_or_default()
+    encode_text(&HTTP_METRICS.registry)
 }
 
 #[derive(serde::Serialize)]
@@ -398,30 +394,6 @@ pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> 
         .inc();
 
     response
-}
-
-fn register_labelled_counter(
-    registry: &Registry,
-    name: &str,
-    help: &str,
-    values: &[(String, i64)],
-) {
-    let cv = IntCounterVec::new(Opts::new(name, help), &["status"]).expect("metric");
-    for (label, value) in values {
-        cv.with_label_values(&[label])
-            .inc_by((*value).max(0) as u64);
-    }
-
-    registry.register(Box::new(cv)).expect("register");
-}
-
-fn register_labelled_gauge(registry: &Registry, name: &str, help: &str, values: &[(String, i64)]) {
-    let gv = IntGaugeVec::new(Opts::new(name, help), &["status"]).expect("metric");
-    for (label, value) in values {
-        gv.with_label_values(&[label]).set(*value);
-    }
-
-    registry.register(Box::new(gv)).expect("register");
 }
 
 // Status sets and label names come from the enums (decoded in Rust below), so a

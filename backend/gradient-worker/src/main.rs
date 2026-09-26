@@ -24,11 +24,11 @@ use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use config::WorkerConfig;
+use gradient_util::logging::{LogSetup, LogWriter};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
 };
 use shutdown::Shutdown;
-use tracing_subscriber::EnvFilter;
 use worker::Worker;
 
 /// Maximum delay between reconnect attempts.
@@ -42,10 +42,14 @@ fn main() -> Result<()> {
     // stderr, not stdout: eval-worker subprocesses use stdout for rkyv frames
     // to the parent (see worker_pool::transport), so any tracing line on stdout
     // would corrupt the frame stream and crash the eval.
-    tracing_subscriber::fmt()
-        .with_env_filter(build_env_filter(&config))
-        .with_writer(std::io::stderr)
-        .init();
+    let overrides = log_overrides(&config);
+    gradient_util::logging::init(&LogSetup {
+        level: &config.log_level,
+        overrides: &overrides,
+        quiet: &[],
+        honor_rust_log: false,
+        writer: LogWriter::Stderr,
+    });
 
     // Re-exec as eval subprocess when launched with the internal flag.
     // The Nix C API (Boehm GC) must run single-threaded, isolated from Tokio.
@@ -312,13 +316,13 @@ async fn next_stop_signal() {
     }
 }
 
-/// Build the tracing `EnvFilter` from the worker's log-level config.
+/// Per-area overrides of the worker's log level.
 ///
 /// `log_level` is the global default. The optional per-area overrides
 /// (`eval_log_level`, `build_log_level`, `proto_log_level`) are appended as
 /// per-target directives so e.g. `settings.logLevel.eval = "trace"` enables
 /// trace logging only for the evaluator-related modules.
-fn build_env_filter(config: &WorkerConfig) -> EnvFilter {
+fn log_overrides(config: &WorkerConfig) -> Vec<(&'static str, Option<&str>)> {
     const EVAL_TARGETS: &[&str] = &[
         "gradient_worker::nix",
         "gradient_worker::worker_pool",
@@ -336,22 +340,15 @@ fn build_env_filter(config: &WorkerConfig) -> EnvFilter {
         "gradient_wire",
     ];
 
-    let mut filter = EnvFilter::new(&config.log_level);
-    let mut overrides: Vec<(&str, &str)> = Vec::new();
-    if let Some(lvl) = &config.eval_log_level {
-        overrides.extend(EVAL_TARGETS.iter().map(|t| (*t, lvl.as_str())));
+    fn area<'a>(
+        targets: &'static [&'static str],
+        level: Option<&'a str>,
+    ) -> impl Iterator<Item = (&'static str, Option<&'a str>)> {
+        targets.iter().map(move |t| (*t, level))
     }
-    if let Some(lvl) = &config.build_log_level {
-        overrides.extend(BUILD_TARGETS.iter().map(|t| (*t, lvl.as_str())));
-    }
-    if let Some(lvl) = &config.proto_log_level {
-        overrides.extend(PROTO_TARGETS.iter().map(|t| (*t, lvl.as_str())));
-    }
-    for (target, lvl) in overrides {
-        match format!("{target}={lvl}").parse() {
-            Ok(d) => filter = filter.add_directive(d),
-            Err(e) => eprintln!("invalid log directive {target}={lvl}: {e}"),
-        }
-    }
-    filter
+
+    area(EVAL_TARGETS, config.eval_log_level.as_deref())
+        .chain(area(BUILD_TARGETS, config.build_log_level.as_deref()))
+        .chain(area(PROTO_TARGETS, config.proto_log_level.as_deref()))
+        .collect()
 }

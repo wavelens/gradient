@@ -268,5 +268,4 @@ gradient-types     = { workspace = true }
 sentry             = { workspace = true }
 tokio              = { workspace = true, features = ["process", "signal", "macros"] }
 tracing            = { workspace = true }
-tracing-subscriber = { workspace = true }
 gradient-web       = { workspace = true }

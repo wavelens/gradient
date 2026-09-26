@@ -18,6 +18,8 @@ doctest = false
 workspace = true
 
 [dependencies]
+prometheus         = { workspace = true }
+tracing-subscriber = { workspace = true }
 base64              = { workspace = true }
 futures             = { workspace = true }
 hex                 = { workspace = true }

@@ -10,6 +10,8 @@ pub mod http;
 pub mod http_validation;
 pub mod hydra;
 pub mod latest;
+pub mod logging;
+pub mod metrics;
 pub mod net;
 pub mod nix_hash;
 pub mod shutdown;
