@@ -36,6 +36,7 @@ use crate::proto::compression::{drv_closure_seeds_from_compressed_nar, resolve_c
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::import_received_nar;
 use crate::proto::nar_recv::NarPayload;
+use crate::proto::progress::{Progress, ProgressSink, read_body};
 
 /// How many missing inputs to download + import in parallel before invoking
 /// the build. Conservative - each one streams a NAR into the local daemon
@@ -150,6 +151,7 @@ type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
 pub(crate) async fn download_one_presigned(
     http: &reqwest::Client,
     cp: CachedPath,
+    progress: &mut Progress<impl ProgressSink>,
 ) -> Result<PresignedFetch> {
     let url = cp.url.clone().expect("by_url entries have a URL");
     let path = cp.path.clone();
@@ -178,11 +180,9 @@ pub(crate) async fn download_one_presigned(
                         "HTTP {status} from {url} (path {path}) is not a usable NAR response"
                     ));
                 } else {
-                    let bytes = resp
-                        .bytes()
+                    let bytes = read_body(resp, cp.file_size, progress)
                         .await
-                        .with_context(|| format!("read body of {url}"))?
-                        .to_vec();
+                        .with_context(|| format!("read body of {url}"))?;
                     if presigned_body_is_short(cp.file_size, bytes.len()) {
                         warn!(
                             %path,
@@ -429,7 +429,7 @@ impl<'a> InputPrefetcher<'a> {
         let outcomes: Vec<Result<PresignedFetch>> =
             futures::stream::iter(by_url.into_iter().map(|cp| {
                 let http = http.clone();
-                async move { download_one_presigned(&http, cp).await }
+                async move { download_one_presigned(&http, cp, &mut Progress::silent()).await }
             }))
             .buffer_unordered(PREFETCH_CONCURRENCY)
             .collect()
@@ -1057,7 +1057,9 @@ mod tests {
         cp.file_size = Some(9);
 
         let http = gradient_util::http::build_download_client().expect("download client");
-        let (path, fetched) = download_one_presigned(&http, cp).await.expect("download");
+        let (path, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
+            .await
+            .expect("download");
         assert_eq!(path, "/nix/store/aaaa-redirected");
         let (bytes, _) = fetched.expect("redirect followed to the object");
         assert_eq!(bytes, b"NAR-BYTES");
@@ -1087,7 +1089,7 @@ mod tests {
         cp.file_size = Some(227840);
 
         let http = gradient_util::http::build_client().expect("api client");
-        let err = download_one_presigned(&http, cp)
+        let err = download_one_presigned(&http, cp, &mut Progress::silent())
             .await
             .expect_err("an unfollowed 3xx is not a usable NAR response");
         assert!(
@@ -1119,7 +1121,9 @@ mod tests {
         cp.file_size = Some(227840);
 
         let http = gradient_util::http::build_download_client().expect("download client");
-        let (path, fetched) = download_one_presigned(&http, cp).await.expect("download");
+        let (path, fetched) = download_one_presigned(&http, cp, &mut Progress::silent())
+            .await
+            .expect("download");
         assert_eq!(path, "/nix/store/aaaa-truncated");
         assert!(
             fetched.is_none(),

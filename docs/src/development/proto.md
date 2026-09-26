@@ -947,6 +947,7 @@ enum ClientMessage {
 
     // Streaming
     LogChunk { job_id: Uuid, task_index: u32, data: Vec<u8> },
+    BuildProgress { job_id: Uuid, dispatch: Uuid, build_id: Uuid, downloaded: u64, total: Option<u64> },
 
     // NAR transfer
     NarRequest { job_id: Uuid, paths: Vec<String> },    // "send me these paths"
@@ -1398,6 +1399,19 @@ Fire-and-forget - no acknowledgement. WebSocket flow control provides backpressu
 
 When the server receives `JobCompleted` or `JobFailed`, it **finalizes** the log (uploads to S3 if configured). Workers do not need to wait for finalization.
 
+## Download Progress
+
+A Substitute or Download build produces no log; its worker reports the bytes fetched instead.
+
+```rust
+BuildProgress { job_id: Uuid, dispatch: Uuid, build_id: Uuid, downloaded: u64, total: Option<u64> }
+```
+
+- Sent at most once per `BUILD_PROGRESS_INTERVAL` (1 s), plus once when the fetch ends. Fire-and-forget.
+- `downloaded` counts compressed bytes over every output of the build; a retried transfer does not count twice.
+- `total` is the sum of the upstream `FileSize`s for a Substitute, the `Content-Length` for a Download, and `None` when any is unknown.
+- The server handles it on the control lane, never in the job-event queue. It keeps the latest value per `derivation_build` in memory (`AppState::download_progress`, forgotten 10 s after the last report) and broadcasts `BoardEvent::BuildProgress`. Nothing is written to the database.
+
 ---
 
 ## Credential Distribution
@@ -1557,7 +1571,7 @@ decommission a worker it does not own.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `16`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `17`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
@@ -1582,6 +1596,7 @@ decommission a worker it does not own.
    over 1 GiB) and `NarUploaded.multipart` (its part ETags).
  - v16 made `CacheQuery.nar_sizes` entries `Option<u64>`, so an unknown size is
    never granted a multipart upload.
+ - v17 added `BuildProgress`, the bytes a Substitute or Download has fetched.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---

@@ -7766,8 +7766,10 @@ paths:
       summary: Build live updates (WebSocket)
       description: |-
         Upgrades to a WebSocket emitting `build_status_changed` events for every
-        build in this build's evaluation (covers its dependency graph). Requires
-        read access.
+        build in this build's evaluation (covers its dependency graph), and
+        `build_progress` events (`derivation_build`, `downloaded`, `total`)
+        while this build's Substitute or Download is fetching. Requires read
+        access.
       operationId: buildLive
       parameters:
         - { name: build, in: path, required: true, schema: { type: string, format: uuid } }
@@ -10506,6 +10508,25 @@ components:
           type: string
           format: date-time
           description: When the build status was last updated
+        download_progress:
+          nullable: true
+          description: |-
+            Bytes a running Substitute or Download has fetched, held in server
+            memory only. Null unless the build is `Building` and its worker
+            reported within the last 10 s.
+          allOf:
+            - $ref: '#/components/schemas/DownloadProgress'
+
+    DownloadProgress:
+      type: object
+      required: [downloaded, total]
+      properties:
+        downloaded: { type: integer, format: int64, minimum: 0 }
+        total:
+          type: integer
+          format: int64
+          nullable: true
+          description: Null when the source announced no size.
 
     DependencyNode:
       type: object

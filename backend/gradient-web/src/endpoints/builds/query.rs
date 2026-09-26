@@ -13,10 +13,12 @@ use gradient_core::ServerState;
 use gradient_db::latest_attempt;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
+use gradient_util::latest::Latest;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::BuildAccessContext;
 
@@ -38,6 +40,20 @@ pub struct BuildWithOutputs {
     pub prioritized: bool,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
+    /// Bytes a running Substitute or Download has fetched; `None` otherwise.
+    pub download_progress: Option<DownloadProgress>,
+}
+
+/// A finished anchor's last report outlives it by up to the TTL; it is not shown.
+fn running_download(
+    progress: &Latest<DerivationBuildId, DownloadProgress>,
+    anchor: DerivationBuildId,
+    status: gradient_entity::build::BuildStatus,
+    now: Instant,
+) -> Option<DownloadProgress> {
+    (status == gradient_entity::build::BuildStatus::Building)
+        .then(|| progress.get(&anchor, now))
+        .flatten()
 }
 
 pub async fn get_build(
@@ -97,7 +113,40 @@ pub async fn get_build(
         prioritized: anchor.prioritized,
         created_at: build_job.created_at,
         updated_at: anchor.updated_at,
+        download_progress: running_download(
+            &state.download_progress,
+            anchor.id,
+            anchor.status,
+            Instant::now(),
+        ),
     };
 
     Ok(ok_json(build_with_outputs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::build::BuildStatus;
+
+    #[test]
+    fn only_a_building_anchor_shows_its_download() {
+        let latest = Latest::new(std::time::Duration::from_secs(10));
+        let anchor = DerivationBuildId::now_v7();
+        let now = Instant::now();
+        let progress = DownloadProgress {
+            downloaded: 1,
+            total: Some(2),
+        };
+        latest.set(anchor, progress, now);
+
+        assert_eq!(
+            running_download(&latest, anchor, BuildStatus::Building, now),
+            Some(progress)
+        );
+        assert_eq!(
+            running_download(&latest, anchor, BuildStatus::Substituted, now),
+            None
+        );
+    }
 }

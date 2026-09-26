@@ -45,7 +45,11 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      returns its part ETags.
 /// v16: `CacheQuery.nar_sizes` entries are `Option<u64>`; an unknown size is never
 ///      granted a multipart upload.
-pub const PROTO_VERSION: u16 = 16;
+/// v17: `BuildProgress` reports the bytes a Substitute or Download has fetched.
+pub const PROTO_VERSION: u16 = 17;
+
+/// How often a worker reports a running download's progress.
+pub const BUILD_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

@@ -169,7 +169,8 @@ pub async fn evaluation_live_ws(
 }
 
 /// `GET /builds/{build}/live` - build status changes for the build's evaluation,
-/// which covers every node in its dependency graph.
+/// which covers every node in its dependency graph, and the build's own
+/// download progress.
 pub async fn build_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -179,6 +180,7 @@ pub async fn build_live_ws(
 ) -> WebResult<Response> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let eval_id = ctx.build_job.evaluation.into_inner();
+    let anchor = ctx.anchor.id.into_inner();
     let rx = state.board_events.subscribe();
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
@@ -187,11 +189,20 @@ pub async fn build_live_ws(
             .spawn(live_stream(
                 socket,
                 rx,
-                move |ev| eval_frame(ev, eval_id),
+                move |ev| build_frame(ev, eval_id, anchor),
                 cancel,
             ))
             .await;
     }))
+}
+
+fn build_frame(ev: &BoardEvent, eval_id: Uuid, anchor: Uuid) -> Option<String> {
+    match ev {
+        BoardEvent::BuildProgress {
+            derivation_build, ..
+        } if *derivation_build == anchor => frame(ev),
+        _ => eval_frame(ev, eval_id),
+    }
 }
 
 fn eval_frame(ev: &BoardEvent, eval_id: Uuid) -> Option<String> {
@@ -318,6 +329,39 @@ mod tests {
                 &mut HashSet::new()
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn build_channel_adds_only_its_own_download_progress() {
+        let eval = Uuid::from_u128(1);
+        let anchor = Uuid::from_u128(2);
+        let download = |derivation_build| BoardEvent::BuildProgress {
+            derivation_build,
+            progress: DownloadProgress {
+                downloaded: 1,
+                total: Some(4),
+            },
+        };
+
+        assert!(build_frame(&download(anchor), eval, anchor).is_some());
+        assert!(build_frame(&download(Uuid::from_u128(3)), eval, anchor).is_none());
+        assert!(build_frame(&build_changed(eval), eval, anchor).is_some());
+        assert!(eval_frame(&download(anchor), eval).is_none());
+    }
+
+    #[test]
+    fn build_progress_serializes_its_numbers_flat() {
+        let ev = BoardEvent::BuildProgress {
+            derivation_build: Uuid::nil(),
+            progress: DownloadProgress {
+                downloaded: 1,
+                total: None,
+            },
+        };
+        assert_eq!(
+            frame(&ev).unwrap(),
+            r#"{"type":"build_progress","derivation_build":"00000000-0000-0000-0000-000000000000","downloaded":1,"total":null}"#
         );
     }
 

@@ -124,6 +124,18 @@ pub enum ClientMessage {
     /// Server stops assigning new jobs to this peer.
     Draining,
 
+    /// Bytes fetched so far for a Substitute or Download build, sent at most
+    /// once per [`crate::messages::BUILD_PROGRESS_INTERVAL`] and once at the end.
+    /// Fire-and-forget; `total` is `None` when the source announced no size.
+    BuildProgress {
+        job_id: String,
+        /// The `dispatch` the `AssignJob` carried.
+        dispatch: String,
+        build_id: String,
+        downloaded: u64,
+        total: Option<u64>,
+    },
+
     /// Build log lines from an in-flight task.  Fire-and-forget.
     LogChunk {
         job_id: String,
@@ -322,6 +334,7 @@ impl ClientMessage {
             ClientMessage::JobCompleted { .. } => "JobCompleted",
             ClientMessage::JobFailed { .. } => "JobFailed",
             ClientMessage::Draining => "Draining",
+            ClientMessage::BuildProgress { .. } => "BuildProgress",
             ClientMessage::LogChunk { .. } => "LogChunk",
             ClientMessage::NarRequest { .. } => "NarRequest",
             ClientMessage::NarStreamHeader { .. } => "NarStreamHeader",

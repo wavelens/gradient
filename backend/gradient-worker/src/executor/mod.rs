@@ -575,12 +575,14 @@ impl JobExecutor {
                     gc_handles.push(self.gcroots.add(path).await);
                 }
 
-                let fetched =
-                    substitute::fetch_outputs(&mut substitute::JobUpdaterIo(updater), &missing)
-                        .await
-                        .map_err(|e| {
-                            failure::classify_substitute_failure(&build_task.build_id, e)
-                        })?;
+                let mut progress = updater.download_progress(build_task.build_id.clone());
+                let fetched = substitute::fetch_outputs(
+                    &mut substitute::JobUpdaterIo(updater),
+                    &missing,
+                    &mut progress,
+                )
+                .await
+                .map_err(|e| failure::classify_substitute_failure(&build_task.build_id, e))?;
 
                 let mut reported = realised_outputs(&realised).await;
                 reported.extend(fetched.iter().map(|f| {
@@ -626,9 +628,14 @@ impl JobExecutor {
             if build_task.kind == BuildSpecKind::Download {
                 let (store_path, raw) = {
                     let _phase = updater.phase(JobPhase::Download);
-                    download::download_output(&mut download::JobUpdaterIo(updater), build_task)
-                        .await
-                        .map_err(|e| failure::classify_download_failure(&build_task.build_id, e))?
+                    let mut progress = updater.download_progress(build_task.build_id.clone());
+                    download::download_output(
+                        &mut download::JobUpdaterIo(updater),
+                        build_task,
+                        &mut progress,
+                    )
+                    .await
+                    .map_err(|e| failure::classify_download_failure(&build_task.build_id, e))?
                 };
                 let reported = vec![BuildOutput {
                     name: "out".to_owned(),

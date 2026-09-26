@@ -20,6 +20,7 @@ use crate::proto::nar::sha256_nix32;
 use crate::proto::prefetch::{
     CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream, download_one_presigned,
 };
+use crate::proto::progress::{Progress, ProgressSink};
 
 #[derive(Debug)]
 pub(crate) struct RawNar {
@@ -42,68 +43,112 @@ pub(crate) struct FetchedOutput {
 pub(crate) trait UpstreamIo {
     async fn have(&mut self, paths: Vec<String>) -> Result<HashSet<String>>;
     async fn locate(&mut self, path: &str) -> Result<Option<CachedPath>>;
-    async fn download(&mut self, upstream: &CachedPath) -> Result<Option<Vec<u8>>>;
+    async fn download(
+        &mut self,
+        upstream: &CachedPath,
+        progress: &mut Progress<impl ProgressSink>,
+    ) -> Result<Option<Vec<u8>>>;
 }
 
 pub(crate) async fn fetch_outputs(
     io: &mut impl UpstreamIo,
     outputs: &[(String, String)],
+    progress: &mut Progress<impl ProgressSink>,
 ) -> Result<Vec<FetchedOutput>> {
-    let have = io
-        .have(outputs.iter().map(|(_, path)| path.clone()).collect())
-        .await?;
-    let mut fetched = Vec::with_capacity(outputs.len());
-    for (name, path) in outputs {
-        if have.contains(path) {
-            fetched.push(FetchedOutput {
-                name: name.clone(),
-                store_path: path.clone(),
-                nar: None,
-            });
-            continue;
-        }
+    let located = locate_missing(io, outputs).await?;
+    progress.set_total(download_size(
+        located.iter().filter_map(|(_, _, u)| u.as_ref()),
+    ));
 
-        let upstream = io
-            .locate(path)
-            .await?
-            .ok_or_else(|| anyhow::Error::new(SubstituteNotOnUpstream(path.clone())))?;
-        let compressed = io
-            .download(&upstream)
-            .await?
-            .ok_or_else(|| anyhow::Error::new(MissingInputs(vec![path.clone()])))?;
-        let nar = decompress(
-            &compressed,
-            resolve_compression(&compressed, upstream.url.as_deref()),
-        )
-        .with_context(|| format!("decompress the upstream NAR of {path}"))?;
-        if upstream
-            .nar_hash
-            .as_deref()
-            .is_some_and(|claimed| normalize_nar_hash(claimed) != sha256_nix32(&nar))
-        {
-            return Err(anyhow::Error::new(CorruptCachedNar(path.clone())));
-        }
-
-        let references = upstream
-            .references
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| r.trim_start_matches("/nix/store/").to_owned())
-            .collect();
+    let mut fetched = Vec::with_capacity(located.len());
+    for (name, store_path, upstream) in located {
+        let nar = match upstream {
+            Some(upstream) => Some(fetch_one(io, &upstream, progress).await?),
+            None => None,
+        };
         fetched.push(FetchedOutput {
-            name: name.clone(),
-            store_path: path.clone(),
-            nar: Some(RawNar {
-                nar,
-                references,
-                deriver: upstream.deriver.clone(),
-                ca: upstream.ca.clone(),
-            }),
+            name,
+            store_path,
+            nar,
         });
+    }
+    if fetched.iter().any(|f| f.nar.is_some()) {
+        progress.finish().await;
     }
 
     Ok(fetched)
+}
+
+/// Every output paired with the upstream entry to fetch it from; `None` for an
+/// output our cache already holds. Fails before any byte moves when one is on
+/// no upstream.
+async fn locate_missing(
+    io: &mut impl UpstreamIo,
+    outputs: &[(String, String)],
+) -> Result<Vec<(String, String, Option<CachedPath>)>> {
+    let have = io
+        .have(outputs.iter().map(|(_, path)| path.clone()).collect())
+        .await?;
+    let mut located = Vec::with_capacity(outputs.len());
+    for (name, path) in outputs {
+        let upstream = if have.contains(path) {
+            None
+        } else {
+            Some(
+                io.locate(path)
+                    .await?
+                    .ok_or_else(|| anyhow::Error::new(SubstituteNotOnUpstream(path.clone())))?,
+            )
+        };
+        located.push((name.clone(), path.clone(), upstream));
+    }
+
+    Ok(located)
+}
+
+/// The compressed bytes to move, known only when every upstream declared its size.
+fn download_size<'a>(upstreams: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
+    upstreams.map(|u| u.file_size).sum()
+}
+
+async fn fetch_one(
+    io: &mut impl UpstreamIo,
+    upstream: &CachedPath,
+    progress: &mut Progress<impl ProgressSink>,
+) -> Result<RawNar> {
+    let path = &upstream.path;
+    let compressed = io
+        .download(upstream, progress)
+        .await?
+        .ok_or_else(|| anyhow::Error::new(MissingInputs(vec![path.clone()])))?;
+    progress.transfer_done();
+    let nar = decompress(
+        &compressed,
+        resolve_compression(&compressed, upstream.url.as_deref()),
+    )
+    .with_context(|| format!("decompress the upstream NAR of {path}"))?;
+    if upstream
+        .nar_hash
+        .as_deref()
+        .is_some_and(|claimed| normalize_nar_hash(claimed) != sha256_nix32(&nar))
+    {
+        return Err(anyhow::Error::new(CorruptCachedNar(path.clone())));
+    }
+
+    let references = upstream
+        .references
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.trim_start_matches("/nix/store/").to_owned())
+        .collect();
+
+    Ok(RawNar {
+        nar,
+        references,
+        deriver: upstream.deriver.clone(),
+        ca: upstream.ca.clone(),
+    })
 }
 
 pub(crate) struct JobUpdaterIo<'a>(pub &'a mut JobUpdater);
@@ -125,10 +170,15 @@ impl UpstreamIo for JobUpdaterIo<'_> {
         self.0.query_upstream(path.to_owned()).await
     }
 
-    async fn download(&mut self, upstream: &CachedPath) -> Result<Option<Vec<u8>>> {
+    async fn download(
+        &mut self,
+        upstream: &CachedPath,
+        progress: &mut Progress<impl ProgressSink>,
+    ) -> Result<Option<Vec<u8>>> {
         let _fetch = self.0.phase(JobPhase::SubstituteFetch);
         let (_, body) =
-            download_one_presigned(crate::http::download_client(), upstream.clone()).await?;
+            download_one_presigned(crate::http::download_client(), upstream.clone(), progress)
+                .await?;
         Ok(body.map(|(bytes, _)| bytes))
     }
 }
@@ -136,6 +186,7 @@ impl UpstreamIo for JobUpdaterIo<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::progress::Recorded;
     use std::collections::BTreeMap;
 
     struct Fake {
@@ -157,9 +208,17 @@ mod tests {
             Ok(self.upstream.get(path).cloned())
         }
 
-        async fn download(&mut self, upstream: &CachedPath) -> Result<Option<Vec<u8>>> {
+        async fn download(
+            &mut self,
+            upstream: &CachedPath,
+            progress: &mut Progress<impl ProgressSink>,
+        ) -> Result<Option<Vec<u8>>> {
             self.downloads.push(upstream.path.clone());
-            Ok(self.bodies.get(&upstream.path).cloned())
+            let body = self.bodies.get(&upstream.path).cloned();
+            if let Some(body) = &body {
+                progress.at(body.len() as u64).await;
+            }
+            Ok(body)
         }
     }
 
@@ -203,12 +262,53 @@ mod tests {
         let mut io = fake(OUT, &sha256_nix32(&nar()), &[]);
         io.have.insert(OUT.to_owned());
 
-        let fetched = fetch_outputs(&mut io, &[("out".to_owned(), OUT.to_owned())])
-            .await
-            .unwrap();
+        let fetched = fetch_outputs(
+            &mut io,
+            &[("out".to_owned(), OUT.to_owned())],
+            &mut Progress::silent(),
+        )
+        .await
+        .unwrap();
 
         assert!(fetched[0].nar.is_none());
         assert!(io.downloads.is_empty());
+    }
+
+    #[tokio::test]
+    async fn progress_counts_only_what_is_fetched_against_the_declared_sizes() {
+        const CACHED: &str = "/nix/store/cccccccccccccccccccccccccccccccc-dev";
+        let mut io = fake(OUT, &sha256_nix32(&nar()), &[]);
+        io.have.insert(CACHED.to_owned());
+        let body_len = io.bodies[OUT].len() as u64;
+        io.upstream.get_mut(OUT).unwrap().file_size = Some(body_len);
+        let mut sent = Recorded::default();
+
+        fetch_outputs(
+            &mut io,
+            &[
+                ("out".to_owned(), OUT.to_owned()),
+                ("dev".to_owned(), CACHED.to_owned()),
+            ],
+            &mut Progress::new(&mut sent),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(sent.0, vec![(body_len, Some(body_len))]);
+    }
+
+    #[test]
+    fn one_undeclared_size_leaves_the_total_unknown() {
+        let sized = |size| CachedPath {
+            file_size: size,
+            ..upstream(OUT, "", &[])
+        };
+
+        assert_eq!(
+            download_size([sized(Some(3)), sized(Some(4))].iter()),
+            Some(7)
+        );
+        assert_eq!(download_size([sized(Some(3)), sized(None)].iter()), None);
     }
 
     #[tokio::test]
@@ -216,9 +316,13 @@ mod tests {
         let mut io = fake(OUT, &sha256_nix32(&nar()), &[]);
         io.upstream.clear();
 
-        let err = fetch_outputs(&mut io, &[("out".to_owned(), OUT.to_owned())])
-            .await
-            .unwrap_err();
+        let err = fetch_outputs(
+            &mut io,
+            &[("out".to_owned(), OUT.to_owned())],
+            &mut Progress::silent(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(
             err.downcast_ref::<SubstituteNotOnUpstream>().is_some(),
@@ -231,9 +335,13 @@ mod tests {
         let mut io = fake(OUT, &sha256_nix32(&nar()), &[]);
         io.bodies.clear();
 
-        let err = fetch_outputs(&mut io, &[("out".to_owned(), OUT.to_owned())])
-            .await
-            .unwrap_err();
+        let err = fetch_outputs(
+            &mut io,
+            &[("out".to_owned(), OUT.to_owned())],
+            &mut Progress::silent(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.downcast_ref::<MissingInputs>().is_some(), "{err}");
     }
@@ -246,9 +354,13 @@ mod tests {
             &[],
         );
 
-        let err = fetch_outputs(&mut io, &[("out".to_owned(), OUT.to_owned())])
-            .await
-            .unwrap_err();
+        let err = fetch_outputs(
+            &mut io,
+            &[("out".to_owned(), OUT.to_owned())],
+            &mut Progress::silent(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.downcast_ref::<CorruptCachedNar>().is_some(), "{err}");
     }
@@ -264,9 +376,13 @@ mod tests {
             &[dep, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-bare"],
         );
 
-        let fetched = fetch_outputs(&mut io, &[("out".to_owned(), OUT.to_owned())])
-            .await
-            .unwrap();
+        let fetched = fetch_outputs(
+            &mut io,
+            &[("out".to_owned(), OUT.to_owned())],
+            &mut Progress::silent(),
+        )
+        .await
+        .unwrap();
 
         let raw = fetched[0].nar.as_ref().unwrap();
         assert_eq!(

@@ -9,7 +9,7 @@
 //! (evaluation/build/cache changes) can publish without a cyclic crate
 //! dependency. The web layer filters the stream per subscribed resource.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize)]
@@ -58,7 +58,21 @@ pub enum BoardEvent {
         task: Option<Uuid>,
         evaluation_id: Uuid,
     },
+    /// Bytes a worker has fetched so far for a Substitute or Download anchor.
+    /// Carries its numbers, so subscribers render it without a refetch.
+    BuildProgress {
+        derivation_build: Uuid,
+        #[serde(flatten)]
+        progress: DownloadProgress,
+    },
     /// Cache contents or stats changed (build cached, NAR deleted, GC). A
     /// content-free ping: subscribers refetch their own scope-filtered view.
     CacheChanged,
+}
+
+/// `total` is `None` when the source announced no size up front.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownloadProgress {
+    pub downloaded: u64,
+    pub total: Option<u64>,
 }

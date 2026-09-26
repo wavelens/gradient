@@ -22,6 +22,7 @@ use crate::proto::compression::{
 };
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{MissingInputs, download_one_presigned};
+use crate::proto::progress::{Progress, ProgressSink, read_body};
 
 #[derive(Debug)]
 pub(crate) struct FixedOutputMismatch(pub String);
@@ -130,25 +131,31 @@ pub(crate) fn fetch_spec(drv: &gradient_db::Derivation, drv_path: &str) -> Resul
 
 pub(crate) trait DownloadIo {
     async fn drv(&mut self, drv_path: &str) -> Result<gradient_db::Derivation>;
-    async fn get(&mut self, url: &str) -> Result<Option<Vec<u8>>>;
+    async fn get(
+        &mut self,
+        url: &str,
+        progress: &mut Progress<impl ProgressSink>,
+    ) -> Result<Option<Vec<u8>>>;
 }
 
 pub(crate) async fn download_output(
     io: &mut impl DownloadIo,
     task: &BuildSpec,
+    progress: &mut Progress<impl ProgressSink>,
 ) -> Result<(String, RawNar)> {
     let drv = io.drv(&task.drv_path).await?;
-    download_with(io, &drv, task).await
+    download_with(io, &drv, task, progress).await
 }
 
 async fn download_with(
     io: &mut impl DownloadIo,
     drv: &gradient_db::Derivation,
     task: &BuildSpec,
+    progress: &mut Progress<impl ProgressSink>,
 ) -> Result<(String, RawNar)> {
     let spec = fetch_spec(drv, &task.drv_path)?;
     let body = io
-        .get(&spec.url)
+        .get(&spec.url, progress)
         .await?
         .ok_or_else(|| anyhow::Error::new(UnsupportedFetch(format!("{} is gone", spec.url))))?;
     let (nar, flat) = if spec.unpack {
@@ -198,10 +205,14 @@ impl DownloadIo for JobUpdaterIo<'_> {
             .find(|cp| cp.cached)
             .ok_or_else(|| anyhow::Error::new(MissingInputs(vec![drv_path.to_owned()])))?;
         let compressed = if entry.url.is_some() {
-            download_one_presigned(crate::http::download_client(), entry.clone())
-                .await?
-                .1
-                .map(|(bytes, _)| bytes)
+            download_one_presigned(
+                crate::http::download_client(),
+                entry.clone(),
+                &mut Progress::silent(),
+            )
+            .await?
+            .1
+            .map(|(bytes, _)| bytes)
         } else {
             // One NAR over the stream, read the way `prefetch::fetch_by_request` reads it.
             match self
@@ -223,12 +234,21 @@ impl DownloadIo for JobUpdaterIo<'_> {
         gradient_db::parse_drv(&extract_single_file_from_nar(&nar).await?)
     }
 
-    async fn get(&mut self, url: &str) -> Result<Option<Vec<u8>>> {
+    async fn get(
+        &mut self,
+        url: &str,
+        progress: &mut Progress<impl ProgressSink>,
+    ) -> Result<Option<Vec<u8>>> {
         let response = crate::http::download_client().get(url).send().await?;
         if matches!(response.status().as_u16(), 404 | 410) {
             return Ok(None);
         }
-        Ok(Some(response.error_for_status()?.bytes().await?.to_vec()))
+        let response = response.error_for_status()?;
+        let size = response.content_length();
+        progress.set_total(size);
+        let body = read_body(response, size, progress).await?;
+        progress.finish().await;
+        Ok(Some(body))
     }
 }
 
@@ -288,7 +308,11 @@ mod tests {
             gradient_db::parse_drv(self.drvs.get(drv_path).expect("drv in cache"))
         }
 
-        async fn get(&mut self, url: &str) -> Result<Option<Vec<u8>>> {
+        async fn get(
+            &mut self,
+            url: &str,
+            _: &mut Progress<impl ProgressSink>,
+        ) -> Result<Option<Vec<u8>>> {
             Ok(self.bodies.get(url).cloned())
         }
     }
@@ -368,7 +392,9 @@ mod tests {
         ]);
         let mut io = body("https://example.org/hello.txt", b"hi\n");
 
-        let (path, raw) = download_with(&mut io, &d, &task()).await.unwrap();
+        let (path, raw) = download_with(&mut io, &d, &task(), &mut Progress::silent())
+            .await
+            .unwrap();
 
         assert_eq!(path, OUT);
         assert_eq!(raw.nar, single_file_nar(b"hi\n", false));
@@ -390,7 +416,9 @@ mod tests {
         ]);
         let mut io = body("https://example.org/hello.txt", b"hi\n");
 
-        let err = download_with(&mut io, &d, &task()).await.unwrap_err();
+        let err = download_with(&mut io, &d, &task(), &mut Progress::silent())
+            .await
+            .unwrap_err();
 
         assert!(err.downcast_ref::<FixedOutputMismatch>().is_some(), "{err}");
     }
@@ -409,7 +437,9 @@ mod tests {
         ]);
         let mut io = body("https://example.org/hello.nar.xz", &xz_encode(&nar));
 
-        let (_, raw) = download_with(&mut io, &d, &task()).await.unwrap();
+        let (_, raw) = download_with(&mut io, &d, &task(), &mut Progress::silent())
+            .await
+            .unwrap();
 
         assert_eq!(raw.nar, nar);
         assert!(raw.ca.as_deref().unwrap().starts_with("fixed:r:sha256:"));

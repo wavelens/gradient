@@ -338,7 +338,7 @@ channel only forwards events for its resource (authorized at connect).
 | `/board/live` | `queue_depth`, `job_dispatched`, `worker_connected`, `worker_disconnected` (scope-masked) |
 | `/tasks/{project}/{task}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the task |
 | `/evals/{evaluation}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the evaluation |
-| `/builds/{build}/live` | `build_status_changed` for the build's evaluation (its dependency graph) |
+| `/builds/{build}/live` | `build_status_changed` for the build's evaluation (its dependency graph), `build_progress` for the build itself |
 | `/board/cache/live` | `cache_changed` (content-free ping; refetch `/board/cache`) |
 
 Frames are JSON with a `type` field, e.g.
@@ -347,6 +347,12 @@ Frames are JSON with a `type` field, e.g.
 is a content-free ping emitted as builds and entry-points are persisted during
 the evaluation phase - before any build changes status - so the build and
 dependency totals grow live instead of only appearing once evaluation finishes.
+`build_progress` (`{"type":"build_progress","derivation_build":"…","downloaded":1048576,"total":4194304}`)
+carries the bytes a running Substitute or Download has fetched, at most once a
+second; `total` is `null` when the source announced no size. It lives in server
+memory only: `GET /builds/{id}` returns the latest value as `download_progress`
+while the build is `Building`, and nothing after a server restart until the
+worker's next report.
 
 ### Nix Binary Cache (root, no `/api/v1` prefix)
 

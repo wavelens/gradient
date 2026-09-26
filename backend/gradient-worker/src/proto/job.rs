@@ -31,6 +31,7 @@ use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 use crate::proto::prefetch::MissingInputs;
+use crate::proto::progress::{BuildProgressSink, Progress};
 use gradient_proto::traits::JobReporter;
 
 /// A pending `CacheQuery`: its reply channel plus the owning `job_id` so a
@@ -530,6 +531,15 @@ impl JobUpdater {
             substituted,
         })
         .await
+    }
+
+    pub(crate) fn download_progress(&self, build_id: String) -> Progress<BuildProgressSink> {
+        Progress::new(BuildProgressSink {
+            writer: self.writer.clone(),
+            job_id: self.job_id.clone(),
+            dispatch: self.dispatch.clone(),
+            build_id,
+        })
     }
 
     pub async fn report_compressing(&self) -> Result<()> {

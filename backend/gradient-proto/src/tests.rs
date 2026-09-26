@@ -112,6 +112,20 @@ fn assign_job_response_reject_roundtrip() {
 }
 
 #[test]
+fn build_progress_roundtrip() {
+    let original = ClientMessage::BuildProgress {
+        job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000001".into(),
+        build_id: "[uuid6]".into(),
+        downloaded: 3 << 30,
+        total: None,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
 fn server_draining_roundtrip() {
     let original = ServerMessage::Draining;
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();

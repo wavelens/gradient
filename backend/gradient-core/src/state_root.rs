@@ -26,8 +26,11 @@ use gradient_graph::Graph;
 use gradient_notify::EmailSender;
 use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
-use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
+use gradient_types::{
+    BoardEvent, DerivationBuildId, DownloadProgress, RuntimeConfig, SecretString,
+};
 use gradient_util::debounce::Debounce;
+use gradient_util::latest::Latest;
 use gradient_util::shutdown::Shutdown;
 
 #[derive(Debug)]
@@ -81,6 +84,8 @@ pub struct AppState {
     pub scim_group_roles: Arc<ScimGroupRoles>,
     /// Broadcast of live board events to WebSocket subscribers.
     pub board_events: broadcast::Sender<BoardEvent>,
+    /// What each running Substitute or Download has fetched, held in memory only.
+    pub download_progress: Arc<Latest<DerivationBuildId, DownloadProgress>>,
     /// Nudged after every committed write that owes an effect; the effects
     /// actor waits on it so a delivery does not sit out the 30 s tick.
     pub outbox_wake: Arc<Notify>,
@@ -104,6 +109,13 @@ pub const LAST_USED_STAMP_INTERVAL: Duration = Duration::from_secs(60);
 
 pub fn last_used_stamps() -> Debounce<Uuid> {
     Debounce::new(LAST_USED_STAMP_INTERVAL)
+}
+
+/// A download whose worker reported nothing for this long has stopped.
+pub const DOWNLOAD_PROGRESS_TTL: Duration = Duration::from_secs(10);
+
+pub fn download_progress() -> Arc<Latest<DerivationBuildId, DownloadProgress>> {
+    Arc::new(Latest::new(DOWNLOAD_PROGRESS_TTL))
 }
 
 impl AppState {

@@ -1321,6 +1321,7 @@ fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
         BoardEvent::EvaluationStatusChanged { .. }
         | BoardEvent::BuildStatusChanged { .. }
         | BoardEvent::EvaluationProgress { .. }
+        | BoardEvent::BuildProgress { .. }
         | BoardEvent::CacheChanged => false,
     };
 

@@ -16,4 +16,5 @@ pub(crate) mod nar_multipart;
 pub mod nar_recv;
 pub(crate) mod object_put;
 pub(crate) mod prefetch;
+pub(crate) mod progress;
 pub mod scorer;

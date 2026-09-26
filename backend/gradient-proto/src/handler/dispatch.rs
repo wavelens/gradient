@@ -8,11 +8,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_sources::strip_nix_store_prefix;
-use gradient_types::ids::{DispatchedJobId, ProjectId};
+use gradient_types::ids::{DerivationBuildId, DispatchedJobId, ProjectId};
+use gradient_types::{BoardEvent, DownloadProgress};
 use tokio::sync::Semaphore;
 use tracing::{debug, info, trace, warn};
 
@@ -226,6 +228,18 @@ impl<'a> DispatchContext<'a> {
                     self.job_events
                         .push(JobEvent::Update { job_id, update })
                         .await;
+                }
+                true
+            }
+            ClientMessage::BuildProgress {
+                job_id,
+                dispatch,
+                build_id,
+                downloaded,
+                total,
+            } => {
+                if self.owns(&job_id, &dispatch) {
+                    self.on_build_progress(&build_id, DownloadProgress { downloaded, total });
                 }
                 true
             }
@@ -750,6 +764,20 @@ impl<'a> DispatchContext<'a> {
         }
     }
 
+    fn on_build_progress(&self, build_id: &str, progress: DownloadProgress) {
+        let Ok(anchor) = build_id.parse::<DerivationBuildId>() else {
+            warn!(peer_id = %self.peer_id, %build_id, "invalid derivation_build in BuildProgress");
+            return;
+        };
+        self.state
+            .download_progress
+            .set(anchor, progress, Instant::now());
+        let _ = self.state.board_events.send(BoardEvent::BuildProgress {
+            derivation_build: anchor.into_inner(),
+            progress,
+        });
+    }
+
     // ── NAR transfer ──────────────────────────────────────────────────────────
 
     async fn on_nar_request(&mut self, job_id: String, paths: Vec<String>) {
@@ -1128,6 +1156,63 @@ mod assignment_response_tests {
         ctx.on_assign_job_response("j1".into(), true, None).await;
 
         assert!(active.contains_key("j1"));
+        assert!(log_db.into_transaction_log().is_empty());
+    }
+
+    /// Progress never touches the database: it is held in memory and broadcast.
+    #[tokio::test]
+    async fn a_progress_report_is_held_in_memory_and_broadcast() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let log_db = db.clone();
+        let state = test_state(db);
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        let writer = detached_writer();
+        let semaphore = Arc::new(Semaphore::new(1));
+        let job_events = JobEvents::spawn(
+            &state.shutdown,
+            "w1",
+            SchedulerJobEvents {
+                shutdown: state.shutdown.clone(),
+                scheduler: Arc::clone(&scheduler),
+                writer: writer.clone(),
+                peer_id: "w1".into(),
+            },
+        );
+        let mut active = HashMap::new();
+        let mut events = state.board_events.subscribe();
+        let anchor = DerivationBuildId::now_v7();
+        let progress = DownloadProgress {
+            downloaded: 512,
+            total: Some(2048),
+        };
+
+        let ctx = DispatchContext {
+            writer: &writer,
+            state: &state,
+            scheduler: &scheduler,
+            peer_id: "w1",
+            nar_serve_semaphore: &semaphore,
+            active: &mut active,
+            job_events: &job_events,
+        };
+        ctx.on_build_progress(&anchor.to_string(), progress);
+        ctx.on_build_progress("not-a-uuid", progress);
+
+        assert_eq!(
+            state.download_progress.get(&anchor, Instant::now()),
+            Some(progress)
+        );
+        match events.try_recv() {
+            Ok(BoardEvent::BuildProgress {
+                derivation_build,
+                progress: sent,
+            }) => {
+                assert_eq!(derivation_build, anchor.into_inner());
+                assert_eq!(sent, progress);
+            }
+            other => panic!("expected BuildProgress, got {other:?}"),
+        }
+        assert!(events.try_recv().is_err());
         assert!(log_db.into_transaction_log().is_empty());
     }
 
