@@ -61,8 +61,7 @@ async fn expand_event(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
         return Ok(());
     };
     let envelope = Envelope::now(event);
-    fan_out_actions(ctx, &envelope, &row.key).await?;
-    fan_out_webhooks(ctx, &envelope, &row.key).await?;
+    fan_out(ctx, &envelope, &row.key).await?;
     if let Event::EvaluationReported(reported) = &envelope.event {
         react_on_terminal(ctx, reported).await;
     }
@@ -77,62 +76,23 @@ pub(crate) fn action_delivery_payload(action: TaskActionId, envelope: &Envelope)
     })
 }
 
-/// One delivery row per matching action, in the transaction that settles the
-/// event: either every delivery this event owes is queued or none is, so a
-/// crash mid-expansion replays the whole expansion.
-async fn fan_out_actions(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<()> {
-    let Some(task) = envelope.event.owner().task else {
-        return Ok(());
-    };
-    let ci = ctx.ci();
-    let actions = active_actions_for_task(&ci, task)
-        .await
-        .context("loading the task's actions")?;
+/// Every delivery row this event owes: one per matching action, one per routed webhook.
+fn plan_deliveries(
+    envelope: &Envelope,
+    actions: &[MTaskAction],
+    hooks: &[MWebhook],
+    parent: &str,
+) -> Vec<(OutboxKind, String, JsonValue)> {
     let name = envelope.event.name();
-    let content = envelope.event.content();
-
-    let txn = ci
-        .db
-        .worker_db
-        .begin()
-        .await
-        .context("begin the action expansion")?;
-    for action in matching_actions(actions, &name, &content) {
-        enqueue(
-            &txn,
+    let to_actions = actions.iter().map(|action| {
+        (
             OutboxKind::ActionDelivery,
             format!("{}:{name}:{parent}", action.id),
             action_delivery_payload(action.id, envelope),
         )
-        .await
-        .context("enqueue an action delivery")?;
-    }
-    txn.commit().await.context("commit the action expansion")?;
-
-    Ok(())
-}
-
-async fn fan_out_webhooks(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<()> {
-    let ci = ctx.ci();
-    let owner = envelope.event.owner();
-    let name = envelope.event.name();
-    let personal = envelope.event.personal();
-    let hooks = gradient_ci::webhooks::candidates(&ci.db.worker_db, &owner)
-        .await
-        .context("loading the event's webhooks")?;
-
-    let txn = ci
-        .db
-        .worker_db
-        .begin()
-        .await
-        .context("begin the webhook expansion")?;
-    for hook in hooks
-        .iter()
-        .filter(|h| gradient_ci::webhooks::routes_to(h, &owner, &name, personal))
-    {
-        enqueue(
-            &txn,
+    });
+    let to_hooks = hooks.iter().map(|hook| {
+        (
             OutboxKind::WebhookDelivery,
             format!("{}:{name}:{parent}", hook.id),
             serde_json::json!({
@@ -141,10 +101,51 @@ async fn fan_out_webhooks(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -
                 "envelope": envelope.to_json(),
             }),
         )
+    });
+    to_actions.chain(to_hooks).collect()
+}
+
+/// The whole expansion in one transaction: either every delivery this event
+/// owes is queued or none is, so a retried expansion never repeats a call.
+async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<()> {
+    let ci = ctx.ci();
+    let owner = envelope.event.owner();
+    let name = envelope.event.name();
+
+    let actions = match owner.task {
+        Some(task) => {
+            let all = active_actions_for_task(&ci, task)
+                .await
+                .context("loading the task's actions")?;
+            matching_actions(all, &name, &envelope.event.content())
+        }
+        None => Vec::new(),
+    };
+    let hooks: Vec<MWebhook> = gradient_ci::webhooks::candidates(&ci.db.worker_db, &owner)
         .await
-        .context("enqueue a webhook delivery")?;
+        .context("loading the event's webhooks")?
+        .into_iter()
+        .filter(|h| gradient_ci::webhooks::routes_to(h, &owner, &name, envelope.event.personal()))
+        .collect();
+
+    let plan = plan_deliveries(envelope, &actions, &hooks, parent);
+    if plan.is_empty() {
+        return Ok(());
     }
-    txn.commit().await.context("commit the webhook expansion")?;
+    let txn = ci
+        .db
+        .worker_db
+        .begin()
+        .await
+        .context("begin the delivery expansion")?;
+    for (kind, key, payload) in plan {
+        enqueue(&txn, kind, key, payload)
+            .await
+            .context("enqueue a delivery")?;
+    }
+    txn.commit()
+        .await
+        .context("commit the delivery expansion")?;
 
     Ok(())
 }
@@ -294,6 +295,35 @@ mod tests {
             .into_connection();
         let r = row(serde_json::json!({ "webhook": uuid::Uuid::now_v7() }));
         assert!(live_webhook(&db, &r).await.unwrap().is_none());
+    }
+
+    #[test]
+    fn one_plan_holds_every_action_and_webhook_delivery() {
+        let env = Envelope::now(
+            gradient_types::events::build::Reported {
+                status: 3,
+                ..Default::default()
+            }
+            .into(),
+        );
+        let actions = vec![MTaskAction {
+            id: TaskActionId::now_v7(),
+            ..Default::default()
+        }];
+        let hooks = vec![MWebhook {
+            id: WebhookId::now_v7(),
+            ..Default::default()
+        }];
+        let plan = plan_deliveries(&env, &actions, &hooks, "parent");
+        let kinds: Vec<_> = plan.iter().map(|(kind, _, _)| *kind).collect();
+        assert_eq!(
+            kinds,
+            vec![OutboxKind::ActionDelivery, OutboxKind::WebhookDelivery]
+        );
+        assert!(
+            plan.iter()
+                .all(|(_, key, _)| key.ends_with(":build.completed:parent"))
+        );
     }
 
     #[test]
