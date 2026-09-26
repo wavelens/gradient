@@ -15,6 +15,7 @@ pub mod manifest_state;
 pub mod reactions;
 pub mod reporting;
 pub mod trigger;
+pub mod webhooks;
 pub mod unpark;
 
 pub use self::abort::{AbortKind, abort_evaluation};

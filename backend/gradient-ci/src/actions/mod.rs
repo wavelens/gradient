@@ -38,7 +38,7 @@ pub(crate) struct ExecutorOk {
     pub(crate) response_body: Option<String>,
 }
 
-fn truncate(mut s: String, max: usize) -> String {
+pub(crate) fn truncate(mut s: String, max: usize) -> String {
     if s.len() > max {
         if let Some((idx, _)) = s.char_indices().take_while(|(i, _)| *i <= max).last() {
             s.truncate(idx);

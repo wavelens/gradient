@@ -19,9 +19,9 @@ use gradient_ci::reactions::react_to_source_comment_on_terminal;
 use gradient_db::outbox::{OutboxKind, OutboxRow, Outcome, enqueue};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
-use gradient_types::ids::{BuildAttemptId, TaskActionId};
+use gradient_types::ids::{BuildAttemptId, TaskActionId, WebhookId};
 use gradient_types::*;
-use sea_orm::{EntityTrait, TransactionTrait};
+use sea_orm::{ConnectionTrait, EntityTrait, TransactionTrait};
 use serde_json::Value as JsonValue;
 use tracing::warn;
 
@@ -112,12 +112,69 @@ async fn fan_out_actions(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) ->
     Ok(())
 }
 
-async fn fan_out_webhooks(_ctx: &EffectsCtx, _envelope: &Envelope, _parent: &str) -> Result<()> {
+async fn fan_out_webhooks(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<()> {
+    let ci = ctx.ci();
+    let owner = envelope.event.owner();
+    let name = envelope.event.name();
+    let personal = envelope.event.personal();
+    let hooks = gradient_ci::webhooks::candidates(&ci.db.worker_db, &owner)
+        .await
+        .context("loading the event's webhooks")?;
+
+    let txn = ci
+        .db
+        .worker_db
+        .begin()
+        .await
+        .context("begin the webhook expansion")?;
+    for hook in hooks
+        .iter()
+        .filter(|h| gradient_ci::webhooks::routes_to(h, &owner, &name, personal))
+    {
+        enqueue(
+            &txn,
+            OutboxKind::WebhookDelivery,
+            format!("{}:{name}:{parent}", hook.id),
+            serde_json::json!({
+                "webhook": hook.id,
+                "event": name,
+                "envelope": envelope.to_json(),
+            }),
+        )
+        .await
+        .context("enqueue a webhook delivery")?;
+    }
+    txn.commit().await.context("commit the webhook expansion")?;
+
     Ok(())
 }
 
-async fn deliver_webhook(_ctx: &EffectsCtx, _row: &OutboxRow) -> Result<()> {
-    Ok(())
+/// A webhook deleted or deactivated while the row waited is delivered-by-omission.
+async fn live_webhook<C: ConnectionTrait>(db: &C, row: &OutboxRow) -> Result<Option<MWebhook>> {
+    let id = WebhookId::new(uuid_field(row, "webhook")?);
+    let hook = EWebhook::find_by_id(id)
+        .one(db)
+        .await
+        .context("looking up the webhook of a delivery")?;
+    Ok(hook.filter(|h| h.active))
+}
+
+/// A non-2xx answer is logged on the delivery row and retried with backoff.
+async fn deliver_webhook(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
+    let ci = ctx.ci();
+    let Some(hook) = live_webhook(&ci.db.worker_db, row).await? else {
+        return Ok(());
+    };
+    let envelope = field(row, "envelope")?;
+    let delivery = gradient_ci::webhooks::deliver(&ci, &hook, envelope, row.id).await?;
+    if delivery.success {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "webhook answered {:?}: {}",
+        delivery.response_status,
+        delivery.error_message.unwrap_or_default()
+    ))
 }
 
 /// A terminal evaluation reacts on the comment that triggered it; a creation
@@ -212,6 +269,31 @@ mod tests {
                 .to_string()
                 .contains("no event")
         );
+    }
+
+    #[tokio::test]
+    async fn a_delivery_for_a_deleted_webhook_settles() {
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MWebhook>::new()])
+            .into_connection();
+        let r = row(serde_json::json!({
+            "webhook": uuid::Uuid::now_v7(),
+            "event": "gc.swept",
+            "envelope": {},
+        }));
+        assert!(live_webhook(&db, &r).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_delivery_for_a_deactivated_webhook_settles() {
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([vec![MWebhook {
+                active: false,
+                ..Default::default()
+            }]])
+            .into_connection();
+        let r = row(serde_json::json!({ "webhook": uuid::Uuid::now_v7() }));
+        assert!(live_webhook(&db, &r).await.unwrap().is_none());
     }
 
     #[test]

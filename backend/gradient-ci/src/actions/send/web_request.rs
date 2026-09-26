@@ -26,11 +26,14 @@ pub(crate) async fn execute_send_web_request(
         .post(url)
         .header("Content-Type", "application/json")
         .header("X-Gradient-Event", event)
-        .body(body);
+        .body(body.clone());
     if let Some(tok) = token {
         let key = load_secret_bytes(&ctx.db.config.secrets.crypt_secret_file)
             .context("loading crypt key")?;
         let decrypted = decrypt_action_secret(tok, key.expose())?;
+        if let Some(signature) = crate::webhooks::sign(decrypted.as_bytes(), body.as_bytes()) {
+            req = req.header("X-Gradient-Signature", signature);
+        }
         req = req.bearer_auth(decrypted);
     }
     let resp = req.send().await.context("HTTP send failed")?;
