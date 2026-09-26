@@ -298,10 +298,9 @@ pub async fn serve_nar(
 mod tests {
     use std::time::Duration;
 
-    use gradient_util::shutdown::Shutdown;
     use gradient_wire::constants::BULK_CHUNK_SIZE;
     use gradient_wire::messages::ServerMessage;
-    use gradient_wire::testing::loopback;
+    use gradient_wire::session::frame::WireMessage;
     use tempfile::TempDir;
 
     use super::*;
@@ -328,24 +327,13 @@ mod tests {
         (dir, store)
     }
 
-    fn is_terminal(msg: &ServerMessage) -> bool {
-        matches!(
-            msg,
-            ServerMessage::NarPush { is_final: true, .. }
-                | ServerMessage::NarUnavailable { .. }
-                | ServerMessage::NarAbort { .. }
-        )
-    }
-
     async fn serve(
         store: &NarStore,
         store_path: &str,
         resume_from: u64,
         client_token: Option<&str>,
     ) -> (Result<u64, ServeError>, Vec<ServerMessage>) {
-        let (authority, mut peer) = loopback().await;
-        let shutdown = Shutdown::new();
-        let (_reader, writer) = authority.split(Duration::from_secs(5), &shutdown);
+        let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(5));
         let req = RelayRequest {
             job_id: "build:1",
             store_path,
@@ -353,15 +341,12 @@ mod tests {
             client_token,
         };
         let result = serve_nar(store, &writer, req, timeouts()).await;
+        drop(writer);
         let mut frames = Vec::new();
-        while let Some(msg) = peer.recv_server_msg().await {
-            let done = is_terminal(&msg);
-            frames.push(msg);
-            if done {
-                break;
-            }
+        while let Some(bytes) = sent.recv().await {
+            let inbound = ServerMessage::decode(bytes).expect("decode");
+            frames.push(inbound.into_message().expect("deserialize"));
         }
-
         (result, frames)
     }
 
