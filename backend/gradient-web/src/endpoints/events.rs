@@ -37,7 +37,7 @@ pub async fn firehose_ws(
         Ok(ws) => ws,
         Err(rejection) => return Ok(rejection.into_response()),
     };
-    let rx = state.events.subscribe();
+    let rx = state.events.subscribe_firehose();
     let select = select_frames(EventFilter::parse(query.events.as_deref()));
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
