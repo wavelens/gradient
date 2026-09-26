@@ -2489,6 +2489,18 @@ in {
       assert anchor_of(busybox) == "7 1 1", (
           f"the second evaluation re-relayed a whole anchor: {anchor_of(busybox)}"
       )
+      # task2 evaluates the same commit on its own poll, and its batch names
+      # busywrap: landing after the retire below, that entry point is not whole
+      # and rightly demands busybox again. Settle it before retiring anything.
+      poll(
+          f"SELECT (count(*) > 0)::text FROM evaluation e JOIN task t ON t.id = e.task "
+          f"JOIN commit c ON c.id = e.commit "
+          f"WHERE t.name = 'task2' AND e.status = 5 AND c.hash = ("
+          f"  SELECT c5.hash FROM evaluation e5 JOIN commit c5 ON c5.id = e5.commit "
+          f"  WHERE e5.id = '{eval5_id}');",
+          "true", "task2 never completed its evaluation of the 'busywrap again' commit",
+          timeout=600,
+      )
 
       # Retire busybox's NAR. Its anchor loses fetchability and is reset to a
       # fresh build intent, but busywrap is terminal and no entry point names
