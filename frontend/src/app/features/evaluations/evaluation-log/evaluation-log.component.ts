@@ -737,9 +737,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       map(b => b.download_progress),
       filter(() => this.download() === null),
     );
-    const updates = this.live.connect<LiveEvent & Partial<DownloadProgress>>(`/builds/${buildId}/live`).pipe(
-      filter(e => e.type === 'build_progress'),
-      map(e => ({ downloaded: e.downloaded ?? 0, total: e.total ?? null })),
+    const updates = this.live.connect<LiveEvent>(`/builds/${buildId}/live`).pipe(
+      filter(e => e.event === 'build.progress'),
+      map(e => ({ downloaded: e.content.downloaded ?? 0, total: e.content.total ?? null })),
     );
     this.downloadSub = merge(seed, updates).subscribe(p => {
       if (this.selectedBuildId() === buildId) this.download.set(p);

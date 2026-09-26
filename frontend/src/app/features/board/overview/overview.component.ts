@@ -64,11 +64,11 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
       .subscribe((points) => this.applyCompleted(points));
     this.sub = this.live.connect().subscribe({
       next: (ev) => {
-        if (ev.type === 'queue_depth') {
-          this.workers.set(ev.workers ?? this.workers());
-          this.pending.set(ev.pending ?? this.pending());
-          this.active.set(ev.active ?? this.active());
-        } else if (ev.type === 'job_dispatched') {
+        if (ev.event === 'worker.queue_depth') {
+          this.workers.set(ev.content.workers ?? this.workers());
+          this.pending.set(ev.content.pending ?? this.pending());
+          this.active.set(ev.content.active ?? this.active());
+        } else if (ev.event === 'worker.job_dispatched') {
           this.dispatchedCount.update((n) => n + 1);
         }
       },

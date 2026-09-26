@@ -251,11 +251,10 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
             continue;
         };
         for job in jobs {
-            let _ = ctx
-                .board_events
-                .send(gradient_types::BoardEvent::BuildStatusChanged {
-                    evaluation_id: job.evaluation.into_inner(),
-                    build_id: job.id.into_inner(),
+            ctx.events
+                .publish(gradient_types::events::build::StatusChanged {
+                    build_id: job.id,
+                    evaluation_id: job.evaluation,
                     status: i32::from(c.to) as i16,
                 });
 
@@ -284,9 +283,8 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
     if changes.iter().any(|c| {
         matches!(c.to, BuildStatus::Completed | BuildStatus::Substituted) && c.from != c.to
     }) {
-        let _ = ctx
-            .board_events
-            .send(gradient_types::BoardEvent::CacheChanged);
+        ctx.events
+            .publish(gradient_types::events::cache::Changed {});
     }
 
     // A terminal transition may have settled its referencing evaluations; the

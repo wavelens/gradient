@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_types::events::worker;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -150,14 +151,11 @@ pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Res
         crate::worker_lifecycle::record_worker_sample(&scheduler.state.worker_db, info).await;
     }
     let (workers, pending, active) = scheduler.metrics_snapshot().await;
-    let _ = scheduler
-        .state
-        .board_events
-        .send(crate::BoardEvent::QueueDepth {
-            workers,
-            pending,
-            active,
-        });
+    scheduler.state.events.publish(worker::QueueDepth {
+        workers,
+        pending,
+        active,
+    });
     Ok(())
 }
 

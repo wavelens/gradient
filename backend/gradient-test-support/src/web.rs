@@ -140,7 +140,7 @@ fn server_from_cli(db: DatabaseConnection, cli: gradient_types::Cli) -> TestServ
         pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
-        board_events: tokio::sync::broadcast::channel(256).0,
+        events: gradient_types::EventBus::default(),
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
         ready_set: Default::default(),

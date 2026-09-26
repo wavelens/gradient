@@ -9,6 +9,7 @@
 //! of every derivation it reports, the anchors and this evaluation's jobs, all
 //! inside the actor's transaction.
 
+use gradient_types::events::evaluation;
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result, anyhow};
@@ -1267,9 +1268,9 @@ pub(crate) async fn after_commit(
 
     ctx.probe_requests.send(report.to_probe.clone());
 
-    let _ = ctx.board_events.send(BoardEvent::EvaluationProgress {
-        task: batch.task.map(|t| t.into_inner()),
-        evaluation_id: report.evaluation.into_inner(),
+    ctx.events.publish(evaluation::Progress {
+        evaluation_id: report.evaluation,
+        task: batch.task,
     });
 }
 

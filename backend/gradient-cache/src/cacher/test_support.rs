@@ -61,7 +61,7 @@ pub(crate) fn test_server_state_with_log(
         pending_project_memberships: Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: Arc::new(std::collections::HashMap::new()),
         scim_group_roles: Arc::new(Default::default()),
-        board_events: tokio::sync::broadcast::channel(256).0,
+        events: gradient_types::EventBus::default(),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
         outbox_wake: Default::default(),

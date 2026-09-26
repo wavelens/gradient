@@ -7,9 +7,9 @@
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
+import type { EventEnvelope } from '@core/models';
 
-export interface BoardLiveEvent {
-  type: 'job_dispatched' | 'worker_connected' | 'worker_disconnected' | 'queue_depth';
+export type BoardLiveEvent = EventEnvelope<{
   project?: string;
   worker_id?: string;
   kind?: number;
@@ -19,7 +19,7 @@ export interface BoardLiveEvent {
   workers?: number;
   pending?: number;
   active?: number;
-}
+}>;
 
 @Injectable({ providedIn: 'root' })
 export class BoardLiveService {

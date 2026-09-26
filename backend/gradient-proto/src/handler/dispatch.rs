@@ -12,8 +12,9 @@ use std::time::Instant;
 
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
+use gradient_types::DownloadProgress;
+use gradient_types::events::build;
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, ProjectId};
-use gradient_types::{BoardEvent, DownloadProgress};
 use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, trace, warn};
@@ -771,8 +772,8 @@ impl<'a> DispatchContext<'a> {
         self.state
             .download_progress
             .set(anchor, progress, Instant::now());
-        let _ = self.state.board_events.send(BoardEvent::BuildProgress {
-            derivation_build: anchor.into_inner(),
+        self.state.events.publish(build::Progress {
+            derivation_build: anchor,
             progress,
         });
     }
@@ -1002,6 +1003,7 @@ mod assignment_response_tests {
     use crate::handler::job_events::SchedulerJobEvents;
     use gradient_scheduler::jobs::PendingEvalJob;
     use gradient_test_support::prelude::*;
+    use gradient_types::events::Event;
     use gradient_types::ids::{CommitId, EvaluationId};
     use gradient_wire::session::frame::WireMessage as _;
     use gradient_wire::types::{FlakeJob, FlakeSource, FlakeStep};
@@ -1170,7 +1172,7 @@ mod assignment_response_tests {
             },
         );
         let mut active = HashMap::new();
-        let mut events = state.board_events.subscribe();
+        let mut events = state.events.subscribe();
         let anchor = DerivationBuildId::now_v7();
         let progress = DownloadProgress {
             downloaded: 512,
@@ -1193,13 +1195,10 @@ mod assignment_response_tests {
             state.download_progress.get(&anchor, Instant::now()),
             Some(progress)
         );
-        match events.try_recv() {
-            Ok(BoardEvent::BuildProgress {
-                derivation_build,
-                progress: sent,
-            }) => {
-                assert_eq!(derivation_build, anchor.into_inner());
-                assert_eq!(sent, progress);
+        match events.try_recv().map(|env| env.event.clone()) {
+            Ok(Event::BuildProgress(sent)) => {
+                assert_eq!(sent.derivation_build, anchor);
+                assert_eq!(sent.progress, progress);
             }
             other => panic!("expected BuildProgress, got {other:?}"),
         }

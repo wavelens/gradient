@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use tokio::sync::{Notify, Semaphore, broadcast};
+use tokio::sync::{Notify, Semaphore};
 use uuid::Uuid;
 
 use gradient_ci::CiContext;
@@ -26,9 +26,7 @@ use gradient_graph::Graph;
 use gradient_notify::EmailSender;
 use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
-use gradient_types::{
-    BoardEvent, DerivationBuildId, DownloadProgress, RuntimeConfig, SecretString,
-};
+use gradient_types::{DerivationBuildId, DownloadProgress, RuntimeConfig, SecretString};
 use gradient_util::debounce::Debounce;
 use gradient_util::latest::Latest;
 use gradient_util::shutdown::Shutdown;
@@ -82,8 +80,8 @@ pub struct AppState {
     pub oidc_group_roles: Arc<OidcGroupRoles>,
     /// SCIM group -> (project, role) grants resolved from state at startup.
     pub scim_group_roles: Arc<ScimGroupRoles>,
-    /// Broadcast of live board events to WebSocket subscribers.
-    pub board_events: broadcast::Sender<BoardEvent>,
+    /// Every event this instance produces; live sockets and the firehose subscribe.
+    pub events: gradient_types::EventBus,
     /// What each running Substitute or Download has fetched, held in memory only.
     pub download_progress: Arc<Latest<DerivationBuildId, DownloadProgress>>,
     /// Nudged after every committed write that owes an effect; the effects
@@ -135,7 +133,7 @@ impl AppState {
             config: self.config.clone(),
             storage: self.storage(),
             shutdown: self.shutdown.clone(),
-            board_events: self.board_events.clone(),
+            events: self.events.clone(),
             outbox_wake: self.outbox_wake.clone(),
             probe_requests: self.probe_requests.clone(),
             ready_set: self.ready_set.clone(),

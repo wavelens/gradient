@@ -6,6 +6,7 @@
 
 //! `Scheduler` methods for worker connect / disconnect / capability management.
 
+use gradient_types::events::worker;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -94,7 +95,7 @@ impl Scheduler {
         session: Arc<dyn SessionPort>,
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
-        let projects = authorized_peers.iter().copied().map(Into::into).collect();
+        let projects = authorized_peers.iter().copied().collect();
         let registered = self
             .reattach_worker(
                 worker_id,
@@ -106,13 +107,10 @@ impl Scheduler {
             .await?;
         self.close_unclaimed_dispatches(worker_id).await;
         self.record_worker_connection(worker_id, caps_json).await;
-        let _ = self
-            .state
-            .board_events
-            .send(crate::BoardEvent::WorkerConnected {
-                projects,
-                worker_id: worker_id.to_owned(),
-            });
+        self.state.events.publish(worker::Connected {
+            worker_id: worker_id.to_owned(),
+            projects,
+        });
         Ok(registered)
     }
 
@@ -282,12 +280,9 @@ impl Scheduler {
             .await
             .unwrap_or_default();
         build::requeue_orphaned_jobs(&self.state, &requeued).await;
-        let _ = self
-            .state
-            .board_events
-            .send(crate::BoardEvent::WorkerDisconnected {
-                worker_id: worker_id.to_owned(),
-            });
+        self.state.events.publish(worker::Disconnected {
+            worker_id: worker_id.to_owned(),
+        });
         self.kick_dispatch();
     }
 

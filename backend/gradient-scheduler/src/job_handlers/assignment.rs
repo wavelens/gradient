@@ -6,6 +6,7 @@
 
 //! Scoring and job assignment (`RequestJob`).
 
+use gradient_types::events::worker;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -143,17 +144,14 @@ impl Scheduler {
     /// Announce the hand-out to the job board. Fired only once the record is
     /// durable, so the board never shows a job that was withdrawn.
     fn announce_dispatch(&self, worker_id: &str, record: &DispatchRecord) {
-        let _ = self
-            .state
-            .board_events
-            .send(crate::BoardEvent::JobDispatched {
-                project: record.project.into(),
-                worker_id: worker_id.to_owned(),
-                kind: i16::from(record.kind),
-                score: record.score,
-                build_id: record.derivation_build.map(Into::into),
-                evaluation_id: record.evaluation_id.into(),
-            });
+        self.state.events.publish(worker::JobDispatched {
+            project: record.project,
+            worker_id: worker_id.to_owned(),
+            kind: i16::from(record.kind),
+            score: record.score,
+            build_id: record.derivation_build,
+            evaluation_id: record.evaluation_id,
+        });
     }
 }
 

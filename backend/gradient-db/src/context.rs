@@ -8,12 +8,12 @@ use std::sync::Arc;
 
 use std::sync::Mutex;
 
-use tokio::sync::{Notify, broadcast, mpsc};
+use tokio::sync::{Notify, mpsc};
 
 use super::pool::{WebDb, WorkerDb};
 use super::ready_set::ReadySet;
 use gradient_storage::StorageCtx;
-use gradient_types::{BoardEvent, DerivationId, RuntimeConfig};
+use gradient_types::{DerivationId, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 
 /// The anchors a demand recompute turned on, on their way to the upstream probe.
@@ -73,7 +73,7 @@ pub struct DbContext {
     pub config: Arc<RuntimeConfig>,
     pub storage: StorageCtx,
     pub shutdown: Shutdown,
-    pub board_events: broadcast::Sender<BoardEvent>,
+    pub events: gradient_types::EventBus,
     /// Nudged after every committed write that owes an effect, so the effects
     /// actor claims the row it just wrote instead of waiting out its tick.
     pub outbox_wake: Arc<Notify>,

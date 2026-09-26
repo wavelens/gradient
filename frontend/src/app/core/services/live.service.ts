@@ -7,19 +7,16 @@
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '@environments/environment';
+import type { EventEnvelope } from '@core/models';
 
-export interface LiveEvent {
-  type:
-    | 'evaluation_status_changed'
-    | 'build_status_changed'
-    | 'evaluation_progress'
-    | 'cache_changed'
-    | string;
+export type LiveEvent = EventEnvelope<{
   task?: string | null;
   evaluation_id?: string;
   build_id?: string;
   status?: number;
-}
+  downloaded?: number;
+  total?: number | null;
+}>;
 
 const MAX_BACKOFF_MS = 15000;
 

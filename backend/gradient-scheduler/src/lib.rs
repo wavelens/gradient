@@ -45,7 +45,6 @@ use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 
 use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
 
-pub use gradient_types::BoardEvent;
 pub use jobs::{BoardActiveJob, DecisionCandidate, DispatchDecision, PendingJobInfo};
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so

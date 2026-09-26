@@ -108,11 +108,10 @@ pub async fn abort_eval_anchors(
     )
     .await;
 
-    let _ = ctx
-        .board_events
-        .send(gradient_types::BoardEvent::EvaluationProgress {
-            task: evaluation.task.map(|p| p.into_inner()),
-            evaluation_id: evaluation.id.into_inner(),
+    ctx.events
+        .publish(gradient_types::events::evaluation::Progress {
+            evaluation_id: evaluation.id,
+            task: evaluation.task,
         });
 
     Ok(abort_ids)

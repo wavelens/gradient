@@ -63,8 +63,9 @@ describe('LiveService', () => {
   it('emits a parsed JSON frame to subscribers', () => {
     const frames: unknown[] = [];
     sub = service.connect('/board/cache/live').subscribe((f) => frames.push(f));
-    FakeWebSocket.instances[0].emit(JSON.stringify({ type: 'cache_changed' }));
-    expect(frames).toEqual([{ type: 'cache_changed' }]);
+    const frame = { event: 'cache.changed', at: '2026-09-26T12:00:00Z', content: {} };
+    FakeWebSocket.instances[0].emit(JSON.stringify(frame));
+    expect(frames).toEqual([frame]);
   });
 
   it('ignores malformed frames', () => {
@@ -72,8 +73,9 @@ describe('LiveService', () => {
     sub = service.connect('/board/cache/live').subscribe((f) => frames.push(f));
     const ws = FakeWebSocket.instances[0];
     ws.emit('not json {');
-    ws.emit(JSON.stringify({ type: 'build_status_changed' }));
-    expect(frames).toEqual([{ type: 'build_status_changed' }]);
+    const frame = { event: 'build.status_changed', at: '2026-09-26T12:00:00Z', content: {} };
+    ws.emit(JSON.stringify(frame));
+    expect(frames).toEqual([frame]);
   });
 
   it('closes the socket on unsubscribe', () => {

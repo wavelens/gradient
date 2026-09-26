@@ -220,9 +220,9 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
         evicted += report.retired.len() as u64;
     }
 
-    let _ = state
-        .board_events
-        .send(gradient_types::BoardEvent::CacheChanged);
+    state
+        .events
+        .publish(gradient_types::events::cache::Changed {});
     Ok(evicted)
 }
 

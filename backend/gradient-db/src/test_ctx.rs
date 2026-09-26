@@ -92,7 +92,7 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
             log_storage: Arc::new(FileLogStorage::new(dir).await.expect("test log storage")),
         },
         shutdown: Shutdown::new(),
-        board_events: tokio::sync::broadcast::channel(16).0,
+        events: gradient_types::EventBus::new(16),
         outbox_wake: Default::default(),
         probe_requests: ProbeRequests::default(),
         ready_set: Default::default(),

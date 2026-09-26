@@ -5,7 +5,7 @@
  */
 
 use super::{EventKind, firehose};
-use crate::ids::{BuildJobId, EvaluationId, ProjectId};
+use crate::ids::{DerivationBuildId, EvaluationId, ProjectId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -35,7 +35,7 @@ pub struct JobDispatched {
     pub worker_id: String,
     pub kind: i16,
     pub score: f64,
-    pub build_id: Option<BuildJobId>,
+    pub build_id: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
 }
 firehose!(JobDispatched, "worker.job_dispatched");

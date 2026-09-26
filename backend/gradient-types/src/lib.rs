@@ -5,7 +5,7 @@
  */
 
 pub mod actions;
-pub mod board_events;
+
 pub mod cli;
 pub mod config;
 pub mod constants;
@@ -26,7 +26,6 @@ mod io;
 mod nix_cache;
 
 pub use self::actions::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
-pub use self::board_events::{BoardEvent, DownloadProgress};
 pub use self::cli::{
     CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs,
     LoggingArgs, MetricsArgs, NetworkArgs, OidcArgs, ProtoArgs, RegistrationArgs, S3Args, ScimArgs,
@@ -38,6 +37,7 @@ pub use self::config::{
 };
 pub use self::consts::*;
 pub use self::entity_aliases::*;
+pub use self::events::build::DownloadProgress;
 pub use self::events::{Envelope, Event, EventBus, EventRx};
 pub use self::flake_url::{NixFlakeUrl, RepositoryUrl};
 pub use self::forge::ForgeType;

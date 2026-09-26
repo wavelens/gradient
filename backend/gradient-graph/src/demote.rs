@@ -9,6 +9,7 @@
 
 use anyhow::Result;
 use gradient_db::{DbContext, collect_transitive_dependents};
+use gradient_types::events::cache;
 use gradient_types::*;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
@@ -99,7 +100,7 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
         gradient_db::demote_cached_output(ctx, hash).await?;
     }
 
-    let _ = ctx.board_events.send(BoardEvent::CacheChanged);
+    ctx.events.publish(cache::Changed {});
 
     Ok(DemoteReport {
         cached_path: Some(cached_path),

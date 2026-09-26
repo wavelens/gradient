@@ -22,7 +22,8 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, flake_output_node};
-use gradient_scheduler::{BoardEvent, Scheduler};
+use gradient_scheduler::Scheduler;
+use gradient_types::events::{Envelope, Event, EventRx, worker};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
 use gradient_util::shutdown::CancellationToken;
@@ -1255,13 +1256,16 @@ pub async fn board_live_ws(
         .unwrap_or(MetricsScope::Projects(vec![]));
 
     // Subscribe before snapshotting so no event is missed between the two.
-    let rx = state.board_events.subscribe();
+    let rx = state.events.subscribe();
     let (workers, pending, active) = scheduler.metrics_snapshot().await;
-    let initial = BoardEvent::QueueDepth {
-        workers,
-        pending,
-        active,
-    };
+    let initial = Envelope::now(
+        worker::QueueDepth {
+            workers,
+            pending,
+            active,
+        }
+        .into(),
+    );
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
     ws.on_upgrade(move |socket| async move {
@@ -1273,9 +1277,9 @@ pub async fn board_live_ws(
 
 async fn board_live_loop(
     mut socket: WebSocket,
-    mut rx: tokio::sync::broadcast::Receiver<BoardEvent>,
+    rx: EventRx,
     scope: MetricsScope,
-    initial: BoardEvent,
+    initial: Envelope,
     cancel: CancellationToken,
 ) {
     // Send a queue-depth snapshot immediately so freshly-opened boards show
@@ -1286,44 +1290,39 @@ async fn board_live_loop(
         return;
     }
 
-    loop {
-        let event = tokio::select! {
-            _ = cancel.cancelled() => break,
-            event = rx.recv() => event,
-        };
-        match event {
-            Ok(ev) => {
-                if let Some(text) = mask_event(&ev, &scope)
-                    && socket.send(Message::Text(text.into())).await.is_err()
-                {
-                    break;
-                }
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-        }
-    }
+    super::live::live_stream(
+        socket,
+        rx,
+        move |env| mask_event(env, &scope),
+        super::live::skip_lag,
+        cancel,
+    )
+    .await;
 }
 
 /// Forward only events the caller may see: queue depth to everyone, per-project
 /// events to members of that project (or superusers), worker disconnects to
 /// superusers. Out-of-scope detail is dropped (the REST view supplies the
 /// "other running" aggregate count).
-fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
-    let visible = match ev {
-        BoardEvent::QueueDepth { .. } => true,
-        BoardEvent::JobDispatched { project, .. } => scope.allows(project),
-        BoardEvent::WorkerConnected { projects, .. } => projects.iter().any(|p| scope.allows(p)),
-        BoardEvent::WorkerDisconnected { .. } => scope.is_all(),
-        // Resource-scoped events are served by the per-resource /live channels.
-        BoardEvent::EvaluationStatusChanged { .. }
-        | BoardEvent::BuildStatusChanged { .. }
-        | BoardEvent::EvaluationProgress { .. }
-        | BoardEvent::BuildProgress { .. }
-        | BoardEvent::CacheChanged => false,
-    };
-
-    visible.then(|| serde_json::to_string(ev).ok()).flatten()
+fn mask_event(env: &Envelope, scope: &MetricsScope) -> Option<String> {
+    match &env.event {
+        Event::WorkerQueueDepth(_) => Some(env.to_line()),
+        Event::WorkerJobDispatched(j) if scope.allows(&j.project.into_inner()) => {
+            Some(env.to_line())
+        }
+        Event::WorkerConnected(w) if w.projects.iter().any(|p| scope.allows(&p.into_inner())) => {
+            Some(
+                serde_json::json!({
+                    "event": "worker.connected",
+                    "at": env.at,
+                    "content": { "worker_id": w.worker_id },
+                })
+                .to_string(),
+            )
+        }
+        Event::WorkerDisconnected(_) if scope.is_all() => Some(env.to_line()),
+        _ => None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -1521,10 +1520,13 @@ mod tests {
     fn a_worker_connection_reaches_each_served_project_without_naming_the_others() {
         let mine = uuid::Uuid::now_v7();
         let other = uuid::Uuid::now_v7();
-        let ev = BoardEvent::WorkerConnected {
-            projects: vec![other, mine],
-            worker_id: "w".into(),
-        };
+        let ev = Envelope::now(
+            worker::Connected {
+                projects: vec![ProjectId::new(other), ProjectId::new(mine)],
+                worker_id: "w".into(),
+            }
+            .into(),
+        );
 
         let text = mask_event(&ev, &MetricsScope::Projects(vec![mine.to_string()]))
             .expect("a member of a served project sees the connection");

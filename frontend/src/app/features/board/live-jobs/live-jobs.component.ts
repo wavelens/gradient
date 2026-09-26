@@ -245,8 +245,8 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     if (this.view() === 'pending') this.loadPending();
     if (this.scoreScope() === 'all') this.loadDecisions();
     this.sub = this.live.connect().subscribe({
-      next: (ev) => {
-        if (ev.type === 'job_dispatched' && ev.project) {
+      next: ({ event, content: ev }) => {
+        if (event === 'worker.job_dispatched' && ev.project) {
           this.jobs.update((list) =>
             [
               {

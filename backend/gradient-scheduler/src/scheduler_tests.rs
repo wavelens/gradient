@@ -1497,7 +1497,7 @@ async fn registering_opens_a_connection_row_without_a_worker_registration() {
         .into_connection();
     let log_db = db.clone();
     let scheduler = test_scheduler_with(db).await;
-    let mut events = scheduler.state.board_events.subscribe();
+    let mut events = scheduler.state.events.subscribe();
     let peers = HashSet::from([ProjectId::now_v7(), ProjectId::now_v7()]);
 
     register(&scheduler, "w1", eval_worker_caps(), peers.clone()).await;
@@ -1513,12 +1513,12 @@ async fn registering_opens_a_connection_row_without_a_worker_registration() {
         "{sql:#?}"
     );
     let announced = std::iter::from_fn(|| events.try_recv().ok())
-        .find_map(|ev| match ev {
-            crate::BoardEvent::WorkerConnected { projects, .. } => Some(projects),
+        .find_map(|env| match &env.event {
+            gradient_types::Event::WorkerConnected(w) => Some(w.projects.clone()),
             _ => None,
         })
         .expect("the connection is announced");
-    let expected: HashSet<uuid::Uuid> = peers.into_iter().map(Into::into).collect();
+    let expected: HashSet<ProjectId> = peers.into_iter().collect();
     assert_eq!(announced.into_iter().collect::<HashSet<_>>(), expected);
 }
 

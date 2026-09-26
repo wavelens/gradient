@@ -100,12 +100,13 @@ pub async fn update_evaluation_status(
             e
         });
 
-    let _ = ctx
-        .board_events
-        .send(gradient_types::BoardEvent::EvaluationStatusChanged {
-            task: updated_eval.task.map(|p| p.into_inner()),
-            evaluation_id: updated_eval.id.into_inner(),
+    ctx.events
+        .publish(gradient_types::events::evaluation::Reported {
+            evaluation_id: updated_eval.id,
+            phase: gradient_types::events::evaluation::Phase::of_status(event_status),
             status: i32::from(event_status) as i16,
+            task: updated_eval.task,
+            ..Default::default()
         });
 
     if let Err(e) = crate::outbox::enqueue(

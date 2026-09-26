@@ -23,16 +23,15 @@ use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::response::Response;
 use axum::routing::get;
-use gradient_types::BoardEvent;
+use gradient_types::EventBus;
 use gradient_util::shutdown::Shutdown;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
 
 /// Signals when the server-side stream task has returned.
 type Done = Arc<tokio::sync::Notify>;
 
 async fn live_route(
-    State((tx, done, shutdown)): State<(broadcast::Sender<BoardEvent>, Done, Shutdown)>,
+    State((tx, done, shutdown)): State<(EventBus, Done, Shutdown)>,
     ws: WebSocketUpgrade,
 ) -> Response {
     let rx = tx.subscribe();
@@ -40,7 +39,8 @@ async fn live_route(
         gradient_web::endpoints::live::live_stream(
             socket,
             rx,
-            |ev| serde_json::to_string(ev).ok(),
+            |env| Some(env.to_line()),
+            gradient_web::endpoints::live::skip_lag,
             shutdown.token(),
         )
         .await;
@@ -50,7 +50,7 @@ async fn live_route(
 
 #[tokio::test]
 async fn live_stream_ends_when_the_client_disconnects() {
-    let (tx, _rx) = broadcast::channel(16);
+    let tx = EventBus::new(16);
     let done: Done = Arc::new(tokio::sync::Notify::new());
     let shutdown = Shutdown::new();
 
@@ -80,7 +80,7 @@ async fn live_stream_ends_when_the_client_disconnects() {
 
 #[tokio::test]
 async fn live_stream_ends_when_the_server_shuts_down() {
-    let (tx, _rx) = broadcast::channel(16);
+    let tx = EventBus::new(16);
     let done: Done = Arc::new(tokio::sync::Notify::new());
     let shutdown = Shutdown::new();
 
