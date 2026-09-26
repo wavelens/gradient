@@ -201,12 +201,13 @@ in {
       maxNixdaemonConnections = lib.mkOption {
         description = ''
           Maximum number of simultaneous local Nix daemon connections in
-          the connection pool. Should comfortably fit
-          `maxConcurrentBuilds * 8` (parallel NAR imports per build) plus
-          headroom for path-presence checks and build dispatch.
+          the connection pool. Each build holds one for its whole run plus
+          up to 8 for parallel NAR imports; the rest is headroom for
+          path-presence checks.
         '';
         type = lib.types.ints.positive;
-        default = 32;
+        default = cfg.settings.maxConcurrentBuilds * 9 + 16;
+        defaultText = lib.literalExpression "config.services.gradient.worker.settings.maxConcurrentBuilds * 9 + 16";
       };
 
       narPartialTtlSecs = lib.mkOption {
