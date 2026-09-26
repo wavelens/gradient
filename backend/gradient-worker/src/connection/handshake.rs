@@ -7,7 +7,7 @@
 //! Protocol handshake: `InitConnection` → `InitAck` / `Reject`.
 //!
 //! The wire sequence is driven by gradient-proto's shared
-//! [`as_peer`](gradient_proto::session::handshake::as_peer) FSM; this module
+//! [`as_peer`](gradient_wire::session::handshake::as_peer) FSM; this module
 //! only supplies the worker's identity (persistent UUID plus the peer tokens
 //! from `GRADIENT_WORKER_PEERS`, wildcards expanded per challenge) and its
 //! advertised capabilities. The negotiated [`GradientCapabilities`] may be a
@@ -15,9 +15,9 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_proto::messages::{GradientCapabilities, PROTO_VERSION};
-use gradient_proto::session::handshake::{HandshakeResult, as_peer};
-use gradient_proto::traits::{CapabilitiesProvider, PeerIdentity};
+use gradient_wire::messages::{GradientCapabilities, PROTO_VERSION};
+use gradient_wire::session::handshake::{HandshakeResult, as_peer};
+use gradient_wire::traits::{CapabilitiesProvider, PeerIdentity};
 use tracing::info;
 
 use crate::config::WorkerConfig;
@@ -89,8 +89,8 @@ mod tests {
     )]
 
     use super::*;
-    use gradient_proto::messages::{ClientMessage, ServerMessage};
     use gradient_test_support::prelude::{MockProtoServer, MockServerConn};
+    use gradient_wire::messages::{ClientMessage, ServerMessage};
 
     fn all_caps() -> GradientCapabilities {
         GradientCapabilities {

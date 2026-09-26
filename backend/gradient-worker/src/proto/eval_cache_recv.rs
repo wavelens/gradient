@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use gradient_proto::messages::{EvalCachePullOutcome, EvalCachePushMode, TRANSFER_TIMEOUT};
+use gradient_wire::messages::{EvalCachePullOutcome, EvalCachePushMode, TRANSFER_TIMEOUT};
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
 

@@ -14,7 +14,7 @@ use gradient_entity::evaluation::WalkMode;
 use gradient_types::ids::{
     CommitId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId, ProjectId, TaskId,
 };
-use gradient_types::proto::{
+use gradient_wire::types::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate, JobKind,
     RequiredPath,
 };
@@ -124,7 +124,7 @@ pub struct WorkerCaps {
     pub architectures: Vec<String>,
     pub system_features: Vec<String>,
     /// Full set of advertised gradient capabilities, surfaced on the dispatch view.
-    pub capabilities: gradient_types::proto::GradientCapabilities,
+    pub capabilities: gradient_wire::types::GradientCapabilities,
     /// Live resource view of the worker, fed into resource-aware scoring rules.
     pub metrics: Option<gradient_score::WorkerMetricsView>,
 }
@@ -1241,7 +1241,7 @@ impl JobTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_types::proto::{
+    use gradient_wire::types::{
         BuildJob, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
     };
 

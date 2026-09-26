@@ -10,9 +10,9 @@
 
 use std::time::Duration;
 
-use gradient_types::proto::{CachedPath, GradientCapabilities, QueryMode};
+use gradient_wire::types::{CachedPath, GradientCapabilities, QueryMode};
 
-use crate::messages::{ClientMessage, PROTO_VERSION, ServerMessage};
+use gradient_wire::messages::{ClientMessage, PROTO_VERSION, ServerMessage};
 
 /// Build the `wss?://host/cache/{cache}/proto` URL from an upstream base URL.
 pub(super) fn proto_ws_url(base_url: &str, remote_cache: &str) -> String {
@@ -48,7 +48,7 @@ pub(crate) async fn pull_paths(
     paths: &[String],
 ) -> Vec<CachedPath> {
     let url = proto_ws_url(base_url, remote_cache);
-    let mut socket = match crate::client::dial_with_auth(&url, api_key).await {
+    let mut socket = match gradient_wire::client::dial_with_auth(&url, api_key).await {
         Ok(s) => s,
         Err(_) => return vec![],
     };

@@ -14,8 +14,8 @@ use std::sync::Arc;
 use gradient_core::ServerState;
 use gradient_entity::StorePath;
 use gradient_graph::UpstreamHit;
-use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
+use gradient_wire::types::DiscoveredDerivation;
 use tracing::{error, warn};
 
 const UPSTREAM_WINDOW_MINUTES: i64 = 60;

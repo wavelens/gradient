@@ -10,7 +10,7 @@ use crate::Scheduler;
 use crate::actor::{Offer, SchedulerMsg};
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
 use crate::worker_pool::WorkerInfo;
-use gradient_types::proto::{GradientCapabilities, JobCandidate};
+use gradient_wire::types::{GradientCapabilities, JobCandidate};
 
 impl Scheduler {
     pub async fn enqueue_eval_job(

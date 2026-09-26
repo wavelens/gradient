@@ -13,7 +13,7 @@
 //! can pattern-match instead of performing two independent `if let Some` checks
 //! that could accidentally diverge.
 
-use super::proto::BuildOutput;
+use crate::types::BuildOutput;
 
 /// Whether NAR metadata is available for a [`BuildOutput`].
 ///

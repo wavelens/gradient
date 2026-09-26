@@ -48,7 +48,7 @@ type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const JOB_OFFER_CHUNK_SIZE: usize = 1_000;
-pub use gradient_types::constants::BULK_CHUNK_SIZE;
+pub use crate::constants::BULK_CHUNK_SIZE;
 
 /// Hard upper bound on any single inbound or outbound `/proto` WebSocket
 /// frame/message. It bounds the control plane - a full `CacheStatus` is the
@@ -613,6 +613,22 @@ impl<M> Clone for MsgWriter<M> {
     }
 }
 
+impl<M> MsgWriter<M> {
+    /// A writer with no socket behind it: both lanes feed the returned
+    /// receiver, so a test sees every frame in send order.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn spy(send_chunk_timeout: Duration) -> (Self, mpsc::Receiver<Bytes>) {
+        let (tx, rx) = mpsc::channel(64);
+        let writer = Self {
+            control_tx: tx.clone(),
+            tx,
+            send_chunk_timeout,
+            _direction: PhantomData,
+        };
+        (writer, rx)
+    }
+}
+
 impl<M: WireMessage> MsgWriter<M> {
     pub async fn send_msg(&self, msg: &M) -> Result<(), SendError> {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
@@ -983,7 +999,7 @@ mod tests {
         );
         assert!(
             !ClientMessage::RequestJob {
-                kind: gradient_types::proto::JobKind::Build,
+                kind: crate::types::JobKind::Build,
             }
             .is_bulk(),
             "the rest of the control plane is untouched"
@@ -1106,7 +1122,7 @@ mod tests {
             job_id: "eval:019fcd73-aa63-7a41-b51c-05ed673c6d1f".to_owned(),
             query_id: "6c1a5e2c-0f52-4f9e-9a0e-2f1b7c4d8e90".to_owned(),
             paths: paths.clone(),
-            mode: gradient_types::proto::QueryMode::Push,
+            mode: crate::types::QueryMode::Push,
             nar_sizes: vec![Some(u64::MAX); paths.len()],
             external: false,
         };
@@ -1271,7 +1287,7 @@ mod codec_tests {
             references: vec![],
             deriver: None,
             ca: None,
-            multipart: Some(Box::new(gradient_types::proto::CompletedMultipart {
+            multipart: Some(Box::new(crate::types::CompletedMultipart {
                 upload_id: "up-1".into(),
                 etags: vec!["\"e1\"".into(), "\"e2\"".into()],
             })),

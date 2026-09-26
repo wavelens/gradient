@@ -17,19 +17,20 @@ use tracing::{debug, info, instrument, warn};
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::messages::{GradientCapabilities, ServerMessage};
-use crate::session::handshake as handshake_fsm;
-use crate::traits::{AuthOutcome, PeerAuthority};
 use gradient_scheduler::Scheduler;
+use gradient_wire::messages::{GradientCapabilities, ServerMessage};
+use gradient_wire::session::handshake as handshake_fsm;
+use gradient_wire::traits::{AuthOutcome, PeerAuthority};
 
 use super::auth::{
     BaseWorkerChallenge, aggregate_enabled_caps, expand_base_authorized,
     filter_project_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
-    lookup_registered_peers, negotiate_capabilities, validate_tokens,
+    lookup_registered_peers, negotiate_capabilities,
 };
 use super::session_actor::SessionArgs;
 use super::sessions::SessionsHandle;
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, send_server_msg};
+use gradient_wire::auth::validate_tokens;
 
 // ── Session state markers ─────────────────────────────────────────────────────
 

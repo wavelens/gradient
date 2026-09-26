@@ -25,6 +25,7 @@ gradient-sources = { workspace = true }
 gradient-db = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
+gradient-wire = { workspace = true }
 gradient-entity = { workspace = true }
 gradient-proto = { workspace = true }
 gradient-storage = { workspace = true }

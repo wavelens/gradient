@@ -38,7 +38,6 @@ pub mod prelude {
     pub use crate::db::db_with;
     pub use crate::fakes::drv_reader::FakeDrvReader;
     pub use crate::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
-    pub use crate::fakes::mock_server::{MockProtoServer, MockServerConn};
     pub use crate::fakes::store_fixture::{StoreFixture, load_store};
     pub use crate::fakes::worker_store::FakeWorkerStore;
     pub use crate::fixtures::*;
@@ -46,4 +45,5 @@ pub mod prelude {
     pub use crate::state::{
         test_state, test_state_cache, test_state_with_log_storage, test_state_with_storage,
     };
+    pub use gradient_wire::testing::{MockProtoServer, MockServerConn};
 }

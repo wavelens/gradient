@@ -9,6 +9,10 @@ use std::collections::{HashMap, HashSet};
 use gradient_core::ServerState;
 use gradient_types::ids::{CacheId, CachedPathId, ProjectId};
 use gradient_types::*;
+use gradient_wire::transport::{
+    PushTransport, Transport, external_arity_ok, may_consult_upstreams, pull_transport,
+    push_transport,
+};
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::{error, warn};
 
@@ -249,71 +253,6 @@ fn pull_fields(
     }
 }
 
-/// How a NAR crosses between worker and storage: over the proto stream through
-/// the server, or straight to object storage on a presigned URL.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Transport {
-    Relay,
-    Presigned,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PushTransport {
-    Relay,
-    Put,
-    Multipart(u64),
-}
-
-/// Upload transport for an uncached path: relay unless the store can presign
-/// and the NAR is over the small-NAR threshold; past `MULTIPART_NAR_BYTES` a
-/// single PUT could hit S3's 5 GiB cap, so the upload goes in parts. Parts are
-/// sized from the NAR, so an unknown size gets a single PUT.
-pub(crate) fn push_transport(
-    nar_size: Option<u64>,
-    small_nar_bytes: u64,
-    presigner: bool,
-) -> PushTransport {
-    match nar_size {
-        _ if !presigner => PushTransport::Relay,
-        Some(size) if size <= small_nar_bytes => PushTransport::Relay,
-        Some(size) if size > gradient_types::constants::MULTIPART_NAR_BYTES => {
-            PushTransport::Multipart(size)
-        }
-        _ => PushTransport::Put,
-    }
-}
-
-/// Whether a query may leave our cache. Only a caller that said `external` ever
-/// does: a build's inputs are here or the build fails, and putting them here is a
-/// Substitute's job, so a Pull without the flag is answered from our rows alone.
-pub(crate) fn may_consult_upstreams(
-    mode: gradient_types::proto::QueryMode,
-    external: bool,
-) -> bool {
-    external && !matches!(mode, gradient_types::proto::QueryMode::Push)
-}
-
-/// An external query names exactly one path: the probe is per path and the caller
-/// is asking about one output.
-pub(crate) fn external_arity_ok(external: bool, paths: usize) -> bool {
-    !external || paths == 1
-}
-
-/// Download transport for a cached path: relay unless the store can presign,
-/// the object is confirmed there, and it is over the threshold.
-pub(crate) fn pull_transport(
-    confirmed: bool,
-    file_size: u64,
-    small_nar_bytes: u64,
-    presigner: bool,
-) -> Transport {
-    if presigner && confirmed && file_size > small_nar_bytes {
-        Transport::Presigned
-    } else {
-        Transport::Relay
-    }
-}
-
 #[allow(
     clippy::too_many_arguments,
     reason = "one wire entry; splitting it would only move the arguments"
@@ -324,12 +263,12 @@ async fn build_cached_entry(
     path: &str,
     file_size: &Option<i64>,
     nar_size: &Option<i64>,
-    mode: gradient_types::proto::QueryMode,
+    mode: gradient_wire::types::QueryMode,
     expire: std::time::Duration,
     row: Option<&gradient_entity::cached_path::Model>,
     meta: &PullMetadata,
-) -> gradient_types::proto::CachedPath {
-    use gradient_types::proto::{CachedPath, QueryMode};
+) -> gradient_wire::types::CachedPath {
+    use gradient_wire::types::{CachedPath, QueryMode};
 
     // Push mode carries only `path` + `cached`. No URL, no metadata.
     if matches!(mode, QueryMode::Push) {
@@ -402,8 +341,8 @@ async fn build_uncached_push_entry(
     path: &str,
     nar_size: Option<u64>,
     expire: std::time::Duration,
-) -> gradient_types::proto::CachedPath {
-    use gradient_types::proto::CachedPath;
+) -> gradient_wire::types::CachedPath {
+    use gradient_wire::types::CachedPath;
 
     let transport = push_transport(
         nar_size,
@@ -464,7 +403,7 @@ fn presign_or_relay<T>(hash: &str, grant: anyhow::Result<Option<T>>) -> Option<T
 async fn extend_with_persisted_upstream(
     state: &ServerState,
     uncached_pairs: &[(String, String)],
-    result: &mut Vec<gradient_types::proto::CachedPath>,
+    result: &mut Vec<gradient_wire::types::CachedPath>,
 ) -> HashSet<String> {
     let mut served = HashSet::new();
     if uncached_pairs.is_empty() {
@@ -496,7 +435,7 @@ async fn extend_with_persisted_upstream(
         let Some(url) = row.external_url.clone() else {
             continue;
         };
-        result.push(gradient_types::proto::CachedPath {
+        result.push(gradient_wire::types::CachedPath {
             path: path.clone(),
             cached: true,
             file_size: row.file_size.map(|v| v as u64),
@@ -523,7 +462,7 @@ async fn extend_with_upstream_results(
     state: &ServerState,
     project_id: ProjectId,
     uncached_pairs: Vec<(String, String)>,
-    result: &mut Vec<gradient_types::proto::CachedPath>,
+    result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
@@ -584,7 +523,7 @@ async fn extend_with_gradient_proto_results(
     state: &ServerState,
     project_id: ProjectId,
     uncached_pairs: &[(String, String)],
-    result: &mut Vec<gradient_types::proto::CachedPath>,
+    result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
     let upstreams = match gradient_db::gradient_proto_upstreams_for_project(
         &state.cache_db,
@@ -642,10 +581,10 @@ async fn query(
     project_id: Option<ProjectId>,
     paths: &[String],
     nar_sizes: &[Option<u64>],
-    mode: gradient_types::proto::QueryMode,
+    mode: gradient_wire::types::QueryMode,
     external: bool,
-) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
-    use gradient_types::proto::QueryMode;
+) -> Result<Vec<gradient_wire::types::CachedPath>, DbErr> {
+    use gradient_wire::types::QueryMode;
 
     if matches!(mode, QueryMode::Push) && nar_sizes.len() != paths.len() {
         return Err(DbErr::Custom(format!(
@@ -715,8 +654,8 @@ async fn query(
         _ => PullMetadata::default(),
     };
 
-    let expire = crate::messages::PRESIGN_TTL;
-    let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
+    let expire = gradient_wire::messages::PRESIGN_TTL;
+    let mut result: Vec<gradient_wire::types::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
         if let Some((file_size, nar_size)) = cached_map.get(*hash) {
@@ -835,9 +774,9 @@ pub(super) async fn query_for_cache(
     state: &ServerState,
     cache_id: CacheId,
     paths: &[String],
-    mode: gradient_types::proto::QueryMode,
-) -> Vec<gradient_types::proto::CachedPath> {
-    use gradient_types::proto::QueryMode;
+    mode: gradient_wire::types::QueryMode,
+) -> Vec<gradient_wire::types::CachedPath> {
+    use gradient_wire::types::QueryMode;
 
     if matches!(mode, QueryMode::Push) {
         return vec![];
@@ -887,8 +826,8 @@ pub(super) async fn query_for_cache(
         _ => PullMetadata::default(),
     };
 
-    let expire = crate::messages::PRESIGN_TTL;
-    let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
+    let expire = gradient_wire::messages::PRESIGN_TTL;
+    let mut result: Vec<gradient_wire::types::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
         if !in_cache.contains(*hash) {
@@ -937,9 +876,9 @@ pub(super) async fn handle_cache_query(
     project_id: Option<ProjectId>,
     paths: &[String],
     nar_sizes: &[Option<u64>],
-    mode: gradient_types::proto::QueryMode,
+    mode: gradient_wire::types::QueryMode,
     external: bool,
-) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
+) -> Result<Vec<gradient_wire::types::CachedPath>, DbErr> {
     query(state, project_id, paths, nar_sizes, mode, external).await
 }
 
@@ -960,7 +899,7 @@ fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_types::proto::QueryMode;
+    use gradient_wire::types::QueryMode;
     use std::sync::Arc;
 
     fn make_state() -> ServerState {
@@ -976,60 +915,6 @@ mod tests {
             .into_connection();
         // The CacheQuery handler reads `cache_db`, so drive lookups from there.
         Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap()
-    }
-
-    #[test]
-    fn push_transport_relays_small_nars_and_presigns_large_ones() {
-        use gradient_types::constants::MULTIPART_NAR_BYTES;
-        let threshold = 1024 * 1024;
-        assert_eq!(
-            push_transport(Some(1024), threshold, true),
-            PushTransport::Relay
-        );
-        assert_eq!(
-            push_transport(Some(threshold), threshold, true),
-            PushTransport::Relay
-        );
-        assert_eq!(
-            push_transport(Some(threshold + 1), threshold, true),
-            PushTransport::Put
-        );
-        assert_eq!(
-            push_transport(Some(MULTIPART_NAR_BYTES), threshold, true),
-            PushTransport::Put
-        );
-        assert_eq!(
-            push_transport(Some(MULTIPART_NAR_BYTES + 1), threshold, true),
-            PushTransport::Multipart(MULTIPART_NAR_BYTES + 1)
-        );
-        assert_eq!(push_transport(None, threshold, false), PushTransport::Relay);
-    }
-
-    #[test]
-    fn an_unknown_size_gets_a_single_put_never_a_multipart_upload() {
-        let threshold = 1024 * 1024;
-        assert_eq!(push_transport(None, threshold, true), PushTransport::Put);
-    }
-
-    #[test]
-    fn pull_transport_relays_unconfirmed_small_and_presignerless_paths() {
-        let threshold = 1024 * 1024;
-        assert_eq!(
-            pull_transport(true, threshold + 1, threshold, true),
-            Transport::Presigned
-        );
-        assert_eq!(
-            pull_transport(false, threshold + 1, threshold, true),
-            Transport::Relay
-        );
-        assert_eq!(
-            pull_transport(true, threshold, threshold, true),
-            Transport::Relay
-        );
-        assert_eq!(
-            pull_transport(true, threshold + 1, threshold, false),
-            Transport::Relay
-        );
     }
 
     #[tokio::test]
@@ -1107,22 +992,6 @@ mod tests {
                 .is_err(),
             "DB error must propagate as Err, not a confident uncached result"
         );
-    }
-
-    #[test]
-    fn only_an_external_pull_or_normal_query_leaves_our_cache() {
-        assert!(may_consult_upstreams(QueryMode::Pull, true));
-        assert!(may_consult_upstreams(QueryMode::Normal, true));
-        assert!(!may_consult_upstreams(QueryMode::Push, true));
-        assert!(!may_consult_upstreams(QueryMode::Pull, false));
-        assert!(!may_consult_upstreams(QueryMode::Normal, false));
-    }
-
-    #[test]
-    fn an_external_query_names_exactly_one_path() {
-        assert!(external_arity_ok(false, 0) && external_arity_ok(false, 200));
-        assert!(external_arity_ok(true, 1));
-        assert!(!external_arity_ok(true, 0) && !external_arity_ok(true, 2));
     }
 
     /// The handler, not only the predicate: two external paths are refused before

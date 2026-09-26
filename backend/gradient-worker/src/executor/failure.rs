@@ -7,7 +7,7 @@
 //! Failure classification - the one place an error becomes a
 //! [`BuildFailureKind`] on its way to the server.
 
-use gradient_proto::messages::BuildFailureKind;
+use gradient_wire::messages::BuildFailureKind;
 
 use crate::executor::eval::CorruptEvalCache;
 use crate::proto::prefetch::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};

@@ -10,7 +10,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_proto::traits::DrvReader;
+use gradient_wire::traits::DrvReader;
 use std::collections::HashMap;
 
 /// In-memory [`DrvReader`] backed by a map of store paths to raw bytes.

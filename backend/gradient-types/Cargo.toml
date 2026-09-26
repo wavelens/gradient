@@ -27,7 +27,6 @@ hex        = { workspace = true }
 ipnet      = { workspace = true }
 libc       = { workspace = true }
 num_enum   = { workspace = true }
-rkyv       = { workspace = true }
 serde      = { workspace = true }
 serde_json = { workspace = true }
 sha2       = { workspace = true }

@@ -24,11 +24,11 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
-use gradient_proto::messages::{
+use gradient_util::store_path::nix_store_path;
+use gradient_wire::CachedPathInfo;
+use gradient_wire::messages::{
     BuildSpec, CachedPath, EvalMessageLevel, QueryMode, TRANSFER_TIMEOUT,
 };
-use gradient_types::CachedPathInfo;
-use gradient_util::store_path::nix_store_path;
 use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;

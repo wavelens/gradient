@@ -2262,6 +2262,7 @@ dependencies = [
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "harmonia-file-nar",
  "hex",
  "hmac 0.13.0",
@@ -2442,6 +2443,7 @@ dependencies = [
  "gradient-storage",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "ractor",
  "sea-orm",
  "serde_json",
@@ -2497,16 +2499,14 @@ dependencies = [
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "hex",
- "password-auth",
  "ractor",
  "reqwest",
- "rkyv",
  "sea-orm",
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "subtle",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -2555,6 +2555,7 @@ dependencies = [
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "ractor",
  "reqwest",
  "sea-orm",
@@ -2679,6 +2680,7 @@ dependencies = [
  "futures",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "harmonia-file-nar",
  "harmonia-store-content-address",
  "harmonia-store-path",
@@ -2720,6 +2722,7 @@ dependencies = [
  "gradient-types",
  "gradient-util",
  "gradient-web",
+ "gradient-wire",
  "harmonia-file-nar",
  "harmonia-store-derivation",
  "jsonwebtoken",
@@ -2748,7 +2751,6 @@ dependencies = [
  "ipnet",
  "libc",
  "num_enum",
- "rkyv",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2815,6 +2817,7 @@ dependencies = [
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "harmonia-file-nar",
  "hex",
  "hmac 0.13.0",
@@ -2852,6 +2855,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-wire"
+version = "1.4.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bytes",
+ "futures",
+ "gradient-util",
+ "hex",
+ "password-auth",
+ "rkyv",
+ "serde",
+ "sha2 0.11.0",
+ "subtle",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "gradient-worker"
 version = "1.4.0"
 dependencies = [
@@ -2873,6 +2899,7 @@ dependencies = [
  "gradient-test-support",
  "gradient-types",
  "gradient-util",
+ "gradient-wire",
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-content-address",

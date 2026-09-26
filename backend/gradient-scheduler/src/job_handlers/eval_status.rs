@@ -11,9 +11,9 @@ use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
 use gradient_graph::IngestBatch;
-use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
 use gradient_util::store_path::strip_nix_store_prefix;
+use gradient_wire::types::DiscoveredDerivation;
 
 use crate::Scheduler;
 use crate::eval;
@@ -72,7 +72,7 @@ impl Scheduler {
         &self,
         job_id: &str,
         candidate_lock: String,
-        bumped: Vec<gradient_types::proto::BumpedInputWire>,
+        bumped: Vec<gradient_wire::types::BumpedInputWire>,
     ) {
         use gradient_entity::evaluation_input_update as eiu;
         use sea_orm::{
@@ -229,7 +229,7 @@ impl Scheduler {
     pub async fn record_eval_message(
         &self,
         job_id: &str,
-        level: gradient_types::proto::EvalMessageLevel,
+        level: gradient_wire::types::EvalMessageLevel,
         source: String,
         message: String,
     ) -> Result<()> {
@@ -239,13 +239,13 @@ impl Scheduler {
         };
 
         let entity_level = match level {
-            gradient_types::proto::EvalMessageLevel::Error => {
+            gradient_wire::types::EvalMessageLevel::Error => {
                 gradient_entity::evaluation_message::MessageLevel::Error
             }
-            gradient_types::proto::EvalMessageLevel::Warning => {
+            gradient_wire::types::EvalMessageLevel::Warning => {
                 gradient_entity::evaluation_message::MessageLevel::Warning
             }
-            gradient_types::proto::EvalMessageLevel::Notice => {
+            gradient_wire::types::EvalMessageLevel::Notice => {
                 gradient_entity::evaluation_message::MessageLevel::Notice
             }
         };

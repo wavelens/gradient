@@ -20,9 +20,9 @@ use gradient_types::ids::CacheId;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
-use crate::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
-use crate::session::frame::Inbound;
-use crate::session::handshake as handshake_fsm;
+use gradient_wire::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use gradient_wire::session::frame::Inbound;
+use gradient_wire::session::handshake as handshake_fsm;
 
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
 
@@ -35,7 +35,7 @@ const CACHE_SESSION_IDLE_TIMEOUT_SECS: u64 = 120;
 /// read-only cache session, `None` means it is served. Pure so the policy is
 /// unit-testable without a socket or DB.
 fn reject_reason(msg: &ClientMessage) -> Option<&'static str> {
-    use gradient_types::proto::QueryMode;
+    use gradient_wire::types::QueryMode;
     match msg {
         ClientMessage::CacheQuery { mode, .. } => match mode {
             QueryMode::Push => Some("Push not allowed on a read-only cache session"),
@@ -210,7 +210,7 @@ pub async fn handle_cache_socket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_types::proto::QueryMode;
+    use gradient_wire::types::QueryMode;
 
     fn cache_query(mode: QueryMode) -> ClientMessage {
         ClientMessage::CacheQuery {
@@ -252,7 +252,7 @@ mod tests {
                 job_id: "job".into(),
                 dispatch: "d".into(),
                 error: "x".into(),
-                kind: crate::messages::BuildFailureKind::Permanent,
+                kind: gradient_wire::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],
                 spans: vec![],
             })

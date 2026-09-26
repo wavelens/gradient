@@ -27,8 +27,8 @@
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use gradient_proto::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
-use gradient_proto::session::frame::WireMessage;
+use gradient_wire::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use gradient_wire::session::frame::WireMessage;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use uuid::Uuid;
 

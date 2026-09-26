@@ -24,7 +24,7 @@ use std::sync::atomic::AtomicI64;
 
 use gradient_types::ids::ProjectId;
 
-use gradient_types::proto::GradientCapabilities;
+use gradient_wire::types::GradientCapabilities;
 
 use crate::actor::SessionPort;
 use crate::peer_auth::PeerAuth;

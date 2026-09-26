@@ -8,10 +8,10 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_proto::messages::{
+use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
 };
-use gradient_proto::traits::JobReporter;
+use gradient_wire::traits::JobReporter;
 
 /// A reported event captured by [`RecordingJobReporter`].
 #[derive(Debug, Clone)]

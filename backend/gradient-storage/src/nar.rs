@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
-use gradient_types::constants::BULK_CHUNK_SIZE;
+use gradient_wire::constants::BULK_CHUNK_SIZE;
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
 use std::io::SeekFrom;
@@ -611,7 +611,7 @@ impl NarStore {
         &self,
         hash: &str,
         nar_size: u64,
-    ) -> Result<Option<gradient_types::proto::PresignedMultipart>> {
+    ) -> Result<Option<gradient_wire::types::PresignedMultipart>> {
         let Some(s3) = &self.s3_signer else {
             return Ok(None);
         };
@@ -623,7 +623,7 @@ impl NarStore {
     pub async fn complete_multipart(
         &self,
         hash: &str,
-        receipt: &gradient_types::proto::CompletedMultipart,
+        receipt: &gradient_wire::types::CompletedMultipart,
     ) -> Result<()> {
         let s3 = self
             .s3_signer

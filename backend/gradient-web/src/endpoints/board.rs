@@ -283,7 +283,7 @@ async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<Job
         .map(|p| JobPhaseView {
             seq: p.seq,
             parent_seq: p.parent_seq,
-            phase: gradient_types::proto::JobPhase::from_i16(p.phase)
+            phase: gradient_wire::types::JobPhase::from_i16(p.phase)
                 .map(|k| k.as_str().to_string())
                 .unwrap_or_else(|| format!("unknown_{}", p.phase)),
             start_ms: p.start_ms,
@@ -1484,7 +1484,7 @@ mod tests {
     use gradient_entity::dispatched_job::DispatchedJobKind;
     use gradient_scheduler::{BoardActiveJob, WorkerInfo};
     use gradient_types::ids::ProjectId;
-    use gradient_types::proto::GradientCapabilities;
+    use gradient_wire::types::GradientCapabilities;
 
     fn worker(
         eval: bool,

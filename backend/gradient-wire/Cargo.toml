@@ -1,0 +1,37 @@
+[package]
+name        = "gradient-wire"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
+
+[lints]
+workspace = true
+
+[features]
+testing = []
+
+[dependencies]
+gradient-util = { workspace = true }
+
+anyhow            = { workspace = true }
+async-trait       = { workspace = true }
+axum              = { workspace = true, features = ["ws", "tokio"] }
+bytes             = { workspace = true }
+futures           = { workspace = true }
+hex               = { workspace = true }
+password-auth     = { workspace = true }
+rkyv              = { workspace = true }
+serde             = { workspace = true }
+sha2              = { workspace = true }
+subtle            = { workspace = true }
+thiserror         = { workspace = true }
+tokio             = { workspace = true, features = ["sync", "net", "rt", "time", "macros"] }
+tokio-tungstenite = { workspace = true }
+tracing           = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "net", "test-util"] }
+uuid  = { workspace = true }

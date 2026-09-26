@@ -35,8 +35,8 @@ use super::session::on_reauth_notify;
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
 };
-use crate::messages::{ClientMessage, GradientCapabilities, ServerMessage};
-use crate::session::frame::{Inbound, ProtoReader};
+use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
+use gradient_wire::session::frame::{Inbound, ProtoReader};
 
 /// How long a draining session waits for its in-flight jobs before closing.
 pub const SESSION_DRAIN_BUDGET: Duration = Duration::from_secs(20);
@@ -368,9 +368,9 @@ async fn read_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::frame::WireMessage;
     use futures::{SinkExt, StreamExt};
     use gradient_test_support::prelude::*;
+    use gradient_wire::session::frame::WireMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::Notify;

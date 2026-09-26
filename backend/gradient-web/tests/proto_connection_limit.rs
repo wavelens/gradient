@@ -11,16 +11,17 @@
 //! route - `proto_router` + `Extension<Arc<Scheduler>>` +
 //! `Extension<Arc<ProtoLimiter>>` - so the test can pre-acquire the only
 //! configured permit and observe the rejection shape (`503` + `Retry-After`).
-//! The unit tests in `gradient_proto::handler::limiter` cover the semaphore semantics
+//! The unit tests in `gradient_wire::limiter` cover the semaphore semantics
 //! themselves; this test verifies the handler is actually consulting them.
 
 use std::sync::Arc;
 
 use axum::extract::Extension;
 use axum_test::TestServer;
-use gradient_proto::{ProtoLimiter, proto_router};
+use gradient_proto::proto_router;
 use gradient_scheduler::Scheduler;
 use gradient_test_support::state::test_state;
+use gradient_wire::ProtoLimiter;
 use http::header;
 use sea_orm::{DatabaseBackend, MockDatabase};
 

@@ -8,7 +8,7 @@
 //! worker PUTs every part straight to object storage.
 
 use anyhow::{Context, Result};
-use gradient_types::proto::{CompletedMultipart, PresignedMultipart};
+use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
 use object_store::aws::AmazonS3;
 use object_store::multipart::{MultipartStore as _, PartId};
 use object_store::path::Path;
@@ -46,7 +46,7 @@ fn part_ttl(nar_size: u64) -> Duration {
     let transfer = Duration::from_secs(
         compressed_bound(nar_size) / crate::nar::MIN_WRITE_THROUGHPUT_BYTES_PER_SEC,
     );
-    (gradient_types::constants::PRESIGN_TTL + transfer).min(MAX_SIGV4_TTL)
+    (gradient_wire::constants::PRESIGN_TTL + transfer).min(MAX_SIGV4_TTL)
 }
 
 pub(crate) async fn presign(
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn part_ttl_scales_with_size_and_caps_at_the_sigv4_limit() {
-        assert!(part_ttl(GIB) > gradient_types::constants::PRESIGN_TTL);
+        assert!(part_ttl(GIB) > gradient_wire::constants::PRESIGN_TTL);
         assert!(part_ttl(100 * GIB) > part_ttl(GIB));
         assert_eq!(part_ttl(1024 * 1024 * GIB), MAX_SIGV4_TTL);
     }

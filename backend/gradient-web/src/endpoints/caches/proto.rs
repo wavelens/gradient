@@ -14,7 +14,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::client_ip::ClientIp;
 use crate::error::{WebError, WebResult};
 use gradient_core::ServerState;
-use gradient_proto::handler::{PerIpLimiter, ProtoLimiter};
+use gradient_wire::{PerIpLimiter, ProtoLimiter};
 
 /// `GET /cache/{cache}/proto` - cache-scoped read-only proto WebSocket.
 ///
@@ -67,8 +67,8 @@ pub async fn cache_proto(
     };
 
     let upgrade = ws
-        .max_message_size(gradient_proto::handler::MAX_PROTO_MESSAGE_SIZE)
-        .max_frame_size(gradient_proto::handler::MAX_PROTO_MESSAGE_SIZE);
+        .max_message_size(gradient_wire::session::frame::MAX_PROTO_MESSAGE_SIZE)
+        .max_frame_size(gradient_wire::session::frame::MAX_PROTO_MESSAGE_SIZE);
 
     let shutdown = state.shutdown.clone();
     Ok(upgrade.on_upgrade(move |sock| async move {
@@ -77,7 +77,7 @@ pub async fn cache_proto(
                 let _global_permit = global_permit;
                 let _ip_permit = ip_permit;
                 gradient_proto::handler::handle_cache_socket(
-                    gradient_proto::server::accept_axum(sock),
+                    gradient_wire::server::accept_axum(sock),
                     state,
                     cache_id,
                 )

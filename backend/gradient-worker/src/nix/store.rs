@@ -30,7 +30,7 @@ use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 use tracing::{debug, warn};
 
-use gradient_proto::traits::WorkerStore;
+use gradient_wire::traits::WorkerStore;
 
 /// Maximum time `pool.acquire()` blocks before failing with a timeout.
 ///

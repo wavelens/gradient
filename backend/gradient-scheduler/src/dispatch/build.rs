@@ -25,7 +25,7 @@ use tracing::{debug, error, warn};
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::jobs::PendingBuildJob;
-use gradient_types::proto::{
+use gradient_wire::types::{
     BuildJob, BuildSpec, BuildSpecKind, CacheInfo, DerivationOutput, RequiredPath,
 };
 

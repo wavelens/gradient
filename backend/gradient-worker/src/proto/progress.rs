@@ -9,7 +9,7 @@
 //! spans every transfer of one build; a retried transfer restarts from where
 //! the finished ones left off.
 
-use gradient_proto::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
+use gradient_wire::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
 use tokio::time::Instant;
 use tracing::debug;
 

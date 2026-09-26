@@ -30,7 +30,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_proto::messages::{ClientMessage, JobCandidate, JobKind};
+use gradient_wire::messages::{ClientMessage, JobCandidate, JobKind};
 use tracing::info;
 
 use crate::config::WorkerConfig;
@@ -64,7 +64,7 @@ pub struct Worker<S> {
     /// Local cache of job candidates - updated on `JobListChunk` / `JobOffer`.
     candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
     /// Last known score per candidate - used for delta filtering.
-    last_scores: Arc<Mutex<HashMap<String, gradient_proto::messages::CandidateScore>>>,
+    last_scores: Arc<Mutex<HashMap<String, gradient_wire::messages::CandidateScore>>>,
     /// Connection state: [`Connected`] or [`Disconnected`].
     conn_state: S,
     _marker: PhantomData<S>,

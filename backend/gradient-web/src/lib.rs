@@ -46,9 +46,9 @@ use uuid::Uuid;
 
 use endpoints::{admin, *};
 use gradient_core::{InitError, ServerState};
-use gradient_proto::handler::PerIpLimiter;
-use gradient_proto::{ProtoLimiter, proto_router};
+use gradient_proto::proto_router;
 use gradient_scheduler::Scheduler;
+use gradient_wire::{PerIpLimiter, ProtoLimiter};
 use std::sync::Arc;
 
 /// Per-request body cap for chunked NAR uploads. Comfortably above the CLI's

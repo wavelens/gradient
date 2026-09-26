@@ -16,12 +16,12 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::{StreamExt as _, TryStreamExt as _};
-use gradient_proto::messages::{
+use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CACHE_QUERY_MAX_PATHS, CACHE_QUERY_TIMEOUT, CACHE_QUERY_WINDOW,
     CachedPath, ClientMessage, DiscoveredDerivation, EvalCachePullOutcome, EvalCachePushMode,
     EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
-use gradient_proto::session::frame::BULK_CHUNK_SIZE;
+use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -32,7 +32,7 @@ use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{BuildProgressSink, Progress};
-use gradient_proto::traits::JobReporter;
+use gradient_wire::traits::JobReporter;
 
 /// A pending `CacheQuery`: its reply channel plus the owning `job_id` so a
 /// finished or aborted job can drop any query it left in flight.
@@ -403,7 +403,7 @@ impl JobUpdater {
     /// arrive via chunked `NarPush` frames. Returns the assembled (still
     /// zstd-compressed) NAR per path in the order requested, staged on disk
     /// when a partial store is configured. Each path has its own
-    /// [`gradient_proto::messages::TRANSFER_TIMEOUT`].
+    /// [`gradient_wire::messages::TRANSFER_TIMEOUT`].
     ///
     /// All waiters are registered **before** the `NarRequest` goes on the
     /// wire so every server response (`NarPush` / `NarUnavailable` /
@@ -790,7 +790,7 @@ impl JobReporter for JobUpdater {
     async fn report_input_update(
         &mut self,
         candidate_lock: String,
-        bumped: Vec<gradient_proto::messages::BumpedInputWire>,
+        bumped: Vec<gradient_wire::messages::BumpedInputWire>,
     ) -> Result<()> {
         self.send_update(JobUpdateKind::InputUpdateResult {
             candidate_lock,
@@ -1123,7 +1123,7 @@ mod tests {
                 job_id: updater.job_id.clone(),
                 dispatch: updater.dispatch.get(),
                 error: "something went wrong".to_owned(),
-                kind: gradient_proto::messages::BuildFailureKind::Permanent,
+                kind: gradient_wire::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],
                 spans: vec![],
             })
@@ -1158,13 +1158,13 @@ mod tests {
         tokio::spawn(async move {
             while let Some(inbound) = reader.recv().await {
                 match inbound {
-                    gradient_proto::Inbound::Control(
-                        gradient_proto::messages::ServerMessage::CacheStatus { query_id, cached },
+                    gradient_wire::Inbound::Control(
+                        gradient_wire::messages::ServerMessage::CacheStatus { query_id, cached },
                     ) => {
                         deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
                     }
-                    gradient_proto::Inbound::Control(
-                        gradient_proto::messages::ServerMessage::KnownDerivations {
+                    gradient_wire::Inbound::Control(
+                        gradient_wire::messages::ServerMessage::KnownDerivations {
                             query_id,
                             known,
                         },
@@ -1182,7 +1182,7 @@ mod tests {
     /// the window in reverse so reassembly order is proven, not assumed.
     #[tokio::test]
     async fn cache_queries_are_pipelined_to_the_window_and_reassembled_in_order() {
-        use gradient_proto::messages::{CACHE_QUERY_WINDOW, ServerMessage};
+        use gradient_wire::messages::{CACHE_QUERY_WINDOW, ServerMessage};
         let chunks = CACHE_QUERY_WINDOW * 2 + 1;
         let total = CACHE_QUERY_MAX_PATHS * (chunks - 1) + 5;
         let (conn, server_task, job_id) = server_then_client!("job-window", |sc| {
@@ -1249,7 +1249,7 @@ mod tests {
     /// `None`, never as a number the server could size an upload by.
     #[tokio::test]
     async fn a_push_query_without_a_store_marks_every_size_unknown() {
-        use gradient_proto::messages::ServerMessage;
+        use gradient_wire::messages::ServerMessage;
         let (conn, server_task, job_id) = server_then_client!("job-sizes", |sc| {
             let msg = sc.recv().await.unwrap();
             let ClientMessage::CacheQuery {
@@ -1292,7 +1292,7 @@ mod tests {
     /// unknown, never absent.
     #[tokio::test]
     async fn an_unsized_push_query_still_carries_one_size_per_path() {
-        use gradient_proto::messages::ServerMessage;
+        use gradient_wire::messages::ServerMessage;
         let (conn, server_task, job_id) = server_then_client!("job-unsized-push", |sc| {
             let msg = sc.recv().await.unwrap();
             let ClientMessage::CacheQuery {
@@ -1334,7 +1334,7 @@ mod tests {
     /// `query_id`: answered in reverse, they still merge in request order.
     #[tokio::test]
     async fn known_derivation_queries_are_pipelined_and_correlate_by_query_id() {
-        use gradient_proto::messages::{CACHE_QUERY_WINDOW, ServerMessage};
+        use gradient_wire::messages::{CACHE_QUERY_WINDOW, ServerMessage};
         let chunks = CACHE_QUERY_WINDOW * 2 + 1;
         let total = CACHE_QUERY_MAX_PATHS * (chunks - 1) + 5;
         let (conn, server_task, job_id) = server_then_client!("job-known-window", |sc| {

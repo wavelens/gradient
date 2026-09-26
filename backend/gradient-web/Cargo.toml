@@ -26,6 +26,7 @@ gradient-storage = { workspace = true }
 gradient-notify = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
+gradient-wire = { workspace = true }
 gradient-proto = { workspace = true }
 gradient-scheduler = { workspace = true }
 gradient-score = { workspace = true }

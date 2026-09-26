@@ -24,20 +24,20 @@ pub mod timeline;
 use std::sync::Arc;
 
 use anyhow::Result;
-use gradient_proto::messages::{
+use gradient_wire::messages::{
     BuildJob, BuildOutput, BuildSpec, BuildSpecKind, FlakeJob, FlakeStep,
 };
 use tokio::sync::watch;
 use tracing::instrument;
 
-use gradient_proto::messages::JobPhase;
-use gradient_types::CachedPathInfo;
+use gradient_wire::CachedPathInfo;
+use gradient_wire::messages::JobPhase;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
 use crate::proto::{credentials::CredentialStore, job::JobUpdater, nar};
-use gradient_proto::messages::CachedPath;
-use gradient_proto::traits::WorkerStore;
+use gradient_wire::messages::CachedPath;
+use gradient_wire::traits::WorkerStore;
 
 pub use eval::WorkerEvaluator;
 
@@ -432,7 +432,7 @@ impl JobExecutor {
 
                     let outcome = fetch::fetch_repository(
                         &job,
-                        updater as &mut dyn gradient_proto::traits::JobReporter,
+                        updater as &mut dyn gradient_wire::traits::JobReporter,
                         credentials,
                         &self.binpath_nix,
                         &self.binpath_ssh,
@@ -805,7 +805,7 @@ mod tests {
             is_fixed_output: false,
             outputs: outputs
                 .iter()
-                .map(|(name, path)| gradient_proto::messages::DerivationOutput {
+                .map(|(name, path)| gradient_wire::messages::DerivationOutput {
                     name: (*name).to_owned(),
                     path: (*path).to_owned(),
                 })

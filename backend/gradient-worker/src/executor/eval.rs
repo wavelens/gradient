@@ -21,11 +21,11 @@ use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
-use gradient_proto::messages::{
+use gradient_sources::{DerivationResolver, FlakeDiscovery};
+use gradient_wire::messages::{
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob,
     FlakeOutputNode, FlakeSource,
 };
-use gradient_sources::{DerivationResolver, FlakeDiscovery};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 

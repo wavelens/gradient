@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use gradient_types::ids::*;
 
-use gradient_types::proto::{
+use gradient_wire::types::{
     BuildJob, BuildSpec, BuildSpecKind, CandidateScore, FlakeJob, FlakeStep, GradientCapabilities,
     JobKind,
 };
@@ -77,7 +77,7 @@ fn eval_job(peer: ProjectId) -> PendingEvalJob {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             steps: vec![FlakeStep::EvaluateDerivations],
-            source: gradient_types::proto::FlakeSource::Repository {
+            source: gradient_wire::types::FlakeSource::Repository {
                 url: "https://example.com/repo".into(),
                 commit: "abc123".into(),
             },
@@ -696,7 +696,7 @@ async fn record_eval_message_drops_when_job_unknown() {
     let r = scheduler
         .record_eval_message(
             "ghost-job",
-            gradient_types::proto::EvalMessageLevel::Error,
+            gradient_wire::types::EvalMessageLevel::Error,
             "build-prefetch".into(),
             "nope".into(),
         )
@@ -745,7 +745,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
     scheduler
         .record_eval_message(
             "jbuild",
-            gradient_types::proto::EvalMessageLevel::Error,
+            gradient_wire::types::EvalMessageLevel::Error,
             "build-prefetch".into(),
             "input prefetch failed: no nar_hash".into(),
         )
@@ -824,7 +824,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
         other => panic!("expected an eval follow-up, got {other:?}"),
     };
     match &follow.job.source {
-        gradient_types::proto::FlakeSource::Cached { store_path } => {
+        gradient_wire::types::FlakeSource::Cached { store_path } => {
             assert_eq!(store_path, source_path)
         }
         other => panic!("expected Cached source, got {other:?}"),
@@ -848,9 +848,9 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 project_id: peer,
                 commit_id: CommitId::now_v7(),
                 repository: "https://example.com/repo".into(),
-                job: gradient_types::proto::FlakeJob {
-                    steps: vec![gradient_types::proto::FlakeStep::EvaluateDerivations],
-                    source: gradient_types::proto::FlakeSource::Repository {
+                job: gradient_wire::types::FlakeJob {
+                    steps: vec![gradient_wire::types::FlakeStep::EvaluateDerivations],
+                    source: gradient_wire::types::FlakeSource::Repository {
                         url: "https://example.com/repo".into(),
                         commit: "abc123".into(),
                     },
@@ -1413,7 +1413,7 @@ async fn a_close_that_fails_is_reported_as_a_failed_close() {
 async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
-    use gradient_types::proto::{JobPhase, JobPhaseSpan};
+    use gradient_wire::types::{JobPhase, JobPhaseSpan};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     let dispatch = DispatchedJobId::now_v7();

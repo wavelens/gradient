@@ -8,7 +8,7 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
-use gradient_types::proto::BuildFailureKind;
+use gradient_wire::types::BuildFailureKind;
 
 /// How the anchor was being fulfilled when it failed, and how much of its
 /// substitute-miss budget is already spent. `misses` counts the anchor's prior
@@ -239,7 +239,7 @@ mod tests {
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
-    use gradient_types::proto::BuildFailureKind;
+    use gradient_wire::types::BuildFailureKind;
 
     /// The user pressed Abort: the worker stopped nix, nothing about the
     /// derivation failed. Reporting it as `Permanent` landed the anchor on

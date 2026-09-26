@@ -11,7 +11,7 @@ use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gradient_proto::messages::{CandidateScore, JobCandidate, JobKind};
+use gradient_wire::messages::{CandidateScore, JobCandidate, JobKind};
 use tracing::warn;
 
 use crate::connection::ProtoWriter;
@@ -81,7 +81,7 @@ pub(super) fn spawn_scoring_task(
             "scoring task complete"
         );
 
-        use gradient_proto::messages::ClientMessage;
+        use gradient_wire::messages::ClientMessage;
         if is_final {
             if let Err(e) = send_score_chunks(&writer, to_send).await {
                 warn!(error = %e, "send_score_chunks (final) failed");
@@ -122,7 +122,7 @@ pub(super) async fn send_score_chunks(
     writer: &ProtoWriter,
     scores: Vec<CandidateScore>,
 ) -> anyhow::Result<()> {
-    use gradient_proto::messages::ClientMessage;
+    use gradient_wire::messages::ClientMessage;
     if scores.is_empty() {
         writer
             .send(ClientMessage::RequestJobChunk {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::proto::BuildSpecKind;
+use gradient_wire::types::BuildSpecKind;
 
 /// A substitute or a download runs on any worker, since neither needs a nix store;
 /// a build needs a worker of its own architecture. A `builtin` derivation is nix's

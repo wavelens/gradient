@@ -14,8 +14,8 @@ pub mod handshake;
 pub mod listener;
 
 use anyhow::{Context, Result};
-use gradient_proto::messages::{ClientMessage, ServerMessage};
-use gradient_proto::session::frame::{
+use gradient_wire::messages::{ClientMessage, ServerMessage};
+use gradient_wire::session::frame::{
     ClientWriter, Inbound, ProtoSocket, ServerReader, accept_tungstenite,
 };
 use std::time::Duration;
@@ -43,7 +43,7 @@ impl ProtoConnection {
     /// [`crate::connection::handshake::perform_handshake`].
     #[instrument(skip_all, fields(%url))]
     pub async fn open(url: &str) -> Result<Self> {
-        let socket = gradient_proto::client::dial(url)
+        let socket = gradient_wire::client::dial(url)
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
         Ok(Self {

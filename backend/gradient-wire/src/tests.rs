@@ -420,7 +420,7 @@ fn proto_version_is_nonzero() {
 ///   ask the server to allocate gigabytes from a single send.
 #[test]
 fn max_proto_message_size_is_sane() {
-    use crate::handler::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
+    use crate::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
     const _: () = {
         assert!(
             MAX_PROTO_MESSAGE_SIZE >= BULK_CHUNK_SIZE * 2,
@@ -438,7 +438,7 @@ fn max_proto_message_size_is_sane() {
 /// task and FD for minutes.
 #[test]
 fn handshake_timeout_is_sane() {
-    use crate::handler::HANDSHAKE_TIMEOUT;
+    use crate::session::frame::HANDSHAKE_TIMEOUT;
     assert!(HANDSHAKE_TIMEOUT.as_secs() >= 5);
     assert!(HANDSHAKE_TIMEOUT.as_secs() <= 60);
 }

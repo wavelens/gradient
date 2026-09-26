@@ -15,13 +15,13 @@ use std::time::{Duration, Instant};
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_scheduler::Scheduler;
 use gradient_types::ids::DispatchedJobId;
-use gradient_types::proto::BuildFailureKind;
 use gradient_util::shutdown::Shutdown;
+use gradient_wire::types::BuildFailureKind;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use crate::messages::{JobPhaseSpan, JobUpdateKind};
+use gradient_wire::messages::{JobPhaseSpan, JobUpdateKind};
 
 use super::nar_transfer::CommitTracker;
 use super::socket::{ProtoWriter, push_pending_candidates};

@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_proto::traits::WorkerStore;
+use gradient_wire::traits::WorkerStore;
 use std::collections::HashSet;
 use std::sync::Mutex;
 

@@ -17,7 +17,7 @@ use sea_orm::{
 use tracing::{debug, info, warn};
 
 use gradient_types::ids::ProjectId;
-use gradient_types::proto::GradientCapabilities;
+use gradient_wire::types::GradientCapabilities;
 
 use crate::Scheduler;
 use crate::actor::{

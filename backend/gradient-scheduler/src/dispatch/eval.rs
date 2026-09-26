@@ -20,7 +20,7 @@ use tracing::{debug, error};
 
 use crate::Scheduler;
 use crate::jobs::PendingEvalJob;
-use gradient_types::proto::{FlakeJob, FlakeStep, RequiredPath};
+use gradient_wire::types::{FlakeJob, FlakeStep, RequiredPath};
 
 pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler.draining.load(Ordering::Relaxed) {
@@ -76,7 +76,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         };
 
         let input_overrides = maps.overrides.get(&eval.id).cloned().unwrap_or_default();
-        let input_update = sidecar.map(|s| gradient_types::proto::InputUpdateSpec {
+        let input_update = sidecar.map(|s| gradient_wire::types::InputUpdateSpec {
             generator: s.generator.clone(),
             discover_only: s.discover_only,
             inputs: s
@@ -146,7 +146,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 struct EvalDispatchMaps {
     commits: HashMap<CommitId, MCommit>,
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
-    overrides: HashMap<EvaluationId, Vec<gradient_types::proto::FlakeInputOverride>>,
+    overrides: HashMap<EvaluationId, Vec<gradient_wire::types::FlakeInputOverride>>,
     projects: HashMap<TaskId, ProjectId>,
 }
 
@@ -190,7 +190,7 @@ impl EvalDispatchMaps {
 
         let eval_ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
         use gradient_entity::evaluation_flake_input_override as efio;
-        let mut overrides: HashMap<EvaluationId, Vec<gradient_types::proto::FlakeInputOverride>> =
+        let mut overrides: HashMap<EvaluationId, Vec<gradient_wire::types::FlakeInputOverride>> =
             HashMap::new();
         for r in gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
             efio::Entity::find()
@@ -202,7 +202,7 @@ impl EvalDispatchMaps {
         .await?
         {
             overrides.entry(r.evaluation).or_default().push(
-                gradient_types::proto::FlakeInputOverride {
+                gradient_wire::types::FlakeInputOverride {
                     input_name: r.input_name,
                     url: r.url,
                 },
@@ -245,10 +245,10 @@ pub(crate) fn flake_job_for_eval_source(
     commit_sha: String,
     wildcards: Vec<String>,
     split_fetch: bool,
-    input_overrides: Vec<gradient_types::proto::FlakeInputOverride>,
-    input_update: Option<gradient_types::proto::InputUpdateSpec>,
+    input_overrides: Vec<gradient_wire::types::FlakeInputOverride>,
+    input_update: Option<gradient_wire::types::InputUpdateSpec>,
 ) -> (FlakeJob, Vec<RequiredPath>) {
-    use gradient_types::proto::FlakeSource;
+    use gradient_wire::types::FlakeSource;
 
     if repository.starts_with("/nix/store/") {
         let steps = if split_fetch {
@@ -323,7 +323,7 @@ pub(crate) async fn project_id_for_eval(
 #[cfg(test)]
 mod eval_source_tests {
     use super::flake_job_for_eval_source;
-    use gradient_types::proto::{FlakeSource, FlakeStep};
+    use gradient_wire::types::{FlakeSource, FlakeStep};
 
     #[test]
     fn cached_source_dispatches_with_fetch() {

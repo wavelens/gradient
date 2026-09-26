@@ -19,14 +19,14 @@ use std::collections::HashMap;
 use gradient_core::ServerState;
 use gradient_entity::eval_cache_store;
 use gradient_types::ids::EvalCacheStoreId;
-use gradient_types::proto::{EvalCachePullOutcome, EvalCachePushMode};
 use gradient_types::*;
+use gradient_wire::types::{EvalCachePullOutcome, EvalCachePushMode};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, warn};
 
 use super::socket::{BULK_CHUNK_SIZE, ProtoWriter, send_server_msg};
-use crate::messages::{PRESIGN_TTL, ServerMessage};
+use gradient_wire::messages::{PRESIGN_TTL, ServerMessage};
 
 /// Storage key for a fingerprint's eval-cache blob. Kept here (not just in
 /// `NarStore`) so the convention is visible at the call site and unit-testable.

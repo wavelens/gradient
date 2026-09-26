@@ -17,14 +17,14 @@ use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_scheduler::Scheduler;
 use gradient_storage::{NarSource, PartialWriter, StagedFile};
-use gradient_types::proto::CompletedMultipart;
 use gradient_util::shutdown::Shutdown;
+use gradient_wire::types::CompletedMultipart;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, trace, warn};
 
 use crate::ingest::WriteNeeded;
-use crate::messages::{ArchivedClientMessage, ClientMessage, ServerMessage};
-use crate::session::frame::Frame;
+use gradient_wire::messages::{ArchivedClientMessage, ClientMessage, ServerMessage};
+use gradient_wire::session::frame::Frame;
 
 use super::dispatch::DispatchContext;
 use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
@@ -1184,7 +1184,7 @@ async fn fail_build_transient(
             peer_id,
             job_id,
             &reason,
-            gradient_types::proto::BuildFailureKind::Transient,
+            gradient_wire::types::BuildFailureKind::Transient,
             &[],
         )
         .await
@@ -1561,9 +1561,9 @@ mod commit_tracker_tests {
 #[cfg(test)]
 mod nar_receive_store_tests {
     use super::{AppendOutcome, ENDED_STREAM_GRACE, MAX_ACTIVE_STREAMS, NarReceiveStore};
-    use crate::messages::ClientMessage;
-    use crate::session::frame::{Frame, Inbound, WireMessage as _};
     use gradient_util::shutdown::Shutdown;
+    use gradient_wire::messages::ClientMessage;
+    use gradient_wire::session::frame::{Frame, Inbound, WireMessage as _};
     use sha2::Digest as _;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -2154,9 +2154,9 @@ mod nar_receive_store_tests {
 #[cfg(test)]
 mod serve_nar_tests {
     use super::*;
-    use crate::session::frame::WireMessage;
     use bytes::Bytes;
     use gradient_test_support::state::test_state;
+    use gradient_wire::session::frame::WireMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::sync::mpsc;
 
@@ -2164,16 +2164,7 @@ mod serve_nar_tests {
     /// test can assert exactly which protocol frames were emitted (NarPush,
     /// NarUnavailable, NarAbort, …).
     fn spy_writer(timeout: Duration) -> (ProtoWriter, mpsc::Receiver<Bytes>) {
-        let (tx, rx) = mpsc::channel::<Bytes>(64);
-        (
-            ProtoWriter {
-                control_tx: tx.clone(),
-                tx,
-                send_chunk_timeout: timeout,
-                _direction: std::marker::PhantomData,
-            },
-            rx,
-        )
+        ProtoWriter::spy(timeout)
     }
 
     fn decode(bytes: Bytes) -> ServerMessage {

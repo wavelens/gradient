@@ -14,7 +14,7 @@
 //! preventing callers from accidentally reading metadata fields on uncached
 //! paths.
 
-use super::proto::{CachedPath, PresignedMultipart};
+use crate::types::{CachedPath, PresignedMultipart};
 
 /// Where an uncached path's NAR goes, as granted by a `CacheQuery {Push}`.
 #[derive(Debug, Clone, Copy, PartialEq)]

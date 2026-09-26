@@ -12,7 +12,7 @@
 //! identical regardless of who initiated the transport.
 
 use anyhow::{Context, Result};
-use gradient_proto::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
+use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;

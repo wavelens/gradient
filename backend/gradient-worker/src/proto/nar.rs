@@ -22,9 +22,9 @@ use std::io::Write as _;
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use gradient_proto::messages::{ClientMessage, NAR_ZSTD_LEVEL};
-use gradient_proto::session::frame::BULK_CHUNK_SIZE;
 use gradient_util::nix_hash::nix32_encode;
+use gradient_wire::messages::{ClientMessage, NAR_ZSTD_LEVEL};
+use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use sha2::{Digest, Sha256};
@@ -36,8 +36,8 @@ use crate::connection::ProtoWriter;
 use crate::nix::store::LocalNixStore;
 use crate::proto::nar_multipart::{PartSink, PartUploader};
 use crate::proto::nar_recv::NarReceiver;
-use gradient_types::UploadTarget;
-use gradient_types::proto::{CompletedMultipart, PresignedMultipart};
+use gradient_wire::UploadTarget;
+use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
 
 /// `sha256:<nix32>` of `data` - the wire format for NAR and file hashes.
 pub(crate) fn sha256_nix32(data: &[u8]) -> String {

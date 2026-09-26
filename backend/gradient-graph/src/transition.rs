@@ -14,8 +14,9 @@ use gradient_db::{
 };
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct};
 use gradient_types::*;
+use gradient_wire::BuildOutputMetadata;
+use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,

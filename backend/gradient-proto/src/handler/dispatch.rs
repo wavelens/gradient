@@ -18,18 +18,16 @@ use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, trace, warn};
 
-use crate::messages::{
-    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, QueryMode,
-    ServerMessage,
-};
-use crate::session::frame::{Frame, Inbound};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
 use gradient_scheduler::jobs::PendingJob;
-
-use super::auth::{
-    expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers, validate_tokens,
+use gradient_wire::messages::{
+    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, QueryMode,
+    ServerMessage,
 };
+use gradient_wire::session::frame::{Frame, Inbound};
+
+use super::auth::{expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers};
 use super::cache::handle_cache_query;
 use super::eval_cache::{
     EvalCacheReceiveStore, handle_eval_cache_chunk, handle_eval_cache_pull, handle_eval_cache_push,
@@ -40,6 +38,7 @@ use super::nar_transfer::{NarReceiveStore, serve_nar_request};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
 };
+use gradient_wire::auth::validate_tokens;
 
 // ── Dispatch context ──────────────────────────────────────────────────────────
 
@@ -513,7 +512,7 @@ impl<'a> DispatchContext<'a> {
     async fn on_eval_message(
         &mut self,
         job_id: String,
-        level: gradient_types::proto::EvalMessageLevel,
+        level: gradient_wire::types::EvalMessageLevel,
         source: String,
         message: String,
     ) {
@@ -638,9 +637,9 @@ impl<'a> DispatchContext<'a> {
 
     async fn send_job_list_chunks(
         &mut self,
-        candidates: Vec<crate::messages::JobCandidate>,
+        candidates: Vec<gradient_wire::messages::JobCandidate>,
     ) -> bool {
-        use crate::messages::ServerMessage;
+        use gradient_wire::messages::ServerMessage;
         let chunks: Vec<_> = candidates.chunks(JOB_OFFER_CHUNK_SIZE).collect();
         let total = chunks.len();
         for (i, chunk) in chunks.into_iter().enumerate() {
@@ -866,7 +865,7 @@ impl RpcContext {
         query_id: String,
         paths: Vec<String>,
         nar_sizes: Vec<Option<u64>>,
-        mode: gradient_types::proto::QueryMode,
+        mode: gradient_wire::types::QueryMode,
         external: bool,
         project: Option<ProjectId>,
     ) {
@@ -1001,13 +1000,12 @@ mod dispatch_id_tests {
 mod assignment_response_tests {
     use super::*;
     use crate::handler::job_events::SchedulerJobEvents;
-    use crate::session::frame::{MsgWriter, WireMessage as _};
     use gradient_scheduler::jobs::PendingEvalJob;
     use gradient_test_support::prelude::*;
     use gradient_types::ids::{CommitId, EvaluationId};
-    use gradient_types::proto::{FlakeJob, FlakeSource, FlakeStep};
+    use gradient_wire::session::frame::WireMessage as _;
+    use gradient_wire::types::{FlakeJob, FlakeSource, FlakeStep};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
-    use std::marker::PhantomData;
     use std::time::Duration;
 
     fn pending_eval() -> PendingJob {
@@ -1039,14 +1037,7 @@ mod assignment_response_tests {
     }
 
     fn detached_writer() -> ProtoWriter {
-        let (tx, _bulk) = tokio::sync::mpsc::channel(1);
-        let (control_tx, _control) = tokio::sync::mpsc::channel(1);
-        MsgWriter {
-            tx,
-            control_tx,
-            send_chunk_timeout: Duration::from_secs(1),
-            _direction: PhantomData,
-        }
+        ProtoWriter::spy(Duration::from_secs(1)).0
     }
 
     /// Draining and at-capacity rejections are routine, and the sweep never
@@ -1222,13 +1213,7 @@ mod assignment_response_tests {
     async fn a_cache_query_for_an_owned_job_is_answered_without_the_scheduler() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
-        let (tx, mut sent) = tokio::sync::mpsc::channel(8);
-        let writer = MsgWriter {
-            control_tx: tx.clone(),
-            tx,
-            send_chunk_timeout: Duration::from_secs(1),
-            _direction: PhantomData,
-        };
+        let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(1));
         let semaphore = Arc::new(Semaphore::new(1));
         let job_events = JobEvents::spawn(
             &state.shutdown,

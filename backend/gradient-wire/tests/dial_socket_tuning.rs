@@ -11,9 +11,9 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use gradient_proto::client::dial;
-use gradient_proto::handler::MAX_PROTO_MESSAGE_SIZE;
-use gradient_proto::session::frame::ProtoSocket;
+use gradient_wire::client::dial;
+use gradient_wire::session::frame::MAX_PROTO_MESSAGE_SIZE;
+use gradient_wire::session::frame::ProtoSocket;
 
 /// Dial a listener that upgrades exactly one inbound connection. The upgrade
 /// has to be driven concurrently with the dial or neither handshake completes,

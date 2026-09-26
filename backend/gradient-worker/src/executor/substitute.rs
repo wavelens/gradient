@@ -11,8 +11,8 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use gradient_proto::messages::{CachedPath, JobPhase};
 use gradient_util::nix_hash::normalize_nar_hash;
+use gradient_wire::messages::{CachedPath, JobPhase};
 
 use crate::proto::compression::{decompress, resolve_compression};
 use crate::proto::job::JobUpdater;

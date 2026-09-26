@@ -690,7 +690,7 @@ pub async fn get_board_health(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Extension(limiter): Extension<Arc<gradient_proto::ProtoLimiter>>,
+    Extension(limiter): Extension<Arc<gradient_wire::ProtoLimiter>>,
 ) -> WebResult<Json<BaseResponse<BoardHealth>>> {
     require_superuser(&user)?;
     let obs = collect(&state, &scheduler).await?;

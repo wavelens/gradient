@@ -18,9 +18,9 @@ use gradient_entity::worker_registration::{
 use gradient_entity::{base_worker, project_base_worker};
 use gradient_scheduler::{Scheduler, WorkerInfo};
 use gradient_types::ids::*;
-use gradient_types::proto::GradientCapabilities;
 use gradient_types::{AProjectBaseWorker, EBaseWorker, EProjectBaseWorker};
 use gradient_types::{BaseResponse, MUser};
+use gradient_wire::types::GradientCapabilities;
 use rand::RngExt as _;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{

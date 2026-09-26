@@ -11,7 +11,6 @@ mod cache_session;
 mod dispatch;
 mod eval_cache;
 mod job_events;
-mod limiter;
 mod nar;
 mod nar_transfer;
 mod session;
@@ -29,15 +28,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
+use gradient_wire::ProtoLimiter;
+use gradient_wire::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 
-pub use crate::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 pub use cache_session::handle_cache_socket;
-pub use limiter::{PerIpLimiter, ProtoLimiter};
 pub(crate) use session::handle_socket;
 pub use sessions::SessionsHandle;
-
-#[cfg(test)]
-pub(crate) use socket::HANDSHAKE_TIMEOUT;
 
 /// `Retry-After` value returned with a 503 when the proto connection cap is
 /// hit - long enough to absorb a brief surge, short enough that a recovered

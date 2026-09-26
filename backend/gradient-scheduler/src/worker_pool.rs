@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use gradient_types::ids::ProjectId;
-use gradient_types::proto::{GradientCapabilities, JobKind};
+use gradient_wire::types::{GradientCapabilities, JobKind};
 
 use crate::actor::{SessionPort, SessionSignal};
 use crate::peer_auth::PeerAuth;

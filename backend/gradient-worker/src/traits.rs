@@ -6,7 +6,7 @@
 
 //! Re-exports trait abstractions from proto and provides production implementations.
 
-pub use gradient_proto::traits::{DrvReader, JobReporter};
+pub use gradient_wire::traits::{DrvReader, JobReporter};
 
 use anyhow::Result;
 use async_trait::async_trait;

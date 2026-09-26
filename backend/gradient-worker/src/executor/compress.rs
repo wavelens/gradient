@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use gradient_proto::messages::CachedPath;
 use gradient_util::store_path::nix_store_path;
+use gradient_wire::messages::CachedPath;
 use tokio::sync::watch;
 
 use crate::proto::job::JobUpdater;
@@ -77,9 +77,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use gradient_proto::messages::{CachedPath, ClientMessage, ServerMessage};
     use gradient_test_support::prelude::MockProtoServer;
     use gradient_util::sync::Mutex;
+    use gradient_wire::messages::{CachedPath, ClientMessage, ServerMessage};
 
     use crate::connection::{ProtoConnection, ProtoReader};
     use crate::executor::UPLOAD_CONCURRENCY;
@@ -122,12 +122,12 @@ mod tests {
         tokio::spawn(async move {
             while let Some(inbound) = reader.recv().await {
                 match inbound {
-                    gradient_proto::Inbound::Control(ServerMessage::NarPushResume {
+                    gradient_wire::Inbound::Control(ServerMessage::NarPushResume {
                         job_id,
                         store_path,
                         received_bytes,
                     }) => nar_recv.resolve_push(&job_id, &store_path, received_bytes),
-                    gradient_proto::Inbound::Control(ServerMessage::CacheStatus {
+                    gradient_wire::Inbound::Control(ServerMessage::CacheStatus {
                         query_id,
                         cached,
                     }) => {

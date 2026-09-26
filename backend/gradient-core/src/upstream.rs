@@ -19,7 +19,7 @@ use tokio::sync::Semaphore;
 
 use gradient_db::{UpstreamAccum, UpstreamEndpoint};
 use gradient_types::ids::CacheUpstreamId;
-use gradient_types::proto::CachedPath;
+use gradient_wire::types::CachedPath;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SampleKind {

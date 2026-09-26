@@ -9,8 +9,8 @@
 use sea_orm::{ActiveModelTrait, IntoActiveModel};
 use tracing::{debug, warn};
 
-use gradient_types::proto::EvalStatsReport;
 use gradient_types::*;
+use gradient_wire::types::EvalStatsReport;
 
 use crate::Scheduler;
 

@@ -10,7 +10,7 @@
 //! When a job task sends `NarRequest`/`NarRequestResume` it then calls
 //! [`NarReceiver::await_pending`] to await the assembled compressed NAR for
 //! each path. The dispatch loop records the leading
-//! [`gradient_proto::messages::ServerMessage::NarStreamHeader`] via
+//! [`gradient_wire::messages::ServerMessage::NarStreamHeader`] via
 //! [`NarReceiver::note_header`] and hands every arriving
 //! `ServerMessage::NarPush` frame to [`NarReceiver::accept_chunk`].
 //!
@@ -29,7 +29,7 @@
 //!
 //! For uploads, [`NarReceiver::register_push`] installs a one-shot gate that
 //! the dispatch loop resolves on
-//! [`gradient_proto::messages::ServerMessage::NarPushResume`], handing the
+//! [`gradient_wire::messages::ServerMessage::NarPushResume`], handing the
 //! pusher the byte offset to seek to.
 
 use gradient_util::sync::Mutex;
@@ -39,9 +39,9 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use gradient_proto::messages::{ArchivedServerMessage, ServerMessage, TRANSFER_TIMEOUT};
-use gradient_proto::session::frame::Frame;
 use gradient_storage::{PartialStore, PartialWriter};
+use gradient_wire::messages::{ArchivedServerMessage, ServerMessage, TRANSFER_TIMEOUT};
+use gradient_wire::session::frame::Frame;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
@@ -513,7 +513,7 @@ impl NarReceiver {
     }
 
     /// Await a previously [`Self::register`]ed waiter until it goes
-    /// [`gradient_proto::messages::TRANSFER_TIMEOUT`] without progress.
+    /// [`gradient_wire::messages::TRANSFER_TIMEOUT`] without progress.
     pub async fn await_pending(&self, pending: PendingNar) -> Result<NarPayload> {
         let PendingNar {
             job_id,
@@ -724,7 +724,7 @@ mod tests {
     )]
 
     use super::*;
-    use gradient_proto::session::frame::{Inbound, WireMessage};
+    use gradient_wire::session::frame::{Inbound, WireMessage};
     use tempfile::TempDir;
 
     fn frame(

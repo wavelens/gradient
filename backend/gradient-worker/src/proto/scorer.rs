@@ -18,8 +18,8 @@
 //! does not skew scoring meaningfully.
 
 use anyhow::Result;
-use gradient_proto::messages::{CandidateScore, JobCandidate};
-use gradient_proto::traits::WorkerStore;
+use gradient_wire::messages::{CandidateScore, JobCandidate};
+use gradient_wire::traits::WorkerStore;
 use tracing::debug;
 
 /// Computes scores for job candidates against the local Nix store.
@@ -73,8 +73,8 @@ impl JobScorer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_proto::messages::{CacheInfo, RequiredPath};
     use gradient_test_support::prelude::*;
+    use gradient_wire::messages::{CacheInfo, RequiredPath};
 
     #[tokio::test]
     async fn score_empty_candidates() {

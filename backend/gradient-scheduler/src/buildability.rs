@@ -18,7 +18,7 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::dispatch_mode::decide_build_spec_kind;
-use gradient_types::proto::BuildSpecKind;
+use gradient_wire::types::BuildSpecKind;
 
 /// Pre-loaded derivation and feature data for a set of pending anchors.
 ///

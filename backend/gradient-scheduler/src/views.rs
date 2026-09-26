@@ -8,7 +8,7 @@
 //! onto the dispatched-job record so the frontend can show every collected value.
 
 use gradient_score::{DerivationRef, HistoryPrediction, JobContext, WorkerContext};
-use gradient_types::proto::{FlakeStep, GradientCapabilities};
+use gradient_wire::types::{FlakeStep, GradientCapabilities};
 use serde::Serialize;
 
 use crate::jobs::PendingJob;
@@ -156,7 +156,7 @@ mod tests {
     use super::*;
     use gradient_score::ScoredJob;
     use gradient_types::ids::{DerivationBuildId, EvaluationId, ProjectId};
-    use gradient_types::proto::{BuildJob, BuildSpec, BuildSpecKind};
+    use gradient_wire::types::{BuildJob, BuildSpec, BuildSpecKind};
 
     fn build_pending() -> PendingJob {
         let now = gradient_types::now();

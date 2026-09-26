@@ -26,7 +26,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use gradient_db::{Derivation, parse_drv};
-use gradient_proto::messages::{DerivationOutput, DiscoveredDerivation};
+use gradient_wire::messages::{DerivationOutput, DiscoveredDerivation};
 
 use super::derivation_resolver::FakeDerivationResolver;
 use super::nix_store::FakeNixStoreProvider;

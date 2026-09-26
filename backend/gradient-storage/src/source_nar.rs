@@ -73,7 +73,7 @@ pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
 
     let compressed_bytes = zstd::encode_all(
         std::io::Cursor::new(&nar_bytes),
-        gradient_types::constants::NAR_ZSTD_LEVEL,
+        gradient_wire::constants::NAR_ZSTD_LEVEL,
     )
     .context("failed to zstd-compress source NAR")?;
     let file_size = compressed_bytes.len() as u64;

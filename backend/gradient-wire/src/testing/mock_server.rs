@@ -12,10 +12,10 @@
 //! `send` / `recv` that match [`worker::connection::ProtoConnection`]'s wire
 //! format (rkyv-serialized binary frames).
 
+use crate::messages::{ClientMessage, ServerMessage};
+use crate::session::frame::WireMessage;
 use anyhow::{Context, Result};
 use futures::{SinkExt, StreamExt};
-use gradient_proto::messages::{ClientMessage, ServerMessage};
-use gradient_proto::session::frame::WireMessage;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{WebSocketStream, accept_async};
@@ -32,7 +32,7 @@ impl MockProtoServer {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind mock server");
-        let port = listener.local_addr().unwrap().port();
+        let port = listener.local_addr().expect("mock listener address").port();
         let url = format!("ws://127.0.0.1:{port}");
         Self { listener, url }
     }

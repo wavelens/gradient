@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use gradient_score::{InstanceContext, ScoringPolicy};
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId};
-use gradient_types::proto::{CandidateScore, GradientCapabilities, JobCandidate, JobKind};
+use gradient_wire::types::{CandidateScore, GradientCapabilities, JobCandidate, JobKind};
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info};
 

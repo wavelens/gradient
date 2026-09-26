@@ -13,7 +13,7 @@ use std::io::Read as _;
 
 use anyhow::{Context, Result};
 use gradient_db::parse_drv;
-use gradient_proto::messages::CachedPath;
+use gradient_wire::messages::CachedPath;
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
 use harmonia_store_path::{StoreDir, StorePath};
 use harmonia_utils_hash::fmt::Any;

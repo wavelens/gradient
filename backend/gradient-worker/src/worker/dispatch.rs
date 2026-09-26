@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
-use gradient_proto::messages::{
+use gradient_wire::messages::{
     ArchivedServerMessage, CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
 };
-use gradient_proto::session::frame::{Frame, Inbound};
+use gradient_wire::session::frame::{Frame, Inbound};
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
@@ -229,7 +229,7 @@ pub(super) struct DispatchState {
     max_build: u32,
     credentials: CredentialStore,
     candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
-    last_scores: Arc<Mutex<HashMap<String, gradient_proto::messages::CandidateScore>>>,
+    last_scores: Arc<Mutex<HashMap<String, gradient_wire::messages::CandidateScore>>>,
     scorer: JobScorer,
     executor: JobExecutor,
     config: WorkerConfig,
@@ -245,7 +245,7 @@ impl DispatchState {
         scorer: JobScorer,
         credentials: CredentialStore,
         candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
-        last_scores: Arc<Mutex<HashMap<String, gradient_proto::messages::CandidateScore>>>,
+        last_scores: Arc<Mutex<HashMap<String, gradient_wire::messages::CandidateScore>>>,
     ) -> Self {
         let nar_recv = match gradient_storage::PartialStore::new(
             config.nar_partial_dir(),
@@ -791,7 +791,7 @@ impl DispatchState {
 
     // ── Credentials ───────────────────────────────────────────────────────────
 
-    fn on_credential(&mut self, kind: gradient_proto::messages::CredentialKind, data: Vec<u8>) {
+    fn on_credential(&mut self, kind: gradient_wire::messages::CredentialKind, data: Vec<u8>) {
         debug!(?kind, "received credential");
         self.credentials.store(kind, data);
     }
@@ -840,7 +840,7 @@ impl DispatchState {
     fn on_auth_update(
         &mut self,
         authorized_peers: Vec<String>,
-        failed_peers: Vec<gradient_proto::messages::FailedPeer>,
+        failed_peers: Vec<gradient_wire::messages::FailedPeer>,
     ) {
         info!(
             authorized = authorized_peers.len(),

@@ -10,7 +10,7 @@
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use gradient_types::proto::{CompletedMultipart, PresignedMultipart};
+use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
 use tokio::task::JoinSet;
 
 const MAX_INFLIGHT_PARTS: usize = 2;

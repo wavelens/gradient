@@ -102,7 +102,8 @@ async fn connect_to_registered_workers(
             debug!(%worker_id, %url, "connecting outbound to worker");
 
             let result =
-                tokio::time::timeout(Duration::from_secs(10), crate::client::dial(&url)).await;
+                tokio::time::timeout(Duration::from_secs(10), gradient_wire::client::dial(&url))
+                    .await;
 
             match result {
                 Ok(Ok(socket)) => {

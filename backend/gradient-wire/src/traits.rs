@@ -134,8 +134,8 @@ pub trait JobReporter: Send {
 /// against the peers the server lists in `AuthChallenge`.
 ///
 /// Production impls:
-/// - `worker::config::WorkerConfig` - static `(peer_id, plaintext_token)` pairs from config.
-/// - `proxy-core::upstream::ProxyUpstreamIdentity` - proxy's own worker token issued by gradient-server.
+/// - the worker's static `(peer_id, plaintext_token)` pairs from config.
+/// - the proxy's own peer tokens for its upstream server.
 #[async_trait]
 pub trait PeerIdentity: Send + Sync {
     /// Stable peer id advertised in `InitConnection.id`.
@@ -151,9 +151,8 @@ pub trait PeerIdentity: Send + Sync {
 /// Supplies the `GradientCapabilities` advertised at handshake.
 ///
 /// Production impls:
-/// - `worker::config::StaticCapabilities` - read once from config.
-/// - `proxy-core::pool::AggregatedCapabilities` - live aggregate over the
-///   connected backend pool, recomputed on join/leave.
+/// - the worker's capabilities, read once from config.
+/// - the proxy's configured upstream capability set.
 #[async_trait]
 pub trait CapabilitiesProvider: Send + Sync {
     /// Capabilities to send in `InitConnection.capabilities` / `InitAck.capabilities`.

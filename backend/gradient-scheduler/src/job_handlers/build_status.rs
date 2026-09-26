@@ -13,8 +13,8 @@ use sea_orm::EntityTrait;
 use tracing::{info, warn};
 
 use gradient_graph::Transition;
-use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput};
 use gradient_types::*;
+use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;

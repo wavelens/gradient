@@ -15,7 +15,7 @@ use gradient_types::ids::{
     BuildAttemptId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId,
     EvaluationId, ProjectId, TaskId,
 };
-use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
+use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
 /// One worker batch of discovered derivations plus the one substitution fact the
 /// scheduler establishes outside the actor: which of them our own cache already

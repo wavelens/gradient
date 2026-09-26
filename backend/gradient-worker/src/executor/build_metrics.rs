@@ -7,7 +7,7 @@
 //! Build metrics sampling - peak network throughput and live build cgroup
 //! (`memory.peak` / `io.stat`) collection, folded into the wire [`BuildMetrics`].
 
-use gradient_proto::messages::BuildMetrics;
+use gradient_wire::messages::BuildMetrics;
 use harmonia_protocol::daemon_wire::types2::Microseconds;
 use std::path::{Path, PathBuf};
 use tracing::debug;

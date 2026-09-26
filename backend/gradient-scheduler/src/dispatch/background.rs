@@ -12,8 +12,8 @@ use gradient_db::LostCompletion;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::Transition;
 use gradient_types::ids::DispatchedJobId;
-use gradient_types::proto::BuildFailureKind;
 use gradient_types::{DerivationBuildId, EvaluationId};
+use gradient_wire::types::BuildFailureKind;
 use tracing::{debug, info, warn};
 
 use crate::Scheduler;

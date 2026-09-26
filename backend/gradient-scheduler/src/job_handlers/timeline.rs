@@ -14,8 +14,8 @@ use tracing::{debug, warn};
 use gradient_entity::dispatched_job::{DispatchedJobOutcome, Entity as EDispatchedJob};
 use gradient_entity::dispatched_job_phase::Model as MDispatchedJobPhase;
 use gradient_entity::ids::{DispatchedJobId, DispatchedJobPhaseId};
-use gradient_types::proto::{JobPhase, JobPhaseSpan};
 use gradient_types::*;
+use gradient_wire::types::{JobPhase, JobPhaseSpan};
 
 use crate::Scheduler;
 

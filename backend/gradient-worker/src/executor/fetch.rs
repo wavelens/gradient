@@ -8,15 +8,15 @@
 //! upload the source + all flake inputs to the Gradient cache.
 //!
 //! Private repositories are accessed using the SSH private key delivered by the
-//! server as a [`gradient_proto::messages::ServerMessage::Credential`] with
-//! [`gradient_proto::messages::CredentialKind::SshKey`].  The key is available via
+//! server as a [`gradient_wire::messages::ServerMessage::Credential`] with
+//! [`gradient_wire::messages::CredentialKind::SshKey`].  The key is available via
 //! [`CredentialStore::ssh_key`] before this step executes.
 
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use gradient_proto::messages::{FlakeJob, FlakeSource};
-use gradient_proto::traits::JobReporter;
+use gradient_wire::messages::{FlakeJob, FlakeSource};
+use gradient_wire::traits::JobReporter;
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
 use tracing::{debug, info, trace, warn};
@@ -125,7 +125,7 @@ pub async fn fetch_repository(
     for msg in &warnings {
         updater
             .send_eval_message(
-                gradient_types::proto::EvalMessageLevel::Warning,
+                gradient_wire::types::EvalMessageLevel::Warning,
                 "fetch",
                 msg,
             )
@@ -186,7 +186,7 @@ pub async fn fetch_repository(
                 Ok((source_path, archived_paths, input_warnings)) => {
                     updater
                         .send_eval_message(
-                            gradient_types::proto::EvalMessageLevel::Warning,
+                            gradient_wire::types::EvalMessageLevel::Warning,
                             "fetch",
                             &format!(
                                 "nix flake archive failed, continued with best-effort per-input fetch: {}",
@@ -197,7 +197,7 @@ pub async fn fetch_repository(
                     for msg in &input_warnings {
                         updater
                             .send_eval_message(
-                                gradient_types::proto::EvalMessageLevel::Warning,
+                                gradient_wire::types::EvalMessageLevel::Warning,
                                 "fetch",
                                 msg,
                             )
@@ -221,7 +221,7 @@ pub async fn fetch_repository(
 /// lock back, and report it (with the bumped set) to the server. An empty patch
 /// returns without reporting so no PR is opened.
 async fn run_input_update(
-    spec: &gradient_proto::messages::InputUpdateSpec,
+    spec: &gradient_wire::messages::InputUpdateSpec,
     checkout: &str,
     ssh_key: Option<&str>,
     updater: &mut dyn JobReporter,
@@ -285,7 +285,7 @@ async fn run_input_update(
     let bumped = patch
         .bumped
         .into_iter()
-        .map(|b| gradient_proto::messages::BumpedInputWire {
+        .map(|b| gradient_wire::messages::BumpedInputWire {
             name: b.name,
             old_rev: b.old_rev,
             new_rev: b.new_rev,
@@ -784,8 +784,8 @@ pub struct OverrideInput {
     pub url: Option<String>,
 }
 
-impl From<&gradient_types::proto::FlakeInputOverride> for OverrideInput {
-    fn from(o: &gradient_types::proto::FlakeInputOverride) -> Self {
+impl From<&gradient_wire::types::FlakeInputOverride> for OverrideInput {
+    fn from(o: &gradient_wire::types::FlakeInputOverride) -> Self {
         Self {
             input_name: o.input_name.clone(),
             url: o.url.clone(),
@@ -859,8 +859,8 @@ fn declared_inputs_from_lock(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_proto::messages::FlakeStep;
     use gradient_test_support::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
+    use gradient_wire::messages::FlakeStep;
 
     fn make_flake_job() -> FlakeJob {
         FlakeJob {
@@ -901,7 +901,7 @@ mod tests {
         let job = make_flake_job();
         let credentials = crate::proto::credentials::CredentialStore::new();
         credentials.store(
-            gradient_proto::messages::CredentialKind::SshKey,
+            gradient_wire::messages::CredentialKind::SshKey,
             b"-----BEGIN OPENSSH PRIVATE KEY-----".to_vec(),
         );
 

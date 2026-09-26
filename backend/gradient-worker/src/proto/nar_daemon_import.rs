@@ -19,7 +19,7 @@ use std::pin::pin;
 
 use anyhow::{Context, Result};
 use futures::stream::StreamExt as _;
-use gradient_proto::messages::CachedPath;
+use gradient_wire::messages::CachedPath;
 use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;

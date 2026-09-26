@@ -137,7 +137,7 @@ pub struct HandshakeResult {
 /// Used by:
 /// - gradient-worker dialing gradient-server (worker→server, standard).
 /// - gradient-worker accepting from gradient-server (server→worker, discoverable mode).
-/// - gradient-proxy dialing its upstream gradient-server (proxy→server).
+/// - gradient-proxy dialing its upstream gradient-server (proxy -> server).
 pub async fn as_peer<I, C>(
     socket: &mut ProtoSocket,
     identity: &I,

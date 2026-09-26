@@ -6,8 +6,6 @@
 
 pub mod actions;
 pub mod board_events;
-pub mod build_output_metadata;
-pub mod cached_path_info;
 pub mod cli;
 pub mod config;
 pub mod constants;
@@ -17,7 +15,6 @@ pub mod forge;
 pub mod ids;
 pub mod input;
 pub mod log_api;
-pub mod proto;
 pub mod secret;
 pub mod triggers;
 pub mod waiting_reason;
@@ -29,8 +26,6 @@ mod nix_cache;
 
 pub use self::actions::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
 pub use self::board_events::{BoardEvent, DownloadProgress};
-pub use self::build_output_metadata::BuildOutputMetadata;
-pub use self::cached_path_info::{CachedPathInfo, UploadTarget};
 pub use self::cli::{
     CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs,
     LoggingArgs, MetricsArgs, NetworkArgs, OidcArgs, ProtoArgs, RegistrationArgs, S3Args, ScimArgs,

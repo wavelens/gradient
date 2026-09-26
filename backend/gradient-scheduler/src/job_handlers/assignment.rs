@@ -15,8 +15,8 @@ use tracing::{info, warn};
 use gradient_core::ServerState;
 use gradient_db::ClaimGate;
 use gradient_graph::Transition;
-use gradient_types::proto::{CandidateScore, JobKind};
 use gradient_types::*;
+use gradient_wire::types::{CandidateScore, JobKind};
 
 use crate::Scheduler;
 use crate::actor::{AssignOutcome, SchedulerMsg};

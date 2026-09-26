@@ -19,8 +19,8 @@ use gradient_entity::StorePath;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
+use gradient_wire::types::DiscoveredDerivation;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
     QueryFilter, TransactionTrait, Value,

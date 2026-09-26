@@ -10,8 +10,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use gradient_types::proto::{JobPhase, JobPhaseSpan};
 use gradient_util::sync::Mutex;
+use gradient_wire::types::{JobPhase, JobPhaseSpan};
 
 /// Ceiling on the spans one job records. A large eval pushes a NAR per closure
 /// member, so an uncapped timeline would put tens of thousands of spans in the

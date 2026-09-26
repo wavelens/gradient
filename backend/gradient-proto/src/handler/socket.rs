@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! State-coupled helpers built on top of [`crate::session::frame`].
+//! State-coupled helpers built on top of [`gradient_wire::session::frame`].
 //!
 //! Pure framing (the [`ProtoSocket`]/[`ProtoReader`]/[`ProtoWriter`]
 //! abstractions and the underlying constants) moved to
-//! [`crate::session::frame`]. What remains here are the helpers that need
+//! [`gradient_wire::session::frame`]. What remains here are the helpers that need
 //! access to [`ServerState`] / [`Scheduler`]: job-offer pushes and credential
 //! delivery. NAR transfer moved to [`super::nar_transfer`].
 
@@ -18,10 +18,10 @@ use gradient_types::*;
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
-use crate::messages::ServerMessage;
 use gradient_scheduler::Scheduler;
+use gradient_wire::messages::ServerMessage;
 
-pub use crate::session::frame::{
+pub use gradient_wire::session::frame::{
     BULK_CHUNK_SIZE, HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter,
     recv_client_msg, send_error, send_server_msg,
 };
@@ -55,10 +55,10 @@ pub(super) async fn send_credentials_for_job(
     state: &ServerState,
     scheduler: &gradient_scheduler::Scheduler,
     worker_id: &str,
-    job: &gradient_types::proto::Job,
+    job: &gradient_wire::types::Job,
     project_id: ProjectId,
 ) {
-    use gradient_types::proto::{FlakeStep, Job};
+    use gradient_wire::types::{FlakeStep, Job};
 
     let caps = scheduler.worker_gradient_caps(worker_id).await;
     let worker_can_fetch = caps.as_ref().map(|c| c.fetch).unwrap_or(false);
@@ -74,7 +74,7 @@ pub(super) async fn send_credentials_for_job(
 }
 
 async fn send_ssh_key_credential(writer: &ProtoWriter, state: &ServerState, project_id: ProjectId) {
-    use gradient_types::proto::CredentialKind;
+    use gradient_wire::types::CredentialKind;
 
     match EProject::find_by_id(project_id).one(&state.worker_db).await {
         Ok(Some(project)) => {
