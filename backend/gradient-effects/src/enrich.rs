@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn firehose_events_pass_through_untouched() {
+    async fn events_without_enrichment_pass_through_untouched() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let event: Event = gradient_types::events::gc::Swept {
             pass: gradient_types::events::gc::Pass::OrphanNars,
