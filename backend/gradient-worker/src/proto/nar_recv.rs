@@ -42,7 +42,7 @@ use anyhow::Result;
 use gradient_proto::messages::{ArchivedServerMessage, ServerMessage, TRANSFER_TIMEOUT};
 use gradient_proto::session::frame::Frame;
 use gradient_storage::{PartialStore, PartialWriter};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
 
@@ -183,7 +183,7 @@ struct Inner {
     /// Live transfers: the channel feeding each one's staging task.
     streams: HashMap<Key, mpsc::Sender<Frame<ServerMessage>>>,
     /// Outstanding pull waiters; resolved on `is_final` or on failure.
-    waiters: HashMap<Key, oneshot::Sender<Result<NarPayload, TransferFailure>>>,
+    waiters: HashMap<Key, Waiter>,
     /// Outstanding push-resume gates; resolved on `NarPushResume`.
     push_waiters: HashMap<Key, oneshot::Sender<u64>>,
 }
@@ -202,11 +202,19 @@ pub struct NarReceiver {
     stagers: TaskTracker,
 }
 
+struct Waiter {
+    tx: oneshot::Sender<Result<NarPayload, TransferFailure>>,
+    /// Bytes staged so far, so the requester times out on a stalled transfer
+    /// rather than on a large one.
+    progress: watch::Sender<u64>,
+}
+
 /// Outstanding pull waiter handle returned by [`NarReceiver::register`].
 pub struct PendingNar {
     job_id: String,
     store_path: String,
     rx: oneshot::Receiver<Result<NarPayload, TransferFailure>>,
+    progress: watch::Receiver<u64>,
 }
 
 impl PendingNar {
@@ -270,6 +278,7 @@ struct StreamSpec {
     disk_key: Option<String>,
     token: String,
     expected: Option<u64>,
+    progress: Option<watch::Sender<u64>>,
 }
 
 /// The half of a [`NarReceiver`] a staging task is allowed to hold. The link
@@ -292,7 +301,7 @@ impl Stager {
                 let mut g = inner.lock();
                 g.streams.remove(key);
                 match g.waiters.remove(key) {
-                    Some(tx) => tx.send(result).err().inspect(|_| {
+                    Some(waiter) => waiter.tx.send(result).err().inspect(|_| {
                         debug!(job_id = %key.0, store_path = %key.1, "NAR waiter went away before delivery");
                     }),
                     None => {
@@ -399,6 +408,9 @@ async fn stage_pull(
                     .await;
                 return;
             }
+            if let Some(progress) = &spec.progress {
+                progress.send_modify(|staged| *staged += data.len() as u64);
+            }
         }
 
         if !is_final {
@@ -446,6 +458,16 @@ async fn stage_pull(
     }
 }
 
+/// Resolves once `progress` has stood still for [`TRANSFER_TIMEOUT`]. A closed
+/// channel means the waiter was resolved or dropped, which the caller observes
+/// on its own oneshot.
+async fn stalled(mut progress: watch::Receiver<u64>) {
+    while let Ok(Ok(())) = tokio::time::timeout(TRANSFER_TIMEOUT, progress.changed()).await {}
+    if progress.has_changed().is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
 impl NarReceiver {
     pub fn new() -> Self {
         Self::default()
@@ -477,24 +499,34 @@ impl NarReceiver {
     pub fn register(&self, job_id: &str, store_path: &str) -> PendingNar {
         let key = (job_id.to_owned(), store_path.to_owned());
         let (tx, rx) = oneshot::channel();
-        self.inner.lock().waiters.insert(key, tx);
+        let (progress, progress_rx) = watch::channel(0);
+        self.inner
+            .lock()
+            .waiters
+            .insert(key, Waiter { tx, progress });
         PendingNar {
             job_id: job_id.to_owned(),
             store_path: store_path.to_owned(),
             rx,
+            progress: progress_rx,
         }
     }
 
-    /// Await a previously [`Self::register`]ed waiter, bounded by
-    /// [`gradient_proto::messages::TRANSFER_TIMEOUT`].
+    /// Await a previously [`Self::register`]ed waiter until it goes
+    /// [`gradient_proto::messages::TRANSFER_TIMEOUT`] without progress.
     pub async fn await_pending(&self, pending: PendingNar) -> Result<NarPayload> {
         let PendingNar {
             job_id,
             store_path,
             rx,
+            progress,
         } = pending;
         let key = (job_id.clone(), store_path.clone());
-        match tokio::time::timeout(TRANSFER_TIMEOUT, rx).await {
+        let outcome = tokio::select! {
+            delivered = rx => Ok(delivered),
+            () = stalled(progress) => Err(()),
+        };
+        match outcome {
             Ok(Ok(Ok(payload))) => Ok(payload),
             Ok(Ok(Err(TransferFailure::Unavailable(reason)))) => {
                 Err(anyhow::Error::new(NarUnavailable { store_path, reason }))
@@ -514,7 +546,7 @@ impl NarReceiver {
                 g.streams.remove(&key);
                 g.waiters.remove(&key);
                 Err(anyhow::anyhow!(
-                    "NarRequest for {} timed out after {}s waiting for NarPush \
+                    "NarRequest for {} made no progress for {}s waiting for NarPush \
                      (job_id={})",
                     store_path,
                     TRANSFER_TIMEOUT.as_secs(),
@@ -555,6 +587,7 @@ impl NarReceiver {
                 .and_then(|_| partial_key(job_id, store_path)),
             token: token.to_owned(),
             expected,
+            progress: None,
         }
     }
 
@@ -592,12 +625,13 @@ impl NarReceiver {
     /// Install a stream for `spec.key` and spawn its staging task, returning
     /// the sender. Any stream already registered under that key is dropped,
     /// which ends its task.
-    fn open_stream(&self, spec: StreamSpec) -> mpsc::Sender<Frame<ServerMessage>> {
+    fn open_stream(&self, mut spec: StreamSpec) -> mpsc::Sender<Frame<ServerMessage>> {
         let (tx, rx) = mpsc::channel(STAGE_QUEUE_DEPTH);
-        self.inner
-            .lock()
-            .streams
-            .insert(spec.key.clone(), tx.clone());
+        {
+            let mut g = self.inner.lock();
+            spec.progress = g.waiters.get(&spec.key).map(|w| w.progress.clone());
+            g.streams.insert(spec.key.clone(), tx.clone());
+        }
 
         let stager = Stager {
             inner: Arc::downgrade(&self.inner),
@@ -633,8 +667,8 @@ impl NarReceiver {
         let mut g = self.inner.lock();
         g.streams.remove(&key);
         match g.waiters.remove(&key) {
-            Some(tx) => {
-                if tx.send(Err(failure)).is_err() {
+            Some(waiter) => {
+                if waiter.tx.send(Err(failure)).is_err() {
                     debug!(%job_id, %store_path, "NAR failure waiter went away before delivery");
                 }
             }
@@ -775,6 +809,51 @@ mod tests {
         )
         .await;
         assert_eq!(bytes(task.await.unwrap().unwrap()), b"abcdefghi");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_transfer_that_keeps_progressing_outlives_the_transfer_timeout() {
+        let r = NarReceiver::new();
+        let r2 = r.clone();
+        let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/big").await });
+        tokio::task::yield_now().await;
+
+        for i in 0..3u64 {
+            r.accept_chunk(
+                "j",
+                "/nix/store/big",
+                frame("j", "/nix/store/big", i, b"x", false),
+            )
+            .await;
+            tokio::time::advance(TRANSFER_TIMEOUT / 2).await;
+        }
+        final_chunk_at(&r, "j", "/nix/store/big", 3, b"y").await;
+
+        assert_eq!(bytes(task.await.unwrap().unwrap()), b"xxxy");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_transfer_without_progress_times_out() {
+        let r = NarReceiver::new();
+        let r2 = r.clone();
+        let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/stuck").await });
+        tokio::task::yield_now().await;
+        r.accept_chunk(
+            "j",
+            "/nix/store/stuck",
+            frame("j", "/nix/store/stuck", 0, b"x", false),
+        )
+        .await;
+
+        tokio::time::advance(TRANSFER_TIMEOUT + Duration::from_secs(1)).await;
+
+        let err = task.await.unwrap().expect_err("stalled transfer fails");
+        assert!(err.to_string().contains("no progress"), "{err}");
+    }
+
+    async fn final_chunk_at(r: &NarReceiver, job: &str, path: &str, offset: u64, data: &[u8]) {
+        r.accept_chunk(job, path, frame(job, path, offset, data, true))
+            .await;
     }
 
     /// With a partial store the transfer never sits in memory: the waiter is

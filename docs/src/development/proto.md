@@ -683,7 +683,7 @@ CachedPath {
 
 A served NAR comes from the hot RAM cache, from a staged file awaiting upload, or from storage, in that order; a storage read at or under `smallNarBytes` fills the cache once for every concurrent request of the same hash.
 
-`NarRequest` is a request the server may not be able to satisfy. To prevent workers from waiting on the 10-minute receive timeout the server emits one of:
+`NarRequest` is a request the server may not be able to satisfy. The worker gives up on a transfer after 10 minutes without a new chunk, however long it has been running; to spare it that wait the server emits one of:
 
 | Message | When | Worker action |
 |---------|------|---------------|
