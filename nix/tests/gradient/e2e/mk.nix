@@ -2927,7 +2927,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     sql(
         "INSERT INTO outbox (id, kind, key, payload, created_at, next_attempt_at) VALUES ("
         "gen_random_uuid(), 3, 'restart-probe', "
-        f"""'{{"action": "{action_id}", "event": "evaluation.approval_granted", "payload": {{"probe": "restart"}}}}'::jsonb, """
+        f"""'{{"action": "{action_id}", "event": "evaluation.approval_granted", "envelope": {{"event": "evaluation.approval_granted", "at": "2026-01-01T00:00:00Z", "content": {{"probe": "restart"}}}}}}'::jsonb, """
         "now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');"
     )
     server.succeed("systemctl start gradient-server.service")
