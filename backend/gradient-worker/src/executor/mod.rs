@@ -319,9 +319,17 @@ fn fully_realised(realised: &[(String, String)], missing: &[(String, String)]) -
     missing.is_empty() && !realised.is_empty()
 }
 
-/// The report for an output nobody had to fetch. Sizes stay `None` for the compress
+/// The report for outputs nobody had to fetch. Sizes stay `None` for the compress
 /// step to fill in, the way a real build reports what it just wrote.
-fn realised_output(name: &str, store_path: &str) -> BuildOutput {
+async fn realised_outputs(realised: &[(String, String)]) -> Vec<BuildOutput> {
+    let mut outputs = Vec::with_capacity(realised.len());
+    for (name, store_path) in realised {
+        outputs.push(realised_output(name, store_path).await);
+    }
+    outputs
+}
+
+async fn realised_output(name: &str, store_path: &str) -> BuildOutput {
     BuildOutput {
         name: name.to_owned(),
         store_path: store_path.to_owned(),
@@ -330,7 +338,7 @@ fn realised_output(name: &str, store_path: &str) -> BuildOutput {
             .unwrap_or_default(),
         nar_size: None,
         nar_hash: None,
-        products: Vec::new(),
+        products: build::load_products(store_path).await,
     }
 }
 
@@ -506,10 +514,7 @@ impl JobExecutor {
         for (_, path) in &realised {
             gc_handles.push(self.gcroots.add(path).await);
         }
-        let reported = realised
-            .iter()
-            .map(|(name, path)| realised_output(name, path))
-            .collect();
+        let reported = realised_outputs(&realised).await;
         updater
             .report_build_output(build_task.build_id.clone(), reported, None, true)
             .await?;
@@ -577,10 +582,7 @@ impl JobExecutor {
                             failure::classify_substitute_failure(&build_task.build_id, e)
                         })?;
 
-                let mut reported: Vec<BuildOutput> = realised
-                    .iter()
-                    .map(|(name, path)| realised_output(name, path))
-                    .collect();
+                let mut reported = realised_outputs(&realised).await;
                 reported.extend(fetched.iter().map(|f| {
                     BuildOutput {
                         name: f.name.clone(),
@@ -880,12 +882,33 @@ mod tests {
 
     /// The sizes are left for the compress step, the way a real build reports the
     /// outputs it just wrote; the hash is the store path's own.
-    #[test]
-    fn a_realised_output_reports_no_sizes() {
-        let out = realised_output("out", "/nix/store/xa1b2c3-thing");
+    #[tokio::test]
+    async fn a_realised_output_reports_no_sizes() {
+        let out = realised_output("out", "/nix/store/xa1b2c3-thing").await;
 
         assert_eq!(out.name, "out");
         assert_eq!(out.store_path, "/nix/store/xa1b2c3-thing");
         assert!(out.nar_size.is_none() && out.nar_hash.is_none());
+    }
+
+    /// An output adopted from disk keeps the hydra products a fresh build would report.
+    #[tokio::test]
+    async fn a_realised_output_reports_its_hydra_products() {
+        let dir = tempfile::tempdir().unwrap();
+        let store_path = dir.path().to_str().unwrap();
+        let tarball = dir.path().join("foo.tar.gz");
+        std::fs::write(&tarball, b"tar").unwrap();
+        std::fs::create_dir(dir.path().join("nix-support")).unwrap();
+        std::fs::write(
+            dir.path().join("nix-support/hydra-build-products"),
+            format!("file binary-dist {}\n", tarball.display()),
+        )
+        .unwrap();
+
+        let out = realised_output("out", store_path).await;
+
+        assert_eq!(out.products.len(), 1);
+        assert_eq!(out.products[0].name, "foo.tar.gz");
+        assert_eq!(out.products[0].size, Some(3));
     }
 }
