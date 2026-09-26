@@ -30,7 +30,7 @@ use harmonia_store_remote::DaemonStore as _;
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
-use gradient_sources::{nix_store_path, strip_store_prefix};
+use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 
 use crate::connection::ProtoWriter;
 use crate::nix::store::LocalNixStore;

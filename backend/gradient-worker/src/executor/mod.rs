@@ -161,7 +161,7 @@ fn pair_with_store<'a>(
 /// still covers it.
 async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<String> {
     use futures::stream::{self, StreamExt as _};
-    use gradient_sources::nix_store_path;
+    use gradient_util::store_path::nix_store_path;
 
     const DRV_READ_CONCURRENCY: usize = 64;
 

@@ -10,7 +10,7 @@ pub use gradient_proto::traits::{DrvReader, JobReporter};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_sources::nix_store_path;
+use gradient_util::store_path::nix_store_path;
 
 /// Production [`DrvReader`] that reads from the filesystem.
 pub struct FsDrvReader;

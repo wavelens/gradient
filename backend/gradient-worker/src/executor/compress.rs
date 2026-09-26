@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use gradient_proto::messages::CachedPath;
-use gradient_sources::nix_store_path;
+use gradient_util::store_path::nix_store_path;
 use tokio::sync::watch;
 
 use crate::proto::job::JobUpdater;

@@ -11,9 +11,9 @@ use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
 use gradient_graph::IngestBatch;
-use gradient_sources::strip_nix_store_prefix;
 use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
+use gradient_util::store_path::strip_nix_store_prefix;
 
 use crate::Scheduler;
 use crate::eval;

@@ -27,8 +27,8 @@ use gradient_db::parse_drv;
 use gradient_proto::messages::{
     BuildSpec, CachedPath, EvalMessageLevel, QueryMode, TRANSFER_TIMEOUT,
 };
-use gradient_sources::nix_store_path;
 use gradient_types::CachedPathInfo;
+use gradient_util::store_path::nix_store_path;
 use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;

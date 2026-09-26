@@ -13,5 +13,6 @@ pub mod latest;
 pub mod net;
 pub mod nix_hash;
 pub mod shutdown;
+pub mod store_path;
 pub mod supervision;
 pub mod sync;

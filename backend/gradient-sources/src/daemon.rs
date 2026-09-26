@@ -12,7 +12,7 @@ use harmonia_utils_hash::HashFormat as _;
 use std::collections::HashMap;
 
 use crate::get_hash_from_path;
-use crate::store::{nix_store_path, strip_store_prefix};
+use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 
 pub use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 

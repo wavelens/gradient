@@ -12,9 +12,9 @@ use std::time::Instant;
 
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_sources::strip_nix_store_prefix;
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, ProjectId};
 use gradient_types::{BoardEvent, DownloadProgress};
+use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, trace, warn};
 
