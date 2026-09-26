@@ -35,7 +35,7 @@ object_store                   = { workspace = true }
 reqwest                        = { workspace = true }
 tempfile                       = { workspace = true }
 thiserror                      = { workspace = true }
-tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync"] }
+tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync", "time"] }
 tokio-util                     = { workspace = true, features = ["io"] }
 tracing                        = { workspace = true }
 uuid                           = { workspace = true }
@@ -45,4 +45,6 @@ async-compression = { workspace = true }
 tar               = { workspace = true }
 
 [dev-dependencies]
-wiremock = { workspace = true }
+gradient-wire = { workspace = true, features = ["testing"] }
+tokio         = { workspace = true, features = ["macros", "rt"] }
+wiremock      = { workspace = true }
