@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::InstanceContext;
-use crate::rule::{JobContext, ScoreRule, WorkerContext};
+use crate::score::context::InstanceContext;
+use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
 /// Penalizes a job proportional to its owning project's share of currently-active
 /// builds, so a quiet project's job is picked promptly even when a busy project floods
@@ -19,7 +19,7 @@ pub struct FairShareRule {
 impl Default for FairShareRule {
     fn default() -> Self {
         Self {
-            weight: crate::weights::FAIR_SHARE_WEIGHT,
+            weight: crate::score::weights::FAIR_SHARE_WEIGHT,
         }
     }
 }
@@ -60,8 +60,8 @@ impl ScoreRule for FairShareRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, ScoredJob};
-    use crate::rules::builtin::WaitTimeRule;
+    use crate::score::context::{HistoryPrediction, ScoredJob};
+    use crate::score::rules::builtin::WaitTimeRule;
     use gradient_types::ids::ProjectId;
     use gradient_types::now;
 

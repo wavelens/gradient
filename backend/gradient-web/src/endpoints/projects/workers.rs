@@ -16,7 +16,8 @@ use gradient_entity::worker_registration::{
     Model as MWorkerRegistration,
 };
 use gradient_entity::{base_worker, project_base_worker};
-use gradient_scheduler::{Scheduler, WorkerInfo};
+use gradient_pool::WorkerInfo;
+use gradient_scheduler::Scheduler;
 use gradient_types::ids::*;
 use gradient_types::{AProjectBaseWorker, EBaseWorker, EProjectBaseWorker};
 use gradient_types::{BaseResponse, MUser};

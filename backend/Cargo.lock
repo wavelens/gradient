@@ -2487,6 +2487,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-pool"
+version = "1.4.0"
+dependencies = [
+ "chrono",
+ "gradient-types",
+ "gradient-wire",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "gradient-proto"
 version = "1.4.0"
 dependencies = [
@@ -2501,6 +2513,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-graph",
+ "gradient-pool",
  "gradient-scheduler",
  "gradient-sources",
  "gradient-storage",
@@ -2557,7 +2570,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-graph",
- "gradient-score",
+ "gradient-pool",
  "gradient-sources",
  "gradient-storage",
  "gradient-test-support",
@@ -2574,17 +2587,6 @@ dependencies = [
  "tracing",
  "uuid",
  "wiremock",
-]
-
-[[package]]
-name = "gradient-score"
-version = "1.4.0"
-dependencies = [
- "chrono",
- "gradient-core",
- "gradient-types",
- "serde",
- "tracing",
 ]
 
 [[package]]
@@ -2817,10 +2819,10 @@ dependencies = [
  "gradient-forge",
  "gradient-graph",
  "gradient-notify",
+ "gradient-pool",
  "gradient-proto",
  "gradient-report",
  "gradient-scheduler",
- "gradient-score",
  "gradient-sources",
  "gradient-state",
  "gradient-storage",

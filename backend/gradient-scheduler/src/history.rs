@@ -40,7 +40,7 @@ pub async fn predict(
     db: &impl ConnectionTrait,
     pname: &str,
     closure_size: Option<i64>,
-) -> gradient_score::HistoryPrediction {
+) -> gradient_pool::score::HistoryPrediction {
     let mut query = EDerivationMetric::find().filter(CDerivationMetric::Pname.eq(pname));
     if let Some(size) = closure_size {
         let (lo, hi) = bucket_bounds(size);
@@ -56,15 +56,15 @@ pub async fn predict(
         .await
     {
         Ok(r) => r,
-        Err(_) => return gradient_score::HistoryPrediction::default(),
+        Err(_) => return gradient_pool::score::HistoryPrediction::default(),
     };
 
     summarize(&rows)
 }
 
-fn summarize(rows: &[MDerivationMetric]) -> gradient_score::HistoryPrediction {
+fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPrediction {
     if rows.is_empty() {
-        return gradient_score::HistoryPrediction::default();
+        return gradient_pool::score::HistoryPrediction::default();
     }
 
     let samples = rows.len() as u32;
@@ -92,7 +92,7 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_score::HistoryPrediction {
     let oom = rows.iter().filter(|r| r.oom_killed).count();
     let oom_rate = oom as f32 / samples as f32;
 
-    gradient_score::HistoryPrediction {
+    gradient_pool::score::HistoryPrediction {
         predicted_peak_ram_mb,
         avg_cpu_time_ms,
         build_time_ms,

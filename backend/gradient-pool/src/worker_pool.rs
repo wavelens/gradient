@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use gradient_types::ids::ProjectId;
 use gradient_wire::types::{GradientCapabilities, JobKind};
 
-use crate::actor::{SessionPort, SessionSignal};
 use crate::peer_auth::PeerAuth;
+use crate::session_port::{SessionPort, SessionSignal};
 use crate::worker_state::{Active, Draining, TypedWorker};
 
 // ── WorkerSlot ────────────────────────────────────────────────────────────────
@@ -186,10 +186,10 @@ impl WorkerPool {
 
     /// One coherent [`WorkerCaps`] snapshot (capabilities, architectures,
     /// features, live metrics) for a connected worker, or `None` if unknown.
-    pub fn worker_caps(&self, id: &str) -> Option<crate::jobs::WorkerCaps> {
+    pub fn worker_caps(&self, id: &str) -> Option<crate::WorkerCaps> {
         self.workers.get(id).map(|slot| {
             let s = slot.shared();
-            crate::jobs::WorkerCaps {
+            crate::WorkerCaps {
                 fetch: s.capabilities.fetch,
                 architectures: s.architectures.clone(),
                 system_features: s.system_features.clone(),
@@ -244,10 +244,10 @@ impl WorkerPool {
 
     /// Returns a scoring view of a connected worker's static caps and latest
     /// live metrics, or `None` if the worker is not connected.
-    pub fn metrics_for(&self, id: &str) -> Option<gradient_score::WorkerMetricsView> {
+    pub fn metrics_for(&self, id: &str) -> Option<crate::score::WorkerMetricsView> {
         self.workers.get(id).map(|slot| {
             let s = slot.shared();
-            gradient_score::WorkerMetricsView {
+            crate::score::WorkerMetricsView {
                 cpu_count: s.cpu_count,
                 cpu_core_score: s.cpu_core_score,
                 ram_total_mb: s.ram_total_mb,
@@ -454,8 +454,8 @@ pub struct WorkerInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actor::{SessionPort, SessionSignal};
     use crate::peer_auth::PeerAuth;
+    use crate::session_port::{SessionPort, SessionSignal};
     use tokio::sync::mpsc;
 
     fn caps() -> GradientCapabilities {

@@ -694,7 +694,7 @@ fn buckets_sorted(acc: LoadAcc) -> Vec<LoadBucket> {
 /// Aggregate already scope-filtered workers and in-flight jobs into the three
 /// load breakdowns. Pure so it can be unit-tested without a scheduler or DB.
 fn aggregate_worker_load(
-    workers: &[&gradient_scheduler::WorkerInfo],
+    workers: &[&gradient_pool::WorkerInfo],
     jobs: &[&gradient_scheduler::BoardActiveJob],
 ) -> WorkerLoad {
     use gradient_entity::dispatched_job::DispatchedJobKind;
@@ -773,7 +773,7 @@ pub async fn get_board_worker_load(
     let workers = scheduler.board_workers().await;
     let jobs = scheduler.board_active_jobs().await;
 
-    let visible_workers: Vec<&gradient_scheduler::WorkerInfo> = workers
+    let visible_workers: Vec<&gradient_pool::WorkerInfo> = workers
         .iter()
         .filter(|w| scope.worker_projects(w.authorized_peers.as_ref()).is_some())
         .collect();
@@ -922,7 +922,7 @@ pub struct RuleDescription {
 /// Static catalog of every scoring rule and what it rewards or penalizes, so the
 /// board UI can explain rule names in a help popup without duplicating the text.
 pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescription>>>> {
-    let rules = gradient_score::rule_catalog()
+    let rules = gradient_pool::score::rule_catalog()
         .into_iter()
         .map(|(rule, description)| RuleDescription {
             rule: rule.to_string(),
@@ -1482,7 +1482,8 @@ pub async fn get_eval_flake_graph(
 mod tests {
     use super::*;
     use gradient_entity::dispatched_job::DispatchedJobKind;
-    use gradient_scheduler::{BoardActiveJob, WorkerInfo};
+    use gradient_pool::WorkerInfo;
+    use gradient_scheduler::BoardActiveJob;
     use gradient_types::ids::ProjectId;
     use gradient_wire::types::GradientCapabilities;
 

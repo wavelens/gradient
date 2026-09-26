@@ -7,7 +7,7 @@
 //! Full structured views of the worker and job scoring context, serialized
 //! onto the dispatched-job record so the frontend can show every collected value.
 
-use gradient_score::{DerivationRef, HistoryPrediction, JobContext, WorkerContext};
+use gradient_pool::score::{DerivationRef, HistoryPrediction, JobContext, WorkerContext};
 use gradient_wire::types::{FlakeStep, GradientCapabilities};
 use serde::Serialize;
 
@@ -154,7 +154,7 @@ impl JobContextView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_score::ScoredJob;
+    use gradient_pool::score::ScoredJob;
     use gradient_types::ids::{DerivationBuildId, EvaluationId, ProjectId};
     use gradient_wire::types::{BuildJob, BuildSpec, BuildSpecKind};
 

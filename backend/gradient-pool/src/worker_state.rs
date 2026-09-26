@@ -26,8 +26,8 @@ use gradient_types::ids::ProjectId;
 
 use gradient_wire::types::GradientCapabilities;
 
-use crate::actor::SessionPort;
 use crate::peer_auth::PeerAuth;
+use crate::session_port::SessionPort;
 
 // ── Sealing trait ─────────────────────────────────────────────────────────────
 

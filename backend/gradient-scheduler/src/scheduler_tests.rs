@@ -18,8 +18,9 @@ use gradient_wire::types::{
 };
 
 use super::Scheduler;
-use super::actor::{SessionPort, SessionSignal, WorkerCapabilities};
+use super::actor::WorkerCapabilities;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
+use gradient_pool::session_port::{SessionPort, SessionSignal};
 use tokio::sync::mpsc;
 
 /// A scheduler with its core actor running, backed by a mock DB whose queries
@@ -126,7 +127,7 @@ fn build_job(
         closure_size: None,
         prefer_local_build: false,
         is_fixed_output: false,
-        history: gradient_score::HistoryPrediction::default(),
+        history: gradient_pool::score::HistoryPrediction::default(),
         queued_at: gradient_types::now(),
         ready_at: gradient_types::now(),
         rescore_count: 0,

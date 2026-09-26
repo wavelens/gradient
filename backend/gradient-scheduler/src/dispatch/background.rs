@@ -117,7 +117,7 @@ pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::R
     Ok(())
 }
 
-/// Recompute the windowed [`gradient_score::InstanceContext`] snapshot consumed
+/// Recompute the windowed [`gradient_pool::score::InstanceContext`] snapshot consumed
 /// by resource-aware scoring and publish it lock-free.
 pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let c = scheduler.counts().await;

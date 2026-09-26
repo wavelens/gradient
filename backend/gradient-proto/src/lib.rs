@@ -22,4 +22,3 @@ pub const fn link() {}
 pub use handler::{SessionsHandle, proto_router};
 
 pub use gradient_scheduler::Scheduler;
-pub use gradient_scheduler::WorkerInfo;

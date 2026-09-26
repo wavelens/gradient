@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::InstanceContext;
-use crate::rule::{JobContext, ScoreRule, WorkerContext};
-use crate::rules::builtin::{
+use crate::score::context::InstanceContext;
+use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
+use crate::score::rules::builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
     RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
 };
-use crate::rules::{
+use crate::score::rules::{
     DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, QosRule,
     ResourceFitRule, ResourceSaturationRule,
 };
@@ -28,8 +28,8 @@ pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
         instance: &InstanceContext,
-    ) -> crate::ScoreBreakdown {
-        crate::ScoreBreakdown {
+    ) -> crate::score::ScoreBreakdown {
+        crate::score::ScoreBreakdown {
             rules: std::collections::BTreeMap::new(),
             total: self.score(job, worker, instance),
             vetoes: Vec::new(),
@@ -87,7 +87,7 @@ impl ScoringPolicy for RulePolicy {
         job: &JobContext<'_>,
         worker: &WorkerContext<'_>,
         instance: &InstanceContext,
-    ) -> crate::ScoreBreakdown {
+    ) -> crate::score::ScoreBreakdown {
         let mut rules = std::collections::BTreeMap::new();
         let mut vetoes = Vec::new();
         let mut total = 0.0;
@@ -99,7 +99,7 @@ impl ScoringPolicy for RulePolicy {
                 vetoes.push(r.name().to_string());
             }
         }
-        crate::ScoreBreakdown {
+        crate::score::ScoreBreakdown {
             rules,
             total,
             vetoes,
@@ -207,7 +207,7 @@ pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, ScoredJob};
+    use crate::score::context::{HistoryPrediction, ScoredJob};
     use gradient_types::ids::ProjectId;
     use gradient_types::now;
 
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn resource_aware_prefers_fast_net_for_fod() {
-        use crate::context::WorkerMetricsView;
+        use crate::score::context::WorkerMetricsView;
         let policy = policy_by_name("resource-aware");
         let archs = vec!["x86_64-linux".to_string()];
         let feats: Vec<String> = vec![];

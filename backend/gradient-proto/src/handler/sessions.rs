@@ -13,8 +13,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
+use gradient_pool::session_port::SessionSignal;
 use gradient_scheduler::Scheduler;
-use gradient_scheduler::actor::{CALL_TIMEOUT, SessionSignal};
+use gradient_scheduler::actor::CALL_TIMEOUT;
 use gradient_util::shutdown::Shutdown;
 use gradient_util::supervision::{ChildCtx, ChildSpec};
 use ractor::rpc::CallResult;

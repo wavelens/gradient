@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::InstanceContext;
-use crate::rule::{JobContext, ScoreRule, WorkerContext};
+use crate::score::context::InstanceContext;
+use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
 pub struct PreferLocalBuildRule {
@@ -16,8 +16,8 @@ pub struct PreferLocalBuildRule {
 impl Default for PreferLocalBuildRule {
     fn default() -> Self {
         Self {
-            local_bonus: crate::weights::PREFER_LOCAL_BONUS,
-            miss_penalty: crate::weights::PREFER_LOCAL_MISS_PENALTY,
+            local_bonus: crate::score::weights::PREFER_LOCAL_BONUS,
+            miss_penalty: crate::score::weights::PREFER_LOCAL_MISS_PENALTY,
         }
     }
 }
@@ -59,7 +59,7 @@ impl ScoreRule for PreferLocalBuildRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, ScoredJob};
+    use crate::score::context::{HistoryPrediction, ScoredJob};
     use gradient_types::ids::ProjectId;
 
     fn job(prefer_local_build: bool) -> ScoredJob<'static> {

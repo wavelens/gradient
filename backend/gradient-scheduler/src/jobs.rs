@@ -19,7 +19,8 @@ use gradient_wire::types::{
     RequiredPath,
 };
 
-use gradient_score::{JobContext, ScoredJob, ScoringPolicy, WorkerContext};
+use gradient_pool::WorkerCaps;
+use gradient_pool::score::{JobContext, ScoredJob, ScoringPolicy, WorkerContext};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -42,7 +43,7 @@ pub struct PendingEvalJob {
     /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
     pub rescore_count: u32,
     /// Per-task predicted peak eval RSS, fed into `ResourceFitRule`.
-    pub history: gradient_score::HistoryPrediction,
+    pub history: gradient_pool::score::HistoryPrediction,
     pub walk_mode: WalkMode,
     pub prioritized: bool,
 }
@@ -93,7 +94,7 @@ pub struct PendingBuildJob {
     pub is_fixed_output: bool,
     /// Historical resource-usage prediction for this build's derivation,
     /// preloaded once per dispatch round and consumed by scoring rules.
-    pub history: gradient_score::HistoryPrediction,
+    pub history: gradient_pool::score::HistoryPrediction,
     /// `build.updated_at` at the time this job was dispatched to the tracker.
     /// Used by the scoring policy to prefer builds that have waited longer.
     pub queued_at: chrono::NaiveDateTime,
@@ -110,50 +111,6 @@ pub struct PendingBuildJob {
     /// True when the build's output is already available from cache; the job can
     /// run on any worker regardless of architecture.
     pub substitute: bool,
-}
-
-/// A connected worker's capabilities, used to gate which jobs are eligible
-/// for assignment: the `fetch` gradient capability plus the Nix architectures
-/// and system features it can build for.
-#[derive(Debug, Clone, Default)]
-pub struct WorkerCaps {
-    /// Worker can fetch flake sources from a repository. Required for any
-    /// FlakeJob carrying a `FetchFlake` step, since the server only sends SSH
-    /// credentials to fetch-capable workers.
-    pub fetch: bool,
-    pub architectures: Vec<String>,
-    pub system_features: Vec<String>,
-    /// Full set of advertised gradient capabilities, surfaced on the dispatch view.
-    pub capabilities: gradient_wire::types::GradientCapabilities,
-    /// Live resource view of the worker, fed into resource-aware scoring rules.
-    pub metrics: Option<gradient_score::WorkerMetricsView>,
-}
-
-impl WorkerCaps {
-    /// Returns true when this worker can execute a build with the given
-    /// `architecture` and `required_features`. `"builtin"` derivations
-    /// (`builtin:fetchurl` etc.) run on any architecture.
-    pub fn can_build(&self, architecture: &str, required_features: &[String]) -> bool {
-        let arch_ok = architecture == gradient_types::BUILTIN_ARCH
-            || self.architectures.iter().any(|a| a == architecture);
-        let features_ok = required_features
-            .iter()
-            .all(|f| self.system_features.iter().any(|sf| sf == f));
-        arch_ok && features_ok
-    }
-
-    /// Returns true when this worker can run flake `job`: a `FetchFlake` step
-    /// needs `fetch` (the server only sends fetch credentials to fetch workers)
-    /// and any `EvaluateFlake`/`EvaluateDerivations` step needs `eval`.
-    pub fn can_eval(&self, job: &FlakeJob) -> bool {
-        let needs_fetch = job.steps.contains(&FlakeStep::FetchFlake);
-        let needs_eval = job
-            .steps
-            .iter()
-            .any(|t| matches!(t, FlakeStep::EvaluateFlake | FlakeStep::EvaluateDerivations));
-
-        (!needs_fetch || self.fetch) && (!needs_eval || self.capabilities.eval)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -367,7 +324,7 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
 /// A vetoed candidate never wins (a rule said "not yet"); below the floor,
 /// dispatching now is worse than idling this round.
 fn wins(sc: &ScoredCandidate) -> bool {
-    !sc.vetoed && sc.total >= gradient_score::weights::DISPATCH_FLOOR
+    !sc.vetoed && sc.total >= gradient_pool::score::weights::DISPATCH_FLOOR
 }
 
 /// Scoring view of the worker; a caps-less caller (open mode / tests) scores
@@ -658,7 +615,7 @@ impl JobTracker {
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
         policy: &dyn ScoringPolicy,
-        instance: &gradient_score::InstanceContext,
+        instance: &gradient_pool::score::InstanceContext,
     ) -> Option<Assignment> {
         let worker_ctx = worker_context_of(caps);
         let scored = self.score_candidates(
@@ -724,7 +681,7 @@ impl JobTracker {
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
         policy: &dyn ScoringPolicy,
-        instance: &gradient_score::InstanceContext,
+        instance: &gradient_pool::score::InstanceContext,
         worker_ctx: &WorkerContext<'_>,
     ) -> Vec<(String, ScoredCandidate)> {
         let worker_scores = self.scores.get(worker_id);
@@ -799,7 +756,7 @@ impl JobTracker {
     fn project_work_shares(
         &self,
         policy: &dyn ScoringPolicy,
-        instance: &gradient_score::InstanceContext,
+        instance: &gradient_pool::score::InstanceContext,
     ) -> ProjectWorkShare {
         let mut by_project: HashMap<ProjectId, f64> = HashMap::new();
         let mut total: f64 = 0.0;
@@ -1429,7 +1386,7 @@ mod tests {
             closure_size: None,
             prefer_local_build: false,
             is_fixed_output: false,
-            history: gradient_score::HistoryPrediction::default(),
+            history: gradient_pool::score::HistoryPrediction::default(),
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
             rescore_count: 0,
@@ -1701,8 +1658,8 @@ mod tests {
             system_features: vec![],
             ..Default::default()
         };
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
                 .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p, &inst)
@@ -1749,8 +1706,8 @@ mod tests {
             },
             ..Default::default()
         };
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
                 .take_best_of_kind(
@@ -1786,8 +1743,8 @@ mod tests {
             },
             ..Default::default()
         };
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
                 .take_best_of_kind("w1", None, Some(&fetch_build), &JobKind::Flake, &*p, &inst)
@@ -1812,8 +1769,8 @@ mod tests {
             ..Default::default()
         };
         // Worker requesting Build → arm-only build is filtered out → no assignment.
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         let assignment =
             tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &*p, &inst);
         assert!(assignment.is_none());
@@ -1851,8 +1808,8 @@ mod tests {
                 }],
             );
         }
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         // Worker without kvm - no assignment.
         assert!(
             tracker
@@ -1891,8 +1848,8 @@ mod tests {
                 missing_nar_size: 0,
             }],
         );
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id(), "j1");
@@ -1905,8 +1862,8 @@ mod tests {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), build_job(peer, vec![]));
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
 
         // No cached score: the rescore hold vetoes the build so the worker
         // idles, but the rejected candidate and its veto are still recorded (#419).
@@ -1954,8 +1911,8 @@ mod tests {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), build_job(peer, vec![]));
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
 
         tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
 
@@ -1991,8 +1948,8 @@ mod tests {
     fn terminal_job_removal_prunes_scores_across_all_workers() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
 
         // Two workers score the same job; only one can ever win it, so the loser's
         // entry would linger forever without lifecycle pruning (the dispatch leak).
@@ -2074,11 +2031,11 @@ mod tests {
     //     let mut tracker = JobTracker::new();
     //     let project_a = ProjectId::now_v7();
     //     let project_b = ProjectId::now_v7();
-    //     let p = gradient_score::policy_by_name("resource-aware");
+    //     let p = gradient_pool::score::policy_by_name("resource-aware");
     //     // Non-zero typical build time so active builds carry work-weight even
     //     // without per-build history, making project_work_share well-defined.
-    //     let inst = gradient_score::InstanceContext {
-    //         build_time_ms: gradient_score::Windowed { w1h: 60_000.0, ..Default::default() },
+    //     let inst = gradient_pool::score::InstanceContext {
+    //         build_time_ms: gradient_pool::score::Windowed { w1h: 60_000.0, ..Default::default() },
     //         ..Default::default()
     //     };
 
@@ -2129,8 +2086,8 @@ mod tests {
             ),
         );
 
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
 
         // No scores yet: the build's total is negative (RescoreWaitRule), so the
         // negative-total gate idles the worker and leaves the job pending.
@@ -2165,8 +2122,8 @@ mod tests {
         let peer = ProjectId::now_v7();
         tracker.add_pending("j1".into(), build_job(peer, vec![]));
 
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         assert!(
             tracker
                 .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
@@ -2193,8 +2150,8 @@ mod tests {
             }],
         );
 
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert_eq!(
             assignment
@@ -2213,8 +2170,8 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
 
         // Assign it.
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
@@ -2242,16 +2199,16 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
@@ -2280,8 +2237,8 @@ mod tests {
         // Job with no required paths - should be taken.
         tracker.add_pending("j2".into(), eval_job(peer));
 
-        let p = gradient_score::policy_by_name("simple");
-        let inst = gradient_score::InstanceContext::default();
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id(), "j2");
@@ -2302,24 +2259,24 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
         tracker.take_best_of_kind(
             "w1",
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
         assert_eq!(tracker.active_jobs().count(), 3);
 
@@ -2344,8 +2301,8 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
 
         let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
@@ -2366,8 +2323,8 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
         // Now in active, not pending - should still be "contained".
         assert!(tracker.contains_job("j1"));
@@ -2393,8 +2350,8 @@ mod tests {
             None,
             None,
             &JobKind::Flake,
-            &*gradient_score::policy_by_name("simple"),
-            &gradient_score::InstanceContext::default(),
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
         );
         assert!(tracker.contains_job("j1"));
         tracker.remove_job("j1");

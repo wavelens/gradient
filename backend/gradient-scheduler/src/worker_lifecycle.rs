@@ -20,17 +20,16 @@ use gradient_types::ids::ProjectId;
 use gradient_wire::types::GradientCapabilities;
 
 use crate::Scheduler;
-use crate::actor::{
-    Registered, Registration, SchedulerMsg, SessionPort, WorkerCapabilities, WorkerMetrics,
-};
+use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, WorkerMetrics};
 use crate::build;
 use crate::jobs::PendingJob;
+use gradient_pool::session_port::SessionPort;
 
 /// Insert a `worker_sample` time-series row for a connected worker. Best-effort;
 /// called from the heartbeat loop.
 pub(crate) async fn record_worker_sample(
     db: &impl sea_orm::ConnectionTrait,
-    info: &crate::WorkerInfo,
+    info: &gradient_pool::WorkerInfo,
 ) {
     let sample = gradient_entity::worker_sample::Model {
         id: gradient_entity::ids::WorkerSampleId::now_v7(),
@@ -314,7 +313,7 @@ impl Scheduler {
     }
 
     /// Every connected worker, including the sampling fields the API masks.
-    pub async fn board_workers(&self) -> Vec<crate::WorkerInfo> {
+    pub async fn board_workers(&self) -> Vec<gradient_pool::WorkerInfo> {
         self.call(|reply| SchedulerMsg::Workers { reply })
             .await
             .unwrap_or_default()

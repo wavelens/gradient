@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::{InstanceContext, JobKindContext};
-use crate::rule::{JobContext, ScoreRule, WorkerContext};
+use crate::score::context::{InstanceContext, JobKindContext};
+use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
 pub struct MissingPathsRule {
@@ -17,9 +17,9 @@ pub struct MissingPathsRule {
 impl Default for MissingPathsRule {
     fn default() -> Self {
         Self {
-            cap: crate::weights::MISSING_PATHS_CAP,
-            k: crate::weights::MISSING_PATHS_BASELINE_K,
-            fallback_avg: crate::weights::MISSING_PATHS_FALLBACK_AVG,
+            cap: crate::score::weights::MISSING_PATHS_CAP,
+            k: crate::score::weights::MISSING_PATHS_BASELINE_K,
+            fallback_avg: crate::score::weights::MISSING_PATHS_FALLBACK_AVG,
         }
     }
 }
@@ -64,8 +64,8 @@ pub struct MissingNarSizeRule {
 impl Default for MissingNarSizeRule {
     fn default() -> Self {
         Self {
-            cap: crate::weights::MISSING_NAR_SIZE_CAP,
-            k: crate::weights::MISSING_NAR_SIZE_BASELINE_K,
+            cap: crate::score::weights::MISSING_NAR_SIZE_CAP,
+            k: crate::score::weights::MISSING_NAR_SIZE_BASELINE_K,
         }
     }
 }
@@ -107,8 +107,8 @@ pub struct BuiltinDeprioritizeRule {
 impl Default for BuiltinDeprioritizeRule {
     fn default() -> Self {
         Self {
-            bonus: crate::weights::REAL_BUILD_BONUS,
-            archless_bonus: crate::weights::ARCHLESS_BUILTIN_BONUS,
+            bonus: crate::score::weights::REAL_BUILD_BONUS,
+            archless_bonus: crate::score::weights::ARCHLESS_BUILTIN_BONUS,
         }
     }
 }
@@ -157,9 +157,9 @@ pub struct DependencyCountRule {
 impl Default for DependencyCountRule {
     fn default() -> Self {
         Self {
-            cap: crate::weights::DEPENDENCY_COUNT_CAP,
-            k: crate::weights::DEPENDENCY_COUNT_BASELINE_K,
-            fallback_avg: crate::weights::DEPENDENCY_COUNT_FALLBACK_AVG,
+            cap: crate::score::weights::DEPENDENCY_COUNT_CAP,
+            k: crate::score::weights::DEPENDENCY_COUNT_BASELINE_K,
+            fallback_avg: crate::score::weights::DEPENDENCY_COUNT_FALLBACK_AVG,
         }
     }
 }
@@ -207,9 +207,9 @@ pub struct WaitTimeRule {
 impl Default for WaitTimeRule {
     fn default() -> Self {
         Self {
-            gain: crate::weights::WAIT_TIME_GAIN,
-            fallback_avg_secs: crate::weights::WAIT_TIME_FALLBACK_AVG_SECS,
-            cap: crate::weights::WAIT_TIME_CAP,
+            gain: crate::score::weights::WAIT_TIME_GAIN,
+            fallback_avg_secs: crate::score::weights::WAIT_TIME_FALLBACK_AVG_SECS,
+            cap: crate::score::weights::WAIT_TIME_CAP,
         }
     }
 }
@@ -249,7 +249,7 @@ pub struct ReserveFetchWorkersRule {
 impl Default for ReserveFetchWorkersRule {
     fn default() -> Self {
         Self {
-            penalty: crate::weights::RESERVE_FETCH_PENALTY,
+            penalty: crate::score::weights::RESERVE_FETCH_PENALTY,
         }
     }
 }
@@ -292,7 +292,7 @@ pub struct RescoreWaitRule {
 impl Default for RescoreWaitRule {
     fn default() -> Self {
         Self {
-            max_rounds: crate::weights::RESCORE_MAX_ROUNDS,
+            max_rounds: crate::score::weights::RESCORE_MAX_ROUNDS,
         }
     }
 }
@@ -333,7 +333,7 @@ impl ScoreRule for RescoreWaitRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, ScoredJob};
+    use crate::score::context::{HistoryPrediction, ScoredJob};
     use gradient_types::ids::ProjectId;
 
     fn build_job(arch: &'static str) -> ScoredJob<'static> {
@@ -369,8 +369,8 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_types::now();
-        let inst = crate::context::InstanceContext {
-            missing_paths: crate::context::Windowed {
+        let inst = crate::score::context::InstanceContext {
+            missing_paths: crate::score::context::Windowed {
                 w1h: Some(10.0),
                 ..Default::default()
             },
@@ -414,8 +414,8 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_types::now();
-        let inst = crate::context::InstanceContext {
-            missing_paths: crate::context::Windowed {
+        let inst = crate::score::context::InstanceContext {
+            missing_paths: crate::score::context::Windowed {
                 w1h: Some(10.0),
                 ..Default::default()
             },
@@ -459,8 +459,8 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_types::now();
-        let inst = crate::context::InstanceContext {
-            nar_size_mb: crate::context::Windowed {
+        let inst = crate::score::context::InstanceContext {
+            nar_size_mb: crate::score::context::Windowed {
                 w1h: Some(100.0),
                 ..Default::default()
             },
@@ -604,8 +604,8 @@ mod tests {
         let w = worker(&archs, false);
         let now = gradient_types::now();
         // w1h=10 → base=20; dep=1 → 2.5, dep=15 → 37.5 (both below saturation)
-        let inst = crate::context::InstanceContext {
-            dependency_cnt: crate::context::Windowed {
+        let inst = crate::score::context::InstanceContext {
+            dependency_cnt: crate::score::context::Windowed {
                 w1h: Some(10.0),
                 ..Default::default()
             },
@@ -649,8 +649,8 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_types::now();
-        let inst = crate::context::InstanceContext {
-            dependency_cnt: crate::context::Windowed {
+        let inst = crate::score::context::InstanceContext {
+            dependency_cnt: crate::score::context::Windowed {
                 w1h: Some(10.0),
                 ..Default::default()
             },
@@ -693,8 +693,8 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_types::now();
-        let inst = crate::context::InstanceContext {
-            dependency_cnt: crate::context::Windowed {
+        let inst = crate::score::context::InstanceContext {
+            dependency_cnt: crate::score::context::Windowed {
                 w1h: Some(10.0),
                 ..Default::default()
             },
@@ -787,7 +787,7 @@ mod tests {
         let rule = RescoreWaitRule::default();
         let archs: Vec<String> = vec![];
         let w = worker(&archs, false);
-        let inst = crate::context::InstanceContext::default();
+        let inst = crate::score::context::InstanceContext::default();
         let now = gradient_types::now();
         let build = build_job("x86_64-linux");
         let eval = eval_job(false);
@@ -876,12 +876,12 @@ mod tests {
         let eval_w = worker(&archs, false);
         let now = gradient_types::now();
 
-        let inst_full = crate::context::InstanceContext {
+        let inst_full = crate::score::context::InstanceContext {
             total_workers: 4,
             idle_workers: 0,
             ..Default::default()
         };
-        let inst_idle = crate::context::InstanceContext {
+        let inst_idle = crate::score::context::InstanceContext {
             total_workers: 4,
             idle_workers: 4,
             ..Default::default()

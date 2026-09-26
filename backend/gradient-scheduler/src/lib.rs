@@ -26,12 +26,9 @@ pub mod history;
 pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
-pub mod peer_auth;
 pub mod probe;
 pub mod views;
 pub mod waiting_state;
-pub mod worker_pool;
-pub mod worker_state;
 
 mod dispatch_mode;
 mod eval_metrics;
@@ -50,7 +47,6 @@ use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
 
 pub use gradient_types::BoardEvent;
 pub use jobs::{BoardActiveJob, DecisionCandidate, DispatchDecision, PendingJobInfo};
-pub use worker_pool::WorkerInfo;
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so
 /// the statements it declares with `gradient_db::sql!` reach the plan gate's
@@ -78,17 +74,17 @@ pub struct Scheduler {
     pub(crate) kick_gen: Arc<AtomicU64>,
     /// Scoring policy used when selecting which pending job to assign to a
     /// requesting worker.  Shared via `Arc` so it can be read lock-free.
-    pub(crate) policy: Arc<dyn gradient_score::ScoringPolicy>,
+    pub(crate) policy: Arc<dyn gradient_pool::score::ScoringPolicy>,
     /// Windowed instance metrics snapshot, recomputed periodically by
     /// `instance_metrics_loop` and read lock-free during scoring.
-    pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_score::InstanceContext>>,
+    pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_pool::score::InstanceContext>>,
     /// Per-task eval-RAM prediction (p95 peak RSS), refreshed by
     /// `instance_metrics_loop`, consumed by eval scoring.
     pub(crate) eval_history: Arc<
         arc_swap::ArcSwap<
             std::collections::HashMap<
                 gradient_types::ids::TaskId,
-                gradient_score::HistoryPrediction,
+                gradient_pool::score::HistoryPrediction,
             >,
         >,
     >,
@@ -109,7 +105,8 @@ impl std::fmt::Debug for Scheduler {
 
 impl Scheduler {
     pub fn new(state: Arc<ServerState>) -> Self {
-        let policy = gradient_score::policy_by_name(&state.config.eval.scheduler_scoring_policy);
+        let policy =
+            gradient_pool::score::policy_by_name(&state.config.eval.scheduler_scoring_policy);
         Self {
             state,
             core: Arc::new(tokio::sync::watch::channel(None).0),
@@ -117,7 +114,7 @@ impl Scheduler {
             kick_gen: Arc::new(AtomicU64::new(0)),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(
-                gradient_score::InstanceContext::default(),
+                gradient_pool::score::InstanceContext::default(),
             )),
             eval_history: Arc::new(arc_swap::ArcSwap::from_pointee(
                 std::collections::HashMap::new(),

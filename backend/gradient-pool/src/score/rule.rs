@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::{InstanceContext, ScoredJob, WorkerMetricsView};
+use crate::score::context::{InstanceContext, ScoredJob, WorkerMetricsView};
 
 /// Everything the policy knows about the candidate job at scoring time.
 #[derive(Clone, Copy)]
@@ -42,7 +42,7 @@ pub trait ScoreRule: Send + Sync + std::fmt::Debug {
     /// must not silently change the persisted key).
     fn name(&self) -> &'static str;
     /// Additive contribution to the job's total for this (job, worker) pair.
-    /// All magnitudes come from [`crate::weights`].
+    /// All magnitudes come from [`crate::score::weights`].
     fn score(
         &self,
         job: &JobContext<'_>,

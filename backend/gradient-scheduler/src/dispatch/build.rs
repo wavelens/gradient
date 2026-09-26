@@ -213,7 +213,7 @@ struct BuildDispatchMaps {
     computed_sizes: HashMap<DerivationId, i64>,
     /// derivation_id → historical resource prediction (default when the
     /// derivation has no `pname` or no matching history).
-    histories: HashMap<DerivationId, gradient_score::HistoryPrediction>,
+    histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
     /// derivation_build → the evaluation driving this anchor's dispatch (used for
     /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
@@ -659,11 +659,12 @@ async fn load_sizes_and_histories(
     uses_history: bool,
 ) -> (
     HashMap<DerivationId, Option<i64>>,
-    HashMap<DerivationId, gradient_score::HistoryPrediction>,
+    HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
     HashMap<DerivationId, i64>,
 ) {
     let mut closure_sizes: HashMap<DerivationId, Option<i64>> = HashMap::new();
-    let mut histories: HashMap<DerivationId, gradient_score::HistoryPrediction> = HashMap::new();
+    let mut histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction> =
+        HashMap::new();
     if !uses_history {
         for (drv_id, drv) in derivations {
             closure_sizes.insert(*drv_id, drv.closure_size);
@@ -686,7 +687,7 @@ async fn load_sizes_and_histories(
                 HashMap::new()
             })
     };
-    let mut predictions: HashMap<(String, Option<i64>), gradient_score::HistoryPrediction> =
+    let mut predictions: HashMap<(String, Option<i64>), gradient_pool::score::HistoryPrediction> =
         HashMap::new();
     for (drv_id, drv) in derivations {
         let size = drv.closure_size.or_else(|| computed.get(drv_id).copied());

@@ -118,7 +118,7 @@ impl Scheduler {
         &self,
         worker_id: &str,
         kind: &JobKind,
-        instance: &Arc<gradient_score::InstanceContext>,
+        instance: &Arc<gradient_pool::score::InstanceContext>,
     ) -> AssignOutcome {
         let worker = worker_id.to_owned();
         let kind = kind.clone();

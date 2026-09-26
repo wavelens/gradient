@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::InstanceContext;
-use crate::rule::{JobContext, ScoreRule, WorkerContext};
+use crate::score::context::InstanceContext;
+use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
 #[derive(Debug)]
 pub struct ResourceFitRule {
@@ -19,11 +19,11 @@ pub struct ResourceFitRule {
 impl Default for ResourceFitRule {
     fn default() -> Self {
         Self {
-            ram_overshoot_penalty: crate::weights::RESOURCE_FIT_RAM_PENALTY,
-            max_overshoot: crate::weights::RESOURCE_FIT_MAX_OVERSHOOT,
-            cpu_affinity_bonus: crate::weights::CPU_AFFINITY_BONUS,
-            cpu_heavy_threshold_ms: crate::weights::CPU_HEAVY_THRESHOLD_MS,
-            cpu_bonus_cap: crate::weights::CPU_AFFINITY_BONUS_CAP,
+            ram_overshoot_penalty: crate::score::weights::RESOURCE_FIT_RAM_PENALTY,
+            max_overshoot: crate::score::weights::RESOURCE_FIT_MAX_OVERSHOOT,
+            cpu_affinity_bonus: crate::score::weights::CPU_AFFINITY_BONUS,
+            cpu_heavy_threshold_ms: crate::score::weights::CPU_HEAVY_THRESHOLD_MS,
+            cpu_bonus_cap: crate::score::weights::CPU_AFFINITY_BONUS_CAP,
         }
     }
 }
@@ -90,11 +90,11 @@ pub struct ResourceSaturationRule {
 impl Default for ResourceSaturationRule {
     fn default() -> Self {
         Self {
-            penalty: crate::weights::RESOURCE_SATURATION_PENALTY,
-            cpu_saturated_pct: crate::weights::CPU_SATURATED_PCT as f32,
-            cpu_saturated_pct_builtin: crate::weights::CPU_SATURATED_PCT_BUILTIN as f32,
-            ram_saturated_free_frac: crate::weights::RAM_SATURATED_FREE_FRAC,
-            ram_fit_headroom: crate::weights::RAM_FIT_HEADROOM,
+            penalty: crate::score::weights::RESOURCE_SATURATION_PENALTY,
+            cpu_saturated_pct: crate::score::weights::CPU_SATURATED_PCT as f32,
+            cpu_saturated_pct_builtin: crate::score::weights::CPU_SATURATED_PCT_BUILTIN as f32,
+            ram_saturated_free_frac: crate::score::weights::RAM_SATURATED_FREE_FRAC,
+            ram_fit_headroom: crate::score::weights::RAM_FIT_HEADROOM,
         }
     }
 }
@@ -155,10 +155,10 @@ impl ScoreRule for ResourceSaturationRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, ScoredJob, Windowed, WorkerMetricsView};
+    use crate::score::context::{HistoryPrediction, ScoredJob, Windowed, WorkerMetricsView};
     // Asserted against the constant, not a literal, so tuning the penalty does
     // not rewrite every expectation here.
-    use crate::weights::RESOURCE_SATURATION_PENALTY as PENALTY;
+    use crate::score::weights::RESOURCE_SATURATION_PENALTY as PENALTY;
     use gradient_types::ids::ProjectId;
 
     fn job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {

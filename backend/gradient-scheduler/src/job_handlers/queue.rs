@@ -9,7 +9,7 @@
 use crate::Scheduler;
 use crate::actor::{Offer, SchedulerMsg};
 use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
-use crate::worker_pool::WorkerInfo;
+use gradient_pool::WorkerInfo;
 use gradient_wire::types::{GradientCapabilities, JobCandidate};
 
 impl Scheduler {

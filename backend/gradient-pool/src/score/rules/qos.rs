@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::InstanceContext;
-use crate::rule::{JobContext, ScoreRule, WorkerContext};
+use crate::score::context::InstanceContext;
+use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
 /// Quality of service: a job a user prioritized, directly or through the
 /// evaluation or build that depends on it, goes ahead of everything else (#530).
@@ -17,7 +17,7 @@ pub struct QosRule {
 impl Default for QosRule {
     fn default() -> Self {
         Self {
-            prioritized: crate::weights::QOS_PRIORITIZED,
+            prioritized: crate::score::weights::QOS_PRIORITIZED,
         }
     }
 }
@@ -48,8 +48,8 @@ impl ScoreRule for QosRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, ScoredJob};
-    use crate::rules::builtin::WaitTimeRule;
+    use crate::score::context::{HistoryPrediction, ScoredJob};
+    use crate::score::rules::builtin::WaitTimeRule;
     use gradient_types::ids::ProjectId;
     use gradient_types::now;
 

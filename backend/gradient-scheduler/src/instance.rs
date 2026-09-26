@@ -20,11 +20,15 @@ pub struct InstanceCounts {
     pub idle_workers: u32,
 }
 
-/// Build a [`gradient_score::Windowed`] from a 5m/1h/24h column triple.
+/// Build a [`gradient_pool::score::Windowed`] from a 5m/1h/24h column triple.
 /// `None` (SQL NULL: no samples in the window) stays `None` - a window with no
 /// data must be distinguishable from a measured zero.
-fn windowed(w5m: Option<f64>, w1h: Option<f64>, w24h: Option<f64>) -> gradient_score::Windowed {
-    gradient_score::Windowed { w5m, w1h, w24h }
+fn windowed(
+    w5m: Option<f64>,
+    w1h: Option<f64>,
+    w24h: Option<f64>,
+) -> gradient_pool::score::Windowed {
+    gradient_pool::score::Windowed { w5m, w1h, w24h }
 }
 
 #[derive(Debug, Default, FromQueryResult)]
@@ -146,7 +150,7 @@ pub async fn compute_instance_context(
     db: &impl ConnectionTrait,
     counts: InstanceCounts,
     now: chrono::NaiveDateTime,
-) -> gradient_score::InstanceContext {
+) -> gradient_pool::score::InstanceContext {
     let c5m = now - chrono::Duration::minutes(5);
     let c1h = now - chrono::Duration::hours(1);
     let c24h = now - chrono::Duration::hours(24);
@@ -181,7 +185,7 @@ pub async fn compute_instance_context(
         }
     };
 
-    gradient_score::InstanceContext {
+    gradient_pool::score::InstanceContext {
         wait_secs: windowed(dispatch.wait_5m, dispatch.wait_1h, dispatch.wait_24h),
         build_time_ms: windowed(
             metric.build_time_5m,
@@ -235,7 +239,7 @@ gradient_db::sql! {
 pub async fn compute_eval_history(
     db: &impl ConnectionTrait,
     now: chrono::NaiveDateTime,
-) -> HashMap<TaskId, gradient_score::HistoryPrediction> {
+) -> HashMap<TaskId, gradient_pool::score::HistoryPrediction> {
     let since = now - chrono::Duration::hours(24);
 
     let rows = match EvalHistoryRow::find_by_statement(EVAL_HISTORY_P95_RAM.bind([since.into()]))
@@ -253,7 +257,7 @@ pub async fn compute_eval_history(
         .map(|r| {
             (
                 r.task,
-                gradient_score::HistoryPrediction {
+                gradient_pool::score::HistoryPrediction {
                     predicted_peak_ram_mb: r.p95_ram.max(0.0) as u64,
                     samples: r.samples.max(0) as u32,
                     ..Default::default()

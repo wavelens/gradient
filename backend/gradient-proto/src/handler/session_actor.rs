@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use gradient_core::ServerState;
+use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_scheduler::Scheduler;
-use gradient_scheduler::actor::{SessionPort, SessionSignal};
 use gradient_types::ids::ProjectId;
 use ractor::rpc::CallResult;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};

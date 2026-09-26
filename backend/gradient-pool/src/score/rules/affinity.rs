@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::context::InstanceContext;
-use crate::rule::{JobContext, ScoreRule, WorkerContext};
+use crate::score::context::InstanceContext;
+use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 
 /// Fixed-output derivations fetch from the network, so prefer faster-network
 /// workers. Bonus scales linearly to `reference_mbps`, then caps.
@@ -18,8 +18,8 @@ pub struct NetworkAffinityRule {
 impl Default for NetworkAffinityRule {
     fn default() -> Self {
         Self {
-            bonus: crate::weights::NETWORK_AFFINITY_BONUS,
-            reference_mbps: crate::weights::NETWORK_REFERENCE_MBPS,
+            bonus: crate::score::weights::NETWORK_AFFINITY_BONUS,
+            reference_mbps: crate::score::weights::NETWORK_REFERENCE_MBPS,
         }
     }
 }
@@ -65,9 +65,9 @@ pub struct DiskAffinityRule {
 impl Default for DiskAffinityRule {
     fn default() -> Self {
         Self {
-            bonus: crate::weights::DISK_AFFINITY_BONUS,
-            heavy_threshold_bytes: crate::weights::DISK_HEAVY_THRESHOLD_BYTES,
-            reference_mbps: crate::weights::DISK_REFERENCE_MBPS,
+            bonus: crate::score::weights::DISK_AFFINITY_BONUS,
+            heavy_threshold_bytes: crate::score::weights::DISK_HEAVY_THRESHOLD_BYTES,
+            reference_mbps: crate::score::weights::DISK_REFERENCE_MBPS,
         }
     }
 }
@@ -106,7 +106,7 @@ impl ScoreRule for DiskAffinityRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, ScoredJob, WorkerMetricsView};
+    use crate::score::context::{HistoryPrediction, ScoredJob, WorkerMetricsView};
     use gradient_types::ids::ProjectId;
 
     fn job(is_fixed_output: bool, h: HistoryPrediction) -> ScoredJob<'static> {
