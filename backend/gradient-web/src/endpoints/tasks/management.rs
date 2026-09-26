@@ -7,7 +7,7 @@
 use super::TaskResponse;
 use super::auto_attach;
 use crate::access::{Caller, ProjectAccess, TaskAccess, has_permission, load_project, load_task};
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, paginate};
@@ -184,6 +184,7 @@ pub async fn get(
 
 pub async fn put(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
@@ -288,6 +289,23 @@ pub async fn put(
         );
     }
 
+    audit_record(
+        &state,
+        Some(user.id),
+        Action::TaskCreate,
+        EventOwner {
+            project: Some(project.id),
+            task: Some(task.id),
+            ..Default::default()
+        },
+        &info,
+        Some(serde_json::json!({
+            "task_id": task.id.to_string(),
+            "name": task.name,
+        })),
+    )
+    .await;
+
     let res = BaseResponse {
         error: false,
         message: task.id.to_string(),
@@ -369,6 +387,7 @@ pub async fn get_task(
 
 pub async fn patch_task(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task)): Path<(String, String)>,
@@ -386,6 +405,21 @@ pub async fn patch_task(
         },
     )
     .await?;
+    let owner = EventOwner {
+        project: Some(project.id),
+        task: Some(task.id),
+        ..Default::default()
+    };
+    let fields = changed_fields([
+        ("name", body.name.is_some()),
+        ("display_name", body.display_name.is_some()),
+        ("description", body.description.is_some()),
+        ("repository", body.repository.is_some()),
+        ("wildcard", body.wildcard.is_some()),
+        ("keep_evaluations", body.keep_evaluations.is_some()),
+        ("concurrency", body.concurrency.is_some()),
+        ("sign_cache", body.sign_cache.is_some()),
+    ]);
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
 
@@ -416,6 +450,16 @@ pub async fn patch_task(
 
     atask.force_evaluation = Set(true);
     atask.update(&state.web_db).await?;
+
+    audit_record(
+        &state,
+        Some(user.id),
+        Action::TaskUpdate,
+        owner,
+        &info,
+        Some(fields),
+    )
+    .await;
 
     Ok(ok_json("Task updated".to_string()))
 }

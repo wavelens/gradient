@@ -5,7 +5,7 @@
  */
 
 use crate::access::{Caller, ProjectAccess, load_project};
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate, role_names};
@@ -199,6 +199,7 @@ pub async fn get(
 
 pub async fn put(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<MakeProjectRequest>,
@@ -269,6 +270,22 @@ pub async fn put(
     .await?;
 
     tx.commit().await?;
+
+    audit_record(
+        &state,
+        Some(user.id),
+        Action::ProjectCreate,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
+        &info,
+        Some(serde_json::json!({
+            "project_id": project.id.to_string(),
+            "name": project.name,
+        })),
+    )
+    .await;
 
     // A connected worker only learns about the new project when it re-auths.
     for worker_id in &auto_enabled {
@@ -349,6 +366,7 @@ pub async fn get_project(
 
 pub async fn patch_project(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
@@ -365,6 +383,12 @@ pub async fn patch_project(
         },
     )
     .await?;
+    let fields = changed_fields([
+        ("name", body.name.is_some()),
+        ("display_name", body.display_name.is_some()),
+        ("description", body.description.is_some()),
+        ("hide_build_requests", body.hide_build_requests.is_some()),
+    ]);
     let mut aproject: AProject = project.into();
 
     if let Some(name) = body.name {
@@ -405,6 +429,19 @@ pub async fn patch_project(
         .update(&state.web_db)
         .await
         .map_err(|e| WebError::from_db_err(e, "Project Name"))?;
+
+    audit_record(
+        &state,
+        Some(user.id),
+        Action::ProjectUpdate,
+        EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
+        &info,
+        Some(fields),
+    )
+    .await;
 
     let res = BaseResponse {
         error: false,

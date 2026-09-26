@@ -13,6 +13,7 @@ use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream::UpstreamProbe;
 use gradient_sources::{CacheSigner, get_hash_from_url};
+use gradient_types::events::cache::NarinfoServed;
 use gradient_types::*;
 use gradient_util::http;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -140,6 +141,11 @@ pub async fn path(
     if let Ok(path_info) =
         get_nar_by_hash(Arc::clone(&state), ctx.cache.clone(), path_hash.clone()).await
     {
+        state.events.publish(NarinfoServed {
+            cache: ctx.cache.id,
+            hash: path_hash.clone(),
+            hit: true,
+        });
         let response = if flag.is_set() {
             axum::Json(path_info).into_response()
         } else {
@@ -150,6 +156,11 @@ pub async fn path(
 
     let rewritten = fetch_from_upstream(&state, &ctx.cache, &path_hash).await;
     if let Some(body) = rewritten {
+        state.events.publish(NarinfoServed {
+            cache: ctx.cache.id,
+            hash: path_hash.clone(),
+            hit: false,
+        });
         let response = if flag.is_set() {
             match gradient_types::parse_narinfo_body(&body) {
                 Ok(parsed) => axum::Json(parsed).into_response(),

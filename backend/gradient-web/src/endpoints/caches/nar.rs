@@ -13,6 +13,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
 use gradient_sources::get_hash_from_url;
+use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -38,6 +39,11 @@ pub async fn nar(
         super::helpers::fetch_nar_stream(&state, &path_hash).await?;
 
     super::super::stats::record_nar_traffic(&state, ctx.cache.id, size as i64);
+    state.events.publish(NarFetched {
+        cache: ctx.cache.id,
+        hash: effective_hash.clone(),
+        size,
+    });
     spawn_fetch_stamp(Arc::clone(&state), ctx.cache.id, effective_hash);
 
     Response::builder()

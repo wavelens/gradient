@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, load_cache};
-use crate::audit::{RequestInfo, record as audit_record};
+use crate::audit::{RequestInfo, changed_fields, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
@@ -120,6 +120,7 @@ pub async fn get(
 
 pub async fn put(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -204,6 +205,22 @@ pub async fn put(
     .await?;
 
     tx.commit().await?;
+
+    audit_record(
+        &state,
+        Some(user.id),
+        Action::CacheCreate,
+        EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
+        &info,
+        Some(serde_json::json!({
+            "cache_id": cache.id.to_string(),
+            "name": cache.name,
+        })),
+    )
+    .await;
 
     Ok(ok_json(cache.id.to_string()))
 }
@@ -291,6 +308,7 @@ pub async fn get_cache(
 
 pub async fn patch_cache(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
@@ -309,6 +327,14 @@ pub async fn patch_cache(
     .await?;
     let cache_id = cache.id;
     let prev_max_storage_gb = cache.max_storage_gb;
+    let fields = changed_fields([
+        ("name", body.name.is_some()),
+        ("display_name", body.display_name.is_some()),
+        ("description", body.description.is_some()),
+        ("priority", body.priority.is_some()),
+        ("local_priority", body.local_priority.is_some()),
+        ("max_storage_gb", body.max_storage_gb.is_some()),
+    ]);
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
@@ -381,6 +407,19 @@ pub async fn patch_cache(
             }
         }
     }
+
+    audit_record(
+        &state,
+        Some(user.id),
+        Action::CacheUpdate,
+        EventOwner {
+            cache: Some(cache_id),
+            ..Default::default()
+        },
+        &info,
+        Some(fields),
+    )
+    .await;
 
     Ok(ok_json("Cache updated".to_string()))
 }

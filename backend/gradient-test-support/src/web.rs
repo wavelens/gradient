@@ -116,13 +116,34 @@ pub fn make_test_server_configured(
     server_from_cli(db, cli)
 }
 
+/// Variant of [`make_test_server`] whose worker pool is `worker_db`, for
+/// asserting on the durable event rows a handler writes there.
+pub fn make_test_server_with_worker_db(
+    db: DatabaseConnection,
+    worker_db: DatabaseConnection,
+) -> TestServer {
+    server_with_pools(db, worker_db, test_cli())
+}
+
 fn server_from_cli(db: DatabaseConnection, cli: gradient_types::Cli) -> TestServer {
+    server_with_pools(
+        db,
+        MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        cli,
+    )
+}
+
+fn server_with_pools(
+    db: DatabaseConnection,
+    worker_db: DatabaseConnection,
+    cli: gradient_types::Cli,
+) -> TestServer {
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: CacheDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        worker_db: WorkerDb::new(worker_db),
         config,
         log_storage: Arc::new(NoopLogStorage),
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,

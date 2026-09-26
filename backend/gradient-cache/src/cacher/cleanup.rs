@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_graph::GcRequest;
+use gradient_types::events::gc::{Pass, Swept};
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -43,7 +44,7 @@ pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Resul
         .await
         .context("Failed to query stale build_request_blob rows")?;
 
-    let mut removed = 0usize;
+    let mut removed = 0u64;
     for blob in stale {
         if blob.hash.len() != 32 {
             warn!(blob_id = %blob.id, "skipping build_request_blob with malformed hash");
@@ -69,6 +70,12 @@ pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Resul
 
     if removed > 0 {
         info!(count = removed, "Removed stale build-request blobs");
+        state
+            .record(Swept {
+                pass: Pass::BuildRequestBlobs,
+                removed,
+            })
+            .await;
     }
     Ok(())
 }
@@ -87,6 +94,12 @@ pub async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<
 
     if res.rows_affected > 0 {
         info!(count = res.rows_affected, "Removed expired upload sessions");
+        state
+            .record(Swept {
+                pass: Pass::UploadSessions,
+                removed: res.rows_affected,
+            })
+            .await;
     }
     Ok(())
 }
@@ -101,6 +114,7 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
         .context("Failed to query tasks for evaluation GC")?;
 
     let ctx = state.db();
+    let mut removed = 0u64;
     for task in tasks {
         let keep = task.keep_evaluations as usize;
         if keep == 0 {
@@ -128,6 +142,7 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
                 }
             };
 
+            removed += report.deleted_evaluations.len() as u64;
             let deleted: Vec<MEvaluation> = chunk
                 .iter()
                 .filter(|e| report.deleted_evaluations.contains(&e.id))
@@ -139,6 +154,14 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
         }
     }
 
+    if removed > 0 {
+        state
+            .record(Swept {
+                pass: Pass::Evaluations,
+                removed,
+            })
+            .await;
+    }
     Ok(())
 }
 
@@ -223,6 +246,14 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
     state
         .events
         .publish(gradient_types::events::cache::Changed {});
+    if evicted > 0 {
+        state
+            .record(Swept {
+                pass: Pass::StaleCachedPaths,
+                removed: evicted,
+            })
+            .await;
+    }
     Ok(evicted)
 }
 
@@ -270,6 +301,12 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<Cle
             count = report.orphan_nars_removed,
             "Removed orphaned NAR files"
         );
+        state
+            .record(Swept {
+                pass: Pass::OrphanNars,
+                removed: report.orphan_nars_removed,
+            })
+            .await;
     }
 
     report.zombie_cached_paths_purged = purge_zombie_cached_paths(&state, &on_disk_set).await?;

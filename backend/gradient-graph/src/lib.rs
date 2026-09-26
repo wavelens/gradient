@@ -20,10 +20,11 @@ mod requeue;
 mod self_heal;
 mod transition;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use gradient_db::DbContext;
 use gradient_types::DerivationId;
+use gradient_types::events::{Event, EventBus, graph};
 use gradient_util::supervision::{ChildCtx, ChildSpec, SupervisorHealth};
 use ractor::rpc::CallResult;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
@@ -37,6 +38,7 @@ pub use policy::retry_backoff_elapsed;
 /// watch so a restart looks like latency.
 pub struct Graph {
     actor: watch::Sender<Option<ActorRef<GraphMsg>>>,
+    events: OnceLock<EventBus>,
     #[cfg(feature = "stub")]
     stub: bool,
 }
@@ -51,6 +53,7 @@ impl Graph {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             actor: watch::channel(None).0,
+            events: OnceLock::new(),
             #[cfg(feature = "stub")]
             stub: false,
         })
@@ -62,6 +65,7 @@ impl Graph {
     pub fn stub() -> Arc<Self> {
         Arc::new(Self {
             actor: watch::channel(None).0,
+            events: OnceLock::new(),
             stub: true,
         })
     }
@@ -91,6 +95,7 @@ impl Graph {
         health: Option<Arc<SupervisorHealth>>,
         parent: Option<ActorCell>,
     ) -> Result<ActorRef<GraphMsg>, SpawnErr> {
+        let _ = self.events.set(ctx.events.clone());
         let args = GraphArgs { ctx, health };
         let (actor, _) = match parent {
             Some(parent) => Actor::spawn_linked(None, GraphActor, args, parent).await?,
@@ -98,6 +103,12 @@ impl Graph {
         };
         self.actor.send_replace(Some(actor.clone()));
         Ok(actor)
+    }
+
+    fn announce<E: Into<Event>>(&self, event: impl FnOnce() -> E) {
+        if let Some(bus) = self.events.get() {
+            bus.publish(event());
+        }
     }
 
     async fn live(&self) -> anyhow::Result<ActorRef<GraphMsg>> {
@@ -126,7 +137,15 @@ impl Graph {
         if self.stub {
             return Ok(IngestReport::default());
         }
-        self.call(|reply| GraphMsg::Ingest(batch, reply)).await
+        let report = self.call(|reply| GraphMsg::Ingest(batch, reply)).await?;
+        self.announce(|| graph::Ingested {
+            evaluation_id: report.evaluation,
+            task: report.task,
+            walked: report.walked,
+            entry_points: report.entry_points.len(),
+            skipped: report.skipped,
+        });
+        Ok(report)
     }
 
     /// Store paths of `drv_hashes` the worker may prune, answered after every
@@ -177,7 +196,15 @@ impl Graph {
                 outputs_marked: 0,
             });
         }
-        self.call(|reply| GraphMsg::CommitNar(commit, reply)).await
+        let committed = self
+            .call(|reply| GraphMsg::CommitNar(commit, reply))
+            .await?;
+        self.announce(|| graph::NarCommitted {
+            cached_path: committed.cached_path,
+            created: committed.created,
+            outputs_marked: committed.outputs_marked,
+        });
+        Ok(committed)
     }
 
     /// Mark a relayed path's object as stored. `false` means the row's bytes
@@ -201,8 +228,14 @@ impl Graph {
         if self.stub {
             return Ok(TransitionReport::default());
         }
-        self.call(|reply| GraphMsg::Transition(transition, reply))
-            .await
+        let report = self
+            .call(|reply| GraphMsg::Transition(transition, reply))
+            .await?;
+        self.announce(|| graph::Transitioned {
+            aborted: report.aborted_anchors.len(),
+            prioritized: report.prioritized_anchors.len(),
+        });
+        Ok(report)
     }
 
     /// Move anchors back to `Queued`; returns how many moved.
@@ -211,7 +244,9 @@ impl Graph {
         if self.stub {
             return Ok(0);
         }
-        self.call(|reply| GraphMsg::Requeue(scope, reply)).await
+        let requeued = self.call(|reply| GraphMsg::Requeue(scope, reply)).await?;
+        self.announce(|| graph::Requeued { requeued });
+        Ok(requeued)
     }
 
     /// Drop a path's claim on the cache index, or a whole sweep of them.
@@ -220,7 +255,12 @@ impl Graph {
         if self.stub {
             return Ok(DemoteReport::default());
         }
-        self.call(|reply| GraphMsg::Demote(demotion, reply)).await
+        let report = self.call(|reply| GraphMsg::Demote(demotion, reply)).await?;
+        self.announce(|| graph::Demoted {
+            producers: report.producers.len(),
+            others_remain: report.others_remain,
+        });
+        Ok(report)
     }
 
     /// Apply one bounded maintenance delete. The sweep scans on the pool and
@@ -230,7 +270,13 @@ impl Graph {
         if self.stub {
             return Ok(GcReport::default());
         }
-        self.call(|reply| GraphMsg::Gc(request, reply)).await
+        let report = self.call(|reply| GraphMsg::Gc(request, reply)).await?;
+        self.announce(|| graph::Collected {
+            derivations: report.deleted_derivations.len(),
+            evaluations: report.deleted_evaluations.len(),
+            retired_paths: report.retired.len(),
+        });
+        Ok(report)
     }
 }
 
@@ -238,6 +284,29 @@ impl Graph {
 /// the statements it declares with `gradient_db::sql!` reach the plan gate's
 /// registry. A linker drops an rlib nothing mentions, registry entries included.
 pub const fn link() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_graph_without_a_bus_reports_nothing_and_does_not_panic() {
+        let graph = Graph::new();
+        graph.announce(|| graph::Requeued { requeued: 1 });
+    }
+
+    #[tokio::test]
+    async fn a_graph_with_a_bus_announces_on_it() {
+        let graph = Graph::new();
+        let bus = EventBus::new(4);
+        let mut rx = bus.subscribe();
+        graph.events.set(bus).unwrap();
+
+        graph.announce(|| graph::Requeued { requeued: 1 });
+
+        assert_eq!(rx.try_recv().unwrap().event.name(), "graph.requeued");
+    }
+}
 
 #[cfg(test)]
 pub(crate) mod test_ctx {

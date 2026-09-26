@@ -121,6 +121,15 @@ pub async fn record(
         .await;
 }
 
+/// Audit metadata `{"fields": [...]}` naming the fields a patch request set.
+pub fn changed_fields<const N: usize>(fields: [(&str, bool); N]) -> serde_json::Value {
+    let set: Vec<&str> = fields
+        .into_iter()
+        .filter_map(|(name, set)| set.then_some(name))
+        .collect();
+    serde_json::json!({ "fields": set })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,11 +9,15 @@
 
 #![expect(clippy::unwrap_used, reason = "test assertions")]
 
-use gradient_entity::project;
+use gradient_entity::{project, task};
 use gradient_test_support::fixtures::{self, user};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_test_support::web::{
+    live_session, make_test_server, make_test_server_with_worker_db, make_token,
+};
 use gradient_types::{MProject, SessionId};
-use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Value};
+use sea_orm::{
+    DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement, Value,
+};
 use serde_json::Value as Json;
 use std::collections::BTreeMap;
 
@@ -43,10 +47,22 @@ fn bearer(session_id: SessionId) -> String {
     format!("Bearer {}", make_token(session_id))
 }
 
-fn last_sql(db: DatabaseConnection) -> String {
-    let log = db.into_transaction_log();
-    let last = log.last().unwrap().statements().last().unwrap();
-    last.sql.clone()
+fn statements(db: DatabaseConnection) -> Vec<Statement> {
+    db.into_transaction_log()
+        .iter()
+        .flat_map(|t| t.statements().to_vec())
+        .collect()
+}
+
+fn ran(db: DatabaseConnection, prefix: &str) -> bool {
+    statements(db).iter().any(|s| s.sql.starts_with(prefix))
+}
+
+fn exec_ok() -> MockExecResult {
+    MockExecResult {
+        last_insert_id: 0,
+        rows_affected: 1,
+    }
 }
 
 #[test]
@@ -88,7 +104,7 @@ fn starring_twice_is_fine() {
         let body: Json = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"], true);
-        assert!(last_sql(db).starts_with("INSERT INTO user_project_star"));
+        assert!(ran(db, "INSERT INTO user_project_star"));
     });
 }
 
@@ -114,7 +130,7 @@ fn unstarring_twice_is_fine() {
         let body: Json = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(body["message"], false);
-        assert!(last_sql(db).starts_with("DELETE FROM user_project_star"));
+        assert!(ran(db, "DELETE FROM user_project_star"));
     });
 }
 
@@ -152,5 +168,41 @@ fn stars_list_groups_by_kind() {
             serde_json::json!([{ "project": "infra", "task": "hosts" }])
         );
         assert_eq!(body["message"]["caches"], serde_json::json!(["main"]));
+    });
+}
+
+#[test]
+fn starring_a_task_records_a_task_star_event() {
+    run(async {
+        let session_id = SessionId::now_v7();
+        let task = task::Model {
+            id: fixtures::task_id(),
+            project: fixtures::project_id(),
+            name: "test-task".into(),
+            ..Default::default()
+        };
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            .append_query_results([vec![public_project()]])
+            .append_query_results([vec![task]])
+            .append_exec_results([exec_ok()])
+            .into_connection();
+        let worker_db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec_ok()])
+            .into_connection();
+        let server = make_test_server_with_worker_db(db.clone(), worker_db.clone());
+
+        let res = server
+            .put("/api/v1/user/stars/tasks/test-project/test-task")
+            .add_header("Authorization", bearer(session_id))
+            .await;
+
+        res.assert_status_ok();
+        assert!(ran(db, "INSERT INTO user_task_star"));
+        let outbox = statements(worker_db)
+            .into_iter()
+            .find(|s| s.sql.contains("INSERT INTO outbox"))
+            .expect("event row");
+        let payload = format!("{:?}", outbox.values);
+        assert!(payload.contains("TaskStar"), "{payload}");
     });
 }

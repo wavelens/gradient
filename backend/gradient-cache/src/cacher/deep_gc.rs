@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use gradient_core::ServerState;
 use gradient_db::admin_tasks;
 use gradient_entity::ids::AdminTaskId;
+use gradient_types::events::gc::DeepFinished;
 use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Serialize;
@@ -69,6 +70,12 @@ pub async fn run_deep_gc(state: Arc<ServerState>, task_id: AdminTaskId) {
     } else {
         info!(?report, %task_id, "deep_gc completed");
     }
+    state
+        .record(DeepFinished {
+            succeeded: true,
+            report: report.to_json(),
+        })
+        .await;
 }
 
 async fn flush_progress(state: &Arc<ServerState>, task_id: AdminTaskId, report: &DeepGcReport) {
@@ -91,6 +98,12 @@ async fn finish_failed(
     {
         error!(error = ?e, %task_id, "deep_gc: mark_failed failed");
     }
+    state
+        .record(DeepFinished {
+            succeeded: false,
+            report: report.to_json(),
+        })
+        .await;
 }
 
 async fn pass_nars(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result<()> {

@@ -8,6 +8,7 @@
 //! and delivery inspection.
 
 use crate::access::{Caller, TaskAccess, load_task};
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -20,6 +21,8 @@ use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_types::actions::{ActionConfig, ActionType};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
 use gradient_util::http_validation::validate_webhook_url;
@@ -162,6 +165,7 @@ pub async fn list_actions(
 /// crypt key; all later reads omit it entirely.
 pub async fn create_action(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task)): Path<(String, String)>,
@@ -292,6 +296,16 @@ pub async fn create_action(
         .await
         .map_err(|e| WebError::from_db_err(e, "Action"))?;
 
+    record_action_event(
+        &state,
+        &user,
+        &info,
+        Action::TaskActionCreate,
+        project.id,
+        &m,
+    )
+    .await;
+
     Ok(ok_json(CreateActionResponse {
         action: to_response(m),
         token: plaintext_token,
@@ -334,6 +348,7 @@ pub async fn read_action(
 
 pub async fn update_action(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task, id)): Path<(String, String, TaskActionId)>,
@@ -471,7 +486,38 @@ pub async fn update_action(
         .await
         .map_err(|e| WebError::from_db_err(e, "Action"))?;
 
+    record_action_event(
+        &state,
+        &user,
+        &info,
+        Action::TaskActionUpdate,
+        project.id,
+        &updated,
+    )
+    .await;
+
     Ok(ok_json(to_response(updated)))
+}
+
+async fn record_action_event(
+    state: &ServerState,
+    user: &MUser,
+    info: &RequestInfo,
+    action: Action,
+    project: ProjectId,
+    row: &MTaskAction,
+) {
+    let owner = EventOwner {
+        project: Some(project),
+        task: Some(row.task),
+        ..Default::default()
+    };
+    let metadata = serde_json::json!({
+        "action_id": row.id.to_string(),
+        "name": row.name,
+        "action_type": row.action_type,
+    });
+    audit_record(state, Some(user.id), action, owner, info, Some(metadata)).await;
 }
 
 #[derive(Serialize, Debug)]
@@ -481,11 +527,12 @@ pub struct DeletedResponse {
 
 pub async fn delete_action(
     state: State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
-    let (_project, proj) = load_task(
+    let (project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
@@ -505,8 +552,18 @@ pub async fn delete_action(
         .await?
         .or_not_found("Action")?;
 
-    let active: ATaskAction = row.into();
+    let active: ATaskAction = row.clone().into();
     active.delete(&state.web_db).await?;
+
+    record_action_event(
+        &state,
+        &user,
+        &info,
+        Action::TaskActionDelete,
+        project.id,
+        &row,
+    )
+    .await;
 
     Ok(ok_json(DeletedResponse { deleted: true }))
 }

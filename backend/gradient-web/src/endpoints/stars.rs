@@ -7,6 +7,7 @@
 use crate::access::{
     CacheAccess, Caller, ProjectAccess, TaskAccess, load_cache, load_project, load_task,
 };
+use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::WebResult;
 use crate::helpers::ok_json;
@@ -14,6 +15,8 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::dashboard::{StarKind, StarredNames, star, starred_names, unstar};
+use gradient_types::events::EventOwner;
+use gradient_types::events::audit::Action;
 use gradient_types::*;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -26,18 +29,46 @@ enum Op {
     Unstar,
 }
 
+struct StarTarget {
+    kind: StarKind,
+    id: Uuid,
+    owner: EventOwner,
+}
+
+impl StarTarget {
+    fn action(&self, op: Op) -> Action {
+        match (self.kind, op) {
+            (StarKind::Project, Op::Star) => Action::ProjectStar,
+            (StarKind::Project, Op::Unstar) => Action::ProjectUnstar,
+            (StarKind::Task, Op::Star) => Action::TaskStar,
+            (StarKind::Task, Op::Unstar) => Action::TaskUnstar,
+            (StarKind::Cache, Op::Star) => Action::CacheStar,
+            (StarKind::Cache, Op::Unstar) => Action::CacheUnstar,
+        }
+    }
+}
+
 /// The JSON `message` is whether the target is starred afterwards; repeating either op is a no-op.
 async fn apply(
     state: &ServerState,
     user: &MUser,
-    kind: StarKind,
-    target: Uuid,
+    info: &RequestInfo,
+    target: StarTarget,
     op: Op,
 ) -> StarResponse {
     match op {
-        Op::Star => star(&state.web_db, user.id, kind, target).await?,
-        Op::Unstar => unstar(&state.web_db, user.id, kind, target).await?,
+        Op::Star => star(&state.web_db, user.id, target.kind, target.id).await?,
+        Op::Unstar => unstar(&state.web_db, user.id, target.kind, target.id).await?,
     }
+    audit_record(
+        state,
+        Some(user.id),
+        target.action(op),
+        target.owner,
+        info,
+        None,
+    )
+    .await;
     Ok(ok_json(matches!(op, Op::Star)))
 }
 
@@ -46,11 +77,18 @@ async fn project_target(
     user: &MUser,
     api_key: &MaybeApiKey,
     project: String,
-) -> WebResult<Uuid> {
+) -> WebResult<StarTarget> {
     let access = ProjectAccess::Readable { label: "Project" };
     let project =
         load_project(state, Caller::User(user), api_key.as_ref(), project, access).await?;
-    Ok(project.id.into_inner())
+    Ok(StarTarget {
+        kind: StarKind::Project,
+        id: project.id.into_inner(),
+        owner: EventOwner {
+            project: Some(project.id),
+            ..Default::default()
+        },
+    })
 }
 
 async fn task_target(
@@ -59,9 +97,9 @@ async fn task_target(
     api_key: &MaybeApiKey,
     project: String,
     task: String,
-) -> WebResult<Uuid> {
+) -> WebResult<StarTarget> {
     let caller = Caller::User(user);
-    let (_, task) = load_task(
+    let (project, task) = load_task(
         state,
         caller,
         api_key.as_ref(),
@@ -70,7 +108,15 @@ async fn task_target(
         TaskAccess::Readable,
     )
     .await?;
-    Ok(task.id.into_inner())
+    Ok(StarTarget {
+        kind: StarKind::Task,
+        id: task.id.into_inner(),
+        owner: EventOwner {
+            project: Some(project.id),
+            task: Some(task.id),
+            ..Default::default()
+        },
+    })
 }
 
 async fn cache_target(
@@ -78,7 +124,7 @@ async fn cache_target(
     user: &MUser,
     api_key: &MaybeApiKey,
     cache: String,
-) -> WebResult<Uuid> {
+) -> WebResult<StarTarget> {
     let caller = Caller::User(user);
     let cache = load_cache(
         state,
@@ -88,7 +134,14 @@ async fn cache_target(
         CacheAccess::Readable,
     )
     .await?;
-    Ok(cache.id.into_inner())
+    Ok(StarTarget {
+        kind: StarKind::Cache,
+        id: cache.id.into_inner(),
+        owner: EventOwner {
+            cache: Some(cache.id),
+            ..Default::default()
+        },
+    })
 }
 
 pub async fn get_stars(
@@ -100,60 +153,66 @@ pub async fn get_stars(
 
 pub async fn put_project_star(
     State(state): State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
 ) -> StarResponse {
-    let id = project_target(&state, &user, &api_key, project).await?;
-    apply(&state, &user, StarKind::Project, id, Op::Star).await
+    let target = project_target(&state, &user, &api_key, project).await?;
+    apply(&state, &user, &info, target, Op::Star).await
 }
 
 pub async fn delete_project_star(
     State(state): State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(project): Path<String>,
 ) -> StarResponse {
-    let id = project_target(&state, &user, &api_key, project).await?;
-    apply(&state, &user, StarKind::Project, id, Op::Unstar).await
+    let target = project_target(&state, &user, &api_key, project).await?;
+    apply(&state, &user, &info, target, Op::Unstar).await
 }
 
 pub async fn put_task_star(
     State(state): State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task)): Path<(String, String)>,
 ) -> StarResponse {
-    let id = task_target(&state, &user, &api_key, project, task).await?;
-    apply(&state, &user, StarKind::Task, id, Op::Star).await
+    let target = task_target(&state, &user, &api_key, project, task).await?;
+    apply(&state, &user, &info, target, Op::Star).await
 }
 
 pub async fn delete_task_star(
     State(state): State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path((project, task)): Path<(String, String)>,
 ) -> StarResponse {
-    let id = task_target(&state, &user, &api_key, project, task).await?;
-    apply(&state, &user, StarKind::Task, id, Op::Unstar).await
+    let target = task_target(&state, &user, &api_key, project, task).await?;
+    apply(&state, &user, &info, target, Op::Unstar).await
 }
 
 pub async fn put_cache_star(
     State(state): State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> StarResponse {
-    let id = cache_target(&state, &user, &api_key, cache).await?;
-    apply(&state, &user, StarKind::Cache, id, Op::Star).await
+    let target = cache_target(&state, &user, &api_key, cache).await?;
+    apply(&state, &user, &info, target, Op::Star).await
 }
 
 pub async fn delete_cache_star(
     State(state): State<Arc<ServerState>>,
+    info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> StarResponse {
-    let id = cache_target(&state, &user, &api_key, cache).await?;
-    apply(&state, &user, StarKind::Cache, id, Op::Unstar).await
+    let target = cache_target(&state, &user, &api_key, cache).await?;
+    apply(&state, &user, &info, target, Op::Unstar).await
 }
