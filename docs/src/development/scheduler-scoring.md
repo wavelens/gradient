@@ -146,4 +146,4 @@ Implement `ScoreRule` (including `description()`) for a new contribution, add it
 to a rule list in `policy.rs` (or a new list), and register the named policy in
 `policy_by_name`. The rule is automatically picked up by `rule_catalog()` and so
 appears in the board's rule-help popup. Each rule has unit tests in
-`backend/gradient-score/src/rules`; run them with `cargo test -p gradient-score`.
+`backend/gradient-pool/src/score/rules`; run them with `cargo test -p gradient-pool`.

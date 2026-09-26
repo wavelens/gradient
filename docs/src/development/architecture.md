@@ -128,24 +128,28 @@ entity         SeaORM entities, one module per table
 migration      SeaORM migrator
 graph          the graph actor: every write to the graph and the cache index
 effects        the effects actor: delivers the outbox rows a state change wrote
-scheduler      worker pool, job tracker, dispatch loops
-proto          worker protocol: sessions, NAR transfer, dispatch
+scheduler      job tracker, dispatch loops
+pool           connected-worker registry, capability aggregate, scoring rules
+wire           wire protocol: types, framing, handshake, dial/accept, role traits
+proto          the server's protocol side: sessions, NAR transfer, dispatch
 web            Axum HTTP API and the binary cache endpoints
 cache          cache sweeps: maintenance, signing, debug index, retention
 ci             evaluation triggers, forge checks, declarative apply
 forge          per-forge reporters, webhook parsing, signature checks
 state          declarative state DTOs and apply
-storage        NAR and log storage (local FS or S3), the staged upload queue
-               and the hot RAM cache
+storage        NAR and log storage (local FS or S3), the staged upload queue,
+               the hot RAM cache and the relayed-NAR sender
 worker         gradient-worker binary (fetch, eval, build, sign)
+worker-client  the peer side of the protocol: connection, reconnect, reply
+               correlation, NAR send/receive; shared by worker and proxy
+derivation     `.drv` parsing
 eval           standalone flake evaluator used by the worker
 sources        store paths, the nix daemon pool, git and SSH sources, cache
                signing keys, and the native `flake.lock` updater
-util           shutdown, supervision, HTTP clients
-score          scoring policies for job assignment
+util           shutdown, supervision, HTTP clients, logging and metrics setup
 notify         email and notification senders
 report         evaluation snapshots for support reports
-types          shared ids, wire types, runtime config
+types          shared ids, runtime config
 test-support   shared test fixtures for the workspace
 ```
 

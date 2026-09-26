@@ -68,8 +68,8 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.logLevel.default` | `info` | Log level: `trace` `debug` `info` `warn` `error`. Targets `gradient_*`; dependency noise (`hyper`, `sqlx`, …) is pinned to `warn`. `RUST_LOG` overrides everything. |
 | `settings.logLevel.cache` | null | `gradient_cache` log level override (null inherits default) |
 | `settings.logLevel.web` | null | `gradient_web` log level override (null inherits default) |
-| `settings.logLevel.proto` | null | `gradient_proto` log level override (null inherits default) |
-| `settings.logLevel.scheduler` | null | `gradient_scheduler` log level override (null inherits default) |
+| `settings.logLevel.proto` | null | `gradient_proto` and `gradient_wire` log level override (null inherits default) |
+| `settings.logLevel.scheduler` | null | `gradient_scheduler` and `gradient_pool` log level override (null inherits default) |
 | `settings.enableRegistration` | `true` | Allow new user self-registration |
 | `settings.createProject` | `everyone` | Who may create projects via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Project" button accordingly. (`GRADIENT_CREATE_PROJECT`) |
 | `settings.createCache` | `everyone` | Who may create caches via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Cache" button accordingly. (`GRADIENT_CREATE_CACHE`) |
