@@ -137,9 +137,21 @@ impl ProtoWriter {
         self.inner
             .send_msg(&msg)
             .await
-            .map_err(|_| anyhow::anyhow!("writer channel closed or send timed out"))
+            .map_err(|_| WriterUnavailable.into())
     }
 }
+
+/// The connection to the server failed, not the job: typed so the worker
+/// reports the job as transient instead of falling through to permanent.
+#[derive(Debug)]
+pub struct WriterUnavailable;
+
+impl std::fmt::Display for WriterUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("writer channel closed or send timed out")
+    }
+}
+impl std::error::Error for WriterUnavailable {}
 
 /// Read-only half produced by [`ProtoConnection::split`].
 pub struct ProtoReader {

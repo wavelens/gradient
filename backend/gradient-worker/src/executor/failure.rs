@@ -8,6 +8,7 @@
 //! [`BuildFailureKind`] on its way to the server.
 
 use gradient_wire::messages::BuildFailureKind;
+use gradient_worker_client::connection::WriterUnavailable;
 
 use crate::executor::eval::CorruptEvalCache;
 use crate::proto::prefetch::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};
@@ -220,6 +221,9 @@ pub(crate) fn wire_failure(e: &anyhow::Error) -> (BuildFailureKind, Vec<String>)
     if e.chain().any(|s| s.is::<JobAborted>()) {
         return (BuildFailureKind::Aborted, Vec::new());
     }
+    if e.chain().any(|s| s.is::<WriterUnavailable>()) {
+        return (BuildFailureKind::Transient, Vec::new());
+    }
     match e.downcast_ref::<BuildError>() {
         Some(be) => (be.kind, be.missing_paths.clone()),
         None => {
@@ -337,6 +341,12 @@ mod tests {
         let from_checkpoint = anyhow::Error::new(JobAborted("job aborted by server".into()))
             .context("compress and push NARs");
         assert_eq!(wire_failure(&from_checkpoint).0, BuildFailureKind::Aborted);
+    }
+
+    #[test]
+    fn a_severed_server_connection_is_transient() {
+        let e = anyhow::Error::new(WriterUnavailable).context("send build log");
+        assert_eq!(wire_failure(&e).0, BuildFailureKind::Transient);
     }
 
     #[test]
