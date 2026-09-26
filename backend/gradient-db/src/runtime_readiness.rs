@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 
-use crate::graph_sql::{anchor_whole_predicate, present_predicate};
+use crate::graph_sql::{anchor_whole_predicate, present_predicate, present_value};
 use crate::readiness::{ids, lock_anchors};
 
 fn seed_sql() -> String {
@@ -78,8 +78,8 @@ fn count_up_sql() -> String {
         "UPDATE derivation_build db SET missing_runtime_deps = db.missing_runtime_deps + c.n \
          FROM unnest($1::uuid[], $2::int[]) AS c(derivation, n) \
          WHERE db.derivation = c.derivation \
-         RETURNING db.derivation, ({present} AND db.missing_runtime_deps = c.n) AS was_whole",
-        present = present_predicate("db"),
+         RETURNING db.derivation, (db.missing_runtime_deps = c.n AND {present}) AS was_whole",
+        present = present_value("db"),
     )
 }
 
@@ -662,6 +662,18 @@ mod tests {
             seed.sql.contains("AND NOT s.fresh) AS was_whole"),
             "the caller's endpoint has to beat the row: {}",
             seed.sql
+        );
+    }
+
+    /// A ripple up projects presence for every row it moves, so it reads the
+    /// outputs in one probe, and only for a row whose counter was at zero.
+    #[test]
+    fn a_ripple_up_reads_the_outputs_once_and_only_behind_the_counter() {
+        let sql = count_up_sql();
+        assert_eq!(sql.matches("FROM derivation_output").count(), 1, "{sql}");
+        assert!(
+            sql.contains("(db.missing_runtime_deps = c.n AND coalesce("),
+            "{sql}"
         );
     }
 

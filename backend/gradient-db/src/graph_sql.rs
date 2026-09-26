@@ -332,6 +332,17 @@ pub fn present_predicate(alias: &str) -> String {
     )
 }
 
+/// [`present_predicate`] as one probe of the outputs, for a projection: a
+/// `RETURNING` pays both of the predicate's subplans per row, where a `WHERE`
+/// would have semi-joined them. No output rows aggregate to NULL, which is absent.
+pub fn present_value(alias: &str) -> String {
+    format!(
+        "coalesce((SELECT bool_and(cp.file_hash IS NOT NULL) FROM derivation_output o \
+                   LEFT JOIN cached_path cp ON cp.hash = o.hash \
+                   WHERE o.derivation = {alias}.derivation), false)"
+    )
+}
+
 /// Present, and every runtime edge leads to a whole anchor: the whole runtime
 /// closure of `{alias}`'s outputs is in our cache. The counter is moved by
 /// [`crate::runtime_readiness`], never derived here, for the reason `unready_deps`
