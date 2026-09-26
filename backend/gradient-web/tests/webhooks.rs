@@ -162,6 +162,22 @@ fn create_rejects_a_private_url() {
 }
 
 #[test]
+fn create_rejects_an_unbounded_event_pattern() {
+    runtime().block_on(async {
+        let session_id = SessionId::now_v7();
+        let server = make_test_server_with(as_project_admin(session_id).into_connection(), None);
+
+        let res = server
+            .post(PROJECT_URL)
+            .add_header("authorization", bearer(session_id))
+            .json(&json!({ "name": "ci", "url": "https://example.com/hook", "events": ["a**b"] }))
+            .await;
+
+        res.assert_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    });
+}
+
+#[test]
 fn a_view_role_cannot_manage_webhooks() {
     runtime().block_on(async {
         let session_id = SessionId::now_v7();

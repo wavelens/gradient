@@ -29,18 +29,56 @@ impl EventFilter {
         &self.0
     }
 
+    pub const MAX_PATTERNS: usize = 64;
+    pub const MAX_PATTERN_LEN: usize = 128;
+
+    /// Patterns a caller may store: event-name characters and single `*` wildcards only.
+    pub fn validate(patterns: &[String]) -> Result<(), String> {
+        if patterns.len() > Self::MAX_PATTERNS {
+            return Err(format!("at most {} event patterns", Self::MAX_PATTERNS));
+        }
+        for p in patterns {
+            let allowed = p
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"._*".contains(&c));
+            if p.is_empty() || p.len() > Self::MAX_PATTERN_LEN || !allowed || p.contains("**") {
+                return Err(format!("invalid event pattern '{p}'"));
+            }
+        }
+        Ok(())
+    }
+
     /// An empty filter matches everything; `*` matches any run of characters, dots included.
     pub fn matches(&self, name: &str) -> bool {
         self.0.is_empty() || self.0.iter().any(|p| glob(p.as_bytes(), name.as_bytes()))
     }
 }
 
+/// Greedy wildcard match with one backtrack point: linear in `pattern` times `name`.
 fn glob(pattern: &[u8], name: &[u8]) -> bool {
-    match pattern.split_first() {
-        None => name.is_empty(),
-        Some((b'*', rest)) => (0..=name.len()).any(|i| glob(rest, &name[i..])),
-        Some((c, rest)) => name.first() == Some(c) && glob(rest, &name[1..]),
+    let (mut p, mut n) = (0, 0);
+    let mut backtrack: Option<(usize, usize)> = None;
+    while n < name.len() {
+        match pattern.get(p) {
+            Some(b'*') => {
+                backtrack = Some((p, n));
+                p += 1;
+            }
+            Some(&c) if c == name[n] => {
+                p += 1;
+                n += 1;
+            }
+            _ => match backtrack {
+                Some((star, matched)) => {
+                    p = star + 1;
+                    n = matched + 1;
+                    backtrack = Some((star, matched + 1));
+                }
+                None => return false,
+            },
+        }
     }
+    pattern[p..].iter().all(|&c| c == b'*')
 }
 
 #[cfg(test)]
@@ -61,6 +99,33 @@ mod tests {
         assert!(f.matches("task.star"));
         assert!(!f.matches("task.unstar"));
         assert!(!f.matches("evaluation.completed"));
+    }
+
+    #[test]
+    fn pathological_patterns_match_in_linear_time() {
+        let pattern = format!("{}z", "*".repeat(64));
+        let f = EventFilter::from_patterns(vec![pattern]);
+        let started = std::time::Instant::now();
+        assert!(!f.matches(&"a".repeat(64)));
+        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+    }
+
+    #[test]
+    fn stars_match_empty_and_trailing_runs() {
+        let f = EventFilter::parse(Some("*.star,build*"));
+        assert!(f.matches("task.star"));
+        assert!(f.matches(".star"));
+        assert!(f.matches("build"));
+        assert!(!f.matches("task.stars"));
+    }
+
+    #[test]
+    fn patterns_outside_the_name_alphabet_are_rejected() {
+        assert!(EventFilter::validate(&["build.*".into(), "task.star".into()]).is_ok());
+        assert!(EventFilter::validate(&["Build.*".into()]).is_err());
+        assert!(EventFilter::validate(&["a**b".into()]).is_err());
+        assert!(EventFilter::validate(&["x".repeat(129)]).is_err());
+        assert!(EventFilter::validate(&vec!["build.*".to_owned(); 65]).is_err());
     }
 
     #[test]

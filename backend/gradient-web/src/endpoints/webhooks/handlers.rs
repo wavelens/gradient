@@ -13,7 +13,7 @@ use axum::extract::{Query, State};
 use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_entity::webhook::WebhookScope;
-use gradient_types::events::{Envelope, webhook};
+use gradient_types::events::{Envelope, EventFilter, webhook};
 use gradient_types::ids::OutboxId;
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
@@ -123,6 +123,10 @@ fn to_delivery_item(r: MWebhookDelivery) -> DeliveryListItem {
     }
 }
 
+fn check_events(events: &[String]) -> WebResult<()> {
+    EventFilter::validate(events).map_err(WebError::unprocessable_entity)
+}
+
 fn check_url(url: &str) -> WebResult<()> {
     validate_webhook_url(url)
         .map(drop)
@@ -190,6 +194,7 @@ pub async fn create_webhook(
     Json(body): Json<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<CreateWebhookResponse>>> {
     check_url(&body.url)?;
+    check_events(&body.events)?;
     let existing = EWebhook::find()
         .filter(owner.rows())
         .filter(CWebhook::Name.eq(body.name.clone()))
@@ -251,6 +256,9 @@ pub async fn update_webhook(
     let row = owned_webhook(&state, &owner).await?;
     if let Some(url) = &body.url {
         check_url(url)?;
+    }
+    if let Some(events) = &body.events {
+        check_events(events)?;
     }
 
     let fields: Vec<&str> = [
