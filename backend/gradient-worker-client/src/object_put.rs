@@ -20,7 +20,7 @@ const DEFAULT_CONCURRENT_PUTS: usize = 8;
 
 static PERMITS: OnceLock<Semaphore> = OnceLock::new();
 
-pub(crate) fn limit_concurrent_puts(limit: usize) {
+pub fn limit_concurrent_puts(limit: usize) {
     if PERMITS.set(Semaphore::new(limit)).is_err() {
         tracing::warn!(limit, "object PUT limit already set; keeping the first");
     }
@@ -30,7 +30,7 @@ fn permits() -> &'static Semaphore {
     PERMITS.get_or_init(|| Semaphore::new(DEFAULT_CONCURRENT_PUTS))
 }
 
-pub(crate) struct Backoff {
+pub struct Backoff {
     pub attempts: u32,
     pub base: Duration,
     pub max: Duration,
@@ -56,7 +56,7 @@ const OBJECT_STORE_BACKOFF: Backoff = Backoff {
 };
 
 /// PUT `body` to a presigned `url`; returns the object's ETag when the store sent one.
-pub(crate) async fn put_object(
+pub async fn put_object(
     url: &str,
     body: Bytes,
     content_type: Option<&str>,
@@ -108,7 +108,7 @@ async fn try_put(
     body: Bytes,
     content_type: Option<&str>,
 ) -> std::result::Result<Option<String>, PutError> {
-    let mut request = gradient_worker_client::http::client().put(url).body(body);
+    let mut request = crate::http::client().put(url).body(body);
     if let Some(content_type) = content_type {
         request = request.header(CONTENT_TYPE, content_type);
     }

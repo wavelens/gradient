@@ -25,22 +25,19 @@ use futures::StreamExt;
 use gradient_util::nix_hash::nix32_encode;
 use gradient_wire::messages::{ClientMessage, NAR_ZSTD_LEVEL};
 use gradient_wire::session::frame::BULK_CHUNK_SIZE;
-use harmonia_store_path::StorePath;
-use harmonia_store_remote::DaemonStore as _;
 use sha2::{Digest, Sha256};
-use tracing::{debug, warn};
+use tracing::debug;
 
-use gradient_util::store_path::{nix_store_path, strip_store_prefix};
+use gradient_util::store_path::nix_store_path;
 
-use crate::nix::store::LocalNixStore;
-use crate::proto::nar_multipart::{PartSink, PartUploader};
-use crate::proto::nar_recv::NarReceiver;
+use crate::connection::ProtoWriter;
+use crate::nar_multipart::{PartSink, PartUploader};
+use crate::nar_recv::NarReceiver;
 use gradient_wire::UploadTarget;
 use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
-use gradient_worker_client::connection::ProtoWriter;
 
 /// `sha256:<nix32>` of `data` - the wire format for NAR and file hashes.
-pub(crate) fn sha256_nix32(data: &[u8]) -> String {
+pub fn sha256_nix32(data: &[u8]) -> String {
     format!("sha256:{}", nix32_encode(&Sha256::digest(data)))
 }
 
@@ -89,7 +86,7 @@ fn compression_threads(size_hint: Option<u64>) -> u32 {
 /// count cannot drift between the relay, presigned and substitute-relay paths.
 /// One worker still builds a ZSTDMT context, so a `threads` of 1 stays on the
 /// plain single-threaded encoder.
-pub(crate) fn nar_encoder<W: std::io::Write>(
+pub fn nar_encoder<W: std::io::Write>(
     sink: W,
     threads: u32,
 ) -> Result<zstd::stream::Encoder<'static, W>> {
@@ -139,9 +136,11 @@ fn part_to_send(part: Vec<u8>, produced: u64, resume_from: u64) -> Option<(u64, 
 /// Where the NAR bytes come from.
 pub enum NarSource<'a> {
     /// Pack the store path from the local filesystem, compressing and hashing
-    /// on the fly. References and deriver come from the nix daemon when a
-    /// `store` is provided (eval-internal pushes and tests pass `None`).
-    Path { store: Option<&'a LocalNixStore> },
+    /// on the fly. References and deriver come from `meta` when provided
+    /// (eval-internal pushes and tests pass `None`).
+    Path {
+        meta: Option<&'a dyn PathMetaSource>,
+    },
     /// An uncompressed NAR already in memory, with the narinfo facts that travel
     /// with it. Compressed and hashed here, so nothing upstream is trusted for
     /// the metadata the server stores.
@@ -199,11 +198,11 @@ pub async fn upload_nar(
     let store_path = store_path.as_str();
 
     match source {
-        NarSource::Path { store } => {
+        NarSource::Path { meta } => {
             // Resolved up-front: a failure here means we'd otherwise transfer
             // a NAR the server can never confirm - wasted bandwidth and an
             // orphan object or half-written upload it has to garbage-collect.
-            let path_meta = resolve_path_meta(store, store_path).await?;
+            let path_meta = resolve_path_meta(meta, store_path).await?;
             let threads = compression_threads(path_meta.nar_size);
             let (meta, multipart) = match sink {
                 NarSink::Relay { nar_recv } => {
@@ -439,7 +438,7 @@ async fn stream_path_to_relay(
     let (produced, resume_from) = relay.finish().await?;
 
     let sent = produced.saturating_sub(resume_from);
-    crate::metrics::throughput::NETWORK
+    crate::throughput::NETWORK
         .observe(sent as f64 * 8.0 / started.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0);
 
     debug!(
@@ -484,7 +483,7 @@ async fn pack_compress_path(
 }
 
 async fn http_put(url: &str, body: Vec<u8>) -> Result<()> {
-    super::object_put::put_object(url, body.into(), Some("application/x-nix-nar")).await?;
+    crate::object_put::put_object(url, body.into(), Some("application/x-nix-nar")).await?;
     Ok(())
 }
 
@@ -557,18 +556,26 @@ pub fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
 
 // ── Local path metadata ───────────────────────────────────────────────────────
 
-/// Local path metadata gathered from the nix-daemon prior to a NAR upload.
-#[derive(Default)]
-struct PathMeta {
-    /// Uncompressed NAR size the daemon reports, used as the encoder's size
-    /// hint. `None` when there is no daemon to ask.
-    nar_size: Option<u64>,
+/// Path metadata a NAR push confirms with, gathered before the upload.
+#[derive(Debug, Default, Clone)]
+pub struct PathMeta {
+    /// Uncompressed NAR size, used as the encoder's size hint. `None` when
+    /// there is nothing to ask.
+    pub nar_size: Option<u64>,
     /// Store-path references in hash-name format (no `/nix/store/` prefix).
-    references: Vec<String>,
-    /// Full deriver `.drv` path, if the daemon reports one.
-    deriver: Option<String>,
-    /// Content address in narinfo form, if the daemon reports one.
-    ca: Option<String>,
+    pub references: Vec<String>,
+    /// Full deriver `.drv` path, if known.
+    pub deriver: Option<String>,
+    /// Content address in narinfo form, if known.
+    pub ca: Option<String>,
+}
+
+/// Where a path's references, deriver and content address come from: the
+/// worker's nix-daemon, or whatever store the proxy keeps.
+#[async_trait::async_trait]
+pub trait PathMetaSource: Send + Sync {
+    /// `None` when the path is unknown or the source cannot be reached.
+    async fn path_meta(&self, store_path: &str) -> Option<PathMeta>;
 }
 
 /// Resolve the metadata an upload should attach to a NAR push.
@@ -577,88 +584,25 @@ struct PathMeta {
 /// tests), the server is left to record whatever metadata it derives on its
 /// side; we emit an empty [`PathMeta`].
 ///
-/// When a store *is* provided, [`gather_path_meta`] failure is a hard error:
+/// When a source *is* provided, a missing answer is a hard error:
 /// silently uploading with empty references stores a permanently incomplete
 /// `cached_path` row, and a later build worker's prefetch closure walk then
 /// misses references parsed straight out of the `.drv` content - the daemon
 /// rejects the import with `path '…' is not valid`. Failing here keeps the
 /// blame at the right layer and lets the caller retry instead of poisoning
 /// the cache.
-async fn resolve_path_meta(store: Option<&LocalNixStore>, store_path: &str) -> Result<PathMeta> {
-    let Some(s) = store else {
+async fn resolve_path_meta(
+    meta: Option<&dyn PathMetaSource>,
+    store_path: &str,
+) -> Result<PathMeta> {
+    let Some(source) = meta else {
         return Ok(PathMeta::default());
     };
-    gather_path_meta(s, store_path).await.ok_or_else(|| {
+    source.path_meta(store_path).await.ok_or_else(|| {
         anyhow::anyhow!(
             "path metadata unavailable for {}; refusing to push NAR with incomplete cache entry",
             store_path
         )
-    })
-}
-
-/// Query the local nix-daemon for `store_path`'s references and deriver.
-///
-/// Returns `None` (and logs a warning) if the path is not found or the query
-/// fails. Callers that intend to record the result in the gradient cache
-/// must go through [`resolve_path_meta`], which turns `None` into a hard
-/// error so the cache is never seeded with an incomplete row.
-async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<PathMeta> {
-    let base = strip_store_prefix(store_path);
-    let sp = match StorePath::from_base_path(base) {
-        Ok(sp) => sp,
-        Err(e) => {
-            warn!(store_path, error = %e, "gather_path_meta: invalid store path");
-            return None;
-        }
-    };
-
-    let mut guard = match store.acquire().await {
-        Ok(g) => g,
-        Err(e) => {
-            warn!(store_path, error = %e, "gather_path_meta: could not acquire store connection");
-            return None;
-        }
-    };
-
-    let path_info = match guard
-        .execute(|client| async move { client.query_path_info(&sp).await })
-        .await
-    {
-        Ok(Some(pi)) => pi,
-        Ok(None) => {
-            warn!(
-                store_path,
-                "gather_path_meta: path not found in local store"
-            );
-            return None;
-        }
-        Err(e) => {
-            warn!(
-                store_path,
-                error = %e,
-                "gather_path_meta: query_path_info failed; discarding daemon connection"
-            );
-            return None;
-        }
-    };
-
-    let references: Vec<String> = path_info
-        .references
-        .iter()
-        .map(|r: &StorePath| {
-            let s = r.to_string();
-            s.strip_prefix("/nix/store/").unwrap_or(&s).to_owned()
-        })
-        .collect();
-
-    let deriver = path_info.deriver.as_ref().map(|d| d.to_string());
-    let ca = path_info.ca.as_ref().map(|c| c.to_string());
-
-    Some(PathMeta {
-        nar_size: Some(path_info.nar_size),
-        references,
-        deriver,
-        ca,
     })
 }
 
@@ -670,7 +614,83 @@ mod tests {
     )]
 
     use super::*;
-    use gradient_test_support::prelude::MockProtoServer;
+    use gradient_wire::testing::MockProtoServer;
+
+    struct Unreachable;
+
+    #[async_trait::async_trait]
+    impl PathMetaSource for Unreachable {
+        async fn path_meta(&self, _: &str) -> Option<PathMeta> {
+            None
+        }
+    }
+
+    struct Known(PathMeta);
+
+    #[async_trait::async_trait]
+    impl PathMetaSource for Known {
+        async fn path_meta(&self, _: &str) -> Option<PathMeta> {
+            Some(self.0.clone())
+        }
+    }
+
+    /// The references and deriver a push confirms with come from the path's
+    /// metadata source, not from anything the NAR bytes could tell us.
+    #[tokio::test]
+    async fn path_relay_carries_the_sources_references() {
+        let store_path = make_temp_store_path();
+        let store_path_str = store_path.to_str().unwrap().to_owned();
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            loop {
+                if let ClientMessage::NarUploaded {
+                    references,
+                    deriver,
+                    ..
+                } = sc.recv().await.unwrap()
+                {
+                    return (references, deriver);
+                }
+            }
+        });
+
+        let conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader, _flush) = conn.split();
+        let recv = NarReceiver::new();
+        let recv2 = recv.clone();
+        let sp = store_path_str.clone();
+        let push = tokio::spawn(async move {
+            let meta = Known(PathMeta {
+                references: vec!["0c5bbq5r7gbpcbym1ilmd0r3mcjq7dfy-dep".into()],
+                deriver: Some("/nix/store/1d6ccq6r8hcpcbym1ilmd0r3mcjq7dfz-x.drv".into()),
+                ..Default::default()
+            });
+            upload_nar(
+                "job-123",
+                &sp,
+                NarSource::Path { meta: Some(&meta) },
+                NarSink::Relay { nar_recv: &recv2 },
+                &writer,
+            )
+            .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        recv.resolve_push("job-123", &store_path_str, 0);
+        push.await.unwrap().unwrap();
+
+        let (references, deriver) = server_task.await.unwrap();
+        assert_eq!(references, ["0c5bbq5r7gbpcbym1ilmd0r3mcjq7dfy-dep"]);
+        assert_eq!(
+            deriver.as_deref(),
+            Some("/nix/store/1d6ccq6r8hcpcbym1ilmd0r3mcjq7dfz-x.drv")
+        );
+        let _ = std::fs::remove_dir_all(&store_path);
+    }
 
     /// Create a temporary directory with a single file and return its path.
     ///
@@ -738,7 +758,7 @@ mod tests {
             total
         });
 
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -810,7 +830,7 @@ mod tests {
             }
         });
 
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -821,7 +841,7 @@ mod tests {
             upload_nar(
                 "job-123",
                 &sp,
-                NarSource::Path { store: None },
+                NarSource::Path { meta: None },
                 NarSink::Relay { nar_recv: &recv2 },
                 &writer,
             )
@@ -864,7 +884,7 @@ mod tests {
             assert!(!decoded.is_empty(), "decompressed NAR should not be empty");
         });
 
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -875,7 +895,7 @@ mod tests {
             upload_nar(
                 "job-123",
                 &sp,
-                NarSource::Path { store: None },
+                NarSource::Path { meta: None },
                 NarSink::Relay { nar_recv: &recv2 },
                 &writer,
             )
@@ -1023,14 +1043,14 @@ mod tests {
             }
         });
 
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
         upload_nar(
             "job-xyz",
             &store_path_str,
-            NarSource::Path { store: None },
+            NarSource::Path { meta: None },
             NarSink::Put { url: &http_url },
             &writer,
         )
@@ -1077,14 +1097,14 @@ mod tests {
             }
         });
 
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
         upload_nar(
             "job-multipart",
             &store_path_str,
-            NarSource::Path { store: None },
+            NarSource::Path { meta: None },
             NarSink::Multipart { grant: &grant },
             &writer,
         )
@@ -1125,13 +1145,7 @@ mod tests {
         // is sent, so the accepted side is never actually written to.
         let _accept = tokio::spawn(async move { server.accept().await });
 
-        // store_path is a `/tmp/...` directory, not a `/nix/store/<hash>-…`
-        // path - `gather_path_meta`'s `StorePath::from_base_path` rejects it
-        // before any daemon connection is attempted, so the socket path
-        // never matters.
-        let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
-
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1141,13 +1155,13 @@ mod tests {
             "job-meta-fail",
             &store_path_str,
             NarSource::Path {
-                store: Some(&store),
+                meta: Some(&Unreachable),
             },
             NarSink::Relay { nar_recv: &recv },
             &writer,
         )
         .await
-        .expect_err("upload must fail when gather_path_meta returns None");
+        .expect_err("upload must fail when the path metadata source has no answer");
         assert!(
             err.to_string().contains("path metadata"),
             "error should explain the abort reason, got: {err}"
@@ -1168,9 +1182,7 @@ mod tests {
         let url = server.url().to_owned();
         let _accept = tokio::spawn(async move { server.accept().await });
 
-        let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
-
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1179,13 +1191,13 @@ mod tests {
             "job-meta-fail",
             &store_path_str,
             NarSource::Path {
-                store: Some(&store),
+                meta: Some(&Unreachable),
             },
             NarSink::Put { url: &http_url },
             &writer,
         )
         .await
-        .expect_err("upload must fail when gather_path_meta returns None");
+        .expect_err("upload must fail when the path metadata source has no answer");
         assert!(
             err.to_string().contains("path metadata"),
             "error should explain the abort reason, got: {err}"
@@ -1242,7 +1254,7 @@ mod tests {
             }
         });
 
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1290,7 +1302,7 @@ mod tests {
         });
 
         let (http_url, _http_task) = one_shot_http_server().await;
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1336,7 +1348,7 @@ mod tests {
             }
         });
 
-        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();

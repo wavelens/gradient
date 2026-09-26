@@ -222,7 +222,7 @@ pub(super) struct DispatchState {
     writer: ProtoWriter,
     cache_waiters: CacheWaiters,
     known_derivation_waiters: KnownDerivationWaiters,
-    nar_recv: crate::proto::nar_recv::NarReceiver,
+    nar_recv: gradient_worker_client::nar_recv::NarReceiver,
     eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
     jobs: JobRegistry,
     done_rx: Option<mpsc::UnboundedReceiver<(String, Result<()>)>>,
@@ -252,10 +252,10 @@ impl DispatchState {
             config.nar_partial_dir(),
             std::time::Duration::from_secs(config.nar_partial_ttl_secs),
         ) {
-            Ok(store) => crate::proto::nar_recv::NarReceiver::with_partial_store(store),
+            Ok(store) => gradient_worker_client::nar_recv::NarReceiver::with_partial_store(store),
             Err(e) => {
                 warn!(error = %e, "failed to init NAR partial dir; downloads will not resume");
-                crate::proto::nar_recv::NarReceiver::new()
+                gradient_worker_client::nar_recv::NarReceiver::new()
             }
         };
         let (done_tx, done_rx) = mpsc::unbounded_channel();
@@ -351,7 +351,8 @@ impl DispatchState {
                 reason,
             } => {
                 warn!(%job_id, %store_path, %reason, "the cache cannot serve this NAR");
-                let failure = crate::proto::nar_recv::TransferFailure::Unavailable(reason);
+                let failure =
+                    gradient_worker_client::nar_recv::TransferFailure::Unavailable(reason);
                 self.nar_recv.fail(&job_id, &store_path, failure);
             }
             ServerMessage::NarAbort {
@@ -360,7 +361,7 @@ impl DispatchState {
                 reason,
             } => {
                 warn!(%job_id, %store_path, %reason, "server aborted a NAR transfer");
-                let failure = crate::proto::nar_recv::TransferFailure::Transient(reason);
+                let failure = gradient_worker_client::nar_recv::TransferFailure::Transient(reason);
                 self.nar_recv.fail(&job_id, &store_path, failure);
             }
             ServerMessage::RequestAllScores => {
@@ -892,8 +893,8 @@ fn send_live_metrics(writer: &ProtoWriter) {
             .send(ClientMessage::WorkerMetrics {
                 cpu_usage_pct: m.cpu_usage_pct,
                 ram_free_mb: m.ram_free_mb,
-                disk_speed_mbps: crate::metrics::throughput::DISK.current(),
-                network_speed_mbps: crate::metrics::throughput::NETWORK.current(),
+                disk_speed_mbps: gradient_worker_client::throughput::DISK.current(),
+                network_speed_mbps: gradient_worker_client::throughput::NETWORK.current(),
             })
             .await
         {

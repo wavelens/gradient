@@ -17,12 +17,12 @@ use gradient_wire::messages::{BuildSpec, QueryMode};
 use sha2::{Digest, Sha256};
 
 use super::substitute::RawNar;
-use crate::proto::compression::{
-    decompress, extract_single_file_from_nar, parse_nar_hash_to_bytes, resolve_compression,
-};
 use crate::proto::job::JobUpdater;
 use crate::proto::prefetch::{MissingInputs, download_one_presigned};
 use crate::proto::progress::{Progress, ProgressSink, read_body};
+use gradient_worker_client::compression::{
+    decompress, extract_single_file_from_nar, parse_nar_hash_to_bytes, resolve_compression,
+};
 
 #[derive(Debug)]
 pub(crate) struct FixedOutputMismatch(pub String);
@@ -346,7 +346,7 @@ mod tests {
         assert!(nar.starts_with(
             b"\x0d\x00\x00\x00\x00\x00\x00\x00nix-archive-1\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00(\x00\x00\x00\x00\x00\x00\x00"
         ));
-        let back = crate::proto::compression::extract_single_file_from_nar(&nar)
+        let back = gradient_worker_client::compression::extract_single_file_from_nar(&nar)
             .await
             .unwrap();
         assert_eq!(back, b"hi\n");

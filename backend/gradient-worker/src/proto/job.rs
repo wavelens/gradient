@@ -28,11 +28,11 @@ use tracing::debug;
 use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
-use crate::proto::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{BuildProgressSink, Progress};
 use gradient_wire::traits::JobReporter;
 use gradient_worker_client::connection::ProtoWriter;
+use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
 
 /// Typed sender for reporting job progress back to the server.
 ///
@@ -154,7 +154,7 @@ impl JobUpdater {
         match pending.await_grant().await? {
             EvalCachePushMode::Skip => Ok(()),
             EvalCachePushMode::Presigned { url } => {
-                super::object_put::put_object(&url, bytes.into(), None)
+                gradient_worker_client::object_put::put_object(&url, bytes.into(), None)
                     .await
                     .with_context(|| format!("eval-cache PUT {url}"))?;
                 self.writer

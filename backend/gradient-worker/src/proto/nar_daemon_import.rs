@@ -27,12 +27,12 @@ use sha2::{Digest as _, Sha256};
 use tracing::{debug, warn};
 
 use crate::nix::store::LocalNixStore;
-use crate::proto::compression::{
-    SNIFF_BYTES, build_unkeyed_path_info, decompress, decompress_reader, parse_nar_hash_to_bytes,
-    resolve_compression,
-};
-use crate::proto::nar_recv::NarPayload;
+use crate::proto::compression::build_unkeyed_path_info;
 use crate::proto::prefetch::CorruptCachedNar;
+use gradient_worker_client::compression::{
+    SNIFF_BYTES, decompress, decompress_reader, parse_nar_hash_to_bytes, resolve_compression,
+};
+use gradient_worker_client::nar_recv::NarPayload;
 
 // ── NarImporter ───────────────────────────────────────────────────────────────
 
@@ -176,7 +176,7 @@ fn verify_nar(
                     "NAR hash mismatch for {}: server said {}, computed {}",
                     store_path,
                     claimed_nar_hash,
-                    crate::proto::nar::sha256_nix32(decompressed)
+                    gradient_worker_client::nar::sha256_nix32(decompressed)
                 )),
             );
         }

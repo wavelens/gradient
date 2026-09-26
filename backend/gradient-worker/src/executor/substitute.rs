@@ -14,13 +14,13 @@ use anyhow::{Context, Result};
 use gradient_util::nix_hash::normalize_nar_hash;
 use gradient_wire::messages::{CachedPath, JobPhase};
 
-use crate::proto::compression::{decompress, resolve_compression};
 use crate::proto::job::JobUpdater;
-use crate::proto::nar::sha256_nix32;
 use crate::proto::prefetch::{
     CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream, download_one_presigned,
 };
 use crate::proto::progress::{Progress, ProgressSink};
+use gradient_worker_client::compression::{decompress, resolve_compression};
+use gradient_worker_client::nar::sha256_nix32;
 
 #[derive(Debug)]
 pub(crate) struct RawNar {

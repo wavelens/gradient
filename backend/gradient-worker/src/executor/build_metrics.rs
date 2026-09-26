@@ -110,7 +110,7 @@ pub(super) fn assemble_build_metrics(
         let bytes = r.disk_read_bytes + r.disk_write_bytes;
         if build_time_ms > 0 && bytes > 0 {
             let mb_per_s = (bytes as f64 / 1_048_576.0) / (build_time_ms as f64 / 1000.0);
-            crate::metrics::throughput::DISK.observe(mb_per_s);
+            gradient_worker_client::throughput::DISK.observe(mb_per_s);
         }
     }
     raw_to_build_metrics(raw, build_time_ms, cpu_count, peak_network_mbps)
@@ -139,7 +139,7 @@ impl NetworkPeakSampler {
         )]
         let handle = tokio::spawn(async move {
             while !s.load(Ordering::Relaxed) {
-                if let Some(v) = crate::metrics::throughput::NETWORK.current() {
+                if let Some(v) = gradient_worker_client::throughput::NETWORK.current() {
                     let bits = (v as f64).to_bits();
                     let mut prev = p.load(Ordering::Relaxed);
                     while f64::from_bits(prev) < v as f64 {

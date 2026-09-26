@@ -35,9 +35,10 @@ use gradient_wire::messages::JobPhase;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
-use crate::proto::{credentials::CredentialStore, job::JobUpdater, nar};
+use crate::proto::{credentials::CredentialStore, job::JobUpdater};
 use gradient_wire::messages::CachedPath;
 use gradient_wire::traits::WorkerStore;
+use gradient_worker_client::nar;
 
 pub use eval::WorkerEvaluator;
 
@@ -149,7 +150,7 @@ fn pair_with_store<'a>(
 ) -> Vec<(CachedPath, nar::NarSource<'a>)> {
     entries
         .into_iter()
-        .map(|cp| (cp, nar::NarSource::Path { store: Some(store) }))
+        .map(|cp| (cp, nar::NarSource::Path { meta: Some(store) }))
         .collect()
 }
 
@@ -524,7 +525,7 @@ impl JobExecutor {
                 .map(|(_, store_path)| compress::OutputNar {
                     store_path,
                     source: nar::NarSource::Path {
-                        store: Some(&self.store),
+                        meta: Some(&*self.store),
                     },
                 }),
         );
@@ -607,7 +608,7 @@ impl JobExecutor {
                         .map(|(_, store_path)| compress::OutputNar {
                             store_path,
                             source: nar::NarSource::Path {
-                                store: Some(&self.store),
+                                meta: Some(&*self.store),
                             },
                         }),
                 );
@@ -702,7 +703,7 @@ impl JobExecutor {
             outputs.extend(built.into_iter().map(|o| compress::OutputNar {
                 store_path: o.store_path,
                 source: nar::NarSource::Path {
-                    store: Some(&self.store),
+                    meta: Some(&*self.store),
                 },
             }));
         }

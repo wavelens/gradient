@@ -2947,14 +2947,26 @@ version = "1.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
+ "bzip2",
  "futures",
+ "gradient-storage",
  "gradient-util",
  "gradient-wire",
+ "harmonia-file-nar",
+ "harmonia-utils-hash",
+ "rand 0.10.3",
  "reqwest",
+ "sha2 0.11.0",
+ "tempfile",
  "tokio",
  "tokio-tungstenite 0.30.0",
+ "tokio-util",
  "tracing",
  "uuid",
+ "wiremock",
+ "xz2",
+ "zstd",
 ]
 
 [[package]]

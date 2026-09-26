@@ -11,18 +11,30 @@ publish     = false
 workspace = true
 
 [dependencies]
-gradient-util = { workspace = true }
-gradient-wire = { workspace = true }
+gradient-storage = { workspace = true }
+gradient-util    = { workspace = true }
+gradient-wire    = { workspace = true }
 
-anyhow            = { workspace = true }
-async-trait       = { workspace = true }
-futures           = { workspace = true }
-reqwest           = { workspace = true }
-tokio             = { workspace = true, features = ["net", "sync", "time", "rt", "macros"] }
-tokio-tungstenite = { workspace = true }
-tracing           = { workspace = true }
-uuid              = { workspace = true }
+anyhow              = { workspace = true }
+async-trait         = { workspace = true }
+bytes               = { workspace = true }
+bzip2               = { workspace = true }
+futures             = { workspace = true }
+harmonia-file-nar   = { workspace = true }
+harmonia-utils-hash = { workspace = true }
+rand                = { workspace = true }
+reqwest             = { workspace = true }
+sha2                = { workspace = true }
+tokio               = { workspace = true, features = ["net", "sync", "time", "rt", "macros", "fs", "io-util"] }
+tokio-tungstenite   = { workspace = true }
+tokio-util          = { workspace = true, features = ["rt"] }
+tracing             = { workspace = true }
+uuid                = { workspace = true }
+xz2                 = { workspace = true }
+zstd                = { workspace = true }
 
 [dev-dependencies]
 gradient-wire = { workspace = true, features = ["testing"] }
+tempfile      = { workspace = true }
 tokio         = { workspace = true, features = ["macros", "rt", "test-util"] }
+wiremock      = { workspace = true }

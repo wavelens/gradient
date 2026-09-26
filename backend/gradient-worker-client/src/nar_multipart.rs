@@ -20,14 +20,14 @@ pub(crate) trait PartSink {
     async fn send_part(&mut self, part: Vec<u8>) -> Result<()>;
 }
 
-pub(crate) struct PartUploader<'a> {
+pub struct PartUploader<'a> {
     grant: &'a PresignedMultipart,
     inflight: JoinSet<Result<(usize, String)>>,
     etags: Vec<Option<String>>,
 }
 
 impl<'a> PartUploader<'a> {
-    pub(crate) fn new(grant: &'a PresignedMultipart) -> Self {
+    pub fn new(grant: &'a PresignedMultipart) -> Self {
         Self {
             grant,
             inflight: JoinSet::new(),
@@ -35,11 +35,11 @@ impl<'a> PartUploader<'a> {
         }
     }
 
-    pub(crate) fn part_size(&self) -> usize {
+    pub fn part_size(&self) -> usize {
         self.grant.part_size as usize
     }
 
-    pub(crate) async fn finish(mut self) -> Result<CompletedMultipart> {
+    pub async fn finish(mut self) -> Result<CompletedMultipart> {
         while !self.inflight.is_empty() {
             self.settle_one().await?;
         }
@@ -83,7 +83,7 @@ impl PartSink for PartUploader<'_> {
 }
 
 async fn put_part(url: String, body: Bytes) -> Result<String> {
-    super::object_put::put_object(&url, body, None)
+    crate::object_put::put_object(&url, body, None)
         .await?
         .context("multipart part response carried no ETag")
 }

@@ -79,7 +79,7 @@ impl NarPayload {
     /// The compressed bytes, reading the staged file back when the transfer
     /// went to disk. Only for the small `.drv` payloads the closure walk mines;
     /// the import path decompresses straight from the file instead.
-    pub(crate) async fn read_bytes(&self) -> Result<std::borrow::Cow<'_, [u8]>> {
+    pub async fn read_bytes(&self) -> Result<std::borrow::Cow<'_, [u8]>> {
         match self {
             NarPayload::Bytes(bytes) => Ok(std::borrow::Cow::Borrowed(bytes)),
             NarPayload::File(path) => Ok(std::borrow::Cow::Owned(
@@ -419,7 +419,7 @@ async fn stage_pull(
 
         let staged = sink.len();
         if let Some(start) = started {
-            crate::metrics::throughput::NETWORK.observe(
+            crate::throughput::NETWORK.observe(
                 staged as f64 * 8.0 / start.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
             );
         }

@@ -31,6 +31,7 @@ use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGu
 use tracing::{debug, warn};
 
 use gradient_wire::traits::WorkerStore;
+use gradient_worker_client::nar::{PathMeta, PathMetaSource};
 
 /// Maximum time `pool.acquire()` blocks before failing with a timeout.
 ///
@@ -246,5 +247,70 @@ impl LocalNixStore {
 impl WorkerStore for LocalNixStore {
     async fn has_path(&self, store_path: &str) -> Result<bool> {
         self.has_path(store_path).await
+    }
+}
+
+/// The daemon's view of a path: what a NAR push from this worker confirms with.
+/// `None` (logged) when the path is invalid, unknown, or the daemon fails.
+#[async_trait]
+impl PathMetaSource for LocalNixStore {
+    async fn path_meta(&self, store_path: &str) -> Option<PathMeta> {
+        let base = strip_store_prefix(store_path);
+        let sp = match StorePath::from_base_path(base) {
+            Ok(sp) => sp,
+            Err(e) => {
+                warn!(store_path, error = %e, "gather_path_meta: invalid store path");
+                return None;
+            }
+        };
+
+        let mut guard = match self.acquire().await {
+            Ok(g) => g,
+            Err(e) => {
+                warn!(store_path, error = %e, "gather_path_meta: could not acquire store connection");
+                return None;
+            }
+        };
+
+        let path_info = match guard
+            .execute(|client| async move { client.query_path_info(&sp).await })
+            .await
+        {
+            Ok(Some(pi)) => pi,
+            Ok(None) => {
+                warn!(
+                    store_path,
+                    "gather_path_meta: path not found in local store"
+                );
+                return None;
+            }
+            Err(e) => {
+                warn!(
+                    store_path,
+                    error = %e,
+                    "gather_path_meta: query_path_info failed; discarding daemon connection"
+                );
+                return None;
+            }
+        };
+
+        let references: Vec<String> = path_info
+            .references
+            .iter()
+            .map(|r: &StorePath| {
+                let s = r.to_string();
+                s.strip_prefix("/nix/store/").unwrap_or(&s).to_owned()
+            })
+            .collect();
+
+        let deriver = path_info.deriver.as_ref().map(|d| d.to_string());
+        let ca = path_info.ca.as_ref().map(|c| c.to_string());
+
+        Some(PathMeta {
+            nar_size: Some(path_info.nar_size),
+            references,
+            deriver,
+            ca,
+        })
     }
 }

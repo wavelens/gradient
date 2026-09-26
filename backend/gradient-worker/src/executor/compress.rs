@@ -17,7 +17,7 @@ use gradient_wire::messages::CachedPath;
 use tokio::sync::watch;
 
 use crate::proto::job::JobUpdater;
-use crate::proto::nar::NarSource;
+use gradient_worker_client::nar::NarSource;
 
 pub(crate) struct OutputNar<'a> {
     pub store_path: String,
@@ -85,10 +85,10 @@ mod tests {
     use crate::executor::timeline::JobTimeline;
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
     use crate::proto::job::JobUpdater;
-    use crate::proto::nar::NarSource;
-    use crate::proto::nar_recv::NarReceiver;
     use gradient_worker_client::connection::{ProtoConnection, ProtoReader};
     use gradient_worker_client::correlation::{CacheWaiters, DispatchHandle, deliver_cache_reply};
+    use gradient_worker_client::nar::NarSource;
+    use gradient_worker_client::nar_recv::NarReceiver;
 
     use super::{OutputNar, push_outputs};
 
@@ -226,7 +226,7 @@ mod tests {
             &updater,
             entries
                 .into_iter()
-                .map(|cp| (cp, NarSource::Path { store: None }))
+                .map(|cp| (cp, NarSource::Path { meta: None }))
                 .collect(),
             None,
         )
@@ -311,7 +311,7 @@ mod tests {
             vec![
                 OutputNar {
                     store_path: cached.clone(),
-                    source: NarSource::Path { store: None },
+                    source: NarSource::Path { meta: None },
                 },
                 OutputNar {
                     store_path: raw_path.clone(),

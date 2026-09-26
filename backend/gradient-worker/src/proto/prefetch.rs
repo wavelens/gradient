@@ -32,11 +32,12 @@ use gradient_wire::messages::{
 use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;
-use crate::proto::compression::{drv_closure_seeds_from_compressed_nar, resolve_compression};
+use crate::proto::compression::drv_closure_seeds_from_compressed_nar;
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::import_received_nar;
-use crate::proto::nar_recv::NarPayload;
 use crate::proto::progress::{Progress, ProgressSink, read_body};
+use gradient_worker_client::compression::resolve_compression;
+use gradient_worker_client::nar_recv::NarPayload;
 
 /// How many missing inputs to download + import in parallel before invoking
 /// the build. Conservative - each one streams a NAR into the local daemon
