@@ -104,6 +104,8 @@ tags:
     description: Health check and server configuration
   - name: board
     description: Job Board - metric queries, live dispatched jobs, workers, scoring, and expensive builds
+  - name: webhooks
+    description: Project, cache and instance webhooks for durable events
   - name: auth
     description: Authentication - login, register, OAuth/OIDC
   - name: user
@@ -7405,6 +7407,716 @@ paths:
       | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
       | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`). Serves this cache's own log for any build that produced one, successful or failed; otherwise asks the cache's upstreams in order and proxies the first hit, so a pull-through cache exposes logs for paths it substituted rather than built. `X-Cache: HIT` (ours) or `MISS` (upstream). Rate-limited at ~300 req/min. |
 
+  /projects/{project}/webhooks:
+    get:
+      tags: [webhooks]
+      summary: List project webhooks
+      description: Requires `manageWebhooks` on the project.
+      operationId: listProjectWebhooks
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+      responses:
+        '200':
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: array, items: { $ref: '#/components/schemas/Webhook' } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [webhooks]
+      summary: Create a project webhook
+      description: |-
+        Requires `manageWebhooks` on the project. The response carries the signing `secret` once; it is
+        never returned again (use `rotate-secret` to replace it).
+      operationId: createProjectWebhook
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWebhookRequest' }
+      responses:
+        '200':
+          description: Created webhook and its secret
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/CreateWebhookResponse' }
+        '409':
+          description: A webhook with this name already exists in this scope
+        '422':
+          description: URL rejected (private address or invalid)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /projects/{project}/webhooks/{id}:
+    get:
+      tags: [webhooks]
+      summary: Read a project webhook
+      operationId: readProjectWebhook
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/Webhook' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [webhooks]
+      summary: Update a project webhook
+      operationId: updateProjectWebhook
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateWebhookRequest' }
+      responses:
+        '200':
+          description: Updated webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/Webhook' }
+        '422':
+          description: URL rejected
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [webhooks]
+      summary: Delete a project webhook
+      operationId: deleteProjectWebhook
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: object, properties: { deleted: { type: boolean } } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{project}/webhooks/{id}/test:
+    post:
+      tags: [webhooks]
+      summary: Send a `webhook.ping` to a project webhook
+      description: Delivers immediately (no retry) and returns the recorded delivery.
+      operationId: testProjectWebhook
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Recorded delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/WebhookDelivery' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{project}/webhooks/{id}/rotate-secret:
+    post:
+      tags: [webhooks]
+      summary: Replace a project webhook's signing secret
+      operationId: rotateProjectWebhookSecret
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The new secret, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: object, properties: { secret: { type: string } } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{project}/webhooks/{id}/deliveries:
+    get:
+      tags: [webhooks]
+      summary: List a project webhook's deliveries
+      operationId: listProjectWebhookDeliveries
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Deliveries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: array, items: { $ref: '#/components/schemas/WebhookDelivery' } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{project}/webhooks/{id}/deliveries/{delivery_id}:
+    get:
+      tags: [webhooks]
+      summary: Read one project webhook delivery with bodies
+      operationId: getProjectWebhookDelivery
+      parameters:
+        - { name: project, in: path, required: true, description: Project name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: delivery_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/WebhookDeliveryDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/webhooks:
+    get:
+      tags: [webhooks]
+      summary: List cache webhooks
+      description: Requires `manageCacheWebhooks` on the cache.
+      operationId: listCacheWebhooks
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+      responses:
+        '200':
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: array, items: { $ref: '#/components/schemas/Webhook' } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [webhooks]
+      summary: Create a cache webhook
+      description: |-
+        Requires `manageCacheWebhooks` on the cache. The response carries the signing `secret` once; it is
+        never returned again (use `rotate-secret` to replace it).
+      operationId: createCacheWebhook
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWebhookRequest' }
+      responses:
+        '200':
+          description: Created webhook and its secret
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/CreateWebhookResponse' }
+        '409':
+          description: A webhook with this name already exists in this scope
+        '422':
+          description: URL rejected (private address or invalid)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /caches/{cache}/webhooks/{id}:
+    get:
+      tags: [webhooks]
+      summary: Read a cache webhook
+      operationId: readCacheWebhook
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/Webhook' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [webhooks]
+      summary: Update a cache webhook
+      operationId: updateCacheWebhook
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateWebhookRequest' }
+      responses:
+        '200':
+          description: Updated webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/Webhook' }
+        '422':
+          description: URL rejected
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [webhooks]
+      summary: Delete a cache webhook
+      operationId: deleteCacheWebhook
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: object, properties: { deleted: { type: boolean } } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/webhooks/{id}/test:
+    post:
+      tags: [webhooks]
+      summary: Send a `webhook.ping` to a cache webhook
+      description: Delivers immediately (no retry) and returns the recorded delivery.
+      operationId: testCacheWebhook
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Recorded delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/WebhookDelivery' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/webhooks/{id}/rotate-secret:
+    post:
+      tags: [webhooks]
+      summary: Replace a cache webhook's signing secret
+      operationId: rotateCacheWebhookSecret
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The new secret, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: object, properties: { secret: { type: string } } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/webhooks/{id}/deliveries:
+    get:
+      tags: [webhooks]
+      summary: List a cache webhook's deliveries
+      operationId: listCacheWebhookDeliveries
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Deliveries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: array, items: { $ref: '#/components/schemas/WebhookDelivery' } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/webhooks/{id}/deliveries/{delivery_id}:
+    get:
+      tags: [webhooks]
+      summary: Read one cache webhook delivery with bodies
+      operationId: getCacheWebhookDelivery
+      parameters:
+        - { name: cache, in: path, required: true, description: Cache name, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: delivery_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/WebhookDeliveryDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/webhooks:
+    get:
+      tags: [webhooks]
+      summary: List instance webhooks
+      description: Requires superuser.
+      operationId: listInstanceWebhooks
+      responses:
+        '200':
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: array, items: { $ref: '#/components/schemas/Webhook' } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [webhooks]
+      summary: Create a instance webhook
+      description: |-
+        Requires superuser. The response carries the signing `secret` once; it is
+        never returned again (use `rotate-secret` to replace it).
+      operationId: createInstanceWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWebhookRequest' }
+      responses:
+        '200':
+          description: Created webhook and its secret
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/CreateWebhookResponse' }
+        '409':
+          description: A webhook with this name already exists in this scope
+        '422':
+          description: URL rejected (private address or invalid)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/webhooks/{id}:
+    get:
+      tags: [webhooks]
+      summary: Read a instance webhook
+      operationId: readInstanceWebhook
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/Webhook' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [webhooks]
+      summary: Update a instance webhook
+      operationId: updateInstanceWebhook
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateWebhookRequest' }
+      responses:
+        '200':
+          description: Updated webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/Webhook' }
+        '422':
+          description: URL rejected
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [webhooks]
+      summary: Delete a instance webhook
+      operationId: deleteInstanceWebhook
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: object, properties: { deleted: { type: boolean } } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/webhooks/{id}/test:
+    post:
+      tags: [webhooks]
+      summary: Send a `webhook.ping` to a instance webhook
+      description: Delivers immediately (no retry) and returns the recorded delivery.
+      operationId: testInstanceWebhook
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Recorded delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/WebhookDelivery' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/webhooks/{id}/rotate-secret:
+    post:
+      tags: [webhooks]
+      summary: Replace a instance webhook's signing secret
+      operationId: rotateInstanceWebhookSecret
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The new secret, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: object, properties: { secret: { type: string } } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/webhooks/{id}/deliveries:
+    get:
+      tags: [webhooks]
+      summary: List a instance webhook's deliveries
+      operationId: listInstanceWebhookDeliveries
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Deliveries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { type: array, items: { $ref: '#/components/schemas/WebhookDelivery' } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/webhooks/{id}/deliveries/{delivery_id}:
+    get:
+      tags: [webhooks]
+      summary: Read one instance webhook delivery with bodies
+      operationId: getInstanceWebhookDelivery
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: delivery_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: boolean }
+                  message: { $ref: '#/components/schemas/WebhookDeliveryDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+
   /metrics/events:
     get:
       tags: [board]
@@ -8384,6 +9096,74 @@ components:
             $ref: '#/components/schemas/ScimError'
 
   schemas:
+
+    # ── Webhooks ──────────────────────────────────────────────────────────────
+
+    Webhook:
+      type: object
+      description: |-
+        Receives durable events as `EventEnvelope` POST bodies with the headers
+        `X-Gradient-Event`, `X-Gradient-Delivery` (dedup id) and
+        `X-Gradient-Signature: sha256=<hex HMAC-SHA256(secret, raw body)>`.
+        Failed deliveries retry 6 times with backoff doubling from 30 s to 15 min.
+      required: [id, scope, name, url, events, active, created_by, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        scope: { type: string, enum: [project, cache, instance] }
+        name: { type: string }
+        url: { type: string, format: uri }
+        events:
+          type: array
+          items: { type: string }
+          description: Event name globs (`build.*`, `task.star`); empty receives every event in scope.
+        active: { type: boolean }
+        last_fired_at: { type: string, format: date-time, nullable: true }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateWebhookRequest:
+      type: object
+      required: [name, url]
+      properties:
+        name: { type: string }
+        url: { type: string, format: uri }
+        events: { type: array, items: { type: string } }
+        active: { type: boolean, default: true }
+
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        name: { type: string }
+        url: { type: string, format: uri }
+        events: { type: array, items: { type: string } }
+        active: { type: boolean }
+
+    CreateWebhookResponse:
+      type: object
+      required: [webhook, secret]
+      properties:
+        webhook: { $ref: '#/components/schemas/Webhook' }
+        secret: { type: string, description: Returned only on create and rotate. }
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        event: { type: string }
+        success: { type: boolean }
+        response_status: { type: integer, nullable: true }
+        error_message: { type: string, nullable: true }
+        duration_ms: { type: integer }
+        delivered_at: { type: string, format: date-time }
+
+    WebhookDeliveryDetail:
+      allOf:
+        - $ref: '#/components/schemas/WebhookDelivery'
+        - type: object
+          properties:
+            request_body: { type: string }
+            response_body: { type: string, nullable: true }
 
     # ── Events ────────────────────────────────────────────────────────────────
 

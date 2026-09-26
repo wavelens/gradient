@@ -35,4 +35,5 @@ pub fn admin_router() -> Router<Arc<ServerState>> {
         .route("/draining", post(draining::set_draining))
         .route("/tasks", get(tasks::list_tasks))
         .route("/tasks/{task_id}", get(tasks::get_task))
+        .nest("/webhooks", super::webhooks::router())
 }

@@ -335,6 +335,11 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             tasks::triggers::router(),
         )
         .nest("/tasks/{project}/{task}/actions", tasks::actions::router())
+        .nest(
+            "/projects/{project}/webhooks",
+            endpoints::webhooks::router(),
+        )
+        .nest("/caches/{cache}/webhooks", endpoints::webhooks::router())
         .route("/evals/{evaluation}", post(evals::post_evaluation))
         .route(
             "/evals/{evaluation}/builds",

@@ -28,6 +28,7 @@ pub mod stars;
 pub mod stats;
 pub mod tasks;
 pub mod user;
+pub mod webhooks;
 pub mod workers;
 
 use crate::error::WebResult;
