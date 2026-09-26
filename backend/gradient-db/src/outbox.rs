@@ -276,7 +276,7 @@ mod tests {
         let known: Vec<String> = OutboxKind::iter()
             .map(|k| i16::from(k).to_string())
             .collect();
-        let sql = norm(OUTBOX_CLAIM_DUE.stmt().sql.as_str());
+        let sql = norm(&OUTBOX_CLAIM_DUE.text());
         assert!(
             sql.contains(&format!("AND kind IN ({})", known.join(", "))),
             "{sql}"
