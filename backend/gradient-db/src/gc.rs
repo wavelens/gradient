@@ -566,7 +566,7 @@ mod tests {
         assert!(
             log[3].contains("SET LOCAL work_mem")
                 && log[4].contains("ORDER BY derivation FOR UPDATE")
-                && log[5].contains("FROM region r ORDER BY r.derivation"),
+                && log[5].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
             "what lost a name and what gained one are recomputed together, locked and raised: {log:?}"
         );
         assert!(
@@ -608,7 +608,7 @@ mod tests {
         assert!(
             log[0].contains("LIMIT 1")
                 && !log.iter().any(|s| s.contains("INSERT INTO build_job"))
-                && log[3].contains("FROM region r ORDER BY r.derivation")
+                && log[3].contains("ON d.derivation = r.derivation ORDER BY r.derivation")
                 && !log.iter().any(|s| s.contains("SET demanded ="))
                 && log[4].contains("SET status = 0"),
             "{log:?}"

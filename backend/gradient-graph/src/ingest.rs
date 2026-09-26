@@ -2043,7 +2043,7 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         let walk = log
             .iter()
-            .position(|s| s.contains("FROM region r ORDER BY r.derivation"))
+            .position(|s| s.contains("ON d.derivation = r.derivation ORDER BY r.derivation"))
             .expect("the batch recomputes what it demands");
         let demand = log
             .iter()
