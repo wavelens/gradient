@@ -34,14 +34,15 @@ use gradient_wire::messages::{ClientMessage, JobCandidate, JobKind};
 use tracing::info;
 
 use crate::config::WorkerConfig;
-use crate::connection::ProtoConnection;
-use crate::connection::handshake::perform_handshake;
-use crate::connection_state::{Connected, Disconnected, RunOutcome};
+use crate::connection_state::{Connected, Disconnected};
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::scorer::JobScorer;
 use crate::shutdown::Shutdown;
+use gradient_worker_client::connection::ProtoConnection;
+use gradient_worker_client::connection::handshake::perform_handshake;
+use gradient_worker_client::reconnect::RunOutcome;
 
 use id::load_or_generate_id;
 

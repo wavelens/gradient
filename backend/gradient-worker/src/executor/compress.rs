@@ -81,13 +81,14 @@ mod tests {
     use gradient_util::sync::Mutex;
     use gradient_wire::messages::{CachedPath, ClientMessage, ServerMessage};
 
-    use crate::connection::{ProtoConnection, ProtoReader};
     use crate::executor::UPLOAD_CONCURRENCY;
     use crate::executor::timeline::JobTimeline;
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
-    use crate::proto::job::{CacheWaiters, DispatchHandle, JobUpdater, deliver_cache_reply};
+    use crate::proto::job::JobUpdater;
     use crate::proto::nar::NarSource;
     use crate::proto::nar_recv::NarReceiver;
+    use gradient_worker_client::connection::{ProtoConnection, ProtoReader};
+    use gradient_worker_client::correlation::{CacheWaiters, DispatchHandle, deliver_cache_reply};
 
     use super::{OutputNar, push_outputs};
 

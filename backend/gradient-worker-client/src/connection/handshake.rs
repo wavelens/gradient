@@ -20,8 +20,41 @@ use gradient_wire::session::handshake::{HandshakeResult, as_peer};
 use gradient_wire::traits::{CapabilitiesProvider, PeerIdentity};
 use tracing::info;
 
-use crate::config::WorkerConfig;
-use crate::connection::ProtoConnection;
+use super::ProtoConnection;
+
+/// Given the list of peer UUIDs the server challenged us about, build the
+/// `(peer_id, token)` pairs to include in `AuthResponse`.
+///
+/// A wildcard entry (`*:token`) expands to a response for every challenged
+/// peer that is not already covered by an explicit entry.
+pub fn resolve_tokens_for_challenge(
+    peer_tokens: &[(String, String)],
+    challenged: &[String],
+) -> Vec<(String, String)> {
+    let wildcard_token: Option<&str> = peer_tokens
+        .iter()
+        .find(|(id, _)| id == "*")
+        .map(|(_, t)| t.as_str());
+
+    let mut result: Vec<(String, String)> = peer_tokens
+        .iter()
+        .filter(|(id, _)| id != "*" && challenged.contains(id))
+        .cloned()
+        .collect();
+
+    if let Some(token) = wildcard_token {
+        let covered: std::collections::HashSet<String> =
+            result.iter().map(|(id, _)| id.clone()).collect();
+        let extras: Vec<(String, String)> = challenged
+            .iter()
+            .filter(|pid| !covered.contains(*pid))
+            .map(|pid| (pid.clone(), token.to_owned()))
+            .collect();
+        result.extend(extras);
+    }
+
+    result
+}
 
 struct WorkerIdentity {
     peer_id: String,
@@ -35,10 +68,7 @@ impl PeerIdentity for WorkerIdentity {
     }
 
     async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, String)>> {
-        Ok(WorkerConfig::resolve_tokens_for_challenge(
-            &self.peer_tokens,
-            peers,
-        ))
+        Ok(resolve_tokens_for_challenge(&self.peer_tokens, peers))
     }
 }
 
@@ -89,8 +119,8 @@ mod tests {
     )]
 
     use super::*;
-    use gradient_test_support::prelude::{MockProtoServer, MockServerConn};
     use gradient_wire::messages::{ClientMessage, ServerMessage};
+    use gradient_wire::testing::{MockProtoServer, MockServerConn};
 
     fn all_caps() -> GradientCapabilities {
         GradientCapabilities {
@@ -303,5 +333,54 @@ mod tests {
             .unwrap();
 
         server_task.await.unwrap();
+    }
+
+    #[test]
+    fn resolve_tokens_explicit_only() {
+        let tokens = vec![
+            ("peer-a".to_owned(), "tok-a".to_owned()),
+            ("peer-c".to_owned(), "tok-c".to_owned()),
+        ];
+        let challenged = vec!["peer-a".to_owned(), "peer-b".to_owned()];
+        let result = resolve_tokens_for_challenge(&tokens, &challenged);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], ("peer-a".to_owned(), "tok-a".to_owned()));
+    }
+
+    #[test]
+    fn resolve_tokens_wildcard_fills_gaps() {
+        let tokens = vec![
+            ("*".to_owned(), "wild".to_owned()),
+            ("peer-a".to_owned(), "tok-a".to_owned()),
+        ];
+        let challenged = vec![
+            "peer-a".to_owned(),
+            "peer-b".to_owned(),
+            "peer-c".to_owned(),
+        ];
+        let result = resolve_tokens_for_challenge(&tokens, &challenged);
+        assert_eq!(result.len(), 3);
+
+        let map: std::collections::HashMap<_, _> = result.into_iter().collect();
+        assert_eq!(map["peer-a"], "tok-a");
+        assert_eq!(map["peer-b"], "wild");
+        assert_eq!(map["peer-c"], "wild");
+    }
+
+    #[test]
+    fn resolve_tokens_wildcard_only() {
+        let tokens = vec![("*".to_owned(), "wild".to_owned())];
+        let challenged = vec!["p1".to_owned(), "p2".to_owned(), "p3".to_owned()];
+        let result = resolve_tokens_for_challenge(&tokens, &challenged);
+        assert_eq!(result.len(), 3);
+        assert!(result.iter().all(|(_, t)| t == "wild"));
+    }
+
+    #[test]
+    fn resolve_tokens_empty_when_no_match() {
+        let tokens = vec![("peer-x".to_owned(), "tok".to_owned())];
+        let challenged = vec!["peer-y".to_owned()];
+        let result = resolve_tokens_for_challenge(&tokens, &challenged);
+        assert!(result.is_empty());
     }
 }

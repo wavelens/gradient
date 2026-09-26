@@ -13,8 +13,8 @@ use gradient_wire::messages::{BUILD_PROGRESS_INTERVAL, ClientMessage};
 use tokio::time::Instant;
 use tracing::debug;
 
-use crate::connection::ProtoWriter;
-use crate::proto::job::DispatchHandle;
+use gradient_worker_client::connection::ProtoWriter;
+use gradient_worker_client::correlation::DispatchHandle;
 
 pub(crate) trait ProgressSink {
     async fn report(&mut self, downloaded: u64, total: Option<u64>);

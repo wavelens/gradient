@@ -2910,6 +2910,7 @@ dependencies = [
  "gradient-types",
  "gradient-util",
  "gradient-wire",
+ "gradient-worker-client",
  "harmonia-file-nar",
  "harmonia-protocol",
  "harmonia-store-content-address",
@@ -2938,6 +2939,22 @@ dependencies = [
  "wiremock",
  "xz2",
  "zstd",
+]
+
+[[package]]
+name = "gradient-worker-client"
+version = "1.4.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "gradient-util",
+ "gradient-wire",
+ "reqwest",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -421,7 +421,7 @@ impl<'a> InputPrefetcher<'a> {
             return Ok(vec![]);
         }
 
-        let http = crate::http::download_client();
+        let http = gradient_worker_client::http::download_client();
 
         // Bound concurrency: firing every download at once opens a TLS
         // connection per path, which is what tips a flaky object store into

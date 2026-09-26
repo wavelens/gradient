@@ -253,7 +253,7 @@ async fn run_input_update(
     }
 
     let resolver = gradient_sources::flake_lock::HttpRevisionResolver::new(
-        crate::http::download_client().clone(),
+        gradient_worker_client::http::download_client().clone(),
     )
     .with_ssh_key(ssh_key.map(str::to_owned));
     let generator = gradient_sources::flake_lock::FlakeLockGenerator::new(resolver);

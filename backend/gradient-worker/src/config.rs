@@ -305,7 +305,7 @@ impl WorkerConfig {
     ///
     /// Format: one `peer_id:token` entry per line. The special peer ID `*`
     /// matches any UUID the server challenges - callers should expand it using
-    /// [`Self::resolve_tokens_for_challenge`].
+    /// `resolve_tokens_for_challenge`.
     pub fn peer_tokens(&self) -> Vec<(String, String)> {
         let raw = if let Some(path) = &self.peers_file {
             match std::fs::read_to_string(path) {
@@ -347,40 +347,6 @@ impl WorkerConfig {
                 Some((peer_id, token))
             })
             .collect()
-    }
-
-    /// Given the list of peer UUIDs the server challenged us about, build the
-    /// `(peer_id, token)` pairs to include in `AuthResponse`.
-    ///
-    /// A wildcard entry (`*:token`) expands to a response for every challenged
-    /// peer that is not already covered by an explicit entry.
-    pub fn resolve_tokens_for_challenge(
-        peer_tokens: &[(String, String)],
-        challenged: &[String],
-    ) -> Vec<(String, String)> {
-        let wildcard_token: Option<&str> = peer_tokens
-            .iter()
-            .find(|(id, _)| id == "*")
-            .map(|(_, t)| t.as_str());
-
-        let mut result: Vec<(String, String)> = peer_tokens
-            .iter()
-            .filter(|(id, _)| id != "*" && challenged.contains(id))
-            .cloned()
-            .collect();
-
-        if let Some(token) = wildcard_token {
-            let covered: std::collections::HashSet<String> =
-                result.iter().map(|(id, _)| id.clone()).collect();
-            let extras: Vec<(String, String)> = challenged
-                .iter()
-                .filter(|pid| !covered.contains(*pid))
-                .map(|pid| (pid.clone(), token.to_owned()))
-                .collect();
-            result.extend(extras);
-        }
-
-        result
     }
 
     /// Directory under which partially-received NAR downloads are staged for
@@ -663,56 +629,5 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].0, "peer-file");
-    }
-
-    // ── resolve_tokens_for_challenge() ────────────────────────────────────────
-
-    #[test]
-    fn resolve_tokens_explicit_only() {
-        let tokens = vec![
-            ("peer-a".to_owned(), "tok-a".to_owned()),
-            ("peer-c".to_owned(), "tok-c".to_owned()),
-        ];
-        let challenged = vec!["peer-a".to_owned(), "peer-b".to_owned()];
-        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], ("peer-a".to_owned(), "tok-a".to_owned()));
-    }
-
-    #[test]
-    fn resolve_tokens_wildcard_fills_gaps() {
-        let tokens = vec![
-            ("*".to_owned(), "wild".to_owned()),
-            ("peer-a".to_owned(), "tok-a".to_owned()),
-        ];
-        let challenged = vec![
-            "peer-a".to_owned(),
-            "peer-b".to_owned(),
-            "peer-c".to_owned(),
-        ];
-        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
-        assert_eq!(result.len(), 3);
-
-        let map: std::collections::HashMap<_, _> = result.into_iter().collect();
-        assert_eq!(map["peer-a"], "tok-a");
-        assert_eq!(map["peer-b"], "wild");
-        assert_eq!(map["peer-c"], "wild");
-    }
-
-    #[test]
-    fn resolve_tokens_wildcard_only() {
-        let tokens = vec![("*".to_owned(), "wild".to_owned())];
-        let challenged = vec!["p1".to_owned(), "p2".to_owned(), "p3".to_owned()];
-        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
-        assert_eq!(result.len(), 3);
-        assert!(result.iter().all(|(_, t)| t == "wild"));
-    }
-
-    #[test]
-    fn resolve_tokens_empty_when_no_match() {
-        let tokens = vec![("peer-x".to_owned(), "tok".to_owned())];
-        let challenged = vec!["peer-y".to_owned()];
-        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
-        assert!(result.is_empty());
     }
 }

@@ -108,7 +108,7 @@ async fn try_put(
     body: Bytes,
     content_type: Option<&str>,
 ) -> std::result::Result<Option<String>, PutError> {
-    let mut request = crate::http::client().put(url).body(body);
+    let mut request = gradient_worker_client::http::client().put(url).body(body);
     if let Some(content_type) = content_type {
         request = request.header(CONTENT_TYPE, content_type);
     }

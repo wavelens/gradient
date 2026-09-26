@@ -209,7 +209,7 @@ impl DownloadIo for JobUpdaterIo<'_> {
             .ok_or_else(|| anyhow::Error::new(MissingInputs(vec![drv_path.to_owned()])))?;
         let compressed = if entry.url.is_some() {
             download_one_presigned(
-                crate::http::download_client(),
+                gradient_worker_client::http::download_client(),
                 entry.clone(),
                 &mut Progress::silent(),
             )
@@ -242,7 +242,10 @@ impl DownloadIo for JobUpdaterIo<'_> {
         url: &str,
         progress: &mut Progress<impl ProgressSink>,
     ) -> Result<Option<Vec<u8>>> {
-        let response = crate::http::download_client().get(url).send().await?;
+        let response = gradient_worker_client::http::download_client()
+            .get(url)
+            .send()
+            .await?;
         if matches!(response.status().as_u16(), 404 | 410) {
             return Ok(None);
         }

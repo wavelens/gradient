@@ -15,7 +15,7 @@
 //! The state is encoded in the type parameter so the compiler prevents calling
 //! `run()` on an already-running worker or `reconnect()` on a connected one.
 
-use crate::connection::ProtoConnection;
+use gradient_worker_client::connection::ProtoConnection;
 
 // ── State types ───────────────────────────────────────────────────────────────
 
@@ -26,19 +26,3 @@ pub struct Connected {
 
 /// The worker has no connection and can call `reconnect()`.
 pub struct Disconnected;
-
-// ── RunOutcome ────────────────────────────────────────────────────────────────
-
-/// Why the dispatch loop (`Worker::run`) exited. Every variant reconnects; the
-/// worker process only ends on a local shutdown signal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunOutcome {
-    /// Server closed the connection cleanly - reconnecting is appropriate.
-    CleanDisconnect,
-    /// Server sent `Draining` - it is going away for a deploy or maintenance.
-    /// In-flight work is finished, then the worker reconnects until it returns.
-    Drained,
-    /// Server refused the session (post-handshake `Reject`), so nothing was
-    /// served. Reconnecting is appropriate but must back off.
-    Refused,
-}

@@ -32,12 +32,12 @@ use tracing::{debug, warn};
 
 use gradient_util::store_path::{nix_store_path, strip_store_prefix};
 
-use crate::connection::ProtoWriter;
 use crate::nix::store::LocalNixStore;
 use crate::proto::nar_multipart::{PartSink, PartUploader};
 use crate::proto::nar_recv::NarReceiver;
 use gradient_wire::UploadTarget;
 use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
+use gradient_worker_client::connection::ProtoWriter;
 
 /// `sha256:<nix32>` of `data` - the wire format for NAR and file hashes.
 pub(crate) fn sha256_nix32(data: &[u8]) -> String {
@@ -738,7 +738,7 @@ mod tests {
             total
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -810,7 +810,7 @@ mod tests {
             }
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -864,7 +864,7 @@ mod tests {
             assert!(!decoded.is_empty(), "decompressed NAR should not be empty");
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1023,7 +1023,7 @@ mod tests {
             }
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1077,7 +1077,7 @@ mod tests {
             }
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1131,7 +1131,7 @@ mod tests {
         // never matters.
         let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1170,7 +1170,7 @@ mod tests {
 
         let store = LocalNixStore::connect_at("/var/empty/gradient-nonexistent.sock", 1).unwrap();
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1242,7 +1242,7 @@ mod tests {
             }
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1290,7 +1290,7 @@ mod tests {
         });
 
         let (http_url, _http_task) = one_shot_http_server().await;
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();
@@ -1336,7 +1336,7 @@ mod tests {
             }
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url)
+        let conn = gradient_worker_client::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
         let (writer, _reader, _flush) = conn.split();

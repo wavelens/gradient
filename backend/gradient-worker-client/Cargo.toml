@@ -1,0 +1,28 @@
+[package]
+name        = "gradient-worker-client"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-util = { workspace = true }
+gradient-wire = { workspace = true }
+
+anyhow            = { workspace = true }
+async-trait       = { workspace = true }
+futures           = { workspace = true }
+reqwest           = { workspace = true }
+tokio             = { workspace = true, features = ["net", "sync", "time", "rt", "macros"] }
+tokio-tungstenite = { workspace = true }
+tracing           = { workspace = true }
+uuid              = { workspace = true }
+
+[dev-dependencies]
+gradient-wire = { workspace = true, features = ["testing"] }
+tokio         = { workspace = true, features = ["macros", "rt", "test-util"] }

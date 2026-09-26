@@ -176,9 +176,12 @@ impl UpstreamIo for JobUpdaterIo<'_> {
         progress: &mut Progress<impl ProgressSink>,
     ) -> Result<Option<Vec<u8>>> {
         let _fetch = self.0.phase(JobPhase::SubstituteFetch);
-        let (_, body) =
-            download_one_presigned(crate::http::download_client(), upstream.clone(), progress)
-                .await?;
+        let (_, body) = download_one_presigned(
+            gradient_worker_client::http::download_client(),
+            upstream.clone(),
+            progress,
+        )
+        .await?;
         Ok(body.map(|(bytes, _)| bytes))
     }
 }

@@ -11,7 +11,6 @@
 //! `ServerMessage`) and remember the server's negotiated protocol version.
 
 pub mod handshake;
-pub mod listener;
 
 use anyhow::{Context, Result};
 use gradient_wire::messages::{ClientMessage, ServerMessage};
@@ -33,7 +32,7 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct ProtoConnection {
     /// Protocol version the server reported in `InitAck`. Set to 0 before the
     /// handshake completes; updated via [`Self::set_server_version`] afterwards.
-    pub(crate) server_version: u16,
+    pub server_version: u16,
     socket: ProtoSocket,
 }
 
@@ -72,7 +71,7 @@ impl ProtoConnection {
     }
 
     /// Pre-split socket handle for the handshake driver.
-    pub(crate) fn socket_mut(&mut self) -> &mut ProtoSocket {
+    pub fn socket_mut(&mut self) -> &mut ProtoSocket {
         &mut self.socket
     }
 
@@ -157,7 +156,7 @@ impl ProtoReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_test_support::prelude::MockProtoServer;
+    use gradient_wire::testing::MockProtoServer;
 
     #[tokio::test]
     async fn closing_the_writer_drops_the_socket_while_a_background_clone_lives() {

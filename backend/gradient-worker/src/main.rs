@@ -5,14 +5,12 @@
  */
 
 mod config;
-mod connection;
 mod connection_state;
 mod executor;
-mod http;
+mod listener;
 mod metrics;
 mod nix;
 mod proto;
-mod reconnect;
 mod shutdown;
 mod traits;
 mod worker;
@@ -26,8 +24,9 @@ use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use config::WorkerConfig;
-use connection_state::RunOutcome;
-use reconnect::{SessionEnd, backoff_after_session, retry_reconnect};
+use gradient_worker_client::reconnect::{
+    RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
+};
 use shutdown::Shutdown;
 use tracing_subscriber::EnvFilter;
 use worker::Worker;
@@ -127,7 +126,7 @@ fn main() -> Result<()> {
             let listener_sessions = sessions.clone();
             #[expect(clippy::disallowed_methods, reason = "returns on drain_requested")]
             tokio::spawn(async move {
-                if let Err(e) = connection::listener::start_listener(
+                if let Err(e) = listener::start_listener(
                     listener_config,
                     listener_shutdown,
                     listener_sessions,
@@ -329,8 +328,10 @@ fn build_env_filter(config: &WorkerConfig) -> EnvFilter {
     ];
     const PROTO_TARGETS: &[&str] = &[
         "gradient_worker::proto",
-        "gradient_worker::connection",
         "gradient_worker::connection_state",
+        "gradient_worker::listener",
+        "gradient_worker_client",
+        "gradient_wire",
     ];
 
     let mut filter = EnvFilter::new(&config.log_level);

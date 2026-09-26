@@ -23,15 +23,16 @@ use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
-use crate::connection::{ProtoReader, ProtoWriter};
 use crate::executor::JobExecutor;
 use crate::executor::abort_true;
 use crate::executor::failure::JobAborted;
 use crate::executor::timeline::JobTimeline;
 use crate::proto::credentials::CredentialStore;
-use crate::proto::job::{CacheWaiters, DispatchHandle, JobUpdater, KnownDerivationWaiters};
+use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
 use crate::shutdown::Shutdown;
+use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
+use gradient_worker_client::correlation::{CacheWaiters, DispatchHandle, KnownDerivationWaiters};
 
 use super::scoring::{send_score_chunks, spawn_scoring_task};
 
@@ -468,8 +469,11 @@ impl DispatchState {
             .jobs
             .finish(&job_id)
             .expect("a job task is registered before it is spawned");
-        crate::proto::job::forget_cache_waiters_for_job(&self.cache_waiters, &job_id);
-        crate::proto::job::forget_known_derivation_waiters_for_job(
+        gradient_worker_client::correlation::forget_cache_waiters_for_job(
+            &self.cache_waiters,
+            &job_id,
+        );
+        gradient_worker_client::correlation::forget_known_derivation_waiters_for_job(
             &self.known_derivation_waiters,
             &job_id,
         );
@@ -800,20 +804,28 @@ impl DispatchState {
 
     fn on_cache_status(&mut self, query_id: String, cached: Vec<CachedPath>) {
         let count = cached.len();
-        if !crate::proto::job::deliver_cache_reply(&self.cache_waiters, &query_id, Ok(cached)) {
+        if !gradient_worker_client::correlation::deliver_cache_reply(
+            &self.cache_waiters,
+            &query_id,
+            Ok(cached),
+        ) {
             debug!(%query_id, count, "CacheStatus arrived after waiter cleared");
         }
     }
 
     fn on_cache_error(&mut self, query_id: String, message: String) {
-        if !crate::proto::job::deliver_cache_reply(&self.cache_waiters, &query_id, Err(message)) {
+        if !gradient_worker_client::correlation::deliver_cache_reply(
+            &self.cache_waiters,
+            &query_id,
+            Err(message),
+        ) {
             debug!(%query_id, "CacheError arrived after waiter cleared");
         }
     }
 
     fn on_known_derivations(&mut self, query_id: String, known: Vec<String>) {
         let count = known.len();
-        if !crate::proto::job::deliver_known_derivations(
+        if !gradient_worker_client::correlation::deliver_known_derivations(
             &self.known_derivation_waiters,
             &query_id,
             known,
@@ -830,7 +842,10 @@ impl DispatchState {
             "mid-connection AuthChallenge - sending AuthResponse"
         );
         let peer_tokens = self.config.peer_tokens();
-        let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &peers);
+        let tokens = gradient_worker_client::connection::handshake::resolve_tokens_for_challenge(
+            &peer_tokens,
+            &peers,
+        );
         self.writer
             .send(ClientMessage::AuthResponse { tokens })
             .await?;

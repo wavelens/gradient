@@ -14,9 +14,9 @@ use std::sync::Arc;
 use gradient_wire::messages::{CandidateScore, JobCandidate, JobKind};
 use tracing::warn;
 
-use crate::connection::ProtoWriter;
 use crate::nix::store::LocalNixStore;
 use crate::proto::scorer::JobScorer;
+use gradient_worker_client::connection::ProtoWriter;
 
 // ── Spawn helpers ─────────────────────────────────────────────────────────────
 
