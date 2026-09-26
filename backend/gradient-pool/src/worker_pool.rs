@@ -281,6 +281,16 @@ impl WorkerPool {
     /// Draining workers finish their in-flight jobs but are never offered new
     /// ones - [`has_capacity`] returns `false` for draining workers at the type
     /// level.
+    /// Every active worker folded into the one worker the pool is upstream.
+    pub fn aggregate(&self) -> crate::Aggregate {
+        crate::aggregate(
+            self.workers
+                .values()
+                .filter(|slot| !slot.is_draining())
+                .map(WorkerSlot::shared),
+        )
+    }
+
     pub fn mark_draining(&mut self, id: &str) {
         if let Some(slot) = self.workers.remove(id) {
             let new_slot = match slot {

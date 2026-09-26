@@ -7,6 +7,7 @@
 //! Connected-worker registry, capability aggregation and the scoring rules the
 //! scheduler and the proxy share.
 
+pub mod aggregate;
 pub mod peer_auth;
 pub mod score;
 pub mod session_port;
@@ -14,6 +15,7 @@ pub mod worker_caps;
 pub mod worker_pool;
 pub mod worker_state;
 
+pub use self::aggregate::{Aggregate, aggregate};
 pub use self::peer_auth::PeerAuth;
 pub use self::worker_caps::WorkerCaps;
 pub use self::worker_pool::{WorkerInfo, WorkerPool, WorkerSlot};

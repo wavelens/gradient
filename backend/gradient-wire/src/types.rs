@@ -45,6 +45,17 @@ pub struct GradientCapabilities {
     pub cache: bool,
 }
 
+impl std::ops::BitOrAssign for GradientCapabilities {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.core |= rhs.core;
+        self.federate |= rhs.federate;
+        self.fetch |= rhs.fetch;
+        self.eval |= rhs.eval;
+        self.build |= rhs.build;
+        self.cache |= rhs.cache;
+    }
+}
+
 // ── Job types ────────────────────────────────────────────────────────────────
 
 /// A job is an ordered sequence of steps.  If any step fails, the rest are
