@@ -14,7 +14,9 @@
 //! relations are empty is unmeasured, and executing it would prove nothing. The
 //! measured pass then runs inside a transaction that is always rolled back,
 //! which is what makes an INSERT, UPDATE, DELETE or FOR UPDATE safe to
-//! EXPLAIN ANALYZE: the statement really does execute.
+//! EXPLAIN ANALYZE: the statement really does execute. Per-node timing is off:
+//! no budget reads it, and the VM's `acpi_pm` clock traps on every read, which
+//! made a sweep over a million rows outlast the statement timeout.
 
 use std::collections::HashMap;
 
@@ -112,7 +114,7 @@ async fn measure_in(
 
     let stmt = Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
-        format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {sql}"),
+        format!("EXPLAIN (ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON) {sql}"),
         values,
     );
 
