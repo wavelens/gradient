@@ -52,6 +52,7 @@ crate::sql! {
              SELECT id FROM outbox \
              WHERE delivered_at IS NULL AND failed_at IS NULL \
                AND next_attempt_at <= (now() AT TIME ZONE 'UTC') \
+               AND kind IN (2, 3, 4, 5) \
              ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED) \
          RETURNING o.id, o.kind, o.key, o.payload, o.attempts",
         params = [Int(8), Int(CLAIM_LEASE_SECS)];
@@ -262,6 +263,22 @@ mod tests {
         );
         assert!(
             sql.ends_with("RETURNING o.id, o.kind, o.key, o.payload, o.attempts"),
+            "{sql}"
+        );
+    }
+
+    /// A row of a kind this build does not know (an older instance's, during a
+    /// rolling deploy) is never claimed, so it cannot fail every claim.
+    #[test]
+    fn the_claim_names_exactly_the_known_kinds() {
+        use sea_orm::Iterable;
+
+        let known: Vec<String> = OutboxKind::iter()
+            .map(|k| i16::from(k).to_string())
+            .collect();
+        let sql = norm(OUTBOX_CLAIM_DUE.stmt().sql.as_str());
+        assert!(
+            sql.contains(&format!("AND kind IN ({})", known.join(", "))),
             "{sql}"
         );
     }
