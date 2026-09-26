@@ -107,9 +107,10 @@ pub(super) async fn run_dispatch_loop(
                 };
                 let started = std::time::Instant::now();
                 let kind = inbound.variant_name();
-                let result = match inbound {
-                    Inbound::Bulk(frame) => state.dispatch_bulk(frame).await,
-                    Inbound::Control(msg) => state.dispatch(msg).await,
+                let result = match state.nar_recv.absorb(inbound).await {
+                    None => Ok(()),
+                    Some(Inbound::Bulk(frame)) => state.dispatch_bulk(frame).await,
+                    Some(Inbound::Control(msg)) => state.dispatch(msg).await,
                 };
                 let elapsed_ms = started.elapsed().as_millis();
                 if elapsed_ms > 1_000 {
@@ -325,45 +326,6 @@ impl DispatchState {
             ServerMessage::Credential { kind, data } => {
                 self.on_credential(kind, data);
             }
-            ServerMessage::NarStreamHeader {
-                job_id,
-                store_path,
-                total_bytes,
-                stream_token,
-            } => {
-                self.nar_recv
-                    .note_header(&job_id, &store_path, total_bytes, &stream_token);
-            }
-            ServerMessage::NarPushResume {
-                job_id,
-                store_path,
-                received_bytes,
-            } => {
-                self.nar_recv
-                    .resolve_push(&job_id, &store_path, received_bytes);
-            }
-            // The two differ in whether a retry can ever succeed: an
-            // unavailable NAR needs its producer rebuilt, an abort needs only
-            // another request.
-            ServerMessage::NarUnavailable {
-                job_id,
-                store_path,
-                reason,
-            } => {
-                warn!(%job_id, %store_path, %reason, "the cache cannot serve this NAR");
-                let failure =
-                    gradient_worker_client::nar_recv::TransferFailure::Unavailable(reason);
-                self.nar_recv.fail(&job_id, &store_path, failure);
-            }
-            ServerMessage::NarAbort {
-                job_id,
-                store_path,
-                reason,
-            } => {
-                warn!(%job_id, %store_path, %reason, "server aborted a NAR transfer");
-                let failure = gradient_worker_client::nar_recv::TransferFailure::Transient(reason);
-                self.nar_recv.fail(&job_id, &store_path, failure);
-            }
             ServerMessage::RequestAllScores => {
                 self.on_request_all_scores().await;
             }
@@ -410,9 +372,14 @@ impl DispatchState {
             ServerMessage::EvalCachePushGrant { job_id, mode } => {
                 self.eval_cache_recv.deliver_push_grant(&job_id, mode);
             }
-            // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
-            ServerMessage::NarPush { .. } | ServerMessage::EvalCacheChunk { .. } => {
-                warn!("bulk variant deserialised into the control lane");
+            // Unreachable: the NAR receiver and the bulk lane own these.
+            ServerMessage::NarPush { .. }
+            | ServerMessage::EvalCacheChunk { .. }
+            | ServerMessage::NarStreamHeader { .. }
+            | ServerMessage::NarPushResume { .. }
+            | ServerMessage::NarUnavailable { .. }
+            | ServerMessage::NarAbort { .. } => {
+                warn!("a NAR or bulk frame reached the control dispatch");
             }
         }
         Ok(())
@@ -422,26 +389,6 @@ impl DispatchState {
     /// written straight from the buffer the socket delivered.
     async fn dispatch_bulk(&mut self, frame: Frame<ServerMessage>) -> Result<()> {
         match frame.archived() {
-            ArchivedServerMessage::NarPush {
-                job_id,
-                store_path,
-                data,
-                offset,
-                is_final,
-            } => {
-                debug!(
-                    job_id = job_id.as_str(),
-                    store_path = store_path.as_str(),
-                    offset = offset.to_native(),
-                    is_final = *is_final,
-                    bytes = data.len(),
-                    "received NAR chunk from server"
-                );
-                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
-                self.nar_recv
-                    .accept_chunk(&job_id, &store_path, frame)
-                    .await;
-            }
             ArchivedServerMessage::EvalCacheChunk {
                 job_id,
                 data,

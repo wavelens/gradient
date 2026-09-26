@@ -109,8 +109,6 @@ mod tests {
         }
     }
 
-    /// Stand in for the dispatch loop: route the server's resume answers back
-    /// to the pushers waiting on their gates.
     /// Stand in for the dispatch loop. It routes the resume a stream waits on AND
     /// the `CacheStatus` a query waits on: [`push_outputs`] asks the cache first,
     /// and a pump that drops that answer leaves the query to time out and every
@@ -122,19 +120,12 @@ mod tests {
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             while let Some(inbound) = reader.recv().await {
-                match inbound {
-                    gradient_wire::Inbound::Control(ServerMessage::NarPushResume {
-                        job_id,
-                        store_path,
-                        received_bytes,
-                    }) => nar_recv.resolve_push(&job_id, &store_path, received_bytes),
-                    gradient_wire::Inbound::Control(ServerMessage::CacheStatus {
-                        query_id,
-                        cached,
-                    }) => {
-                        deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
-                    }
-                    _ => {}
+                if let Some(gradient_wire::Inbound::Control(ServerMessage::CacheStatus {
+                    query_id,
+                    cached,
+                })) = nar_recv.absorb(inbound).await
+                {
+                    deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
                 }
             }
         })

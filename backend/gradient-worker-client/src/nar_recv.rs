@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use gradient_storage::{PartialStore, PartialWriter};
 use gradient_wire::messages::{ArchivedServerMessage, ServerMessage, TRANSFER_TIMEOUT};
-use gradient_wire::session::frame::Frame;
+use gradient_wire::session::frame::{Frame, Inbound};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
@@ -714,6 +714,73 @@ impl NarReceiver {
         g.waiters.retain(|(j, _), _| j != job_id);
         g.push_waiters.retain(|(j, _), _| j != job_id);
     }
+
+    /// Route a frame that belongs to a NAR transfer into this receiver; every
+    /// other frame comes back for the caller's own dispatch.
+    pub async fn absorb(&self, inbound: Inbound<ServerMessage>) -> Option<Inbound<ServerMessage>> {
+        match inbound {
+            Inbound::Bulk(frame) => {
+                let ArchivedServerMessage::NarPush {
+                    job_id,
+                    store_path,
+                    offset,
+                    is_final,
+                    data,
+                } = frame.archived()
+                else {
+                    return Some(Inbound::Bulk(frame));
+                };
+
+                debug!(
+                    job_id = job_id.as_str(),
+                    store_path = store_path.as_str(),
+                    offset = offset.to_native(),
+                    is_final = *is_final,
+                    bytes = data.len(),
+                    "received NAR chunk"
+                );
+                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
+                self.accept_chunk(&job_id, &store_path, frame).await;
+                None
+            }
+            Inbound::Control(ServerMessage::NarStreamHeader {
+                job_id,
+                store_path,
+                total_bytes,
+                stream_token,
+            }) => {
+                self.note_header(&job_id, &store_path, total_bytes, &stream_token);
+                None
+            }
+            Inbound::Control(ServerMessage::NarPushResume {
+                job_id,
+                store_path,
+                received_bytes,
+            }) => {
+                self.resolve_push(&job_id, &store_path, received_bytes);
+                None
+            }
+            Inbound::Control(ServerMessage::NarUnavailable {
+                job_id,
+                store_path,
+                reason,
+            }) => {
+                warn!(%job_id, %store_path, %reason, "the cache cannot serve this NAR");
+                self.fail(&job_id, &store_path, TransferFailure::Unavailable(reason));
+                None
+            }
+            Inbound::Control(ServerMessage::NarAbort {
+                job_id,
+                store_path,
+                reason,
+            }) => {
+                warn!(%job_id, %store_path, %reason, "server aborted a NAR transfer");
+                self.fail(&job_id, &store_path, TransferFailure::Transient(reason));
+                None
+            }
+            other => Some(other),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1157,5 +1224,74 @@ mod tests {
         let gate = r.register_push("j", "/nix/store/x");
         r.cancel_pushes("j");
         assert!(gate.await_resume().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn absorb_feeds_a_pull_stream_into_its_waiter() {
+        let r = NarReceiver::new();
+        let pending = r.register("j", "/nix/store/p");
+        let header = ServerMessage::NarStreamHeader {
+            job_id: "j".into(),
+            store_path: "/nix/store/p".into(),
+            total_bytes: 3,
+            stream_token: "t".into(),
+        };
+        assert!(r.absorb(Inbound::Control(header)).await.is_none());
+
+        for chunk in [
+            frame("j", "/nix/store/p", 0, b"abc", false),
+            frame("j", "/nix/store/p", 3, b"", true),
+        ] {
+            assert!(r.absorb(Inbound::Bulk(chunk)).await.is_none());
+        }
+
+        assert_eq!(bytes(r.await_pending(pending).await.unwrap()), b"abc");
+    }
+
+    #[tokio::test]
+    async fn absorb_types_an_unavailable_nar_and_an_abort_apart() {
+        let r = NarReceiver::new();
+        let gone = r.register("j", "/nix/store/gone");
+        let dropped = r.register("j", "/nix/store/dropped");
+        let unavailable = ServerMessage::NarUnavailable {
+            job_id: "j".into(),
+            store_path: "/nix/store/gone".into(),
+            reason: "missing".into(),
+        };
+        let abort = ServerMessage::NarAbort {
+            job_id: "j".into(),
+            store_path: "/nix/store/dropped".into(),
+            reason: "reset".into(),
+        };
+        assert!(r.absorb(Inbound::Control(unavailable)).await.is_none());
+        assert!(r.absorb(Inbound::Control(abort)).await.is_none());
+
+        let gone = r.await_pending(gone).await.unwrap_err();
+        assert!(gone.downcast_ref::<NarUnavailable>().is_some());
+        let dropped = r.await_pending(dropped).await.unwrap_err();
+        assert!(dropped.downcast_ref::<NarUnavailable>().is_none());
+    }
+
+    #[tokio::test]
+    async fn absorb_resolves_a_push_resume_gate() {
+        let r = NarReceiver::new();
+        let gate = r.register_push("j", "/nix/store/up");
+        let resume = ServerMessage::NarPushResume {
+            job_id: "j".into(),
+            store_path: "/nix/store/up".into(),
+            received_bytes: 7,
+        };
+        assert!(r.absorb(Inbound::Control(resume)).await.is_none());
+        assert_eq!(gate.await_resume().await.unwrap(), 7);
+    }
+
+    #[tokio::test]
+    async fn absorb_hands_back_what_is_not_a_nar_transfer() {
+        let r = NarReceiver::new();
+        let back = r.absorb(Inbound::Control(ServerMessage::Draining)).await;
+        assert!(matches!(
+            back,
+            Some(Inbound::Control(ServerMessage::Draining))
+        ));
     }
 }
