@@ -15,6 +15,12 @@ export interface Build {
   updated_at: string;
 }
 
+/** Bytes a running Substitute or Download has fetched; `total` is null when the source announced no size. */
+export interface DownloadProgress {
+  downloaded: number;
+  total: number | null;
+}
+
 export type BuildStatus =
   | 'Created'
   | 'Queued'

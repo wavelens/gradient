@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Evaluation, EvaluationMessage } from '@core/models';
+import { DownloadProgress, Evaluation, EvaluationMessage } from '@core/models';
 
 export interface DependencyNode {
   id: string;
@@ -76,6 +76,7 @@ export interface BuildWithOutputs {
   prioritized: boolean;
   created_at: string;
   updated_at: string;
+  download_progress: DownloadProgress | null;
 }
 
 export interface PaginatedBuilds {

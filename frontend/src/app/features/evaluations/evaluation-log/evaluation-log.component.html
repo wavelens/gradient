@@ -286,6 +286,22 @@
             <span class="queued-title">Build Queued</span>
             <span class="queued-sub">This build is waiting to start. Logs will appear once it begins.</span>
           </div>
+        } @else if (downloadView(); as d) {
+          <div class="download-hint">
+            <gr-icon name="download" class="download-icon" size="xl" />
+            <span class="download-title">Downloading{{ d.percent === null ? '' : ' ' + d.percent + ' %' }}</span>
+            <div
+              class="download-bar"
+              role="progressbar"
+              [class.download-bar--indeterminate]="d.ratio === null"
+              [attr.aria-valuenow]="d.percent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div class="download-bar-fill" [style.width.%]="d.ratio === null ? 100 : d.ratio * 100"></div>
+            </div>
+            <span class="download-sub">{{ d.label }}</span>
+          </div>
         } @else {
           <div class="log-container-wrapper">
             <div class="log-build-header">

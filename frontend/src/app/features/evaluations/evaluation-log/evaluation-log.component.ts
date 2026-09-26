@@ -22,18 +22,19 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { LogChunkIndex, LogSearchHit, parseLineFragment, searchLines, windowAround } from './log-window';
 import { matchesBuildSearch } from './build-search';
 import { isTypingTarget } from './keyboard';
+import { downloadLabel, downloadRatio } from './download-progress';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { Subscription } from 'rxjs';
-import { auditTime, switchMap } from 'rxjs/operators';
+import { Subscription, merge } from 'rxjs';
+import { auditTime, filter, map, switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
-import { LiveService } from '@core/services/live.service';
+import { LiveEvent, LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { AccessService, WritableDirective } from '@shared/access';
 import { AccessState, accessFromEntity } from '@core/models/access.model';
-import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
+import { DownloadProgress, Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
   BadgeComponent,
@@ -173,10 +174,19 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     ];
   });
 
+  download = signal<DownloadProgress | null>(null);
+  downloadView = computed(() => {
+    const d = this.download();
+    if (!d) return null;
+    const ratio = downloadRatio(d);
+    return { ratio, percent: ratio === null ? null : Math.floor(ratio * 100), label: downloadLabel(d) };
+  });
+
   errorMessages = computed(() => this.messages().filter(m => m.level === 'Error'));
   warningMessages = computed(() => this.messages().filter(m => m.level === 'Warning'));
 
   private liveSub?: Subscription;
+  private downloadSub?: Subscription;
   private durationInterval?: ReturnType<typeof setInterval>;
   private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
   private streamingBuildId?: string;
@@ -715,7 +725,31 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const isBuilding = build && ['Queued', 'Building'].includes(build.status);
     if (isBuilding) {
       this.startLogStream(buildId);
+      this.watchDownload(buildId);
     }
+  }
+
+  /// A Substitute or Download reports its bytes instead of log lines: seed from
+  /// the build, then follow the build's live channel until its log stream ends.
+  private watchDownload(buildId: string): void {
+    this.stopDownloadWatch();
+    const seed = this.evalService.getBuild(buildId).pipe(
+      map(b => b.download_progress),
+      filter(() => this.download() === null),
+    );
+    const updates = this.live.connect<LiveEvent & Partial<DownloadProgress>>(`/builds/${buildId}/live`).pipe(
+      filter(e => e.type === 'build_progress'),
+      map(e => ({ downloaded: e.downloaded ?? 0, total: e.total ?? null })),
+    );
+    this.downloadSub = merge(seed, updates).subscribe(p => {
+      if (this.selectedBuildId() === buildId) this.download.set(p);
+    });
+  }
+
+  private stopDownloadWatch(): void {
+    this.downloadSub?.unsubscribe();
+    this.downloadSub = undefined;
+    this.download.set(null);
   }
 
   private async startLogStream(buildId: string): Promise<void> {
@@ -753,6 +787,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     } finally {
       this.activeStreamReader = undefined;
       this.streamingBuildId = undefined;
+      if (this.selectedBuildId() === buildId) this.stopDownloadWatch();
     }
   }
 
@@ -762,6 +797,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.streamingBuildId = undefined;
     this.pendingLogLines = [];
     this.stopLogDrainTimer();
+    this.stopDownloadWatch();
   }
 
   // ── Virtualized log window ──────────────────────────────────────────────────
