@@ -21,13 +21,12 @@
     ];
 
     buildCommand = ''
-      out=''${outputs[out]}
       mkdir $out
 
       jq -r '.closure[] | .path' < "$NIX_ATTRS_JSON_FILE" > $out/store-paths
     '';
   };
-in with pkgs; runCommand "store-${testPkgs.pname}" { } ''
+in with pkgs; runCommand "store-${testPkgs.pname}" { __structuredAttrs = true; } ''
   mkdir -p $out/nix-support
   echo "file folder $out/store" >> $out/nix-support/hydra-build-products
 

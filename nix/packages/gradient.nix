@@ -59,10 +59,16 @@ let
   commonArgs = {
     inherit src cargoVendorDir;
     strictDeps = true;
+    __structuredAttrs = true;
 
-    # A sandbox starts with no incremental cache to reuse, so the bookkeeping
-    # is pure overhead and it fattens the target dir crane packs between layers.
-    CARGO_INCREMENTAL = "0";
+    env = {
+      # A sandbox starts with no incremental cache to reuse, so the bookkeeping
+      # is pure overhead and it fattens the target dir crane packs between layers.
+      CARGO_INCREMENTAL = "0";
+      LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+      BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
+    };
+
     cargoExtraArgs = "--locked --features gradient-daemon/mock";
 
     nativeBuildInputs = [
@@ -76,9 +82,6 @@ let
       openssl
       zstd
     ];
-
-    LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-    BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
   };
 
   # crane's default dummy source. Provide a minimal stub that compiles

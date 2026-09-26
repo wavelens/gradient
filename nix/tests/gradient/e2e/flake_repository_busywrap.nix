@@ -14,7 +14,7 @@
 
       # A dependent of something only the upstream serves: busywrap is built
       # here, busybox is relayed, and only because busywrap demands it.
-      busywrap = pkgs.runCommand "busywrap" { } ''
+      busywrap = pkgs.runCommand "busywrap" { __structuredAttrs = true; } ''
         mkdir -p $out/bin
         ln -s ${pkgs.busybox}/bin/busybox $out/bin/bb
       '';

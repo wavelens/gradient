@@ -20,4 +20,4 @@ assert throws (s.normalize { derivations = { }; });
 assert chain.derivations.c2.outputs.out.references == [ chain.derivations.c1.outputs.out.path ];
 assert flakeDrvs.c2.drvPath == chain.derivations.c2.drvPath;
 assert builtins.all (id: (s.resolve (s.presets.wide 3 4)).derivations.${id}.drvPath != "") (builtins.attrNames (s.presets.wide 3 4).derivations);
-pkgs.runCommand "store-spec-check" { } "touch $out"
+pkgs.runCommand "store-spec-check" { __structuredAttrs = true; } "touch $out"

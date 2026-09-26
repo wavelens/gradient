@@ -71,8 +71,15 @@ let
     strictDeps = true;
     sourceRoot = "${src.name}/cli";
     cargoToml = cliSrc + "/Cargo.toml";
+    __structuredAttrs = true;
 
-    CARGO_INCREMENTAL = "0";
+    env = {
+      CARGO_INCREMENTAL = "0";
+    } // lib.optionalAttrs withEval {
+      LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+    } // lib.optionalAttrs stdenv.hostPlatform.isLinux {
+      BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${stdenv.cc.libc.dev}";
+    };
 
     nativeBuildInputs = [
       installShellFiles
@@ -84,11 +91,7 @@ let
       gradient-nix
       openssl
     ];
-  } // (lib.optionalAttrs withEval {
-    LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-  } // lib.optionalAttrs stdenv.hostPlatform.isLinux {
-    BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${stdenv.cc.libc.dev}";
-  });
+  };
 
   # The cli workspace sits in a subdirectory because the `eval` feature pulls
   # gradient-eval from backend/. `mkDummySrc` keeps the source's store name, so

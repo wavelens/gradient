@@ -26,7 +26,7 @@
   # over the generated state file so config errors fail the Nix build instead
   # of surfacing on first server start.
   validatedStateJsonFile = if cfg.validateState then
-    pkgs.runCommand "gradient-state-validated.json" { } ''
+    pkgs.runCommand "gradient-state-validated.json" { __structuredAttrs = true; } ''
       ${lib.getExe cfg.packages.server} --state-file ${stateJsonFile} --validate-state
       cp ${stateJsonFile} $out
     ''

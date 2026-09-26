@@ -100,7 +100,7 @@ let
 
   toFlake = raw:
     let spec = normalize raw;
-    in pkgs.runCommand "store-spec-flake-${spec.name}" { } ''
+    in pkgs.runCommand "store-spec-flake-${spec.name}" { __structuredAttrs = true; } ''
       mkdir -p $out
       cp ${./derivations.nix} $out/derivations.nix
       echo '{"nodes":{"root":{}},"root":"root","version":7}' > $out/flake.lock
@@ -130,7 +130,7 @@ let
     derivations = foldl' (acc: spec: acc // lib.mapAttrs' (daemonNode spec) spec.derivations) { } (map resolve raws);
   });
 
-  toUpstreamCache = raws: pkgs.runCommand "store-spec-upstream" { } ''
+  toUpstreamCache = raws: pkgs.runCommand "store-spec-upstream" { __structuredAttrs = true; } ''
     ${daemon}/bin/gradient-daemon mock cache-export \
       --spec ${toDaemonConfig raws "upstream"} \
       --secret-key-file ${./keys/upstream.sec} \
