@@ -2734,6 +2734,7 @@ dependencies = [
  "gradient-util",
  "gradient-web",
  "gradient-wire",
+ "gradient-worker-client",
  "harmonia-file-nar",
  "harmonia-store-derivation",
  "jsonwebtoken",

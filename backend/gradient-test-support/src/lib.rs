@@ -46,4 +46,5 @@ pub mod prelude {
         test_state, test_state_cache, test_state_with_log_storage, test_state_with_storage,
     };
     pub use gradient_wire::testing::{MockProtoServer, MockServerConn};
+    pub use gradient_worker_client::testing::{Assignment, PeerSpec, ProtoPeer};
 }

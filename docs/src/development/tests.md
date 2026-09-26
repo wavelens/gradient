@@ -55,7 +55,7 @@ extending it over re-deriving a helper in a test file.
 
 | Module | Provides |
 |---|---|
-| `fakes/` | In-memory doubles for the production traits: `NixStoreProvider`, `DerivationResolver`, `WorkerStore`, `DrvReader`, `JobReporter`, `BuildExecutor`, `CiReporter`, `EmailSender`, `WebhookClient`, `LogStorage`, plus `MockProtoServer` for the worker protocol |
+| `fakes/` | In-memory doubles for the production traits: `NixStoreProvider`, `DerivationResolver`, `WorkerStore`, `DrvReader`, `JobReporter`, `BuildExecutor`, `CiReporter`, `EmailSender`, `WebhookClient`, `LogStorage`, plus `MockProtoServer`, which scripts an authority (handshake, offers, scores, claims, NAR relay), and `ProtoPeer`, which scripts a worker on the real client connection |
 | `fakes/store_fixture.rs` | `StoreFixture`, a real 951-derivation `hello` closure loaded from `test/store/`, with helpers to mark subtrees built or unbuild a deterministic fraction |
 | `fixtures.rs` | Canonical entity models and stable IDs (`project()`, `user()`, `eval_at()`, …) |
 | `db.rs` | `db_with(rows)`, the four-line `MockDatabase` setup |

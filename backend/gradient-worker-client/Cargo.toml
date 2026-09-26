@@ -10,6 +10,9 @@ publish     = false
 [lints]
 workspace = true
 
+[features]
+testing = ["gradient-wire/testing"]
+
 [dependencies]
 gradient-storage = { workspace = true }
 gradient-util    = { workspace = true }

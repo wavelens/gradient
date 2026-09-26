@@ -27,6 +27,7 @@ gradient-notify = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-wire = { workspace = true, features = ["testing"] }
+gradient-worker-client = { workspace = true, features = ["testing"] }
 gradient-entity = { workspace = true }
 gradient-proto = { workspace = true }
 gradient-web = { workspace = true }

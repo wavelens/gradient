@@ -16,4 +16,6 @@ pub mod nar_multipart;
 pub mod nar_recv;
 pub mod object_put;
 pub mod reconnect;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod throughput;
