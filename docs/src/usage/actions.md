@@ -64,20 +64,30 @@ POSTs a JSON payload to a URL. Optional `Authorization: Bearer <token>` header.
 ```http
 Content-Type: application/json
 X-Gradient-Event: build.completed
-Authorization: Bearer <token>   # only if token is set
+Authorization: Bearer <token>                  # only if token is set
+X-Gradient-Signature: sha256=<hex HMAC>        # only if token is set, keyed by the token
 ```
 
-**Payload shape:**
+**Payload shape:** the event envelope shared with [webhooks](events.md); receivers read `content`.
 
 ```json
 {
   "event": "build.completed",
-  "task": "my-task",
-  "project": "acme",
-  "id": "<eval-or-build-uuid>",
-  "status": "completed"
+  "at": "2026-09-26T12:00:00.123Z",
+  "content": {
+    "build_id": "<uuid>",
+    "evaluation_id": "<uuid>",
+    "derivation": "<uuid>",
+    "status": 3,
+    "task": "<uuid>",
+    "project": "<uuid>",
+    "derivation_path": "/nix/store/...-hello.drv",
+    "evaluation_kind": "normal"
+  }
 }
 ```
+
+The flat payload of earlier releases (`task`, `project`, `id`, `status` at the top level) is replaced by this envelope.
 
 Token management: the plaintext token is revealed exactly once - on create or after `POST .../regenerate-token`. Store it immediately.
 

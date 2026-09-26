@@ -65,8 +65,17 @@ it never prunes a subtree whose edges are still unwritten. Reads that need no
 ordering (`CacheQuery`, board and API queries) stay on the pools. Effects that
 leave the process are rows in `outbox`, written in the transaction that changed
 state and delivered by the `effects` actor: events expand into one delivery per
-matching task action, deliveries run on a factory of eight workers, fail with
-backoff and dead-letter after six attempts. Maintenance deletes are `Gc`
+matching task action and webhook, deliveries run on a factory of eight workers,
+fail with backoff and dead-letter after six attempts.
+
+Every event is typed (`gradient_types::events::Event`) and flows two ways:
+
+- `EventBus`: an in-process broadcast every emit site publishes to. The live UI
+  sockets and the `/metrics/events` firehose subscribe; a slow subscriber skips.
+- `outbox` (`kind = event`): durable events only, written by
+  `gradient_db::events::record` in the caller's connection. The effects actor
+  enriches them (task, project, repository) and fans each out into
+  `action_delivery` and `webhook_delivery` rows. Maintenance deletes are `Gc`
 requests: the sweep scans on the pool, the actor applies each chunk in one short
 transaction after re-checking what became live since the scan. Startup recovery
 and the debug indexer's flag stay outside the actor.

@@ -27,6 +27,7 @@ nav:
       - Pull Deployment: usage/pull-deployment.md
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md
+      - Events & Webhooks: usage/events.md
       - Caches: usage/caches.md
       - Invites: usage/invites.md
       - Cache NARs: usage/cache-nars.md
