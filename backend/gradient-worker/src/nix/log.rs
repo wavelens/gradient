@@ -24,12 +24,17 @@ pub fn store_log_path(log_dir: &Path, drv_path: &str) -> PathBuf {
         .join(format!("{rest}.bz2"))
 }
 
+pub fn nix_log_dir() -> PathBuf {
+    std::env::var_os("NIX_LOG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/nix/var/log/nix"))
+}
+
 /// Read and decompress the nix-store build log for `drv_path`, if present.
 /// Tries the bzip2 file first, then the uncompressed sibling. Returns `None`
 /// when no log exists.
-pub fn read_store_build_log(drv_path: &str) -> Result<Option<String>> {
-    let log_dir = std::env::var("NIX_LOG_DIR").unwrap_or_else(|_| "/nix/var/log/nix".into());
-    let bz2 = store_log_path(Path::new(&log_dir), drv_path);
+pub fn read_store_build_log(log_dir: &Path, drv_path: &str) -> Result<Option<String>> {
+    let bz2 = store_log_path(log_dir, drv_path);
     if bz2.exists() {
         let data = std::fs::read(&bz2)?;
         let mut out = String::new();
@@ -45,8 +50,51 @@ pub fn read_store_build_log(drv_path: &str) -> Result<Option<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::store_log_path;
+    use super::{read_store_build_log, store_log_path};
+    use std::io::Write;
     use std::path::Path;
+
+    const DRV: &str = "/nix/store/abcd1234efgh5678-foo.drv";
+
+    fn log_file(dir: &Path, name: &str) -> std::path::PathBuf {
+        let path = dir.join("drvs/ab").join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        path
+    }
+
+    #[test]
+    fn reads_the_bzip2_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut enc = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::fast());
+        enc.write_all(b"building foo\n").unwrap();
+        std::fs::write(
+            log_file(dir.path(), "cd1234efgh5678-foo.drv.bz2"),
+            enc.finish().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_store_build_log(dir.path(), DRV).unwrap().as_deref(),
+            Some("building foo\n")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_plain_log() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(log_file(dir.path(), "cd1234efgh5678-foo.drv"), "plain\n").unwrap();
+
+        assert_eq!(
+            read_store_build_log(dir.path(), DRV).unwrap().as_deref(),
+            Some("plain\n")
+        );
+    }
+
+    #[test]
+    fn no_log_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_store_build_log(dir.path(), DRV).unwrap(), None);
+    }
 
     #[test]
     fn computes_drvs_path() {

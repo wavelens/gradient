@@ -416,8 +416,13 @@ pub async fn build_derivation(
 /// When a derivation is already built locally the daemon produces no log.
 /// Read nix's stored `.bz2` log and forward it so the UI still shows output.
 /// Best-effort: missing logs and read errors are logged at debug and ignored.
-async fn forward_store_build_log(updater: &mut JobUpdater, task_index: u32, drv_path: &str) {
-    match crate::nix::log::read_store_build_log(drv_path) {
+pub(super) async fn forward_store_build_log(
+    updater: &mut JobUpdater,
+    task_index: u32,
+    drv_path: &str,
+) {
+    let log_dir = crate::nix::log::nix_log_dir();
+    match crate::nix::log::read_store_build_log(&log_dir, drv_path) {
         Ok(Some(text)) if !text.is_empty() => {
             const SEND_CHUNK: usize = 256 * 1024;
             let bytes = text.into_bytes();

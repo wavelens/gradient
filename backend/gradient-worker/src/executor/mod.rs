@@ -493,12 +493,16 @@ impl JobExecutor {
     /// worker.
     async fn adopt_realised<'a>(
         &'a self,
-        build_id: &str,
+        build_task: &BuildSpec,
+        task_index: u32,
         realised: Vec<(String, String)>,
         updater: &mut JobUpdater,
         gc_handles: &mut Vec<GcRootHandle>,
         outputs: &mut Vec<compress::OutputNar<'a>>,
     ) -> Result<()> {
+        if self.log_fetch_from_store {
+            build::forward_store_build_log(updater, task_index, &build_task.drv_path).await;
+        }
         for (_, path) in &realised {
             gc_handles.push(self.gcroots.add(path).await);
         }
@@ -507,7 +511,7 @@ impl JobExecutor {
             .map(|(name, path)| realised_output(name, path))
             .collect();
         updater
-            .report_build_output(build_id.to_owned(), reported, None, true)
+            .report_build_output(build_task.build_id.clone(), reported, None, true)
             .await?;
         outputs.extend(
             realised
@@ -547,7 +551,8 @@ impl JobExecutor {
                 split_already_realised(self.store.as_ref(), named_outputs(build_task)).await;
             if fully_realised(&realised, &missing) {
                 self.adopt_realised(
-                    &build_task.build_id,
+                    build_task,
+                    index as u32,
                     realised,
                     updater,
                     &mut gc_handles,
