@@ -75,10 +75,9 @@ pub(super) async fn get_basic_derivation(
         outputs.insert(output_name, drv_output);
     }
 
-    // ── Input paths: input_sources + output paths of input_derivations ────────
-    // The daemon needs all direct inputs present in the store before building.
-    // input_sources are plain store paths; input_derivations map drv→outputs,
-    // so we read each input .drv to resolve the concrete output paths.
+    // ── Input paths: input_sources + requested outputs of input_derivations ───
+    // Exactly what prefetch fetched: the daemon rejects any listed input that
+    // is absent, and an input's unrequested outputs are never fetched.
     let mut inputs: harmonia_store_path::StorePathSet = drv
         .input_sources
         .iter()
@@ -95,7 +94,7 @@ pub(super) async fn get_basic_derivation(
         })
         .collect();
 
-    for (input_drv_path, _output_names) in &drv.input_derivations {
+    for (input_drv_path, output_names) in &drv.input_derivations {
         let input_full = nix_store_path(input_drv_path);
         let input_bytes = match tokio::fs::read(&input_full).await {
             Ok(b) => b,
@@ -113,19 +112,14 @@ pub(super) async fn get_basic_derivation(
             }
         };
 
-        for o in &input_drv.outputs {
-            if o.path.is_empty() {
-                continue;
-            }
-
-            let base = strip_nix_store_prefix(&o.path);
-            match StorePath::from_base_path(&base) {
+        for path in input_drv.requested_output_paths(output_names) {
+            match StorePath::from_base_path(&strip_nix_store_prefix(path)) {
                 Ok(sp) => {
                     inputs.insert(sp);
                 }
 
                 Err(e) => {
-                    warn!(path = %o.path, error = %e, "skipping input drv output: not a valid store path");
+                    warn!(path = %path, error = %e, "skipping input drv output: not a valid store path");
                 }
             }
         }

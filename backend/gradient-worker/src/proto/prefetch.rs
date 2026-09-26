@@ -307,7 +307,7 @@ impl<'a> InputPrefetcher<'a> {
         let mut wanted: HashSet<String> = drv.input_sources.iter().cloned().collect();
         for (input_drv_path, outputs) in &drv.input_derivations {
             let input_drv = read_local_drv(input_drv_path).await?;
-            wanted.extend(requested_output_paths(&input_drv, outputs).map(str::to_owned));
+            wanted.extend(input_drv.requested_output_paths(outputs).map(str::to_owned));
         }
 
         Ok(wanted)
@@ -781,16 +781,6 @@ async fn read_local_drv(drv_path: &str) -> Result<gradient_derivation::Derivatio
     parse_drv(&bytes).with_context(|| format!("parse .drv {full} for prefetch"))
 }
 
-fn requested_output_paths<'d>(
-    drv: &'d gradient_derivation::Derivation,
-    requested: &'d [String],
-) -> impl Iterator<Item = &'d str> {
-    drv.outputs
-        .iter()
-        .filter(|o| !o.path.is_empty() && requested.contains(&o.name))
-        .map(|o| o.path.as_str())
-}
-
 /// Result of splitting a `CacheQuery Pull` response into its three categories.
 #[derive(Debug, Default)]
 struct Classified {
@@ -981,23 +971,6 @@ mod tests {
             .downcast_ref::<MissingInputs>()
             .expect("MissingInputs survives anyhow boxing");
         assert_eq!(recovered.0, paths);
-    }
-
-    #[test]
-    fn only_the_requested_outputs_of_an_input_are_wanted() {
-        let mesa = parse_drv(br#"Derive([("debug","/nix/store/dddddddddddddddddddddddddddddddd-mesa-debug","",""),("drivers","/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-mesa-drivers","",""),("out","/nix/store/oooooooooooooooooooooooooooooooo-mesa","","")],[],[],"x86_64-linux","/bin/sh",[],[])"#).unwrap();
-
-        let requested = ["drivers".to_owned(), "out".to_owned()];
-
-        let wanted: Vec<&str> = requested_output_paths(&mesa, &requested).collect();
-
-        assert_eq!(
-            wanted,
-            vec![
-                "/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-mesa-drivers",
-                "/nix/store/oooooooooooooooooooooooooooooooo-mesa",
-            ]
-        );
     }
 
     #[test]

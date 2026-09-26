@@ -125,6 +125,18 @@ impl Derivation {
         }
     }
 
+    /// Store paths of the outputs a consumer requests by name. Deferred
+    /// (content-addressed) outputs have no path yet and are skipped.
+    pub fn requested_output_paths<'d>(
+        &'d self,
+        requested: &'d [String],
+    ) -> impl Iterator<Item = &'d str> {
+        self.outputs
+            .iter()
+            .filter(|o| !o.path.is_empty() && requested.contains(&o.name))
+            .map(|o| o.path.as_str())
+    }
+
     /// Returns the `requiredSystemFeatures` as a list.
     pub fn required_system_features(&self) -> Vec<String> {
         let attrs = self.structured_attrs();
@@ -527,5 +539,22 @@ mod tests {
         assert!(!parse_drv(zero).unwrap().allow_substitutes());
         let on = br#"Derive([("out","/nix/store/a","","")],[],[],"x86_64-linux","/nix/store/bash",[],[("name","x"),("allowSubstitutes","1")])"#;
         assert!(parse_drv(on).unwrap().allow_substitutes());
+    }
+
+    #[test]
+    fn only_the_requested_outputs_of_an_input_are_wanted() {
+        let mesa = parse_drv(br#"Derive([("debug","/nix/store/dddddddddddddddddddddddddddddddd-mesa-debug","",""),("drivers","/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-mesa-drivers","",""),("out","/nix/store/oooooooooooooooooooooooooooooooo-mesa","","")],[],[],"x86_64-linux","/bin/sh",[],[])"#).unwrap();
+
+        let requested = ["drivers".to_owned(), "out".to_owned()];
+
+        let wanted: Vec<&str> = mesa.requested_output_paths(&requested).collect();
+
+        assert_eq!(
+            wanted,
+            vec![
+                "/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-mesa-drivers",
+                "/nix/store/oooooooooooooooooooooooooooooooo-mesa",
+            ]
+        );
     }
 }
