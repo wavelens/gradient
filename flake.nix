@@ -13,12 +13,14 @@
     crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
-    pkgs = import nixpkgs {
+  outputs = { self, nixpkgs, flake-utils, crane, ... }@inputs: let
+    pkgsFor = system: import nixpkgs {
       inherit system;
       overlays = map (v: self.overlays.${v}) (builtins.attrNames self.overlays);
       config = { allowUnfree = true; };
     };
+  in flake-utils.lib.eachDefaultSystem (system: let
+    pkgs = pkgsFor system;
 
     craneLib = crane.mkLib pkgs;
 
@@ -36,6 +38,7 @@
       cli-clippy = self.packages.${system}.gradient-cli-full.clippy;
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
+      test-topologies = import ./nix/tests/harness/check.nix { inherit pkgs; inherit (pkgs) lib; };
     };
 
     packages = rec {
@@ -115,6 +118,19 @@
       GRADIENT_REPORT_ERRORS = "false";
     };
   }) // {
+    lib.tests = {
+      topologies.direct = import ./nix/tests/harness/topologies/direct.nix;
+      contract = import ./nix/tests/harness/contract.nix;
+      scheduler = { system, topology }: import ./nix/tests/gradient/scheduler/mk.nix {
+        inherit self topology;
+        pkgs = pkgsFor system;
+      };
+      e2e = { system, topology }: import ./nix/tests/gradient/e2e/mk.nix {
+        inherit self topology;
+        pkgs = pkgsFor system;
+      };
+    };
+
     overlays = {
       gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };

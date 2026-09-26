@@ -14,7 +14,7 @@ the catalogue, and a per-test list goes stale and collides on every merge.
 | CLI | `cli/tests/*.rs`, `cli/connector/tests/*.rs` | the installed `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | components and services under vitest |
 | Report inspector | `nix/tools/report-inspector/tests/` | the inspector's commands over a report fixture the test builds |
-| NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
+| NixOS VM | `nix/tests/gradient/<name>/`, `nix/tests/harness/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
 | SQL plan gate | `backend/src/sql_gate/`, run by the e2e VM test | every registered statement's plan at production scale |
 | Mock daemon | `daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/` | the scheduler and workers against a scripted Nix store, at synthetic speed |
 
@@ -230,6 +230,19 @@ builds the binary into the `daemon` output of the `gradient` package, and the
   references, sizes and (scaled) build durations. What was substituted or
   already built before the run starts cached; `--allow-failed` replays failed
   builds as failures, `--anonymize` replaces package names with `n0`, `n1`, ...
+
+## Topologies
+
+The scheduler and e2e suites are `mk.nix { self, pkgs, topology }`; their
+`default.nix` passes `nix/tests/harness/topologies/direct.nix`, and the flake
+exports both as `lib.tests.{scheduler,e2e} { system, topology }` so another repo
+(the proxy) runs the same suites over its own wiring.
+
+- A topology is `{ pkgs, lib, workers, token, ... }: { nodes, upstreamPeers, workerNodes, provides, pythonPrelude }`.
+- The suite owns the `server` node and each worker's role (mock daemon, features, closure); the topology owns how workers reach the server and which ids the server registers (`upstreamPeers`).
+- `nix/tests/harness/contract.nix` (`lib.tests.contract`) is what the suites assert at evaluation; `check.nix` (the `test-topologies` check) pins the direct topology.
+- Scripts use the prelude, never a hardcoded unit or id: `WORKER_NODES`, `wait_workers_ready()`, `fleet_units()` (every non-server gradient service as `(node, unit)`), `requires(what, *tags)`.
+- An assertion that holds only when the server sees each worker itself goes under `requires(..., "distinct-upstream-workers")`, which logs `skipping <what>` when the topology lacks the tag. Gate the assertion, not the phase, when the phase also drives state later phases need.
 
 ## Conventions
 
