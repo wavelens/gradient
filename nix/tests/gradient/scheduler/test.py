@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
-# FLAKES and RESOLVED are prepended by default.nix: spec file -> flake dir / resolved store-spec.
+# mk.nix prepends FLAKES and RESOLVED (spec file -> flake dir / resolved store-spec) and the topology
+# prelude (WORKER_NODES, wait_workers_ready, fleet_units, requires).
 # Build order is checked by each mock daemon (BuildWithMissingInput), never across VM clocks.
 
-WORKERS = [worker1, worker2]
 API = "http://gradient.local/api/v1"
 TOKEN = ""
 
@@ -73,8 +73,10 @@ def wait_evaluation(eval_id, want, timeout=300):
         f"JOIN derivation d ON d.id = db.derivation WHERE bj.evaluation = '{eval_id}' ORDER BY d.name"
     ))
     print(server.succeed("journalctl -u gradient-server --no-pager -n 120"))
-    for w in WORKERS:
-        print(w.succeed("journalctl -u gradient-daemon -u gradient-worker --no-pager -n 80"))
+    for node, unit in fleet_units():
+        print(node.succeed(f"journalctl -u {unit} --no-pager -n 80"))
+    for w in WORKER_NODES:
+        print(w.succeed("journalctl -u gradient-daemon --no-pager -n 80"))
     raise Exception(f"evaluation {eval_id} is {status}, wanted {want}")
 
 
@@ -88,7 +90,7 @@ def out_of(spec, node):
 
 def builds_of(spec, node):
     drv = drv_of(spec, node)
-    return [(w, e) for w in WORKERS for e in daemon(w, "builds") if drv in e["paths"]]
+    return [(w, e) for w in WORKER_NODES for e in daemon(w, "builds") if drv in e["paths"]]
 
 
 def only_build(spec, node):
@@ -103,7 +105,7 @@ def uploaded(path):
 
 
 def assert_clean():
-    for w in WORKERS:
+    for w in WORKER_NODES:
         violations = daemon(w, "violations")
         assert violations == [], f"{w.name}: {violations}"
 
@@ -116,7 +118,7 @@ def phase(spec):
 
 def merged_journal():
     rows = []
-    for w in WORKERS:
+    for w in WORKER_NODES:
         rows += [dict(e, worker=w.name) for e in daemon(w, "journal")]
     return sorted(rows, key=lambda e: e["at_us"])
 
@@ -180,23 +182,20 @@ def latency_report(spec):
         "overhead_factor": wall_ms / critical if critical else None,
         "ready_to_dispatch_ms": spread(ready_to_dispatch),
         "build_ms": spread(list(build_ms.values())),
-        "ops": {w.name: daemon(w, "latency") for w in WORKERS},
+        "ops": {w.name: daemon(w, "latency") for w in WORKER_NODES},
     }
     print(json.dumps(report, indent=2))
     server.succeed(f"mkdir -p /tmp/xchg-out && echo '{json.dumps(report)}' >> /tmp/xchg-out/latency.jsonl")
-    for w in WORKERS:
+    for w in WORKER_NODES:
         daemon(w, "reset-journal")
     return report
 
 
 start_all()
 server.wait_for_unit("gradient-server.service")
-for w in WORKERS:
+for w in WORKER_NODES:
     w.wait_for_unit("gradient-daemon.service")
-    w.wait_for_unit("gradient-worker.service")
-    w.wait_until_succeeds(
-        "journalctl -u gradient-worker --no-pager | grep -q 'handshake successful'", timeout=180
-    )
+wait_workers_ready()
 login()
 
 e = phase("chain-3")
@@ -245,11 +244,11 @@ latency_report("upstream-cached")
 
 banner("unchanged commit")
 wait_evaluation(evaluate("chain-3"), "Completed")
-assert all(daemon(w, "builds") == [] for w in WORKERS), "an unchanged commit rebuilt something"
+assert all(daemon(w, "builds") == [] for w in WORKER_NODES), "an unchanged commit rebuilt something"
 assert_clean()
 
 banner("forgotten output")
-for w in WORKERS:
+for w in WORKER_NODES:
     for n in ["c0", "c1", "c2"]:
         daemon(w, "forget", {"node": f"chain-3/{n}"})
 e = phase("chain-4")
@@ -270,12 +269,12 @@ banner("worker lost mid build")
 e = phase("hang")
 hanging = None
 for _ in range(300):
-    hanging = next((w for w in WORKERS if "hang/c1" in daemon(w, "running")), None)
+    hanging = next((w for w in WORKER_NODES if "hang/c1" in daemon(w, "running")), None)
     if hanging:
         break
     server.sleep(1)
 assert hanging, "c1 never started building"
-survivor = next(w for w in WORKERS if w is not hanging)
+survivor = next(w for w in WORKER_NODES if w is not hanging)
 daemon(survivor, "outcome", {"node": "hang/c1", "outcome": "success"})
 hanging.succeed("systemctl kill --signal=KILL gradient-worker && systemctl stop gradient-worker")
 wait_evaluation(e, "Completed")
@@ -292,19 +291,20 @@ banner("worker frozen mid build")
 e = phase("frozen")
 frozen = None
 for _ in range(300):
-    frozen = next((w for w in WORKERS if "frozen/c1" in daemon(w, "running")), None)
+    frozen = next((w for w in WORKER_NODES if "frozen/c1" in daemon(w, "running")), None)
     if frozen:
         break
     server.sleep(1)
 assert frozen, "c1 never started building"
-survivor = next(w for w in WORKERS if w is not frozen)
+survivor = next(w for w in WORKER_NODES if w is not frozen)
 daemon(survivor, "outcome", {"node": "frozen/c1", "outcome": "success"})
 since = frozen.succeed("date +%s").strip()
 server_since = server.succeed("date +%s").strip()
 frozen.succeed("systemctl kill --signal=STOP gradient-worker")
-server.wait_until_succeeds(
-    f"journalctl -u gradient-server --no-pager --since=@{server_since} | grep -q 'presumed dead'", timeout=120
-)
+if requires("the server's presumed-dead verdict", "distinct-upstream-workers"):
+    server.wait_until_succeeds(
+        f"journalctl -u gradient-server --no-pager --since=@{server_since} | grep -q 'presumed dead'", timeout=120
+    )
 wait_evaluation(e, "Completed")
 frozen.succeed("systemctl kill --signal=CONT gradient-worker")
 frozen.wait_until_succeeds(
@@ -339,7 +339,7 @@ while True:
 e = phase("replay")
 wait_evaluation(e, "Failed" if failing else "Completed", timeout=900)
 by_drv = {}
-for w in WORKERS:
+for w in WORKER_NODES:
     for entry in daemon(w, "builds"):
         for p in entry["paths"]:
             by_drv.setdefault(p, []).append((w, entry))
