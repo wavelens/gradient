@@ -112,6 +112,10 @@ WebSocket; the scheduler, cache and CI code are libraries the tree drives.
 
 `gradient-worker` is a standalone process that connects to the server over WebSocket at `/proto`. It handles fetch, eval, build, and sign tasks dispatched by the server's scheduler. Workers can run co-located on the server host or on separate machines.
 
+### Proxy
+
+`gradient-proxy` (a separate, closed-source repository) is a federation gateway: one worker to its upstream server, an authority to its own workers. It reuses `gradient-wire` (protocol, handshake, limiter), `gradient-worker-client` (upstream session, reconnect, test peer), `gradient-pool` (worker pool and aggregate), `gradient-storage` (`NarStore`, partial transfers, relay serving) and `gradient-util`, and path-depends on them from `../backend`. See the Federation section of [Proto](proto.md).
+
 ### Server has no Nix daemon
 
 The server does not require access to a Nix daemon. All store interaction (eval, build, fetch, sign) happens on worker nodes, which talk to a local `nix-daemon` via harmonia. The server reads `.narinfo` responses straight from DB rows (`cached_path`) and serves artefact downloads from `nar_storage` (local FS or S3), extracting individual files from the stored NARs on the fly. GC roots are created and removed only on the worker that builds the output.

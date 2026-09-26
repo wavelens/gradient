@@ -239,10 +239,11 @@ exports both as `lib.tests.{scheduler,e2e} { system, topology }` so another repo
 (the proxy) runs the same suites over its own wiring.
 
 - A topology is `{ pkgs, lib, workers, token, ... }: { nodes, upstreamPeers, workerNodes, provides, pythonPrelude }`.
-- The suite owns the `server` node and each worker's role (mock daemon, features, closure); the topology owns how workers reach the server and which ids the server registers (`upstreamPeers`).
+- The suite owns the `server` node (and e2e the `client` node) and each worker's role (mock daemon, features, closure); the topology owns how workers reach the server and which ids the server registers (`upstreamPeers`).
 - `nix/tests/harness/contract.nix` (`lib.tests.contract`) is what the suites assert at evaluation; `check.nix` (the `test-topologies` check) pins the direct topology.
 - Scripts use the prelude, never a hardcoded unit or id: `WORKER_NODES`, `wait_workers_ready()`, `fleet_units()` (every non-server gradient service as `(node, unit)`), `requires(what, *tags)`.
 - An assertion that holds only when the server sees each worker itself goes under `requires(..., "distinct-upstream-workers")`, which logs `skipping <what>` when the topology lacks the tag. Gate the assertion, not the phase, when the phase also drives state later phases need.
+- The proxy repository runs both suites through its `topologies.proxied` (workers dial a `gradient-proxy`, the server registers only the proxy) as the `scheduler-proxied` and `e2e-proxied` checks.
 
 ## Conventions
 
