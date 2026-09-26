@@ -789,7 +789,7 @@ pub(crate) static RECOUNT_DEMANDED_SQL: LazyLock<String> = LazyLock::new(|| {
          WHERE {open} \
            AND db.demanded <> (db.derivation IN (SELECT derivation FROM demanded)) \
          RETURNING db.derivation, db.demanded",
-        cte = crate::graph_sql::open_closure_cte_body("demanded", &open_entry_points(), ""),
+        cte = crate::graph_sql::open_closure_cte_body("demanded", &open_entry_points(), None),
         open = open_predicate("db"),
     )
 });
@@ -843,22 +843,23 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
     let region = crate::graph_sql::open_closure_cte_body(
         "region",
         "SELECT NULL::uuid AS evaluation, unnest($1::uuid[]) AS derivation, true AS builder",
-        "",
+        None,
     );
-    // Both halves of the parent lookup are fenced with `OFFSET 0` so each stays a
-    // keyed probe per region member: unfenced, the edges are hoisted into a scan of
-    // every demanded anchor, and the parent row is merge-joined against a scan of
-    // every open one. It demands what the walk's own step would: an open, demanded
-    // parent outside the region, over a runtime edge from anything and over any
-    // edge from a builder.
-    let parent = format!(
-        "EXISTS (SELECT 1 FROM (SELECT e.derivation AS parent, e.kind FROM derivation_dependency e \
-                                WHERE e.dependency = r.derivation OFFSET 0) pe, \
-                 LATERAL (SELECT 1 FROM derivation_build p \
-                          JOIN derivation pw ON pw.id = p.derivation \
-                          WHERE p.derivation = pe.parent AND p.demanded AND {open} \
-                            AND (({builder}) OR pe.kind IN (1, 2)) OFFSET 0) q \
-                 WHERE pe.parent NOT IN (SELECT derivation FROM region))",
+    // The planner sizes the region from the root count, far past its real size, and
+    // a membership subplan it will not hash scans the whole region per probe. Every
+    // region test below is a join over whole sets instead; the parent lookup stays a
+    // fenced keyed probe per member. It demands what the walk's own step would: an
+    // open, demanded parent outside the region, over a runtime edge from anything
+    // and over any edge from a builder.
+    let entered = format!(
+        "entered(derivation) AS (SELECT pe.dependency FROM region r, \
+         LATERAL (SELECT e.derivation AS parent, e.dependency, e.kind \
+                  FROM derivation_dependency e WHERE e.dependency = r.derivation OFFSET 0) pe, \
+         LATERAL (SELECT 1 FROM derivation_build p \
+                  JOIN derivation pw ON pw.id = p.derivation \
+                  WHERE p.derivation = pe.parent AND p.demanded AND {open} \
+                    AND (({builder}) OR pe.kind IN (1, 2)) OFFSET 0) q \
+         WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent))",
         open = open_predicate("p"),
         builder = builder_predicate("p", "pw"),
     );
@@ -867,23 +868,18 @@ static RECOMPUTE_DEMAND_SQL: LazyLock<String> = LazyLock::new(|| {
          JOIN derivation_build rb ON rb.derivation = r.derivation \
          JOIN derivation w ON w.id = rb.derivation \
          WHERE {open} \
-           AND (EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = r.derivation) OR {parent})",
+           AND r.derivation IN (SELECT ep.derivation FROM entry_point ep \
+                                UNION ALL SELECT derivation FROM entered)",
         builder = builder_predicate("rb", "w"),
         open = open_predicate("rb"),
     );
-    // Double negation keeps the region a hashed subplan built once; `IN` is pulled
-    // up into a semi-join that re-aggregates the region per demanded row.
-    let demanded = crate::graph_sql::open_closure_cte_body(
-        "demanded",
-        &seed,
-        "NOT (e.dependency NOT IN (SELECT derivation FROM region))",
-    );
+    let demanded = crate::graph_sql::open_closure_cte_body("demanded", &seed, Some("region"));
 
     format!(
-        "WITH RECURSIVE {region}, {demanded} \
-         SELECT DISTINCT r.derivation, \
-                (r.derivation IN (SELECT derivation FROM demanded)) AS demanded \
-         FROM region r ORDER BY r.derivation",
+        "WITH RECURSIVE {region}, {entered}, {demanded} \
+         SELECT DISTINCT r.derivation, (d.derivation IS NOT NULL) AS demanded \
+         FROM region r LEFT JOIN (SELECT DISTINCT derivation FROM demanded) d \
+           ON d.derivation = r.derivation ORDER BY r.derivation",
     )
 });
 
@@ -1902,17 +1898,26 @@ mod tests {
             "{walk}"
         );
         assert!(
-            walk.contains("pe.parent NOT IN (SELECT derivation FROM region)"),
+            walk.contains(
+                "WHERE NOT EXISTS (SELECT 1 FROM region x WHERE x.derivation = pe.parent))"
+            ),
             "the seed must come from demanders OUTSIDE the region: {walk}"
         );
-        // Both region tests are hashed subplans built once: a semi-join re-aggregates
-        // the region per demanded row, and an unfenced parent merge-joins a scan of
-        // every open anchor per region member. A nixos closure ran past 170 s either way.
+        // The planner sizes the region from the root count, and an estimate past
+        // hash_mem turns every `IN (SELECT .. FROM region)` into a scan of the whole
+        // CTE per probe: 6.9k roots ran 41 min. Every region test is therefore a
+        // join over whole sets, never a subplan, and the demanded step's test sits
+        // outside its fenced probe so it runs once per level, not once per row.
         assert!(
             walk.contains(
-                "AND NOT (e.dependency NOT IN (SELECT derivation FROM region)) OFFSET 0) s"
+                "OFFSET 0) s OFFSET 0) t WHERE EXISTS (SELECT 1 FROM region x WHERE x.derivation = t.next))"
             ),
-            "the demanded step probes the region as a hashed subplan: {walk}"
+            "the demanded step semi-joins the region once per level: {walk}"
+        );
+        assert!(
+            !walk.contains("IN (SELECT derivation FROM region)")
+                && !walk.contains("IN (SELECT derivation FROM demanded)"),
+            "no region or demanded membership is a subplan: {walk}"
         );
         assert!(
             !walk.contains("JOIN derivation_build p ON"),
@@ -1925,14 +1930,15 @@ mod tests {
         // a `Completed` anchor whose closure has a hole.
         assert!(
             walk.contains(
-                "WHERE e.dependency = r.derivation OFFSET 0) pe, \
+                "entered(derivation) AS (SELECT pe.dependency FROM region r, \
+                 LATERAL (SELECT e.derivation AS parent, e.dependency, e.kind \
+                 FROM derivation_dependency e WHERE e.dependency = r.derivation OFFSET 0) pe, \
                  LATERAL (SELECT 1 FROM derivation_build p \
                  JOIN derivation pw ON pw.id = p.derivation \
                  WHERE p.derivation = pe.parent AND p.demanded \
                  AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
                  AND ((pw.walked AND p.probed AND NOT p.substitutable \
-                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2)) OFFSET 0) q \
-                 WHERE pe.parent NOT IN (SELECT derivation FROM region))"
+                 AND p.status IN (0, 1, 2, 8)) OR pe.kind IN (1, 2)) OFFSET 0) q"
             ),
             "{walk}"
         );
@@ -1941,7 +1947,8 @@ mod tests {
                 "FROM region r JOIN derivation_build rb ON rb.derivation = r.derivation \
                  JOIN derivation w ON w.id = rb.derivation \
                  WHERE (NOT rb.fetchable AND rb.status NOT IN (4, 6, 9)) \
-                 AND (EXISTS (SELECT 1 FROM entry_point ep"
+                 AND r.derivation IN (SELECT ep.derivation FROM entry_point ep \
+                 UNION ALL SELECT derivation FROM entered)"
             ),
             "a settled root seeds nothing, and a seed carries its own builder bit: {walk}"
         );
@@ -1950,7 +1957,10 @@ mod tests {
             "a name is what adoption writes for what the walk reaches: {walk}"
         );
         assert!(
-            walk.contains("FROM region r ORDER BY r.derivation"),
+            walk.contains(
+                "FROM region r LEFT JOIN (SELECT DISTINCT derivation FROM demanded) d \
+                 ON d.derivation = r.derivation ORDER BY r.derivation"
+            ),
             "the write takes its locks in the order the walk sorted: {walk}"
         );
         let write = norm(&log[3]);

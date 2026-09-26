@@ -471,7 +471,7 @@ pub fn kept_hashes_cte_body(reachable: &str, runtime: &str) -> String {
 pub fn open_closure_cte(name: &str, seed_select: &str) -> String {
     format!(
         "WITH RECURSIVE {}",
-        open_closure_cte_body(name, seed_select, "")
+        open_closure_cte_body(name, seed_select, None)
     )
 }
 
@@ -483,32 +483,32 @@ pub fn open_closure_cte(name: &str, seed_select: &str) -> String {
 /// reached, so a fetchable input and a failed one both end the walk. A relay is
 /// reached and never stepped through on a build edge, which is what keeps a relayed
 /// subtree from being built. There is no name guard: a name is what adoption writes
-/// for what this reaches, and demand is what the recount writes for it. `bound` is
-/// an extra predicate over the edge alias `e`, applied inside the probe so a
-/// region-scoped walk prunes at the index lookup.
-pub fn open_closure_cte_body(name: &str, seed_select: &str, bound: &str) -> String {
-    let restrict = if bound.is_empty() {
-        String::new()
-    } else {
-        format!(" AND {bound}")
+/// for what this reaches, and demand is what the recount writes for it. `within`
+/// names a CTE of derivations the walk stays inside, tested outside the fenced
+/// probe so each level is semi-joined against it once.
+pub fn open_closure_cte_body(name: &str, seed_select: &str, within: Option<&str>) -> String {
+    let step = lateral_step(
+        name,
+        "c.evaluation, s.next, s.builder",
+        &format!(
+            "SELECT e.dependency AS next, ({builder}) AS builder \
+             FROM derivation_dependency e \
+             JOIN derivation_build dep ON dep.derivation = e.dependency \
+             JOIN derivation w ON w.id = dep.derivation \
+             WHERE e.derivation = c.derivation AND (c.builder OR e.kind IN (1, 2)) \
+               AND {open}",
+            builder = builder_predicate("dep", "w"),
+            open = open_predicate("dep"),
+        ),
+    );
+    let step = match within {
+        None => step,
+        Some(set) => format!(
+            "SELECT t.evaluation, t.next, t.builder FROM ({step} OFFSET 0) t \
+             WHERE EXISTS (SELECT 1 FROM {set} x WHERE x.derivation = t.next)"
+        ),
     };
-    format!(
-        "{name}(evaluation, derivation, builder) AS ({seed_select} UNION {})",
-        lateral_step(
-            name,
-            "c.evaluation, s.next, s.builder",
-            &format!(
-                "SELECT e.dependency AS next, ({builder}) AS builder \
-                 FROM derivation_dependency e \
-                 JOIN derivation_build dep ON dep.derivation = e.dependency \
-                 JOIN derivation w ON w.id = dep.derivation \
-                 WHERE e.derivation = c.derivation AND (c.builder OR e.kind IN (1, 2)) \
-                   AND {open}{restrict}",
-                builder = builder_predicate("dep", "w"),
-                open = open_predicate("dep"),
-            ),
-        )
-    )
+    format!("{name}(evaluation, derivation, builder) AS ({seed_select} UNION {step})")
 }
 
 #[cfg(test)]
@@ -1074,27 +1074,30 @@ mod tests {
         );
     }
 
-    /// A bounded walk applies its restriction inside the fenced probe, after the
-    /// edge kind and the reach test, so a region-scoped recompute prunes at the
-    /// index lookup instead of walking the live graph and discarding it.
+    /// A walk kept inside a set tests membership outside the fenced probe, so the
+    /// planner semi-joins the whole level against the set once instead of
+    /// re-reading the set for every working-table row.
     #[test]
-    fn a_bound_prunes_inside_the_probe() {
+    fn a_walk_within_a_set_semi_joins_it_once_per_level() {
         let cte = norm(&open_closure_cte_body(
             "demanded",
             "SELECT NULL::uuid, r.derivation, r.builder FROM region r",
-            "e.dependency IN (SELECT derivation FROM region)",
+            Some("region"),
         ));
         assert!(
             cte.contains(&format!(
-                "AND {} AND e.dependency IN (SELECT derivation FROM region) OFFSET 0) s",
+                "AND {} OFFSET 0) s OFFSET 0) t \
+                 WHERE EXISTS (SELECT 1 FROM region x WHERE x.derivation = t.next))",
                 norm(&open_predicate("dep"))
             )),
             "{cte}"
         );
         assert!(
-            norm(&open_closure_cte_body("x", "SELECT 1", ""))
-                .contains(&format!("AND {} OFFSET 0) s", norm(&open_predicate("dep")))),
-            "an empty bound is the unrestricted walk"
+            norm(&open_closure_cte_body("x", "SELECT 1", None)).ends_with(&format!(
+                "AND {} OFFSET 0) s)",
+                norm(&open_predicate("dep"))
+            )),
+            "no set is the unrestricted walk"
         );
     }
 }
