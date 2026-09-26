@@ -283,9 +283,7 @@ async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<Job
         .map(|p| JobPhaseView {
             seq: p.seq,
             parent_seq: p.parent_seq,
-            phase: gradient_wire::types::JobPhase::from_i16(p.phase)
-                .map(|k| k.as_str().to_string())
-                .unwrap_or_else(|| format!("unknown_{}", p.phase)),
+            phase: gradient_wire::types::JobPhase::name_of(p.phase).into_owned(),
             start_ms: p.start_ms,
             end_ms: p.end_ms,
             paths: p.paths,

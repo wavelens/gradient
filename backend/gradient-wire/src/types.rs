@@ -596,7 +596,7 @@ impl JobPhase {
 
     /// Wire/DB discriminant, written out so reordering the enum cannot silently
     /// re-label historical rows. 9 is retired (`substitute_relay`) and must stay
-    /// unused; a historical span carrying it renders as `unknown_9`.
+    /// unused; [`Self::name_of`] still names it for historical spans.
     pub const fn as_i16(self) -> i16 {
         match self {
             Self::Fetch => 0,
@@ -636,6 +636,15 @@ impl JobPhase {
             15 => Self::Download,
             _ => return None,
         })
+    }
+
+    /// Display name of a stored discriminant, including retired ones.
+    pub fn name_of(v: i16) -> std::borrow::Cow<'static, str> {
+        match (Self::from_i16(v), v) {
+            (Some(phase), _) => phase.as_str().into(),
+            (None, 9) => "substitute_relay".into(),
+            (None, _) => format!("unknown_{v}").into(),
+        }
     }
 }
 
