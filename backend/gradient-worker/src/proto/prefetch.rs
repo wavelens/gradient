@@ -221,22 +221,6 @@ pub(crate) async fn download_one_presigned(
     unreachable!("loop returns on the final attempt")
 }
 
-/// How the closure walker treats `.drv` content seeds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ClosureMode {
-    /// Mine each fetched `.drv` for outputs **and** input_derivations +
-    /// input_sources. Use when prefetching binary inputs: declared outputs of
-    /// intermediate `.drv`s are typically cached and downstream builds will
-    /// need them, so eager fetching is a useful optimisation.
-    FollowOutputs,
-    /// Skip output seeds; mine only input_derivations + input_sources. Use
-    /// when fetching a build target's own `.drv`: its outputs are by
-    /// definition not in the cache (we're about to build them), and asking
-    /// the server for them would surface as a fatal `Uncached` classification
-    /// even though the daemon only needs the input chain to accept the import.
-    InputsOnly,
-}
-
 // ── InputPrefetcher ───────────────────────────────────────────────────────────
 
 /// Drives the five-stage pipeline that ensures every input path a build needs
@@ -288,10 +272,7 @@ impl<'a> InputPrefetcher<'a> {
     /// The fetch must also pull the `.drv`'s reference chain - every
     /// transitive input_derivation `.drv` plus its input_sources - because
     /// `add_to_store_nar` rejects the build target's `.drv` if any reference
-    /// declared in its `ValidPathInfo` is absent from the local store. We use
-    /// [`ClosureMode::InputsOnly`] to skip output seeds: the build target's
-    /// outputs are by construction not cached (we're about to produce them),
-    /// and the daemon doesn't need them present to accept the `.drv` import.
+    /// declared in its `ValidPathInfo` is absent from the local store.
     async fn ensure_self_drv_present(&mut self) -> Result<()> {
         let full_drv_path = nix_store_path(&self.drv_path);
         if tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
@@ -304,8 +285,7 @@ impl<'a> InputPrefetcher<'a> {
             "build target drv absent locally; fetching from server cache"
         );
 
-        self.fetch_closure(vec![self.drv_path.to_owned()], ClosureMode::InputsOnly)
-            .await?;
+        self.fetch_closure(vec![self.drv_path.to_owned()]).await?;
 
         if !tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
             return Err(anyhow::anyhow!(
@@ -317,48 +297,16 @@ impl<'a> InputPrefetcher<'a> {
         Ok(())
     }
 
-    /// Stage 1 - collect every input store path declared by this derivation.
-    ///
-    /// Reads `input_sources` (plain paths) and the output paths of each
-    /// `input_derivation` by parsing their `.drv` files.
+    /// Stage 1 - collect the input store paths this derivation declares: its
+    /// `input_sources` and, of each input derivation, only the outputs it
+    /// requests. Stage 0 left every input `.drv` in the store, since they are
+    /// references of the target's `.drv`.
     async fn enumerate_inputs(&self) -> Result<HashSet<String>> {
-        let full_drv_path = nix_store_path(&self.drv_path);
-        let drv_bytes = tokio::fs::read(&full_drv_path)
-            .await
-            .with_context(|| format!("read .drv {} for prefetch", full_drv_path))?;
-        let drv = parse_drv(&drv_bytes)
-            .with_context(|| format!("parse .drv {} for prefetch", full_drv_path))?;
-
-        let mut wanted: HashSet<String> = HashSet::new();
-        for src in &drv.input_sources {
-            wanted.insert(src.clone());
-        }
-        for (input_drv_path, _outputs) in &drv.input_derivations {
-            let input_full = nix_store_path(input_drv_path);
-            match tokio::fs::read(&input_full).await {
-                Ok(bytes) => match parse_drv(&bytes) {
-                    Ok(input_drv) => {
-                        for o in &input_drv.outputs {
-                            if !o.path.is_empty() {
-                                wanted.insert(o.path.clone());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(drv = %input_full, error = %e, "cannot parse input .drv during prefetch");
-                    }
-                },
-                Err(e) => {
-                    debug!(drv = %input_full, error = %e, "input .drv not present locally; queuing for fetch");
-                    // Queue the input .drv itself. Its outputs will be
-                    // discovered after it lands in the local store and the
-                    // closure walk processes its `references` (which include
-                    // any input drvs of its own). Output paths the build
-                    // ultimately needs are reached transitively via the same
-                    // walk.
-                    wanted.insert(input_drv_path.clone());
-                }
-            }
+        let drv = read_local_drv(&self.drv_path).await?;
+        let mut wanted: HashSet<String> = drv.input_sources.iter().cloned().collect();
+        for (input_drv_path, outputs) in &drv.input_derivations {
+            let input_drv = read_local_drv(input_drv_path).await?;
+            wanted.extend(requested_output_paths(&input_drv, outputs).map(str::to_owned));
         }
 
         Ok(wanted)
@@ -638,19 +586,12 @@ impl<'a> InputPrefetcher<'a> {
             );
             return Ok(());
         }
-        self.fetch_closure(initial_missing, ClosureMode::FollowOutputs)
-            .await
+        self.fetch_closure(initial_missing).await
     }
 
     /// Fetch a seed set of paths plus their transitive closure into the local nix
     /// store. Used by `run` for a build's inputs and by [`ensure_path`].
-    ///
-    /// `mode` controls how the walker treats `.drv` content: see [`ClosureMode`].
-    async fn fetch_closure(
-        &mut self,
-        initial_missing: Vec<String>,
-        mode: ClosureMode,
-    ) -> Result<()> {
+    async fn fetch_closure(&mut self, initial_missing: Vec<String>) -> Result<()> {
         const MAX_ITERATIONS: usize = 1024;
 
         debug!(
@@ -696,11 +637,9 @@ impl<'a> InputPrefetcher<'a> {
                 .filter(|r| !queried.contains(r))
                 .collect();
 
-            // For every `.drv` we just fetched, parse it and harvest the
-            // full set of closure-walk seeds - outputs (so downstream builds
-            // find them), input_derivations (transitive `.drv` prerequisites),
-            // and input_sources (plain files the daemon validates as
-            // references when accepting the `.drv` NAR). Relying on
+            // For every `.drv` we just fetched, parse it and harvest its
+            // input_derivations and input_sources: the references the daemon
+            // validates when accepting the `.drv` NAR. Relying on
             // `cached_path.references` alone is unsafe: the eval worker
             // silently stores `NULL` when its own metadata query fails.
             for (path, nar, meta) in &batch {
@@ -715,9 +654,7 @@ impl<'a> InputPrefetcher<'a> {
                     }
                 };
                 let compression = resolve_compression(&bytes, meta.url.as_deref());
-                for seed in
-                    drv_closure_seeds_from_compressed_nar(&bytes, compression, path, mode).await
-                {
+                for seed in drv_closure_seeds_from_compressed_nar(&bytes, compression, path).await {
                     if !queried.contains(&seed) {
                         tracing::trace!(
                             drv = %path,
@@ -829,11 +766,29 @@ pub async fn ensure_path(
         return Ok(());
     }
     InputPrefetcher::for_path(store, path.to_owned(), updater)
-        .fetch_closure(vec![path.to_owned()], ClosureMode::FollowOutputs)
+        .fetch_closure(vec![path.to_owned()])
         .await
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+async fn read_local_drv(drv_path: &str) -> Result<gradient_db::Derivation> {
+    let full = nix_store_path(drv_path);
+    let bytes = tokio::fs::read(&full)
+        .await
+        .with_context(|| format!("read .drv {full} for prefetch"))?;
+    parse_drv(&bytes).with_context(|| format!("parse .drv {full} for prefetch"))
+}
+
+fn requested_output_paths<'d>(
+    drv: &'d gradient_db::Derivation,
+    requested: &'d [String],
+) -> impl Iterator<Item = &'d str> {
+    drv.outputs
+        .iter()
+        .filter(|o| !o.path.is_empty() && requested.contains(&o.name))
+        .map(|o| o.path.as_str())
+}
 
 /// Result of splitting a `CacheQuery Pull` response into its three categories.
 #[derive(Debug, Default)]
@@ -1025,6 +980,23 @@ mod tests {
             .downcast_ref::<MissingInputs>()
             .expect("MissingInputs survives anyhow boxing");
         assert_eq!(recovered.0, paths);
+    }
+
+    #[test]
+    fn only_the_requested_outputs_of_an_input_are_wanted() {
+        let mesa = parse_drv(br#"Derive([("debug","/nix/store/dddddddddddddddddddddddddddddddd-mesa-debug","",""),("drivers","/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-mesa-drivers","",""),("out","/nix/store/oooooooooooooooooooooooooooooooo-mesa","","")],[],[],"x86_64-linux","/bin/sh",[],[])"#).unwrap();
+
+        let requested = ["drivers".to_owned(), "out".to_owned()];
+
+        let wanted: Vec<&str> = requested_output_paths(&mesa, &requested).collect();
+
+        assert_eq!(
+            wanted,
+            vec![
+                "/nix/store/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr-mesa-drivers",
+                "/nix/store/oooooooooooooooooooooooooooooooo-mesa",
+            ]
+        );
     }
 
     #[test]
