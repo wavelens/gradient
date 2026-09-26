@@ -76,6 +76,7 @@ export class ActionFormComponent implements OnChanges {
   name = signal('');
   active = signal(true);
   events = signal<string[]>([]);
+  readonly taskFamilies = ['build', 'evaluation', 'task'];
   recipientsRaw = signal('');
   subjectTemplate = signal('');
   url = signal('');

@@ -179,11 +179,12 @@
   @if (type() !== 'open_pr') {
     <gr-form-field label="Events">
       @if (type() === 'forge_status_report') {
-        <app-action-events [selected]="displayedEvents()" [disabled]="true" />
+        <app-action-events [selected]="displayedEvents()" [disabled]="true" [families]="taskFamilies" />
         <small class="text-secondary">Events are fixed for forge status reports.</small>
       } @else {
         <app-action-events
           [selected]="events()"
+          [families]="taskFamilies"
           (selectedChange)="events.set($event)"
         />
       }

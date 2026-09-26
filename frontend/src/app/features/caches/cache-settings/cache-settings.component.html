@@ -145,6 +145,10 @@
           Subscriptions
           <span slot="meta">Projects asking to use this cache</span>
         </gr-row>
+        <gr-row icon="webhook" linkLabel="Webhooks" [link]="['/caches', cacheName, 'webhooks']">
+          Webhooks
+          <span slot="meta">Signed HTTP requests for this cache's events</span>
+        </gr-row>
       </gr-row-list>
     </gr-settings-section>
 

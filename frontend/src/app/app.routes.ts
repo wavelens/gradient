@@ -240,6 +240,14 @@ export const routes: Routes = [
             (m) => m.CacheSubscriptionRequestsComponent,
           ),
       },
+      {
+        path: 'webhooks',
+        title: 'Cache Webhooks',
+        canActivate: [authGuard],
+        data: { webhookScope: 'cache' },
+        loadComponent: () =>
+          import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
+      },
     ],
   },
 
@@ -420,6 +428,16 @@ export const routes: Routes = [
           ),
       },
 
+      // Webhooks
+      {
+        path: 'project/:project/webhooks',
+        title: 'Webhooks',
+        data: { webhookScope: 'project' },
+        resolve: { projectAccess: projectAccessResolver },
+        loadComponent: () =>
+          import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
+      },
+
       // Cache Subscriptions
       {
         path: 'project/:project/caches',
@@ -467,6 +485,14 @@ export const routes: Routes = [
     ],
   },
 
+  {
+    path: 'admin/webhooks',
+    title: 'Webhooks (admin)',
+    canActivate: [authGuard, adminGuard],
+    data: { webhookScope: 'instance' },
+    loadComponent: () =>
+      import('./features/webhooks/webhooks.component').then((m) => m.WebhooksComponent),
+  },
   {
     path: 'admin/github-app',
     title: 'GitHub App (admin)',

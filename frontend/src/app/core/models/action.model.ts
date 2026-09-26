@@ -73,19 +73,4 @@ export interface ActionDeliveryDetail extends ActionDelivery {
   response_body: string | null;
 }
 
-export const ACTION_EVENTS: { group: string; value: string; label: string }[] = [
-  { group: 'Evaluation', value: 'evaluation.queued',    label: 'Queued' },
-  { group: 'Evaluation', value: 'evaluation.started',   label: 'Started' },
-  { group: 'Evaluation', value: 'evaluation.building',  label: 'Building' },
-  { group: 'Evaluation', value: 'evaluation.waiting',   label: 'Waiting' },
-  { group: 'Evaluation', value: 'evaluation.completed', label: 'Completed' },
-  { group: 'Evaluation', value: 'evaluation.failed',    label: 'Failed' },
-  { group: 'Evaluation', value: 'evaluation.aborted',   label: 'Aborted' },
-  { group: 'Build',      value: 'build.queued',         label: 'Queued' },
-  { group: 'Build',      value: 'build.started',        label: 'Started' },
-  { group: 'Build',      value: 'build.completed',      label: 'Completed' },
-  { group: 'Build',      value: 'build.failed',         label: 'Failed' },
-  { group: 'Build',      value: 'build.substituted',    label: 'Substituted' },
-];
-
 export const FORGE_STATUS_EVENTS = ['build.started', 'build.completed', 'build.failed'];

@@ -1,0 +1,120 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout [title]="title" subtitle="Signed POSTs of durable events to your endpoints">
+  <button slot="actions" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
+
+  @if (error()) {
+    <div class="dialog-error">
+      <gr-icon name="error" />
+      {{ error() }}
+    </div>
+  }
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading webhooks..." />
+  } @else if (webhooks().length === 0) {
+    <gr-empty-state icon="webhook" title="No webhooks" message="Create a webhook to receive events as signed HTTP requests.">
+      <button slot="action" grButton label="New Webhook" icon="add" (click)="startCreate()"></button>
+    </gr-empty-state>
+  } @else {
+    <div class="webhook-list">
+      @for (hook of webhooks(); track hook.id) {
+        <div class="webhook-row">
+          <div class="webhook-info">
+            <div class="webhook-name">{{ hook.name }}</div>
+            <div class="webhook-meta text-secondary">
+              <code>{{ hook.url }}</code>
+              <gr-badge [severity]="hook.active ? 'success' : 'warning'">{{ hook.active ? 'Active' : 'Inactive' }}</gr-badge>
+              <span>Last fired: {{ relativeTime(hook.last_fired_at) }}</span>
+              @if (testResult(); as result) {
+                @if (result.id === hook.id && result.delivery; as d) {
+                  <gr-badge [severity]="d.success ? 'success' : 'danger'">
+                    Test {{ d.success ? 'delivered' : 'failed' }} {{ d.response_status ?? '' }}
+                  </gr-badge>
+                }
+              }
+            </div>
+            <div class="events-chips">
+              @for (ev of hook.events; track ev) {
+                <gr-badge>{{ ev }}</gr-badge>
+              } @empty {
+                <gr-badge>all events</gr-badge>
+              }
+            </div>
+          </div>
+          <div class="webhook-actions">
+            <button grButton label="Test" icon="play_arrow" severity="secondary" size="small" (click)="test(hook)"></button>
+            <button grButton label="Deliveries" icon="list" severity="secondary" size="small" (click)="openDeliveries(hook)"></button>
+            <button grButton [label]="hook.active ? 'Disable' : 'Enable'" icon="power_settings_new" severity="secondary" size="small" (click)="toggleActive(hook)"></button>
+            <button grButton label="Rotate secret" icon="key" severity="secondary" size="small" (click)="rotate(hook)"></button>
+            <button grButton label="Edit" icon="edit" severity="secondary" size="small" (click)="startEdit(hook)"></button>
+            <button grButton label="Delete" icon="delete" severity="danger" size="small" (click)="confirmDeleteId.set(hook.id)"></button>
+          </div>
+        </div>
+      }
+    </div>
+  }
+</gr-page-layout>
+
+<gr-dialog [header]="editing() ? 'Edit Webhook' : 'New Webhook'" [visible]="formOpen()" (visibleChange)="formOpen.set($event)" width="600px">
+  <gr-form-field label="Name" for="webhook-name">
+    <input grInput id="webhook-name" [ngModel]="name()" (ngModelChange)="name.set($event)" />
+  </gr-form-field>
+  <gr-form-field label="URL" for="webhook-url">
+    <input grInput id="webhook-url" [ngModel]="url()" (ngModelChange)="url.set($event)" placeholder="https://example.com/gradient" />
+  </gr-form-field>
+  <gr-form-field label="Events" hint="Nothing selected receives every event in this scope.">
+    <app-action-events [selected]="events()" (selectedChange)="events.set($event)" />
+  </gr-form-field>
+  <gr-form-field label="Event globs (optional)" for="webhook-globs" hint="Comma-separated, e.g. build.*, cache.nar.*">
+    <input grInput id="webhook-globs" [ngModel]="globs()" (ngModelChange)="globs.set($event)" />
+  </gr-form-field>
+  <gr-checkbox label="Active" [ngModel]="active()" (ngModelChange)="active.set($event)" />
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="formOpen.set(false)"></button>
+    <button grButton label="Save" icon="check" [loading]="saving()" (click)="save()"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog header="Save this secret now" [visible]="revealedSecret() !== null" (visibleChange)="$event || revealedSecret.set(null)" width="520px">
+  <p>Use it to verify <code>X-Gradient-Signature</code>. It will not be displayed again.</p>
+  <pre class="secret-reveal">{{ revealedSecret() }}</pre>
+  <div grDialogFooter>
+    <button grButton label="I've copied it" icon="check" (click)="revealedSecret.set(null)"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog header="Delete Webhook" [visible]="confirmDeleteId() !== null" (visibleChange)="$event || confirmDeleteId.set(null)" width="400px">
+  <p>Delete this webhook and its delivery history? This cannot be undone.</p>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="confirmDeleteId.set(null)"></button>
+    <button grButton label="Delete" severity="danger" (click)="confirmDelete()"></button>
+  </div>
+</gr-dialog>
+
+<gr-dialog header="Delivery history" [visible]="deliveriesFor() !== null" (visibleChange)="$event || deliveriesFor.set(null)" width="860px">
+  @if (deliveries().length === 0) {
+    <p class="state-msg">No deliveries yet.</p>
+  } @else {
+    <gr-table>
+      <thead>
+        <tr><th>Time</th><th>Event</th><th>Result</th><th>Status</th><th>Duration</th></tr>
+      </thead>
+      <tbody>
+        @for (d of deliveries(); track d.id) {
+          <tr>
+            <td>{{ d.delivered_at }}</td>
+            <td>{{ d.event }}</td>
+            <td><gr-badge [severity]="d.success ? 'success' : 'danger'">{{ d.success ? 'OK' : 'FAIL' }}</gr-badge></td>
+            <td>{{ d.response_status ?? d.error_message }}</td>
+            <td>{{ d.duration_ms }} ms</td>
+          </tr>
+        }
+      </tbody>
+    </gr-table>
+  }
+</gr-dialog>

@@ -21,3 +21,4 @@ export * from './action.model';
 export * from './invite.model';
 export * from './dashboard.model';
 export * from './event.model';
+export * from './webhook.model';

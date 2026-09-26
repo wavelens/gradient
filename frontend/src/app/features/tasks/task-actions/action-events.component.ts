@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, input, output, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, inject, input, output, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ACTION_EVENTS } from '../../../core/models/action.model';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { groupCatalog } from '@core/models';
+import { EventsService } from '@core/services/events.service';
 
 @Component({
   selector: 'app-action-events',
@@ -19,16 +21,12 @@ import { ACTION_EVENTS } from '../../../core/models/action.model';
 export class ActionEventsComponent {
   selected = input.required<string[]>();
   disabled = input(false);
+  families = input<string[] | undefined>(undefined);
   selectedChange = output<string[]>();
 
-  readonly grouped = computed(() => {
-    const byGroup = new Map<string, typeof ACTION_EVENTS>();
-    for (const e of ACTION_EVENTS) {
-      if (!byGroup.has(e.group)) byGroup.set(e.group, []);
-      byGroup.get(e.group)!.push(e);
-    }
-    return Array.from(byGroup.entries()).map(([group, items]) => ({ group, items }));
-  });
+  private readonly catalog = toSignal(inject(EventsService).catalog$, { initialValue: [] });
+
+  readonly grouped = computed(() => groupCatalog(this.catalog(), this.families()));
 
   toggle(value: string, checked: boolean) {
     const set = new Set(this.selected());

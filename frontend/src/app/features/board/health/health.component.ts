@@ -73,6 +73,7 @@ import { formatBytes, formatDuration } from '@shared/text';
         @if (!config.githubAppEnabled) {
           <a class="btn" routerLink="/admin/github-app">Set up GitHub App</a>
         }
+        <a class="btn" routerLink="/admin/webhooks">Instance Webhooks</a>
         <button class="btn" (click)="runDeepGc()" [disabled]="gcBusy()">Run Deep GC</button>
         <button class="btn" [class.danger]="!h.draining" (click)="toggleDraining(h.draining)" [disabled]="drainBusy()">
           {{ h.draining ? 'Disable Draining' : 'Enable Draining' }}

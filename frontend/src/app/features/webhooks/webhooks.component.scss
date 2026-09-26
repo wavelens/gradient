@@ -1,0 +1,42 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../styles/variables' as *;
+
+.webhook-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.webhook-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  flex-wrap: wrap;
+}
+
+.webhook-name {
+  font-weight: 600;
+}
+
+.webhook-meta,
+.events-chips,
+.webhook-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.secret-reveal {
+  user-select: all;
+  overflow-x: auto;
+}

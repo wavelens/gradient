@@ -98,6 +98,10 @@
         Integrations
         <span slot="meta">Inbound forge webhooks and outbound status reporters</span>
       </gr-row>
+      <gr-row icon="webhook" linkLabel="Webhooks" [link]="['/project', projectName, 'webhooks']">
+        Webhooks
+        <span slot="meta">Signed HTTP requests for this project's events</span>
+      </gr-row>
     </gr-row-list>
   </gr-settings-section>
 

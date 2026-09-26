@@ -95,7 +95,7 @@ describe('BoardHealthComponent', () => {
     });
 
     it('hides the "Set up GitHub App" link', () => {
-      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.btn');
+      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.btn[routerlink="/admin/github-app"]');
       expect(link).toBeNull();
       expect(fixture.nativeElement.textContent).not.toContain('Set up GitHub App');
     });
@@ -108,7 +108,7 @@ describe('BoardHealthComponent', () => {
     afterEach(() => TestBed.resetTestingModule());
 
     it('shows "Set up GitHub App" text without disabled class', () => {
-      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.btn');
+      const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.btn[routerlink="/admin/github-app"]');
       expect(link).toBeTruthy();
       expect(link.textContent?.trim()).toBe('Set up GitHub App');
       expect(link.classList.contains('disabled')).toBe(false);
