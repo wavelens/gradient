@@ -58,6 +58,8 @@ pub enum Permission {
     TriggerEvaluation,
     /// CRUD on task triggers.
     ManageTriggers,
+    /// CRUD on project webhooks.
+    ManageWebhooks,
 }
 
 /// A bitmask over [`Permission`] capabilities. Stored on `role.permission`.
@@ -81,6 +83,7 @@ impl Permission {
         Permission::EditTask,
         Permission::TriggerEvaluation,
         Permission::ManageTriggers,
+        Permission::ManageWebhooks,
     ];
 
     /// Stable bit position in the `role.permission` bitmask.
@@ -103,6 +106,7 @@ impl Permission {
             Permission::EditTask => 11,
             Permission::TriggerEvaluation => 12,
             Permission::ManageTriggers => 13,
+            Permission::ManageWebhooks => 14,
         };
         1_i64 << pos
     }
@@ -124,6 +128,7 @@ impl Permission {
             Permission::EditTask => "editTask",
             Permission::TriggerEvaluation => "triggerEvaluation",
             Permission::ManageTriggers => "manageTriggers",
+            Permission::ManageWebhooks => "manageWebhooks",
         }
     }
 
@@ -185,6 +190,7 @@ pub fn write_mask() -> PermissionMask {
         EditTask,
         TriggerEvaluation,
         ManageTriggers,
+        ManageWebhooks,
     ])
 }
 
@@ -233,6 +239,7 @@ pub enum CachePermission {
     ManageCacheRoles,
     ManageCacheSubscriptions,
     DeleteCache,
+    ManageCacheWebhooks,
 }
 
 impl CachePermission {
@@ -247,6 +254,7 @@ impl CachePermission {
         CachePermission::ManageCacheRoles,
         CachePermission::ManageCacheSubscriptions,
         CachePermission::DeleteCache,
+        CachePermission::ManageCacheWebhooks,
     ];
 
     pub const fn bit(self) -> PermissionMask {
@@ -261,6 +269,7 @@ impl CachePermission {
             CachePermission::ManageCacheRoles => 7,
             CachePermission::ManageCacheSubscriptions => 8,
             CachePermission::DeleteCache => 9,
+            CachePermission::ManageCacheWebhooks => 10,
         };
         1_i64 << pos
     }
@@ -277,6 +286,7 @@ impl CachePermission {
             CachePermission::ManageCacheRoles => "manageCacheRoles",
             CachePermission::ManageCacheSubscriptions => "manageCacheSubscriptions",
             CachePermission::DeleteCache => "deleteCache",
+            CachePermission::ManageCacheWebhooks => "manageCacheWebhooks",
         }
     }
 
@@ -489,5 +499,20 @@ mod tests {
         assert!(is_builtin_cache_role(BASE_CACHE_ROLE_VIEW_ID));
         let other = RoleId::new(uuid::uuid!("99999999-9999-9999-9999-999999999999"));
         assert!(!is_builtin_cache_role(other));
+    }
+
+    #[test]
+    fn webhook_permissions_append_new_bits() {
+        assert_eq!(Permission::ManageWebhooks.bit(), 1 << 14);
+        assert_eq!(
+            Permission::from_wire_name("manageWebhooks"),
+            Some(Permission::ManageWebhooks)
+        );
+        assert!(mask_grants(write_mask(), Permission::ManageWebhooks));
+        assert_eq!(CachePermission::ManageCacheWebhooks.bit(), 1 << 10);
+        assert!(cache_mask_grants(
+            cache_admin_mask(),
+            CachePermission::ManageCacheWebhooks
+        ));
     }
 }

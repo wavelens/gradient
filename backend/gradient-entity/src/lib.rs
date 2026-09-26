@@ -80,6 +80,8 @@ pub mod dispatched_job;
 pub mod dispatched_job_phase;
 pub mod metric_rollup;
 pub mod phase_event;
+pub mod webhook;
+pub mod webhook_delivery;
 pub mod worker_connection;
 pub mod worker_sample;
 
