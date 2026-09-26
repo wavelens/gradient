@@ -72,8 +72,12 @@ impl Drop for ProtoPeer {
 impl ProtoPeer {
     pub async fn connect(url: &str, spec: PeerSpec) -> Result<Self> {
         let mut conn = ProtoConnection::open(url).await?;
-        let handshake =
-            perform_handshake(&mut conn, spec.id, spec.tokens, spec.capabilities).await?;
+        let handshake = tokio::time::timeout(
+            SCRIPT_TIMEOUT,
+            perform_handshake(&mut conn, spec.id, spec.tokens, spec.capabilities),
+        )
+        .await
+        .context("the authority never finished the handshake")??;
         conn.set_server_version(handshake.server_version);
         let (writer, mut reader, _flush) = conn.split();
         let nar_recv = NarReceiver::new();
@@ -235,7 +239,9 @@ impl ProtoPeer {
             paths: vec![store_path.into()],
         })
         .await?;
-        let payload = self.nar_recv.await_pending(pending).await?;
+        let payload = tokio::time::timeout(SCRIPT_TIMEOUT, self.nar_recv.await_pending(pending))
+            .await
+            .context("the authority never served the NAR")??;
         Ok(payload.read_bytes().await?.into_owned())
     }
 }
@@ -362,5 +368,22 @@ mod tests {
             tokio::join!(conn.serve_pull(&object), peer.pull_nar("build:1", PATH));
         assert_eq!(served.unwrap(), ("build:1".to_owned(), PATH.to_owned()));
         assert_eq!(pulled.unwrap(), object);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_authority_that_never_answers_the_handshake_fails_the_connect() {
+        let server = MockProtoServer::bind().await;
+        let (_conn, peer) = tokio::join!(
+            server.accept(),
+            ProtoPeer::connect(server.url(), PeerSpec::default())
+        );
+        assert!(peer.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_pull_the_authority_ignores_fails_the_script() {
+        let (_conn, peer) = pair(PeerSpec::default()).await;
+        tokio::time::pause();
+        assert!(peer.pull_nar("build:1", PATH).await.is_err());
     }
 }
