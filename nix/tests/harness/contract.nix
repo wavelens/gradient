@@ -12,6 +12,7 @@ in
 clause (lib.all (name: topology.nodes ? ${name}) (lib.attrNames workers)) "every suite worker is a node"
 && clause (lib.sort lib.lessThan topology.workerNodes == lib.sort lib.lessThan (lib.attrNames workers)) "workerNodes are exactly the suite's workers"
 && clause (!(topology.nodes ? server)) "the suite owns the server node"
+&& clause (!(topology.nodes ? client)) "the e2e suite owns the client node"
 && clause (lib.isAttrs topology.upstreamPeers && lib.all lib.isString (lib.attrValues topology.upstreamPeers)) "upstreamPeers maps names to worker ids"
 && clause (lib.isList topology.provides) "provides is a list of tags"
 && clause (lib.hasInfix "def wait_workers_ready(" topology.pythonPrelude) "the prelude defines wait_workers_ready"

@@ -22,4 +22,5 @@ assert direct.nodes.b.environment.etc."gradient/secrets/worker_peers".text == "*
 assert lib.hasInfix "WORKER_NODES = [a, b]" prelude;
 assert lib.hasInfix ''PROVIDES = set(["distinct-upstream-workers"])'' prelude;
 assert lib.hasInfix "def requires(" prelude;
+assert !(builtins.tryEval (import ./contract.nix { inherit lib workers; topology = direct // { nodes = direct.nodes // { client = { }; }; }; })).success;
 pkgs.runCommand "test-topologies-check" { } "touch $out"

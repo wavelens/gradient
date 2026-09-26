@@ -1262,10 +1262,12 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     # is >=12 KB (schema) and larger once attributes are memoised.
     banner("Phase 5b: worker eval-cache is committed (non-empty)")
     eval_cache_dir = "/var/lib/gradient-worker/eval-cache/eval-cache-v6"
-    builder.succeed(f"test -d {eval_cache_dir}")
-    sizes = builder.succeed(
-        f"find {eval_cache_dir} -name '*.sqlite' -printf '%s %p\\n' | sort -rn"
-    ).strip()
+    listings = [
+        node.succeed(f"find {eval_cache_dir} -name '*.sqlite' -printf '%s %p\\n' 2>/dev/null || true").strip()
+        for node in WORKER_NODES
+    ]
+    lines = [line for listing in listings for line in listing.splitlines() if line]
+    sizes = "\n".join(sorted(lines, key=lambda line: -int(line.split()[0])))
     print(sizes or "(no .sqlite files)")
     biggest = int(sizes.splitlines()[0].split()[0]) if sizes else 0
     assert biggest > 4096, (
