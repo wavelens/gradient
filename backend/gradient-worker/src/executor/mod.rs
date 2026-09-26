@@ -169,7 +169,7 @@ async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<St
         .map(|drv_path| async move {
             let full = nix_store_path(&drv_path);
             match tokio::fs::read(&full).await {
-                Ok(bytes) => match gradient_db::parse_drv(&bytes) {
+                Ok(bytes) => match gradient_derivation::parse_drv(&bytes) {
                     Ok(drv) => drv.input_sources,
                     Err(e) => {
                         tracing::warn!(drv = %drv_path, error = %e, "push: cannot parse .drv for input sources");

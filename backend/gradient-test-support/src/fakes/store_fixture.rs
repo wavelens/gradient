@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use gradient_db::{Derivation, parse_drv};
+use gradient_derivation::{Derivation, parse_drv};
 use gradient_wire::messages::{DerivationOutput, DiscoveredDerivation};
 
 use super::derivation_resolver::FakeDerivationResolver;
@@ -146,7 +146,7 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             prefer_local_build: false,
             is_fixed_output: drv.build_meta().is_fixed_output,
             allow_substitutes: drv.allow_substitutes(),
-            pname: gradient_db::derive_pname(
+            pname: gradient_derivation::derive_pname(
                 drv.environment.get("pname").map(String::as_str),
                 drv.environment
                     .get("name")

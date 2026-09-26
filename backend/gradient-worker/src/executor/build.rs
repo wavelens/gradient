@@ -22,7 +22,7 @@
 
 use anyhow::{Context, Result};
 use futures::StreamExt as _;
-use gradient_db::parse_drv;
+use gradient_derivation::parse_drv;
 use gradient_sources::get_hash_from_path;
 use gradient_util::hydra::parse_hydra_product_line;
 use gradient_util::store_path::{nix_store_path, strip_store_prefix};
@@ -56,7 +56,7 @@ use super::failure::classify_build_error;
 /// Obtain via [`ParsedDerivation::load`]; advance to built outputs via
 /// [`ParsedDerivation::realize`].
 pub(super) struct ParsedDerivation {
-    drv: gradient_db::Derivation,
+    drv: gradient_derivation::Derivation,
     harmonia_path: StorePath,
     basic_drv: BasicDerivation,
 }
@@ -280,7 +280,7 @@ fn output_pairs_from_built_or_drv(
         harmonia_store_derivation::derived_path::OutputName,
         harmonia_store_derivation::realisation::UnkeyedRealisation,
     >,
-    drv: &gradient_db::Derivation,
+    drv: &gradient_derivation::Derivation,
 ) -> Vec<(String, String)> {
     if !built_outputs.is_empty() {
         return built_outputs
@@ -716,11 +716,11 @@ mod tests {
         );
     }
 
-    fn drv_with_outputs(outputs: Vec<(&str, &str)>) -> gradient_db::Derivation {
-        gradient_db::Derivation {
+    fn drv_with_outputs(outputs: Vec<(&str, &str)>) -> gradient_derivation::Derivation {
+        gradient_derivation::Derivation {
             outputs: outputs
                 .into_iter()
-                .map(|(name, path)| gradient_db::DerivationOutput {
+                .map(|(name, path)| gradient_derivation::DerivationOutput {
                     name: name.to_string(),
                     path: path.to_string(),
                     hash_algo: String::new(),

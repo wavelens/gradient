@@ -269,7 +269,7 @@ fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
     }
 }
 
-type InputDrv = (String, Vec<String>);
+pub type InputDrv = (String, Vec<String>);
 
 /// Parses `[("/nix/store/hash.drv",["out","dev"]),...]`.
 fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {

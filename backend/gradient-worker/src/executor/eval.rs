@@ -20,7 +20,7 @@ use std::time::Instant;
 use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
-use gradient_db::parse_drv;
+use gradient_derivation::parse_drv;
 use gradient_sources::{DerivationResolver, FlakeDiscovery};
 use gradient_wire::messages::{
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob,
@@ -539,7 +539,7 @@ fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(
 async fn parse_drv_wave(
     drv_reader: &dyn DrvReader,
     wave: &[(Option<String>, String)],
-) -> Result<Vec<gradient_db::Derivation>> {
+) -> Result<Vec<gradient_derivation::Derivation>> {
     // Index-tagged futures so results can be sorted back into BFS order.
     let mut futs: FuturesUnordered<_> = wave
         .iter()
@@ -564,7 +564,8 @@ async fn parse_drv_wave(
         })
         .collect();
 
-    let mut slots: Vec<Option<gradient_db::Derivation>> = (0..wave.len()).map(|_| None).collect();
+    let mut slots: Vec<Option<gradient_derivation::Derivation>> =
+        (0..wave.len()).map(|_| None).collect();
     while let Some(result) = futs.next().await {
         let (i, drv) = result?;
         slots[i] = Some(drv);
@@ -580,7 +581,7 @@ async fn parse_drv_wave(
 fn build_discovered_derivation(
     attr: Option<String>,
     drv_path: String,
-    drv: &gradient_db::Derivation,
+    drv: &gradient_derivation::Derivation,
 ) -> DiscoveredDerivation {
     let outputs: Vec<DerivationOutput> = drv
         .outputs
@@ -606,7 +607,8 @@ fn build_discovered_derivation(
         .get("name")
         .map(String::as_str)
         .unwrap_or("");
-    let pname = gradient_db::derive_pname(drv.environment.get("pname").map(String::as_str), name);
+    let pname =
+        gradient_derivation::derive_pname(drv.environment.get("pname").map(String::as_str), name);
     DiscoveredDerivation {
         attr: attr.unwrap_or_default(),
         drv_path,
@@ -1245,8 +1247,8 @@ mod tests {
 
     #[test]
     fn build_discovered_derivation_carries_input_sources() {
-        let drv = gradient_db::Derivation {
-            outputs: vec![gradient_db::DerivationOutput {
+        let drv = gradient_derivation::Derivation {
+            outputs: vec![gradient_derivation::DerivationOutput {
                 name: "out".into(),
                 path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out".into(),
                 hash_algo: String::new(),

@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
-use gradient_db::{Derivation, parse_drv};
+use gradient_derivation::{Derivation, parse_drv};
 use gradient_eval::ipc::ResolvedItem;
 use gradient_sources::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use gradient_util::store_path::nix_store_path;

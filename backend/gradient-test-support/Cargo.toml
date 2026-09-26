@@ -20,6 +20,7 @@ gradient-ci = { workspace = true }
 gradient-sources = { workspace = true }
 gradient-forge = { workspace = true }
 gradient-db = { workspace = true }
+gradient-derivation = { workspace = true }
 gradient-graph = { workspace = true, features = ["stub"] }
 gradient-storage = { workspace = true }
 gradient-notify = { workspace = true }

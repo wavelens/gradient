@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use gradient_db::{DrvOutputSpec, parse_drv};
+use gradient_derivation::{DrvOutputSpec, parse_drv};
 use gradient_util::store_path::{nix_store_path, strip_nix_store_prefix};
 use harmonia_store_content_address::{ContentAddress, ContentAddressMethod};
 use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, DerivationT};
@@ -31,7 +31,7 @@ use tracing::warn;
 /// `structured_attrs` so the daemon handles them correctly.
 pub(super) async fn get_basic_derivation(
     full_drv_path: &str,
-    drv: &gradient_db::Derivation,
+    drv: &gradient_derivation::Derivation,
 ) -> Result<BasicDerivation> {
     // ── Build outputs from .drv data ──────────────────────────────────────────
     //

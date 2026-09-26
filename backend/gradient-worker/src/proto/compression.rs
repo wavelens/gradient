@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::io::Read as _;
 
 use anyhow::{Context, Result};
-use gradient_db::parse_drv;
+use gradient_derivation::parse_drv;
 use gradient_wire::messages::CachedPath;
 use harmonia_protocol::valid_path_info::UnkeyedValidPathInfo;
 use harmonia_store_path::{StoreDir, StorePath};
@@ -159,7 +159,7 @@ pub(crate) async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec
 /// without this fallback the daemon then rejects the `.drv` import with
 /// `path '…' is not valid` for a reference parsed straight out of the
 /// `.drv` text.
-pub(crate) fn drv_closure_seeds(drv: &gradient_db::Derivation) -> Vec<String> {
+pub(crate) fn drv_closure_seeds(drv: &gradient_derivation::Derivation) -> Vec<String> {
     drv.input_derivations
         .iter()
         .map(|(drv_path, _)| drv_path)
@@ -539,7 +539,7 @@ mod tests {
     /// chosen by the consumer's requested output names, not by the walk.
     #[test]
     fn drv_closure_seeds_are_inputs_never_outputs() {
-        use gradient_db::parse_drv;
+        use gradient_derivation::parse_drv;
 
         let drv_bytes = br#"Derive([("debug","/nix/store/dddddddddddddddddddddddddddddddd-debug","",""),("out","/nix/store/oooooooooooooooooooooooooooooooo-out","","")],[("/nix/store/iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii-dep.drv",["out"])],["/nix/store/ssssssssssssssssssssssssssssssss-src.sh"],"x86_64-linux","/bin/sh",[],[])"#;
         let drv = parse_drv(drv_bytes).unwrap();

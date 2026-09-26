@@ -19,14 +19,12 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-gradient-core = { workspace = true }
 gradient-eval = { path = "../gradient-eval" }
 gradient-sources = { workspace = true }
-gradient-db = { workspace = true }
+gradient-derivation = { workspace = true }
 gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-wire = { workspace = true }
-gradient-entity = { workspace = true }
 gradient-proto = { workspace = true }
 gradient-storage = { workspace = true }
 

@@ -22,10 +22,8 @@ pub mod dashboard;
 pub mod debug_info;
 pub mod dep_counts;
 pub mod dependency_graph;
-pub mod derivation;
 pub mod dispatch_record;
 pub mod draining;
-pub mod drv_output_spec;
 pub mod eval_counters;
 pub mod eval_watchdog;
 pub mod gc;
@@ -82,7 +80,6 @@ pub use self::debug_info::{
 };
 pub use self::dep_counts::*;
 pub use self::dependency_graph::*;
-pub use self::derivation::*;
 pub use self::dispatch_record::{
     BUILD_KEY_PREFIX, ClaimGate, EVAL_KEY_PREFIX, abandon_all_open_dispatches,
     abandon_open_dispatch, abandon_open_dispatches, abandon_open_dispatches_for_jobs,
@@ -90,7 +87,6 @@ pub use self::dispatch_record::{
     latest_eval_jobs, no_open_dispatch_predicate,
 };
 pub use self::draining::{park_active_evals, unpark_draining_evals};
-pub use self::drv_output_spec::DrvOutputSpec;
 pub use self::eval_counters::{
     EvalCounters, eval_counters, fold_anchor_deltas, in_flight_counters,
     recount_eval_anchor_counters, recount_evaluations,

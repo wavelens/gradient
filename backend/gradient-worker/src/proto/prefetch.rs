@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
-use gradient_db::parse_drv;
+use gradient_derivation::parse_drv;
 use gradient_util::store_path::nix_store_path;
 use gradient_wire::CachedPathInfo;
 use gradient_wire::messages::{
@@ -772,7 +772,7 @@ pub async fn ensure_path(
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-async fn read_local_drv(drv_path: &str) -> Result<gradient_db::Derivation> {
+async fn read_local_drv(drv_path: &str) -> Result<gradient_derivation::Derivation> {
     let full = nix_store_path(drv_path);
     let bytes = tokio::fs::read(&full)
         .await
@@ -781,7 +781,7 @@ async fn read_local_drv(drv_path: &str) -> Result<gradient_db::Derivation> {
 }
 
 fn requested_output_paths<'d>(
-    drv: &'d gradient_db::Derivation,
+    drv: &'d gradient_derivation::Derivation,
     requested: &'d [String],
 ) -> impl Iterator<Item = &'d str> {
     drv.outputs

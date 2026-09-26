@@ -96,7 +96,10 @@ fn parse_sha256(text: &str) -> Result<Vec<u8>> {
     })
 }
 
-pub(crate) fn fetch_spec(drv: &gradient_db::Derivation, drv_path: &str) -> Result<FetchSpec> {
+pub(crate) fn fetch_spec(
+    drv: &gradient_derivation::Derivation,
+    drv_path: &str,
+) -> Result<FetchSpec> {
     if drv.builder != "builtin:fetchurl" {
         return Err(anyhow::Error::new(UnsupportedFetch(drv.builder.clone())));
     }
@@ -130,7 +133,7 @@ pub(crate) fn fetch_spec(drv: &gradient_db::Derivation, drv_path: &str) -> Resul
 }
 
 pub(crate) trait DownloadIo {
-    async fn drv(&mut self, drv_path: &str) -> Result<gradient_db::Derivation>;
+    async fn drv(&mut self, drv_path: &str) -> Result<gradient_derivation::Derivation>;
     async fn get(
         &mut self,
         url: &str,
@@ -149,7 +152,7 @@ pub(crate) async fn download_output(
 
 async fn download_with(
     io: &mut impl DownloadIo,
-    drv: &gradient_db::Derivation,
+    drv: &gradient_derivation::Derivation,
     task: &BuildSpec,
     progress: &mut Progress<impl ProgressSink>,
 ) -> Result<(String, RawNar)> {
@@ -196,7 +199,7 @@ async fn download_with(
 pub(crate) struct JobUpdaterIo<'a>(pub &'a mut JobUpdater);
 
 impl DownloadIo for JobUpdaterIo<'_> {
-    async fn drv(&mut self, drv_path: &str) -> Result<gradient_db::Derivation> {
+    async fn drv(&mut self, drv_path: &str) -> Result<gradient_derivation::Derivation> {
         let entry = self
             .0
             .query_cache(vec![drv_path.to_owned()], QueryMode::Pull)
@@ -231,7 +234,7 @@ impl DownloadIo for JobUpdaterIo<'_> {
             &compressed,
             resolve_compression(&compressed, entry.url.as_deref()),
         )?;
-        gradient_db::parse_drv(&extract_single_file_from_nar(&nar).await?)
+        gradient_derivation::parse_drv(&extract_single_file_from_nar(&nar).await?)
     }
 
     async fn get(
@@ -261,9 +264,9 @@ mod tests {
     const OUT: &str = "/nix/store/oooooooooooooooooooooooooooooooo-hello.txt";
     const DRV: &str = "/nix/store/dddddddddddddddddddddddddddddddd-hello.txt.drv";
 
-    fn drv(env: &[(&str, &str)]) -> gradient_db::Derivation {
-        gradient_db::Derivation {
-            outputs: vec![gradient_db::DerivationOutput {
+    fn drv(env: &[(&str, &str)]) -> gradient_derivation::Derivation {
+        gradient_derivation::Derivation {
+            outputs: vec![gradient_derivation::DerivationOutput {
                 name: "out".to_owned(),
                 path: OUT.to_owned(),
                 hash_algo: String::new(),
@@ -304,8 +307,8 @@ mod tests {
     }
 
     impl DownloadIo for Fake {
-        async fn drv(&mut self, drv_path: &str) -> Result<gradient_db::Derivation> {
-            gradient_db::parse_drv(self.drvs.get(drv_path).expect("drv in cache"))
+        async fn drv(&mut self, drv_path: &str) -> Result<gradient_derivation::Derivation> {
+            gradient_derivation::parse_drv(self.drvs.get(drv_path).expect("drv in cache"))
         }
 
         async fn get(

@@ -13,7 +13,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_db::Derivation;
+use gradient_derivation::Derivation;
 /// Result of resolving one flake attribute path: `(attr_path, Result<(drv_path, references)>)`.
 pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 

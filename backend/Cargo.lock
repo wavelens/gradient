@@ -2361,6 +2361,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-derivation"
+version = "1.4.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+]
+
+[[package]]
 name = "gradient-effects"
 version = "1.4.0"
 dependencies = [
@@ -2623,6 +2631,7 @@ dependencies = [
  "git-url-parse",
  "git2",
  "gradient-db",
+ "gradient-derivation",
  "gradient-types",
  "gradient-util",
  "harmonia-file-nar",
@@ -2712,6 +2721,7 @@ dependencies = [
  "gradient-ci",
  "gradient-core",
  "gradient-db",
+ "gradient-derivation",
  "gradient-entity",
  "gradient-forge",
  "gradient-graph",
@@ -2889,9 +2899,7 @@ dependencies = [
  "clap",
  "futures",
  "git2",
- "gradient-core",
- "gradient-db",
- "gradient-entity",
+ "gradient-derivation",
  "gradient-eval",
  "gradient-proto",
  "gradient-sources",
