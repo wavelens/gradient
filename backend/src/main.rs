@@ -14,12 +14,16 @@ use tracing::info;
 
 /// Per-component overrides of the server's log level, keyed by the crates
 /// each component lives in.
-fn log_overrides(logging: &LoggingArgs) -> [(&'static str, Option<&str>); 6] {
+fn log_overrides(logging: &LoggingArgs) -> [(&'static str, Option<&str>); 7] {
     [
         ("gradient_web", logging.web_log_level.as_deref()),
         ("gradient_cache", logging.cache_log_level.as_deref()),
         ("gradient_proto", logging.proto_log_level.as_deref()),
         ("gradient_wire", logging.proto_log_level.as_deref()),
+        (
+            "gradient_storage::relay",
+            logging.proto_log_level.as_deref(),
+        ),
         ("gradient_scheduler", logging.scheduler_log_level.as_deref()),
         ("gradient_pool", logging.scheduler_log_level.as_deref()),
     ]
@@ -163,6 +167,16 @@ mod tests {
         assert!(d.contains("gradient_scheduler=trace"));
         assert!(d.contains("gradient_pool=trace"));
         assert!(!d.contains("builder="));
+    }
+
+    #[test]
+    fn the_proto_level_reaches_the_relayed_nar_sender() {
+        let logging = LoggingArgs {
+            proto_log_level: Some("trace".into()),
+            ..Default::default()
+        };
+        let d = server_directive(&logging);
+        assert!(d.contains("gradient_storage::relay=trace"), "{d}");
     }
 
     #[test]

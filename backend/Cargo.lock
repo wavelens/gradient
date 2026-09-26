@@ -2904,7 +2904,6 @@ dependencies = [
  "git2",
  "gradient-derivation",
  "gradient-eval",
- "gradient-proto",
  "gradient-sources",
  "gradient-storage",
  "gradient-test-support",
