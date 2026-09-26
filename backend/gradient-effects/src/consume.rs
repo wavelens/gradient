@@ -16,12 +16,12 @@
 use anyhow::{Context, Result, anyhow};
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
-use gradient_ci::reporting::{
-    build_event_for_status, eval_kind_str, evaluation_created_event, evaluation_event_for_status,
-};
+use gradient_ci::reporting::eval_kind_str;
 use gradient_db::outbox::{OutboxKind, OutboxRow, Outcome, enqueue};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_types::events::build::Reported;
+use gradient_types::events::evaluation::Phase;
 use gradient_types::ids::{BuildAttemptId, BuildJobId, EvaluationId, TaskActionId};
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
@@ -71,7 +71,7 @@ async fn expand_build_status(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
     let db = ctx.db();
     let status = BuildStatus::try_from(i32_field(row, "status")?)
         .map_err(|_| anyhow!("outbox build status out of range"))?;
-    let Some(event) = build_event_for_status(status) else {
+    let Some(event) = Reported::reports(status) else {
         return Ok(());
     };
 
@@ -149,12 +149,12 @@ async fn expand_evaluation_status(ctx: &EffectsCtx, row: &OutboxRow) -> Result<(
             .waiting_reason
             .as_ref()
             .and_then(WaitingReason::from_json);
-        match evaluation_created_event(status, reason) {
-            Some(pair) => pair,
+        match Phase::of_created(status, reason) {
+            Some((phase, description)) => (phase.name(), description),
             None => return Ok(()),
         }
     } else {
-        (evaluation_event_for_status(status), None)
+        (Phase::of_status(status).name(), None)
     };
 
     let mut payload = serde_json::json!({

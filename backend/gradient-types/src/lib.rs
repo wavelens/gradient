@@ -10,6 +10,7 @@ pub mod cli;
 pub mod config;
 pub mod constants;
 pub mod consts;
+pub mod events;
 pub mod flake_url;
 pub mod forge;
 pub mod ids;
@@ -37,6 +38,7 @@ pub use self::config::{
 };
 pub use self::consts::*;
 pub use self::entity_aliases::*;
+pub use self::events::{Envelope, Event, EventBus, EventRx};
 pub use self::flake_url::{NixFlakeUrl, RepositoryUrl};
 pub use self::forge::ForgeType;
 pub use self::ids::*;

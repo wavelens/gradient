@@ -9,7 +9,8 @@
 //! (evaluation/build/cache changes) can publish without a cyclic crate
 //! dependency. The web layer filters the stream per subscribed resource.
 
-use serde::{Deserialize, Serialize};
+pub use crate::events::build::DownloadProgress;
+use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize)]
@@ -68,11 +69,4 @@ pub enum BoardEvent {
     /// Cache contents or stats changed (build cached, NAR deleted, GC). A
     /// content-free ping: subscribers refetch their own scope-filtered view.
     CacheChanged,
-}
-
-/// `total` is `None` when the source announced no size up front.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DownloadProgress {
-    pub downloaded: u64,
-    pub total: Option<u64>,
 }

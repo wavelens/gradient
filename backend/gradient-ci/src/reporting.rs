@@ -10,7 +10,6 @@
 use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
-use gradient_types::waiting_reason::WaitingReason;
 
 /// Snake-case tag of an evaluation kind, surfaced in action payloads so the
 /// effects consumer can restrict `OpenPr` to `input_update` runs.
@@ -20,61 +19,6 @@ pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
         EvaluationKind::InputUpdate => "input_update",
         EvaluationKind::DrvRecovery => "drv_recovery",
     }
-}
-
-/// The dispatch event an evaluation's status transition reports.
-pub fn evaluation_event_for_status(status: EvaluationStatus) -> &'static str {
-    match status {
-        EvaluationStatus::Queued => "evaluation.queued",
-        EvaluationStatus::Fetching
-        | EvaluationStatus::EvaluatingFlake
-        | EvaluationStatus::EvaluatingDerivation => "evaluation.started",
-        EvaluationStatus::Building => "evaluation.building",
-        EvaluationStatus::Waiting => "evaluation.waiting",
-        EvaluationStatus::Completed => "evaluation.completed",
-        EvaluationStatus::Failed => "evaluation.failed",
-        EvaluationStatus::Aborted => "evaluation.aborted",
-    }
-}
-
-/// The event a freshly INSERTed evaluation reports, with the description the
-/// forge check carries. Such a row never transitions through
-/// `update_evaluation_status`, so without this the commit shows no Gradient
-/// check at all until an eval worker picks it up.
-///
-/// `Queued` is a plain pending check; the three `Waiting` gates the trigger
-/// path can park on report pending (or action-required, for approval) with the
-/// reason spelled out. Anything else owes no first report.
-pub fn evaluation_created_event(
-    status: EvaluationStatus,
-    reason: Option<WaitingReason>,
-) -> Option<(&'static str, Option<&'static str>)> {
-    Some(match (status, reason) {
-        (EvaluationStatus::Queued, _) => ("evaluation.queued", None),
-        (EvaluationStatus::Waiting, Some(WaitingReason::Approval { .. })) => (
-            "evaluation.action_required",
-            Some("Awaiting maintainer approval for external contributor PR."),
-        ),
-        (EvaluationStatus::Waiting, Some(WaitingReason::NoCache)) => (
-            "evaluation.queued",
-            Some("Waiting for a writable cache subscription before this evaluation can run."),
-        ),
-        (EvaluationStatus::Waiting, Some(WaitingReason::CacheStorageFull)) => (
-            "evaluation.queued",
-            Some("Waiting for cache storage to free up before this evaluation can run."),
-        ),
-        (
-            EvaluationStatus::Waiting,
-            Some(WaitingReason::Workers {
-                connected_workers: 0,
-                ..
-            }),
-        ) => (
-            "evaluation.queued",
-            Some("Waiting for an eval-capable worker to be registered on the project."),
-        ),
-        _ => return None,
-    })
 }
 
 /// `"{project}/{task}"` when both are known, falling back to `"{task}"` when
@@ -192,29 +136,10 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
 /// The dispatch event a per-entry-point build transition reports. `Created` posts
 /// `build.created` (a pending check the moment the entry point evaluates, so an
 /// already-cached derivation that never transitions still shows a check).
-/// `FailedTransient` maps to an event no forge action consumes, so a retrying
-/// build's check stays put. `Queued`/`Building` post the live Pending/Running
-/// progress; a dependency failure or an abort surface as a failed check so a
-/// build that already posted Pending/Running resolves rather than hanging.
-pub fn build_event_for_status(status: BuildStatus) -> Option<&'static str> {
-    Some(match status {
-        BuildStatus::Created => "build.created",
-        BuildStatus::Queued => "build.queued",
-        BuildStatus::Building => "build.started",
-        BuildStatus::Completed => "build.completed",
-        BuildStatus::FailedPermanent
-        | BuildStatus::FailedTimeout
-        | BuildStatus::DependencyFailed
-        | BuildStatus::Aborted => "build.failed",
-        BuildStatus::FailedTransient => "build.failed_transient",
-        BuildStatus::Substituted => "build.substituted",
-        BuildStatus::Skipped => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_types::events::build::Reported;
 
     #[test]
     fn check_scope_with_project() {
@@ -343,20 +268,17 @@ mod tests {
     fn build_event_posts_live_progress() {
         // Queued/Building report before the terminal result so the per-build
         // check tracks progress, not just completion.
+        assert_eq!(Reported::reports(BuildStatus::Queued), Some("build.queued"));
         assert_eq!(
-            build_event_for_status(BuildStatus::Queued),
-            Some("build.queued")
-        );
-        assert_eq!(
-            build_event_for_status(BuildStatus::Building),
+            Reported::reports(BuildStatus::Building),
             Some("build.started")
         );
         assert_eq!(
-            build_event_for_status(BuildStatus::Completed),
+            Reported::reports(BuildStatus::Completed),
             Some("build.completed")
         );
         assert_eq!(
-            build_event_for_status(BuildStatus::Substituted),
+            Reported::reports(BuildStatus::Substituted),
             Some("build.substituted")
         );
     }
@@ -369,9 +291,9 @@ mod tests {
             BuildStatus::DependencyFailed,
             BuildStatus::Aborted,
         ] {
-            assert_eq!(build_event_for_status(s), Some("build.failed"));
+            assert_eq!(Reported::reports(s), Some("build.failed"));
             assert_eq!(
-                crate::actions::forge_status_for_event(build_event_for_status(s).unwrap()),
+                crate::actions::forge_status_for_event(Reported::reports(s).unwrap()),
                 Some(CiStatus::Failure)
             );
         }
@@ -380,7 +302,7 @@ mod tests {
     #[test]
     fn build_event_created_posts_pending_check() {
         assert_eq!(
-            build_event_for_status(BuildStatus::Created),
+            Reported::reports(BuildStatus::Created),
             Some("build.created")
         );
         assert_eq!(

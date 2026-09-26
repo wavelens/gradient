@@ -148,6 +148,8 @@ id_newtype!(WorkerConnectionId);
 id_newtype!(WorkerSampleId);
 id_newtype!(BaseWorkerId);
 id_newtype!(ProjectBaseWorkerId);
+id_newtype!(WebhookId);
+id_newtype!(WebhookDeliveryId);
 
 #[cfg(test)]
 mod tests {
