@@ -557,7 +557,7 @@ mod tests {
             (breakdown.total - total).abs() < 1e-9,
             "total must match score()"
         );
-        assert_eq!(breakdown.rules.len(), 8, "simple policy has 8 rules");
+        assert_eq!(breakdown.rules.len(), 9, "simple policy has 9 rules");
         assert!(breakdown.rules.contains_key("MissingPathsRule"));
         assert!(breakdown.rules.contains_key("QosRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
@@ -575,6 +575,7 @@ mod tests {
     fn rule_names_are_pinned() {
         let expected = [
             "BuiltinDeprioritizeRule",
+            "CpuAffinityRule",
             "DependencyCountRule",
             "DiskAffinityRule",
             "MissingNarSizeRule",
@@ -582,6 +583,7 @@ mod tests {
             "NetworkAffinityRule",
             "PreferLocalBuildRule",
             "QosRule",
+            "RealisedOutputsRule",
             "RescoreWaitRule",
             "ReserveFetchWorkersRule",
             "ResourceFitRule",
