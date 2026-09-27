@@ -1349,6 +1349,7 @@ mod commit_tracker_tests {
 mod commit_gate_tests {
     use super::*;
     use gradient_test_support::state::test_state;
+    use gradient_wire::session::frame::WireMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     const JOB: &str = "build:1";
@@ -1398,13 +1399,18 @@ mod commit_gate_tests {
         );
 
         drop(held);
-        tokio::time::timeout(Duration::from_secs(5), commit)
+        let frame = tokio::time::timeout(Duration::from_secs(5), sent.recv())
             .await
             .expect("the commit never took the freed permit")
-            .expect("commit panicked");
+            .expect("the writer stays open");
+        commit.abort();
+        let msg = ServerMessage::decode(frame)
+            .expect("decode ServerMessage")
+            .into_message()
+            .expect("deserialise ServerMessage");
         assert!(
-            !tracker.settle(JOB).await,
-            "the object is absent, so the released commit fails the build"
+            matches!(msg, ServerMessage::AbortJob { ref job_id, .. } if job_id == JOB),
+            "the object is absent, so the released commit fails the build: {msg:?}"
         );
     }
 }
