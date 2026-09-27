@@ -267,6 +267,7 @@ mod tests {
     fn build_changed(eval: Uuid) -> Envelope {
         env(build::StatusChanged {
             build_id: BuildJobId::new(Uuid::from_u128(9)),
+            derivation_build: DerivationBuildId::new(Uuid::from_u128(10)),
             evaluation_id: EvaluationId::new(eval),
             status: 2,
         })

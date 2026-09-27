@@ -20,6 +20,7 @@ pub struct DownloadProgress {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StatusChanged {
     pub build_id: BuildJobId,
+    pub derivation_build: DerivationBuildId,
     pub evaluation_id: EvaluationId,
     pub status: i16,
 }
@@ -28,6 +29,7 @@ firehose!(StatusChanged, "build.status_changed");
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reported {
     pub build_id: BuildJobId,
+    pub derivation_build: DerivationBuildId,
     pub evaluation_id: EvaluationId,
     pub derivation: DerivationId,
     pub status: i16,
@@ -131,6 +133,30 @@ mod tests {
         ] {
             assert_eq!(reported(s).name(), "build.failed");
         }
+    }
+
+    #[test]
+    fn build_events_link_their_job_to_the_dispatched_derivation_build() {
+        let anchor = DerivationBuildId::now_v7();
+        let changed = StatusChanged {
+            build_id: BuildJobId::now_v7(),
+            derivation_build: anchor,
+            evaluation_id: EvaluationId::now_v7(),
+            status: 2,
+        };
+        let reported = Reported {
+            derivation_build: anchor,
+            ..reported(BuildStatus::Completed)
+        };
+        let anchor = serde_json::json!(anchor);
+        assert_eq!(
+            serde_json::to_value(&changed).unwrap()["derivation_build"],
+            anchor
+        );
+        assert_eq!(
+            serde_json::to_value(&reported).unwrap()["derivation_build"],
+            anchor
+        );
     }
 
     #[test]

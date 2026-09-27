@@ -8528,7 +8528,8 @@ paths:
       tags: [builds]
       summary: Build live updates (WebSocket)
       description: |-
-        Upgrades to a WebSocket emitting `build_status_changed` events for every
+        Upgrades to a WebSocket emitting `build_status_changed` events
+        (`build_id`, `derivation_build`, `evaluation_id`, `status`) for every
         build in this build's evaluation (covers its dependency graph), and
         `build_progress` events (`derivation_build`, `downloaded`, `total`)
         while this build's Substitute or Download is fetching. Requires read

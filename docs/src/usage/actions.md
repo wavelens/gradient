@@ -76,6 +76,7 @@ X-Gradient-Signature: sha256=<hex HMAC>        # only if token is set, keyed by 
   "at": "2026-09-26T12:00:00.123Z",
   "content": {
     "build_id": "<uuid>",
+    "derivation_build": "<uuid>",
     "evaluation_id": "<uuid>",
     "derivation": "<uuid>",
     "status": 3,

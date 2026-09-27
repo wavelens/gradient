@@ -224,6 +224,7 @@ pub async fn announce_entry_point_statuses(
             &ctx.events,
             gradient_types::events::build::Reported {
                 build_id: job.id,
+                derivation_build: job.derivation_build,
                 evaluation_id: job.evaluation,
                 derivation: job.derivation,
                 status: i32::from(status) as i16,

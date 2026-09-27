@@ -342,7 +342,7 @@ channel only forwards events for its resource (authorized at connect).
 | `/board/cache/live` | `cache_changed` (content-free ping; refetch `/board/cache`) |
 
 Frames are JSON with a `type` field, e.g.
-`{"type":"build_status_changed","evaluation_id":"…","build_id":"…","status":2}`.
+`{"type":"build_status_changed","evaluation_id":"…","build_id":"…","derivation_build":"…","status":2}`.
 `evaluation_progress` (`{"type":"evaluation_progress","task":"…","evaluation_id":"…"}`)
 is a content-free ping emitted as builds and entry-points are persisted during
 the evaluation phase - before any build changes status - so the build and

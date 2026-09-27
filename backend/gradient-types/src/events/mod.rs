@@ -191,6 +191,7 @@ mod tests {
     fn stored_events_round_trip() {
         let event: Event = build::Reported {
             build_id: BuildJobId::nil(),
+            derivation_build: DerivationBuildId::nil(),
             evaluation_id: EvaluationId::nil(),
             derivation: DerivationId::nil(),
             status: 3,

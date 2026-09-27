@@ -254,6 +254,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
             ctx.events
                 .publish(gradient_types::events::build::StatusChanged {
                     build_id: job.id,
+                    derivation_build: job.derivation_build,
                     evaluation_id: job.evaluation,
                     status: i32::from(c.to) as i16,
                 });
@@ -267,6 +268,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
                     &ctx.events,
                     gradient_types::events::build::Reported {
                         build_id: job.id,
+                        derivation_build: job.derivation_build,
                         evaluation_id: job.evaluation,
                         derivation: job.derivation,
                         status: i32::from(c.to) as i16,

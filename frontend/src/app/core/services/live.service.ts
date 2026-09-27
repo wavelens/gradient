@@ -13,6 +13,7 @@ export type LiveEvent = EventEnvelope<{
   task?: string | null;
   evaluation_id?: string;
   build_id?: string;
+  derivation_build?: string;
   status?: number;
   downloaded?: number;
   total?: number | null;

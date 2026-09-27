@@ -15,7 +15,7 @@ The same JSON everywhere: websocket frames, webhook bodies, task action bodies.
 {
   "event": "build.completed",
   "at": "2026-09-26T12:00:00.123Z",
-  "content": { "build_id": "...", "evaluation_id": "...", "status": 3, "task": "...", "project": "..." }
+  "content": { "build_id": "...", "derivation_build": "...", "evaluation_id": "...", "status": 3, "task": "...", "project": "..." }
 }
 ```
 
@@ -33,6 +33,8 @@ The same JSON everywhere: websocket frames, webhook bodies, task action bodies.
 | `worker.*` | no | `worker.connected`, `worker.job_dispatched`, `worker.queue_depth` |
 | `proto.client.*`, `proto.server.*` | no | message type, worker, job id and size; never the payload |
 | `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served` | no | cache traffic |
+
+Every `build.*` event carrying a per-evaluation `build_id` also carries `derivation_build`, the shared build anchor that `worker.job_dispatched` names as its `build_id`.
 
 ## Webhooks
 
