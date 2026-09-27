@@ -714,6 +714,8 @@ impl BatchWriter<'_> {
     /// the references, and the referrers move exactly as a NAR commit's producers do:
     /// demand first, then the wholeness they lost ripples up and takes fetchability
     /// with it, so nothing downstream dispatches against an input nobody produced.
+    /// `unready_deps` counts every edge kind, so the referrers are recounted last,
+    /// absolutely, after every relative move of this pass has landed.
     async fn adopt_references(
         &self,
         resolved: &Resolved,
@@ -754,6 +756,12 @@ impl BatchWriter<'_> {
             let lock = gradient_db::lock_anchors(&txn, &seeded.unwhole).await?;
             changes.extend(gradient_db::lost_fetchability(&lock).await?);
         }
+
+        let lock = gradient_db::lock_seed_anchors(&txn, &referrers).await?;
+        gradient_db::seed_unready_deps(&lock)
+            .await
+            .context("recount unready_deps over the adopted edges")?;
+        changes.extend(gradient_db::unpromote_ungated(&txn, &referrers).await?);
 
         txn.commit()
             .await
