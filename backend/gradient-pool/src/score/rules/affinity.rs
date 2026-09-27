@@ -429,6 +429,17 @@ mod tests {
     }
 
     #[test]
+    fn cpu_rule_heavy_threshold_follows_the_instance_average() {
+        let rule = CpuAffinityRule::default();
+        let j = job(false, cpu_history(30_000));
+        let mut inst = fleet(10_000.0);
+        assert_eq!(rule.score(&ctx(&j), &cores(15_000), &inst), 0.0);
+
+        inst.cpu_time_ms.w1h = Some(10_000.0);
+        assert!(rule.score(&ctx(&j), &cores(15_000), &inst) > 0.0);
+    }
+
+    #[test]
     fn cpu_rule_falls_back_to_build_time_without_cpu_samples() {
         let rule = CpuAffinityRule::default();
         let j = job(

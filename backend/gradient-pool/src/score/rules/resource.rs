@@ -336,29 +336,6 @@ mod tests {
         assert_eq!(rule.score(&ctx(&job), &w, &InstanceContext::default()), 0.0);
     }
 
-    #[test]
-    fn cpu_bonus_triggers_below_fixed_threshold_when_instance_avg_low() {
-        let rule = ResourceFitRule::default();
-        let strong = worker_with(WorkerMetricsView {
-            cpu_core_score: 1500,
-            ..Default::default()
-        });
-        let job = job_with_history(HistoryPrediction {
-            avg_cpu_time_ms: 30_000,
-            samples: 5,
-            ..Default::default()
-        });
-
-        assert_eq!(
-            rule.score(&ctx(&job), &strong, &InstanceContext::default()),
-            0.0
-        );
-
-        let mut inst = InstanceContext::default();
-        inst.cpu_time_ms.w1h = Some(10_000.0);
-        assert!(rule.score(&ctx(&job), &strong, &inst) > 0.0);
-    }
-
     fn builtin_job() -> ScoredJob<'static> {
         ScoredJob::new_build(
             "test",
