@@ -3,6 +3,7 @@ backend/test-store
 .nixos-test-history
 
 /proxy/
+/gradjoeng/
 
 # ---> Python
 # Byte-compiled / optimized / DLL files
