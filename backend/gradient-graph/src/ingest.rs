@@ -606,7 +606,8 @@ impl BatchWriter<'_> {
     /// Move the readiness counters this batch changed, in one transaction under one
     /// ordered lock: the anchors whose substitution it established become
     /// fetchable and their dependents' counters drop, `unready_deps` is recounted
-    /// from ground truth, and whatever now passes the gates is queued.
+    /// from ground truth over the walked, grown and adopting anchors, and whatever
+    /// now passes the gates is queued.
     ///
     /// ONE lock over the union of the two sets, never one per set: two ordered
     /// acquisitions in the same transaction are not monotone across each other, and
@@ -655,6 +656,7 @@ impl BatchWriter<'_> {
         resolved: &Resolved,
         newly_walked: &HashSet<String>,
         grew: &[DerivationId],
+        adopted: &[DerivationId],
         entry_points: &[DerivationId],
     ) -> Result<Vec<DerivationId>> {
         let mut to_seed: Vec<DerivationId> = newly_walked
@@ -662,6 +664,7 @@ impl BatchWriter<'_> {
             .filter_map(|h| resolved.by_hash.get(h).copied())
             .collect();
         to_seed.extend_from_slice(grew);
+        to_seed.extend_from_slice(adopted);
         to_seed.sort_unstable();
         to_seed.dedup();
 
@@ -714,19 +717,19 @@ impl BatchWriter<'_> {
     /// the references, and the referrers move exactly as a NAR commit's producers do:
     /// demand first, then the wholeness they lost ripples up and takes fetchability
     /// with it, so nothing downstream dispatches against an input nobody produced.
-    /// `unready_deps` counts every edge kind, so the referrers are recounted last,
-    /// absolutely, after every relative move of this pass has landed.
+    /// The referrers are returned for the readiness pass to recount `unready_deps`,
+    /// after it marks the producers fetchable.
     async fn adopt_references(
         &self,
         resolved: &Resolved,
         newly_walked: &HashSet<String>,
-    ) -> Result<()> {
+    ) -> Result<Vec<DerivationId>> {
         let walked: Vec<DerivationId> = newly_walked
             .iter()
             .filter_map(|h| resolved.by_hash.get(h).copied())
             .collect();
         if walked.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let txn = self
@@ -738,10 +741,10 @@ impl BatchWriter<'_> {
             .await
             .context("adopt the references naming newly walked outputs")?;
         if referrers.is_empty() {
-            return txn
-                .commit()
+            txn.commit()
                 .await
-                .context("commit the reference adoption transaction");
+                .context("commit the reference adoption transaction")?;
+            return Ok(referrers);
         }
 
         debug!(
@@ -757,18 +760,12 @@ impl BatchWriter<'_> {
             changes.extend(gradient_db::lost_fetchability(&lock).await?);
         }
 
-        let lock = gradient_db::lock_seed_anchors(&txn, &referrers).await?;
-        gradient_db::seed_unready_deps(&lock)
-            .await
-            .context("recount unready_deps over the adopted edges")?;
-        changes.extend(gradient_db::unpromote_ungated(&txn, &referrers).await?);
-
         txn.commit()
             .await
             .context("commit the reference adoption transaction")?;
         gradient_db::emit_transition_effects(self.ctx, &changes).await;
 
-        Ok(())
+        Ok(referrers)
     }
 
     /// Settle the demand a batch moves without moving any anchor's status, so the
@@ -1040,7 +1037,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             .resolve_anchors(ids, &batch.derivations, batch)
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
-        writer.adopt_references(&resolved, &newly_walked).await?;
+        let adopted = writer.adopt_references(&resolved, &newly_walked).await?;
         // Entry points are demand, so their rows exist before the gates are read.
         report.entry_points = match batch.task {
             Some(task) => {
@@ -1051,7 +1048,14 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             None => Vec::new(),
         };
         report.to_probe = writer
-            .advance_readiness(batch, &resolved, &newly_walked, &grew, &report.entry_points)
+            .advance_readiness(
+                batch,
+                &resolved,
+                &newly_walked,
+                &grew,
+                &adopted,
+                &report.entry_points,
+            )
             .await?;
         report.to_probe.extend(
             newly_walked
@@ -2077,6 +2081,71 @@ mod tests {
         assert!(
             seed < promotes[1] && promotes[1] < unpromote,
             "the seed's own promote and the un-promote that undoes a stale-low queueing come last: {log:?}"
+        );
+    }
+
+    /// A referrer that adopted an edge into a newly walked producer is recounted by
+    /// the readiness pass, after the producer's mark: seeded before it, the seed
+    /// already counts the producer ready and the mark's ripple takes it down again.
+    #[tokio::test]
+    async fn an_adopting_referrer_is_seeded_once_after_the_mark() {
+        let evaluation = EvaluationId::now_v7();
+        let referrer = DerivationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![completeness_row(a.id, false, false)]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv_row(referrer)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv_row(b.id)]])
+            .append_query_results([vec![ripple_row(a.id, true)]])
+            .append_query_results([vec![drv_row(a.id)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![ok(1); 10])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                truly_substituted: HashSet::from([B.to_owned()]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let mark = log
+            .iter()
+            .position(|s| s.contains("SET fetchable = true"))
+            .unwrap_or_else(|| panic!("the mark runs: {log:?}"));
+        let seeds: Vec<usize> = log
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.contains("SET unready_deps = (SELECT count(*)"))
+            .map(|(i, _)| i)
+            .collect();
+
+        assert_eq!(seeds.len(), 1, "one absolute seed per batch: {log:?}");
+        assert!(mark < seeds[0], "the seed follows the mark: {log:?}");
+        assert!(
+            log[seeds[0]].contains(&referrer.into_inner().to_string()),
+            "the adopting referrer is seeded with the batch: {log:?}"
         );
     }
 
