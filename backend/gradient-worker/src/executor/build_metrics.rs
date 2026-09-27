@@ -5,7 +5,7 @@
  */
 
 //! Build metrics sampling - peak network throughput and live build cgroup
-//! (`memory.peak` / `io.stat`) collection, folded into the wire [`BuildMetrics`].
+//! (`memory.peak` / `io.stat` / `cpu.stat`) collection, folded into the wire [`BuildMetrics`].
 
 use gradient_wire::messages::BuildMetrics;
 use harmonia_protocol::daemon_wire::types2::Microseconds;
@@ -89,7 +89,8 @@ pub(super) fn daemon_cpu_usec(
 }
 
 /// Assemble per-build metrics from the live-sampled cgroup snapshot (peak RAM /
-/// disk, captured before teardown) and the daemon-reported CPU time. Always
+/// disk / CPU, captured before teardown) and the daemon-reported CPU time, which
+/// wins when present since it covers the build's last moments. Always
 /// reports `build_time_ms`; cgroup fields stay `None` when no cgroup was
 /// sampled (metrics disabled, or the build cgroup never appeared).
 pub(super) fn assemble_build_metrics(
@@ -101,10 +102,13 @@ pub(super) fn assemble_build_metrics(
     let cpu_count = crate::metrics::host_static().cpu_count;
     let raw = match (sampled, cpu_usec) {
         (None, None) => None,
-        (s, cpu) => Some(BuildMetricsRaw {
-            cpu_usage_usec: cpu,
-            ..s.unwrap_or_default()
-        }),
+        (s, cpu) => {
+            let s = s.unwrap_or_default();
+            Some(BuildMetricsRaw {
+                cpu_usage_usec: cpu.or(s.cpu_usage_usec),
+                ..s
+            })
+        }
     };
     if let Some(r) = raw.as_ref() {
         let bytes = r.disk_read_bytes + r.disk_write_bytes;
@@ -171,10 +175,10 @@ impl NetworkPeakSampler {
     }
 }
 
-/// Samples a daemon build's cgroup `memory.peak` / `io.stat` *while it runs*,
-/// because nix destroys the cgroup as soon as the build finishes. It locates
-/// the cgroup via [`build_cgroup`], locks onto it, and keeps the last good
-/// reading - the high-water `memory.peak` and cumulative `io.stat` just before
+/// Samples a daemon build's cgroup `memory.peak` / `io.stat` / `cpu.stat` *while
+/// it runs*, because nix destroys the cgroup as soon as the build finishes. It
+/// locates the cgroup via [`build_cgroup`], locks onto it, and keeps the last good
+/// reading - the high-water `memory.peak` and cumulative counters just before
 /// teardown.
 pub(super) struct CgroupSampler {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -238,13 +242,13 @@ impl CgroupSampler {
 }
 
 /// Fold a fresh cgroup reading into the running snapshot: `memory.peak` is a
-/// kernel high-water mark so take the max; `io.stat` is cumulative so the latest
-/// read is the total; OOM is sticky.
+/// kernel high-water mark so take the max; `io.stat` and `cpu.stat` are
+/// cumulative so the latest read is the total; OOM is sticky.
 fn merge_cgroup_sample(prev: Option<BuildMetricsRaw>, cur: BuildMetricsRaw) -> BuildMetricsRaw {
     let prev = prev.unwrap_or_default();
     BuildMetricsRaw {
         peak_ram_bytes: prev.peak_ram_bytes.max(cur.peak_ram_bytes),
-        cpu_usage_usec: None,
+        cpu_usage_usec: cur.cpu_usage_usec.or(prev.cpu_usage_usec),
         disk_read_bytes: cur.disk_read_bytes,
         disk_write_bytes: cur.disk_write_bytes,
         oom_killed: prev.oom_killed || cur.oom_killed,
@@ -344,5 +348,31 @@ mod tests {
         assert_eq!(m.cpu_time_ms, Some(8_000));
         assert_eq!(m.avg_cpu_pct, Some(50.0));
         assert_eq!(m.peak_network_mbps, Some(125.0));
+    }
+
+    fn sample(cpu_usage_usec: Option<u64>) -> BuildMetricsRaw {
+        BuildMetricsRaw {
+            peak_ram_bytes: Some(BYTES_PER_MB),
+            cpu_usage_usec,
+            disk_read_bytes: 1,
+            disk_write_bytes: 2,
+            oom_killed: false,
+        }
+    }
+
+    #[test]
+    fn merge_keeps_the_latest_cumulative_cpu_usage() {
+        let merged = merge_cgroup_sample(Some(sample(Some(1_000))), sample(Some(5_000)));
+        assert_eq!(merged.cpu_usage_usec, Some(5_000));
+        let merged = merge_cgroup_sample(Some(sample(Some(5_000))), sample(None));
+        assert_eq!(merged.cpu_usage_usec, Some(5_000));
+    }
+
+    #[test]
+    fn assemble_falls_back_to_the_sampled_cpu_without_daemon_times() {
+        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), None, 1_000, None);
+        assert_eq!(m.cpu_time_ms, Some(3_000));
+        let m = assemble_build_metrics(Some(sample(Some(3_000_000))), Some(4_000_000), 1_000, None);
+        assert_eq!(m.cpu_time_ms, Some(4_000));
     }
 }
