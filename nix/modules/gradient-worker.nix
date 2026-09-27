@@ -233,7 +233,7 @@ in {
           (`systemctl kill -s TERM gradient-worker`) aborts it.
         '';
         type = lib.types.ints.unsigned;
-        default = 600;
+        default = 60;
       };
 
       evalWorkers = lib.mkOption {

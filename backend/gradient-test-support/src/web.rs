@@ -167,6 +167,7 @@ fn server_with_pools(
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
     });
     TestServer::new(gradient_web::create_router(state).expect("router"))
 }

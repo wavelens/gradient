@@ -199,6 +199,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     };
 
     let upstream_query_concurrency = config.proto.upstream_query_concurrency;
+    let nar_commit_concurrency = config.proto.nar_commit_concurrency;
 
     Ok(Arc::new(ServerState {
         worker_db: WorkerDb::new(db),
@@ -214,6 +215,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         upstream_query: Arc::new(tokio::sync::Semaphore::new(
             upstream_query_concurrency.max(1),
         )),
+        nar_commit: Arc::new(tokio::sync::Semaphore::new(nar_commit_concurrency.max(1))),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         shutdown: Shutdown::new(),
         last_used_stamps: last_used_stamps(),

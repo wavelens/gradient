@@ -894,6 +894,9 @@ enum HotUpdate {
 
 /// Detached storage commit plus DB effects for one `NarUploaded`.
 async fn commit_uploaded_nar(c: CommitUploadedNar) {
+    let Ok(_permit) = c.state.nar_commit.acquire().await else {
+        return c.guard.fail();
+    };
     let relayed = match c.staged {
         Some(staged) => {
             match commit_relayed(
@@ -1338,6 +1341,70 @@ mod commit_tracker_tests {
             tokio::time::timeout(Duration::from_secs(1), tracker.settle("build:1"))
                 .await
                 .expect("settle blocked on a job that owes nothing")
+        );
+    }
+}
+
+#[cfg(test)]
+mod commit_gate_tests {
+    use super::*;
+    use gradient_test_support::state::test_state;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    const JOB: &str = "build:1";
+    const HASH: &str = "abcdefghijklmnopqrstuvwxyz012345";
+
+    /// Every worker session commits on the same server, so a commit beyond the
+    /// server-wide gate queues instead of adding one more storage read and DB
+    /// write to the pile.
+    #[tokio::test]
+    async fn a_commit_queues_until_the_server_wide_gate_frees_a_permit() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(5));
+        let tracker = Arc::new(CommitTracker::default());
+        let every_permit = state.nar_commit.available_permits() as u32;
+        let held = Arc::clone(&state.nar_commit)
+            .acquire_many_owned(every_permit)
+            .await
+            .unwrap();
+
+        let commit = state.shutdown.spawn(commit_uploaded_nar(CommitUploadedNar {
+            writer,
+            state: Arc::clone(&state),
+            scheduler,
+            peer_id: "peer-1".into(),
+            job_id: JOB.into(),
+            project_id: None,
+            store_path: format!("/nix/store/{HASH}-pkg"),
+            hash: HASH.into(),
+            file_hash: "sha256:missing".into(),
+            file_size: 3,
+            nar_size: 3,
+            nar_hash: "sha256:missing".into(),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            multipart: None,
+            staged: None,
+            guard: tracker.start(JOB),
+        }));
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!commit.is_finished(), "the commit ran past a closed gate");
+        assert!(
+            sent.try_recv().is_err(),
+            "a queued commit touched the build"
+        );
+
+        drop(held);
+        tokio::time::timeout(Duration::from_secs(5), commit)
+            .await
+            .expect("the commit never took the freed permit")
+            .expect("commit panicked");
+        assert!(
+            !tracker.settle(JOB).await,
+            "the object is absent, so the released commit fails the build"
         );
     }
 }

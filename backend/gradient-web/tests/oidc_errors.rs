@@ -76,6 +76,7 @@ fn server_with_broken_oidc() -> TestServer {
         events: gradient_types::EventBus::default(),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
         ready_set: Default::default(),

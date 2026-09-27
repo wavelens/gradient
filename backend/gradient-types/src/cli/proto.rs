@@ -128,6 +128,12 @@ pub struct ProtoArgs {
         default_value_t = 32
     )]
     pub upstream_query_concurrency: usize,
+
+    /// Maximum NAR commits (staged-file verification, storage placement and
+    /// cache-index write after a `NarUploaded`) running at once across every
+    /// worker session. Further commits queue for a permit.
+    #[arg(long, env = "GRADIENT_NAR_COMMIT_CONCURRENCY", default_value_t = 8)]
+    pub nar_commit_concurrency: usize,
 }
 
 impl Default for ProtoArgs {
@@ -147,6 +153,7 @@ impl Default for ProtoArgs {
             nar_partial_ttl_secs: 86400,
             worker_heartbeat_timeout_secs: 120,
             upstream_query_concurrency: 32,
+            nar_commit_concurrency: 8,
         }
     }
 }

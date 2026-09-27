@@ -55,6 +55,8 @@ pub struct AppState {
     /// Global outbound-request pool for upstream narinfo probes, shared by the
     /// scheduler eval probe and the proto cache-query probe.
     pub upstream_query: Arc<Semaphore>,
+    /// Global pool for NAR commits, shared by every worker session.
+    pub nar_commit: Arc<Semaphore>,
     /// Resolved-once registry of forge providers (reporters, webhook parsing,
     /// signature verification) shared into every [`CiContext`].
     pub forge: ForgeRegistry,

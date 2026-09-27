@@ -157,6 +157,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
     })
 }
 
@@ -215,6 +216,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
     })
 }
 
@@ -278,6 +280,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
     });
 
     let compressed = synthetic_nar_zst().await;
@@ -400,6 +403,7 @@ fn make_state(
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
     })
 }
 
@@ -489,6 +493,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
     })
 }
 
@@ -563,6 +568,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
+        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
     });
 
     let compressed = synthetic_nar_zst().await;

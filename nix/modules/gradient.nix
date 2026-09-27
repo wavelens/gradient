@@ -576,6 +576,12 @@ in {
           default = 32;
         };
 
+        narCommitConcurrency = lib.mkOption {
+          description = "Maximum NAR upload commits (verification, storage placement, cache-index write) running at once across all worker connections. Further commits queue.";
+          type = lib.types.ints.positive;
+          default = 8;
+        };
+
         keepEvaluations = lib.mkOption {
           description = "Global maximum of evaluations kept per task. Caps the per-task setting, and a new task starts at the lower of 30 and this. 0 disables the cap.";
           type = lib.types.ints.unsigned;
@@ -1189,6 +1195,7 @@ in {
         GRADIENT_MAX_SOURCE_UPLOAD_SIZE = toString cfg.settings.maxSourceUploadSize;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
         GRADIENT_UPSTREAM_QUERY_CONCURRENCY = toString cfg.settings.upstreamQueryConcurrency;
+        GRADIENT_NAR_COMMIT_CONCURRENCY = toString cfg.settings.narCommitConcurrency;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
         GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
         GRADIENT_QUIC = lib.boolToString cfg.enableQuic;
