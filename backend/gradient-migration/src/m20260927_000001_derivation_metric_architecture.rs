@@ -6,14 +6,16 @@
 
 //! Build history is predicted per `(pname, architecture)`, newest first, so the
 //! architecture is carried on the metric row next to the already denormalized
-//! `pname` and indexed in lookup order.
+//! `pname` and indexed in lookup order. A derivation without `pname` is recorded
+//! under its `name`.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
 const UP: &[&str] = &[
     r#"ALTER TABLE derivation_metric ADD COLUMN architecture text"#,
-    r#"UPDATE derivation_metric dm SET architecture = d.architecture
+    r#"UPDATE derivation_metric dm
+     SET architecture = d.architecture, pname = coalesce(dm.pname, d.name)
      FROM derivation d WHERE d.id = dm.derivation"#,
     r#"ALTER TABLE derivation_metric ALTER COLUMN architecture SET NOT NULL"#,
     r#"DROP INDEX IF EXISTS "idx-derivation_metric-pname-closure_size""#,

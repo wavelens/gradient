@@ -652,7 +652,7 @@ enum DispatchOutcome {
 /// read history (resource-aware); the simple policy skips the walk and uses
 /// whatever is persisted. Derivations missing `closure_size` are sized in one
 /// batched walk, returned as the third element for the graph actor to persist;
-/// history is queried once per distinct `(pname, architecture)`.
+/// history is queried once per distinct `(history_name, architecture)`.
 async fn load_sizes_and_histories(
     state: &Arc<ServerState>,
     derivations: &HashMap<DerivationId, MDerivation>,
@@ -692,9 +692,7 @@ async fn load_sizes_and_histories(
     for (drv_id, drv) in derivations {
         let size = drv.closure_size.or_else(|| computed.get(drv_id).copied());
         closure_sizes.insert(*drv_id, size);
-        let Some(pname) = drv.pname.as_deref() else {
-            continue;
-        };
+        let pname = drv.history_name();
         let key = (pname, drv.architecture.as_str());
         let prediction = match predictions.get(&key) {
             Some(p) => *p,

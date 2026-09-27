@@ -769,7 +769,7 @@ async fn record_metrics(
     let metric = MDerivationMetric {
         id: DerivationMetricId::now_v7(),
         derivation: derivation_id,
-        pname: derivation.pname,
+        pname: Some(derivation.history_name().to_owned()),
         architecture: derivation.architecture,
         closure_size: derivation.closure_size,
         peak_ram_mb: metrics.peak_ram_mb.map(|v| v as i64),

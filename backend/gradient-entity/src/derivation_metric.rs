@@ -16,6 +16,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: DerivationMetricId,
     pub derivation: DerivationId,
+    /// [`super::derivation::Model::history_name`] of the built derivation.
     pub pname: Option<String>,
     pub architecture: String,
     pub closure_size: Option<i64>,

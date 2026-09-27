@@ -13,15 +13,15 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder
 const HISTORY_WINDOW: u64 = 20;
 
 /// Predict resource usage for a build from the latest metrics of the same
-/// `pname` on the same architecture. Returns the default (zero samples)
+/// `history_name` on the same architecture. Returns the default (zero samples)
 /// prediction when no history exists.
 pub async fn predict(
     db: &impl ConnectionTrait,
-    pname: &str,
+    history_name: &str,
     architecture: &str,
 ) -> gradient_pool::score::HistoryPrediction {
     let rows = match EDerivationMetric::find()
-        .filter(CDerivationMetric::Pname.eq(pname))
+        .filter(CDerivationMetric::Pname.eq(history_name))
         .filter(CDerivationMetric::Architecture.eq(architecture))
         .order_by_desc(CDerivationMetric::CreatedAt)
         .limit(HISTORY_WINDOW)

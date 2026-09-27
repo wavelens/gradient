@@ -45,6 +45,12 @@ impl Model {
         self.as_store_path().base()
     }
 
+    /// Identity its build history is recorded and predicted under: `pname`, else
+    /// the `name` for derivations that declare none.
+    pub fn history_name(&self) -> &str {
+        self.pname.as_deref().unwrap_or(&self.name)
+    }
+
     /// Full `/nix/store/<hash>-<name>.drv` path for dispatch + worker store ops.
     pub fn store_path(&self) -> String {
         self.as_store_path().full()
@@ -55,3 +61,24 @@ impl Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_name_falls_back_to_the_name_without_pname() {
+        let named = Model {
+            name: "hello-2.12".into(),
+            pname: Some("hello".into()),
+            ..Default::default()
+        };
+        let unnamed = Model {
+            name: "etc".into(),
+            pname: None,
+            ..Default::default()
+        };
+        assert_eq!(named.history_name(), "hello");
+        assert_eq!(unnamed.history_name(), "etc");
+    }
+}

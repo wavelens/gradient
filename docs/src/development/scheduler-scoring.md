@@ -39,7 +39,7 @@ unset, and unknown names log a warning and fall back to `resource-aware`.
 - `ScoredJob` exposes lazy providers (`closure_size`, `history`) so a policy
   pays for closure/history lookups only when a rule reads them.
 - A build's `history` summarizes the 20 latest `derivation_metric` rows of the
-  same `pname` and architecture; a derivation without `pname` has no history.
+  same `pname` (else derivation `name`) and architecture.
 
 The scheduler builds the contexts, calls the configured policy per candidate,
 and assigns the worker its top-scoring job - unless that score is negative.
