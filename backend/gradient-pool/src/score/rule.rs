@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::score::context::{InstanceContext, ScoredJob, WorkerMetricsView};
+use crate::score::context::{HistoryPrediction, InstanceContext, ScoredJob, WorkerMetricsView};
 
 /// Everything the policy knows about the candidate job at scoring time.
 #[derive(Clone, Copy)]
@@ -12,6 +12,8 @@ pub struct JobContext<'a> {
     pub job: &'a ScoredJob<'a>,
     pub missing_count: Option<u32>,
     pub missing_nar_size: Option<u64>,
+    /// The worker already holds every output: dispatch only uploads them.
+    pub outputs_present: bool,
     pub dependency_count: u32,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
@@ -24,6 +26,18 @@ pub struct JobContext<'a> {
     /// Scoring-time clock, threaded in so rules are deterministic functions of
     /// their inputs instead of reading the wall clock.
     pub now: chrono::NaiveDateTime,
+}
+
+impl JobContext<'_> {
+    /// The job's predicted build cost on this worker: none when the worker
+    /// already holds the outputs, since nothing is built there.
+    pub fn build_history(&self) -> HistoryPrediction {
+        if self.outputs_present {
+            HistoryPrediction::default()
+        } else {
+            self.job.history()
+        }
+    }
 }
 
 /// Build-relevant capabilities of the requesting worker.

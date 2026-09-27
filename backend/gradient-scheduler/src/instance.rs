@@ -18,6 +18,7 @@ pub struct InstanceCounts {
     pub pending_builds: u32,
     pub total_workers: u32,
     pub idle_workers: u32,
+    pub cpu_core_score_mean: Option<f64>,
 }
 
 /// Build a [`gradient_pool::score::Windowed`] from a 5m/1h/24h column triple.
@@ -211,6 +212,7 @@ pub async fn compute_instance_context(
         pending_builds: counts.pending_builds,
         total_workers: counts.total_workers,
         idle_workers: counts.idle_workers,
+        cpu_core_score_mean: counts.cpu_core_score_mean,
     }
 }
 
@@ -337,6 +339,7 @@ mod tests {
             pending_builds: 3,
             total_workers: 5,
             idle_workers: 1,
+            cpu_core_score_mean: None,
         };
         let ic = compute_instance_context(&db, counts, gradient_types::now()).await;
 

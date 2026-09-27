@@ -43,6 +43,8 @@ pub struct InstanceContext {
     pub pending_builds: u32,
     pub total_workers: u32,
     pub idle_workers: u32,
+    /// Mean `cpu_core_score` of the connected workers that reported one.
+    pub cpu_core_score_mean: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

@@ -14,7 +14,9 @@
 //! out-budgets everything else so nothing waits forever; the resource penalties
 //! (RESOURCE_SATURATION_PENALTY 5000, stackable to 10000; RAM overshoot up to
 //! RESOURCE_FIT_RAM_PENALTY x MAX_OVERSHOOT = 800 before OOM factors) keep
-//! doomed placements out; cache-warmth bonuses (MISSING_NAR_SIZE_CAP 500,
+//! doomed placements out; REALISED_OUTPUTS_BONUS (2500) sends a job to a worker
+//! that only has to upload it; CpuAffinityRule (up to +-1200) moves long builds
+//! to faster cores; cache-warmth bonuses (MISSING_NAR_SIZE_CAP 500,
 //! MISSING_PATHS_CAP 200) prefer cheap transfers; the rest are tie-breakers.
 
 /// A job dispatches only when its summed score reaches this floor. "Do not
@@ -32,6 +34,10 @@ pub const MISSING_PATHS_FALLBACK_AVG: f64 = 20.0;
 /// baseline multiplier over the 1h average missing-NAR megabytes.
 pub const MISSING_NAR_SIZE_CAP: f64 = 500.0;
 pub const MISSING_NAR_SIZE_BASELINE_K: f64 = 2.0;
+
+/// RealisedOutputsRule: bonus for a worker already holding every output. Out-budgets
+/// a rival's full cache warmth plus the largest CpuAffinityRule swing.
+pub const REALISED_OUTPUTS_BONUS: f64 = 2500.0;
 
 /// BuiltinDeprioritizeRule: bonus for real compilation jobs, and the stronger
 /// lift builtins get on an architecture-less worker so it is not left idle.
@@ -58,13 +64,17 @@ pub const RESERVE_FETCH_PENALTY: f64 = 300.0;
 /// measured before dispatching unmeasured (the rule vetoes until then).
 pub const RESCORE_MAX_ROUNDS: u32 = 4;
 
-/// ResourceFitRule: RAM-overshoot penalty scale and its overshoot clamp, plus
-/// the CPU-affinity bonus for CPU-heavy builds on strong cores.
+/// ResourceFitRule: RAM-overshoot penalty scale and its overshoot clamp.
 pub const RESOURCE_FIT_RAM_PENALTY: f64 = 400.0;
 pub const RESOURCE_FIT_MAX_OVERSHOOT: f64 = 2.0;
-pub const CPU_AFFINITY_BONUS: f64 = 50.0;
+
+/// CpuAffinityRule: points per heaviness step at a core twice the fleet mean,
+/// the heaviness cap (1 at the heavy threshold, +1 per doubling), and the
+/// heavy-work threshold when the instance has no CPU-time average. A capped
+/// build on a core 50% off the mean swings more than MISSING_NAR_SIZE_CAP.
+pub const CPU_AFFINITY_WEIGHT: f64 = 400.0;
+pub const CPU_HEAVINESS_CAP: f64 = 3.0;
 pub const CPU_HEAVY_THRESHOLD_MS: u64 = 60_000;
-pub const CPU_AFFINITY_BONUS_CAP: f64 = 2.0;
 
 /// ResourceSaturationRule: flat penalty per tripped saturation signal
 /// (stackable), the CPU thresholds, the free-RAM fraction floor, and the

@@ -161,14 +161,20 @@ impl PendingJob {
     }
 
     pub fn as_candidate(&self, job_id: &str) -> JobCandidate {
-        let drv_paths = match self {
-            PendingJob::Build(j) => j.job.builds.iter().map(|t| t.drv_path.clone()).collect(),
-            PendingJob::Eval(_) => vec![],
+        let builds = match self {
+            PendingJob::Build(j) => j.job.builds.as_slice(),
+            PendingJob::Eval(_) => &[],
         };
         JobCandidate {
             job_id: job_id.to_owned(),
             required_paths: self.required_paths().to_vec(),
-            drv_paths,
+            drv_paths: builds.iter().map(|t| t.drv_path.clone()).collect(),
+            output_paths: builds
+                .iter()
+                .flat_map(|t| &t.outputs)
+                .filter(|o| !o.path.is_empty())
+                .map(|o| o.path.clone())
+                .collect(),
         }
     }
 
@@ -373,6 +379,8 @@ pub struct WorkerJobScore {
     pub missing_count: u32,
     /// Total uncompressed NAR size (bytes) of the missing paths.
     pub missing_nar_size: u64,
+    /// The worker already holds every output, so it would only upload them.
+    pub outputs_present: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -553,6 +561,7 @@ impl JobTracker {
                 WorkerJobScore {
                     missing_count: score.missing_count,
                     missing_nar_size: score.missing_nar_size,
+                    outputs_present: score.outputs_present,
                 },
             );
         }
@@ -720,6 +729,7 @@ impl JobTracker {
                     job: &scored_job,
                     missing_count: s.map(|s| s.missing_count),
                     missing_nar_size: s.map(|s| s.missing_nar_size),
+                    outputs_present: s.is_some_and(|s| s.outputs_present),
                     dependency_count: job.dependency_count(),
                     queued_at: job.queued_at(),
                     ready_at: job.ready_at(),
@@ -1805,6 +1815,7 @@ mod tests {
                     job_id: "kvm".into(),
                     missing_count: 0,
                     missing_nar_size: 0,
+                    outputs_present: false,
                 }],
             );
         }
@@ -1846,6 +1857,7 @@ mod tests {
                 job_id: "j1".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         );
         let p = gradient_pool::score::policy_by_name("simple");
@@ -1894,6 +1906,7 @@ mod tests {
                 job_id: "j1".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         );
         assert!(
@@ -1961,6 +1974,7 @@ mod tests {
                     job_id: "build:j1".into(),
                     missing_count: 0,
                     missing_nar_size: 0,
+                    outputs_present: false,
                 }],
             );
         }
@@ -1984,6 +1998,7 @@ mod tests {
                 job_id: "build:j2".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         );
         tracker.remove_job("build:j2");
@@ -2010,6 +2025,7 @@ mod tests {
                 job_id: "build:j1".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         );
         tracker.remove_pending_for_evaluation(eval_id);
@@ -2105,6 +2121,7 @@ mod tests {
                 job_id: "j1".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         );
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
@@ -2147,6 +2164,7 @@ mod tests {
                 job_id: "j1".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         );
 

@@ -309,6 +309,7 @@ mod tests {
                 cache_info: None,
             }],
             drv_paths: vec![],
+            output_paths: vec![],
         };
 
         let (served, seen) = tokio::join!(
@@ -322,6 +323,7 @@ mod tests {
             job_id: "build:1".into(),
             missing_count: 1,
             missing_nar_size: 42,
+            outputs_present: false,
         };
         let (sent, scores) = tokio::join!(peer.score(vec![score.clone()]), conn.scores());
         sent.unwrap();

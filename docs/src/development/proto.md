@@ -429,6 +429,7 @@ JobCandidate {
     job_id: Uuid,
     required_paths: Vec<RequiredPath>,  // store paths needed (worker scores against these)
     drv_paths: Vec<String>,             // .drv paths for build candidates; empty for eval jobs
+    output_paths: Vec<String>,          // output store paths of every build; empty for eval jobs
 }
 
 RequiredPath {
@@ -472,6 +473,7 @@ CandidateScore {
     missing_count: u32,                 // number of required_paths not in local store
     missing_nar_size: u64,              // total uncompressed NAR size of missing paths (bytes)
                                         // derived from CacheInfo.nar_size; 0 when unavailable
+    outputs_present: bool,              // every output_path is in the local store: the job only uploads
 }
 ```
 
@@ -1586,7 +1588,7 @@ decommission a worker it does not own.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `17`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `18`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
@@ -1612,6 +1614,7 @@ decommission a worker it does not own.
  - v16 made `CacheQuery.nar_sizes` entries `Option<u64>`, so an unknown size is
    never granted a multipart upload.
  - v17 added `BuildProgress`, the bytes a Substitute or Download has fetched.
+ - v18 added `JobCandidate.output_paths` and `CandidateScore.outputs_present`.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---

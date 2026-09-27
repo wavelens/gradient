@@ -80,6 +80,7 @@ mod tests {
             job,
             missing_count,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),

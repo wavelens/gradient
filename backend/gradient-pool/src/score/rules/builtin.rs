@@ -98,6 +98,40 @@ impl ScoreRule for MissingNarSizeRule {
     }
 }
 
+/// A worker that already holds every output of the job builds nothing: it only
+/// uploads them. That beats any cache-warmth or core-speed advantage elsewhere.
+#[derive(Debug)]
+pub struct RealisedOutputsRule {
+    pub bonus: f64,
+}
+
+impl Default for RealisedOutputsRule {
+    fn default() -> Self {
+        Self {
+            bonus: crate::score::weights::REALISED_OUTPUTS_BONUS,
+        }
+    }
+}
+
+impl ScoreRule for RealisedOutputsRule {
+    fn name(&self) -> &'static str {
+        "RealisedOutputsRule"
+    }
+
+    fn score(
+        &self,
+        job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
+        if job.outputs_present { self.bonus } else { 0.0 }
+    }
+
+    fn description(&self) -> &'static str {
+        "Strongly prefers a worker that already holds every output of the job, since it only uploads them instead of building."
+    }
+}
+
 #[derive(Debug)]
 pub struct BuiltinDeprioritizeRule {
     pub bonus: f64,
@@ -381,6 +415,7 @@ mod tests {
             job: &job,
             missing_count: Some(0),
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -393,6 +428,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -426,6 +462,7 @@ mod tests {
             job: &job,
             missing_count: Some(2),
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -438,6 +475,7 @@ mod tests {
             job: &job,
             missing_count: Some(10),
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -471,6 +509,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -483,6 +522,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: Some(0),
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -495,6 +535,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: Some(100_000_000_000),
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -526,6 +567,7 @@ mod tests {
             job: &real,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -538,6 +580,7 @@ mod tests {
             job: &builtin,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -581,6 +624,7 @@ mod tests {
             job: &eval,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -616,6 +660,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 1,
             queued_at: now,
             ready_at: now,
@@ -628,6 +673,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 15,
             queued_at: now,
             ready_at: now,
@@ -661,6 +707,7 @@ mod tests {
             job: &build,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -673,6 +720,7 @@ mod tests {
             job: &eval,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 5,
             queued_at: now,
             ready_at: now,
@@ -705,6 +753,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 100_000,
             queued_at: now,
             ready_at: now,
@@ -729,6 +778,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -741,6 +791,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now - chrono::Duration::seconds(60),
             ready_at: now - chrono::Duration::seconds(60),
@@ -753,6 +804,7 @@ mod tests {
             job: &job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now - chrono::Duration::seconds(10_000),
             ready_at: now - chrono::Duration::seconds(10_000),
@@ -796,6 +848,7 @@ mod tests {
             job: &build,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -808,6 +861,7 @@ mod tests {
             job: &build,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -820,6 +874,7 @@ mod tests {
             job: &build,
             missing_count: None,
             missing_nar_size: Some(10),
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -832,6 +887,7 @@ mod tests {
             job: &eval,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -891,6 +947,7 @@ mod tests {
             job: &cached_eval,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -903,6 +960,7 @@ mod tests {
             job: &fetch_eval,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -915,6 +973,7 @@ mod tests {
             job: &build,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
@@ -948,5 +1007,31 @@ mod tests {
             0.0,
             "build job not penalized"
         );
+    }
+
+    #[test]
+    fn realised_outputs_reward_only_a_worker_holding_them() {
+        let rule = RealisedOutputsRule::default();
+        let job = build_job("x86_64-linux");
+        let archs = vec!["x86_64-linux".to_string()];
+        let w = worker(&archs, false);
+        let now = gradient_types::now();
+        let ctx = |outputs_present| JobContext {
+            job: &job,
+            missing_count: Some(0),
+            missing_nar_size: Some(0),
+            outputs_present,
+            dependency_count: 0,
+            queued_at: now,
+            ready_at: now,
+            project_work_share: None,
+            prioritized: false,
+            rescore_count: 0,
+            now,
+        };
+        let inst = crate::score::context::InstanceContext::default();
+
+        assert_eq!(rule.score(&ctx(true), &w, &inst), rule.bonus);
+        assert_eq!(rule.score(&ctx(false), &w, &inst), 0.0);
     }
 }

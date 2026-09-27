@@ -389,6 +389,19 @@ impl WorkerPool {
         (total, idle)
     }
 
+    /// Mean `cpu_core_score` of the connected workers that reported one: the
+    /// reference a worker's core speed is scored against.
+    pub fn mean_cpu_core_score(&self) -> Option<f64> {
+        let scores: Vec<f64> = self
+            .workers
+            .values()
+            .map(|slot| slot.shared().cpu_core_score)
+            .filter(|s| *s > 0)
+            .map(f64::from)
+            .collect();
+        (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64)
+    }
+
     fn info_for(&self, id: &str, slot: &WorkerSlot) -> WorkerInfo {
         let s = slot.shared();
         WorkerInfo {
@@ -571,6 +584,17 @@ mod tests {
         assert_eq!(view.cpu_count, 8);
         assert_eq!(view.ram_total_mb, 16384);
         assert_eq!(view.cpu_core_score, 1200);
+    }
+
+    #[test]
+    fn mean_cpu_core_score_skips_workers_without_one() {
+        let mut pool = WorkerPool::new();
+        assert_eq!(pool.mean_cpu_core_score(), None);
+        for (id, score) in [("w1", 1_000), ("w2", 3_000), ("w3", 0)] {
+            pool.register(id.into(), caps(), HashSet::new(), port().0);
+            pool.update_capabilities(id, vec![], vec![], 1, 1, 1, score);
+        }
+        assert_eq!(pool.mean_cpu_core_score(), Some(2_000.0));
     }
 
     #[test]

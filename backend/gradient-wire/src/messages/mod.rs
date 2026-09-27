@@ -46,7 +46,8 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 /// v16: `CacheQuery.nar_sizes` entries are `Option<u64>`; an unknown size is never
 ///      granted a multipart upload.
 /// v17: `BuildProgress` reports the bytes a Substitute or Download has fetched.
-pub const PROTO_VERSION: u16 = 17;
+/// v18: `JobCandidate.output_paths`; `CandidateScore.outputs_present`.
+pub const PROTO_VERSION: u16 = 18;
 
 /// How often a worker reports a running download's progress, skipping an
 /// interval in which no bytes arrived.

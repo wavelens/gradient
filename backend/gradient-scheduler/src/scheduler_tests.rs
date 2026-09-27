@@ -307,6 +307,7 @@ async fn test_score_assignment_flow() {
                 job_id: "j1".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         )
         .await;
@@ -738,6 +739,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 job_id: "jbuild".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         )
         .await;
@@ -1115,6 +1117,7 @@ async fn a_lost_build_claim_hands_its_anchor_back_to_the_ready_set() {
                 job_id: "jbuild".into(),
                 missing_count: 0,
                 missing_nar_size: 0,
+                outputs_present: false,
             }],
         )
         .await;

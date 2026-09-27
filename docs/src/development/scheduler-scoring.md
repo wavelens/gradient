@@ -38,6 +38,8 @@ unset, and unknown names log a warning and fall back to `resource-aware`.
     soft-rule thresholds instance-relative.
 - `ScoredJob` exposes lazy providers (`closure_size`, `history`) so a policy
   pays for closure/history lookups only when a rule reads them.
+- A build's `history` summarizes the 20 latest `derivation_metric` rows of the
+  same `pname` and architecture; a derivation without `pname` has no history.
 
 The scheduler builds the contexts, calls the configured policy per candidate,
 and assigns the worker its top-scoring job - unless that score is negative.
@@ -51,8 +53,8 @@ Each rule is one of two classes:
   500, `MissingPathsRule` at 200, `DependencyCountRule` at 50, `WaitTimeRule`
   scaled by the instance average wait). Soft rules never push a job below zero.
 - **Disqualifier** - may go negative (`RescoreWaitRule`,
-  `ReserveFetchWorkersRule`). `ResourceFitRule` is mixed: its RAM-overshoot side
-  is a disqualifier; its CPU-affinity side is a soft bonus.
+  `ReserveFetchWorkersRule`, `ResourceFitRule`). `CpuAffinityRule` is mixed: a
+  bonus on faster-than-average cores, a penalty on slower ones.
 
 `FairShareRule` is currently disabled in `resource_aware_rules`: its idle gate
 counted zero-occupancy workers rather than spare build capacity, so multi-slot
@@ -101,6 +103,7 @@ count - so a few long builds and many short ones are balanced fairly.
 |---|---|---|
 | `MissingPathsRule` | soft | `[0,200]` bonus for path availability the worker can serve, instance-relative to the average missing-path count. |
 | `MissingNarSizeRule` | soft | `[0,500]` bonus for low fetch size, scaled by the instance average NAR size. |
+| `RealisedOutputsRule` | soft | `+2500` when the worker already holds every output (`outputs_present`): it only uploads them, which beats any rival's cache warmth plus the largest `CpuAffinityRule` swing. History-based build-cost rules read no history for such a worker. |
 | `DependencyCountRule` | soft | `[0,50]` bonus per dependency for build jobs (unblocks more downstream work first). |
 | `WaitTimeRule` | soft | Bonus growing with `ready_at` wait, scaled by the instance average wait, for anti-starvation. |
 | `RescoreWaitRule` | disqualifier | `-1000` for a build with no reported `missing_nar_size`, until `rescore_count` hits 4; never penalizes eval. |
@@ -114,12 +117,13 @@ Adds the following on top of the `simple` rule set:
 
 | Rule | Class | Effect |
 |---|---|---|
-| `ResourceFitRule` | soft + disqualifier | Penalty scaling with predicted-RAM overshoot of free RAM (amplified by past/instance OOM rate); bonus for CPU-heavy jobs on higher-CPU-score workers. Now also applies to **evaluation** jobs (previously builds-only), using a per-task p95 of historical eval peak-RSS so heavy evals route to big-RAM workers. No-op without history samples or worker metrics. |
+| `ResourceFitRule` | disqualifier | Penalty scaling with predicted-RAM overshoot of free RAM (amplified by past/instance OOM rate). Now also applies to **evaluation** jobs (previously builds-only), using a per-task p95 of historical eval peak-RSS so heavy evals route to big-RAM workers. No-op without history samples or worker metrics. |
 | `ResourceSaturationRule` | disqualifier | `-5000` when the worker's live CPU usage is `>= 90%` or free RAM is `<= 10%` of total, plus another `-5000` when the build's historical peak RAM x1.1 exceeds the worker's free RAM (likely OOM); the two stack (up to `-10000`). Keeps real builds off overloaded or too-small workers. Exempts `builtin`-architecture (substitute-only) builds and evals; no-op without worker metrics, and the RAM-fit check needs history samples. |
 | `PreferLocalBuildRule` | soft | Bonus for `preferLocalBuild` derivations on a worker that already holds (most of) the closure, decaying with missing paths. |
 | `FairShareRule` | disqualifier (disabled) | Penalty proportional to the project's share of in-flight work (duration-weighted; prefer-local at half), so a quiet project is served promptly when a busy project floods the queue. Currently disabled - see the idle-gate note above. |
 | `NetworkAffinityRule` | soft | Bonus for fixed-output derivations on faster-network workers, scaling to a reference speed then capping. No-op for non-FOD jobs or without a network metric. |
 | `DiskAffinityRule` | soft | Bonus for disk-heavy jobs on faster-disk workers, scaling to a reference speed then capping. No-op below the disk-heavy threshold or without a disk metric. |
+| `CpuAffinityRule` | soft + disqualifier | For builds whose history (CPU time, else wall time) exceeds the heavy threshold: `400 x heaviness x (cpu_core_score / fleet mean - 1)`, the relative speed clamped to `[-1, 1]` and heaviness `1 + log2(work / threshold)` capped at 3. Faster-than-average workers attract long builds, slower ones repel them, outweighing cache warmth; `WaitTimeRule` still lets a slow worker take a job nobody faster picked up. No-op without history, a fleet mean or a worker score. |
 
 ## Worker speed signals
 

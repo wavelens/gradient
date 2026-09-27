@@ -68,6 +68,7 @@ fn job_list_chunk_roundtrip() {
                 cache_info: None,
             }],
             drv_paths: vec![],
+            output_paths: vec![],
         }],
         is_final: false,
     };

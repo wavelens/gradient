@@ -411,6 +411,8 @@ pub struct JobCandidate {
     /// Workers use these to read the `.drv` file and determine the
     /// actual set of inputs needed.
     pub drv_paths: Vec<String>,
+    /// Output store paths of every build in the candidate; empty for eval jobs.
+    pub output_paths: Vec<String>,
 }
 
 /// A worker's score for a single job candidate.
@@ -423,6 +425,9 @@ pub struct CandidateScore {
     /// Total uncompressed NAR size of missing paths (bytes).
     /// Derived from `CacheInfo.nar_size`; zero when cache info is unavailable.
     pub missing_nar_size: u64,
+    /// Every one of the candidate's `output_paths` is already in the worker's
+    /// store, so the job only uploads them. `false` without output paths.
+    pub outputs_present: bool,
 }
 
 // ── Derivation discovery ─────────────────────────────────────────────────────

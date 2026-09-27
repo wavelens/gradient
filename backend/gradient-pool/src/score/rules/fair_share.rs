@@ -83,6 +83,7 @@ mod tests {
             job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),

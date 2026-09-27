@@ -10,7 +10,8 @@
 //! paths in `required_paths`. The worker checks each path against its local
 //! Nix store and reports `(missing_count, missing_nar_size)`. A lower
 //! `missing` count means fewer paths need downloading, so the worker is a
-//! better fit for the job.
+//! better fit for the job. A worker that already holds every output in
+//! `output_paths` reports `outputs_present`: it would only upload them.
 //!
 //! Source paths (`inputSrcs`) are not included in `required_paths` - they
 //! live only in the `.drv` file and are not stored server-side. They tend
@@ -43,20 +44,15 @@ impl JobScorer {
     ) -> Result<Vec<CandidateScore>> {
         let mut scores = Vec::with_capacity(candidates.len());
         for c in candidates {
-            let mut missing_count = 0u32;
-            let mut missing_nar_size = 0u64;
-            for rp in &c.required_paths {
-                if !store.has_path(&rp.path).await.unwrap_or(false) {
-                    missing_count += 1;
-                    missing_nar_size += rp.cache_info.as_ref().map(|ci| ci.nar_size).unwrap_or(0);
-                }
-            }
-            if missing_count > 0 || !c.required_paths.is_empty() {
+            let (missing_count, missing_nar_size) = missing_inputs(store, c).await;
+            let outputs_present = holds_every_output(store, c).await;
+            if missing_count > 0 || !c.required_paths.is_empty() || outputs_present {
                 debug!(
                     job_id = %c.job_id,
                     required_count = c.required_paths.len(),
                     missing_count,
                     missing_nar_size,
+                    outputs_present,
                     "scored candidate"
                 );
             }
@@ -64,10 +60,37 @@ impl JobScorer {
                 job_id: c.job_id.clone(),
                 missing_count,
                 missing_nar_size,
+                outputs_present,
             });
         }
         Ok(scores)
     }
+}
+
+/// Count of `required_paths` absent from the store and their summed NAR size.
+async fn missing_inputs<S: WorkerStore + ?Sized>(store: &S, c: &JobCandidate) -> (u32, u64) {
+    let mut missing_count = 0u32;
+    let mut missing_nar_size = 0u64;
+    for rp in &c.required_paths {
+        if !store.has_path(&rp.path).await.unwrap_or(false) {
+            missing_count += 1;
+            missing_nar_size += rp.cache_info.as_ref().map(|ci| ci.nar_size).unwrap_or(0);
+        }
+    }
+    (missing_count, missing_nar_size)
+}
+
+/// Whether the store already holds every output, so the job needs no build.
+async fn holds_every_output<S: WorkerStore + ?Sized>(store: &S, c: &JobCandidate) -> bool {
+    if c.output_paths.is_empty() {
+        return false;
+    }
+    for path in &c.output_paths {
+        if !store.has_path(path).await.unwrap_or(false) {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -93,6 +116,7 @@ mod tests {
             job_id: "eval:1".to_owned(),
             required_paths: vec![],
             drv_paths: vec![],
+            output_paths: vec![],
         }];
         let scores = JobScorer::new()
             .score_candidates(&store, &candidates)
@@ -128,6 +152,7 @@ mod tests {
                 },
             ],
             drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
+            output_paths: vec![],
         }];
         let scores = JobScorer::new()
             .score_candidates(&store, &candidates)
@@ -135,5 +160,32 @@ mod tests {
             .unwrap();
         assert_eq!(scores[0].missing_count, 2);
         assert_eq!(scores[0].missing_nar_size, 200);
+    }
+
+    fn build_candidate(output_paths: &[&str]) -> JobCandidate {
+        JobCandidate {
+            job_id: "build:1".to_owned(),
+            required_paths: vec![],
+            drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
+            output_paths: output_paths.iter().map(|p| (*p).to_owned()).collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn score_reports_outputs_present_only_when_every_output_is_held() {
+        let store = FakeWorkerStore::new()
+            .with_present_path("/nix/store/aaaa-out")
+            .with_present_path("/nix/store/bbbb-dev");
+        let candidates = vec![
+            build_candidate(&["/nix/store/aaaa-out", "/nix/store/bbbb-dev"]),
+            build_candidate(&["/nix/store/aaaa-out", "/nix/store/cccc-doc"]),
+            build_candidate(&[]),
+        ];
+        let scores = JobScorer::new()
+            .score_candidates(&store, &candidates)
+            .await
+            .unwrap();
+        let present: Vec<bool> = scores.iter().map(|s| s.outputs_present).collect();
+        assert_eq!(present, [true, false, false]);
     }
 }

@@ -8,11 +8,11 @@ use crate::score::context::InstanceContext;
 use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::score::rules::builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
-    RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
+    RealisedOutputsRule, RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
 };
 use crate::score::rules::{
-    DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, QosRule,
-    ResourceFitRule, ResourceSaturationRule,
+    CpuAffinityRule, DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule,
+    QosRule, ResourceFitRule, ResourceSaturationRule,
 };
 
 pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
@@ -131,6 +131,7 @@ fn simple_table() -> Vec<RuleSpec> {
     vec![
         spec(true, Box::new(MissingPathsRule::default())),
         spec(true, Box::new(MissingNarSizeRule::default())),
+        spec(true, Box::new(RealisedOutputsRule::default())),
         spec(true, Box::new(RescoreWaitRule::default())),
         spec(true, Box::new(DependencyCountRule::default())),
         spec(true, Box::new(WaitTimeRule::default())),
@@ -151,6 +152,7 @@ fn resource_aware_table() -> Vec<RuleSpec> {
     rules.push(spec(false, Box::new(FairShareRule::default())));
     rules.push(spec(true, Box::new(NetworkAffinityRule::default())));
     rules.push(spec(true, Box::new(DiskAffinityRule::default())));
+    rules.push(spec(true, Box::new(CpuAffinityRule::default())));
     rules
 }
 
@@ -279,6 +281,7 @@ mod tests {
             job: &j_fresh,
             missing_count: Some(0),
             missing_nar_size: Some(0),
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),
@@ -293,6 +296,7 @@ mod tests {
             job: &j_old,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now() - chrono::Duration::seconds(3600),
             ready_at: now() - chrono::Duration::seconds(3600),
@@ -331,6 +335,7 @@ mod tests {
             job: &j,
             missing_count: Some(0),
             missing_nar_size: Some(0),
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),
@@ -363,6 +368,123 @@ mod tests {
         );
     }
 
+    // A long CPU-bound build finishes sooner on a faster core than the
+    // transfer a cache-warm but slower worker saves.
+    #[test]
+    fn resource_aware_sends_heavy_build_to_fast_cold_worker_over_slow_warm_one() {
+        use crate::score::context::WorkerMetricsView;
+        let policy = policy_by_name("resource-aware");
+        let archs = vec!["x86_64-linux".to_string()];
+        let feats: Vec<String> = vec![];
+        let j = ScoredJob::new_build(
+            "j",
+            ProjectId::now_v7(),
+            "x86_64-linux",
+            false,
+            false,
+            None,
+            None,
+            HistoryPrediction {
+                avg_cpu_time_ms: 30 * 60_000,
+                samples: 5,
+                ..Default::default()
+            },
+        );
+        let on = |missing_count, missing_nar_size| JobContext {
+            job: &j,
+            missing_count: Some(missing_count),
+            missing_nar_size: Some(missing_nar_size),
+            outputs_present: false,
+            dependency_count: 0,
+            queued_at: now(),
+            ready_at: now(),
+            project_work_share: None,
+            prioritized: false,
+            rescore_count: 0,
+            now: now(),
+        };
+        let with_cores = |cpu_core_score| WorkerContext {
+            architectures: &archs,
+            system_features: &feats,
+            fetch: false,
+            metrics: Some(WorkerMetricsView {
+                cpu_core_score,
+                ..Default::default()
+            }),
+        };
+        let inst = InstanceContext {
+            cpu_core_score_mean: Some(10_000.0),
+            ..Default::default()
+        };
+
+        let warm_slow = policy.score(&on(0, 0), &with_cores(5_000), &inst);
+        let cold_fast = policy.score(&on(40, 4 << 30), &with_cores(15_000), &inst);
+        assert!(
+            cold_fast > warm_slow,
+            "cold_fast={cold_fast} warm_slow={warm_slow}"
+        );
+    }
+
+    // Holding the outputs means nothing is built: the job only uploads, so no
+    // faster core can beat it.
+    #[test]
+    fn resource_aware_sends_heavy_build_to_the_worker_holding_its_outputs() {
+        use crate::score::context::WorkerMetricsView;
+        let policy = policy_by_name("resource-aware");
+        let archs = vec!["x86_64-linux".to_string()];
+        let feats: Vec<String> = vec![];
+        let j = ScoredJob::new_build(
+            "j",
+            ProjectId::now_v7(),
+            "x86_64-linux",
+            false,
+            false,
+            None,
+            None,
+            HistoryPrediction {
+                avg_cpu_time_ms: 30 * 60_000,
+                predicted_peak_ram_mb: 64_000,
+                samples: 5,
+                ..Default::default()
+            },
+        );
+        let on = |outputs_present, missing_count, missing_nar_size| JobContext {
+            job: &j,
+            missing_count: Some(missing_count),
+            missing_nar_size: Some(missing_nar_size),
+            outputs_present,
+            dependency_count: 0,
+            queued_at: now(),
+            ready_at: now(),
+            project_work_share: None,
+            prioritized: false,
+            rescore_count: 0,
+            now: now(),
+        };
+        let with_cores = |cpu_core_score, ram_free_mb| WorkerContext {
+            architectures: &archs,
+            system_features: &feats,
+            fetch: false,
+            metrics: Some(WorkerMetricsView {
+                cpu_core_score,
+                ram_total_mb: 128_000,
+                ram_free_mb: Some(ram_free_mb),
+                ..Default::default()
+            }),
+        };
+        let inst = InstanceContext {
+            cpu_core_score_mean: Some(10_000.0),
+            ..Default::default()
+        };
+
+        let holding_slow = policy.score(&on(true, 40, 4 << 30), &with_cores(2_000, 16_000), &inst);
+        let cold_fast = policy.score(&on(false, 0, 0), &with_cores(20_000, 120_000), &inst);
+        assert!(
+            holding_slow > cold_fast,
+            "holding_slow={holding_slow} cold_fast={cold_fast}"
+        );
+    }
+
     #[test]
     fn simple_policy_prefers_ready_over_costly() {
         let policy = policy_by_name("simple");
@@ -376,6 +498,7 @@ mod tests {
             job: &j_ready,
             missing_count: Some(0),
             missing_nar_size: Some(0),
+            outputs_present: false,
             dependency_count: 0,
             queued_at: n,
             ready_at: n,
@@ -390,6 +513,7 @@ mod tests {
             job: &j_costly,
             missing_count: Some(5),
             missing_nar_size: Some(50_000_000),
+            outputs_present: false,
             dependency_count: 0,
             queued_at: n,
             ready_at: n,
@@ -416,6 +540,7 @@ mod tests {
             job: &j,
             missing_count: Some(0),
             missing_nar_size: Some(0),
+            outputs_present: false,
             dependency_count: 2,
             queued_at: now(),
             ready_at: now(),
@@ -482,6 +607,7 @@ mod tests {
             job: &j,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),

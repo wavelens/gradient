@@ -87,6 +87,7 @@ pub struct Counts {
     pub active: usize,
     pub pending_builds: u32,
     pub active_builds: u32,
+    pub cpu_core_score_mean: Option<f64>,
 }
 
 #[allow(
@@ -603,6 +604,7 @@ impl Actor for CoreActor {
                     active: core.tracker.active_count(),
                     pending_builds,
                     active_builds,
+                    cpu_core_score_mean: core.pool.mean_cpu_core_score(),
                 });
             }
             SchedulerMsg::PendingSnapshot { reply } => {

@@ -127,6 +127,7 @@ pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::
         pending_builds: c.pending_builds,
         total_workers: c.workers as u32,
         idle_workers: c.idle_workers as u32,
+        cpu_core_score_mean: c.cpu_core_score_mean,
     };
     let ctx = crate::instance::compute_instance_context(
         &scheduler.state.worker_db,

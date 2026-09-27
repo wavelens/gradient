@@ -92,6 +92,7 @@ export interface JobContextView {
   architecture: string;
   missing_count: number | null;
   missing_nar_size: number | null;
+  outputs_present: boolean;
   project_work_share: number | null;
   rescore_count: number;
   queued_at: string;
@@ -124,6 +125,7 @@ export interface InstanceContextView {
   pending_builds: number;
   total_workers: number;
   idle_workers: number;
+  cpu_core_score_mean?: number | null;
 }
 
 /// One derivation the job builds, carrying both identities: `build` is what

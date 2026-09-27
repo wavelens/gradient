@@ -11,9 +11,6 @@ use crate::score::rule::{JobContext, ScoreRule, WorkerContext};
 pub struct ResourceFitRule {
     pub ram_overshoot_penalty: f64,
     pub max_overshoot: f64,
-    pub cpu_affinity_bonus: f64,
-    pub cpu_heavy_threshold_ms: u64,
-    pub cpu_bonus_cap: f64,
 }
 
 impl Default for ResourceFitRule {
@@ -21,9 +18,6 @@ impl Default for ResourceFitRule {
         Self {
             ram_overshoot_penalty: crate::score::weights::RESOURCE_FIT_RAM_PENALTY,
             max_overshoot: crate::score::weights::RESOURCE_FIT_MAX_OVERSHOOT,
-            cpu_affinity_bonus: crate::score::weights::CPU_AFFINITY_BONUS,
-            cpu_heavy_threshold_ms: crate::score::weights::CPU_HEAVY_THRESHOLD_MS,
-            cpu_bonus_cap: crate::score::weights::CPU_AFFINITY_BONUS_CAP,
         }
     }
 }
@@ -40,7 +34,7 @@ impl ScoreRule for ResourceFitRule {
         instance: &InstanceContext,
     ) -> f64 {
         let Some(m) = worker.metrics else { return 0.0 };
-        let h = job.job.history();
+        let h = job.build_history();
         if h.samples == 0 {
             return 0.0;
         }
@@ -59,18 +53,11 @@ impl ScoreRule for ResourceFitRule {
                 * (1.0 + instance.oom_rate.w1h.unwrap_or(0.0));
         }
 
-        let cpu_threshold = instance
-            .cpu_time_ms
-            .w1h_or(self.cpu_heavy_threshold_ms as f64);
-        if (h.avg_cpu_time_ms as f64) > cpu_threshold {
-            s += self.cpu_affinity_bonus
-                * ((m.cpu_core_score as f64 / 1000.0).min(self.cpu_bonus_cap));
-        }
         s
     }
 
     fn description(&self) -> &'static str {
-        "Uses historical RAM and CPU usage to penalize workers that would likely run out of memory and reward CPU-strong workers for compute-heavy builds."
+        "Uses historical peak RAM to penalize workers that would likely run out of memory."
     }
 }
 
@@ -136,7 +123,7 @@ impl ScoreRule for ResourceSaturationRule {
 
         // The build's historical peak RAM (plus headroom) would not fit in the
         // worker's free RAM, so it would likely OOM here.
-        let h = job.job.history();
+        let h = job.build_history();
         if h.samples > 0
             && m.ram_free_mb
                 .is_some_and(|f| h.predicted_peak_ram_mb as f64 * self.ram_fit_headroom > f as f64)
@@ -183,6 +170,7 @@ mod tests {
             job,
             missing_count: None,
             missing_nar_size: None,
+            outputs_present: false,
             dependency_count: 0,
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
@@ -287,34 +275,6 @@ mod tests {
         assert!(
             rule.score(&ctx(&high), &w, &InstanceContext::default())
                 < rule.score(&ctx(&low), &w, &InstanceContext::default())
-        );
-    }
-
-    #[test]
-    fn cpu_heavy_on_strong_worker_is_positive_and_capped() {
-        let rule = ResourceFitRule::default();
-        let heavy = job_with_history(HistoryPrediction {
-            avg_cpu_time_ms: 120_000,
-            samples: 5,
-            ..Default::default()
-        });
-
-        let strong = worker_with(WorkerMetricsView {
-            cpu_core_score: 1500,
-            ..Default::default()
-        });
-        let monster = worker_with(WorkerMetricsView {
-            cpu_core_score: 100_000,
-            ..Default::default()
-        });
-
-        let s_strong = rule.score(&ctx(&heavy), &strong, &InstanceContext::default());
-        let s_monster = rule.score(&ctx(&heavy), &monster, &InstanceContext::default());
-        assert!(s_strong > 0.0);
-        let cap = rule.cpu_affinity_bonus * rule.cpu_bonus_cap;
-        assert!(
-            (s_monster - cap).abs() < 0.001,
-            "cpu bonus must cap at {cap}, got {s_monster}"
         );
     }
 

@@ -366,6 +366,7 @@ mod tests {
             job_id: job.into(),
             missing_count: 0,
             missing_nar_size: 0,
+            outputs_present: false,
         };
         for (scores, is_final) in [(vec![score("a")], false), (vec![score("b")], true)] {
             socket

@@ -155,6 +155,7 @@ interface RuleRow {
             }
             <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '-' }}</td></tr>
             <tr><td class="label">Missing NAR size</td><td class="mono">{{ formatBytes(j.job_context.missing_nar_size) }}</td></tr>
+            <tr><td class="label">Outputs in store</td><td class="mono">{{ j.job_context.outputs_present ? 'yes' : 'no' }}</td></tr>
             <tr><td class="label">Project work share</td><td class="mono">{{ j.job_context.project_work_share != null ? (j.job_context.project_work_share | number: '1.0-3') : '-' }}</td></tr>
             <tr><td class="label">Rescore count</td><td class="mono">{{ j.job_context.rescore_count }}</td></tr>
             <tr><td class="label">Queued</td><td class="mono">{{ j.job_context.queued_at | date: 'medium' }}</td></tr>
@@ -220,6 +221,7 @@ interface RuleRow {
               <tr><td class="label">Pending builds</td><td class="mono">{{ inst.pending_builds }}</td></tr>
               <tr><td class="label">Total workers</td><td class="mono">{{ inst.total_workers }}</td></tr>
               <tr><td class="label">Idle workers</td><td class="mono">{{ inst.idle_workers }}</td></tr>
+              <tr><td class="label">Fleet CPU score</td><td class="mono">{{ inst.cpu_core_score_mean != null ? (inst.cpu_core_score_mean | number: '1.0-0') : '-' }}</td></tr>
             </tbody>
           </gr-table>
         </section>

@@ -11,10 +11,10 @@ pub mod prefer_local;
 pub mod qos;
 pub mod resource;
 
-pub use affinity::{DiskAffinityRule, NetworkAffinityRule};
+pub use affinity::{CpuAffinityRule, DiskAffinityRule, NetworkAffinityRule};
 pub use builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
-    RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
+    RealisedOutputsRule, RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
 };
 pub use fair_share::FairShareRule;
 pub use prefer_local::PreferLocalBuildRule;

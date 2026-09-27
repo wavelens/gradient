@@ -12760,6 +12760,7 @@ components:
         architecture: { type: string }
         missing_count: { type: integer, nullable: true }
         missing_nar_size: { type: integer, nullable: true }
+        outputs_present: { type: boolean, description: The worker already holds every output and would only upload them. }
         project_work_share: { type: number, nullable: true }
         rescore_count: { type: integer }
         queued_at: { type: string }
@@ -12815,6 +12816,7 @@ components:
         pending_builds: { type: integer }
         total_workers: { type: integer }
         idle_workers: { type: integer }
+        cpu_core_score_mean: { type: number, nullable: true, description: Mean cpu_core_score of the connected workers that reported one. }
 
     DispatchedJobDetail:
       type: object
