@@ -180,6 +180,7 @@ impl WireMessage for ClientMessage {
         if matches!(
             archived,
             ArchivedClientMessage::NarPush { .. }
+                | ArchivedClientMessage::UploadChunk { .. }
                 | ArchivedClientMessage::EvalCacheChunk { .. }
                 | ArchivedClientMessage::LogChunk { .. }
         ) {
@@ -199,6 +200,7 @@ impl WireMessage for ClientMessage {
         matches!(
             self,
             ClientMessage::NarPush { .. }
+                | ClientMessage::UploadChunk { .. }
                 | ClientMessage::NarStreamHeader { .. }
                 | ClientMessage::NarRequestResume { .. }
                 | ClientMessage::NarUploaded { .. }
@@ -241,6 +243,7 @@ impl Frame<ClientMessage> {
     pub fn variant_name(&self) -> &'static str {
         match self.archived() {
             ArchivedClientMessage::NarPush { .. } => "NarPush",
+            ArchivedClientMessage::UploadChunk { .. } => "UploadChunk",
             ArchivedClientMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
             ArchivedClientMessage::LogChunk { .. } => "LogChunk",
             _ => "Control",
@@ -952,6 +955,38 @@ mod tests {
     #[test]
     fn the_bulk_batch_cap_fits_in_a_chunk() {
         const { assert!(BULK_BATCH_BYTES <= BULK_CHUNK_SIZE) };
+    }
+
+    #[test]
+    fn upload_bytes_ride_bulk_and_the_handshake_rides_control() {
+        assert!(
+            ClientMessage::UploadChunk {
+                request_id: 1,
+                data: vec![0u8; 8],
+                offset: 0,
+                is_final: false,
+            }
+            .is_bulk()
+        );
+        assert!(
+            !ClientMessage::UploadRequest {
+                job_id: "build:1".into(),
+                request_id: 1,
+                object: crate::types::UploadObject::Nar {
+                    store_path: "/nix/store/aaa-foo".into()
+                },
+                size: 1,
+            }
+            .is_bulk()
+        );
+        assert!(!ClientMessage::UploadCancel { request_id: 1 }.is_bulk());
+        assert!(
+            !ServerMessage::UploadGrant {
+                request_id: 1,
+                target: crate::types::GrantTarget::Skip,
+            }
+            .is_bulk()
+        );
     }
 
     fn nar_chunk(offset: u64) -> ServerMessage {

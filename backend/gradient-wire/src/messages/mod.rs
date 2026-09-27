@@ -17,6 +17,10 @@ pub use crate::types::{
     GradientCapabilities, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan,
     JobUpdateKind, QueryMode, RequiredPath,
 };
+pub use crate::types::{
+    CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
+    UploadObject, UploadOutcome,
+};
 pub use client::{ArchivedClientMessage, ClientMessage};
 pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 
@@ -47,7 +51,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      granted a multipart upload.
 /// v17: `BuildProgress` reports the bytes a Substitute or Download has fetched.
 /// v18: `JobCandidate.output_paths`; `CandidateScore.outputs_present`.
-pub const PROTO_VERSION: u16 = 18;
+/// v19: per-path upload admission: `UploadRequest`/`UploadGrant`/`UploadChunk`/
+///      `UploadFinished`/`UploadCommitted`/`UploadCancel`.
+pub const PROTO_VERSION: u16 = 19;
 
 /// How often a worker reports a running download's progress, skipping an
 /// interval in which no bytes arrived.

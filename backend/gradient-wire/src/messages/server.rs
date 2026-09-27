@@ -5,8 +5,8 @@
  */
 
 use crate::types::{
-    CachedPath, CredentialKind, EvalCachePullOutcome, EvalCachePushMode, GradientCapabilities, Job,
-    JobCandidate,
+    CachedPath, CredentialKind, EvalCachePullOutcome, EvalCachePushMode, GradientCapabilities,
+    GrantTarget, Job, JobCandidate, UploadOutcome,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -209,6 +209,15 @@ pub enum ServerMessage {
         query_id: String,
         message: String,
     },
+
+    UploadGrant {
+        request_id: u64,
+        target: GrantTarget,
+    },
+    UploadCommitted {
+        request_id: u64,
+        outcome: UploadOutcome,
+    },
 }
 
 impl ServerMessage {
@@ -257,6 +266,8 @@ impl ServerMessage {
             ServerMessage::CacheStatus { .. } => "CacheStatus",
             ServerMessage::KnownDerivations { .. } => "KnownDerivations",
             ServerMessage::CacheError { .. } => "CacheError",
+            ServerMessage::UploadGrant { .. } => "UploadGrant",
+            ServerMessage::UploadCommitted { .. } => "UploadCommitted",
         }
     }
 }

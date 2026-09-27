@@ -363,6 +363,9 @@ impl DispatchState {
             ServerMessage::CacheError { query_id, message } => {
                 self.on_cache_error(query_id, message);
             }
+            ServerMessage::UploadGrant { .. } | ServerMessage::UploadCommitted { .. } => {
+                warn!("upload handshake not wired yet");
+            }
             ServerMessage::KnownDerivations { query_id, known } => {
                 self.on_known_derivations(query_id, known);
             }

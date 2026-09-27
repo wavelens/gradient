@@ -395,7 +395,14 @@ impl<'a> DispatchContext<'a> {
                 true
             }
             // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
+            ClientMessage::UploadRequest { .. }
+            | ClientMessage::UploadFinished { .. }
+            | ClientMessage::UploadCancel { .. } => {
+                warn!("upload handshake not wired yet");
+                true
+            }
             ClientMessage::NarPush { .. }
+            | ClientMessage::UploadChunk { .. }
             | ClientMessage::EvalCacheChunk { .. }
             | ClientMessage::LogChunk { .. } => {
                 warn!("bulk variant deserialised into the control lane");

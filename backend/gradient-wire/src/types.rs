@@ -336,6 +336,52 @@ pub struct CompletedMultipart {
     pub etags: Vec<String>,
 }
 
+/// What an [`crate::messages::ClientMessage::UploadRequest`] wants to store.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum UploadObject {
+    Nar { store_path: String },
+    EvalCache { fingerprint: String },
+}
+
+/// How a granted upload moves its bytes; decided by the server's storage backend.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum GrantTarget {
+    Skip,
+    Relay { resume_offset: u64 },
+    Put { url: String },
+    Multipart(PresignedMultipart),
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct NarUploadMetadata {
+    pub file_hash: String,
+    pub file_size: u64,
+    pub nar_size: u64,
+    pub nar_hash: String,
+    pub references: Vec<String>,
+    pub deriver: Option<String>,
+    pub ca: Option<String>,
+    pub multipart: Option<CompletedMultipart>,
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum UploadMetadata {
+    Nar(Box<NarUploadMetadata>),
+    EvalCache { size_bytes: u64 },
+}
+
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum UploadOutcome {
+    Ok,
+    Retry { reason: String },
+    Rejected { reason: String },
+}
+
 /// A store path entry returned in [`CacheStatus`].
 ///
 /// `cached` indicates whether the path is already in the Gradient cache.

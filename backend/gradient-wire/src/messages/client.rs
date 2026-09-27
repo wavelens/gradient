@@ -6,7 +6,7 @@
 
 use crate::types::{
     BuildFailureKind, CandidateScore, CompletedMultipart, EvalMessageLevel, GradientCapabilities,
-    JobKind, JobPhaseSpan, JobUpdateKind, QueryMode,
+    JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -27,7 +27,9 @@ pub enum ClientMessage {
     /// Response to [`super::server::ServerMessage::AuthChallenge`].
     /// Contains per-peer tokens for each peer the worker has credentials for.
     /// Pairs are `(peer_id, token)`.
-    AuthResponse { tokens: Vec<(String, String)> },
+    AuthResponse {
+        tokens: Vec<(String, String)>,
+    },
 
     /// Request a new auth challenge from the server - sent when the worker
     /// has acquired a new peer token and wants to become authorized for that
@@ -37,7 +39,10 @@ pub enum ClientMessage {
     /// Decline the connection after receiving
     /// [`super::server::ServerMessage::InitAck`].
     /// The peer closes the WebSocket immediately after sending this.
-    Reject { code: u16, reason: String },
+    Reject {
+        code: u16,
+        reason: String,
+    },
 
     /// Advertise build capacity.  Sent after a successful handshake by any
     /// peer with the `build` capability negotiated.
@@ -144,7 +149,10 @@ pub enum ClientMessage {
     },
 
     /// Request specific store paths from the server (direct NAR mode).
-    NarRequest { job_id: String, paths: Vec<String> },
+    NarRequest {
+        job_id: String,
+        paths: Vec<String>,
+    },
 
     /// One chunk of a NAR being pushed from worker to server (direct mode).
     NarPush {
@@ -210,7 +218,10 @@ pub enum ClientMessage {
 
     /// Request the eval-cache SQLite blob for `fingerprint`.  The server
     /// answers with [`super::server::ServerMessage::EvalCachePullResult`].
-    EvalCachePull { job_id: String, fingerprint: String },
+    EvalCachePull {
+        job_id: String,
+        fingerprint: String,
+    },
 
     /// Announce an eval-cache blob the worker wants to upload.  The server
     /// answers with [`super::server::ServerMessage::EvalCachePushGrant`]
@@ -248,7 +259,9 @@ pub enum ClientMessage {
     ///
     /// The server assigns the first matching pending job directly - no scoring
     /// round-trip needed.
-    RequestJob { kind: JobKind },
+    RequestJob {
+        kind: JobKind,
+    },
 
     /// Request the full current job candidate list from the server.
     /// Sent once at startup (alongside [`ClientMessage::RequestJobList`]) so
@@ -313,6 +326,27 @@ pub enum ClientMessage {
         query_id: String,
         drv_paths: Vec<String>,
     },
+
+    /// Ask for an upload slot; nothing is sent for this object before its grant.
+    UploadRequest {
+        job_id: String,
+        request_id: u64,
+        object: UploadObject,
+        size: u64,
+    },
+    UploadChunk {
+        request_id: u64,
+        data: Vec<u8>,
+        offset: u64,
+        is_final: bool,
+    },
+    UploadFinished {
+        request_id: u64,
+        metadata: UploadMetadata,
+    },
+    UploadCancel {
+        request_id: u64,
+    },
 }
 
 impl ClientMessage {
@@ -335,7 +369,8 @@ impl ClientMessage {
             | ClientMessage::EvalCachePushDone { job_id, .. }
             | ClientMessage::CacheQuery { job_id, .. }
             | ClientMessage::EvalMessage { job_id, .. }
-            | ClientMessage::QueryKnownDerivations { job_id, .. } => Some(job_id),
+            | ClientMessage::QueryKnownDerivations { job_id, .. }
+            | ClientMessage::UploadRequest { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -374,6 +409,10 @@ impl ClientMessage {
             ClientMessage::CacheQuery { .. } => "CacheQuery",
             ClientMessage::EvalMessage { .. } => "EvalMessage",
             ClientMessage::QueryKnownDerivations { .. } => "QueryKnownDerivations",
+            ClientMessage::UploadRequest { .. } => "UploadRequest",
+            ClientMessage::UploadChunk { .. } => "UploadChunk",
+            ClientMessage::UploadFinished { .. } => "UploadFinished",
+            ClientMessage::UploadCancel { .. } => "UploadCancel",
         }
     }
 }

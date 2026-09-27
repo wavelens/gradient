@@ -10,6 +10,10 @@ use crate::messages::{
     FlakeSource, FlakeStep, GradientCapabilities, Job, JobCandidate, JobPhase, JobPhaseSpan,
     JobUpdateKind, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
 };
+use crate::messages::{
+    CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
+    UploadObject, UploadOutcome,
+};
 use rkyv::rancor::Error as RkyvError;
 
 // ── Message round-trip (rkyv serialize → deserialize) ────────────────────────
@@ -703,4 +707,108 @@ fn job_update_roundtrip_keeps_the_dispatch_id() {
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
     assert_eq!(decoded, original);
+}
+
+fn roundtrip_client(original: ClientMessage) {
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    assert_eq!(
+        rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap(),
+        original
+    );
+}
+
+fn roundtrip_server(original: ServerMessage) {
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    assert_eq!(
+        rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn upload_request_roundtrip() {
+    roundtrip_client(ClientMessage::UploadRequest {
+        job_id: "build:1".into(),
+        request_id: 7,
+        object: UploadObject::Nar {
+            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+        },
+        size: 4096,
+    });
+    roundtrip_client(ClientMessage::UploadRequest {
+        job_id: "eval:1".into(),
+        request_id: 8,
+        object: UploadObject::EvalCache {
+            fingerprint: "fp".into(),
+        },
+        size: 12,
+    });
+}
+
+#[test]
+fn upload_chunk_finished_and_cancel_roundtrip() {
+    roundtrip_client(ClientMessage::UploadChunk {
+        request_id: 7,
+        data: vec![1, 2, 3],
+        offset: 512,
+        is_final: true,
+    });
+    roundtrip_client(ClientMessage::UploadFinished {
+        request_id: 7,
+        metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
+            file_hash: "sha256:x".into(),
+            file_size: 3,
+            nar_size: 4096,
+            nar_hash: "sha256:y".into(),
+            references: vec!["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into()],
+            deriver: None,
+            ca: None,
+            multipart: Some(CompletedMultipart {
+                upload_id: "u".into(),
+                etags: vec!["e1".into()],
+            }),
+        })),
+    });
+    roundtrip_client(ClientMessage::UploadFinished {
+        request_id: 8,
+        metadata: UploadMetadata::EvalCache { size_bytes: 12 },
+    });
+    roundtrip_client(ClientMessage::UploadCancel { request_id: 7 });
+}
+
+#[test]
+fn upload_grant_and_committed_roundtrip() {
+    for target in [
+        GrantTarget::Skip,
+        GrantTarget::Relay {
+            resume_offset: 1024,
+        },
+        GrantTarget::Put {
+            url: "https://s3/put".into(),
+        },
+        GrantTarget::Multipart(PresignedMultipart {
+            upload_id: "u".into(),
+            part_size: 64,
+            part_urls: vec!["https://s3/1".into()],
+        }),
+    ] {
+        roundtrip_server(ServerMessage::UploadGrant {
+            request_id: 7,
+            target,
+        });
+    }
+    for outcome in [
+        UploadOutcome::Ok,
+        UploadOutcome::Retry {
+            reason: "busy".into(),
+        },
+        UploadOutcome::Rejected {
+            reason: "bad offset".into(),
+        },
+    ] {
+        roundtrip_server(ServerMessage::UploadCommitted {
+            request_id: 7,
+            outcome,
+        });
+    }
 }
