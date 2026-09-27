@@ -200,6 +200,10 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
 
     let upstream_query_concurrency = config.proto.upstream_query_concurrency;
     let nar_commit_concurrency = config.proto.nar_commit_concurrency;
+    let upload_limits = gradient_storage::admission::Limits {
+        concurrency: config.proto.upload_concurrency.max(1),
+        bytes: config.proto.upload_bytes_budget.max(1),
+    };
 
     Ok(Arc::new(ServerState {
         worker_db: WorkerDb::new(db),
@@ -216,6 +220,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
             upstream_query_concurrency.max(1),
         )),
         nar_commit: Arc::new(tokio::sync::Semaphore::new(nar_commit_concurrency.max(1))),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         shutdown: Shutdown::new(),
         last_used_stamps: last_used_stamps(),

@@ -134,6 +134,16 @@ pub struct ProtoArgs {
     /// worker session. Further commits queue for a permit.
     #[arg(long, env = "GRADIENT_NAR_COMMIT_CONCURRENCY", default_value_t = 8)]
     pub nar_commit_concurrency: usize,
+
+    /// Uploads (NARs and eval-cache blobs) admitted at once across every worker
+    /// and REST client; further requests wait for a permit.
+    #[arg(long, env = "GRADIENT_UPLOAD_CONCURRENCY", default_value_t = 16)]
+    pub upload_concurrency: usize,
+
+    /// Sum of admitted upload sizes; a request that does not fit waits, and one
+    /// larger than the whole budget runs alone once nothing else is in flight.
+    #[arg(long, env = "GRADIENT_UPLOAD_BYTES_BUDGET", default_value_t = 8 * 1024 * 1024 * 1024)]
+    pub upload_bytes_budget: u64,
 }
 
 impl Default for ProtoArgs {
@@ -154,6 +164,8 @@ impl Default for ProtoArgs {
             worker_heartbeat_timeout_secs: 120,
             upstream_query_concurrency: 32,
             nar_commit_concurrency: 8,
+            upload_concurrency: 16,
+            upload_bytes_budget: 8 * 1024 * 1024 * 1024,
         }
     }
 }

@@ -59,6 +59,8 @@ pub fn write_config_snapshot(
             "nar_commit_concurrency",
             proto.nar_commit_concurrency.to_string(),
         ),
+        ("upload_concurrency", proto.upload_concurrency.to_string()),
+        ("upload_bytes_budget", proto.upload_bytes_budget.to_string()),
         ("nar_ttl_hours", storage.nar_ttl_hours.to_string()),
         (
             "nar_upload_grace_hours",

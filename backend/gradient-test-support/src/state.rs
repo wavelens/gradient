@@ -65,6 +65,12 @@ pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) ->
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     })
 }
 
@@ -103,6 +109,12 @@ pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     })
 }
 
@@ -142,5 +154,11 @@ pub fn test_state_with_log_storage(
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     })
 }

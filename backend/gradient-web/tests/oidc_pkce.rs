@@ -127,6 +127,12 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
         outbox_wake: Default::default(),
         probe_requests: Default::default(),
         ready_set: Default::default(),

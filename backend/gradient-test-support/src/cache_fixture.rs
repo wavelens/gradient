@@ -158,6 +158,12 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     })
 }
 
@@ -217,6 +223,12 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     })
 }
 
@@ -281,6 +293,12 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     });
 
     let compressed = synthetic_nar_zst().await;
@@ -404,6 +422,12 @@ fn make_state(
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     })
 }
 
@@ -494,6 +518,12 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     })
 }
 
@@ -569,6 +599,12 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     });
 
     let compressed = synthetic_nar_zst().await;

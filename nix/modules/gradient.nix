@@ -582,6 +582,18 @@ in {
           default = 8;
         };
 
+        uploadConcurrency = lib.mkOption {
+          description = "Uploads (NARs and eval-cache blobs) admitted at once across all workers and REST clients. Further requests wait for a permit.";
+          type = lib.types.ints.positive;
+          default = 16;
+        };
+
+        uploadBytesBudget = lib.mkOption {
+          description = "Sum of admitted upload sizes in bytes. A request that does not fit waits; one larger than the budget runs alone once nothing else is in flight.";
+          type = lib.types.ints.positive;
+          default = 8589934592;
+        };
+
         keepEvaluations = lib.mkOption {
           description = "Global maximum of evaluations kept per task. Caps the per-task setting, and a new task starts at the lower of 30 and this. 0 disables the cap.";
           type = lib.types.ints.unsigned;
@@ -1196,6 +1208,8 @@ in {
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
         GRADIENT_UPSTREAM_QUERY_CONCURRENCY = toString cfg.settings.upstreamQueryConcurrency;
         GRADIENT_NAR_COMMIT_CONCURRENCY = toString cfg.settings.narCommitConcurrency;
+        GRADIENT_UPLOAD_CONCURRENCY = toString cfg.settings.uploadConcurrency;
+        GRADIENT_UPLOAD_BYTES_BUDGET = toString cfg.settings.uploadBytesBudget;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
         GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
         GRADIENT_QUIC = lib.boolToString cfg.enableQuic;

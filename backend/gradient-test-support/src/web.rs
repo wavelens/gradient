@@ -168,6 +168,12 @@ fn server_with_pools(
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
     });
     TestServer::new(gradient_web::create_router(state).expect("router"))
 }
