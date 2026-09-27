@@ -147,6 +147,7 @@ events! {
     CacheChanged(cache::Changed),
     CacheNarFetched(cache::NarFetched),
     CacheNarinfoServed(cache::NarinfoServed),
+    CacheNarSigned(cache::NarSigned),
     GcSwept(gc::Swept),
     GcDeepFinished(gc::DeepFinished),
     Audit(audit::Audited),
@@ -177,6 +178,7 @@ mod tests {
             "cache.changed",
             "cache.nar.fetched",
             "cache.narinfo.served",
+            "cache.nar.signed",
             "proto.client.*",
             "proto.server.*",
         ];

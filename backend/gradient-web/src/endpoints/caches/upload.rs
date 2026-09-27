@@ -197,6 +197,7 @@ async fn sign_uploaded_path(
 ) {
     gradient_proto::signing::sign_cached_path(
         &state.web_db,
+        &state.events,
         &state.config.secrets.crypt_secret_file,
         &state.config.server.serve_url,
         gradient_proto::signing::SignRequest {

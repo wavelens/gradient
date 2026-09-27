@@ -6,8 +6,9 @@
 
 //! Runtime edges of the derivation graph. They are learned, never declared: from
 //! an upstream narinfo when an output is probed, and from the NAR when it lands.
-//! A reference whose hash has no producing derivation is an `inputSrc` the
-//! evaluation pushed itself and gets no edge.
+//! A reference whose hash has no producing derivation yet is either an `inputSrc`
+//! the evaluation pushed itself or an output of a stub the walk has not reached,
+//! so the walk that gives a stub its outputs adopts the references naming them.
 
 use gradient_types::ids::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
@@ -24,6 +25,31 @@ SELECT $1, d.dependency, 1 FROM unnest($2::uuid[]) AS d(dependency) WHERE d.depe
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 "#,
         params = [DerivationId, DerivationIds(64)];
+
+    /// The runtime edges into `$1` that references recorded before `$1` had output
+    /// rows could not resolve, from both places a reference is kept. Returns each
+    /// referrer whose edge landed or was upgraded, once per edge.
+    ///
+    /// The producer lookup is fenced: a generic plan guesses thousands of referrers
+    /// per GIN probe and hash-joins them against a sequential scan of every output.
+    ADOPT_REFERENCED_OUTPUTS = r#"
+INSERT INTO derivation_dependency (derivation, dependency, kind)
+SELECT DISTINCT r.derivation, o.derivation, 1
+FROM derivation_output o
+CROSS JOIN LATERAL (VALUES (ARRAY[o.hash || '-' || o.package, '/nix/store/' || o.hash || '-' || o.package])) AS t(tokens)
+JOIN LATERAL (
+    SELECT cp.hash FROM cached_path cp WHERE string_to_array(cp."references", ' ') && t.tokens
+    UNION
+    SELECT ro.hash FROM derivation_output ro WHERE string_to_array(ro.references_list, ' ') && t.tokens
+) h ON true
+JOIN LATERAL (SELECT p.derivation FROM derivation_output p WHERE p.hash = h.hash OFFSET 0) r
+  ON r.derivation <> o.derivation
+WHERE o.derivation = ANY($1::uuid[])
+ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
+RETURNING derivation
+"#,
+        params = [DerivationIds(64)],
+        tier = Bulk;
 }
 
 /// The store-path hash of a narinfo reference token, which the worker sends as
@@ -64,6 +90,29 @@ pub async fn insert_runtime_edges<C: ConnectionTrait>(
         .rows_affected())
 }
 
+/// Write the runtime edges earlier references name into the outputs of `walked`,
+/// returning the referrers whose runtime edges grew.
+pub async fn adopt_referenced_outputs<C: ConnectionTrait>(
+    db: &C,
+    walked: &[DerivationId],
+) -> Result<Vec<DerivationId>, DbErr> {
+    if walked.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut referrers: Vec<DerivationId> = db
+        .query_all_raw(ADOPT_REFERENCED_OUTPUTS.bind([ids(walked)]))
+        .await?
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+        .map(DerivationId::new)
+        .collect();
+    referrers.sort_unstable();
+    referrers.dedup();
+
+    Ok(referrers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +127,61 @@ mod tests {
             "{sql}"
         );
         assert!(sql.contains("WHERE d.dependency <> $1"), "{sql}");
+    }
+
+    #[test]
+    fn adoption_matches_both_token_forms_against_both_reference_columns() {
+        let sql = ADOPT_REFERENCED_OUTPUTS.text();
+        assert!(
+            sql.contains(
+                "ARRAY[o.hash || '-' || o.package, '/nix/store/' || o.hash || '-' || o.package]"
+            ),
+            "{sql}"
+        );
+        assert!(
+            sql.contains(r#"string_to_array(cp."references", ' ') && t.tokens"#),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("string_to_array(ro.references_list, ' ') && t.tokens"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("WHERE p.hash = h.hash OFFSET 0"),
+            "unfenced, the producer lookup seq-scans every output: {sql}"
+        );
+        assert!(
+            sql.contains("SELECT DISTINCT r.derivation, o.derivation, 1"),
+            "a referrer naming two outputs of one producer must land one row, or the upsert touches it twice: {sql}"
+        );
+    }
+
+    #[tokio::test]
+    async fn adoption_reports_each_grown_referrer_once() {
+        use sea_orm::{DatabaseBackend, MockDatabase};
+        use std::collections::BTreeMap;
+
+        let referrer = DerivationId::now_v7();
+        let row = |id: DerivationId| {
+            BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row(referrer), row(referrer)]])
+            .into_connection();
+
+        let grown = adopt_referenced_outputs(&db, &[DerivationId::now_v7()])
+            .await
+            .unwrap();
+
+        assert_eq!(grown, vec![referrer]);
+    }
+
+    #[tokio::test]
+    async fn adopting_nothing_touches_the_database() {
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
+
+        assert!(adopt_referenced_outputs(&db, &[]).await.unwrap().is_empty());
+        assert!(db.into_transaction_log().is_empty());
     }
 
     #[test]

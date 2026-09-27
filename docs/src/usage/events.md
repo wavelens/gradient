@@ -32,7 +32,7 @@ The same JSON everywhere: websocket frames, webhook bodies, task action bodies.
 | `graph.*` | no | `graph.ingested`, `graph.demoted`, `graph.collected` |
 | `worker.*` | no | `worker.connected`, `worker.job_dispatched`, `worker.queue_depth` |
 | `proto.client.*`, `proto.server.*` | no | message type, worker, job id and size; never the payload |
-| `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served` | no | cache traffic |
+| `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served`, `cache.nar.signed` | no | cache traffic; `cache.nar.signed` names the cache a fresh upload was signed into |
 
 Every `build.*` event carrying a per-evaluation `build_id` also carries `derivation_build`, the shared build anchor that `worker.job_dispatched` names as its `build_id`.
 

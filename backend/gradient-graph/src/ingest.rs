@@ -708,6 +708,61 @@ impl BatchWriter<'_> {
         self.move_batch_demand(&to_seed, entry_points).await
     }
 
+    /// A path committed or probed while a dependency was still a stub named outputs
+    /// that had no rows, so its runtime edges into them were never written and its
+    /// anchor read whole over a hole. The walk that gives those outputs rows adopts
+    /// the references, and the referrers move exactly as a NAR commit's producers do:
+    /// demand first, then the wholeness they lost ripples up and takes fetchability
+    /// with it, so nothing downstream dispatches against an input nobody produced.
+    async fn adopt_references(
+        &self,
+        resolved: &Resolved,
+        newly_walked: &HashSet<String>,
+    ) -> Result<()> {
+        let walked: Vec<DerivationId> = newly_walked
+            .iter()
+            .filter_map(|h| resolved.by_hash.get(h).copied())
+            .collect();
+        if walked.is_empty() {
+            return Ok(());
+        }
+
+        let txn = self
+            .db()
+            .begin()
+            .await
+            .context("begin the reference adoption transaction")?;
+        let referrers = gradient_db::adopt_referenced_outputs(&txn, &walked)
+            .await
+            .context("adopt the references naming newly walked outputs")?;
+        if referrers.is_empty() {
+            return txn
+                .commit()
+                .await
+                .context("commit the reference adoption transaction");
+        }
+
+        debug!(
+            referrers = referrers.len(),
+            "adopted runtime edges recorded before their producers were walked"
+        );
+        let moved = gradient_db::recompute_demand(&txn, &referrers).await?;
+        let mut changes = gradient_db::promote(&txn, &moved.gained).await?;
+        changes.extend(gradient_db::unpromote_ungated(&txn, &moved.lost).await?);
+        let seeded = gradient_db::seed_runtime_deps(&txn, &[], &referrers).await?;
+        if !seeded.unwhole.is_empty() {
+            let lock = gradient_db::lock_anchors(&txn, &seeded.unwhole).await?;
+            changes.extend(gradient_db::lost_fetchability(&lock).await?);
+        }
+
+        txn.commit()
+            .await
+            .context("commit the reference adoption transaction")?;
+        gradient_db::emit_transition_effects(self.ctx, &changes).await;
+
+        Ok(())
+    }
+
     /// Settle the demand a batch moves without moving any anchor's status, so the
     /// transition emitter cannot see it: a newly walked or newly grown builder wants
     /// its inputs, an entry point wants its own derivation, and an anchor an upstream
@@ -977,6 +1032,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
             .resolve_anchors(ids, &batch.derivations, batch)
             .await?;
         writer.add_system_features(&batch.derivations, ids).await;
+        writer.adopt_references(&resolved, &newly_walked).await?;
         // Entry points are demand, so their rows exist before the gates are read.
         report.entry_points = match batch.task {
             Some(task) => {
@@ -1501,6 +1557,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 6])
             .into_connection()
     }
@@ -1556,8 +1613,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            19,
-            "evaluation, walked, stubs, resolve, edges, walk lock, walk seed, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote, version, and the raised, locked demand recompute: {log:?}"
+            20,
+            "evaluation, walked, stubs, resolve, edges, walk lock, walk seed, anchor insert, anchor select, jobs, reference adoption, lock, mark, seed, promote, unpromote, version, and the raised, locked demand recompute: {log:?}"
         );
         let walked = log
             .iter()
@@ -1590,6 +1647,18 @@ mod tests {
         assert!(
             lock < mark && mark < seed,
             "the lock precedes the flip, and the absolute seed is the last word on the batch's own rows: {log:?}"
+        );
+        let anchors = log
+            .iter()
+            .position(|s| s.contains(r#"INSERT INTO \"derivation_build\""#))
+            .expect("the anchor insert runs");
+        let adopt = log
+            .iter()
+            .position(|s| s.contains("&& t.tokens"))
+            .expect("the reference adoption runs");
+        assert!(
+            anchors < adopt && adopt < lock,
+            "a referrer's recount reads its new dependency's anchor, so adoption follows the anchor insert: {log:?}"
         );
         assert!(
             log[stub].contains(&b.hash) && !log[walked].contains(&b.hash),
@@ -1741,6 +1810,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1782,6 +1852,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1865,6 +1936,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             // stubs, lock, seed, the batch's own bump, the cross-evaluation bump,
             // then the demand recompute's raise and lock
             .append_exec_results(vec![ok(1); 7])
@@ -1944,6 +2016,7 @@ mod tests {
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![drv_row(b.id)]])
             .append_query_results([vec![ripple_row(a.id, true)]])
             .append_query_results([vec![drv_row(a.id)]])
@@ -2019,6 +2092,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -2207,6 +2281,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])

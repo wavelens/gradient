@@ -28,3 +28,11 @@ pub struct NarinfoServed {
     pub hit: bool,
 }
 firehose!(NarinfoServed, "cache.narinfo.served");
+
+/// A freshly uploaded NAR was signed into `cache`; backfill signing announces nothing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NarSigned {
+    pub cache: CacheId,
+    pub hash: String,
+}
+firehose!(NarSigned, "cache.nar.signed");

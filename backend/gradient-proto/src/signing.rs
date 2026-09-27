@@ -9,6 +9,7 @@
 //! rather than waiting for the periodic sweep.
 
 use gradient_sources::CacheSigner;
+use gradient_types::events::cache::NarSigned;
 use gradient_types::ids::{CacheId, CachedPathId};
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
@@ -34,9 +35,10 @@ pub struct SignRequest<'a> {
 /// Skips paths whose every producing task has `sign_cache=false` (the
 /// reserved `build-request` task is always signable). Signing failures are
 /// logged, never propagated: the NAR is already stored and the periodic sweep
-/// re-signs whatever is left NULL.
+/// re-signs whatever is left NULL. Each cache signed into is announced on `events`.
 pub async fn sign_cached_path<C: ConnectionTrait>(
     db: &C,
+    events: &EventBus,
     crypt_secret_file: &str,
     serve_url: &str,
     req: SignRequest<'_>,
@@ -87,10 +89,15 @@ pub async fn sign_cached_path<C: ConnectionTrait>(
         };
 
         let sig = signer.sign_narinfo_raw(store_path, &nar_hash_nix32, nar_size, req.references);
+        let cache = row.cache;
         let mut am = row.into_active_model();
         am.signature = Set(Some(sig));
-        if let Err(e) = am.update(db).await {
-            warn!(store_path, error = %e, "eager sign: persist signature failed");
+        match am.update(db).await {
+            Ok(_) => events.publish(NarSigned {
+                cache,
+                hash: hash.to_owned(),
+            }),
+            Err(e) => warn!(store_path, error = %e, "eager sign: persist signature failed"),
         }
     }
 }
@@ -152,5 +159,127 @@ async fn producing_tasks_all_private<C: ConnectionTrait>(db: &C, hash: &str) -> 
             warn!(%hash, error = %e, "eager sign: producer-flag query failed; signing");
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::ids::{CachedPathSignatureId, UserId};
+    use gradient_types::EventBus;
+    use gradient_types::events::{Event, cache::NarSigned};
+    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+    use std::collections::BTreeMap;
+    use std::io::Write;
+
+    const STORE_PATH: &str = "/nix/store/0c7m1b3d0bgalbq8w4nmh5pjm3kc2dfq-hello-2.12";
+    const NAR_HASH: &str = "sha256:1b8m03r63zqhnjf7l5wnldhh7c134ap5vpj0850ymkq1iyzicy5s";
+
+    fn secret_file() -> (tempfile::NamedTempFile, String) {
+        let mut file = tempfile::NamedTempFile::new().expect("temp secret");
+        file.write_all(b"test-secret-key-32-bytes-padding!").expect("write secret");
+        let path = file.path().to_string_lossy().to_string();
+        (file, path)
+    }
+
+    fn cache(private_key: String) -> MCache {
+        MCache {
+            id: CacheId::now_v7(),
+            name: "main".into(),
+            display_name: "Main".into(),
+            description: String::new(),
+            active: true,
+            priority: 0,
+            local_priority: None,
+            public_key: String::new(),
+            private_key,
+            public: true,
+            created_by: UserId::now_v7(),
+            created_at: chrono::Utc::now().naive_utc(),
+            managed: false,
+            max_storage_gb: 0,
+        }
+    }
+
+    fn pending(cached_path: CachedPathId, cache: CacheId) -> MCachedPathSignature {
+        MCachedPathSignature {
+            id: CachedPathSignatureId::now_v7(),
+            cached_path,
+            cache,
+            signature: None,
+            last_fetched_at: None,
+            fetch_count: 0,
+            created_at: chrono::Utc::now().naive_utc(),
+        }
+    }
+
+    fn no_producers() -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            ("producers".to_owned(), Value::BigInt(Some(0))),
+            ("signable".to_owned(), Value::BigInt(Some(0))),
+        ])
+    }
+
+    async fn signed_events(cache: MCache) -> Vec<NarSigned> {
+        let (_file, secret) = secret_file();
+        let cached_path = CachedPathId::now_v7();
+        let row = pending(cached_path, cache.id);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![no_producers()]])
+            .append_query_results([vec![row.clone()]])
+            .append_query_results([vec![cache]])
+            .append_query_results([vec![MCachedPathSignature {
+                signature: Some(vec![1]),
+                ..row
+            }]])
+            .into_connection();
+        let events = EventBus::default();
+        let mut rx = events.subscribe();
+
+        sign_cached_path(
+            &db,
+            &events,
+            &secret,
+            "https://gradient.example",
+            SignRequest {
+                cached_path,
+                store_path: STORE_PATH,
+                nar_hash: NAR_HASH,
+                nar_size: 1024,
+                references: &[],
+            },
+        )
+        .await;
+
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|envelope| match &envelope.event {
+                Event::CacheNarSigned(signed) => Some(signed.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_signed_upload_announces_the_cache_it_landed_in() {
+        let (_file, secret) = secret_file();
+        let (private_key, _) =
+            gradient_sources::generate_signing_key(&secret).expect("signing key");
+        let cache = cache(private_key);
+        let id = cache.id;
+
+        let signed = signed_events(cache).await;
+
+        assert_eq!(
+            signed,
+            vec![NarSigned {
+                cache: id,
+                hash: "0c7m1b3d0bgalbq8w4nmh5pjm3kc2dfq".into(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cache_without_a_key_announces_nothing() {
+        assert!(signed_events(cache(String::new())).await.is_empty());
     }
 }
