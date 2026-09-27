@@ -18,7 +18,10 @@ def sql(query):
 
 
 def daemon(node, cmd, args=None):
-    return json.loads(node.succeed(f"gradient-daemon ctl {cmd} '{json.dumps(args or {})}'"))
+    # A reply of a few hundred KB decodes corrupted when read back over the shell, so it crosses the shared dir.
+    name = f"ctl-{node.name}.json"
+    node.succeed(f"gradient-daemon ctl {cmd} '{json.dumps(args or {})}' > /tmp/shared/{name}")
+    return json.loads((node.shared_dir / name).read_text())
 
 
 def login():
