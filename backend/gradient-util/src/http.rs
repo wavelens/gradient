@@ -51,20 +51,29 @@ fn rustls_root_store() -> rustls::RootCertStore {
     roots
 }
 
+/// reqwest writes ALPN only into a TLS config it builds itself, so a preconfigured
+/// one without it pins every connection, S3 included, to HTTP/1.1.
 fn rustls_config() -> rustls::ClientConfig {
     init_crypto_provider();
-    rustls::ClientConfig::builder()
+    let mut config = rustls::ClientConfig::builder()
         .with_root_certificates(rustls_root_store())
-        .with_no_client_auth()
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    config
 }
 
 /// The shared user agent and TLS roots, with no total request timeout: for a
 /// caller whose transfers legitimately outlive one and that polices progress
 /// another way (the S3 client, whose read timeout is an inactivity timer).
+/// HTTP/2 multiplexes every request to a host over one connection, so its flow
+/// control window adapts to the link instead of capping a NAR stream at 64 KiB
+/// in flight.
 pub fn untimed_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .user_agent(user_agent())
         .use_preconfigured_tls(rustls_config())
+        .http2_adaptive_window(true)
 }
 
 fn client_builder() -> reqwest::ClientBuilder {
@@ -111,6 +120,15 @@ pub fn download_client() -> &'static reqwest::Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tls_offers_http2_before_falling_back_to_http1() {
+        assert_eq!(
+            rustls_config().alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+            "without ALPN every HTTPS connection, S3 included, stays on HTTP/1.1"
+        );
+    }
 
     #[test]
     fn build_client_succeeds() {
