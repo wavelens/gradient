@@ -751,11 +751,11 @@ async fn record_metrics(
     derivation_id: DerivationId,
     metrics: &BuildMetrics,
 ) {
-    let (pname, closure_size) = match EDerivation::find_by_id(derivation_id)
+    let derivation = match EDerivation::find_by_id(derivation_id)
         .one(&ctx.worker_db)
         .await
     {
-        Ok(Some(d)) => (d.pname, d.closure_size),
+        Ok(Some(d)) => d,
         Ok(None) => {
             warn!(%derivation_id, "derivation row missing; skipping metric history");
             return;
@@ -769,8 +769,9 @@ async fn record_metrics(
     let metric = MDerivationMetric {
         id: DerivationMetricId::now_v7(),
         derivation: derivation_id,
-        pname,
-        closure_size,
+        pname: derivation.pname,
+        architecture: derivation.architecture,
+        closure_size: derivation.closure_size,
         peak_ram_mb: metrics.peak_ram_mb.map(|v| v as i64),
         cpu_time_ms: metrics.cpu_time_ms.map(|v| v as i64),
         avg_cpu_pct: metrics.avg_cpu_pct.map(|v| v as f64),

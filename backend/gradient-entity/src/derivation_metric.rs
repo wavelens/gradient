@@ -17,6 +17,7 @@ pub struct Model {
     pub id: DerivationMetricId,
     pub derivation: DerivationId,
     pub pname: Option<String>,
+    pub architecture: String,
     pub closure_size: Option<i64>,
     pub peak_ram_mb: Option<i64>,
     pub cpu_time_ms: Option<i64>,

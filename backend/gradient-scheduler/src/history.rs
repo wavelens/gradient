@@ -9,47 +9,20 @@
 use gradient_types::{CDerivationMetric, EDerivationMetric, MDerivationMetric};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
-/// Most recent rows considered when predicting; bounds query cost.
-const HISTORY_WINDOW: u64 = 200;
+/// Most recent rows considered: older builds drift with toolchain and host changes.
+const HISTORY_WINDOW: u64 = 20;
 
-/// Map a closure size in bytes to a coarse log2-of-megabytes bucket. Builds
-/// within ±1 bucket are treated as comparable for prediction purposes.
-pub fn closure_bucket(closure_size_bytes: i64) -> i64 {
-    let mb = (closure_size_bytes / 1_048_576).max(1);
-    (mb as f64).log2().floor() as i64
-}
-
-/// Inclusive byte bounds covering buckets `[bucket-1, bucket+1]`.
-fn bucket_bounds(closure_size_bytes: i64) -> (i64, i64) {
-    let bucket = closure_bucket(closure_size_bytes);
-    let lo_bucket = (bucket - 1).max(0);
-    let hi_bucket = bucket + 1;
-    let lo = if lo_bucket == 0 {
-        0
-    } else {
-        (1i64 << lo_bucket) * 1_048_576
-    };
-    let hi = ((1i64 << (hi_bucket + 1)) * 1_048_576) - 1;
-    (lo, hi)
-}
-
-/// Predict resource usage for a build from past metrics of the same `pname`,
-/// optionally narrowed to comparable closure sizes (±1 bucket). Returns the
-/// default (zero samples) prediction when no history exists.
+/// Predict resource usage for a build from the latest metrics of the same
+/// `pname` on the same architecture. Returns the default (zero samples)
+/// prediction when no history exists.
 pub async fn predict(
     db: &impl ConnectionTrait,
     pname: &str,
-    closure_size: Option<i64>,
+    architecture: &str,
 ) -> gradient_pool::score::HistoryPrediction {
-    let mut query = EDerivationMetric::find().filter(CDerivationMetric::Pname.eq(pname));
-    if let Some(size) = closure_size {
-        let (lo, hi) = bucket_bounds(size);
-        query = query
-            .filter(CDerivationMetric::ClosureSize.gte(lo))
-            .filter(CDerivationMetric::ClosureSize.lte(hi));
-    }
-
-    let rows = match query
+    let rows = match EDerivationMetric::find()
+        .filter(CDerivationMetric::Pname.eq(pname))
+        .filter(CDerivationMetric::Architecture.eq(architecture))
         .order_by_desc(CDerivationMetric::CreatedAt)
         .limit(HISTORY_WINDOW)
         .all(db)
@@ -129,13 +102,6 @@ fn percentile_or_max(values: &mut [i64], p: f64) -> i64 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn buckets_are_log2_of_mb() {
-        assert_eq!(closure_bucket(1_048_576), 0);
-        assert_eq!(closure_bucket(4 * 1_048_576), 2);
-        assert_eq!(closure_bucket(1000 * 1_048_576), 9);
-    }
-
     fn metric(peak: Option<i64>, cpu: Option<i64>, oom: bool) -> MDerivationMetric {
         MDerivationMetric {
             peak_ram_mb: peak,
@@ -182,18 +148,30 @@ mod tests {
         assert_eq!(p.avg_disk_bytes, 50_000_000);
     }
 
-    #[test]
-    fn bucket_bounds_widen_by_one_bucket_each_side() {
-        let (lo, hi) = bucket_bounds(4 * 1_048_576);
-        assert!(lo <= 2 * 1_048_576);
-        assert!(hi >= 8 * 1_048_576);
-    }
+    #[tokio::test]
+    async fn predict_reads_the_latest_rows_of_the_same_pname_and_architecture() {
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results([vec![metric(Some(100), Some(1000), false)]])
+            .into_connection();
 
-    #[test]
-    fn bucket_bounds_bucket0_lower_bound_is_zero() {
-        // Bucket 0 covers closures < 2 MiB; lo_bucket clamps to 0, so the
-        // lower bound must be 0 (not 1 MiB) to include sub-1-MiB metrics.
-        let (lo, _hi) = bucket_bounds(1_048_576);
-        assert_eq!(lo, 0);
+        let p = predict(&db, "hello", "x86_64-linux").await;
+        assert_eq!(p.samples, 1);
+
+        let sql: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .flat_map(|t| t.statements())
+            .map(|stmt| stmt.sql.clone())
+            .collect();
+        let [sql] = sql.as_slice() else {
+            panic!("one statement expected: {sql:?}")
+        };
+        assert!(sql.contains(r#""pname" = $1"#), "{sql}");
+        assert!(sql.contains(r#""architecture" = $2"#), "{sql}");
+        assert!(!sql.contains(r#""closure_size" >="#), "{sql}");
+        assert!(
+            sql.contains(r#"ORDER BY "derivation_metric"."created_at" DESC"#),
+            "{sql}"
+        );
     }
 }

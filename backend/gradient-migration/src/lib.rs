@@ -82,6 +82,7 @@ mod m20260926_000001_events_outbox;
 mod m20260926_000002_cache_usage;
 mod m20260926_000003_webhook;
 mod m20260927_000000_foreign_key_indexes;
+mod m20260927_000001_derivation_metric_architecture;
 
 pub struct Migrator;
 
@@ -160,6 +161,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260926_000002_cache_usage::Migration),
             Box::new(m20260926_000003_webhook::Migration),
             Box::new(m20260927_000000_foreign_key_indexes::Migration),
+            Box::new(m20260927_000001_derivation_metric_architecture::Migration),
         ]
     }
 }
