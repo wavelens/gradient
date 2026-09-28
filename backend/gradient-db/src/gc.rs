@@ -303,8 +303,8 @@ fn evaluations_to_gc(
 /// `gradient_graph::gc`. Rows and attempt logs are all this pass reclaims: the
 /// NARs of what it deletes leave the live set with it and are the eviction pass's
 /// (`evict_stale_cached_paths`) to remove once past the fetch TTL. FK cascade
-/// cleans up `derivation_output`, `derivation_build`, dep/closure edges, features,
-/// metrics, and `cache_derivation`.
+/// cleans up `derivation_output`, `derivation_build`, dep/closure edges, features
+/// and metrics.
 pub async fn orphan_derivation_candidates<C>(
     db: &C,
     grace_hours: i64,

@@ -467,9 +467,9 @@ pub(super) struct DeleteOutcome {
     pub ref_counted_others: bool,
 }
 
-/// Removes a single cache's claim on a NAR. Drops the per-cache signature row,
-/// the per-cache derivation pin, and - if no other cache still holds the path -
-/// the shared `cached_path` row plus the underlying NAR blob.
+/// Removes a single cache's claim on a NAR. Drops the per-cache signature row
+/// and - if no other cache still holds the path - the shared `cached_path` row
+/// plus the underlying NAR blob.
 pub(super) async fn delete_nar_from_cache(
     state: &Arc<ServerState>,
     cache_id: CacheId,

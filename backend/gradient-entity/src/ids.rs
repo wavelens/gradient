@@ -89,7 +89,6 @@ id_newtype!(BuildLogChunkId);
 id_newtype!(BuildProductId);
 id_newtype!(BuildRequestBlobId);
 id_newtype!(CacheId);
-id_newtype!(CacheDerivationId);
 id_newtype!(CacheInvitationId);
 id_newtype!(CacheMetricId);
 id_newtype!(CacheSubscriptionRequestId);

@@ -35,16 +35,6 @@ ${baseDir}/nars/<2 chars>/<rest>.nar.zst
     - No object versioning (nor object lock or replication, which force versioning): Gradient assumes overwrite on PUT, and a versioned bucket keeps one copy per re-upload that no S3 GC reclaims.
     - An `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days): NARs over 1 GiB go up as multipart, and a worker that dies mid-upload leaves the parts behind.
 
-## Closure Rows
-
-`cache_derivation(cache, derivation)` exists when every output of the derivation is cached and every dependency has its own row for the same cache, for projects subscribed to the cache.
-
-| Operation | Code |
-|---|---|
-| Write | Sign sweep, `record_newly_completed_derivations`; a full backfill at most once an hour |
-| Revoke | `gradient_db::revoke_cache_closures` |
-| Read | Nothing reads the table today |
-
 ## Deep GC
 
 `POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) reconciles every storage backend against the database in three passes (`gradient-cache/src/cacher/deep_gc.rs`).

@@ -38,9 +38,9 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
     }
 }
 
-/// Remove a single cache's claim on a NAR: the per-cache signature row and the
-/// per-cache derivation pins, plus - when no other cache still holds the path -
-/// the shared `cached_path` row, the NAR blob and the gate flags they backed.
+/// Remove a single cache's claim on a NAR: the per-cache signature row, plus -
+/// when no other cache still holds the path - the shared `cached_path` row, the
+/// NAR blob and the gate flags they backed.
 async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<DemoteReport> {
     let db = &ctx.worker_db;
     let Some(cached_path) = ECachedPath::find()
@@ -61,16 +61,6 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
     };
 
     ECachedPathSignature::delete_by_id(sig.id).exec(db).await?;
-
-    let derivation_ids: Vec<DerivationId> = EDerivationOutput::find()
-        .filter(CDerivationOutput::Hash.eq(hash))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|o| o.derivation)
-        .collect();
-
-    gradient_db::revoke_cache_closures(db, &derivation_ids, Some(cache)).await?;
 
     let remaining = ECachedPathSignature::find()
         .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))

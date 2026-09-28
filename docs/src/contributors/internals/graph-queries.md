@@ -23,7 +23,6 @@ flowchart LR
 | Walk completeness | `walk_completeness.rs` (hand-written) | Yes |
 | Runtime recount | `runtime_readiness.rs`, `recount_sql` | No |
 | Task board dependency counts | `task_board.rs`, `DEP_COUNTS_SQL` | No |
-| Cache closure revoke | `cache_storage.rs`, `revoke_cache_closures_sql` | No |
 
 ## The `OFFSET 0` Fence
 

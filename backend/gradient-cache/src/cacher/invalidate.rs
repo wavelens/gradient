@@ -13,8 +13,7 @@ use std::sync::Arc;
 /// Invalidates a path's cached state across all caches in the graph actor's
 /// transaction: the cache link and upstream availability on every matching
 /// output, the trusted producers, the `cached_path` rows and the NAR object,
-/// the gate flags they backed, and the `cache_derivation` closure assertions of
-/// the producers and their transitive dependents.
+/// and the gate flags they backed.
 pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) -> Result<()> {
     let (hash, _package) = get_hash_from_path(path.clone())
         .with_context(|| format!("Failed to parse path {}", path))?;

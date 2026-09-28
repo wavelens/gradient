@@ -12,14 +12,12 @@
 //! handler (`sign_cached_path`); this periodic pass is the backfill that
 //! catches subscription placeholders and any row a commit left NULL. It walks
 //! the pending rows, computes narinfo signatures with the cache's private key,
-//! and fills them in, and records `cache_derivation` rows when a derivation's
-//! full closure has become cached for a given cache.
+//! and fills them in.
 
 use gradient_core::ServerState;
 use gradient_sources::CacheSigner;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
-use gradient_util::sync::Mutex;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
     QuerySelect, Set,
@@ -98,9 +96,8 @@ pub(crate) fn compute_skipped_cached_paths(
         .collect()
 }
 
-/// One pass: sign every pending `cached_path_signature` row and update
-/// `cache_derivation` where newly-signed paths complete a derivation
-/// closure. Errors on individual rows are logged and skipped.
+/// One pass: sign every pending `cached_path_signature` row. Errors on
+/// individual rows are logged and skipped.
 pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<()> {
     // Before signing, give back a claim to any path that lost one, so this same
     // pass signs it rather than leaving it unservable for another interval.
@@ -173,8 +170,6 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         signers.insert(*cache_id, signer);
     }
 
-    let mut touched_caches: HashSet<CacheId> = HashSet::new();
-    let mut signed_hashes: Vec<String> = Vec::new();
     let mut signed = 0usize;
 
     for row in pending {
@@ -220,8 +215,6 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         }
 
         debug!(cache_name = %cache.name, store_path = %store_path, "sign sweep: signed");
-        touched_caches.insert(cache.id);
-        signed_hashes.push(cp.hash.clone());
         signed += 1;
     }
 
@@ -229,186 +222,6 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         tracing::info!(count = signed, "sign sweep: signatures filled");
     }
 
-    // Update cache_derivation where this pass's newly signed paths complete a
-    // derivation closure. Seeded by the signed outputs and walked up through
-    // dependents; the unseeded full scan of every project derivation runs hourly
-    // as the backfill (fresh subscriptions, rows a crashed sweep missed).
-    let seed: Vec<uuid::Uuid> = if signed_hashes.is_empty() {
-        vec![]
-    } else {
-        EDerivationOutput::find()
-            .filter(CDerivationOutput::Hash.is_in(signed_hashes))
-            .all(&state.worker_db)
-            .await?
-            .into_iter()
-            .map(|o| o.derivation.into_inner())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect()
-    };
-    let full = full_backfill_due();
-    for cache_id in touched_caches {
-        if let Err(e) = record_newly_completed_derivations(&state, cache_id, &seed, full).await {
-            warn!(cache = %cache_id, error = %e, "sign sweep: cache_derivation update failed");
-        }
-    }
-
-    Ok(())
-}
-
-/// The full backfill scans every derivation of every subscribed project (minutes
-/// on a large DB), so it runs at most once per hour; the per-sweep frontier
-/// walk covers everything the sweep itself changed.
-const FULL_BACKFILL_SECS: u64 = 3600;
-
-fn full_backfill_due() -> bool {
-    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-    let mut last = LAST.lock();
-    match *last {
-        // Arm on first call instead of running: a restart must not pay the
-        // full scan immediately (frontier passes cover the steady state).
-        None => {
-            *last = Some(std::time::Instant::now());
-            false
-        }
-        Some(t) if t.elapsed().as_secs() < FULL_BACKFILL_SECS => false,
-        Some(_) => {
-            *last = Some(std::time::Instant::now());
-            true
-        }
-    }
-}
-
-gradient_db::sql! {
-    /// The unseeded hourly backfill: materialises the already-recorded set once
-    /// and hash anti-joins against it, instead of a correlated probe per
-    /// candidate per dependency (which scanned for minutes on a large graph).
-    FULL_BACKFILL_CACHE_DERIVATION = r#"
-        WITH have AS MATERIALIZED (
-            SELECT derivation FROM cache_derivation WHERE cache = $1
-        ),
-        project_drvs AS (
-            SELECT DISTINCT bj.derivation
-            FROM build_job bj
-            JOIN evaluation ev ON ev.id = bj.evaluation
-            JOIN task p ON p.id = ev.task
-            JOIN project_cache oc ON oc.project = p.project
-            WHERE oc.cache = $1
-        )
-        INSERT INTO cache_derivation (id, cache, derivation, cached_at)
-        SELECT uuidv7(), $1, c.derivation, $2
-        FROM project_drvs c
-        LEFT JOIN have ON have.derivation = c.derivation
-        WHERE have.derivation IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM derivation_output o
-            WHERE o.derivation = c.derivation AND o.is_cached = false)
-          AND NOT EXISTS (
-            SELECT 1 FROM derivation_dependency e
-            LEFT JOIN have h ON h.derivation = e.dependency
-            WHERE e.derivation = c.derivation AND h.derivation IS NULL)
-                "#,
-        params = [CacheId, Now];
-
-    /// The frontier-walk's next layer: dependents of the derivations the
-    /// previous layer just inserted.
-    FRONTIER_DEPENDENTS = "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
-        params = [DerivationIds(64)];
-}
-
-/// For every derivation built by a project subscribed to `cache_id`
-/// whose outputs are all cached and whose dependency closure is already
-/// recorded, insert a `cache_derivation` row (project scoping mirrors
-/// `gradient_db::derivation_ids_for_project`: task -> evaluation -> build_job).
-/// Idempotent. `full = false` restricts the walk to `seed` and its dependents,
-/// layer by layer to a fixpoint; `full = true` is the unseeded hourly backfill.
-async fn record_newly_completed_derivations(
-    state: &ServerState,
-    cache_id: CacheId,
-    seed: &[uuid::Uuid],
-    full: bool,
-) -> anyhow::Result<()> {
-    use sea_orm::ConnectionTrait;
-
-    gradient_db::sql! {
-        INSERT_LAYER = r#"
-        INSERT INTO cache_derivation (id, cache, derivation, cached_at)
-        SELECT uuidv7(), $1, d.id, $2
-        FROM derivation d
-        WHERE d.id = ANY($3)
-          AND d.id IN (
-            SELECT bj.derivation
-            FROM build_job bj
-            JOIN evaluation ev ON ev.id = bj.evaluation
-            JOIN task p ON p.id = ev.task
-            JOIN project_cache oc ON oc.project = p.project
-            WHERE oc.cache = $1)
-          AND NOT EXISTS (
-            SELECT 1 FROM derivation_output o
-            WHERE o.derivation = d.id AND o.is_cached = false)
-          AND NOT EXISTS (
-            SELECT 1 FROM derivation_dependency e
-            WHERE e.derivation = d.id
-              AND NOT EXISTS (
-                SELECT 1 FROM cache_derivation cd
-                WHERE cd.cache = $1 AND cd.derivation = e.dependency))
-          AND NOT EXISTS (
-            SELECT 1 FROM cache_derivation cd2
-            WHERE cd2.cache = $1 AND cd2.derivation = d.id)
-        RETURNING derivation
-    "#,
-            params = [CacheId, Now, DerivationIds(64)];
-    }
-
-    if full {
-        // Set-based shape: materialise the already-recorded set once and hash
-        // anti-join against it, instead of a correlated probe per candidate
-        // per dependency (which scanned for minutes on a large graph).
-        let inserted = state
-            .worker_db
-            .execute_raw(
-                FULL_BACKFILL_CACHE_DERIVATION
-                    .bind([cache_id.into_inner().into(), gradient_types::now().into()]),
-            )
-            .await?
-            .rows_affected();
-        if inserted > 0 {
-            debug!(cache = %cache_id, inserted, "backfilled closure-complete derivations");
-        }
-        return Ok(());
-    }
-
-    let mut frontier: Vec<uuid::Uuid> = seed.to_vec();
-    let mut inserted_total = 0usize;
-    while !frontier.is_empty() {
-        let rows = state
-            .worker_db
-            .query_all_raw(INSERT_LAYER.bind([
-                cache_id.into_inner().into(),
-                gradient_types::now().into(),
-                frontier.into(),
-            ]))
-            .await?;
-        if rows.is_empty() {
-            break;
-        }
-        let inserted: Vec<uuid::Uuid> = rows
-            .iter()
-            .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
-            .collect();
-        inserted_total += inserted.len();
-        frontier = state
-            .worker_db
-            .query_all_raw(FRONTIER_DEPENDENTS.bind([inserted.into()]))
-            .await?
-            .iter()
-            .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
-            .collect();
-    }
-
-    if inserted_total > 0 {
-        debug!(cache = %cache_id, inserted = inserted_total, "recorded newly closure-complete derivations");
-    }
     Ok(())
 }
 

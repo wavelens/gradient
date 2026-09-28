@@ -20,7 +20,6 @@ pub mod build_log_chunk;
 pub mod build_product;
 pub mod build_request_blob;
 pub mod cache;
-pub mod cache_derivation;
 pub mod cache_invitation;
 pub mod cache_metric;
 pub mod cache_role;
