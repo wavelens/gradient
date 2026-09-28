@@ -17,7 +17,7 @@ use gradient_db::DbContext;
 use gradient_types::DerivationId;
 use gradient_util::supervision::SupervisorHealth;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-use sea_orm::TransactionTrait;
+use sea_orm::{ConnectionTrait, TransactionTrait};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
@@ -34,6 +34,8 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// bound on a reply: a caller waits out the queue ahead of its message, because
 /// the actor still runs a message whose caller gave up, and a session behind a
 /// burst must block its reader (TCP backpressure on the worker), not drop the batch.
+/// Postgres enforces it per statement as well: the rollback waits for the running
+/// statement to end, so a budget the database does not know is no bound at all.
 pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
 /// How many times a transaction aborted for a deadlock or serialization failure runs.
 pub const GRAPH_TX_ATTEMPTS: u32 = 3;
@@ -330,6 +332,10 @@ where
     }
 }
 
+fn statement_timeout(budget: Duration) -> String {
+    format!("SET LOCAL statement_timeout = {}", budget.as_millis())
+}
+
 /// SQLSTATE `40P01` (deadlock detected) or `40001` (serialization failure) anywhere
 /// in the chain: the transaction was aborted for its timing, not its content.
 fn is_retryable(err: &anyhow::Error) -> bool {
@@ -355,6 +361,9 @@ where
     Fut: Future<Output = anyhow::Result<T>>,
 {
     let tx = Arc::new(ctx.worker_db.begin().await.context("begin")?);
+    tx.execute_unprepared(&statement_timeout(budget))
+        .await
+        .context("statement timeout")?;
     let scoped = ctx.in_transaction(Arc::clone(&tx));
     let ready_set = scoped.ready_set.clone();
     let outcome = tokio::time::timeout(budget, work(scoped)).await;
@@ -390,7 +399,11 @@ mod tests {
     use crate::test_ctx::ctx;
     use gradient_entity::evaluation::EvaluationStatus;
     use gradient_types::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+    fn timeouts(transactions: usize) -> Vec<MockExecResult> {
+        vec![MockExecResult::default(); transactions]
+    }
 
     fn evaluation(id: EvaluationId) -> MEvaluation {
         MEvaluation {
@@ -412,6 +425,7 @@ mod tests {
         let e1 = EvaluationId::now_v7();
         let e2 = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(1))
             .append_query_results([vec![evaluation(e1)], vec![evaluation(e2)]])
             .append_query_results([Vec::<MDerivation>::new()])
             .into_connection();
@@ -470,6 +484,7 @@ mod tests {
         let e1 = EvaluationId::now_v7();
         let e2 = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(1))
             .append_query_results([vec![evaluation(e1)], Vec::<MEvaluation>::new()])
             .into_connection();
         let (ctx, _) = ctx(db).await;
@@ -492,7 +507,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_transaction_past_its_budget_is_rolled_back() {
-        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
+        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(1))
+            .into_connection())
+        .await;
         let err = transact(&ctx, Duration::from_millis(20), |_scoped| async {
             tokio::time::sleep(Duration::from_millis(200)).await;
             Ok(())
@@ -509,6 +527,30 @@ mod tests {
         assert!(
             log.iter().any(|t| t.contains("ROLLBACK")) && log.iter().all(|t| !t.contains("COMMIT")),
             "rolled back, never committed: {log:?}"
+        );
+    }
+
+    /// The budget reaches Postgres before any work, so a runaway statement is
+    /// cancelled there: a dropped future leaves it running, and the rollback
+    /// waited 18 minutes for one while every caller queued behind the actor.
+    #[tokio::test]
+    async fn a_transaction_hands_its_budget_to_postgres_first() {
+        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(1))
+            .into_connection())
+        .await;
+        transact(&ctx, Duration::from_secs(120), |_scoped| async { Ok(()) })
+            .await
+            .unwrap();
+        drop(ctx);
+        let log: Vec<String> = pool
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log[0].contains("SET LOCAL statement_timeout = 120000"),
+            "{log:?}"
         );
     }
 
@@ -570,7 +612,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_deadlocked_transaction_is_retried_and_its_second_attempt_commits() {
-        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
+        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(2))
+            .into_connection())
+        .await;
         let attempts = &std::sync::atomic::AtomicU32::new(0);
         let out = transact(&ctx, GRAPH_TX_BUDGET, move |_scoped| async move {
             if attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
@@ -612,8 +657,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_unique_violation_is_not_retried() {
-        let (ctx, _pool) =
-            ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
+        let (ctx, _pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(1))
+            .into_connection())
+        .await;
         let attempts = &std::sync::atomic::AtomicU32::new(0);
         let err = transact(&ctx, GRAPH_TX_BUDGET, move |_scoped| async move {
             attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
