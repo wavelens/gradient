@@ -307,16 +307,21 @@ mod tests {
             panic!("the first worker is granted");
         };
         drop(first);
-        assert!(matches!(
-            next(&mut second_rx).await,
-            Admitted::Granted { id: 1, .. }
-        ));
+        let Admitted::Granted {
+            id: 1,
+            permit: held,
+            ..
+        } = next(&mut second_rx).await
+        else {
+            panic!("the second worker is granted");
+        };
         drop(permit);
         assert_eq!(
             admission.in_flight(),
             1,
             "a stale permit of a gone session frees nothing twice"
         );
+        drop(held);
     }
 
     #[tokio::test]
