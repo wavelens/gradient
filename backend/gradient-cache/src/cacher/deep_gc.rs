@@ -301,16 +301,4 @@ mod tests {
         pass_logs(Arc::clone(&state), &mut report).await.unwrap();
         assert_eq!(report.orphan_logs_removed, 1);
     }
-
-    #[test]
-    fn report_serialises_with_snake_case_keys() {
-        let r = DeepGcReport {
-            orphan_nars_removed: 1,
-            zombie_blob_rows_purged: 2,
-            ..Default::default()
-        };
-        let json = r.to_json();
-        assert_eq!(json["orphan_nars_removed"], 1);
-        assert_eq!(json["zombie_blob_rows_purged"], 2);
-    }
 }

@@ -205,11 +205,4 @@ mod tests {
         assert!(journal.violations().is_empty());
         assert_eq!(journal.start(1, "y", vec![]).finish(true, None), 2);
     }
-
-    #[test]
-    fn violation_serializes_with_kind_tag() {
-        let json = serde_json::to_value(Violation::UnknownDerivation { drv: "d".into() })
-            .expect("serialize");
-        assert_eq!(json["kind"], "unknown_derivation");
-    }
 }

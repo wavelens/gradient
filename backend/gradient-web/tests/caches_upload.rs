@@ -39,12 +39,3 @@ fn upload_unauthenticated_returns_403() {
         resp.assert_status(StatusCode::FORBIDDEN);
     });
 }
-
-// Needs real-DB harness; MockDatabase cannot satisfy the full write path.
-#[test]
-#[ignore]
-fn upload_writer_creates_cached_path_and_signature() {}
-
-#[test]
-#[ignore]
-fn upload_size_mismatch_returns_400() {}

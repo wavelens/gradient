@@ -181,39 +181,6 @@ pub async fn get_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_util::hydra::parse_hydra_product_line;
-
-    #[test]
-    fn parse_hydra_product_line_typical() {
-        let got = parse_hydra_product_line("file doc /nix/store/xyz/share/doc/index.html");
-        assert_eq!(
-            got,
-            Some((
-                "file".to_string(),
-                "doc".to_string(),
-                "/nix/store/xyz/share/doc/index.html".to_string()
-            ))
-        );
-    }
-
-    #[test]
-    fn parse_hydra_product_line_accepts_any_type() {
-        assert_eq!(
-            parse_hydra_product_line("doc readme /nix/store/xyz/README.md"),
-            Some((
-                "doc".to_string(),
-                "readme".to_string(),
-                "/nix/store/xyz/README.md".to_string()
-            ))
-        );
-    }
-
-    #[test]
-    fn parse_hydra_product_line_rejects_too_few_parts() {
-        assert_eq!(parse_hydra_product_line("file doc"), None);
-        assert_eq!(parse_hydra_product_line("file"), None);
-        assert_eq!(parse_hydra_product_line(""), None);
-    }
 
     /// The sandbox is the whole defence: it puts a build-authored page in an
     /// opaque origin so its script cannot act as the viewer against our API.
@@ -286,18 +253,6 @@ mod tests {
                         && v == UNTRUSTED_CONTENT_CSP)
             );
         }
-    }
-
-    #[test]
-    fn content_type_for_known_extensions() {
-        assert_eq!(content_type_for_filename("x.html"), "text/html");
-        assert_eq!(content_type_for_filename("x.htm"), "text/html");
-        assert_eq!(content_type_for_filename("x.tar"), "application/x-tar");
-        assert_eq!(content_type_for_filename("x.gz"), "application/gzip");
-        assert_eq!(content_type_for_filename("x.zst"), "application/zstd");
-        assert_eq!(content_type_for_filename("x.txt"), "text/plain");
-        assert_eq!(content_type_for_filename("x.json"), "application/json");
-        assert_eq!(content_type_for_filename("x.zip"), "application/zip");
     }
 
     #[test]

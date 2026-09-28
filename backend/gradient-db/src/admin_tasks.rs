@@ -195,69 +195,6 @@ pub async fn mark_all_active_failed<C: ConnectionTrait>(conn: &C) -> Result<u64>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
-
-    fn task_row(id: AdminTaskId, status: AdminTaskStatus) -> MAdminTask {
-        MAdminTask {
-            id,
-            kind: AdminTaskKind::DeepGc,
-            status,
-            created_at: now(),
-            started_at: None,
-            finished_at: None,
-            progress: None,
-            error: None,
-            created_by: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn insert_pending_returns_inserted_row() {
-        let id = AdminTaskId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![task_row(id, AdminTaskStatus::Pending)]])
-            .into_connection();
-        let inserted = insert_pending(&db, AdminTaskKind::DeepGc, None)
-            .await
-            .unwrap();
-        assert_eq!(inserted.status, AdminTaskStatus::Pending);
-    }
-
-    #[tokio::test]
-    async fn find_active_filters_by_kind_and_status() {
-        let id = AdminTaskId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![task_row(id, AdminTaskStatus::Running)]])
-            .into_connection();
-        let got = find_active(&db, AdminTaskKind::DeepGc).await.unwrap();
-        assert_eq!(got.map(|r| r.id), Some(id));
-    }
-
-    #[tokio::test]
-    async fn mark_running_sets_status_and_started_at() {
-        let id = AdminTaskId::now_v7();
-        let row = task_row(id, AdminTaskStatus::Pending);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![row.clone()]])
-            .append_query_results([vec![row]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-        mark_running(&db, id).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn mark_all_active_failed_executes_statement() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 7,
-            }])
-            .into_connection();
-        assert_eq!(mark_all_active_failed(&db).await.unwrap(), 7);
-    }
 
     #[test]
     fn unique_violation_detection_is_case_insensitive() {

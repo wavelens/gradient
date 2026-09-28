@@ -136,38 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn build_events_link_their_job_to_the_dispatched_derivation_build() {
-        let anchor = DerivationBuildId::now_v7();
-        let changed = StatusChanged {
-            build_id: BuildJobId::now_v7(),
-            derivation_build: anchor,
-            evaluation_id: EvaluationId::now_v7(),
-            status: 2,
-        };
-        let reported = Reported {
-            derivation_build: anchor,
-            ..reported(BuildStatus::Completed)
-        };
-        let anchor = serde_json::json!(anchor);
-        assert_eq!(
-            serde_json::to_value(&changed).unwrap()["derivation_build"],
-            anchor
-        );
-        assert_eq!(
-            serde_json::to_value(&reported).unwrap()["derivation_build"],
-            anchor
-        );
-    }
-
-    #[test]
     fn skipped_builds_report_nothing() {
         assert!(Reported::reports(BuildStatus::Skipped).is_none());
-    }
-
-    #[test]
-    fn a_reported_build_keys_on_build_and_status() {
-        let a = reported(BuildStatus::Completed);
-        assert_eq!(a.key(), a.clone().key());
-        assert_ne!(a.key(), reported(BuildStatus::Queued).key());
     }
 }

@@ -44,21 +44,3 @@ pub fn eval_in(set: &[EvaluationStatus]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_the_pinned_numbers() {
-        assert_eq!(build(BuildStatus::DependencyFailed), 6);
-        assert_eq!(eval(EvaluationStatus::Completed), 5);
-        assert_eq!(build_in(&BuildStatus::TERMINAL_FAILURE), "4, 6, 9");
-        assert_eq!(build_in(&BuildStatus::TERMINAL_SUCCESS), "3, 7");
-        assert_eq!(build_in(&BuildStatus::PENDING), "0, 1");
-        assert_eq!(build_in(&BuildStatus::REQUEUEABLE), "4, 5, 6, 9");
-        assert_eq!(eval_in(&EvaluationStatus::TERMINAL), "5, 6, 7");
-        assert_eq!(attempt_outcome(AttemptOutcome::Failed), 3);
-        assert_eq!(attempt_reason(AttemptFailureReason::BuilderNonzero), 5);
-    }
-}

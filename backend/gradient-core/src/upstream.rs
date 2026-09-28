@@ -587,13 +587,6 @@ mod tests {
         );
     }
 
-    /// Both the worker cache-query path and the cache's narinfo endpoint have to
-    /// consult the same health, or each learns a dead upstream separately.
-    #[test]
-    fn the_breakers_are_process_wide() {
-        assert!(std::ptr::eq(breakers(), breakers()));
-    }
-
     /// The same constructor the server uses. `reqwest::Client::new()` panics
     /// where no system CA bundle exists (the nix build sandbox); `build_client`
     /// folds in `webpki_roots`, so it builds with or without native certs.

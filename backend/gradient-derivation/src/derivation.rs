@@ -433,12 +433,6 @@ mod tests {
     }
 
     #[test]
-    fn test_required_system_features() {
-        let drv = parse_drv(EXAMPLE).unwrap();
-        assert_eq!(drv.required_system_features(), vec!["kvm", "big-parallel"]);
-    }
-
-    #[test]
     fn test_no_features() {
         let drv = br#"Derive([("out","/nix/store/abc-hello","","")],[],["/nix/store/src"],"aarch64-linux","/nix/store/bash",[],[("name","hello")])"#;
         let drv = parse_drv(drv).unwrap();

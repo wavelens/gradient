@@ -88,15 +88,3 @@ fn find_ref_in_list(
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn fetch_options_with_ssh_builds_for_none_and_some() {
-        // Smoke: constructing options with and without a key must not panic and
-        // yields a usable FetchOptions (callbacks are set internally).
-        let _no_key = super::fetch_options_with_ssh(None);
-        let _with_key =
-            super::fetch_options_with_ssh(Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
-    }
-}

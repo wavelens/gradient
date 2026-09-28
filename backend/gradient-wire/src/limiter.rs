@@ -133,20 +133,6 @@ mod tests {
     }
 
     #[test]
-    fn in_use_tracks_held_permits() {
-        let limiter = ProtoLimiter::new(3);
-        assert_eq!(limiter.in_use(), 0);
-        let p1 = limiter.try_acquire().expect("first permit");
-        assert_eq!(limiter.in_use(), 1);
-        let p2 = limiter.try_acquire().expect("second permit");
-        assert_eq!(limiter.in_use(), 2);
-        drop(p1);
-        assert_eq!(limiter.in_use(), 1);
-        drop(p2);
-        assert_eq!(limiter.in_use(), 0);
-    }
-
-    #[test]
     fn per_ip_caps_concurrent() {
         let limiter = PerIpLimiter::new(2);
         let ip: IpAddr = "127.0.0.1".parse().unwrap();

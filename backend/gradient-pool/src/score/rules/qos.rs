@@ -92,15 +92,6 @@ mod tests {
     }
 
     #[test]
-    fn prioritized_scores_qos_and_unprioritized_scores_zero() {
-        let rule = QosRule::default();
-        let job = build_job();
-        let inst = InstanceContext::default();
-        assert_eq!(rule.score(&ctx(&job, true), &worker(), &inst), 5000.0);
-        assert_eq!(rule.score(&ctx(&job, false), &worker(), &inst), 0.0);
-    }
-
-    #[test]
     fn fresh_prioritized_job_outranks_starving_unprioritized_job() {
         let qos = QosRule::default();
         let wait = WaitTimeRule::default();

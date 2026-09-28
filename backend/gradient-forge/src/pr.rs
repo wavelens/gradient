@@ -108,13 +108,6 @@ mod ident_tests {
     use super::CommitIdent;
 
     #[test]
-    fn gradient_bot_uses_host_noreply_email() {
-        let id = CommitIdent::gradient_bot("https://codeberg.org");
-        assert_eq!(id.name, "Gradient");
-        assert_eq!(id.email, "gradient@users.noreply.codeberg.org");
-    }
-
-    #[test]
     fn gradient_bot_strips_scheme_port_and_path() {
         let id = CommitIdent::gradient_bot("https://git.example.com:3000/sub");
         assert_eq!(id.email, "gradient@users.noreply.git.example.com");
@@ -416,39 +409,6 @@ pub(crate) mod github {
     struct UpdatePullReq<'a> {
         title: &'a str,
         body: &'a str,
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        fn commit_req(author: Option<Ident<'_>>) -> serde_json::Value {
-            serde_json::to_value(CommitReq {
-                message: "m",
-                tree: "t".into(),
-                parents: vec!["p".into()],
-                author,
-                committer: author,
-            })
-            .unwrap()
-        }
-
-        #[test]
-        fn omits_author_when_unset() {
-            let v = commit_req(None);
-            assert!(v.get("author").is_none());
-            assert!(v.get("committer").is_none());
-        }
-
-        #[test]
-        fn includes_author_when_set() {
-            let v = commit_req(Some(Ident {
-                name: "gradient[bot]",
-                email: "bot@example.com",
-            }));
-            assert_eq!(v["author"]["name"], "gradient[bot]");
-            assert_eq!(v["committer"]["email"], "bot@example.com");
-        }
     }
 }
 

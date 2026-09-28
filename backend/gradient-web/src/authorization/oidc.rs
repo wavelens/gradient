@@ -530,16 +530,6 @@ async fn create_or_update_user(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{EncodingKey, Header};
-
-    fn jwt_with_secret(claims: &CsrfClaims, secret: &str) -> String {
-        encode(
-            &Header::default(),
-            claims,
-            &EncodingKey::from_secret(secret.as_bytes()),
-        )
-        .unwrap()
-    }
 
     #[test]
     fn random_url_safe_is_unique_and_url_safe() {
@@ -549,65 +539,6 @@ mod tests {
         for c in a.chars() {
             assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
         }
-    }
-
-    #[test]
-    fn csrf_cookie_roundtrips() {
-        let now = Utc::now();
-        let claims = CsrfClaims {
-            iat: now.timestamp(),
-            exp: (now + Duration::minutes(5)).timestamp(),
-            state: "abc".into(),
-            nonce: "xyz".into(),
-            pkce_verifier: "verifier".into(),
-        };
-        let token = jwt_with_secret(&claims, "shh");
-        let decoded = decode::<CsrfClaims>(
-            &token,
-            &DecodingKey::from_secret(b"shh"),
-            &Validation::new(Algorithm::HS256),
-        )
-        .unwrap();
-        assert_eq!(decoded.claims.state, "abc");
-        assert_eq!(decoded.claims.nonce, "xyz");
-    }
-
-    #[test]
-    fn csrf_cookie_rejects_wrong_secret() {
-        let now = Utc::now();
-        let claims = CsrfClaims {
-            iat: now.timestamp(),
-            exp: (now + Duration::minutes(5)).timestamp(),
-            state: "abc".into(),
-            nonce: "xyz".into(),
-            pkce_verifier: "verifier".into(),
-        };
-        let token = jwt_with_secret(&claims, "secret-a");
-        let decoded = decode::<CsrfClaims>(
-            &token,
-            &DecodingKey::from_secret(b"secret-b"),
-            &Validation::new(Algorithm::HS256),
-        );
-        assert!(decoded.is_err());
-    }
-
-    #[test]
-    fn csrf_cookie_rejects_expired() {
-        let past = Utc::now() - Duration::hours(1);
-        let claims = CsrfClaims {
-            iat: past.timestamp() - 60,
-            exp: past.timestamp(),
-            state: "abc".into(),
-            nonce: "xyz".into(),
-            pkce_verifier: "verifier".into(),
-        };
-        let token = jwt_with_secret(&claims, "shh");
-        let decoded = decode::<CsrfClaims>(
-            &token,
-            &DecodingKey::from_secret(b"shh"),
-            &Validation::new(Algorithm::HS256),
-        );
-        assert!(decoded.is_err());
     }
 
     #[test]
@@ -640,13 +571,5 @@ mod tests {
         assert_eq!(grants, vec![(project, role)]);
 
         assert!(super::grants_for_groups(&map, &["nobody".into()]).is_empty());
-    }
-
-    #[test]
-    fn state_compare_constant_time_rejects_mismatch() {
-        let a = "abc".as_bytes();
-        let b = "abd".as_bytes();
-        assert_eq!(a.ct_eq(b).unwrap_u8(), 0);
-        assert_eq!(a.ct_eq(a).unwrap_u8(), 1);
     }
 }

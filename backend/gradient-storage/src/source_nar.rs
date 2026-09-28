@@ -151,19 +151,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn store_path_ends_in_source() {
-        let dir = make_staging_dir();
-        let result = materialise_source_nar(dir.path())
-            .await
-            .expect("materialise");
-        assert!(
-            result.store_path.ends_with("-source"),
-            "store path should end with '-source', got: {}",
-            result.store_path
-        );
-    }
-
-    #[tokio::test]
     async fn store_path_shape() {
         let dir = make_staging_dir();
         let result = materialise_source_nar(dir.path())

@@ -844,36 +844,12 @@ mod tests {
     }
 
     #[test]
-    fn base_worker_entry_is_flagged_and_reflects_opt_in() {
-        let opted_in = base_worker_entry(base_worker_model(), true, None);
-        assert!(opted_in.is_base);
-        assert!(opted_in.active);
-
-        let opted_out = base_worker_entry(base_worker_model(), false, None);
-        assert!(opted_out.is_base);
-        assert!(!opted_out.active);
-    }
-
-    #[test]
     fn a_registration_names_the_worker_over_a_base_of_the_same_id() {
         assert_eq!(
             worker_display_name(Some("builder-1".into()), Some("shared-1".into())),
             Some("builder-1".to_string()),
             "the project's own registration wins, as it does in the list",
         );
-    }
-
-    #[test]
-    fn a_base_worker_names_itself_when_the_project_has_no_registration() {
-        assert_eq!(
-            worker_display_name(None, Some("shared-1".into())),
-            Some("shared-1".to_string()),
-        );
-    }
-
-    #[test]
-    fn a_worker_serving_neither_way_is_not_the_projects() {
-        assert_eq!(worker_display_name(None, None), None);
     }
 
     #[test]

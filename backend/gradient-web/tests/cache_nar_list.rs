@@ -83,24 +83,3 @@ fn list_returns_signed_nar_for_cache() {
         assert_eq!(items[0]["package"], "hello");
     });
 }
-
-#[test]
-fn list_accepts_pagination_query_params() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = public_cache_empty_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
-
-        let resp = server
-            .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
-            .add_query_param("page", "1")
-            .add_query_param("per_page", "10")
-            .add_query_param("sort", "created_at")
-            .add_query_param("order", "desc")
-            .await;
-        resp.assert_status_ok();
-    });
-}

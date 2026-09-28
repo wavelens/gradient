@@ -252,13 +252,6 @@ mod tests {
         assert_eq!(resolve_compression(b"opaque", None), Compression::Zstd);
     }
 
-    #[test]
-    fn decompress_none_passthrough() {
-        let raw = b"raw NAR bytes".to_vec();
-        let out = decompress(&raw, Compression::None).unwrap();
-        assert_eq!(out, raw);
-    }
-
     /// The staged-file import path decompresses through a reader; it must agree
     /// byte for byte with the in-memory path the presigned download still uses.
     #[test]

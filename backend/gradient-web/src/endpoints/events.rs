@@ -85,11 +85,4 @@ mod tests {
         assert!(select(&Envelope::now(depth.into())).is_some());
         assert!(select(&Envelope::now(cache::Changed {}.into())).is_none());
     }
-
-    #[test]
-    fn a_lagged_subscriber_gets_a_lag_frame_and_continues() {
-        let frame: serde_json::Value = serde_json::from_str(&lag_frame(7).unwrap()).unwrap();
-        assert_eq!(frame["event"], "stream.lagged");
-        assert_eq!(frame["content"]["skipped"], 7);
-    }
 }

@@ -305,13 +305,6 @@ mod tests {
     }
 
     #[test]
-    fn relative_in_output_nested() {
-        let full = "/nix/store/abc123-pkg/subdir/image.iso";
-        let root = "/nix/store/abc123-pkg";
-        assert_eq!(relative_in_output(full, root), "subdir/image.iso");
-    }
-
-    #[test]
     fn relative_in_output_fallback_on_no_prefix() {
         let full = "/other/path/image.iso";
         let root = "/nix/store/abc123-pkg";

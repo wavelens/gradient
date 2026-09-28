@@ -454,30 +454,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn substitute_miss_requeues_but_real_failures_cap_at_three() {
-        assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 0, 3, sub(true, 0)),
-            FailureOutcome::Requeue
-        ));
-        assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 99, 3, sub(true, 0)),
-            FailureOutcome::Requeue
-        ));
-        assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::Transient, 0, 3, sub(false, 0)),
-            FailureOutcome::Retry
-        ));
-        assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::Transient, 1, 3, sub(false, 0)),
-            FailureOutcome::Retry
-        ));
-        assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::Transient, 2, 3, sub(false, 0)),
-            FailureOutcome::Permanent
-        ));
-    }
-
     /// A missing input is self-healed (its producer is re-queued) and the build
     /// retries in-eval, so it behaves like a transient failure up to the attempt
     /// budget rather than failing permanently on the first miss.

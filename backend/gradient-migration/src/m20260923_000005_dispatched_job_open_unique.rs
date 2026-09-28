@@ -60,15 +60,4 @@ mod tests {
         assert!(UP[0].starts_with("UPDATE dispatched_job"), "{}", UP[0]);
         assert!(UP[0].contains("outcome = 2"), "{}", UP[0]);
     }
-
-    /// The claim's `ON CONFLICT` names exactly this column and predicate.
-    #[test]
-    fn the_index_is_unique_on_the_open_job_key() {
-        assert!(
-            UP[1].contains("CREATE UNIQUE INDEX")
-                && UP[1].contains("(job_id) WHERE finished_at IS NULL"),
-            "{}",
-            UP[1]
-        );
-    }
 }

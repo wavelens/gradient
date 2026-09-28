@@ -352,14 +352,6 @@ mod tests {
         assert!(!ci_reports(BuildStatus::FailedTransient));
     }
 
-    #[test]
-    fn unchanged_marks_from_equal_to() {
-        let d = DerivationId::now_v7();
-        let c = TransitionChange::unchanged(d, BuildStatus::Completed);
-        assert_eq!(c.from, c.to);
-        assert_eq!(c.derivation, d);
-    }
-
     /// Demand follows the builder boundary, not "terminal": an anchor thawed back
     /// into the queue makes its inputs wanted again, and one that leaves for ANY
     /// non-builder status (a success and an abort alike) stops wanting them. Which

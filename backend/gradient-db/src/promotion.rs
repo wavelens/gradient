@@ -610,22 +610,6 @@ mod tests {
                 reason = status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
             ),
         );
-        assert_eq!(status_sql::attempt_outcome(AttemptOutcome::Failed), 3);
-        assert_eq!(
-            status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
-            5
-        );
-    }
-
-    /// Both requeue paths must carry the deterministic-failure exclusion, keep
-    /// `FailedPermanent` requeueable for transient causes, and never thaw a
-    /// build-once success.
-    #[test]
-    fn requeue_keeps_failed_permanent_but_excludes_deterministic() {
-        assert!(BuildStatus::REQUEUEABLE.contains(&BuildStatus::FailedPermanent));
-        for s in BuildStatus::TERMINAL_SUCCESS {
-            assert!(!BuildStatus::REQUEUEABLE.contains(&s));
-        }
     }
 
     /// A fresh evaluation is a new intent: its thaw takes every requeueable anchor

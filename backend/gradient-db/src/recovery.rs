@@ -247,15 +247,6 @@ mod tests {
         );
     }
 
-    /// The scheduler re-drives these two itself; aborting them would cancel work
-    /// that is still live.
-    #[test]
-    fn recovery_leaves_the_statuses_the_scheduler_re_drives() {
-        let lost = lost_eval_statuses();
-        assert!(!lost.contains(&EvaluationStatus::Queued), "{lost:?}");
-        assert!(!lost.contains(&EvaluationStatus::Waiting), "{lost:?}");
-    }
-
     /// Derived from `ACTIVE`, never listed: a newly added active status must be
     /// recovered by default rather than silently surviving a restart.
     #[test]

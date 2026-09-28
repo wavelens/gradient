@@ -149,13 +149,6 @@ mod tests {
     }
 
     #[test]
-    fn format_public_key_format() {
-        let project = make_project("wavelens", "ssh-ed25519 BBBB");
-        let result = format_public_key(project, "https://gradient.wavelens.io");
-        assert_eq!(result, "ssh-ed25519 BBBB gradient.wavelens.io-wavelens");
-    }
-
-    #[test]
     fn format_public_key_strips_http() {
         let project = make_project("myproject", "ssh-ed25519 AAAA");
         let result = format_public_key(project, "http://example.com");

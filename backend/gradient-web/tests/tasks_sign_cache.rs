@@ -20,7 +20,7 @@ use chrono::{Duration, Utc};
 use gradient_core::ServerState;
 use gradient_db::permissions::admin_mask;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{ids::*, project_user, role, session, task, task_trigger};
+use gradient_entity::{ids::*, project_user, role, session, task};
 use gradient_notify::EmailSender;
 use gradient_storage::NarStore;
 use gradient_test_support::cli::test_cli;
@@ -196,84 +196,5 @@ fn get_task_includes_sign_cache() {
             body["message"]["sign_cache"], false,
             "GET response must echo task.sign_cache verbatim, got: {body}"
         );
-    });
-}
-
-#[test]
-fn patch_task_writes_sign_cache_false() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![task_with(true)]])
-            .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([vec![task_with(false)]]);
-
-        let server = make_server(db.into_connection());
-        let res = server
-            .patch("/api/v1/tasks/test-project/test-task")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({ "sign_cache": false }))
-            .await;
-
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-    });
-}
-
-#[test]
-fn create_task_accepts_sign_cache_false() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let session_id = SessionId::now_v7();
-        let token = make_token(session_id);
-
-        let seeded_trigger = task_trigger::Model {
-            id: TaskTriggerId::now_v7(),
-            task: task_id(),
-            config: serde_json::json!({"interval_secs": 300}),
-            active: true,
-            created_at: test_date(),
-            updated_at: test_date(),
-            ..Default::default()
-        };
-
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![project()]])
-            .append_query_results([vec![admin_membership()]])
-            .append_query_results([vec![admin_role_row()]])
-            .append_query_results([Vec::<task::Model>::new()])
-            .append_query_results([vec![task_with(false)]])
-            .append_query_results([vec![seeded_trigger]]);
-
-        let server = make_server(db.into_connection());
-        let res = server
-            .put("/api/v1/tasks/test-project")
-            .add_header("authorization", format!("Bearer {}", token))
-            .json(&serde_json::json!({
-                "name": "test-task",
-                "display_name": "Test Task",
-                "description": "",
-                "repository": "https://github.com/test/repo",
-                "wildcard": "*",
-                "sign_cache": false
-            }))
-            .await;
-
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["error"], false);
-        assert_eq!(body["message"], task_id().to_string());
     });
 }

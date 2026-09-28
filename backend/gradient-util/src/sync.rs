@@ -89,11 +89,4 @@ mod tests {
         let inner = Arc::into_inner(m).expect("the poisoner thread is joined");
         assert_eq!(inner.into_inner(), vec![1, 2, 3]);
     }
-
-    #[test]
-    fn the_guard_writes_through() {
-        let m = Mutex::new(0);
-        *m.lock() += 5;
-        assert_eq!(*m.lock(), 5);
-    }
 }

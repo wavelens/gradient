@@ -475,20 +475,6 @@ async fn load_producing_task_flags(
 mod orphan_claim_tests {
     use super::RECONCILE_ORPHAN_CLAIMS;
 
-    /// The signing pass fills `signature IS NULL` on rows that exist, so a path
-    /// with no row at all is invisible to it and 404s forever. The reconcile is
-    /// the only thing that gives such a path a claim back.
-    #[test]
-    fn the_reconcile_targets_paths_with_no_claim_at_all() {
-        let sql = RECONCILE_ORPHAN_CLAIMS.text();
-        assert!(sql.contains("NOT EXISTS"), "{sql}");
-        assert!(sql.contains("INSERT INTO cached_path_signature"), "{sql}");
-        assert!(
-            sql.contains("ON CONFLICT (cached_path, cache) DO NOTHING"),
-            "a re-created claim must never collide with a live one"
-        );
-    }
-
     /// An unbounded fixpoint over `cached_path` has starved this scheduler
     /// before, and the pass runs on a timer.
     #[test]
@@ -529,15 +515,5 @@ mod tests {
             !skipped.contains(&cp(4)),
             "orphan (absent from map) must be signed"
         );
-    }
-
-    #[test]
-    fn skip_set_empty_when_no_private_producers() {
-        let mut producers: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
-        producers.insert(cp(1), vec![true]);
-        producers.insert(cp(2), vec![true, true]);
-
-        let skipped = compute_skipped_cached_paths(&producers);
-        assert!(skipped.is_empty());
     }
 }

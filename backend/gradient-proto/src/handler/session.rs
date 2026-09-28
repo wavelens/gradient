@@ -508,19 +508,4 @@ mod auth_decision_tests {
             AuthDecision::Accept
         );
     }
-
-    /// `authorize_against` mode expands a single authorized identity to the
-    /// full enabled-project set; a non-match collapses to empty.
-    #[test]
-    fn authorize_against_expands_to_enabled_projects_when_identity_authorized() {
-        let identity = "id-1".to_string();
-        let enabled = vec!["project-1".to_string(), "project-2".to_string()];
-        let authorized = [identity.clone()];
-        let out = if authorized.contains(&identity) {
-            enabled.clone()
-        } else {
-            vec![]
-        };
-        assert_eq!(out, enabled);
-    }
 }

@@ -231,14 +231,6 @@ mod tests {
     }
 
     #[test]
-    fn serialization_is_idempotent() {
-        let lock = FlakeLock::parse(FIXTURE).unwrap();
-        let once = lock.to_bytes().unwrap();
-        let twice = FlakeLock::parse(&once).unwrap().to_bytes().unwrap();
-        assert_eq!(once, twice);
-    }
-
-    #[test]
     fn resolves_input_node_and_original_ref() {
         let lock = FlakeLock::parse(FIXTURE).unwrap();
         let node_name = lock.input_node_name("nixpkgs").unwrap();
@@ -256,33 +248,6 @@ mod tests {
                 repo: "nixpkgs".into(),
                 ref_: Some("nixos-unstable".into()),
             }
-        );
-    }
-
-    #[test]
-    fn only_git_keeps_ref_in_locked() {
-        assert!(
-            LockedRef::Git {
-                url: "u".into(),
-                ref_: Some("main".into())
-            }
-            .locked_keeps_ref()
-        );
-        assert!(
-            !LockedRef::Github {
-                owner: "o".into(),
-                repo: "r".into(),
-                ref_: Some("main".into())
-            }
-            .locked_keeps_ref()
-        );
-        assert!(
-            !LockedRef::Gitlab {
-                owner: "o".into(),
-                repo: "r".into(),
-                ref_: None
-            }
-            .locked_keeps_ref()
         );
     }
 

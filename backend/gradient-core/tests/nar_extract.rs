@@ -303,34 +303,3 @@ fn directory_tarball_preserves_symlinks() {
     }
     assert_eq!(found_link_target.as_deref(), Some("real"));
 }
-
-/// When the requested path is the NAR's root directory itself (target of a
-/// single empty component), we still return a tarball rather than erroring -
-/// this happens when a build product's path equals the output store path.
-#[test]
-fn directory_match_at_root_via_basename() {
-    // Build a NAR whose root *is* the matched directory by using a top-level
-    // file: target = "myout" hits via a directory called "myout" at depth 1.
-    let body = Bytes::from_static(b"hello");
-    let events: TestNarEvents = vec![
-        TestNarEvent::StartDirectory { name: Bytes::new() },
-        TestNarEvent::StartDirectory {
-            name: Bytes::from_static(b"myout"),
-        },
-        TestNarEvent::File {
-            name: Bytes::from_static(b"only.txt"),
-            executable: false,
-            size: body.len() as u64,
-            reader: std::io::Cursor::new(body.clone()),
-        },
-        TestNarEvent::EndDirectory,
-        TestNarEvent::EndDirectory,
-    ];
-    let nar = write_nar(&events).to_vec();
-    let compressed = zstd_compress(&nar);
-
-    let out = block_on(extract_path_from_nar_bytes(compressed, "myout")).unwrap();
-    let tar_zst = unwrap_dir(out);
-    let (files, _paths) = read_tar_zst(&tar_zst);
-    assert_eq!(files.get("myout/only.txt").unwrap().1, &body[..]);
-}

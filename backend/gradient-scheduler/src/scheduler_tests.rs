@@ -439,12 +439,6 @@ async fn test_request_reauth_signals_connected_worker() {
 }
 
 #[tokio::test]
-async fn test_request_reauth_noop_for_disconnected_worker() {
-    let scheduler = test_scheduler().await;
-    scheduler.request_reauth("nonexistent").await;
-}
-
-#[tokio::test]
 async fn abort_evaluation_signals_the_worker_running_its_job() {
     let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();

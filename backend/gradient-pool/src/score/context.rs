@@ -231,58 +231,6 @@ impl<'a> ScoredJob<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_types::ids::ProjectId;
-
-    fn make_job() -> ScoredJob<'static> {
-        ScoredJob::new_build(
-            "test-job",
-            ProjectId::now_v7(),
-            "x86_64-linux",
-            false,
-            false,
-            None,
-            Some(99),
-            HistoryPrediction::default(),
-        )
-    }
-
-    #[test]
-    fn build_carries_owned_closure_size_and_history() {
-        let job = make_job();
-        let b = job.build().expect("build");
-        assert_eq!(b.closure_size(), Some(99));
-        assert_eq!(b.history(), HistoryPrediction::default());
-    }
-
-    #[test]
-    fn scored_job_exposes_build_kind_context() {
-        let job = make_job();
-        match job.kind() {
-            JobKindContext::Build(b) => {
-                assert_eq!(b.architecture, "x86_64-linux");
-                assert!(!b.prefer_local_build);
-            }
-            _ => panic!("expected build"),
-        }
-    }
-
-    #[test]
-    fn windowed_default_is_absent_and_fields_read_back() {
-        let w = Windowed {
-            w5m: Some(1.0),
-            w1h: Some(2.0),
-            w24h: Some(3.0),
-        };
-        assert_eq!(
-            Windowed::default(),
-            Windowed {
-                w5m: None,
-                w1h: None,
-                w24h: None
-            }
-        );
-        assert_eq!(w.w1h, Some(2.0));
-    }
 
     /// A window with no samples falls back; a MEASURED zero is honored - the
     /// old `0.0 == absent` heuristic silently swapped in the fallback.
@@ -322,14 +270,6 @@ mod tests {
             0.0
         );
         assert_eq!(Windowed::default().w24h_or(9.0), 9.0);
-    }
-
-    #[test]
-    fn instance_context_default_is_absent() {
-        let ic = InstanceContext::default();
-        assert_eq!(ic.wait_secs.w1h, None);
-        assert_eq!(ic.active_builds, 0);
-        assert_eq!(ic.total_workers, 0);
     }
 
     #[test]

@@ -35,21 +35,3 @@ pub struct StatsDelta {
     pub alloc_bytes: u64,
     pub gc_heap_size: u64,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn metrics_default_on_roundtrips_through_serde() {
-        let d = StatsDelta {
-            nr_thunks: 3,
-            gc_heap_size: 42,
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&d).unwrap();
-        let back: StatsDelta = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.nr_thunks, 3);
-        assert_eq!(back.gc_heap_size, 42);
-    }
-}

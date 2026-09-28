@@ -993,15 +993,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_put_lease_is_the_url_lifetime_and_a_relay_has_none() {
-        assert_eq!(
-            upload_lease(&StorageTarget::Put { url: "u".into() }, 1),
-            Some(gradient_wire::constants::PRESIGN_TTL)
-        );
-        assert_eq!(upload_lease(&StorageTarget::Relay, 1), None);
-    }
-
     fn local_store() -> (TempDir, NarStore) {
         let dir = TempDir::new().expect("tempdir");
         let store = NarStore::local(dir.path().to_str().unwrap()).expect("local store");

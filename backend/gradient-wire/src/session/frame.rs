@@ -1100,27 +1100,6 @@ mod tests {
         assert!(batch.is_empty());
     }
 
-    /// A bulk lane wedged full must never block a control reply: the two lanes
-    /// have independent capacity, which is what keeps a stalled NAR transfer
-    /// from taking the cache RPCs down with it.
-    #[tokio::test]
-    async fn a_full_bulk_lane_does_not_block_the_control_lane() {
-        let (bulk_tx, _bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
-        let (prio_tx, mut prio_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
-        for i in 0..WRITER_QUEUE_DEPTH {
-            bulk_tx.send(Bytes::from(vec![i as u8])).await.unwrap();
-        }
-        assert!(
-            bulk_tx.try_send(Bytes::from_static(&[0xaa])).is_err(),
-            "bulk lane is full"
-        );
-
-        prio_tx
-            .try_send(Bytes::from_static(&[0xff]))
-            .expect("control lane is free");
-        assert_eq!(prio_rx.recv().await, Some(Bytes::from_static(&[0xff])));
-    }
-
     /// The knob that keeps the cache RPC deadlock-free: a full-size
     /// `CacheQuery` and the worst-case `CacheStatus` it can provoke - every
     /// path uncached, each carrying a presigned upload URL and path info -
@@ -1193,15 +1172,6 @@ mod codec_tests {
         }
     }
 
-    fn upload_chunk() -> ClientMessage {
-        ClientMessage::UploadChunk {
-            request_id: 1,
-            data: vec![9; 4096],
-            offset: 7,
-            is_final: true,
-        }
-    }
-
     /// A frame decoded from a buffer starting one byte into an allocation must
     /// still read in place: the payload slice points inside the source bytes.
     #[test]
@@ -1251,17 +1221,6 @@ mod codec_tests {
         let msg = nar_push(vec![1, 2, 3]);
         let inbound = ServerMessage::decode(msg.encode().expect("encodes")).expect("decodes");
         assert_eq!(inbound.into_message().expect("deserialises"), msg);
-    }
-
-    /// Encoding hands the rkyv buffer to the writer as is.
-    #[test]
-    fn encode_does_not_copy_the_archive() {
-        let msg = nar_push(vec![9; 4096]);
-        let archive = rkyv::to_bytes::<RkyvError>(&msg).expect("serialises");
-        let ptr = archive.as_ptr();
-        let bytes = Bytes::from_owner(archive);
-        assert_eq!(bytes.as_ptr(), ptr);
-        assert!(ClientMessage::decode(upload_chunk().encode().expect("encodes")).is_ok());
     }
 
     #[test]

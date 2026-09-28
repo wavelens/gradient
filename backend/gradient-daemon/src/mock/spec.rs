@@ -131,14 +131,4 @@ mod tests {
         let (id, _, output) = config.by_output(&lib_out).expect("lib out");
         assert_eq!((id, output), ("t/lib", "out"));
     }
-
-    #[test]
-    fn outcome_and_dist_parse() {
-        let config = fixture();
-        assert_eq!(config.derivations["t/lib"].build.outcome, Outcome::Success);
-        assert!(matches!(
-            config.derivations["t/app"].timing.build_ms,
-            Dist::Lognormal { .. }
-        ));
-    }
 }

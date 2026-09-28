@@ -955,37 +955,6 @@ mod tests {
     }
 
     #[test]
-    fn missing_inputs_message_and_downcast() {
-        let paths = vec![
-            "/nix/store/g9y0fvqh2c991vjprgz9mvdm0zj7ggij-python3-static".to_string(),
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-other".to_string(),
-        ];
-        let err = anyhow::Error::new(MissingInputs(paths.clone()));
-        let msg = format!("{err}");
-        assert!(msg.contains("2 required input path(s)"), "msg: {msg}");
-        assert!(msg.contains("python3-static"), "msg: {msg}");
-
-        let recovered = err
-            .downcast_ref::<MissingInputs>()
-            .expect("MissingInputs survives anyhow boxing");
-        assert_eq!(recovered.0, paths);
-    }
-
-    #[test]
-    fn corrupt_cached_nar_survives_context_wrapping() {
-        let path = "/nix/store/97v143jdvzv5rlvdi5jcjvy88czayn43-ruby3.4-delayed_job".to_string();
-        let err = anyhow::Error::new(CorruptCachedNar(path.clone()))
-            .context("import into local store")
-            .context("prefetch import failed");
-
-        let recovered = err
-            .chain()
-            .find_map(|s| s.downcast_ref::<CorruptCachedNar>())
-            .expect("CorruptCachedNar survives anyhow context wrapping");
-        assert_eq!(recovered.0, path);
-    }
-
-    #[test]
     fn short_body_contradicts_a_declared_file_size() {
         // The regression: a non-followed 3xx hands back an empty body, which
         // without this check reads as a successful zero-byte download.

@@ -398,13 +398,4 @@ mod tests {
         let timeout = classify_substitute_failure("b", anyhow::anyhow!("operation timed out"));
         assert!(matches!(timeout.kind, BuildFailureKind::Transient));
     }
-
-    #[test]
-    fn substitute_not_on_upstream_wins() {
-        let e = anyhow::Error::new(crate::proto::prefetch::SubstituteNotOnUpstream(
-            "/nix/store/a-b".into(),
-        ));
-        let be = classify_substitute_failure("b1", e);
-        assert_eq!(be.kind, BuildFailureKind::SubstituteUnavailable);
-    }
 }

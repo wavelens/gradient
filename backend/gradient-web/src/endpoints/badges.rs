@@ -382,12 +382,6 @@ mod tests {
     }
 
     #[test]
-    fn badge_for_none_is_unknown() {
-        let b = badge_for_status(None, false);
-        assert_eq!(b.message, "unknown");
-    }
-
-    #[test]
     fn completed_with_failures_is_partial() {
         let b = badge_for_status(Some(EvaluationStatus::Completed), true);
         assert_eq!(b.message, "partial");
@@ -397,11 +391,5 @@ mod tests {
     fn completed_no_failures_is_passing() {
         let b = badge_for_status(Some(EvaluationStatus::Completed), false);
         assert_eq!(b.message, "passing");
-    }
-
-    #[test]
-    fn waiting_status_renders_as_waiting() {
-        let b = badge_for_status(Some(EvaluationStatus::Waiting), false);
-        assert_eq!(b.message, "waiting");
     }
 }

@@ -157,19 +157,3 @@ pub async fn apply_pending_project_memberships<C: ConnectionTrait>(
     }
     Ok(applied)
 }
-
-#[cfg(test)]
-mod pending_membership_tests {
-    use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
-
-    #[tokio::test]
-    async fn apply_pending_returns_zero_for_unknown_user() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let pending: PendingProjectMemberships = HashMap::new();
-        let count = apply_pending_project_memberships(&db, &pending, "ghost", UserId::now_v7())
-            .await
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-}

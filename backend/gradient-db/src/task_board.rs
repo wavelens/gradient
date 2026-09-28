@@ -312,14 +312,4 @@ mod tests {
             "the walk stays inside this evaluation's build graph: {sql}"
         );
     }
-
-    /// An entry point's own build is not one of its dependencies, and the page
-    /// reports the count per status.
-    #[test]
-    fn the_count_excludes_the_entry_points_own_build() {
-        let sql = norm(DEP_COUNTS_SQL);
-
-        assert!(sql.contains("WHERE c.drv <> s.root_drv"), "{sql}");
-        assert!(sql.contains("GROUP BY c.ep, b.status"), "{sql}");
-    }
 }

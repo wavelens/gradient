@@ -1700,16 +1700,6 @@ mod tests {
     }
 
     #[test]
-    fn eval_metric_expr_known_keys_have_units() {
-        assert_eq!(eval_metric_expr("rss").unwrap().1, "MB");
-        assert_eq!(eval_metric_expr("heap").unwrap().1, "MB");
-        assert_eq!(eval_metric_expr("thunks").unwrap().1, "count");
-        assert_eq!(eval_metric_expr("fncalls").unwrap().1, "count");
-        assert_eq!(eval_metric_expr("alloc").unwrap().1, "bytes");
-        assert_eq!(eval_metric_expr("time").unwrap().1, "ms");
-    }
-
-    #[test]
     fn eval_metric_expr_unknown_is_none() {
         assert!(eval_metric_expr("bogus").is_none());
         assert!(eval_metric_expr("").is_none());

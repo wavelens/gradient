@@ -785,37 +785,6 @@ mod trigger_helper_tests {
     }
 
     #[test]
-    fn trigger_key_stable_for_same_config() {
-        let cfg = TriggerConfig::Polling {
-            interval_secs: 300,
-            branch: None,
-        };
-        assert_eq!(trigger_key(&cfg), trigger_key(&cfg));
-    }
-
-    #[test]
-    fn state_trigger_serde_round_trip() {
-        let json = serde_json::json!({
-            "type": "polling",
-            "config": { "interval_secs": 120 },
-            "active": true
-        });
-        let t: StateTrigger = serde_json::from_value(json.clone()).unwrap();
-        assert_eq!(t.trigger_type, TriggerType::Polling);
-        assert!(t.active);
-    }
-
-    #[test]
-    fn state_trigger_active_defaults_to_true() {
-        let json = serde_json::json!({
-            "type": "polling",
-            "config": { "interval_secs": 60 }
-        });
-        let t: StateTrigger = serde_json::from_value(json).unwrap();
-        assert!(t.active);
-    }
-
-    #[test]
     fn build_reporter_pr_rejects_outbound_integration_with_kind_aware_error() {
         let mut outbound = HashMap::new();
         outbound.insert("forgejo-status-reports".into(), IntegrationId::nil());

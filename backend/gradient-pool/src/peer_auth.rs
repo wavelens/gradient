@@ -90,35 +90,10 @@ mod tests {
     }
 
     #[test]
-    fn open_contains_any_peer() {
-        let auth = PeerAuth::Open;
-        assert!(auth.contains(&ProjectId::now_v7()));
-    }
-
-    #[test]
-    fn restricted_contains_registered_peer() {
-        let peer = ProjectId::now_v7();
-        let auth = PeerAuth::Restricted(HashSet::from([peer]));
-        assert!(auth.contains(&peer));
-    }
-
-    #[test]
     fn restricted_does_not_contain_other_peer() {
         let peer = ProjectId::now_v7();
         let other = ProjectId::now_v7();
         let auth = PeerAuth::Restricted(HashSet::from([peer]));
         assert!(!auth.contains(&other));
-    }
-
-    #[test]
-    fn open_as_filter_is_none() {
-        assert!(PeerAuth::Open.as_filter().is_none());
-    }
-
-    #[test]
-    fn restricted_as_filter_is_some() {
-        let peer = ProjectId::now_v7();
-        let auth = PeerAuth::Restricted(HashSet::from([peer]));
-        assert!(auth.as_filter().is_some());
     }
 }

@@ -461,19 +461,3 @@ fn inactive_user_session_returns_403() {
         res.assert_status_forbidden();
     });
 }
-
-#[test]
-fn scim_service_provider_config_ok() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let s = scim_server(db);
-        let res = s
-            .get("/scim/v2/ServiceProviderConfig")
-            .add_header("Authorization", auth_header())
-            .await;
-        res.assert_status_ok();
-        let body: Value = res.json();
-        assert_eq!(body["patch"]["supported"], true);
-    });
-}

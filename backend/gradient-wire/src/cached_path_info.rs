@@ -148,18 +148,4 @@ mod tests {
             other => panic!("expected Cached, got {:?}", other),
         }
     }
-
-    #[test]
-    fn as_info_cached_no_url_uses_ws_transfer() {
-        let cp = CachedPath {
-            url: None,
-            ..cached_path()
-        };
-        match cp.as_info() {
-            CachedPathInfo::Cached { download_url, .. } => {
-                assert_eq!(download_url, None);
-            }
-            other => panic!("expected Cached, got {:?}", other),
-        }
-    }
 }

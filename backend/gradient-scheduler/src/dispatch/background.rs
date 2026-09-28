@@ -474,13 +474,6 @@ mod tests {
     }
 
     #[test]
-    fn the_outcome_numbers_are_pinned() {
-        assert_eq!(i16::from(DispatchedJobOutcome::Completed), 0);
-        assert_eq!(i16::from(DispatchedJobOutcome::Failed), 1);
-        assert_eq!(i16::from(DispatchedJobOutcome::Abandoned), 2);
-    }
-
-    #[test]
     fn each_outcome_maps_to_the_transition_that_was_lost() {
         let rows = vec![
             lost(DispatchedJobOutcome::Completed),

@@ -742,28 +742,6 @@ pub async fn public_cache_available_false() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + a raw aggregate row matching the stats handler's SQL.
-pub async fn public_cache_stats_row() -> Arc<ServerState> {
-    use sea_orm::Value;
-    use std::collections::BTreeMap;
-
-    let mut row: BTreeMap<&'static str, Value> = BTreeMap::new();
-    row.insert("total_nars", Value::BigInt(Some(2)));
-    row.insert("total_nar_size", Value::BigInt(Some(135780)));
-    row.insert("total_file_size", Value::BigInt(Some(24690)));
-    row.insert("last_uploaded_at", Value::ChronoDateTime(Some(test_date())));
-    row.insert(
-        "oldest_fetched_at",
-        Value::ChronoDateTime(Some(test_date())),
-    );
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![row]])
-        .into_connection();
-    make_state(db, Arc::new(NoopLogStorage))
-}
-
 /// Private cache + completed build in cache - for auth-required tests on `/log`.
 pub async fn private_cache_with_completed_build_in_cache() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)

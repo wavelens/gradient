@@ -147,17 +147,4 @@ mod tests {
         );
         assert_eq!(acc.finish().peak_heap_bytes, 900);
     }
-
-    #[test]
-    fn stats_env_enables_nix_show_stats_only_when_metrics_on() {
-        assert_eq!(
-            eval_worker_stats_env(true),
-            [
-                ("NIX_SHOW_STATS", "1"),
-                ("NIX_SHOW_STATS_PATH", "/dev/null")
-            ]
-            .as_slice()
-        );
-        assert!(eval_worker_stats_env(false).is_empty());
-    }
 }

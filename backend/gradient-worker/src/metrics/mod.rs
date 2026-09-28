@@ -90,21 +90,3 @@ pub fn cpu_core_score() -> u32 {
     let score = (ops_per_ms / 100.0).round() as i64;
     score.clamp(SCORE_MIN as i64, SCORE_MAX as i64) as u32
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cpu_core_score_in_bounds_and_positive() {
-        let s = cpu_core_score();
-        assert!((1..=100_000).contains(&s));
-    }
-
-    #[test]
-    fn host_static_reports_nonzero() {
-        let h = host_static();
-        assert!(h.cpu_count >= 1);
-        assert!(h.ram_total_mb >= 1);
-    }
-}

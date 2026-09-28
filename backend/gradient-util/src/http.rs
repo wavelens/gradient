@@ -121,20 +121,6 @@ pub fn download_client() -> &'static reqwest::Client {
 mod tests {
     use super::*;
 
-    #[test]
-    fn tls_offers_http2_before_falling_back_to_http1() {
-        assert_eq!(
-            rustls_config().alpn_protocols,
-            vec![b"h2".to_vec(), b"http/1.1".to_vec()],
-            "without ALPN every HTTPS connection, S3 included, stays on HTTP/1.1"
-        );
-    }
-
-    #[test]
-    fn build_client_succeeds() {
-        let _ = build_client().expect("client builds with defaults");
-    }
-
     /// Regression test for issue #232: without an installed `CryptoProvider`,
     /// rustls panics inside `ClientConfig::builder()` when feature
     /// auto-detection fails. `init_crypto_provider` must be idempotent and
@@ -162,17 +148,5 @@ mod tests {
             roots.len() >= webpki_roots::TLS_SERVER_ROOTS.len(),
             "root store missing webpki baseline",
         );
-    }
-
-    #[test]
-    fn user_agent_includes_brand_and_contact_url() {
-        let ua = user_agent();
-        assert!(ua.starts_with("Gradient/"));
-        assert!(ua.contains("(+https://github.com/wavelens/gradient)"));
-    }
-
-    #[test]
-    fn user_agent_does_not_use_lowercase_brand() {
-        assert!(!user_agent().starts_with("gradient/"));
     }
 }

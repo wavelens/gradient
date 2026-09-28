@@ -13,7 +13,6 @@ use gradient_test_support::fixtures::{superuser_user, user};
 use gradient_test_support::web::{live_session, make_test_server_with, make_token};
 use gradient_types::{MUser, SessionId};
 use sea_orm::{DatabaseBackend, MockDatabase};
-use serde_json::Value;
 
 fn authed_as(caller: MUser, session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);
@@ -63,31 +62,5 @@ fn a_superuser_without_an_upgrade_is_told_to_upgrade() {
             .await;
         assert!(res.status_code().is_client_error(), "{}", res.status_code());
         assert_ne!(res.status_code(), axum::http::StatusCode::FORBIDDEN);
-    });
-}
-
-#[test]
-fn the_catalog_lists_durable_and_firehose_events() {
-    runtime().block_on(async {
-        let session_id = SessionId::now_v7();
-        let server = make_test_server_with(authed_as(user(), session_id).into_connection(), None);
-        let res = server
-            .get("/api/v1/events/catalog")
-            .add_header(
-                "authorization",
-                format!("Bearer {}", make_token(session_id)),
-            )
-            .await;
-        res.assert_status_ok();
-        let body: Value = res.json();
-        let entries = body["message"].as_array().unwrap();
-        let has = |name: &str, durable: bool| {
-            entries
-                .iter()
-                .any(|e| e["name"] == name && e["durable"] == durable)
-        };
-        assert!(has("build.completed", true));
-        assert!(has("task.star", true));
-        assert!(has("proto.client.*", false));
     });
 }

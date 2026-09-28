@@ -37,11 +37,3 @@ fn delete_unauthenticated_returns_403() {
         resp.assert_status(StatusCode::FORBIDDEN);
     });
 }
-
-// TODO(#260): needs real-DB harness; mock cannot verify blob deletion,
-// signature row removal, or audit_log insertion. The handler's control flow
-// is exercised by `helpers::delete_nar_from_cache` unit coverage at the
-// integration level once a real Postgres fixture is available.
-#[test]
-#[ignore]
-fn delete_owner_removes_signature_and_writes_audit_row() {}

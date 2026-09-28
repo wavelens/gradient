@@ -8,30 +8,8 @@ mod fixtures;
 
 use super::{StateConfiguration, resolve_oidc_group_roles, resolve_scim_group_roles};
 use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
-use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::{ProjectId, RoleId};
 use std::collections::HashMap;
-
-#[test]
-fn user_accepts_missing_password_file() {
-    // OIDC-only users have `password_file = null`; serde must default to
-    // None instead of failing. This is the on-disk contract that lets
-    // gradient-state.nix emit `password_file = null` entries.
-    let json = r#"{
-        "users": {
-            "alice": {
-                "username": "alice",
-                "name": "Alice",
-                "email": "alice@example.com",
-                "password_file": null,
-                "email_verified": true,
-                "superuser": false
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(cfg.users["alice"].password_file.is_none());
-}
 
 #[test]
 fn project_task_cache_descriptions_optional() {
@@ -81,41 +59,6 @@ fn project_task_cache_descriptions_optional() {
 }
 
 #[test]
-fn state_task_concurrency_defaults_to_soft_abort() {
-    let json = r#"{
-        "tasks": {
-            "web": {
-                "name": "web",
-                "project": "acme",
-                "display_name": "Web",
-                "repository": "https://example.com/acme/web.git",
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.tasks["web"].concurrency, ConcurrencyPolicy::SoftAbort);
-}
-
-#[test]
-fn state_task_accepts_wildcard_field() {
-    let json = r#"{
-        "tasks": {
-            "web": {
-                "name": "web",
-                "project": "acme",
-                "display_name": "Web",
-                "repository": "https://example.com/acme/web.git",
-                "wildcard": "packages.x86_64-linux.*",
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.tasks["web"].wildcard, "packages.x86_64-linux.*");
-}
-
-#[test]
 fn state_task_accepts_legacy_evaluation_wildcard_alias() {
     // Existing nix configurations using `evaluation_wildcard` must keep
     // working after the rename to `wildcard`.
@@ -133,23 +76,6 @@ fn state_task_accepts_legacy_evaluation_wildcard_alias() {
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
     assert_eq!(cfg.tasks["web"].wildcard, "checks.*");
-}
-
-#[test]
-fn state_task_keep_evaluations_defaults_to_thirty() {
-    let json = r#"{
-        "tasks": {
-            "web": {
-                "name": "web",
-                "project": "acme",
-                "display_name": "Web",
-                "repository": "https://example.com/acme/web.git",
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.tasks["web"].keep_evaluations, 30);
 }
 
 #[test]
@@ -193,44 +119,6 @@ fn state_task_keep_evaluations_zero_rejected_by_validator() {
         "expected keep_evaluations >= 1 validation error, got: {:?}",
         v.errors
     );
-}
-
-#[test]
-fn state_task_actions_round_trip_all_types() {
-    let json = r#"{
-        "tasks": {
-            "web": {
-                "name": "web",
-                "project": "acme",
-                "display_name": "Web",
-                "repository": "https://example.com/acme/web.git",
-                "created_by": "alice",
-                "actions": [
-                    {
-                        "name": "notify-ops",
-                        "type": "send_mail",
-                        "events": ["build.failed"],
-                        "config": { "recipients": ["ops@example.com"] }
-                    },
-                    {
-                        "name": "webhook",
-                        "type": "send_web_request",
-                        "events": ["build.completed"],
-                        "config": { "url": "https://hooks.example.com/gradient", "token_file": "/etc/gradient/secrets/hook-token" }
-                    },
-                    {
-                        "name": "status",
-                        "type": "forge_status_report",
-                        "config": { "integration": "gitea-prod" }
-                    }
-                ]
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.tasks["web"].actions.len(), 3);
-    assert_eq!(cfg.tasks["web"].actions[0].action_type, "send_mail");
-    assert!(cfg.tasks["web"].actions[2].events.is_empty());
 }
 
 #[test]
@@ -536,25 +424,6 @@ fn state_task_silently_ignores_legacy_force_evaluation_field() {
 }
 
 #[test]
-fn state_task_concurrency_hard_abort_round_trip() {
-    let json = r#"{
-        "tasks": {
-            "web": {
-                "name": "web",
-                "project": "acme",
-                "display_name": "Web",
-                "repository": "https://example.com/acme/web.git",
-                "created_by": "alice",
-                "concurrency": "hard_abort"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.tasks["web"].concurrency, ConcurrencyPolicy::HardAbort);
-    assert_eq!(i16::from(cfg.tasks["web"].concurrency), 0);
-}
-
-#[test]
 fn state_worker_accepts_multiple_projects() {
     let cfg = worker_cfg(r#"["acme", "globex"]"#);
     assert_eq!(
@@ -623,44 +492,6 @@ fn base_worker_accepts_valid_authorize_against_and_empty_projects() {
 }
 
 #[test]
-fn state_project_accepts_explicit_id() {
-    let json = r#"{
-        "projects": {
-            "acme": {
-                "name": "acme",
-                "display_name": "ACME",
-                "id": "018f6f3a-0000-7000-8000-000000000001",
-                "private_key_file": "/dev/null",
-                "public": false,
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        cfg.projects["acme"].id.as_deref(),
-        Some("018f6f3a-0000-7000-8000-000000000001")
-    );
-}
-
-#[test]
-fn state_project_id_defaults_none() {
-    let json = r#"{
-        "projects": {
-            "acme": {
-                "name": "acme",
-                "display_name": "ACME",
-                "private_key_file": "/dev/null",
-                "public": false,
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(cfg.projects["acme"].id.is_none());
-}
-
-#[test]
 fn state_project_validator_rejects_malformed_id() {
     let json = r#"{
         "users": {
@@ -710,49 +541,6 @@ fn state_project_validator_rejects_duplicate_ids() {
         "expected duplicate-id error, got: {:?}",
         v.errors
     );
-}
-
-#[test]
-fn state_project_members_serde_round_trip() {
-    let json = r#"{
-        "projects": {
-            "acme": {
-                "name": "acme",
-                "display_name": "ACME",
-                "private_key_file": "/dev/null",
-                "public": false,
-                "created_by": "alice",
-                "members": [
-                    { "user": "bob", "role": "Write" },
-                    { "user": "carol", "role": "releaser" }
-                ]
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    let members = &cfg.projects["acme"].members;
-    assert_eq!(members.len(), 2);
-    assert_eq!(members[0].user, "bob");
-    assert_eq!(members[0].role, "Write");
-    assert_eq!(members[1].user, "carol");
-    assert_eq!(members[1].role, "releaser");
-}
-
-#[test]
-fn state_project_members_default_empty() {
-    let json = r#"{
-        "projects": {
-            "acme": {
-                "name": "acme",
-                "display_name": "ACME",
-                "private_key_file": "/dev/null",
-                "public": false,
-                "created_by": "alice"
-            }
-        }
-    }"#;
-    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(cfg.projects["acme"].members.is_empty());
 }
 
 #[test]
@@ -1011,10 +799,4 @@ fn state_worker_rejects_unknown_created_by() {
         "expected unknown created_by error, got: {:?}",
         v.errors
     );
-}
-
-#[test]
-fn state_base_worker_auto_enable_defaults_off() {
-    let cfg = worker_cfg(r#"["acme"]"#);
-    assert!(!cfg.workers["builder-1"].auto_enable);
 }

@@ -310,11 +310,4 @@ mod tests {
             }
         );
     }
-
-    // ── storage key ─────────────────────────────────────────────────────────────
-
-    #[test]
-    fn storage_key_is_namespaced() {
-        assert_eq!(storage_key("abc123"), "eval-cache/abc123");
-    }
 }

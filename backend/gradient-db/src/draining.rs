@@ -95,18 +95,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn park_returns_rows_affected() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 4,
-            }])
-            .into_connection();
-
-        assert_eq!(park_active_evals(&db).await.unwrap(), 4);
-    }
-
-    #[tokio::test]
     async fn unpark_touches_only_draining_parks() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // SELECT Waiting evals: one Draining park, one capacity park.

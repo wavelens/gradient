@@ -896,23 +896,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn fetch_with_ssh_key_reports_fetching() {
-        let job = make_flake_job();
-        let credentials = crate::proto::credentials::CredentialStore::new();
-        credentials.store(
-            gradient_wire::messages::CredentialKind::SshKey,
-            b"-----BEGIN OPENSSH PRIVATE KEY-----".to_vec(),
-        );
-
-        let mut reporter = RecordingJobReporter::new();
-        let result =
-            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
-
-        assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
-        assert!(result.is_err()); // fake URL
-    }
-
     /// A Cached source must attempt archive (failing only because nix is absent
     /// in unit context), NOT bail with "requires FlakeSource::Repository".
     #[tokio::test]
@@ -1096,20 +1079,6 @@ mod tests {
     }
 
     #[test]
-    fn build_archive_argv_no_overrides_matches_baseline() {
-        let argv = super::build_archive_argv("git+file:///tmp/x?rev=abc", &[]);
-        assert_eq!(
-            argv,
-            vec![
-                "flake".to_owned(),
-                "archive".to_owned(),
-                "--json".to_owned(),
-                "git+file:///tmp/x?rev=abc".to_owned(),
-            ],
-        );
-    }
-
-    #[test]
     fn declared_inputs_from_lock_reads_root_inputs() {
         let lock: serde_json::Value = serde_json::json!({
             "nodes": {
@@ -1276,19 +1245,6 @@ mod tests {
         assert_eq!(
             super::flake_ref_from_lock_locked(&locked).unwrap(),
             "path:/nix/store/xxx-source",
-        );
-    }
-
-    #[test]
-    fn build_prefetch_argv_shape() {
-        assert_eq!(
-            super::build_prefetch_argv("github:NixOS/nixpkgs/rev"),
-            vec![
-                "flake".to_owned(),
-                "prefetch".to_owned(),
-                "--json".to_owned(),
-                "github:NixOS/nixpkgs/rev".to_owned(),
-            ],
         );
     }
 

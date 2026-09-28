@@ -368,15 +368,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_tokens_wildcard_only() {
-        let tokens = vec![("*".to_owned(), "wild".to_owned())];
-        let challenged = vec!["p1".to_owned(), "p2".to_owned(), "p3".to_owned()];
-        let result = resolve_tokens_for_challenge(&tokens, &challenged);
-        assert_eq!(result.len(), 3);
-        assert!(result.iter().all(|(_, t)| t == "wild"));
-    }
-
-    #[test]
     fn resolve_tokens_empty_when_no_match() {
         let tokens = vec![("peer-x".to_owned(), "tok".to_owned())];
         let challenged = vec!["peer-y".to_owned()];

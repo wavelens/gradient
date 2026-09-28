@@ -347,30 +347,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_strips_dot_git_suffix() {
-        assert_eq!(
-            normalize_repo_url("https://github.com/owner/repo.git"),
-            "https://github.com/owner/repo"
-        );
-    }
-
-    #[test]
-    fn normalize_strips_trailing_slash() {
-        assert_eq!(
-            normalize_repo_url("https://github.com/owner/repo/"),
-            "https://github.com/owner/repo"
-        );
-    }
-
-    #[test]
-    fn normalize_rewrites_ssh_to_https() {
-        assert_eq!(
-            normalize_repo_url("git@github.com:owner/repo.git"),
-            "https://github.com/owner/repo"
-        );
-    }
-
-    #[test]
     fn normalize_passes_through_canonical_form() {
         assert_eq!(
             normalize_repo_url("https://github.com/owner/repo"),

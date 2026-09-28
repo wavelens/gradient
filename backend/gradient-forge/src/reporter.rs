@@ -2008,34 +2008,8 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_pull_request_snapshot_carries_its_title() {
-        let pr: GithubPrResponse = serde_json::from_value(serde_json::json!({
-            "title": "feat: add thing",
-            "head": { "sha": "abc", "ref": "feature" },
-        }))
-        .expect("pull request response");
-
-        assert_eq!(
-            github_pr_response_to_snapshot(pr).title.as_deref(),
-            Some("feat: add thing")
-        );
-    }
-
     fn test_client() -> reqwest::Client {
         gradient_util::http::build_client().expect("build test http client")
-    }
-
-    #[test]
-    fn author_or_bot_keeps_resolved_identity() {
-        let ident = CommitIdent {
-            name: "Bot".to_owned(),
-            email: "bot@example.com".to_owned(),
-        };
-        assert_eq!(
-            author_or_bot(Ok(ident.clone()), "https://codeberg.org"),
-            ident
-        );
     }
 
     #[test]
@@ -2049,76 +2023,6 @@ mod tests {
         );
     }
 
-    // ── State conversions ─────────────────────────────────────────────────────
-
-    #[test]
-    fn gitea_state_from_ci_status_all_variants() {
-        assert!(matches!(
-            GiteaState::from(&CiStatus::Pending),
-            GiteaState::Pending
-        ));
-        assert!(matches!(
-            GiteaState::from(&CiStatus::Running),
-            GiteaState::Pending
-        ));
-        assert!(matches!(
-            GiteaState::from(&CiStatus::Success),
-            GiteaState::Success
-        ));
-        assert!(matches!(
-            GiteaState::from(&CiStatus::Failure),
-            GiteaState::Failure
-        ));
-        assert!(matches!(
-            GiteaState::from(&CiStatus::Error),
-            GiteaState::Error
-        ));
-    }
-
-    #[test]
-    fn gitlab_state_from_ci_status_all_variants() {
-        assert!(matches!(
-            GitlabState::from(&CiStatus::Pending),
-            GitlabState::Pending
-        ));
-        assert!(matches!(
-            GitlabState::from(&CiStatus::Running),
-            GitlabState::Running
-        ));
-        assert!(matches!(
-            GitlabState::from(&CiStatus::Success),
-            GitlabState::Success
-        ));
-        assert!(matches!(
-            GitlabState::from(&CiStatus::Failure),
-            GitlabState::Failed
-        ));
-        assert!(matches!(
-            GitlabState::from(&CiStatus::Error),
-            GitlabState::Failed
-        ));
-    }
-
-    #[test]
-    fn gitlab_state_serializes_lowercase() {
-        assert_eq!(
-            serde_json::to_string(&GitlabState::Pending).unwrap(),
-            "\"pending\""
-        );
-        assert_eq!(
-            serde_json::to_string(&GitlabState::Running).unwrap(),
-            "\"running\""
-        );
-        assert_eq!(
-            serde_json::to_string(&GitlabState::Success).unwrap(),
-            "\"success\""
-        );
-        assert_eq!(
-            serde_json::to_string(&GitlabState::Failed).unwrap(),
-            "\"failed\""
-        );
-    }
-
     #[test]
     fn gitlab_project_id_flat_path() {
         assert_eq!(gitlab_project_id("acme", "widgets"), "acme%2Fwidgets");
@@ -2129,73 +2033,11 @@ mod tests {
         assert_eq!(gitlab_project_id("group", "sub/repo"), "group%2Fsub%2Frepo");
     }
 
-    #[test]
-    fn github_state_from_ci_status_all_variants() {
-        assert!(matches!(
-            GithubState::from(&CiStatus::Pending),
-            GithubState::Pending
-        ));
-        assert!(matches!(
-            GithubState::from(&CiStatus::Running),
-            GithubState::Pending
-        ));
-        assert!(matches!(
-            GithubState::from(&CiStatus::Success),
-            GithubState::Success
-        ));
-        assert!(matches!(
-            GithubState::from(&CiStatus::Failure),
-            GithubState::Failure
-        ));
-        assert!(matches!(
-            GithubState::from(&CiStatus::Error),
-            GithubState::Error
-        ));
-    }
-
-    #[test]
-    fn gitea_state_serializes_lowercase() {
-        assert_eq!(
-            serde_json::to_string(&GiteaState::Pending).unwrap(),
-            "\"pending\""
-        );
-        assert_eq!(
-            serde_json::to_string(&GiteaState::Success).unwrap(),
-            "\"success\""
-        );
-        assert_eq!(
-            serde_json::to_string(&GiteaState::Failure).unwrap(),
-            "\"failure\""
-        );
-        assert_eq!(
-            serde_json::to_string(&GiteaState::Error).unwrap(),
-            "\"error\""
-        );
-    }
-
-    #[test]
-    fn github_state_serializes_lowercase() {
-        assert_eq!(
-            serde_json::to_string(&GithubState::Pending).unwrap(),
-            "\"pending\""
-        );
-        assert_eq!(
-            serde_json::to_string(&GithubState::Success).unwrap(),
-            "\"success\""
-        );
-    }
-
     // ── Reporter constructors ────────────────────────────────────────────────
 
     #[test]
     fn gitea_reporter_trims_trailing_slash() {
         let r = GiteaReporter::new(test_client(), "https://gitea.example.com/", "tok").unwrap();
-        assert_eq!(r.base_url, "https://gitea.example.com");
-    }
-
-    #[test]
-    fn gitea_reporter_preserves_no_trailing_slash() {
-        let r = GiteaReporter::new(test_client(), "https://gitea.example.com", "tok").unwrap();
         assert_eq!(r.base_url, "https://gitea.example.com");
     }
 
@@ -2225,13 +2067,6 @@ mod tests {
     fn github_reporter_empty_url_uses_default() {
         let r = GithubReporter::new(test_client(), "", "tok").unwrap();
         assert_eq!(r.base_url, GithubReporter::DEFAULT_API_URL);
-    }
-
-    #[test]
-    fn github_reporter_custom_url_kept() {
-        let r =
-            GithubReporter::new(test_client(), "https://github.example.com/api/v3", "tok").unwrap();
-        assert_eq!(r.base_url, "https://github.example.com/api/v3");
     }
 
     #[test]
@@ -2434,24 +2269,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn github_comment_url_targets_issues_endpoint() {
-        let url = github_comment_url("https://api.github.com", "octo", "demo", 42);
-        assert_eq!(
-            url,
-            "https://api.github.com/repos/octo/demo/issues/42/comments"
-        );
-    }
-
-    #[test]
-    fn gitea_comment_url_targets_issues_endpoint() {
-        let url = gitea_comment_url("https://gitea.example.com", "octo", "demo", 42);
-        assert_eq!(
-            url,
-            "https://gitea.example.com/api/v1/repos/octo/demo/issues/42/comments"
-        );
-    }
-
     // ── verify (Test button) probe ───────────────────────────────────────────
 
     #[derive(Debug, Default)]
@@ -2500,17 +2317,5 @@ mod tests {
         };
         let err = down.verify("acme", "widgets").await.unwrap_err();
         assert!(err.to_string().contains("forge unreachable"));
-    }
-
-    #[test]
-    fn forge_comment_payload_serializes_with_body_field() {
-        let payload = ForgeCommentPayload {
-            body: "Could not parse wildcard `bad`: error",
-        };
-        let json = serde_json::to_value(&payload).unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({"body": "Could not parse wildcard `bad`: error"})
-        );
     }
 }

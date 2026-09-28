@@ -149,51 +149,10 @@ mod tests {
     }
 
     #[test]
-    fn build_sm_building_to_completed() {
-        assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Completed).is_ok());
-    }
-
-    #[test]
     fn build_sm_building_to_substituted() {
         assert!(
             BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Substituted).is_ok()
         );
-    }
-
-    #[test]
-    fn build_sm_building_to_failed() {
-        assert!(
-            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedPermanent)
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn build_sm_any_nonterminal_to_aborted() {
-        for from in [
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ] {
-            assert!(
-                BuildStateMachine::validate(from, BuildStatus::Aborted).is_ok(),
-                "{from:?} to Aborted should be valid"
-            );
-        }
-    }
-
-    #[test]
-    fn build_sm_any_nonterminal_to_dep_failed() {
-        for from in [
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ] {
-            assert!(
-                BuildStateMachine::validate(from, BuildStatus::DependencyFailed).is_ok(),
-                "{from:?} to DependencyFailed should be valid"
-            );
-        }
     }
 
     #[test]

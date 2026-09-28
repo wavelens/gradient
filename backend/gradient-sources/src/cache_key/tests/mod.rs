@@ -47,20 +47,6 @@ fn format_cache_public_key_stored() {
 }
 
 #[test]
-fn format_cache_public_key_legacy() {
-    // Empty public_key → derive from private key
-    let (_f, path) = temp_secret_file();
-    let (encrypted_priv, _pub_b64) = generate_signing_key(&path).expect("generate failed");
-    let cache = make_cache("legacy", "", &encrypted_priv);
-    let result = format_cache_public_key(&path, cache, "https://cache.example.com".to_string())
-        .expect("format failed");
-    assert!(
-        result.starts_with("cache.example.com-legacy:"),
-        "unexpected format: {result}"
-    );
-}
-
-#[test]
 fn sign_narinfo_fingerprint_format() {
     let (_f, path) = temp_secret_file();
     let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");

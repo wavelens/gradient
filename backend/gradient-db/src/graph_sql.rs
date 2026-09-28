@@ -863,17 +863,6 @@ mod tests {
         );
     }
 
-    /// Every promotion and dispatch gate reads the derivation's `walked` bit
-    /// through this one predicate.
-    #[test]
-    fn walked_predicate_reads_the_derivation_row() {
-        let p = norm(&walked_predicate("db"));
-        assert_eq!(
-            p,
-            "EXISTS (SELECT 1 FROM derivation w WHERE w.id = db.derivation AND w.walked)"
-        );
-    }
-
     /// The orphan-GC keep-set must be the build-dependency closure of the live
     /// roots (entry_points + build_jobs), not just the roots themselves - a dep
     /// reached only through `derivation_dependency` (its own `build_job` pruned

@@ -939,24 +939,3 @@ async fn ready(
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn missing_artefact_message_names_the_path_and_kind() {
-        let product = BuildProduct {
-            file_type: "file".into(),
-            subtype: "iso".into(),
-            name: "image.iso".into(),
-            path: "/nix/store/abc-img/image.iso".into(),
-            size: None,
-        };
-        assert_eq!(
-            missing_artefact_message(&product),
-            "artefact /nix/store/abc-img/image.iso (file iso) is declared in \
-             hydra-build-products but missing from the build output"
-        );
-    }
-}

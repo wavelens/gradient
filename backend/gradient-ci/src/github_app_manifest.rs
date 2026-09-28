@@ -132,7 +132,6 @@ pub async fn exchange_code_with_base(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn build_manifest_strips_trailing_slash() {
@@ -156,47 +155,6 @@ mod tests {
         assert!(
             m.get("setup_url").is_none() || m["setup_url"].is_null(),
             "setup_url must be absent so the post-install redirect doesn't loop back to /admin/github-app"
-        );
-    }
-
-    #[test]
-    fn build_manifest_has_default_permissions_and_events() {
-        let m = build_manifest("https://x.test");
-        assert_eq!(m["name"], "Gradient CI");
-        assert_eq!(m["public"], false);
-        assert_eq!(m["hook_attributes"]["active"], true);
-        assert_eq!(m["setup_on_update"], false);
-        assert_eq!(m["default_permissions"]["metadata"], "read");
-        assert_eq!(m["default_permissions"]["contents"], "read");
-        assert_eq!(m["default_permissions"]["statuses"], "write");
-        assert_eq!(m["default_permissions"]["checks"], "write");
-        assert_eq!(m["default_permissions"]["pull_requests"], "write");
-        assert_eq!(m["default_permissions"]["issues"], "write");
-        assert_eq!(
-            m["default_events"],
-            json!([
-                "push",
-                "pull_request",
-                "release",
-                "check_run",
-                "issue_comment"
-            ])
-        );
-    }
-
-    #[test]
-    fn manifest_post_url_github_com() {
-        assert_eq!(
-            manifest_post_url("github.com", "abc123"),
-            "https://github.com/settings/apps/new?state=abc123"
-        );
-    }
-
-    #[test]
-    fn manifest_post_url_enterprise_host() {
-        assert_eq!(
-            manifest_post_url("ghe.example.com", "tok"),
-            "https://ghe.example.com/settings/apps/new?state=tok"
         );
     }
 

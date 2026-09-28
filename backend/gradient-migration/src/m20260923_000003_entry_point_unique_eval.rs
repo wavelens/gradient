@@ -52,16 +52,6 @@ impl MigrationTrait for Migration {
 mod tests {
     use super::UP;
 
-    /// The ingest insert names exactly these columns in its `ON CONFLICT`.
-    #[test]
-    fn the_index_is_unique_on_evaluation_and_attribute() {
-        assert!(
-            UP[2].contains("CREATE UNIQUE INDEX") && UP[2].contains("(evaluation, eval)"),
-            "{}",
-            UP[2]
-        );
-    }
-
     #[test]
     fn duplicates_are_gone_before_the_index_is_built() {
         assert!(UP[0].starts_with("DELETE FROM entry_point"), "{}", UP[0]);

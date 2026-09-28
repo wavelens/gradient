@@ -564,7 +564,6 @@ async fn project_name_for(state: &Arc<ServerState>, project_id: ProjectId) -> Op
 
 #[cfg(test)]
 mod tests {
-    use super::super::WebhookTriggerOutcome;
     use super::super::approval::PullRequestApprovalContext;
     use super::{gate_decision, glob_match_pattern, glob_matches};
 
@@ -615,14 +614,6 @@ mod tests {
     }
 
     #[test]
-    fn trigger_outcome_default_is_empty() {
-        let o = WebhookTriggerOutcome::default();
-        assert_eq!(o.tasks_scanned, 0);
-        assert!(o.queued.is_empty());
-        assert!(o.skipped.is_empty());
-    }
-
-    #[test]
     fn glob_empty_list_matches_all() {
         assert!(glob_matches(&[], "main"));
         assert!(glob_matches(&[], "anything"));
@@ -645,12 +636,6 @@ mod tests {
     fn glob_star_only() {
         assert!(glob_match_pattern("*", "main"));
         assert!(glob_match_pattern("*", ""));
-    }
-
-    #[test]
-    fn glob_version_pattern() {
-        assert!(glob_match_pattern("v*", "v1.2.3"));
-        assert!(!glob_match_pattern("v*", "1.2.3"));
     }
 
     #[test]

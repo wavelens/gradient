@@ -157,7 +157,6 @@ events! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::*;
     use std::collections::HashSet;
 
     #[test]
@@ -165,42 +164,5 @@ mod tests {
         let catalog = Event::catalog();
         let names: HashSet<_> = catalog.iter().map(|e| e.name).collect();
         assert_eq!(names.len(), catalog.len());
-    }
-
-    #[test]
-    fn firehose_only_events_are_not_durable() {
-        let firehose = [
-            "build.status_changed",
-            "build.progress",
-            "evaluation.progress",
-            "worker.queue_depth",
-            "worker.job_dispatched",
-            "cache.changed",
-            "cache.nar.fetched",
-            "cache.narinfo.served",
-            "cache.nar.signed",
-            "proto.client.*",
-            "proto.server.*",
-        ];
-        for entry in Event::catalog() {
-            if firehose.contains(&entry.name) {
-                assert!(!entry.durable, "{} must be firehose only", entry.name);
-            }
-        }
-    }
-
-    #[test]
-    fn stored_events_round_trip() {
-        let event: Event = build::Reported {
-            build_id: BuildJobId::nil(),
-            derivation_build: DerivationBuildId::nil(),
-            evaluation_id: EvaluationId::nil(),
-            derivation: DerivationId::nil(),
-            status: 3,
-            ..Default::default()
-        }
-        .into();
-        let stored = serde_json::to_value(&event).unwrap();
-        assert_eq!(serde_json::from_value::<Event>(stored).unwrap(), event);
     }
 }

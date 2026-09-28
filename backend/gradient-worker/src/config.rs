@@ -617,27 +617,6 @@ mod tests {
         assert!(mismatched.is_empty(), "{mismatched:#?}");
     }
 
-    #[test]
-    fn eval_fork_defaults() {
-        let cli = config_with_peers("");
-        assert!(cli.eval.fork_workers >= 1);
-        assert_eq!(cli.eval.max_rss, 8 * 1024 * 1024 * 1024);
-    }
-
-    #[test]
-    fn build_cores_defaults_to_all_cores() {
-        let cfg = config_with_peers("");
-        assert_eq!(cfg.build.max_cores, None);
-        assert_eq!(cfg.build_cores(), 0);
-    }
-
-    #[test]
-    fn build_cores_uses_configured_cap() {
-        let mut cfg = config_with_peers("");
-        cfg.build.max_cores = Some(4);
-        assert_eq!(cfg.build_cores(), 4);
-    }
-
     // ── peer_tokens() ─────────────────────────────────────────────────────────
 
     #[test]

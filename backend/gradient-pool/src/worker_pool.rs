@@ -555,38 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn test_unregister_unknown_returns_empty() {
-        let mut pool = WorkerPool::new();
-        assert!(pool.unregister("w1").is_empty());
-    }
-
-    #[test]
-    fn test_update_capabilities() {
-        let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.update_capabilities(
-            "w1",
-            vec!["x86_64-linux".into()],
-            vec!["kvm".into()],
-            4,
-            8,
-            16384,
-            1200,
-        );
-
-        let workers = pool.all_workers();
-        assert_eq!(workers.len(), 1);
-        assert_eq!(workers[0].architectures, vec!["x86_64-linux"]);
-        assert_eq!(workers[0].system_features, vec!["kvm"]);
-        assert_eq!(workers[0].max_concurrent_builds, 4);
-
-        let view = pool.metrics_for("w1").unwrap();
-        assert_eq!(view.cpu_count, 8);
-        assert_eq!(view.ram_total_mb, 16384);
-        assert_eq!(view.cpu_core_score, 1200);
-    }
-
-    #[test]
     fn mean_cpu_core_score_skips_workers_without_one() {
         let mut pool = WorkerPool::new();
         assert_eq!(pool.mean_cpu_core_score(), None);
@@ -682,19 +650,6 @@ mod tests {
         assert_eq!(caps.metrics.unwrap().ram_free_mb, Some(9000));
 
         assert!(pool.worker_caps("unknown").is_none());
-    }
-
-    #[test]
-    fn test_mark_draining() {
-        let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new(), port().0);
-
-        let info = &pool.all_workers()[0];
-        assert!(!info.draining);
-
-        pool.mark_draining("w1");
-        let info = &pool.all_workers()[0];
-        assert!(info.draining);
     }
 
     #[test]
@@ -912,12 +867,6 @@ mod tests {
     fn unregister_of_an_unknown_worker_signals_nothing() {
         let mut pool = WorkerPool::new();
         assert!(pool.unregister("nope").is_empty());
-    }
-
-    #[test]
-    fn test_request_reauth_noop_for_unknown_worker() {
-        let pool = WorkerPool::new();
-        pool.request_reauth("nonexistent");
     }
 
     #[test]

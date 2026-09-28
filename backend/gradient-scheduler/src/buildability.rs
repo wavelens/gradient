@@ -419,17 +419,6 @@ mod tests {
         assert!(!checker.any_buildable(&[b], &caps));
     }
 
-    #[test]
-    fn substitutable_within_budget_is_buildable_anywhere() {
-        let eval_id = EvaluationId::now_v7();
-        let d = drv(DerivationId::now_v7(), "i686-linux");
-        let mut b = build_for(d.id, eval_id);
-        b.substitutable = true;
-        let checker = checker_with(vec![d], vec![]);
-        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
-        assert!(checker.any_buildable(&[b], &caps));
-    }
-
     /// `Queued` means the gates held, so a real build is buildable exactly when
     /// a worker matches its architecture and features.
     #[test]

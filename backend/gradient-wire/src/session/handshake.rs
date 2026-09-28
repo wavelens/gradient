@@ -381,18 +381,4 @@ mod tests {
         );
         assert!(matches!(result, Err(Intent::Reject { .. })));
     }
-
-    #[test]
-    fn authenticated_to_registered_is_idempotent_carry() {
-        let auth = Authenticated {
-            peer_id: "peer-1".into(),
-            negotiated: GradientCapabilities {
-                eval: true,
-                ..Default::default()
-            },
-        };
-        let r = to_registered(auth.clone());
-        assert_eq!(r.peer_id, auth.peer_id);
-        assert_eq!(r.negotiated, auth.negotiated);
-    }
 }

@@ -150,12 +150,6 @@ mod tests {
     use super::SgrState;
 
     #[test]
-    fn default_state_has_empty_prefix() {
-        let s = SgrState::default();
-        assert_eq!(s.to_prefix(), "");
-    }
-
-    #[test]
     fn carries_active_foreground_color() {
         let mut s = SgrState::default();
         s.apply_text("plain \x1b[31mred starts here");

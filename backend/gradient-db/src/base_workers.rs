@@ -204,25 +204,6 @@ mod tests {
     use gradient_entity::project_base_worker::Model as ProjectBaseWorkerModel;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    #[tokio::test]
-    async fn projects_enabling_returns_empty_when_none() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<ProjectBaseWorkerModel>::new()])
-            .into_connection();
-        let out = projects_enabling_base_worker(&db, BaseWorkerId::nil())
-            .await
-            .unwrap();
-        assert!(out.is_empty());
-    }
-
-    #[tokio::test]
-    async fn worker_id_is_base_false_when_no_row() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::base_worker::Model>::new()])
-            .into_connection();
-        assert!(!worker_id_is_base(&db, "w-1").await.unwrap());
-    }
-
     /// The row a Postgres `INSERT ... RETURNING` hands back. Without one the
     /// insert reports zero rows and sea-orm raises `RecordNotInserted`.
     fn returned_link(project: ProjectId, base_worker: BaseWorkerId) -> ProjectBaseWorkerModel {

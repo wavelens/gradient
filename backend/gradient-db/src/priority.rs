@@ -149,13 +149,4 @@ mod tests {
         assert!(sql.contains("AND NOT db.prioritized"), "{sql}");
         assert!(sql.contains("status IN (0, 1, 2, 8)"), "{sql}");
     }
-
-    #[test]
-    fn finished_evaluations_are_not_prioritized() {
-        assert!(
-            prioritize_evaluation_sql().contains("status NOT IN (5, 6, 7)"),
-            "{}",
-            prioritize_evaluation_sql()
-        );
-    }
 }

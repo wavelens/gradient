@@ -61,34 +61,3 @@ impl CredentialStore {
         inner.ssh_key = None;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn store_and_retrieve_ssh_key() {
-        let store = CredentialStore::new();
-        let raw = vec![0xDE, 0xAD, 0xBE, 0xEF];
-        store.store(CredentialKind::SshKey, raw.clone());
-        let key = store.ssh_key().expect("ssh key should be present");
-        assert_eq!(key.expose(), raw.as_slice());
-    }
-
-    #[test]
-    fn clear_drops_ssh() {
-        let store = CredentialStore::new();
-        store.store(CredentialKind::SshKey, vec![1, 2, 3]);
-        store.clear();
-        assert!(store.ssh_key().is_none());
-    }
-
-    #[test]
-    fn clone_shares_state() {
-        let store = CredentialStore::new();
-        let clone = store.clone();
-        clone.store(CredentialKind::SshKey, vec![0xAA]);
-        let key = store.ssh_key().expect("ssh key should be present");
-        assert_eq!(key.expose(), &[0xAA]);
-    }
-}

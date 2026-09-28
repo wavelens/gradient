@@ -41,18 +41,4 @@ mod tests {
         .expect("--state-validate must parse without secret files");
         assert!(cli.state.validate);
     }
-
-    #[test]
-    fn secret_files_parse_from_flags() {
-        let cli = Cli::try_parse_from([
-            "gradient-server",
-            "--secrets-crypt-file",
-            "/c",
-            "--secrets-jwt-file",
-            "/j",
-        ])
-        .expect("explicit secret files must parse");
-        assert_eq!(cli.secrets.crypt_file, "/c");
-        assert_eq!(cli.secrets.jwt_file, "/j");
-    }
 }

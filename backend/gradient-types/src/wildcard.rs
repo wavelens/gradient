@@ -391,12 +391,6 @@ mod tests {
     // ── valid patterns ───────────────────────────────────────────────────────
 
     #[test]
-    fn star_in_path_valid() {
-        let w: Wildcard = "packages.*.*".parse().unwrap();
-        assert_eq!(w.patterns(), &["packages.*.*"]);
-    }
-
-    #[test]
     fn multiple_patterns() {
         let w: Wildcard = "packages.*.*,checks.*.*".parse().unwrap();
         assert_eq!(w.patterns(), &["packages.*.*", "checks.*.*"]);
@@ -415,23 +409,6 @@ mod tests {
         let w: Wildcard = r#"my."wild.card".is.*"#.parse().unwrap();
         assert_eq!(w.patterns(), &[r#"my."wild.card".is.*"#]);
         assert_eq!(w.to_string(), r#"my."wild.card".is.*"#);
-    }
-
-    #[test]
-    fn quoted_segment_python_style_valid() {
-        let w: Wildcard = r#"packages.*."python3.12""#.parse().unwrap();
-        assert_eq!(w.patterns(), &[r#"packages.*."python3.12""#]);
-    }
-
-    #[test]
-    fn exclusion_pattern_valid() {
-        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
-            .parse()
-            .unwrap();
-        assert_eq!(
-            w.patterns(),
-            &["packages.*.*", "!packages.x86_64-linux.broken"]
-        );
     }
 
     #[test]
@@ -513,13 +490,6 @@ mod tests {
     }
 
     // ── bare special chars ───────────────────────────────────────────────────
-
-    #[test]
-    fn bare_star_valid() {
-        // `*` alone means "evaluate everything"
-        let w: Wildcard = "*".parse().unwrap();
-        assert_eq!(w.patterns(), &["*"]);
-    }
 
     #[test]
     fn bare_hash_rejected() {

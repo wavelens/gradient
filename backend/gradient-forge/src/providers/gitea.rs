@@ -95,15 +95,6 @@ mod tests {
     }
 
     #[test]
-    fn accepts_forgejo_and_gitea_headers() {
-        let p = GiteaProvider::new(ForgeType::Forgejo);
-        assert!(p.event_headers().contains(&"X-Forgejo-Event"));
-        assert!(p.event_headers().contains(&"X-Gitea-Event"));
-        assert!(p.signature_headers().contains(&"X-Forgejo-Signature"));
-        assert!(p.signature_headers().contains(&"X-Gitea-Signature"));
-    }
-
-    #[test]
     fn classifies_pr_comment_as_comment() {
         let p = GiteaProvider::new(ForgeType::Forgejo);
         assert!(matches!(

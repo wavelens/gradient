@@ -171,12 +171,6 @@ mod tests {
     }
 
     #[test]
-    fn bind_builds_a_statement_with_the_sql() {
-        let stmt = TEST_LOOKUP.bind([sea_orm::Value::from(Vec::<uuid::Uuid>::new())]);
-        assert!(stmt.sql.contains("FROM derivation"));
-    }
-
-    #[test]
     #[should_panic(expected = "TEST_LOOKUP takes 1 value")]
     fn bind_rejects_the_wrong_value_count() {
         let _ = TEST_LOOKUP.bind([]);

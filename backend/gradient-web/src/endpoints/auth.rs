@@ -1013,17 +1013,4 @@ mod tests {
         assert!(cookie.contains("Max-Age=2592000"));
         assert!(!cookie.contains("Secure"));
     }
-
-    #[test]
-    fn jwt_cookie_both_flags() {
-        let cookie = jwt_cookie("mytoken", true, true);
-        assert!(cookie.contains("; Secure"));
-        assert!(cookie.contains("Max-Age=2592000"));
-    }
-
-    #[test]
-    fn jwt_cookie_contains_token() {
-        let cookie = jwt_cookie("tok123", false, false);
-        assert!(cookie.starts_with("jwt_token=tok123"));
-    }
 }

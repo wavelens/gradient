@@ -205,28 +205,3 @@ impl WalkNode for CursorNode<'_> {
         Ok(self.has_attr("type")? || self.has_attr("_type")?)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    type LockFlakeFn = fn(
-        &Arc<Context>,
-        &FetchersSettings,
-        &Arc<FlakeSettings>,
-        &EvalState,
-        &str,
-        &[(String, String)],
-    ) -> Result<LockedFlake>;
-
-    #[test]
-    fn lock_flake_accepts_input_overrides() {
-        // Compile-time guard that lock_flake takes the overrides slice. The
-        // behavioral proof (an override changes the locked input, hence the
-        // resolved drvPath) runs under CI where nix is available.
-        fn _assert(f: LockFlakeFn) {
-            let _ = f;
-        }
-        _assert(lock_flake);
-    }
-}

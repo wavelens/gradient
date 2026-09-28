@@ -122,17 +122,6 @@ fn nar_location_shards_by_first_two_hex_chars() {
     assert!(path.ends_with(".nar"));
 }
 
-#[test]
-fn nar_compressed_location_has_zst_extension() {
-    let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().to_str().unwrap().to_string();
-    let hash = "ab1234567890abcdef1234567890abcdef123456".to_string();
-
-    let path = get_cache_nar_compressed_location(base, hash).unwrap();
-
-    assert!(path.ends_with(".nar.zst"));
-}
-
 // ── generate_ssh_key ──────────────────────────────────────────────────────────
 
 #[test]

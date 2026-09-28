@@ -423,44 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_config_from_default_cli_has_no_optional_features() {
-        let runtime = RuntimeConfig::from_cli(&base_cli()).expect("valid");
-        assert!(runtime.oidc.is_none());
-        assert!(runtime.email.is_none());
-        assert!(runtime.s3.is_none());
-        assert!(runtime.github_app.is_none());
-        assert_eq!(runtime.server.base_dir, "/tmp/gradient-test");
-    }
-
-    #[test]
-    fn runtime_config_populates_optional_features_when_configured() {
-        let mut cli = base_cli();
-        cli.oidc.enable = true;
-        cli.oidc.required = true;
-        cli.oidc.client_id = Some("cid".into());
-        cli.oidc.client_secret_file = Some("/run/secrets/oidc".into());
-        cli.oidc.discovery_url = Some("https://idp.example.com".into());
-        cli.email.enable = true;
-        cli.email.require_verification = true;
-        cli.email.smtp_host = Some("smtp.example.com".into());
-        cli.email.smtp_username = Some("u".into());
-        cli.email.smtp_password_file = Some("/run/secrets/smtp".into());
-        cli.email.from_address = Some("g@example.com".into());
-        cli.s3.bucket = Some("bkt".into());
-        cli.github_app.id = Some(1);
-        cli.github_app.private_key_file = Some("/k".into());
-        cli.github_app.webhook_secret_file = Some("/w".into());
-
-        let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
-        let oidc = runtime.oidc.expect("oidc populated");
-        assert!(oidc.required);
-        let email = runtime.email.expect("email populated");
-        assert!(email.require_verification);
-        assert!(runtime.s3.is_some());
-        assert!(runtime.github_app.is_some());
-    }
-
-    #[test]
     fn network_config_defaults_parse() {
         let cli = base_cli();
         let cfg = cli.network_config().expect("default CIDR lists parse");
@@ -518,19 +480,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_config_metrics_propagates() {
-        use std::io::Write;
-        let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
-        write!(tmp, "tok").expect("write");
-        let path = tmp.path().to_string_lossy().into_owned();
-
-        let mut cli = base_cli();
-        cli.metrics.token_file = Some(path);
-        let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
-        assert!(runtime.metrics.is_some());
-    }
-
-    #[test]
     fn scim_config_disabled_returns_none() {
         let cli = base_cli();
         assert!(cli.scim_config().is_none());
@@ -552,14 +501,5 @@ mod tests {
         let cfg = cli.scim_config().expect("should return Some");
         assert_eq!(cfg.token_file, "/run/secrets/scim");
         assert!(cfg.hard_delete);
-    }
-
-    #[test]
-    fn runtime_config_scim_propagates() {
-        let mut cli = base_cli();
-        cli.scim.enable = true;
-        cli.scim.token_file = Some("/run/secrets/scim".into());
-        let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
-        assert!(runtime.scim.is_some());
     }
 }

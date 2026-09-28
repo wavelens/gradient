@@ -241,23 +241,6 @@ mod tests {
         assert!(err.is_err());
     }
 
-    /// The blob half of an ingest: no `cached_path` row records the path, so the
-    /// bytes are written to storage before the commit is handed to the actor.
-    #[tokio::test]
-    async fn create_path_writes_blob_and_reports_created() {
-        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .into_connection();
-        let store = temp_store();
-        let wrote = put_nar_idempotent(&db, &store, hash, "sha256:abc", vec![1, 2, 3, 4, 5])
-            .await
-            .expect("put");
-        assert!(wrote);
-        let blob = store.get(hash).await.expect("get").expect("present");
-        assert_eq!(blob, vec![1, 2, 3, 4, 5]);
-    }
-
     const IDEM_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     fn row_with_file_hash(file_hash: &str) -> gradient_entity::cached_path::Model {

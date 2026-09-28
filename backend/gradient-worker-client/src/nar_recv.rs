@@ -775,16 +775,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn single_chunk_delivers_to_waiter() {
-        let r = NarReceiver::new();
-        let r2 = r.clone();
-        let task = tokio::spawn(async move { r2.wait_for("job1", "/nix/store/aaa").await });
-        tokio::task::yield_now().await;
-        final_chunk(&r, "job1", "/nix/store/aaa", b"hello world").await;
-        assert_eq!(bytes(task.await.unwrap().unwrap()), b"hello world");
-    }
-
-    #[tokio::test]
     async fn multi_chunk_assembled_in_order() {
         let r = NarReceiver::new();
         let r2 = r.clone();

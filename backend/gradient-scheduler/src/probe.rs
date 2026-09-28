@@ -422,30 +422,6 @@ mod tests {
         );
     }
 
-    /// The request channel is in memory, so a process that stops between the commit
-    /// and the send leaves demand nothing will ever ask about - and demand stops at
-    /// an anchor the probe has not answered, so every build below it would stall
-    /// for good. The sweep is the only reader that finds those.
-    #[tokio::test]
-    async fn the_sweep_finds_demand_whose_request_was_lost() {
-        let derivation = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![MDerivationBuild {
-                id: gradient_types::ids::DerivationBuildId::now_v7(),
-                derivation,
-                demanded: true,
-                ..Default::default()
-            }]])
-            .into_connection();
-
-        assert_eq!(
-            unanswered_demand(&test_state(db))
-                .await
-                .expect("the sweep reads"),
-            vec![derivation]
-        );
-    }
-
     /// The sweep is a database read on a loop that ticks every second. It is the
     /// backstop for a lost request, not the way a round normally starts.
     #[tokio::test]

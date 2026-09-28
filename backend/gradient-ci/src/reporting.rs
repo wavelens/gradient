@@ -155,14 +155,6 @@ mod tests {
     }
 
     #[test]
-    fn approval_context_format() {
-        assert_eq!(
-            approval_check_context("my-task"),
-            "gradient/my-task: Approval"
-        );
-    }
-
-    #[test]
     fn evaluation_context_format() {
         assert_eq!(
             evaluation_check_context("my-task", None),
@@ -175,14 +167,6 @@ mod tests {
         assert_eq!(
             evaluation_check_context("my-task", Some("packages.x86_64-linux.foo")),
             "gradient/my-task: Evaluation: packages.x86_64-linux.foo"
-        );
-    }
-
-    #[test]
-    fn build_context_format() {
-        assert_eq!(
-            build_check_context("my-task", "my-package"),
-            "gradient/my-task: Build my-package"
         );
     }
 

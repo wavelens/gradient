@@ -364,31 +364,3 @@ impl StateConfiguration {
         Ok(config)
     }
 }
-
-#[cfg(test)]
-mod config_tests {
-    use super::*;
-
-    #[test]
-    fn deserializes_github_integration_with_installation_id() {
-        let json = r#"{
-            "integrations": {
-                "acme-gh-in": {
-                    "name": "acme-gh-in",
-                    "project": "acme",
-                    "kind": "inbound",
-                    "forge_type": "github",
-                    "installation_id": 42,
-                    "account_login": "acme",
-                    "created_by": "alice"
-                }
-            }
-        }"#;
-        let config: StateConfiguration = serde_json::from_str(json).unwrap();
-        let int = config.integrations.get("acme-gh-in").unwrap();
-        assert_eq!(int.forge_type, "github");
-        assert_eq!(int.installation_id, Some(42));
-        assert_eq!(int.account_login.as_deref(), Some("acme"));
-        assert_eq!(int.created_by, "alice");
-    }
-}

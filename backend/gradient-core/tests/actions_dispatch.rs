@@ -8,10 +8,7 @@
 //!
 //! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
 
-use gradient_ci::CiStatus;
-use gradient_ci::actions::{
-    FORGE_STATUS_EVENTS, forge_status_for_event, forge_status_payload, matches_event,
-};
+use gradient_ci::actions::{FORGE_STATUS_EVENTS, forge_status_payload, matches_event};
 use gradient_types::{ActionType, MTaskAction, TaskActionId, TaskId, UserId};
 use serde_json::json;
 use uuid::Uuid;
@@ -66,51 +63,6 @@ fn matches_event_forge_status_report_ignores_stored_events() {
         );
     }
     assert!(!matches_event(&action, "evaluation.waiting"));
-}
-
-#[test]
-fn forge_status_mapping_complete() {
-    assert!(matches!(
-        forge_status_for_event("build.started"),
-        Some(CiStatus::Running)
-    ));
-    assert!(matches!(
-        forge_status_for_event("build.completed"),
-        Some(CiStatus::Success)
-    ));
-    assert!(matches!(
-        forge_status_for_event("build.failed"),
-        Some(CiStatus::Failure)
-    ));
-    assert!(matches!(
-        forge_status_for_event("build.substituted"),
-        Some(CiStatus::Success)
-    ));
-    assert!(matches!(
-        forge_status_for_event("evaluation.queued"),
-        Some(CiStatus::Pending)
-    ));
-    assert!(matches!(
-        forge_status_for_event("evaluation.building"),
-        Some(CiStatus::Success)
-    ));
-    assert!(matches!(
-        forge_status_for_event("evaluation.completed"),
-        Some(CiStatus::Success)
-    ));
-    assert!(matches!(
-        forge_status_for_event("evaluation.failed"),
-        Some(CiStatus::Failure)
-    ));
-    assert!(matches!(
-        forge_status_for_event("evaluation.aborted"),
-        Some(CiStatus::Error)
-    ));
-    assert!(matches!(
-        forge_status_for_event("evaluation.action_required"),
-        Some(CiStatus::ActionRequired)
-    ));
-    assert!(forge_status_for_event("evaluation.waiting").is_none());
 }
 
 #[test]

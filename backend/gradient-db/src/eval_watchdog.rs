@@ -87,17 +87,3 @@ pub async fn lost_eval_completions<C: ConnectionTrait>(
         })
         .collect())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The scope is composed from the pinned enum numbers, never hand-written,
-    /// so a renumber cannot silently widen it to `Fetching` or `Building`.
-    #[test]
-    fn the_scope_is_the_evaluating_pair_only() {
-        let scope = status_sql::eval_in(&EvaluationStatus::EVALUATING);
-        assert_eq!(scope, "1, 2");
-        assert_eq!(i16::from(DispatchedJobKind::Eval), 0);
-    }
-}

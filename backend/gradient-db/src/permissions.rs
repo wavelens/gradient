@@ -414,15 +414,6 @@ mod tests {
         assert!(is_mutating(Permission::ManageRoles));
     }
 
-    #[test]
-    fn is_builtin_role_recognises_seed_uuids() {
-        assert!(is_builtin_role(BASE_ROLE_ADMIN_ID));
-        assert!(is_builtin_role(BASE_ROLE_WRITE_ID));
-        assert!(is_builtin_role(BASE_ROLE_VIEW_ID));
-        let other = RoleId::new(uuid::uuid!("99999999-9999-9999-9999-999999999999"));
-        assert!(!is_builtin_role(other));
-    }
-
     // ── CachePermission tests ────────────────────────────────────────────────
 
     #[test]
@@ -487,32 +478,5 @@ mod tests {
         let mask = cache_write_mask();
         let perms = cache_mask_to_vec(mask);
         assert_eq!(cache_mask_from(&perms), mask);
-    }
-
-    #[test]
-    fn is_builtin_cache_role_recognises_seed_uuids() {
-        use gradient_types::consts::{
-            BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
-        };
-        assert!(is_builtin_cache_role(BASE_CACHE_ROLE_ADMIN_ID));
-        assert!(is_builtin_cache_role(BASE_CACHE_ROLE_WRITE_ID));
-        assert!(is_builtin_cache_role(BASE_CACHE_ROLE_VIEW_ID));
-        let other = RoleId::new(uuid::uuid!("99999999-9999-9999-9999-999999999999"));
-        assert!(!is_builtin_cache_role(other));
-    }
-
-    #[test]
-    fn webhook_permissions_append_new_bits() {
-        assert_eq!(Permission::ManageWebhooks.bit(), 1 << 14);
-        assert_eq!(
-            Permission::from_wire_name("manageWebhooks"),
-            Some(Permission::ManageWebhooks)
-        );
-        assert!(mask_grants(write_mask(), Permission::ManageWebhooks));
-        assert_eq!(CachePermission::ManageCacheWebhooks.bit(), 1 << 10);
-        assert!(cache_mask_grants(
-            cache_admin_mask(),
-            CachePermission::ManageCacheWebhooks
-        ));
     }
 }

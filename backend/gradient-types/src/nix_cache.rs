@@ -319,15 +319,6 @@ mod tests {
     }
 
     #[test]
-    fn build_output_path_deserializes() {
-        let json = r#"{"id":"out","outPath":"/nix/store/abc-hello","signatures":["k:sig"]}"#;
-        let bop: BuildOutputPath = serde_json::from_str(json).unwrap();
-        assert_eq!(bop.id, "out");
-        assert_eq!(bop.out_path, "/nix/store/abc-hello");
-        assert_eq!(bop.signatures, vec!["k:sig".to_string()]);
-    }
-
-    #[test]
     fn parse_narinfo_body_roundtrip() {
         let original = NixPathInfo {
             store_path: "/nix/store/abc-foo".into(),

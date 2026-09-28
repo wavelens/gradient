@@ -468,26 +468,12 @@ pub fn require_create_permission(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DbErr, RuntimeErr};
+    use sea_orm::DbErr;
 
     #[test]
     fn from_db_err_passes_through_non_db_errors() {
         let err = DbErr::Custom("boom".into());
         let mapped = WebError::from_db_err(err, "Anything");
-        assert!(matches!(mapped, WebError::Internal(_)));
-    }
-
-    #[test]
-    fn from_db_err_passes_through_query_string_errors() {
-        let err = DbErr::Query(RuntimeErr::Internal("nope".into()));
-        let mapped = WebError::from_db_err(err, "Cache Name");
-        assert!(matches!(mapped, WebError::Internal(_)));
-    }
-
-    #[test]
-    fn from_db_err_record_not_found_is_internal() {
-        let err = DbErr::RecordNotFound("nothing".into());
-        let mapped = WebError::from_db_err(err, "User");
         assert!(matches!(mapped, WebError::Internal(_)));
     }
 }

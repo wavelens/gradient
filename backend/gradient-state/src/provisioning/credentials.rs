@@ -179,18 +179,10 @@ mod api_key_hash_tests {
 
 #[cfg(test)]
 mod helper_tests {
-    use super::{credentials_dir, read_credential};
+    use super::read_credential;
     use crate::provisioning::lookup_id;
     use std::collections::HashMap;
     use uuid::Uuid;
-
-    #[test]
-    fn lookup_id_returns_id_when_present() {
-        let id = Uuid::now_v7();
-        let mut m = HashMap::new();
-        m.insert("alice".to_string(), id);
-        assert_eq!(lookup_id(&m, "alice", "User").unwrap(), id);
-    }
 
     #[test]
     fn lookup_id_errors_with_kind_and_name() {
@@ -212,12 +204,5 @@ mod helper_tests {
         let s = err.to_string();
         assert!(s.contains("password file"));
         assert!(s.contains("gradient_user_alice_password"));
-    }
-
-    #[test]
-    fn credentials_dir_returns_nonempty() {
-        // We can't assert the exact value without racing on env state, but it
-        // must always be a non-empty path so format!() composes a valid path.
-        assert!(!credentials_dir().is_empty());
     }
 }

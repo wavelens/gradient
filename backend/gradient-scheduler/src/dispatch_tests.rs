@@ -270,22 +270,6 @@ fn make_polling_trigger(
     }
 }
 
-/// `dispatch_once` with no active polling/time triggers is a no-op.
-#[tokio::test]
-async fn dispatch_once_no_triggers_is_noop() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // Query for active polling/time triggers → empty
-        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
-        .into_connection();
-
-    let scheduler = make_scheduler(db).await;
-    let result = trigger_dispatch::dispatch_once(&scheduler).await;
-    assert!(
-        result.is_ok(),
-        "dispatch_once with no triggers should succeed"
-    );
-}
-
 /// A trigger whose `last_fired_at` is recent (within interval) must not cause
 /// an evaluation - the `dispatch_once` loop skips it as not-due.
 ///

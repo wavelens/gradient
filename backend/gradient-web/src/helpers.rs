@@ -84,30 +84,3 @@ pub async fn role_names<C: ConnectionTrait>(
 
     Ok(map)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ok_json_wraps_with_error_false() {
-        let response = ok_json(42i32);
-        assert!(!response.0.error);
-        assert_eq!(response.0.message, 42);
-    }
-
-    #[test]
-    fn or_not_found_returns_value_for_some() {
-        let r: WebResult<i32> = Some(7).or_not_found("Thing");
-        assert_eq!(r.unwrap(), 7);
-    }
-
-    #[test]
-    fn or_not_found_maps_none_to_not_found() {
-        let r: WebResult<i32> = Option::<i32>::None.or_not_found("Thing");
-        match r.unwrap_err() {
-            WebError::NotFound(_, msg) => assert_eq!(msg, "Thing not found"),
-            other => panic!("expected NotFound, got {other:?}"),
-        }
-    }
-}

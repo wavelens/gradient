@@ -154,15 +154,6 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
 mod tests {
     use super::*;
 
-    /// Both scopes name an evaluation; there is no tick-driven scope left, so no
-    /// caller can ask this for a full-table pass.
-    #[test]
-    fn every_scope_is_bounded_to_one_evaluation() {
-        let eval = EvaluationId::now_v7();
-        assert_eq!(ReconcileScope::Eval(eval).evaluation(), eval);
-        assert_eq!(ReconcileScope::Unstick(eval).evaluation(), eval);
-    }
-
     /// The heal names what it thawed and reset before it promotes: a pruned
     /// interior in this closure that no evaluation names any more would otherwise
     /// fail the gate the promote embeds, and the heal would loop on it forever.

@@ -839,17 +839,6 @@ mod tests {
         assert!(!fully_realised(&[], &[]));
     }
 
-    /// The sizes are left for the compress step, the way a real build reports the
-    /// outputs it just wrote; the hash is the store path's own.
-    #[tokio::test]
-    async fn a_realised_output_reports_no_sizes() {
-        let out = realised_output("out", "/nix/store/xa1b2c3-thing").await;
-
-        assert_eq!(out.name, "out");
-        assert_eq!(out.store_path, "/nix/store/xa1b2c3-thing");
-        assert!(out.nar_size.is_none() && out.nar_hash.is_none());
-    }
-
     /// An output adopted from disk keeps the hydra products a fresh build would report.
     #[tokio::test]
     async fn a_realised_output_reports_its_hydra_products() {

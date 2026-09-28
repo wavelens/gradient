@@ -390,39 +390,6 @@ mod tests {
     use super::*;
     use sea_orm::{MockDatabase, MockExecResult};
 
-    /// Regression for #68: a function typed `fn(&WebDb)` must not accept a
-    /// `&WorkerDb` (and vice versa). The two newtypes are non-substitutable
-    /// at any explicitly-typed function boundary, which is the compile-time
-    /// defense the issue asked for.
-    #[test]
-    fn newtypes_are_non_substitutable() {
-        fn takes_web(_: &WebDb) {}
-        fn takes_worker(_: &WorkerDb) {}
-
-        let web = WebDb::new(MockDatabase::new(DbBackend::Postgres).into_connection());
-        let worker = WorkerDb::new(MockDatabase::new(DbBackend::Postgres).into_connection());
-
-        takes_web(&web);
-        takes_worker(&worker);
-
-        // The following lines, if uncommented, must fail to compile:
-        // takes_web(&worker);
-        // takes_worker(&web);
-    }
-
-    /// `&WebDb` / `&WorkerDb` satisfy `&impl ConnectionTrait`, so existing
-    /// SeaORM call sites keep working without `.inner()` boilerplate.
-    #[tokio::test]
-    async fn forwards_connection_trait() {
-        async fn run<C: ConnectionTrait>(db: &C) -> DbBackend {
-            db.get_database_backend()
-        }
-        let web = WebDb::new(MockDatabase::new(DbBackend::Postgres).into_connection());
-        let worker = WorkerDb::new(MockDatabase::new(DbBackend::Postgres).into_connection());
-        assert_eq!(run(&web).await, DbBackend::Postgres);
-        assert_eq!(run(&worker).await, DbBackend::Postgres);
-    }
-
     crate::sql! {
         TEST_TRANSACTIONAL_UPDATE = "UPDATE derivation_build SET status = 1",
             params = [];

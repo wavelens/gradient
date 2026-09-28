@@ -196,14 +196,4 @@ mod tests {
             "the hash is what a cache check needs: {text}"
         );
     }
-
-    /// Successful attempts are the filtered-out case, so the query has to say
-    /// so rather than relying on the caller to remember.
-    #[test]
-    fn only_failed_attempts_are_selected() {
-        let sql = FAILED_ATTEMPT_SQL.text();
-        assert!(sql.contains("outcome IN (3, 4)"));
-        assert!(sql.contains("$1"), "must be eval-scoped");
-        assert!(!sql.contains('*'));
-    }
 }

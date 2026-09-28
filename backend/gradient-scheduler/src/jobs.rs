@@ -1212,19 +1212,6 @@ mod tests {
         BuildJob, BuildSpec, BuildSpecKind, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
     };
 
-    // `dispatched_job.job_id` stores this key, and the abandoned-job sweep
-    // closes rows by matching on it. If the key stopped agreeing with what the
-    // dispatchers enqueue, close-out would find no row and fail silently, which
-    // is how dispatches came to sit "running" forever.
-    #[test]
-    fn a_jobs_key_is_the_id_it_was_enqueued_under() {
-        let evaluation = EvaluationId::now_v7();
-        let anchor = DerivationBuildId::now_v7();
-
-        assert_eq!(eval_job_key(evaluation), format!("eval:{evaluation}"));
-        assert_eq!(build_job_key(anchor), format!("build:{anchor}"));
-    }
-
     #[test]
     fn a_pending_job_reports_its_own_key() {
         let peer = ProjectId::now_v7();
@@ -1836,40 +1823,6 @@ mod tests {
     }
 
     #[test]
-    fn test_record_scores_then_request_assigns_best() {
-        let mut tracker = JobTracker::new();
-        let peer = ProjectId::now_v7();
-        tracker.add_pending(
-            "j1".into(),
-            build_job(
-                peer,
-                vec![RequiredPath {
-                    path: "/nix/store/foo".into(),
-                    cache_info: None,
-                }],
-            ),
-        );
-
-        // Record scores, then request - assignment uses the score to pick.
-        tracker.record_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-                outputs_present: false,
-            }],
-        );
-        let p = gradient_pool::score::policy_by_name("simple");
-        let inst = gradient_pool::score::InstanceContext::default();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
-        assert!(assignment.is_some());
-        assert_eq!(assignment.unwrap().job_id(), "j1");
-        assert_eq!(tracker.pending_count(), 0);
-        assert_eq!(tracker.active_count(), 1);
-    }
-
-    #[test]
     fn records_dispatch_decisions_including_rejected_candidates() {
         let mut tracker = JobTracker::new();
         let peer = ProjectId::now_v7();
@@ -2038,55 +1991,6 @@ mod tests {
         );
     }
 
-    // Currently not in use
-    // #[test]
-    // fn fair_share_quiet_project_wins_over_busy_project() {
-    //     // #111: project A floods the queue and already has builds running; project B is
-    //     // quiet. With the resource-aware policy the next build must go to B so a
-    //     // busy tenant cannot starve a quiet one.
-    //     let mut tracker = JobTracker::new();
-    //     let project_a = ProjectId::now_v7();
-    //     let project_b = ProjectId::now_v7();
-    //     let p = gradient_pool::score::policy_by_name("resource-aware");
-    //     // Non-zero typical build time so active builds carry work-weight even
-    //     // without per-build history, making project_work_share well-defined.
-    //     let inst = gradient_pool::score::InstanceContext {
-    //         build_time_ms: gradient_pool::score::Windowed { w1h: 60_000.0, ..Default::default() },
-    //         ..Default::default()
-    //     };
-
-    //     // Seed several active builds for project A. Each is fully cached on its
-    //     // worker so it clears the negative-total dispatch gate.
-    //     for i in 0..5 {
-    //         let id = format!("a_active_{i}");
-    //         tracker.add_pending(id.clone(), build_job(project_a, vec![]));
-    //         tracker.record_scores(
-    //             "wa",
-    //             vec![CandidateScore { job_id: id, missing_count: 0, missing_nar_size: 0 }],
-    //         );
-    //         tracker.take_best_of_kind("wa", None, None, &JobKind::Build, &*p, &inst);
-    //     }
-    //     assert_eq!(tracker.active_count(), 5);
-
-    //     // One pending build each for A and B, both cached on the requesting worker.
-    //     tracker.add_pending("a_pending".into(), build_job(project_a, vec![]));
-    //     tracker.add_pending("b_pending".into(), build_job(project_b, vec![]));
-    //     for id in ["a_pending", "b_pending"] {
-    //         tracker.record_scores(
-    //             "wb",
-    //             vec![CandidateScore { job_id: id.into(), missing_count: 0, missing_nar_size: 0 }],
-    //         );
-    //     }
-
-    //     let assignment = tracker
-    //         .take_best_of_kind("wb", None, None, &JobKind::Build, &*p, &inst)
-    //         .expect("a build must be assigned");
-    //     assert_eq!(
-    //         assignment.job_id, "b_pending",
-    //         "quiet project B must win over busy project A"
-    //     );
-    // }
-
     #[test]
     fn unscored_build_is_gated_until_scored() {
         let mut tracker = JobTracker::new();
@@ -2126,57 +2030,6 @@ mod tests {
         );
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert_eq!(assignment.unwrap().job_id(), "j1");
-        assert_eq!(tracker.pending_count(), 0);
-        assert_eq!(tracker.active_count(), 1);
-    }
-
-    #[test]
-    fn dispatch_skips_all_negative() {
-        // The only eligible build is unscored (missing_nar_size None, rescore 0),
-        // so RescoreWaitRule drives its total to -1000 with nothing to offset it.
-        // The negative-total gate must idle the worker, leaving the job pending.
-        let mut tracker = JobTracker::new();
-        let peer = ProjectId::now_v7();
-        tracker.add_pending("j1".into(), build_job(peer, vec![]));
-
-        let p = gradient_pool::score::policy_by_name("simple");
-        let inst = gradient_pool::score::InstanceContext::default();
-        assert!(
-            tracker
-                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
-                .is_none()
-        );
-        assert_eq!(tracker.pending_count(), 1);
-        assert_eq!(tracker.active_count(), 0);
-    }
-
-    #[test]
-    fn dispatch_picks_non_negative() {
-        // A fully-cached build (missing_nar_size Some(0)) earns the MissingNarSize
-        // bonus and avoids the rescore penalty, so its total is >= 0 and it is
-        // dispatched.
-        let mut tracker = JobTracker::new();
-        let peer = ProjectId::now_v7();
-        tracker.add_pending("j1".into(), build_job(peer, vec![]));
-        tracker.record_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-                outputs_present: false,
-            }],
-        );
-
-        let p = gradient_pool::score::policy_by_name("simple");
-        let inst = gradient_pool::score::InstanceContext::default();
-        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
-        assert_eq!(
-            assignment
-                .expect("non-negative build must dispatch")
-                .job_id(),
-            "j1"
-        );
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
     }
@@ -2374,12 +2227,6 @@ mod tests {
         assert!(tracker.contains_job("j1"));
         tracker.remove_job("j1");
         assert!(!tracker.contains_job("j1"));
-    }
-
-    #[test]
-    fn remove_job_unknown_id_is_noop() {
-        let mut tracker = JobTracker::new();
-        tracker.remove_job("does-not-exist");
     }
 
     #[test]

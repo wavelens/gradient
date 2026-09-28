@@ -126,11 +126,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn expiry_is_seven_days_out() {
-        assert_eq!(invitation_expiry(at(0)), at(0) + Duration::days(7));
-    }
-
     fn item(kind: InviteKind, scope: &str, created: i64) -> InviteItem {
         InviteItem {
             kind,

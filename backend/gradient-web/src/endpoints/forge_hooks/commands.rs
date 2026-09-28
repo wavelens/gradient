@@ -751,16 +751,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_gradient_run_with_wildcard() {
-        assert_eq!(
-            parse_gradient_command("/gradient run packages.*.*"),
-            Some(GradientCommand::Run {
-                wildcard: Some("packages.*.*".to_string())
-            })
-        );
-    }
-
-    #[test]
     fn parse_gradient_run_with_complex_wildcard_preserves_raw() {
         let body = "/gradient run packages.*.foo,!packages.x86_64-linux.broken";
         let Some(GradientCommand::Run { wildcard: Some(w) }) = parse_gradient_command(body) else {

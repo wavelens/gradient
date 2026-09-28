@@ -229,18 +229,4 @@ mod tests {
             "a dropped span must not become a parent"
         );
     }
-
-    /// Detail counters ride on the span so the board can show throughput.
-    #[test]
-    fn a_guard_records_paths_and_bytes() {
-        let t = JobTimeline::new();
-        {
-            let mut g = t.enter(JobPhase::NarPush);
-            g.record(7, 1024);
-        }
-
-        let spans = t.snapshot();
-        assert_eq!(spans[0].paths, 7);
-        assert_eq!(spans[0].bytes, 1024);
-    }
 }

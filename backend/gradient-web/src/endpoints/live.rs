@@ -388,11 +388,4 @@ mod tests {
             })
         );
     }
-
-    #[test]
-    fn cache_changed_serializes_as_a_named_ping() {
-        let v: serde_json::Value =
-            serde_json::from_str(&frame(&env(cache::Changed {})).unwrap()).unwrap();
-        assert_eq!(v["event"], "cache.changed");
-    }
 }

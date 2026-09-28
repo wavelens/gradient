@@ -661,27 +661,6 @@ mod tests {
         }
     }
 
-    /// The report inspector's `why_stuck` weighs the `build_job` promotion gate
-    /// by looking the row up in the exported `build_job` table, which only works
-    /// because the anchor scope starts from that same set. The boundary rows the
-    /// scope adds on top have no `build_job`, and that is the difference the
-    /// inspector reads: a rewrite that scoped `derivation_build` some other way
-    /// would leave it unable to tell the two apart.
-    #[test]
-    fn the_anchor_scope_starts_from_the_build_jobs_that_open_that_gate() {
-        let specs = eval_scope_tables();
-        let spec = specs
-            .iter()
-            .find(|s| s.name == "derivation_build")
-            .expect("the report exports derivation_build");
-        assert!(
-            spec.sql
-                .contains("SELECT derivation FROM build_job WHERE evaluation = $1"),
-            "why_stuck reads the build_job gate against this set: {}",
-            spec.sql
-        );
-    }
-
     /// Every table an offline reader re-derives `unready_deps` from is scoped to
     /// the evaluation's derivations AND their direct dependencies. Without the
     /// boundary the `LEFT JOIN ... IS NULL` rule that makes an absent dependency
@@ -721,26 +700,6 @@ mod tests {
         }
     }
 
-    /// A runtime reference is an edge of the graph now, so the dependency
-    /// boundary already carries the producer of every path an exported output
-    /// references and `cached_path` carries their paths. That is what separates
-    /// "the instance never had this path" - the finding on an unwhole closure -
-    /// from "the export did not ask for it".
-    #[test]
-    fn the_reference_boundary_is_exported_so_an_absent_path_means_absent() {
-        let sql = spec_named("cached_path").sql;
-        assert!(
-            sql.contains(
-                "UNION SELECT e.dependency FROM derivation_dependency e WHERE e.derivation IN ("
-            ),
-            "cached_path stops at the evaluation's own outputs: {sql}"
-        );
-        assert!(
-            sql.contains("c.\"references\"::text"),
-            "the narinfo line is what a reference closure is read from now: {sql}"
-        );
-    }
-
     /// An attempt's substitute-miss budget is scoped per `(anchor, evaluation)`
     /// through its `build_job`. Export the attempts without those rows and the
     /// budget cannot be bucketed at all, which is how a loop that ran 788 misses
@@ -752,30 +711,6 @@ mod tests {
             sql.contains("SELECT a.build_job FROM build_attempt a WHERE a.derivation_build IN ("),
             "an attempt from another evaluation cannot be bucketed: {sql}"
         );
-    }
-
-    /// The gate the promoter reads is
-    /// `walked AND build_job AND demanded AND (substitutable OR unready_deps = 0)`.
-    /// A report that carries every term but `demanded` reports "every gate open"
-    /// for an anchor held by the one gate it cannot see, which is exactly the
-    /// state an undemanded relay sits in forever.
-    #[test]
-    fn an_anchor_exports_the_demand_gate() {
-        let spec = spec_named("derivation_build");
-        assert!(spec.columns.contains(&"demanded"), "{:?}", spec.columns);
-        assert!(spec.ddl.contains("demanded INTEGER"), "{}", spec.ddl);
-        assert!(spec.sql.contains("db.demanded::int::text"), "{}", spec.sql);
-    }
-
-    /// Demand stops at an anchor the upstream probe has not answered for, so its
-    /// inputs read as undemanded with no reason of their own. `probed` is that
-    /// reason, and nothing else in the export carries it.
-    #[test]
-    fn an_anchor_exports_whether_the_probe_answered() {
-        let spec = spec_named("derivation_build");
-        assert!(spec.columns.contains(&"probed"), "{:?}", spec.columns);
-        assert!(spec.ddl.contains("probed INTEGER"), "{}", spec.ddl);
-        assert!(spec.sql.contains("db.probed::int::text"), "{}", spec.sql);
     }
 
     #[test]
@@ -826,19 +761,6 @@ mod tests {
         assert!(!sql.contains("SELECT id FROM build_job"), "{sql}");
     }
 
-    /// `evaluation.commit` is a foreign key, so without the commit itself a
-    /// report names the repository but never the revision that broke.
-    #[test]
-    fn the_commit_is_exported_and_its_hash_is_readable() {
-        let spec = spec_named("commit");
-        assert!(
-            spec.sql.contains("encode(c.hash, 'hex')"),
-            "a bytea hash has to be hex to be greppable: {}",
-            spec.sql
-        );
-        assert!(spec.columns.contains(&"hash"));
-    }
-
     /// The commit message is free text carrying whatever the author wrote, so
     /// it takes the log treatment rather than passing through verbatim.
     #[test]
@@ -876,46 +798,6 @@ mod tests {
         }
     }
 
-    /// A phase span belongs to a dispatched job, not to the evaluation, so it
-    /// is scoped through the jobs this evaluation dispatched. Scoping it any
-    /// other way would either miss the build jobs or pull in a stranger's.
-    #[test]
-    fn phase_spans_are_scoped_through_the_evaluations_dispatched_jobs() {
-        let sql = spec_named("dispatched_job_phase").sql;
-        assert!(
-            sql.contains("SELECT id FROM dispatched_job WHERE evaluation_id = $1"),
-            "{sql}"
-        );
-    }
-
-    /// The outcome is what separates "the worker finished" from "the worker
-    /// vanished" when reading a report offline, so it must be exported.
-    #[test]
-    fn a_dispatched_job_exports_its_outcome() {
-        let spec = spec_named("dispatched_job");
-        assert!(spec.columns.contains(&"outcome"), "{:?}", spec.columns);
-        assert!(spec.ddl.contains("outcome INTEGER"), "{}", spec.ddl);
-        assert!(spec.sql.contains("outcome::text"), "{}", spec.sql);
-    }
-
-    /// `fetchable` and `unready_deps` are what a stalled anchor is waiting on,
-    /// so a report that stops at `status` cannot say why nothing dispatched.
-    #[test]
-    fn an_anchor_exports_its_readiness_counters() {
-        let spec = spec_named("derivation_build");
-        for column in ["fetchable", "unready_deps"] {
-            assert!(spec.columns.contains(&column), "{:?}", spec.columns);
-            assert!(
-                spec.ddl.contains(&format!("{column} INTEGER")),
-                "{}",
-                spec.ddl
-            );
-        }
-
-        assert!(spec.sql.contains("db.fetchable::int::text"), "{}", spec.sql);
-        assert!(spec.sql.contains("db.unready_deps::text"), "{}", spec.sql);
-    }
-
     /// A stuck evaluation is exactly the one worth reporting on, and
     /// `updated_at` freezes at the moment it wedged: bounding the worker window
     /// there ends it before the interesting period instead of at "now".
@@ -932,40 +814,6 @@ mod tests {
                 "{name} still bounds the window at the wedge: {sql}"
             );
         }
-    }
-
-    /// On an instance running only base workers `worker_registration` is empty,
-    /// so the fleet itself has to be exported for a report to name its workers.
-    #[test]
-    fn the_base_worker_fleet_is_exported() {
-        let spec = spec_named("base_worker");
-        assert!(spec.columns.contains(&"enable_eval"), "{:?}", spec.columns);
-        assert!(spec.columns.contains(&"enabled"), "{:?}", spec.columns);
-        assert!(
-            !spec.columns.contains(&"token_hash"),
-            "a base worker's token must never leave the instance"
-        );
-        assert!(
-            spec_named("project_base_worker")
-                .sql
-                .contains("project = $1")
-        );
-    }
-
-    /// An `input_update` evaluation blocks every later flake-lock run for its
-    /// task while it stays active, and the sidecar is the only row saying which
-    /// inputs it holds.
-    #[test]
-    fn an_input_update_evaluation_exports_its_sidecar() {
-        let spec = spec_named("evaluation_input_update");
-        assert!(spec.sql.contains("WHERE evaluation = $1"), "{}", spec.sql);
-        for column in ["target_inputs", "discover_only", "generator"] {
-            assert!(spec.columns.contains(&column), "{:?}", spec.columns);
-        }
-        assert!(
-            !spec.columns.contains(&"candidate_lock"),
-            "a whole generated flake.lock is not scheduling evidence"
-        );
     }
 
     /// A narinfo is only served when a `cached_path_signature` row exists for

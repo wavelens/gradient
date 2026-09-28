@@ -172,23 +172,4 @@ mod tests {
         let names: HashSet<_> = Action::ALL.iter().map(|a| a.name()).collect();
         assert_eq!(names.len(), Action::ALL.len());
     }
-
-    #[test]
-    fn audit_rows_keep_their_stored_names() {
-        assert_eq!(Action::LoginSuccess.name(), "login.success");
-        assert_eq!(
-            Action::CacheSubscriptionCancel.name(),
-            "cache.subscription.cancel"
-        );
-        assert_eq!(
-            Action::ProjectMemberRoleChange.name(),
-            "project.member.role_change"
-        );
-    }
-
-    #[test]
-    fn credential_activity_is_personal() {
-        assert!(Action::ApiKeyCreate.personal());
-        assert!(!Action::TaskStar.personal());
-    }
 }

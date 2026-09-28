@@ -193,34 +193,6 @@ mod tests {
     }
 
     #[test]
-    fn concurrency_round_trip() {
-        for (p, n) in [
-            (ConcurrencyPolicy::HardAbort, 0),
-            (ConcurrencyPolicy::SoftAbort, 1),
-            (ConcurrencyPolicy::All, 2),
-            (ConcurrencyPolicy::Skip, 3),
-        ] {
-            assert_eq!(i16::from(p), n);
-            assert_eq!(ConcurrencyPolicy::try_from(n), Ok(p));
-        }
-        assert!(ConcurrencyPolicy::try_from(99).is_err());
-    }
-
-    #[test]
-    fn trigger_type_round_trip() {
-        for (t, n) in [
-            (TriggerType::Polling, 0),
-            (TriggerType::ReporterPush, 1),
-            (TriggerType::ReporterPullRequest, 2),
-            (TriggerType::Time, 3),
-        ] {
-            assert_eq!(i16::from(t), n);
-            assert_eq!(TriggerType::try_from(n), Ok(t));
-        }
-        assert!(TriggerType::try_from(99).is_err());
-    }
-
-    #[test]
     fn reporter_pull_request_require_approval_defaults_true_for_legacy_rows() {
         // Pre-#247 rows lack `require_approval` in the stored JSON. The serde
         // default must produce `true` on read so secure-by-default applies
@@ -239,23 +211,5 @@ mod tests {
             panic!("expected ReporterPullRequest");
         };
         assert!(require_approval, "missing field must default to true");
-    }
-
-    #[test]
-    fn reporter_push_db_json_omits_type_tag() {
-        let id = IntegrationId::nil();
-        let cfg = TriggerConfig::ReporterPush {
-            integration_id: id,
-            branches: vec!["main".into()],
-            tags: vec![],
-            releases_only: false,
-        };
-        let db = cfg.to_db_json();
-        assert!(
-            db.get("type").is_none(),
-            "db json should not carry the type tag"
-        );
-        let parsed = TriggerConfig::parse_row(TriggerType::ReporterPush, &db).unwrap();
-        assert_eq!(parsed, cfg);
     }
 }

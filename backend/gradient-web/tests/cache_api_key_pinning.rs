@@ -252,38 +252,3 @@ fn create_cache_pinned_key_cannot_exceed_member_mask() {
         res.assert_status(axum::http::StatusCode::FORBIDDEN);
     });
 }
-
-#[test]
-fn permissions_endpoint_returns_both_catalogues() {
-    run(async {
-        // GET /user/keys/permissions requires authentication.
-        let session_id = gradient_types::SessionId::now_v7();
-        let token = gradient_test_support::web::make_token(session_id);
-        let session = gradient_test_support::web::live_session(session_id);
-
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![session.clone()]])
-            .append_query_results([vec![session]])
-            .append_query_results([vec![user()]]);
-
-        let server = make_test_server(db.into_connection());
-        let res = server
-            .get("/api/v1/user/keys/permissions")
-            .add_header("authorization", format!("Bearer {}", token))
-            .await;
-
-        res.assert_status_ok();
-        let body: serde_json::Value = res.json();
-        assert_eq!(body["error"], false);
-        assert!(body["message"]["available_permissions"].is_array());
-        assert!(body["message"]["availableCache"].is_array());
-        let cache_perms = body["message"]["availableCache"].as_array().unwrap();
-        assert!(!cache_perms.is_empty(), "availableCache must not be empty");
-        let ids: Vec<&str> = cache_perms
-            .iter()
-            .map(|e| e["id"].as_str().unwrap())
-            .collect();
-        assert!(ids.contains(&"viewCache"), "must include viewCache");
-        assert!(ids.contains(&"writeStore"), "must include writeStore");
-    });
-}

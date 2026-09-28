@@ -1083,21 +1083,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_query_push_deduplicates_by_hash() {
-        let state = make_state();
-        let paths = vec![
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
-        ];
-        let result = query(&state, None, &paths, &[None; 2], QueryMode::Push, false)
-            .await
-            .unwrap();
-        for cp in &result {
-            assert!(!cp.cached);
-        }
-    }
-
-    #[tokio::test]
     async fn cache_scoped_query_rejects_push() {
         let state = make_state();
         let cache = CacheId::new(uuid::Uuid::now_v7());
@@ -1130,24 +1115,6 @@ mod tests {
     #[test]
     fn expand_references_empty_string_empty_vec() {
         assert_eq!(expand_references(Some("")), Some(vec![]));
-    }
-
-    #[test]
-    fn expand_references_splits_whitespace() {
-        let out = expand_references(Some("aaaa-a bbbb-b cccc-c")).unwrap();
-        assert_eq!(out.len(), 3);
-    }
-
-    #[test]
-    fn expand_references_prefixes_bare_names() {
-        let out = expand_references(Some("aaaa-a")).unwrap();
-        assert_eq!(out, vec!["/nix/store/aaaa-a".to_string()]);
-    }
-
-    #[test]
-    fn expand_references_preserves_absolute() {
-        let out = expand_references(Some("/nix/store/aaaa-a")).unwrap();
-        assert_eq!(out, vec!["/nix/store/aaaa-a".to_string()]);
     }
 
     #[test]

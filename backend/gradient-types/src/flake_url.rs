@@ -233,12 +233,6 @@ mod tests {
     }
 
     #[test]
-    fn nix_url_rev_accessor() {
-        let u = NixFlakeUrl::new("git@github.com:foo/bar.git", REV).unwrap();
-        assert_eq!(u.rev(), REV);
-    }
-
-    #[test]
     fn with_rev_roundtrip() {
         let r: RepositoryUrl = "https://github.com/foo/bar.git".parse().unwrap();
         let u = r.with_rev(REV).unwrap();

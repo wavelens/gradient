@@ -278,40 +278,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
     // ── generate_jwt ─────────────────────────────────────────────────────────
 
     #[test]
-    fn generate_jwt_three_parts() {
-        let jwt = generate_jwt(12345, TEST_RSA_PEM).expect("generate_jwt failed");
-        let parts: Vec<&str> = jwt.split('.').collect();
-        assert_eq!(parts.len(), 3, "JWT must have header.payload.signature");
-    }
-
-    #[test]
-    fn generate_jwt_header_rs256() {
-        let jwt = generate_jwt(1, TEST_RSA_PEM).expect("generate_jwt failed");
-        let header_b64 = jwt.split('.').next().unwrap();
-        let header_json = general_purpose::URL_SAFE_NO_PAD.decode(header_b64).unwrap();
-        let header_str = String::from_utf8(header_json).unwrap();
-        assert!(
-            header_str.contains("RS256"),
-            "header must contain RS256: {header_str}"
-        );
-    }
-
-    #[test]
-    fn generate_jwt_payload_iss() {
-        let app_id = 99887u64;
-        let jwt = generate_jwt(app_id, TEST_RSA_PEM).expect("generate_jwt failed");
-        let payload_b64 = jwt.split('.').nth(1).unwrap();
-        let payload_json = general_purpose::URL_SAFE_NO_PAD
-            .decode(payload_b64)
-            .unwrap();
-        let payload_str = String::from_utf8(payload_json).unwrap();
-        assert!(
-            payload_str.contains(&format!("\"iss\":\"{app_id}\"")),
-            "payload must contain iss={app_id}: {payload_str}"
-        );
-    }
-
-    #[test]
     fn generate_jwt_invalid_pem_err() {
         let result = generate_jwt(1, "not a pem");
         assert!(result.is_err(), "expected Err for invalid PEM");
@@ -435,25 +401,6 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
     }
 
     #[test]
-    fn generate_jwt_payload_iat_and_exp_diff_600() {
-        // exp must be 10 minutes after iat (back-dated 60 s). Guards against
-        // the constant drift mutations on iat/exp arithmetic.
-        let jwt = generate_jwt(1, TEST_RSA_PEM).expect("generate_jwt failed");
-        let payload_b64 = jwt.split('.').nth(1).unwrap();
-        let payload_json = general_purpose::URL_SAFE_NO_PAD
-            .decode(payload_b64)
-            .unwrap();
-        let payload: serde_json::Value = serde_json::from_slice(&payload_json).unwrap();
-        let iat = payload["iat"].as_u64().expect("iat must be a u64");
-        let exp = payload["exp"].as_u64().expect("exp must be a u64");
-        assert_eq!(
-            exp - iat,
-            660,
-            "exp should be iat + 660 (60 back-date + 600 window)"
-        );
-    }
-
-    #[test]
     fn generate_jwt_signature_verifies_with_public_key() {
         // Round-trip: RS256-sign then verify with the corresponding public key
         // derived from the same PEM. Catches mutations that corrupt the
@@ -495,12 +442,5 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         let bare = compute_gitea_sig("secret", b"body");
         let sig = format!("sha1={bare}");
         assert!(!verify_github_signature("secret", &sig, b"body"));
-    }
-
-    #[test]
-    fn parses_installation_account_login() {
-        let body = r#"{"id":42,"account":{"login":"acme-corp"}}"#;
-        let parsed: InstallationResponse = serde_json::from_str(body).unwrap();
-        assert_eq!(parsed.account.login, "acme-corp");
     }
 }

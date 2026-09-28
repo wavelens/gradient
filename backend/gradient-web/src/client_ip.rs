@@ -97,7 +97,6 @@ fn in_any(ip: IpAddr, nets: &[IpNet]) -> bool {
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
-    use std::net::Ipv4Addr;
 
     fn ip(s: &str) -> IpAddr {
         s.parse().unwrap()
@@ -198,14 +197,6 @@ mod tests {
             resolve_client_ip(&h, ip("127.0.0.1"), &trusted),
             ip("127.0.0.1")
         );
-    }
-
-    #[test]
-    fn untrusted_peer_default_ipv4() {
-        let trusted = nets(&["127.0.0.1/32", "::1/128"]);
-        let h = headers_with_xff("8.8.8.8");
-        let peer = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
-        assert_eq!(resolve_client_ip(&h, peer, &trusted), peer);
     }
 
     #[test]

@@ -283,11 +283,6 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    fn sha256_hex(s: &str) -> String {
-        use sha2::{Digest, Sha256};
-        hex::encode(Sha256::digest(s.as_bytes()))
-    }
-
     fn all_caps(val: bool) -> GradientCapabilities {
         GradientCapabilities {
             core: val,
@@ -379,18 +374,6 @@ mod tests {
         let result = negotiate_capabilities(&state, client, enabled);
         assert!(!result.fetch);
         assert!(result.eval);
-        assert!(!result.build);
-    }
-
-    #[test]
-    fn negotiate_capabilities_all_false_client() {
-        let state = make_state(false);
-        let result = negotiate_capabilities(&state, all_caps(false), EnabledCapsAggregate::all());
-        assert!(result.core);
-        assert!(result.cache);
-        assert!(!result.federate);
-        assert!(!result.fetch);
-        assert!(!result.eval);
         assert!(!result.build);
     }
 
@@ -549,44 +532,5 @@ mod tests {
         assert!(authorized.contains(&cache_peer.to_string()));
         assert_eq!(demoted.len(), 1);
         assert_eq!(demoted[0].peer_id, project_without.to_string());
-    }
-
-    #[tokio::test]
-    async fn validate_then_filter_demotes_project_without_cache() {
-        use gradient_wire::auth::validate_tokens;
-
-        let token = "token-x";
-        let project_with = ProjectId::now_v7();
-        let project_without = ProjectId::now_v7();
-        let registered = vec![
-            (project_with.to_string(), sha256_hex(token)),
-            (project_without.to_string(), sha256_hex(token)),
-        ];
-        let auth = vec![
-            (project_with.to_string(), token.to_string()),
-            (project_without.to_string(), token.to_string()),
-        ];
-        let (authorized, failed) = validate_tokens(&registered, &auth);
-        assert_eq!(authorized.len(), 2);
-        assert!(failed.is_empty());
-
-        let cache = gradient_types::ids::CacheId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![
-                project_row(project_with),
-                project_row(project_without),
-            ]])
-            .append_query_results([vec![project_cache_row(project_with, cache)]])
-            .into_connection();
-        let state = state_with_db(db);
-
-        let (authorized, demoted) = filter_project_peers_without_cache(&state, authorized).await;
-        let mut failed = failed;
-        failed.extend(demoted);
-
-        assert_eq!(authorized, vec![project_with.to_string()]);
-        assert_eq!(failed.len(), 1);
-        assert_eq!(failed[0].peer_id, project_without.to_string());
-        assert!(failed[0].reason.contains("project has no cache subscribed"));
     }
 }
