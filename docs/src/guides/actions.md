@@ -96,5 +96,6 @@ The signature lets the receiver reject requests that did not come from Gradient.
 
 ## Next Steps
 
+- [Update Flake Inputs](flake-updates.md): pull requests that bump `flake.lock`
 - [Connect GitHub](forge-github.md): status checks with the **Forge Status Report** action
 - [Projects and Tasks](../concepts/projects-and-tasks.md): triggers and actions
