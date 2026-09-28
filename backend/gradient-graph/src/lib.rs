@@ -30,7 +30,7 @@ use ractor::rpc::CallResult;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 use tokio::sync::watch;
 
-use actor::{CALL_TIMEOUT, GraphActor, GraphArgs, GraphMsg, HEALTH_NAME, RPC_TIMEOUT};
+use actor::{CALL_TIMEOUT, GraphActor, GraphArgs, GraphMsg, HEALTH_NAME};
 pub use messages::*;
 pub use policy::retry_backoff_elapsed;
 
@@ -124,10 +124,11 @@ impl Graph {
         &self,
         msg: impl FnOnce(RpcReplyPort<anyhow::Result<T>>) -> GraphMsg,
     ) -> anyhow::Result<T> {
-        match self.live().await?.call(msg, Some(RPC_TIMEOUT)).await {
+        match self.live().await?.call(msg, None).await {
             Ok(CallResult::Success(result)) => result,
-            Ok(CallResult::Timeout) => Err(anyhow::anyhow!("graph call timed out")),
-            Ok(CallResult::SenderError) => Err(anyhow::anyhow!("graph actor dropped the reply")),
+            Ok(CallResult::SenderError | CallResult::Timeout) => {
+                Err(anyhow::anyhow!("graph actor dropped the reply"))
+            }
             Err(e) => Err(anyhow::anyhow!("graph actor unreachable: {e}")),
         }
     }
@@ -289,6 +290,47 @@ mod tests {
         graph.announce(|| graph::Requeued { requeued: 1 });
 
         assert_eq!(rx.try_recv().unwrap().event.name(), "graph.requeued");
+    }
+
+    struct Backlogged;
+
+    impl Actor for Backlogged {
+        type Msg = GraphMsg;
+        type State = ();
+        type Arguments = ();
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<GraphMsg>,
+            _args: (),
+        ) -> Result<(), ractor::ActorProcessingErr> {
+            Ok(())
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<GraphMsg>,
+            msg: GraphMsg,
+            _state: &mut (),
+        ) -> Result<(), ractor::ActorProcessingErr> {
+            if let GraphMsg::KnownDerivations { reply, .. } = msg {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                let _ = reply.send(Ok(vec!["answered".into()]));
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_caller_behind_a_backlog_gets_the_answer_the_actor_still_gives() {
+        let graph = Graph::new();
+        let (actor, _) = Actor::spawn(None, Backlogged, ()).await.unwrap();
+        graph.actor.send_replace(Some(actor.clone()));
+
+        let answer = graph.known_derivations(Vec::new()).await.unwrap();
+
+        assert_eq!(answer, vec!["answered".to_owned()]);
+        actor.stop(None);
     }
 }
 

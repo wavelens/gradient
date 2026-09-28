@@ -69,10 +69,10 @@ Every non-ingest message flushes the ingest queue first: a read after a batch se
 | Constant | Value | Meaning |
 |---|---|---|
 | `CALL_TIMEOUT` | 30 s | Wait for the actor to exist after a restart |
-| `RPC_TIMEOUT` | 600 s | Wait for a reply; blocks the worker session's reader as backpressure instead of dropping a batch |
 | `GRAPH_TX_BUDGET` | 120 s | Per transaction; past this the transaction rolls back and the caller gets `graph transaction exceeded 120s` |
 | `GRAPH_TX_ATTEMPTS` | 3 | Runs of a transaction aborted with SQLSTATE `40P01` or `40001` |
 
+- A caller waits for its reply without a deadline. The actor runs a message whose caller gave up, so a caller-side timeout would report a write that still lands as failed. A worker session behind a backlog blocks its reader as backpressure.
 - A deadlock inside one batch fails the whole flush (`escalate_retryable`), and `transact` retries the flush.
 - Board events and probe requests an aborted attempt already sent are sent again by the retry.
 - `Transition::Reconcile` (`gradient_db::reconcile_build_graph`) and cache demotion run inside the actor. The consistency sweep (`consistency_sweep_pass`, `gradient-scheduler`) runs outside and is not retried; its next run picks the work up.

@@ -134,7 +134,7 @@ pub(crate) async fn gc_task_evaluations(
         let report = match actor
             .call(
                 |reply| GraphMsg::Gc(GcRequest::Evaluations { ids }, reply),
-                Some(crate::actor::RPC_TIMEOUT),
+                None,
             )
             .await
         {

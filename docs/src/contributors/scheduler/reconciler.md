@@ -109,7 +109,7 @@ Scheduler passes in `backend/gradient-scheduler/src/dispatch/background.rs`. A j
 | `abandoned-dispatch-sweep` | 60 s | Open `dispatched_job` row older than 1800 s | Closes the row `Abandoned`; first reaps aborts unconfirmed after 300 s |
 | `graph-stuck-reheal` | Sweep interval | `Waiting` evaluations with reason `GraphStuck` | Sends `Reconcile { Unstick }` |
 
-- The 900 s grace sits above the graph actor's `RPC_TIMEOUT` (600 s): a slow transition never looks lost.
+- The 900 s grace covers a transition still queued in the graph actor. A re-send that races it is harmless.
 - Both re-sent transitions are idempotent.
 
 ## Dispatch Record Closers

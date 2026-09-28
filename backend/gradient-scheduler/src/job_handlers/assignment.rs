@@ -165,13 +165,13 @@ const TRANSITION_FLOOR_MS: u64 = 500;
 
 /// How long `claim` waits on the `Dispatched` transition.
 ///
-/// The graph actor answers within 600 s, which is far longer than the session
-/// may spend on one frame: the worker's heartbeats queue behind it, and a
-/// heartbeat the liveness pass never sees costs the worker its registration,
-/// its anchor and every other build it is running. Half the deadline keeps the
-/// wait well inside it even when the watchdog is configured tighter than the
-/// default; with the watchdog disabled the ceiling still applies, because the
-/// graph actor's own timeout is no bound on a session at all.
+/// The graph actor answers only once the queue ahead of the message drained,
+/// which can be far longer than the session may spend on one frame: the worker's
+/// heartbeats queue behind it, and a heartbeat the liveness pass never sees costs
+/// the worker its registration, its anchor and every other build it is running.
+/// Half the deadline keeps the wait well inside it even when the watchdog is
+/// configured tighter than the default; with the watchdog disabled the ceiling
+/// still applies, because the graph actor sets no bound on a caller at all.
 fn transition_budget(heartbeat_timeout_secs: u64) -> Duration {
     let ms = match heartbeat_timeout_secs {
         0 => TRANSITION_CEILING_MS,

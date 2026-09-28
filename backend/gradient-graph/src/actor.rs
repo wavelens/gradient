@@ -30,11 +30,10 @@ use crate::{demote, gc, known, nar, requeue, transition};
 
 /// How long a caller waits for the actor to exist after a restart.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long a caller waits for its reply. Long on purpose: a session behind a
-/// burst must block its reader (TCP backpressure on the worker), not drop the
-/// batch; the per-transaction budget below bounds the actor's own work.
-pub const RPC_TIMEOUT: Duration = Duration::from_secs(600);
-/// A transaction past this is rolled back and its caller told.
+/// A transaction past this is rolled back and its caller told. This is the only
+/// bound on a reply: a caller waits out the queue ahead of its message, because
+/// the actor still runs a message whose caller gave up, and a session behind a
+/// burst must block its reader (TCP backpressure on the worker), not drop the batch.
 pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
 /// How many times a transaction aborted for a deadlock or serialization failure runs.
 pub const GRAPH_TX_ATTEMPTS: u32 = 3;
