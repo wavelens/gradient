@@ -1,4 +1,4 @@
-# Database migrations
+# Database Migrations
 
 Gradient uses [SeaORM migrations](https://www.sea-ql.org/SeaORM/docs/migration/setting-up-migration/). Migration files live in `backend/gradient-migration/src/` and are registered in `backend/gradient-migration/src/lib.rs`. Each NixOS service start runs `Migrator::up(&db, None)` (see `backend/gradient-db/src/connection.rs`), which applies every registered migration not yet recorded in the `seaql_migrations` table.
 

@@ -3,7 +3,7 @@
 The Gradient scheduler coordinates build dispatch across connected workers.
 This page covers how builds are shared across evaluations and projects.
 For a general overview of the scheduler architecture see
-[Architecture](development/architecture.md).
+[Architecture](contributors/architecture.md).
 
 ### Shared build anchors
 

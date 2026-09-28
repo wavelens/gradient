@@ -85,17 +85,17 @@ nav:
       - Events and Webhooks: reference/events.md
       - Scheduler Policies: reference/scheduler-policies.md
   - Contributors:
-      - Architecture: development/architecture.md
-      - Internals: development/internals.md
+      - Architecture: contributors/architecture.md
+      - Internals: contributors/internals.md
       - Scheduler: scheduler.md
-      - Eval Worker Setup: development/eval-worker.md
-      - Migrations: migrations.md
+      - Eval Worker Setup: contributors/eval-worker.md
+      - Migrations: contributors/migrations.md
       - Proto: development/proto.md
       - Scheduler Scoring: development/scheduler-scoring.md
-      - Evaluation Metrics: development/eval-metrics.md
-      - Tests: development/tests.md
-      - Frontend Style Guide: development/frontend-style-guide.md
-      - Contributing: development/contributing.md
+      - Evaluation Metrics: contributors/eval-metrics.md
+      - Tests: contributors/tests.md
+      - Frontend Style Guide: contributors/frontend-style-guide.md
+      - Contributing: contributors/contributing.md
 
 plugins:
   - search
