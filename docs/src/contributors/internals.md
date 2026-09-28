@@ -1,174 +1,100 @@
 # Internals
 
-Key functions inside each crate.
+Implementation details that fit no other contributor page: forge hooks, NAR storage and signing, the graph API, recursive SQL walks, authentication and the deep GC. Paths are relative to `backend/`.
 
----
+| Topic | Page |
+|---|---|
+| Evaluation steps, fetch and walk | [Jobs](proto/jobs.md), [Eval Worker Setup](eval-worker.md) |
+| Batch ingest, anchors | [Build Anchors](scheduler/build-anchors.md) |
+| Promotion, dispatch gates, failure cascade | [Promotion and Counters](scheduler/promotion-and-counters.md) |
+| Offers, assignment, scoring | [Capabilities and Dispatch](proto/capabilities-and-dispatch.md), [Scoring](scheduler/scoring.md) |
+| Uploads, downloads | [Transfer](proto/transfer.md) |
+| Wholeness, runtime ripple, cache access | [Cache Closure](scheduler/cache-closure.md) |
+| Worker registration and auth | [Connection](proto/connection.md) |
+| Statuses | [Evaluations and Builds](../concepts/evaluations-and-builds.md) |
 
-## Forge Webhook Ingestion
+## Forge Webhooks
 
-`web::endpoints::forge_hooks` handles incoming push events from external forges. All endpoints are unauthenticated and self-verify via HMAC.
+`gradient-web/src/endpoints/forge_hooks/` receives forge events. The routes carry no session; each delivery proves itself with the forge's signature.
 
-**GitHub App** (`POST /api/v1/hooks/github`):
-- Verifies `X-Hub-Signature-256` against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
-- `push` → calls `core::evaluation_trigger::trigger_evaluation` for each matching task.
-- `installation` / `installation_repositories` → upserts or clears `github_installation` rows and seeds the `github-<account>` integration pair.
+| Route | Verification |
+|---|---|
+| `POST /api/v1/hooks/github` | `X-Hub-Signature-256` against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`; `503` until the App is fully configured |
+| `POST /api/v1/hooks/{forge}/{project}/{integration}` | `{forge}` is `gitea`, `forgejo` or `gitlab` (`github` answers `400`). Gitea/Forgejo HMAC (`X-Forgejo-Signature`, then `X-Gitea-Signature`); GitLab compares `X-Gitlab-Token` in constant time |
 
-**Generic forges** (`POST /api/v1/hooks/{forge}/{project}/{integration_name}`):
-- `{forge}` ∈ `gitea`, `forgejo`, `gitlab`. GitHub deliveries route to the App webhook above.
-- Looks up the integration by `(project, kind=inbound, name=integration_name)` - `forge_type` is **not** part of the filter, so one inbound row can serve all three generic forges.
-- Decrypts `integration.secret` (same `crypt_secret_file` infrastructure as SSH keys).
-- Picks the HMAC scheme from the `{forge}` path segment (`X-Gitea-Signature`, `X-Gitlab-Token`, etc).
-- `push` → calls `trigger_evaluation` for each matching task.
+- The generic route looks the integration up by `(project, inbound, name)`, without `forge_type`: one inbound row serves all three forges. The secret is decrypted with the crypt file; `allowed_ips` rejects other sources with `403`.
+- GitHub `installation` / `installation_repositories` events upsert or clear `github_installation` and seed the `github-<login>` integration pair (`github-<installation_id>` without a login).
+- Handled events: `push`, `pull_request`, `release`, `check_run`, `issue_comment`, `pull_request_review`.
 
-**Shared trigger** (`core::evaluation_trigger::trigger_evaluation`):
-1. Checks no evaluation is already in progress (returns `TriggerError::AlreadyInProgress` if so).
-2. Inserts a `Commit` row with the push SHA.
-3. Inserts an `Evaluation` row with status `Queued`.
-4. Sets `task.force_evaluation = true` and resets `last_check_at` to the epoch.
-5. The scheduler picks it up on its next tick (≤ 60 s) via the existing pre-created `Queued` evaluation path.
+**Push chain:**
 
-Repository matching normalises URLs by stripping trailing `.git` and compares against all active tasks.
+1. `trigger_push_for_integration` -> `fan_out_triggers` (`forge_hooks/fanout.rs`): active `task_trigger` rows of type `ReporterPush` whose branch and tag globs match.
+2. Repository match: `normalize_repo_url` strips `.git` and a trailing `/` and rewrites `git@` URLs; `event_repo_matches_task` compares lowercased `owner/repo`, ignoring the host.
+3. `gradient_ci::apply_trigger` applies dedup and concurrency: a running evaluation is aborted, or the new one parks in `Waiting`; a violation of `uq_evaluation_one_active_per_task` maps to `SkippedConcurrency`.
+4. `gradient_ci::trigger::trigger_evaluation` inserts the `Commit` row and a `Queued` evaluation, sets `task.force_evaluation` and resets `last_check_at`.
+5. The `eval-dispatch` tick (every 5 s) hands the evaluation to a worker.
 
----
+## NAR Storage
 
-## Evaluation Pipeline
+- **Layout:** `${baseDir}/nars/<2 chars>/<rest>.nar.zst`, keyed by the **store-path hash**: a presigned upload URL exists before the worker knows the content hash. The narinfo advertises `nar/<file_hash>.nar.zst`; `resolve_effective_hash_db` maps the file hash back.
+- **Idempotent REST uploads:** `ingest_nar_reader` (`nix copy` push) goes through `put_nar_idempotent`, which skips the write when `cached_path` records the same `file_hash` and a `HEAD` finds the object.
+- **Proto commits** verify length and SHA-256 and move the relayed file in with `adopt_file`; presigned uploads bypass the server.
+- **Local storage** relays every upload through the server.
+- `last_fetched_at` and `fetch_count` feed eviction.
 
-`builder::scheduler::schedule_evaluation_loop` polls for queued evaluations every 60 seconds, up to `max_concurrent_evaluations` concurrent tasks.
+!!! warning "Bucket Requirements"
+    - No object versioning (nor object lock or replication, which force versioning): Gradient assumes overwrite on PUT, and a versioned bucket keeps one copy per re-upload that no S3 GC reclaims.
+    - An `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days): NARs over 1 GiB go up as multipart, and a worker that dies mid-upload leaves the parts behind.
 
-For each evaluation, a `PendingEvalJob` is enqueued into the proto scheduler's `JobTracker`. The scheduler dispatches it to an eligible connected worker that has the `eval` (and optionally `fetch`) capability negotiated.
+## Signing and Narinfo
 
-The worker executes:
+- **Keys:** one Ed25519 key per cache, encrypted with the crypt secret. `format_cache_key` returns the decrypted private key; `format_cache_public_key` the `<host>-<name>:<base64>` public key.
+- **The server signs**, never the worker: `gradient_proto::signing::sign_cached_path`, called on a NAR commit and on a REST upload. A commit queues `cached_path_signature` placeholders for every subscribed cache; the sign sweep (`gradient-cache/src/cacher/sign_sweep.rs`, `sign_missing_signatures`) fills them. Subscribing a cache later inserts placeholders too.
+- **Narinfo** (`GET /cache/{cache}/<hash>.narinfo`) is built from the database only: `derivation_output`, `cached_path`, `cached_path_signature`, with `CA:` for content-addressed paths. A hash without a `derivation_output` falls back to `cached_path` (`.drv` files, standalone paths). The server never re-packs or re-hashes a NAR.
+- **Pull-through:** an upstream narinfo gets `URL:` rewritten to `nar/upstream/{id}/...` and is re-signed only after the upstream signature verifies; `X-Cache` tells local from upstream.
 
-**1. FetchFlake** (if `fetch` capability)
+## Debug Info
 
-Converts the repository URL and commit hash into a Nix flake reference: `git+https://host/repo?rev=<sha1>`, then runs `nix flake prefetch` to populate the local store. SSH credentials for private repos are delivered via the `Credential::SshKey` proto message.
+`GET /cache/{cache}/debuginfo/{build_id}` mirrors Nix's `index-debug-info`:
 
-**2. EvaluateFlake + EvaluateDerivations** (if `eval` capability)
-
-Expands the evaluation wildcard into attribute paths, resolves each to a `.drv` path via the Nix C API, and walks the dependency closure via BFS. During the walk the worker sends **incremental `EvalResult` batches** as derivations are discovered - the server inserts rows immediately without waiting for the full walk.
-
-Wildcard segments:
-
-- `*` - **recursive**: matches any attribute name and, when at the trailing position, descends one additional level to recover derivations hidden by consecutive-wildcard collapsing (`packages.*.*` and `packages.*` are equivalent).
-- `#` - **non-recursive**: matches any attribute name at exactly that depth and checks `type == "derivation"` without descending further.
-- `!prefix` - **exclusion**: removes exact paths from the collected set.
-
-**3. Server-side batch insert** (on each `EvalResult` batch)
-
-Every batch is one transaction in the graph actor: `derivation` rows are upserted (a stub for each named dependency, the full record for each walked derivation), then outputs, dependency edges and input sources for the walked ones, then `derivation_build` anchors and this evaluation's `build_job` rows for every name. A derivation whose outputs are whole in our cache is inserted `Substituted`.
-
-**4. Status transitions**
-
-```text
-build:       Created → Queued → Building → Completed | Failed
-                                         ↘ Substituted (already in store)
-                                         ↘ Aborted | DependencyFailed
-evaluation:  Queued → Fetching → EvaluatingFlake → EvaluatingDerivation → Building
-                                                                       → Completed | Failed | Aborted
+```json
+{"archive": "../nar/<file_hash>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}
 ```
 
-`Substituted` is distinct from `Completed`: it means the derivation was already in the local Nix store at evaluation time and never ran on a builder.
+- `archive` is relative to the requested key. Both spellings are accepted: `<build-id>` (Hydra) and `<build-id>.debug` (`nix copy`). The `cached_path_signature` join is the access gate, as for narinfo.
+- The `debug_info` index comes from walking the NARs of paths ending in `-debug` (`separateDebugInfo` outputs). An upload walks its own NAR on a detached task; `cached_path.debug_info_indexed` marks a scanned NAR, and the `debug-index` sweep reads each `file_hash` at most once.
+- A miss falls through to the upstreams and rewrites `archive` through `nar/upstream/{id}/...`. An `archive` that is absolute or escapes the upstream root is refused.
 
-Builds promote from `Created` to `Queued` incrementally (#392): as soon as a derivation is walked and its dependencies are satisfied - which may happen mid-walk - its build is queued, and the dispatcher (which gates on dependencies, not evaluation status) may start it while later derivations still evaluate. The evaluation row stays in `EvaluatingDerivation` until the walk finishes, then moves to `Building`.
+**Status codes under `/cache/{cache}/`:** an unknown key answers `404`, never another `4xx`: substituters and debuginfod clients treat other codes as hard errors instead of trying the next source. A disabled cache answers `400`, a private cache without credentials `401`.
 
----
+## Closure Rows
 
-## Build Dispatcher
+`cache_derivation(cache, derivation)` exists when every output of the derivation is cached and every dependency has its own row for the same cache, for projects subscribed to the cache.
 
-The proto scheduler's dispatch loop (`proto::scheduler::dispatch`) polls for eligible builds and pushes `JobOffer` messages to connected workers with the `build` capability.
-
-**Eligibility:** an anchor is offered when it is `Queued`. `Queued` is maintained by the readiness counters (`derivation_build.unready_deps = 0`, a whole `.drv` or an upstream copy, a walked derivation) and un-promoted when a gate regresses, so the dispatcher reads the status and the `build_job` reachability check only. Two partial indexes back the hot path: `idx-derivation_build-dispatch-ready` (`status = 1`) drives the queue scan in `updated_at` order, and `idx-derivation_build-promotable` (`status = 0 AND unready_deps = 0`) keeps the table-wide promote an index lookup.
-
-**Worker matching:** `JobOffer` is sent to workers whose `WorkerCapabilities` include the build's target architecture and all required features from `derivation_feature`. Workers score each candidate against their local store (missing required paths) and stream scores back via `RequestJobChunk`. The server assigns to the worker with the lowest `missing` count; ties broken by fewest assigned jobs.
-
-**Execution** (on the worker):
-1. Receive `AssignJob` with the full dependency chain in topological order.
-2. Send `NarRequest` for missing input paths (known from scoring).
-3. Receive input NARs via `NarPush` frames or presigned S3 URLs.
-4. Build each derivation in order via the local Nix daemon (`build_derivation`).
-5. Stream `JobUpdate::BuildOutput` for each completed derivation.
-6. Compress outputs and send `JobUpdate::Compressing`.
-7. Sign outputs and send `JobUpdate::Signing` (if `sign` capability).
-8. Send `JobCompleted`.
-
-The server updates `build` and `derivation_output` rows as `JobUpdate` messages arrive, making results visible in the UI immediately.
-
-**Failure cascade:** when a build fails, the server walks reverse `derivation_dependency` edges and marks all downstream builds `DependencyFailed`. The failing build is set to `Failed`.
-
----
-
-## Binary Cache
-
-**Serving a NAR**
-NARs are served with ZSTD compression. They are stored in `${base_dir}/nars/[first 2 chars of hash]/[rest of the hash].nar.zst`, keyed by the **store-path hash** (so a presigned upload URL can be issued before the worker has computed the content hash). The narinfo advertises `nar/<file_hash>.nar.zst`; `resolve_effective_hash_db` maps that file_hash back to the store-path key on each fetch.
-
-**Idempotent writes.** Server-side ingestion (`ingest_nar` for `nix copy` push, and the upload commit) goes through `put_nar_idempotent`, which skips the object-store write when a `cached_path` row already records the same `file_hash` and the object is present (`HEAD`). This keeps redundant re-pushes from rewriting an identical object. The NAR object store must **not** retain noncurrent versions: gradient assumes overwrite-on-PUT semantics, so a bucket with versioning (or object-lock / replication, which force it on) accumulates one retained copy per re-upload that no S3-API GC can reclaim. The worker→S3 presigned upload bypasses the server entirely, so the no-versioning requirement is the only guard on that path. NARs over 1 GiB go up as a presigned multipart upload that the server completes on `UploadFinished`; a worker that dies mid-upload leaves the upload open, so the bucket should carry an `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days) to reclaim its parts.
-
-**Signing**
-
-Each cache has a dedicated Ed25519 signing key encrypted in the database (using the server's crypt secret). `format_cache_key` decrypts it and returns the public key in Nix's `<hostname>-<name>:<base64>` format for use in `trusted-public-keys`.
-
-**Narinfo** (`GET /cache/{cache}/{hash}.narinfo`)
-
-Constructs a `NixPathInfo` response from `derivation_output` + `cached_path` + `cached_path_signature`. Sizes, hashes, and references are read directly from the DB row the worker populated when it uploaded the NAR - the server never re-packs or re-hashes a NAR. For content-addressed paths (those with `cached_path.ca` set), the `CA:` field is emitted in the narinfo response.
-
-When the hash doesn't match any `derivation_output`, narinfo falls back to the `cached_path` table. This covers `.drv` files and any other standalone store path the worker pushed.
-
-**Worker-side signing.** All packing, zstd compression, and Ed25519 signing happen on the worker. Before dispatching a `FlakeJob` or `BuildJob`, the server sends one `Credential { kind: SigningKey }` per cache owned by the job's project that has a `private_key` configured. The worker accumulates the keys and signs every path it uploads (fetched flake input, evaluated `.drv`, built output) once per key. Signatures arrive via `FetchedInput.signatures` or `JobUpdate::Signed`; the server stores each entry in `cached_path_signature` keyed by the cache named in the signature. A cache added after a path was uploaded has no signature for that path until it is re-uploaded - there is no server-side backfill.
-
-**Debug info** (`GET /cache/{cache}/debuginfo/{build_id}`)
-
-Mirrors nix's `index-debug-info`: the response is the JSON document
-`{"archive": "../nar/<file_hash>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}`,
-with `archive` relative to the requested key so it resolves against the cache root. Both the hydra spelling (`<build-id>`) and the `nix copy` one (`<build-id>.debug`) are accepted, and the `cached_path_signature` join is the access gate, same as narinfo. The index in `debug_info` is filled by walking the stored NAR of `separateDebugInfo` outputs - store paths whose name ends in `-debug`, the only ones nixpkgs gives a `lib/debug/.build-id` tree. An upload walks its own NAR on a detached task; `cached_path.debug_info_indexed` marks a NAR scanned (even when it held nothing) so the `debug-index` backfill sweep reads each one at most once per `file_hash`. A miss falls through to the cache's upstreams and rewrites their `archive` link through `nar/upstream/{id}/...`, the same pull-through shape `/log` has; `X-Cache` distinguishes the two. Nix signs store paths, not the debug index, so there is nothing to verify on an upstream document - an `archive` that is absolute or escapes the upstream root is refused rather than proxied.
-
-Every key under `/cache/{cache}/` that we do not serve answers `404`, never another `4xx`: substituters and debuginfod clients treat any other status as a hard error and abandon the lookup instead of trying the next substituter.
-
-**Closure presence** (`cache_derivation`)
-
-The cacher maintains the invariant: a `cache_derivation(cache, derivation)` row exists iff every `derivation_output` of `derivation` has `is_cached = true` AND every transitive dependency of `derivation` has its own `cache_derivation` row for the same cache. After caching an output, `try_record_cache_derivation` checks both conditions and inserts the row when they hold; otherwise the next caching pass picks it up. Invalidation walks reverse `derivation_dependency` edges in `revoke_cache_derivation_closure` and deletes every dependent's `cache_derivation` row for the affected cache, since their closure assertion no longer holds.
-
-This makes "is the full closure of build B available in cache C" a single DB lookup against `cache_derivation` instead of a per-output filesystem probe.
-
----
+- Written by the sign sweep's `record_newly_completed_derivations`, with a full backfill at most once an hour.
+- Revoked by `gradient_db::revoke_cache_closures`.
+- Nothing reads the table today.
 
 ## Dependency Graph API
 
-`GET /builds/{build}/graph` - BFS from the requested build, capped at 500 nodes. The graph is stored on derivations, so the BFS walks `derivation_dependency` and resolves each visited derivation back to a `build` row in the same evaluation for UI display:
+`GET /builds/{build}/graph` (`gradient-web/src/endpoints/builds/graph.rs`) walks `derivation_dependency` breadth-first from the build and maps each derivation to its `build_job` in the same evaluation.
 
-```text
-root_drv = build.derivation
-visited_drvs = {root_drv}
-queue = [[root_drv]]
-
-while queue not empty and nodes.len() < 500:
-    batch = queue.pop_front()
-    fetch derivation_dependency edges where derivation IN batch
-    resolve dep drv ids → builds in the same evaluation as the requested build
-
-    for each edge:
-        if edge.dependency not in visited_drvs:
-            visited_drvs.add(edge.dependency)
-            next_batch.push(edge.dependency)
-
-    if next_batch not empty: queue.push(next_batch)
-```
-
-Returned `DependencyEdge { source, target }` are build IDs - `source` is the dependency's build and `target` is the dependent's build, so `source` must be built before `target`.
-
-Batching the BFS (one DB round-trip per level) keeps the query count proportional to graph depth rather than node count.
-
----
+- The frontier is a set of `BuildJobId`s; a dependency without a `build_job` in the evaluation is dropped.
+- A soft cap of 500 nodes, checked before each wave.
+- About five queries per wave: the query count follows the depth, not the node count.
+- No `kind` filter: runtime edges appear too.
+- `DependencyEdge { source, target }`: `source` is the dependency, built before `target`.
+- `GET /builds/{build}/dependencies` lists the direct dependencies.
 
 ## Recursive Graph Walks
 
-Every unbounded traversal is generated in `gradient-db/src/graph_sql.rs`: the build closure and the failure cascade, and the on-demand runtime closure (the build closure page, the runtime-closure size on the task metrics), all over `derivation_dependency`. Callers pass a seed and a direction and get back a `WITH RECURSIVE` prelude, so no two walkers can disagree about what "reachable" means.
+`gradient-db/src/graph_sql.rs` generates the build closure, the failure cascade, the runtime closure (`runtime_closure_cte`, `kind IN (1, 2)`) and the GC keep-set (`live_cached_paths_cte`). Callers pass a seed and a direction and get a `WITH RECURSIVE` prelude; walks run under `begin_walk`, which sets `work_mem = '64MB'`.
 
-Build-time and runtime dependencies are two kinds of one edge, not two graphs: `derivation_dependency.kind` is `0` for the build inputs the walk reads off the `.drv`, `1` for the runtime references a narinfo or a landed NAR names, and `2` for an edge that is both. A reference is resolved through `derivation_output`, so one naming an output of a still-unwalked stub cannot become an edge when it is recorded; the walk that gives the stub its outputs adopts every `cached_path.references` and `derivation_output.references_list` entry naming them (GIN-indexed on `string_to_array(..., ' ')`), and the referrers lose wholeness and gain demand exactly as a NAR commit's producers would. Demand and naming are where the two meet, and they are projections of the one walk that steps over both (`graph_sql::open_closure_cte_body`): it reaches an anchor while it is open (not fetchable, not the requeue's), every member steps over its runtime edges, and only a builder steps over its build edges.
+Hand-written walks outside the module: `walk_completeness.rs`, `runtime_readiness.rs` (`recount_sql`), `task_board.rs` (`DEP_COUNTS_SQL`), `cache_storage.rs` (`revoke_cache_closures_sql`).
 
-Cache wholeness is deliberately not one of them. `derivation_build.missing_runtime_deps` counts an anchor's runtime edges into something that is not whole and is moved one level per statement as anchors become or stop being whole, so no walk re-derives it outside the sweep's absolute recount; see [the scheduler](scheduler/cache-closure.md).
+### The `OFFSET 0` Fence
 
-The recursive term is always a `LATERAL` probe behind an `OFFSET 0` fence:
+`graph_sql.rs` (`lateral_step`) and `walk_completeness.rs` put the recursive term behind a `LATERAL` probe and an `OFFSET 0` fence:
 
 ```sql
 WITH RECURSIVE closure(derivation) AS (
@@ -179,91 +105,62 @@ WITH RECURSIVE closure(derivation) AS (
       WHERE e.derivation = c.derivation OFFSET 0) s)
 ```
 
-The fence is load-bearing, not decoration. Postgres estimates a recursive CTE's working table at ten times the seed; on a 44 000-node evaluation closure that is 348 870 rows estimated against 2 439 actual. At the estimated cardinality a merge join against the whole edge index costs out cheaper than a nested loop, so the planner rescans all four million edges once per iteration. `OFFSET 0` stops the subquery being pulled up, and a correlated lateral can only run as a nested loop with a per-row index lookup. Measured against production:
+- Postgres estimates a recursive working table at ten times the seed: 348 870 rows estimated against 2 439 actual on a 44 000-node closure.
+- At that estimate a merge join over the whole edge index looks cheaper than a nested loop, and the planner rescans four million edges per iteration.
+- `OFFSET 0` stops the pull-up; a correlated lateral can only run as a nested loop with an index lookup per row.
 
-| walk | plain join | fenced |
+| Walk (production) | Plain join | Fenced |
 |---|---|---|
-| evaluation closure, 43 898 nodes | 5 278 ms | 955 ms |
+| Evaluation closure, 43 898 nodes | 5 278 ms | 955 ms |
 | GC keep-set, 315 155 nodes | 40 069 ms | 9 746 ms |
 
-The set operator stays `UNION`. It is what deduplicates the frontier on each iteration; the dependents walk emits 940 000 rows for 68 000 distinct nodes, and `UNION ALL` would make the walk exponential in depth on a diamond-shaped graph.
+The set operator stays `UNION`, which deduplicates the frontier each iteration. The dependents walk emits 940 000 rows for 68 000 distinct nodes; `UNION ALL` grows exponentially with depth on diamond graphs.
 
-The edge table carries a covering index in each direction it is probed, so the walk is index-only rather than one heap fetch per row: `(derivation, dependency)` and `(dependency, derivation)`, plus a partial `(dependency) INCLUDE (derivation) WHERE kind IN (1, 2)` for the wholeness ripple, which probes from a dependency to the anchors that count it. The table has no surrogate key; the natural pair is the primary key.
+### Indexes and Ripples
 
-A ripple level is two statements, not one: it reads its referrers and their edge counts `ORDER BY referrer`, then moves the counters through `unnest` of that bound set. Deriving the set inside the update instead left the planner with no small driver, and at production scale it answered the join with a sequential scan of the whole of `cached_path` — which both cost far more than the lookup and took the update's row locks in physical rather than hash order, deadlocking a NAR commit against a concurrent maintenance retire roughly every six minutes. Driving the update from the ordered array is what keeps the ripples inside the hash-ordered lock discipline the rest of `nar_closure` obeys.
+- `derivation_dependency` has no surrogate key: the pair is the primary key (`derivation_dependency_pkey`), with `idx-derivation_dependency-reverse-pair` for the other direction. Both are covering: walks are index-only.
+- `idx-derivation_dependency-runtime`, a partial `(dependency) INCLUDE (derivation) WHERE kind IN (1, 2)`, drives the wholeness ripple from a dependency to the anchors counting it.
+- A ripple level is three statements: `RUNTIME_DEPENDENT_COUNTS` reads the dependents and their edge counts, `lock_anchors` locks them in `derivation` order, and `COUNT_DOWN_RUNTIME` / `COUNT_UP_RUNTIME` move the counters through `unnest` of the bound set.
+    - Deriving the set inside the update left the planner without a small driver: a sequential scan of `cached_path` that took row locks in physical order and deadlocked NAR commits against maintenance about every six minutes.
+- The GC freshness seed reads `build_job` and `entry_point` by `created_at` (`idx-build_job-created_at`, `idx-entry_point-created_at`, both `INCLUDE (derivation)`). The cutoff is the candidate scan's start: the seed matches almost nothing and must not scan to find that out.
 
-The GC's freshness seed reads `build_job` and `entry_point` by `created_at`, both indexed `INCLUDE (derivation)`: the cutoff is the moment the candidate scan ran, so the seed normally matches almost nothing and must not read the table to discover that.
+### Instance Metrics
 
-The instance-metrics pass averages nine values over the last 24 hours of dispatches every 30 seconds. Three of them — `missing_nar_size`, `missing_count`, `dependency_count` — are columns on `dispatched_job` rather than reads out of `job_context`, and `idx-dispatched_job-build-window` carries them alongside `ready_at` so the aggregate is an index-only scan of the window. Averaging them out of the jsonb instead was measured in production at 1.94M buffers and 1.6 s against 449k rows, of which the scan itself was only 183k buffers. The columns are written from the same view that writes the jsonb and are deliberately not backfilled: `AVG` skips nulls exactly as it skipped an absent json key, and no window is longer than a day.
+Every 30 s (`GRADIENT_METRICS_INSTANCE_INTERVAL_SECS`) the instance pass averages nine `derivation_metric` values and four `dispatched_job` values over 5 min, 1 h and 24 h windows.
+
+- `missing_nar_size`, `missing_count` and `dependency_count` are columns on `dispatched_job`, carried by `idx-dispatched_job-build-window` next to `ready_at`: the aggregate is an index-only scan.
+- Reading them out of the `job_context` jsonb measured 1.94M buffers and 1.6 s for 449k rows in production.
+- The columns are not backfilled: `AVG` skips nulls as it skipped a missing JSON key, and no window exceeds a day.
 
 ### SQL/PGQ
 
-PostgreSQL 19 implements SQL/PGQ (ISO SQL:2023 part 16), which layers a property-graph view over ordinary tables and queries it with `GRAPH_TABLE`. Gradient does not use it, and adopting it is not currently possible: the first implementation matches fixed-length patterns only, with no quantified path patterns and no transitive closure, and every walk here is unbounded depth.
-
-Nothing needs to change for that to become an option. `derivation` is already a vertex table and `derivation_dependency` an edge table with foreign keys to both ends, which is the shape `CREATE PROPERTY GRAPH ... EDGE TABLES (... SOURCE ... DESTINATION ...)` requires, and keeping every traversal inside `graph_sql.rs` means a switch would touch one module. Revisit when quantified path patterns land.
-
----
+PostgreSQL 19's SQL/PGQ (`GRAPH_TABLE`) is not used: the first implementation matches fixed-length patterns only, and every walk here has unbounded depth. `derivation` and `derivation_dependency` already have the vertex and edge table shape `CREATE PROPERTY GRAPH` needs; a switch would touch `graph_sql.rs` and the hand-written walks above. Revisit when quantified path patterns land.
 
 ## Authentication
 
-**JWT** - `HS256` signed with the key in `GRADIENT_SECRETS_JWT_FILE`. Payload contains `sub: user_uuid`. Regular tokens expire after 24 hours; `remember_me` tokens after 30 days. Generated in `web::authorization::encode_jwt`.
+| Token | Details |
+|---|---|
+| Session JWT | HS256 with `GRADIENT_SECRETS_JWT_FILE`. Claims `{ exp, iat, id, jti }`, `jti` the `session` row. 24 h, or 30 days with `remember_me`. Minted by `create_session_and_token` |
+| API key | 64 random alphanumeric characters, stored as SHA-256 hex, returned with a `GRAD` prefix. Carries `expires_at`, `revoked_at`, an optional project or cache pin, a permission mask and `allowed_ips` |
+| Download token | 1 h, from `encode_download_token` |
 
-**API keys** - 32 random bytes encoded as hex, stored hashed in `api.key`, prefixed with `GRAD` when returned to the user. The `authorization::authorize` middleware accepts both token types in the `Authorization: Bearer` header.
+- Tokens come from `Authorization: Bearer` or the `jwt_token` cookie.
+- Each request checks the session row for revocation and expiry.
+- `api.last_used_at` and `session.last_used_at` are stamped at most once a minute (`LAST_USED_STAMP_INTERVAL`); a failed stamp is logged, never fatal.
+- **OIDC:** `oidc_login_create` builds the authorization URL with PKCE (S256) and keeps `state`, `nonce` and the verifier in a signed `oidc_csrf` cookie (10 min). `oidc_login_verify` checks `state`, exchanges the code, verifies the ID token against the provider JWKS and upserts the user; the endpoint then mints the session. Discovery reads `<discoveryUrl>/.well-known/openid-configuration`.
 
-**Last used.** `api.last_used_at` and `session.last_used_at` are stamped on the request path at most once per minute per key or session (`ServerState::last_used_stamps`, `LAST_USED_STAMP_INTERVAL`). A failed stamp is logged and never fails the request.
+## Deep GC
 
-**OIDC** - `oidc_login_create` builds the authorization URL with PKCE (S256), storing `state`, `nonce`, and the PKCE verifier in a short-lived signed `oidc_csrf` cookie. `oidc_login_verify` validates `state`, exchanges the code (sending `code_verifier`), verifies the ID token against the provider JWKS, then upserts the user row and returns a JWT. Endpoint discovery is automatic from `GRADIENT_OIDC_DISCOVERY_URL/.well-known/openid-configuration`.
+Long-running admin operations live in `admin_task`: `kind` (`deep_gc`) and `status` (`pending` -> `running` -> `completed` / `failed`). The partial unique index `admin_task_one_active_per_kind` allows one active task per kind; a second `POST` answers `409`.
 
----
+`POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) inserts the row and starts the sweep via `Shutdown::spawn`. Three passes reconcile storage against the database (`gradient-cache/src/cacher/deep_gc.rs`):
 
-## Worker Registration & Auth
+| Pass | Removes |
+|---|---|
+| NAR | `cleanup_orphaned_cache_files`: objects without `cached_path` rows and rows without objects. Evicting stale live paths is maintenance's job |
+| Blob | `build-request-blobs/...` objects and `build_request_blob` rows without a partner |
+| Log | Logs keyed by `BuildAttemptId` without a `build_attempt` row; an attempt without a log is legitimate |
 
-Workers authenticate to the server using a challenge-response flow:
-
-1. A peer (project admin) calls `POST /api/v1/projects/{project}/workers` with `{"worker_id": "<string>"}`.
-2. The server generates a 32-byte random token, stores `sha256(token)` in `worker_registration` with `peer_id = project.id`, and returns `{peer_id, token}`.
-3. The worker operator configures `GRADIENT_WORKER_PEERS_FILE` with `peer_id:token` pairs.
-4. On connect, the server sends `AuthChallenge { peers }` listing all project IDs that registered this worker ID.
-5. The worker responds with `AuthResponse { tokens: {peer_id: token} }`.
-6. The server validates each token by comparing `sha256(token)` against the stored hash. The worker is authorized for all peers that pass.
-
-A worker may be authorized for multiple projects simultaneously - it sees job candidates from all its authorized peers.
-
----
-
-## State-Managed Resources
-
-See [Declarative State](../concepts/declarative-state.md#ui-managed-and-nix-managed).
-
----
-
-## Admin tasks and the deep GC sweep
-
-Long-running administrative operations are tracked in the `admin_task`
-table. Each row has a `kind` (currently only `deep_gc`) and a `status`
-(`pending` → `running` → `completed`/`failed`). A partial unique index on
-`(kind) WHERE status IN (pending, running)` enforces that at most one
-active task per kind exists; a concurrent `POST` collides on the index
-and the endpoint returns `409 Conflict`.
-
-`POST /admin/maintenance/deep-gc` inserts a `pending` row and spawns the
-sweep via `Shutdown::spawn`. The sweep runs three passes - NAR, blob,
-log - each bidirectionally reconciling its storage backend against the
-DB:
-
-1. **NAR pass** reuses `cleanup_orphaned_cache_files`: removes NAR objects
-   with no `cached_path` row and rows whose object is gone; eviction of
-   live-but-stale paths is the maintenance pass's job, not the deep GC's.
-2. **Blob pass** lists `build-request-blobs/...` from `nar_storage` and
-   `build_request_blob` rows. Orphans on either side are removed.
-3. **Log pass** lists `BuildId`s from `log_storage`. Orphan logs (no
-   matching `build` row) are deleted. The DB→storage direction is
-   intentionally skipped because a `build` row without a log is a
-   legitimate state.
-
-Counters are flushed to `admin_task.progress` between passes.
-
-When the server restarts, any non-terminal admin task is marked `failed`
-with `error = "server restarted before completion"` before the web layer
-accepts traffic. Operators re-issue the POST to start a fresh sweep;
-each pass is idempotent.
+- Progress is flushed to `admin_task.progress` between passes and read at `GET /api/v1/admin/tasks[/{task_id}]`.
+- A failed pass stops the sweep and keeps the partial report.
+- On restart, every non-terminal task is marked `failed` ("server restarted before completion") before the web layer serves; each pass is idempotent, and a new `POST` starts over.
