@@ -1,4 +1,4 @@
-# Events & Webhooks
+# Events and Webhooks
 
 Every state change Gradient makes is a typed event with a dotted name (`build.completed`, `task.star`, `proto.client.nar_push`).
 
@@ -19,7 +19,7 @@ The same JSON everywhere: websocket frames, webhook bodies, task action bodies.
 }
 ```
 
-## Event families
+## Event Families
 
 | Family | Durable | Examples |
 |---|---|---|
@@ -38,6 +38,8 @@ Every `build.*` event carrying a per-evaluation `build_id` also carries `derivat
 
 ## Webhooks
 
+Webhooks are managed under **Webhooks** in the project settings, on the cache page, and for superusers under **Job Board -> System Health -> Instance Webhooks**. [Task actions](../guides/actions.md) receive the same envelope for single tasks.
+
 | Scope | API | Who may manage | Receives |
 |---|---|---|---|
 | Project | `/api/v1/projects/{project}/webhooks` | `manageWebhooks` | events of the project, its tasks and evaluations |
@@ -54,7 +56,7 @@ Request headers:
 ```http
 Content-Type: application/json
 X-Gradient-Event: build.completed
-X-Gradient-Delivery: <uuid>                    # stable across retries, use it to deduplicate
+X-Gradient-Delivery: <uuid>                    # stable across retries, for deduplication
 X-Gradient-Signature: sha256=<hex HMAC-SHA256(secret, raw body)>
 ```
 
@@ -71,7 +73,8 @@ def verify(secret: str, body: bytes, header: str) -> bool:
 
 ## Firehose
 
-Should not be used for production! Best-effort, in-process, per server instance, drops on lag. Use webhooks.
+!!! warning
+    For debugging only: best-effort, per server process, and dropped on lag. Integrations use webhooks.
 
 `GET /api/v1/metrics/events` (superuser) upgrades to a websocket that streams every event, durable or not, as one JSON envelope per frame. `?events=` takes comma-separated globs.
 

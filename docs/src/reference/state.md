@@ -185,4 +185,4 @@ services.gradient.state = {
 | `forge_status_report` | Empty | `integration`: an outbound integration |
 | `open_pr` | Empty | `integration`, `generator`, `granularity`, `verify_gate`, `branch_pattern`, `title_template`, `body_template`, `update_existing`, see [Update Flake Inputs](../guides/flake-updates.md) |
 
-The event names are in the [events reference](../usage/events.md).
+The event names are in the [events reference](events.md).

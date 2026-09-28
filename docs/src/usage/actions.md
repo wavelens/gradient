@@ -68,7 +68,7 @@ Authorization: Bearer <token>                  # only if token is set
 X-Gradient-Signature: sha256=<hex HMAC>        # only if token is set, keyed by the token
 ```
 
-**Payload shape:** the event envelope shared with [webhooks](events.md); receivers read `content`.
+**Payload shape:** the event envelope shared with [webhooks](../reference/events.md); receivers read `content`.
 
 ```json
 {

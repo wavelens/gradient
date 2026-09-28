@@ -53,7 +53,7 @@ An action without events never fires. The events most actions need:
 | `build.failed` | One build failed |
 | `evaluation.action_required` | A pull request from a fork waits for maintainer approval |
 
-The full list is in the [events reference](../usage/events.md).
+The full list is in the [events reference](../reference/events.md).
 
 ## Mail
 
