@@ -48,8 +48,8 @@ impl Scheduler {
         }
     }
 
-    /// Every pending candidate visible to the worker (`RequestJobList`,
-    /// `RequestAllCandidates`); all of them are marked sent.
+    /// Every pending candidate visible to the worker (`RequestJobList`); all of
+    /// them are marked sent.
     pub async fn get_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
         let worker = worker_id.to_owned();
         self.call(|reply| SchedulerMsg::Candidates {

@@ -69,10 +69,6 @@ pub enum ServerMessage {
     /// Paginated at 1 000 entries per message.
     JobOffer { candidates: Vec<JobCandidate> },
 
-    /// Remove candidates from the worker's local cache - they have been
-    /// assigned to another worker or cancelled.
-    RevokeJob { job_ids: Vec<String> },
-
     /// Assign a job to this worker.  Worker must respond with
     /// [`super::client::ClientMessage::AssignJobResponse`] before starting
     /// work.
@@ -152,13 +148,6 @@ pub enum ServerMessage {
         is_final: bool,
     },
 
-    /// Ask a newly connected worker to send its full candidate score set.
-    /// Sent once by the server during the initial handshake completion so it
-    /// can populate its in-memory score table.  After startup all score
-    /// updates arrive as delta [`super::client::ClientMessage::RequestJobChunk`]
-    /// messages - `RequestAllScores` is not sent again.
-    RequestAllScores,
-
     /// Response to [`super::client::ClientMessage::CacheQuery`].
     /// In `Pull` mode a local hit carries a presigned GET URL, or `url: None` when
     /// the NAR is pulled over the stream; a path found in an upstream Nix cache
@@ -232,7 +221,6 @@ impl ServerMessage {
             ServerMessage::Draining => "Draining",
             ServerMessage::JobListChunk { .. } => "JobListChunk",
             ServerMessage::JobOffer { .. } => "JobOffer",
-            ServerMessage::RevokeJob { .. } => "RevokeJob",
             ServerMessage::AssignJob { .. } => "AssignJob",
             ServerMessage::AbortJob { .. } => "AbortJob",
             ServerMessage::Credential { .. } => "Credential",
@@ -242,7 +230,6 @@ impl ServerMessage {
             ServerMessage::NarStreamHeader { .. } => "NarStreamHeader",
             ServerMessage::EvalCachePullResult { .. } => "EvalCachePullResult",
             ServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
-            ServerMessage::RequestAllScores => "RequestAllScores",
             ServerMessage::CacheStatus { .. } => "CacheStatus",
             ServerMessage::KnownDerivations { .. } => "KnownDerivations",
             ServerMessage::CacheError { .. } => "CacheError",

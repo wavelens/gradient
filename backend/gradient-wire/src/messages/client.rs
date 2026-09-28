@@ -72,7 +72,8 @@ pub enum ClientMessage {
 
     /// Request the full current job candidate list as a stream of
     /// [`super::server::ServerMessage::JobListChunk`] messages.  Sent once
-    /// after the handshake to bootstrap the local candidate cache.
+    /// after the handshake; later candidates arrive as
+    /// [`super::server::ServerMessage::JobOffer`].
     RequestJobList,
 
     /// Stream pre-computed job scores to the server.  Sent incrementally as
@@ -185,13 +186,6 @@ pub enum ClientMessage {
     RequestJob {
         kind: JobKind,
     },
-
-    /// Request the full current job candidate list from the server.
-    /// Sent once at startup (alongside [`ClientMessage::RequestJobList`]) so
-    /// the server can send the worker its initial candidate set.  All
-    /// subsequent candidate updates arrive as delta [`super::server::ServerMessage::JobOffer`]
-    /// messages and do not require another `RequestAllCandidates`.
-    RequestAllCandidates,
 
     /// Bulk query against the server cache.
     ///
@@ -318,7 +312,6 @@ impl ClientMessage {
             ClientMessage::NarRequestResume { .. } => "NarRequestResume",
             ClientMessage::EvalCachePull { .. } => "EvalCachePull",
             ClientMessage::RequestJob { .. } => "RequestJob",
-            ClientMessage::RequestAllCandidates => "RequestAllCandidates",
             ClientMessage::CacheQuery { .. } => "CacheQuery",
             ClientMessage::EvalMessage { .. } => "EvalMessage",
             ClientMessage::QueryKnownDerivations { .. } => "QueryKnownDerivations",

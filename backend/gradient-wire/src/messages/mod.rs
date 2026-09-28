@@ -56,7 +56,8 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      the worker-to-server push handshake (`NarPushResume`, `NarStreamHeader`
 ///      on uploads; pulls still open with it), `EvalCachePush*`,
 ///      `CachedPath.multipart`.
-pub const PROTO_VERSION: u16 = 19;
+/// v20: removed `RevokeJob`, `RequestAllScores` and `RequestAllCandidates`.
+pub const PROTO_VERSION: u16 = 20;
 
 /// How often a worker reports a running download's progress, skipping an
 /// interval in which no bytes arrived.

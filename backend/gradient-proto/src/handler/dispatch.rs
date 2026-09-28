@@ -186,7 +186,6 @@ impl<'a> DispatchContext<'a> {
             }
             ClientMessage::RequestJobList => self.on_request_job_list().await,
             ClientMessage::RequestJob { kind } => self.on_request_job(kind).await,
-            ClientMessage::RequestAllCandidates => self.on_request_all_candidates().await,
             ClientMessage::RequestJobChunk { scores, is_final } => {
                 self.on_request_job_chunk(scores, is_final).await;
                 true
@@ -553,12 +552,6 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_request_job_list(&mut self) -> bool {
         debug!(peer_id = %self.peer_id, "RequestJobList");
-        let candidates = self.scheduler.get_job_candidates(self.peer_id).await;
-        self.send_job_list_chunks(candidates).await
-    }
-
-    async fn on_request_all_candidates(&mut self) -> bool {
-        debug!(peer_id = %self.peer_id, "RequestAllCandidates");
         let candidates = self.scheduler.get_job_candidates(self.peer_id).await;
         self.send_job_list_chunks(candidates).await
     }

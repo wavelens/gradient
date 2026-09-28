@@ -34,7 +34,7 @@ use crate::shutdown::Shutdown;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::{CacheWaiters, DispatchHandle, KnownDerivationWaiters};
 
-use super::scoring::{send_score_chunks, spawn_scoring_task};
+use super::scoring::spawn_scoring_task;
 
 // ── Dispatch loop ─────────────────────────────────────────────────────────────
 
@@ -316,9 +316,6 @@ impl DispatchState {
             ServerMessage::JobOffer { candidates } => {
                 self.on_job_offer(candidates);
             }
-            ServerMessage::RevokeJob { job_ids } => {
-                self.on_revoke_job(job_ids);
-            }
             ServerMessage::AssignJob {
                 job_id,
                 dispatch,
@@ -331,9 +328,6 @@ impl DispatchState {
             }
             ServerMessage::Credential { kind, data } => {
                 self.on_credential(kind, data);
-            }
-            ServerMessage::RequestAllScores => {
-                self.on_request_all_scores().await;
             }
             ServerMessage::Draining => {
                 info!("server is draining; finishing in-flight work then disconnecting");
@@ -589,40 +583,6 @@ impl DispatchState {
                 true,
                 true,
                 request_after,
-            );
-        }
-    }
-
-    fn on_revoke_job(&mut self, job_ids: Vec<String>) {
-        debug!(?job_ids, "jobs revoked");
-        let mut cands = self.candidates.lock();
-        let mut scores = self.last_scores.lock();
-        for id in &job_ids {
-            cands.remove(id);
-            scores.remove(id);
-        }
-    }
-
-    async fn on_request_all_scores(&mut self) {
-        let all: Vec<JobCandidate> = self.candidates.lock().values().cloned().collect();
-        debug!(
-            count = all.len(),
-            "RequestAllScores - re-scoring all cached candidates"
-        );
-        if all.is_empty() {
-            if let Err(e) = send_score_chunks(&self.writer, vec![]).await {
-                warn!(error = %e, "send_score_chunks (empty) failed");
-            }
-        } else {
-            spawn_scoring_task(
-                self.scorer,
-                Arc::clone(&self.executor.store),
-                Arc::clone(&self.last_scores),
-                self.writer.clone(),
-                all,
-                true,
-                true,
-                Vec::new(),
             );
         }
     }
