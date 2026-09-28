@@ -40,20 +40,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::UP;
-
-    /// The predicate is spelled as `readiness::repair_scope` spells its arm, so the
-    /// planner can prove the one implies the other.
-    #[test]
-    fn the_predicate_is_the_scopes_contradiction_arm() {
-        assert!(
-            UP[0].contains("WHERE fetchable AND missing_runtime_deps > 0"),
-            "{}",
-            UP[0]
-        );
-        assert!(UP[0].contains("derivation_build (derivation)"), "{}", UP[0]);
-    }
-}

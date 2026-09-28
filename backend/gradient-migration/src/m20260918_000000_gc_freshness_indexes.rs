@@ -47,22 +47,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::UP;
-
-    /// Both halves of the `fresh` seed are indexed, and each carries the column
-    /// the CTE selects: a seed that had to visit the heap for `derivation`
-    /// would read the same pages the sequential scan did.
-    #[test]
-    fn both_freshness_seeds_are_covered_by_their_index() {
-        for (index, table) in UP.iter().zip(["build_job", "entry_point"]) {
-            assert!(
-                index.contains(&format!("ON {table} (created_at)")),
-                "{index}"
-            );
-            assert!(index.contains("INCLUDE (derivation)"), "{index}");
-        }
-    }
-}

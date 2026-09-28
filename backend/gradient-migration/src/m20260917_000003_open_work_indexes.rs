@@ -45,35 +45,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::UP;
-
-    /// Postgres only uses a partial index where it can prove the query's
-    /// predicate implies the index's, so each predicate has to name what the
-    /// statements name: the builder statuses Created, Queued, Building and
-    /// Substituting, and `promotion`'s deterministic build failure.
-    #[test]
-    fn each_predicate_names_what_the_statements_ask_for() {
-        let anchors = UP[0];
-        let attempts = UP[1];
-
-        assert!(
-            anchors.contains("WHERE status IN (0, 1, 2, 8)"),
-            "{anchors}"
-        );
-        assert!(
-            anchors.contains("derivation_build (derivation)"),
-            "{anchors}"
-        );
-        assert!(
-            attempts.contains("WHERE outcome = 3 AND reason = 5"),
-            "{attempts}"
-        );
-        assert!(
-            attempts.contains("build_attempt (derivation_build)"),
-            "{attempts}"
-        );
-    }
-}

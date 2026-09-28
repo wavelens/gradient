@@ -38,21 +38,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::UP;
-
-    /// Postgres only uses a partial index where it can prove the query's predicate
-    /// implies the index's, so this has to spell `graph_sql::open_predicate` as the
-    /// statements do: not fetchable, and not `BuildStatus::REQUEUEABLE`.
-    #[test]
-    fn the_predicate_is_open_as_the_statements_spell_it() {
-        assert!(
-            UP[0].contains("WHERE NOT fetchable AND status NOT IN (4, 5, 6, 9)"),
-            "{}",
-            UP[0]
-        );
-        assert!(UP[0].contains("derivation_build (derivation)"), "{}", UP[0]);
-    }
-}

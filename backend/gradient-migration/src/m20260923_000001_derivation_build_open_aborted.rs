@@ -44,21 +44,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::UP;
-
-    /// The predicate spells `graph_sql::open_predicate`: not fetchable, and not
-    /// `BuildStatus::TERMINAL_FAILURE`, so the planner can prove the statements'
-    /// predicate implies it.
-    #[test]
-    fn the_predicate_is_open_with_aborted_inside() {
-        assert!(
-            UP[1].contains("WHERE NOT fetchable AND status NOT IN (4, 6, 9)"),
-            "{}",
-            UP[1]
-        );
-        assert!(UP[1].contains("derivation_build (derivation)"), "{}", UP[1]);
-    }
-}

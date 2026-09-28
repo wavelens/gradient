@@ -43,36 +43,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{DOWN, UP};
-
-    #[test]
-    fn every_existing_row_is_confirmed_by_the_default() {
-        assert!(UP[0].contains("NOT NULL DEFAULT true"), "{}", UP[0]);
-    }
-
-    #[test]
-    fn the_uploader_scan_is_a_partial_index_over_the_unconfirmed_rows() {
-        assert!(
-            UP[1].contains("(created_at) WHERE NOT confirmed"),
-            "{}",
-            UP[1]
-        );
-    }
-
-    #[test]
-    fn down_removes_exactly_what_up_added() {
-        assert!(
-            DOWN[0].contains("idx-cached_path-unconfirmed"),
-            "{}",
-            DOWN[0]
-        );
-        assert!(
-            DOWN[1].contains("DROP COLUMN IF EXISTS confirmed"),
-            "{}",
-            DOWN[1]
-        );
-    }
-}

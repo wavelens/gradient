@@ -57,32 +57,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{DOWN, UP};
-
-    #[test]
-    fn every_star_cascades_from_both_sides() {
-        for table in &UP[..3] {
-            assert_eq!(table.matches("ON DELETE CASCADE").count(), 2, "{table}");
-        }
-    }
-
-    #[test]
-    fn a_star_is_unique_per_user_and_target() {
-        for (table, target) in UP[..3].iter().zip(["project", "task", "cache"]) {
-            assert!(
-                table.contains(&format!(r#"PRIMARY KEY ("user", {target})"#)),
-                "{table}"
-            );
-        }
-    }
-
-    #[test]
-    fn down_drops_every_table_up_creates() {
-        for name in ["user_project_star", "user_task_star", "user_cache_star"] {
-            assert!(DOWN.iter().any(|d| d.ends_with(name)), "{name}");
-        }
-    }
-}

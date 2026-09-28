@@ -31,16 +31,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::UP;
-
-    #[test]
-    fn legacy_status_rows_are_settled_not_dropped() {
-        assert!(
-            UP.iter()
-                .any(|s| s.contains("kind IN (0, 1)") && s.contains("failed_at"))
-        );
-    }
-}

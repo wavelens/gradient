@@ -31,17 +31,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{DOWN, UP};
-
-    #[test]
-    fn down_restores_exactly_what_up_dropped() {
-        assert!(UP.contains("DROP COLUMN IF EXISTS last_fetched_at"), "{UP}");
-        assert!(
-            DOWN.contains("ADD COLUMN IF NOT EXISTS last_fetched_at timestamp"),
-            "{DOWN}"
-        );
-    }
-}

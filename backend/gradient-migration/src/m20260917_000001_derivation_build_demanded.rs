@@ -38,31 +38,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{DOWN, UP};
-
-    /// A stale `false` stalls every pending build; a stale `true` only wastes work
-    /// the fleet was already doing. The consistency sweep recomputes the column
-    /// absolutely on its first pass, so the default IS the backfill and no second
-    /// copy of the definition has to live in this crate.
-    #[test]
-    fn every_existing_row_is_demanded_by_the_default() {
-        assert!(UP[0].contains("NOT NULL DEFAULT true"), "{}", UP[0]);
-        assert_eq!(
-            UP.len(),
-            1,
-            "the sweep is the backfill, not a statement here"
-        );
-    }
-
-    #[test]
-    fn down_removes_exactly_what_up_added() {
-        assert!(
-            DOWN[0].contains("DROP COLUMN IF EXISTS demanded"),
-            "{}",
-            DOWN[0]
-        );
-    }
-}

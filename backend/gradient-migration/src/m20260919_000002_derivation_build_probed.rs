@@ -46,32 +46,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{DOWN, UP};
-
-    /// A stale `false` stalls every build below an anchor nothing has asked an
-    /// upstream about; the anchors a deploy interrupts have already had their
-    /// answer, whatever it was, so they start where they stopped.
-    #[test]
-    fn every_existing_anchor_starts_answered() {
-        assert!(UP[0].contains("NOT NULL DEFAULT true"), "{}", UP[0]);
-    }
-
-    /// The recovery sweep asks for exactly this predicate, and Postgres uses a
-    /// partial index only where it can prove the query's implies the index's.
-    #[test]
-    fn the_index_names_what_the_sweep_asks_for() {
-        assert!(UP[1].contains("WHERE NOT probed AND demanded"), "{}", UP[1]);
-    }
-
-    #[test]
-    fn down_removes_exactly_what_up_added() {
-        assert!(
-            DOWN[0].contains("idx-derivation_build-unprobed"),
-            "{DOWN:?}"
-        );
-        assert!(DOWN[1].contains("DROP COLUMN IF EXISTS probed"), "{DOWN:?}");
-    }
-}

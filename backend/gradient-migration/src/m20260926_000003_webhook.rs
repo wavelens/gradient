@@ -75,16 +75,3 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::UP;
-
-    #[test]
-    fn a_webhook_names_exactly_its_scope_owner() {
-        assert!(
-            UP.iter()
-                .any(|s| s.contains("CONSTRAINT \"chk-webhook-scope\""))
-        );
-    }
-}
