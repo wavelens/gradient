@@ -59,13 +59,19 @@ Secrets never go into the Nix store: every `*_file` option points at a file on t
 The server stores only a digest of each API key. `key_file` holds that digest; clients send the token with a `GRAD` prefix.
 
 ```sh
-TOKEN=$(openssl rand -hex 32)
-printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > ci-key # (1)!
-echo "GRAD$TOKEN" # (2)!
+gradient generate apikey
 ```
 
-1.  The file for `key_file`. `printf %s` keeps a trailing newline out of the digest.
-2.  The token for clients, e.g. `Authorization: Bearer GRAD...`.
+The command prints the `API token` for clients (`Authorization: Bearer GRAD...`) and the `key_file digest` to write into the `key_file`.
+
+??? note "Without the CLI"
+    ```sh
+    TOKEN=$(openssl rand -hex 32)
+    printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > ci-key # (1)!
+    echo "GRAD$TOKEN"
+    ```
+
+    1.  `printf %s` keeps a trailing newline out of the digest.
 
 ## Removal
 
