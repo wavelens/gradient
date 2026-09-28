@@ -39,7 +39,7 @@ impl<'a> TaskGitContext<'a> {
                 })?
                 .ok_or(SourceError::ProjectNotFound { id: task.project })?;
             Some(crate::ssh_key::decrypt_ssh_private_key(
-                &ctx.config.secrets.crypt_secret_file,
+                &ctx.config.secrets.crypt_file,
                 project,
                 &ctx.config.server.serve_url,
             )?)

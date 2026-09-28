@@ -143,14 +143,15 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
                     state.config.server.serve_url
                 ))
             })?;
-    let debug_url: http::HeaderValue = format!("http://{}:8000", state.config.server.ip.clone())
-        .try_into()
-        .map_err(|_| {
-            InitError::NetworkConfig(format!(
-                "invalid debug_url from ip {}",
-                state.config.server.ip
-            ))
-        })?;
+    let debug_url: http::HeaderValue =
+        format!("http://{}:8000", state.config.server.listen_addr.clone())
+            .try_into()
+            .map_err(|_| {
+                InitError::NetworkConfig(format!(
+                    "invalid debug_url from ip {}",
+                    state.config.server.listen_addr
+                ))
+            })?;
 
     let cors_allow_origin = AllowOrigin::list(vec![serve_url, debug_url]);
 
@@ -382,7 +383,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route(
             "/build-requests/source",
             post(build_requests::source::post_source).layer(DefaultBodyLimit::max(
-                state.config.limits.max_source_upload_size,
+                state.config.http.max_source_upload_size,
             )),
         )
         .route(
@@ -402,9 +403,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         )
         .route(
             "/caches/{cache}/nars",
-            post(caches::nars_upload).layer(DefaultBodyLimit::max(
-                state.config.limits.max_nar_upload_size,
-            )),
+            post(caches::nars_upload)
+                .layer(DefaultBodyLimit::max(state.config.nar.max_upload_size)),
         )
         .route(
             "/caches/{cache}/nars/{hash}/chunk",
@@ -751,13 +751,13 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .supervise(sessions.child_spec(Arc::clone(&scheduler)));
     gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler), Arc::clone(&sessions));
 
-    let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_proto_connections));
+    let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_connections));
 
     // Default tier covers everything left under /api/v1 (the bulk authenticated
     // surface) plus the proto WS upgrade.
     let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)?));
     let api = api.route_layer(axum::middleware::from_fn(metrics::track_http_metrics));
-    let api = api.layer(DefaultBodyLimit::max(state.config.limits.max_request_size));
+    let api = api.layer(DefaultBodyLimit::max(state.config.http.max_request_size));
 
     let mut app = Router::new()
         .nest("/api/v1", api)
@@ -819,7 +819,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     // and key→private (respecting cache_pin). Per-IP fan-out is bounded by the
     // concurrent-connection cap below; the upgrade shares the NAR-download tier.
     let cache_per_ip = Arc::new(PerIpLimiter::new(
-        state.config.proto.anon_max_connections_per_ip,
+        state.config.proto.anonymous_cache_max_connections_per_ip,
     ));
     let cache_proto_route = Router::new()
         .route("/cache/{cache}/proto", get(caches::cache_proto))
@@ -901,7 +901,7 @@ fn tuned_listener(
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let server_url = format!(
         "{}:{}",
-        state.config.server.ip.clone(),
+        state.config.server.listen_addr.clone(),
         state.config.server.port.clone()
     );
 

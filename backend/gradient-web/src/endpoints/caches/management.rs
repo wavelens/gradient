@@ -124,7 +124,7 @@ pub async fn put(
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    require_create_permission(state.config.server.create_cache, &user)?;
+    require_create_permission(state.config.permissions.create_cache, &user)?;
 
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Cache Name"));
@@ -149,11 +149,11 @@ pub async fn put(
         return Err(WebError::already_exists("Cache Name"));
     }
 
-    let (private_key, public_key) = generate_signing_key(&state.config.secrets.crypt_secret_file)
+    let (private_key, public_key) = generate_signing_key(&state.config.secrets.crypt_file)
         .map_err(|e| {
-        tracing::error!(error = %e, "Failed to generate signing key");
-        WebError::internal("Failed to generate signing key")
-    })?;
+            tracing::error!(error = %e, "Failed to generate signing key");
+            WebError::internal("Failed to generate signing key")
+        })?;
 
     let tx = state.web_db.inner().begin().await?;
 
@@ -252,7 +252,7 @@ pub async fn get_cache(
     .await?;
 
     let public_key = format_cache_public_key(
-        &state.config.secrets.crypt_secret_file,
+        &state.config.secrets.crypt_file,
         cache.clone(),
         state.config.server.serve_url.clone(),
     )
@@ -399,7 +399,7 @@ pub async fn patch_cache(
             if let Err(e) = gradient_ci::unpark_storage_full_for_project(
                 &state.web_db,
                 project,
-                state.config.storage.max_storage_gb,
+                state.config.cache.max_storage_gb,
             )
             .await
             {

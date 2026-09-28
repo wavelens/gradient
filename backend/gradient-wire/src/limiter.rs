@@ -7,7 +7,7 @@
 //! Concurrency cap for inbound `/proto` WebSocket connections.
 //!
 //! Wraps a [`tokio::sync::Semaphore`] sized from
-//! `config.proto.max_proto_connections`. The proto upgrade handler tries to
+//! `config.proto.max_connections`. The proto upgrade handler tries to
 //! acquire one permit per connection and holds it for the lifetime of the
 //! session; when no permits are available the upgrade is rejected with 503
 //! instead of queueing, so a misbehaving worker fan-out cannot exhaust file

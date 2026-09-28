@@ -76,7 +76,7 @@ async fn post(
     delivery: OutboxId,
 ) -> Result<(i32, String)> {
     validate_webhook_url(&hook.url).map_err(|e| anyhow!("URL rejected: {e}"))?;
-    let secret = decrypt_secret_with_file(&ctx.db.config.secrets.crypt_secret_file, &hook.secret)?;
+    let secret = decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, &hook.secret)?;
     let signature = sign(secret.expose().as_bytes(), body.as_bytes())
         .ok_or_else(|| anyhow!("webhook secret cannot key an HMAC"))?;
     let resp = ctx

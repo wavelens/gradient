@@ -78,7 +78,7 @@ pub struct StateTask {
     pub active: bool,
     pub created_by: String,
     /// How many evaluations to retain per task. Must be at least 1; the
-    /// runtime `GRADIENT_KEEP_EVALUATIONS` cap further reduces it if exceeded.
+    /// runtime `GRADIENT_EVAL_MAX_KEEP` cap further reduces it if exceeded.
     #[serde(default = "default_keep_evaluations")]
     pub keep_evaluations: i32,
     /// Declarative trigger list. `None` leaves existing triggers untouched

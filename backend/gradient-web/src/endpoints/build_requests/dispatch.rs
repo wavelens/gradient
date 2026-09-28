@@ -277,7 +277,7 @@ pub(super) async fn queue_build_request<C: ConnectionTrait>(
         tx,
         project,
         user.id,
-        state.config.storage.default_keep_evaluations(),
+        state.config.eval.default_keep_evaluations(),
     )
     .await?;
 

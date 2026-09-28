@@ -11,70 +11,70 @@ pub struct MetricsArgs {
     /// Path to a file containing the bearer token required to scrape
     /// `/metrics`. When unset, the metrics endpoint is disabled and
     /// returns 404. The file is read once at startup.
-    #[arg(long, env = "GRADIENT_METRICS_TOKEN_FILE")]
-    pub metrics_token_file: Option<String>,
+    #[arg(
+        id = "metrics-token-file",
+        long = "metrics-token-file",
+        env = "GRADIENT_METRICS_TOKEN_FILE"
+    )]
+    pub token_file: Option<String>,
 
     /// Interval in seconds between metric rollup-aggregator passes.
-    #[arg(long, env = "GRADIENT_METRICS_ROLLUP_INTERVAL", default_value_t = 60)]
-    pub metrics_rollup_interval_secs: u64,
+    #[arg(
+        long = "metrics-rollup-interval-secs",
+        env = "GRADIENT_METRICS_ROLLUP_INTERVAL_SECS",
+        default_value_t = 60
+    )]
+    pub rollup_interval_secs: u64,
+
+    /// Days to retain raw `phase_event` / `worker_sample` rows. 0 = keep forever.
+    #[arg(
+        long = "metrics-retention-raw-days",
+        env = "GRADIENT_METRICS_RETENTION_RAW_DAYS",
+        default_value_t = 14
+    )]
+    pub retention_raw_days: i64,
+
+    /// Days to retain minute/hour `metric_rollup` buckets (day/week kept). 0 = keep forever.
+    #[arg(
+        long = "metrics-retention-rollup-days",
+        env = "GRADIENT_METRICS_RETENTION_ROLLUP_DAYS",
+        default_value_t = 400
+    )]
+    pub retention_rollup_days: i64,
+
+    /// Per-dimension cardinality cap for rollup scope labels (top-N by activity).
+    #[arg(
+        long = "metrics-label-topn",
+        env = "GRADIENT_METRICS_LABEL_TOPN",
+        default_value_t = 20
+    )]
+    pub label_topn: u32,
 
     /// Interval in seconds between flushes of the in-memory cache-traffic
     /// accumulator into `cache_metric`. A flush that fails loses at most this
     /// much traffic telemetry.
     #[arg(
-        long,
-        env = "GRADIENT_CACHE_METRIC_FLUSH_INTERVAL",
+        long = "metrics-cache-flush-interval-secs",
+        env = "GRADIENT_METRICS_CACHE_FLUSH_INTERVAL_SECS",
         default_value_t = 10
     )]
-    pub cache_metric_flush_interval_secs: u64,
-
-    /// Days to retain raw `phase_event` / `worker_sample` rows. 0 = keep forever.
-    #[arg(
-        long,
-        env = "GRADIENT_METRICS_RETENTION_RAW_DAYS",
-        default_value_t = 14
-    )]
-    pub metrics_retention_raw_days: i64,
-
-    /// Days to retain minute/hour `metric_rollup` buckets (day/week kept). 0 = keep forever.
-    #[arg(
-        long,
-        env = "GRADIENT_METRICS_RETENTION_ROLLUP_DAYS",
-        default_value_t = 400
-    )]
-    pub metrics_retention_rollup_days: i64,
-
-    /// Days to retain `dispatched_job` forensic rows. 0 = keep forever.
-    #[arg(long, env = "GRADIENT_DISPATCH_RETENTION_DAYS", default_value_t = 30)]
-    pub dispatch_retention_days: i64,
+    pub cache_flush_interval_secs: u64,
 
     /// Interval in seconds between worker live-metric samples written to `worker_sample`.
-    #[arg(long, env = "GRADIENT_WORKER_SAMPLE_INTERVAL", default_value_t = 15)]
+    #[arg(
+        long = "metrics-worker-sample-interval-secs",
+        env = "GRADIENT_METRICS_WORKER_SAMPLE_INTERVAL_SECS",
+        default_value_t = 15
+    )]
     pub worker_sample_interval_secs: u64,
 
-    /// Per-dimension cardinality cap for rollup scope labels (top-N by activity).
-    #[arg(long, env = "GRADIENT_METRICS_LABEL_TOPN", default_value_t = 20)]
-    pub metrics_label_topn: u32,
-
-    /// OTLP collector endpoint for metric push export. Unset = OTLP disabled.
-    #[arg(long, env = "GRADIENT_OTLP_ENDPOINT")]
-    pub otlp_endpoint: Option<String>,
-
-    /// Interval in seconds between OTLP metric push exports.
-    #[arg(long, env = "GRADIENT_OTLP_PUSH_INTERVAL", default_value_t = 30)]
-    pub otlp_push_interval_secs: u64,
-
-    /// Persist runner-up scoring candidates on each `dispatched_job` row.
-    #[arg(
-        long,
-        env = "GRADIENT_DISPATCH_RECORD_CANDIDATES",
-        default_value_t = false
-    )]
-    pub dispatch_record_candidates: bool,
-
     /// Interval in seconds between InstanceContext window recomputations.
-    #[arg(long, env = "GRADIENT_INSTANCE_METRICS_INTERVAL", default_value_t = 30)]
-    pub instance_metrics_interval_secs: u64,
+    #[arg(
+        long = "metrics-instance-interval-secs",
+        env = "GRADIENT_METRICS_INSTANCE_INTERVAL_SECS",
+        default_value_t = 30
+    )]
+    pub instance_interval_secs: u64,
 
     /// Interval in seconds between build-graph consistency sweeps (stale gate
     /// flags, unpromoted-ready anchors, unbacked trusted outputs, wedged Building
@@ -82,29 +82,39 @@ pub struct MetricsArgs {
     /// reference counter over the paths pending anchors gate on, and is that
     /// counter's only backstop, so 0 disables both.
     #[arg(
-        long,
-        env = "GRADIENT_GRAPH_CONSISTENCY_INTERVAL",
+        long = "metrics-graph-consistency-interval-secs",
+        env = "GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS",
         default_value_t = 300
     )]
     pub graph_consistency_interval_secs: u64,
+
+    /// OTLP collector endpoint for metric push export. Unset = OTLP disabled.
+    #[arg(long = "metrics-otlp-endpoint", env = "GRADIENT_METRICS_OTLP_ENDPOINT")]
+    pub otlp_endpoint: Option<String>,
+
+    /// Interval in seconds between OTLP metric push exports.
+    #[arg(
+        long = "metrics-otlp-push-interval-secs",
+        env = "GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS",
+        default_value_t = 30
+    )]
+    pub otlp_push_interval_secs: u64,
 }
 
 impl Default for MetricsArgs {
     fn default() -> Self {
         Self {
-            metrics_token_file: None,
-            metrics_rollup_interval_secs: 60,
-            cache_metric_flush_interval_secs: 10,
-            metrics_retention_raw_days: 14,
-            metrics_retention_rollup_days: 400,
-            dispatch_retention_days: 30,
+            token_file: None,
+            rollup_interval_secs: 60,
+            retention_raw_days: 14,
+            retention_rollup_days: 400,
+            label_topn: 20,
+            cache_flush_interval_secs: 10,
             worker_sample_interval_secs: 15,
-            metrics_label_topn: 20,
+            instance_interval_secs: 30,
+            graph_consistency_interval_secs: 300,
             otlp_endpoint: None,
             otlp_push_interval_secs: 30,
-            dispatch_record_candidates: false,
-            instance_metrics_interval_secs: 30,
-            graph_consistency_interval_secs: 300,
         }
     }
 }

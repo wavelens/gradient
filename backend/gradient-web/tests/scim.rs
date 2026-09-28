@@ -58,13 +58,13 @@ fn build_server(
     std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");
 
     let mut cli = test_cli();
-    cli.secrets.jwt_secret_file = jwt_path.to_string_lossy().into_owned();
-    cli.scim.scim_enabled = true;
-    cli.scim.scim_token_file = Some(write_token());
-    cli.scim.scim_hard_delete = hard_delete;
+    cli.secrets.jwt_file = jwt_path.to_string_lossy().into_owned();
+    cli.scim.enable = true;
+    cli.scim.token_file = Some(write_token());
+    cli.scim.hard_delete = hard_delete;
 
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(

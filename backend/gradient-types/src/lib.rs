@@ -27,9 +27,10 @@ mod nix_cache;
 
 pub use self::actions::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
 pub use self::cli::{
-    CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs,
-    LoggingArgs, MetricsArgs, NetworkArgs, OidcArgs, ProtoArgs, RegistrationArgs, S3Args, ScimArgs,
-    SecretsArgs, ServerArgs, StorageArgs, in_any, parse_cidr_list,
+    BuildArgs, CacheArgs, CidrParseError, CreatePermission, DatabaseArgs, EmailArgs, EvalArgs,
+    GcArgs, GitHubAppArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs, OidcArgs, PermissionsArgs,
+    ProtoArgs, PullRequestsArgs, RegistrationArgs, S3Args, SchedulerArgs, ScimArgs, SecretsArgs,
+    SentryArgs, ServerArgs, StateArgs, UploadArgs, in_any, parse_cidr_list,
 };
 pub use self::config::{
     ConfigError, EmailConfig, GitHubAppConfig, MetricsConfig, NetworkConfig, OidcConfig,
@@ -63,27 +64,47 @@ pub fn now() -> NaiveDateTime {
     chrono::Utc::now().naive_utc()
 }
 
-#[derive(Parser, Debug, Clone)]
+#[derive(Parser, Debug, Clone, Default)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient-server", author = "Wavelens", version, about, long_about = None)]
 pub struct Cli {
     #[command(flatten)]
-    pub logging: LoggingArgs,
-    #[command(flatten)]
     pub server: ServerArgs,
-    #[command(flatten)]
-    pub database: DatabaseArgs,
-    #[command(flatten)]
-    pub eval: EvalArgs,
-    #[command(flatten)]
-    pub storage: StorageArgs,
     #[command(flatten)]
     pub secrets: SecretsArgs,
     #[command(flatten)]
-    pub limits: LimitsArgs,
+    pub state: StateArgs,
+    #[command(flatten)]
+    pub permissions: PermissionsArgs,
     #[command(flatten)]
     pub registration: RegistrationArgs,
     #[command(flatten)]
+    pub sentry: SentryArgs,
+    #[command(flatten)]
+    pub pull_requests: PullRequestsArgs,
+    #[command(flatten)]
+    pub database: DatabaseArgs,
+    #[command(flatten)]
+    pub http: HttpArgs,
+    #[command(flatten)]
     pub proto: ProtoArgs,
+    #[command(flatten)]
+    pub upload: UploadArgs,
+    #[command(flatten)]
+    pub nar: NarArgs,
+    #[command(flatten)]
+    pub cache: CacheArgs,
+    #[command(flatten)]
+    pub gc: GcArgs,
+    #[command(flatten)]
+    pub eval: EvalArgs,
+    #[command(flatten)]
+    pub build: BuildArgs,
+    #[command(flatten)]
+    pub scheduler: SchedulerArgs,
+    #[command(flatten)]
+    pub metrics: MetricsArgs,
+    #[command(flatten)]
+    pub log: LogArgs,
     #[command(flatten)]
     pub oidc: OidcArgs,
     #[command(flatten)]
@@ -94,10 +115,6 @@ pub struct Cli {
     pub s3: S3Args,
     #[command(flatten)]
     pub github_app: GitHubAppArgs,
-    #[command(flatten)]
-    pub metrics: MetricsArgs,
-    #[command(flatten)]
-    pub network: NetworkArgs,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

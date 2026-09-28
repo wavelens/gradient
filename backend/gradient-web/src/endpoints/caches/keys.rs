@@ -36,7 +36,7 @@ pub async fn get_cache_key(
     .await?;
 
     let cache_key = format_cache_key(
-        &state.config.secrets.crypt_secret_file,
+        &state.config.secrets.crypt_file,
         cache,
         state.config.server.serve_url.clone(),
     )
@@ -64,7 +64,7 @@ pub async fn get_cache_public_key(
     .await?;
 
     let public_key = format_cache_public_key(
-        &state.config.secrets.crypt_secret_file,
+        &state.config.secrets.crypt_file,
         cache,
         state.config.server.serve_url.clone(),
     )

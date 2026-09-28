@@ -79,7 +79,7 @@ async fn send_ssh_key_credential(writer: &ProtoWriter, state: &ServerState, proj
     match EProject::find_by_id(project_id).one(&state.worker_db).await {
         Ok(Some(project)) => {
             match gradient_sources::ssh_key::decrypt_ssh_private_key(
-                &state.config.secrets.crypt_secret_file,
+                &state.config.secrets.crypt_file,
                 project,
                 &state.config.server.serve_url,
             ) {

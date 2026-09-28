@@ -232,8 +232,8 @@ struct DispatchConfig {
 impl DispatchConfig {
     fn from_state(state: &ServerState) -> Self {
         Self {
-            default_timeout_secs: nonzero(state.config.eval.build_default_timeout_secs),
-            default_max_silent_secs: nonzero(state.config.eval.build_default_max_silent_secs),
+            default_timeout_secs: nonzero(state.config.build.default_timeout_secs),
+            default_max_silent_secs: nonzero(state.config.build.default_max_silent_secs),
         }
     }
 }

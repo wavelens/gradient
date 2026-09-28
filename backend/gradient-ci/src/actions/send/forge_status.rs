@@ -133,7 +133,7 @@ pub(crate) async fn build_reporter_for_integration(
 
     let token = match integration.access_token.as_deref() {
         Some(enc) => Some(
-            decrypt_secret_with_file(&ctx.db.config.secrets.crypt_secret_file, enc)
+            decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, enc)
                 .map_err(|e| anyhow!("decrypt integration token: {}", e))?,
         ),
         None => None,

@@ -78,7 +78,7 @@ pub struct ApplyInput {
     /// in `evaluation.source_comment` so the terminal-status reporter can
     /// react with thumbs-up / thumbs-down once the build resolves.
     pub source_comment: Option<serde_json::Value>,
-    /// Instance-wide `max_storage_gb` limit (`GRADIENT_MAX_STORAGE_GB`), used by
+    /// Instance-wide `max_storage_gb` limit (`GRADIENT_CACHE_MAX_STORAGE_GB`), used by
     /// the storage-full gate. `0` disables the instance-wide limit.
     pub instance_max_storage_gb: i32,
 }

@@ -108,7 +108,7 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
         periodic(
             scheduler,
             "instance-metrics",
-            Duration::from_secs(metrics.instance_metrics_interval_secs.max(1)),
+            Duration::from_secs(metrics.instance_interval_secs.max(1)),
             METRICS_BUDGET,
             background::instance_metrics_pass,
         ),

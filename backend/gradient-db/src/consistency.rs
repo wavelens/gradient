@@ -18,7 +18,7 @@
 //! notice a lost move. This pass recomputes both over the scope that gates
 //! progress and repairs them in place, so the counts it reports for them are
 //! what was repaired. That makes the sweep those counters' only backstop, so
-//! `GRADIENT_GRAPH_CONSISTENCY_INTERVAL = 0` leaves them with none.
+//! `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS = 0` leaves them with none.
 //! The counters BELOW zero are counted separately and table-wide: the repair is
 //! bounded to the gating paths, so a row driven negative outside them is exactly
 //! the state the design calls unrecoverable and the drift count cannot see it.

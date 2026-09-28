@@ -8,10 +8,23 @@ use clap::Args;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct ScimArgs {
-    #[arg(long, env = "GRADIENT_SCIM_ENABLED", default_value = "false")]
-    pub scim_enabled: bool,
-    #[arg(long, env = "GRADIENT_SCIM_TOKEN_FILE")]
-    pub scim_token_file: Option<String>,
-    #[arg(long, env = "GRADIENT_SCIM_HARD_DELETE", default_value = "false")]
-    pub scim_hard_delete: bool,
+    #[arg(
+        id = "scim-enable",
+        long = "scim-enable",
+        env = "GRADIENT_SCIM_ENABLE",
+        default_value = "false"
+    )]
+    pub enable: bool,
+    #[arg(
+        id = "scim-token-file",
+        long = "scim-token-file",
+        env = "GRADIENT_SCIM_TOKEN_FILE"
+    )]
+    pub token_file: Option<String>,
+    #[arg(
+        long = "scim-hard-delete",
+        env = "GRADIENT_SCIM_HARD_DELETE",
+        default_value = "false"
+    )]
+    pub hard_delete: bool,
 }

@@ -48,7 +48,7 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
     runtime.metrics = enabled.then(|| MetricsConfig {
         token: TOKEN.to_string(),
     });
-    let nar_storage = NarStore::local(&runtime.storage.base_path).expect("nar store");
+    let nar_storage = NarStore::local(&runtime.server.base_dir).expect("nar store");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(

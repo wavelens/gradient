@@ -89,18 +89,18 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
     std::fs::write(&secret_path, "test-client-secret").unwrap();
 
     let mut cli = test_cli();
-    cli.secrets.jwt_secret_file = jwt_path.to_string_lossy().into_owned();
+    cli.secrets.jwt_file = jwt_path.to_string_lossy().into_owned();
     cli.oidc = OidcArgs {
-        oidc_enabled: true,
-        oidc_required: false,
-        oidc_client_id: Some("test-client".into()),
-        oidc_client_secret_file: Some(secret_path.to_string_lossy().into_owned()),
-        oidc_scopes: None,
-        oidc_discovery_url: Some(base.clone()),
+        enable: true,
+        required: false,
+        client_id: Some("test-client".into()),
+        client_secret_file: Some(secret_path.to_string_lossy().into_owned()),
+        scopes: None,
+        discovery_url: Some(base.clone()),
     };
 
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         cache_db: gradient_db::CacheDb::new(

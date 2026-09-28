@@ -71,11 +71,11 @@ fn make_state(
         None => test_cli(),
     };
     if let Some(ref p) = gh_secret_path {
-        cli.github_app.github_app_id = Some(1234);
-        cli.github_app.github_app_private_key_file = Some("/dev/null".into());
-        cli.github_app.github_app_webhook_secret_file = Some(p.clone());
+        cli.github_app.id = Some(1234);
+        cli.github_app.private_key_file = Some("/dev/null".into());
+        cli.github_app.webhook_secret_file = Some(p.clone());
     }
-    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(

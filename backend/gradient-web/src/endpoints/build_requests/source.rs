@@ -108,8 +108,8 @@ pub struct SourceFinalize {
 /// Disk-staging store for chunked source uploads. Its own root keeps the
 /// per-user upload keys away from the cache NAR partials.
 fn source_partial_store(state: &ServerState) -> WebResult<PartialStore> {
-    let root = format!("{}/source-upload-partial", state.config.storage.base_path);
-    let ttl = Duration::from_secs(state.config.proto.nar_partial_ttl_secs);
+    let root = format!("{}/source-upload-partial", state.config.server.base_dir);
+    let ttl = Duration::from_secs(state.config.nar.partial_ttl_secs);
     Ok(PartialStore::new(root, ttl)?)
 }
 
@@ -136,7 +136,7 @@ pub async fn source_chunk(
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     require_safe_upload_id(&upload)?;
 
-    let max = state.config.limits.max_source_upload_size as u64;
+    let max = state.config.http.max_source_upload_size as u64;
     if offset + body.len() as u64 > max {
         return Err(WebError::payload_too_large(format!(
             "source upload exceeds max size of {max} bytes"

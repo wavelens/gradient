@@ -141,7 +141,7 @@ fn new_secret(state: &ServerState) -> WebResult<(String, String)> {
     let mut raw = [0u8; 32];
     rand::rng().fill(&mut raw);
     let plaintext = format!("whs_{}", URL_SAFE_NO_PAD.encode(raw));
-    let key = load_secret_bytes(&state.config.secrets.crypt_secret_file)
+    let key = load_secret_bytes(&state.config.secrets.crypt_file)
         .map_err(|e| WebError::internal(e.to_string()))?;
     let encrypted = encrypt_action_secret(&plaintext, key.expose())
         .map_err(|e| WebError::internal(e.to_string()))?;

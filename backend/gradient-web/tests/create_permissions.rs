@@ -88,7 +88,7 @@ fn create_project_superusers_rejects_regular_user() {
             user(),
         );
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_project = CreatePermission::Superusers;
+            cli.permissions.create_project = CreatePermission::Superusers;
         });
 
         let res = server
@@ -114,7 +114,7 @@ fn create_project_none_rejects_superuser() {
             superuser_user(),
         );
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_project = CreatePermission::None;
+            cli.permissions.create_project = CreatePermission::None;
         });
 
         let res = server
@@ -141,7 +141,7 @@ fn create_project_superusers_allows_superuser_past_gate() {
         )
         .append_query_results([vec![project_row("acme")]]);
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_project = CreatePermission::Superusers;
+            cli.permissions.create_project = CreatePermission::Superusers;
         });
 
         let res = server
@@ -167,7 +167,7 @@ fn create_cache_superusers_rejects_regular_user() {
             user(),
         );
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_cache = CreatePermission::Superusers;
+            cli.permissions.create_cache = CreatePermission::Superusers;
         });
 
         let res = server
@@ -193,7 +193,7 @@ fn create_cache_none_rejects_superuser() {
             superuser_user(),
         );
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_cache = CreatePermission::None;
+            cli.permissions.create_cache = CreatePermission::None;
         });
 
         let res = server
@@ -220,7 +220,7 @@ fn create_cache_everyone_allows_regular_user_past_gate() {
         )
         .append_query_results([vec![cache_row("acme")]]);
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_cache = CreatePermission::Everyone;
+            cli.permissions.create_cache = CreatePermission::Everyone;
         });
 
         let res = server

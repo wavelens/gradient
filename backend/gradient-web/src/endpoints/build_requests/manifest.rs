@@ -71,7 +71,7 @@ pub async fn post_manifest(
         ));
     }
 
-    let max_source_upload_size = state.0.config.limits.max_source_upload_size;
+    let max_source_upload_size = state.0.config.http.max_source_upload_size;
     let mut total: i64 = 0;
     let mut seen_paths: HashSet<&str> = HashSet::with_capacity(body.files.len());
     let mut hashes: Vec<Vec<u8>> = Vec::with_capacity(body.files.len());

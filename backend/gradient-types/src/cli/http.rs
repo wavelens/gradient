@@ -4,23 +4,44 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Network-layer config: trusted-proxy and local-IP CIDR allowlists.
+//! HTTP-layer config: request body caps and the trusted-proxy / local-IP CIDR
+//! allowlists.
 //!
-//! `--trusted-proxies` gates X-Forwarded-For unwrapping (only peers in this
-//! list may rewrite the client IP). `--local-ips` selects which resolved
-//! client IPs are eligible for a cache's `local_priority` override.
+//! `--http-trusted-proxies` gates X-Forwarded-For unwrapping (only peers in
+//! this list may rewrite the client IP). `--http-local-ips` selects which
+//! resolved client IPs are eligible for a cache's `local_priority` override.
 
+use crate::input::greater_than_zero;
 use clap::Args;
 use ipnet::IpNet;
 
 #[derive(Args, Debug, Clone)]
-pub struct NetworkArgs {
+pub struct HttpArgs {
+    /// Maximum size in bytes of an HTTP request body for most endpoints (default 2 MiB).
+    #[arg(
+        long = "http-max-request-size",
+        env = "GRADIENT_HTTP_MAX_REQUEST_SIZE",
+        value_parser = greater_than_zero::<usize>,
+        default_value_t = 2 * 1024 * 1024,
+    )]
+    pub max_request_size: usize,
+
+    /// Maximum size in bytes of a source upload to `POST /build-requests/source`
+    /// (single-shot NAR) and the chunked manifest total (default 512 MiB).
+    #[arg(
+        long = "http-max-source-upload-size",
+        env = "GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE",
+        value_parser = greater_than_zero::<usize>,
+        default_value_t = 512 * 1024 * 1024,
+    )]
+    pub max_source_upload_size: usize,
+
     /// Comma-separated CIDR allowlist of peers permitted to set
     /// `X-Forwarded-For`. Defaults to loopback (covers reverse-proxies
     /// running on the same host).
     #[arg(
-        long,
-        env = "GRADIENT_TRUSTED_PROXIES",
+        long = "http-trusted-proxies",
+        env = "GRADIENT_HTTP_TRUSTED_PROXIES",
         default_value = "127.0.0.1/32,::1/128"
     )]
     pub trusted_proxies: String,
@@ -28,13 +49,19 @@ pub struct NetworkArgs {
     /// Comma-separated CIDR allowlist whose resolved client IPs receive a
     /// cache's `local_priority` (when set and non-zero). Defaults to the
     /// RFC1918 10/8 block.
-    #[arg(long, env = "GRADIENT_LOCAL_IPS", default_value = "10.0.0.0/8")]
+    #[arg(
+        long = "http-local-ips",
+        env = "GRADIENT_HTTP_LOCAL_IPS",
+        default_value = "10.0.0.0/8"
+    )]
     pub local_ips: String,
 }
 
-impl Default for NetworkArgs {
+impl Default for HttpArgs {
     fn default() -> Self {
         Self {
+            max_request_size: 2 * 1024 * 1024,
+            max_source_upload_size: 512 * 1024 * 1024,
             trusted_proxies: "127.0.0.1/32,::1/128".into(),
             local_ips: "10.0.0.0/8".into(),
         }

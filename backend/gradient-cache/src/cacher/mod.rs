@@ -66,29 +66,29 @@ impl Sweep {
 /// GC/reconcile steps; "sign-sweep" is the signature backfill, "debug-index"
 /// the build-id backfill, "eval-cache-sweep" the eval-cache eviction.
 fn sweeps(state: &ServerState) -> Vec<Sweep> {
-    let storage = &state.config.storage;
+    let config = &state.config;
     vec![
         Sweep::new(
             "cache-maintenance",
-            storage.cache_maintenance_interval_secs.max(1),
+            config.gc.interval_secs.max(1),
             1800,
             run_cache_maintenance,
         ),
         Sweep::new(
             "sign-sweep",
-            storage.sign_sweep_interval_secs.max(1),
+            config.cache.sign_sweep_interval_secs.max(1),
             300,
             sign_missing_signatures,
         ),
         Sweep::new(
             "debug-index",
-            storage.debug_index_interval_secs.max(1),
+            config.cache.debug_index_interval_secs.max(1),
             600,
             index_pending_debug_info,
         ),
         Sweep::new(
             "eval-cache-sweep",
-            storage.eval_cache_sweep_interval_secs.max(1),
+            config.eval.cache_sweep_interval_secs.max(1),
             600,
             evict_eval_cache,
         ),
@@ -121,7 +121,7 @@ pub fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
 async fn run_derivation_gc(state: &Arc<ServerState>) -> anyhow::Result<usize> {
     let (candidates, scanned_at) = gradient_db::orphan_derivation_candidates(
         &state.worker_db,
-        state.config.storage.keep_orphan_derivations_hours,
+        state.config.gc.orphan_derivation_hours,
     )
     .await?;
 
@@ -176,7 +176,7 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
         Err(e) => error!(error = ?e, "Stale cached-path eviction failed"),
     }
     if let Err(e) =
-        gradient_ci::unpark_storage_full_all(&state.worker_db, state.config.storage.max_storage_gb)
+        gradient_ci::unpark_storage_full_all(&state.worker_db, state.config.cache.max_storage_gb)
             .await
     {
         error!(error = ?e, "Failed to unpark storage-full evaluations after cleanup");
@@ -187,11 +187,11 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     if let Err(e) = cleanup_expired_upload_sessions(Arc::clone(&state)).await {
         error!(error = ?e, "Upload-session GC failed");
     }
-    if state.config.proto.nar_partial_ttl_secs > 0 {
-        let root = format!("{}/nar-partial", state.config.storage.base_path);
+    if state.config.nar.partial_ttl_secs > 0 {
+        let root = format!("{}/nar-partial", state.config.server.base_dir);
         let swept = match gradient_storage::PartialStore::new(
             root,
-            Duration::from_secs(state.config.proto.nar_partial_ttl_secs),
+            Duration::from_secs(state.config.nar.partial_ttl_secs),
         ) {
             Ok(store) => store.gc().await,
             Err(e) => Err(e),

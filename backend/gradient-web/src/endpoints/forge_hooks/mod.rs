@@ -407,7 +407,7 @@ pub async fn forge_webhook(
     })?;
 
     let plaintext_secret = decrypt_secret_with_file(
-        &state.config.secrets.crypt_secret_file,
+        &state.config.secrets.crypt_file,
         encrypted_secret,
     )
     .map_err(|e| {

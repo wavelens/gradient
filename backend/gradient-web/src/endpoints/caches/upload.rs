@@ -60,7 +60,7 @@ pub async fn nars_upload(
 
     let upload_store = upload_partial_store(&state)?;
     let stage_key = format!("{}/oneshot-{}", cache.id, uuid::Uuid::now_v7());
-    let max = state.config.limits.max_nar_upload_size as u64;
+    let max = state.config.nar.max_upload_size as u64;
 
     let mut narinfo: Option<NarinfoPart> = None;
     let mut staged_size: Option<u64> = None;
@@ -198,7 +198,7 @@ async fn sign_uploaded_path(
     gradient_proto::signing::sign_cached_path(
         &state.web_db,
         &state.events,
-        &state.config.secrets.crypt_secret_file,
+        &state.config.secrets.crypt_file,
         &state.config.server.serve_url,
         gradient_proto::signing::SignRequest {
             cached_path,
@@ -220,8 +220,8 @@ pub struct ChunkQuery {
 /// under a dedicated root so per-NAR keys never collide with the proto path's
 /// per-session budget accounting.
 fn upload_partial_store(state: &ServerState) -> WebResult<PartialStore> {
-    let root = format!("{}/nar-upload-partial", state.config.storage.base_path);
-    let ttl = Duration::from_secs(state.config.proto.nar_partial_ttl_secs);
+    let root = format!("{}/nar-upload-partial", state.config.server.base_dir);
+    let ttl = Duration::from_secs(state.config.nar.partial_ttl_secs);
     Ok(PartialStore::new(root, ttl)?)
 }
 
@@ -296,7 +296,7 @@ pub async fn nar_chunk(
     .await?;
     require_safe_hash(&store_hash)?;
 
-    let max = state.config.limits.max_nar_upload_size as u64;
+    let max = state.config.nar.max_upload_size as u64;
     if offset + body.len() as u64 > max {
         return Err(WebError::PayloadTooLarge(
             ErrorCode::PAYLOAD_TOO_LARGE,

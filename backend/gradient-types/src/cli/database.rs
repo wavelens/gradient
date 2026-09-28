@@ -8,68 +8,76 @@ use clap::Args;
 
 #[derive(Args, Debug, Clone)]
 pub struct DatabaseArgs {
-    #[arg(long, env = "GRADIENT_DATABASE_URL")]
-    pub database_url: Option<String>,
-    #[arg(long, env = "GRADIENT_DATABASE_URL_FILE")]
-    pub database_url_file: Option<String>,
+    #[arg(long = "database-url", env = "GRADIENT_DATABASE_URL")]
+    pub url: Option<String>,
+    #[arg(long = "database-url-file", env = "GRADIENT_DATABASE_URL_FILE")]
+    pub url_file: Option<String>,
 
     /// Maximum connections the scheduler / worker pool may open.
     /// Total Postgres connections per gradient-server process is
-    /// `database_max_connections + database_web_max_connections +
-    /// database_cache_max_connections`.
-    #[arg(long, env = "GRADIENT_DATABASE_MAX_CONNECTIONS", default_value_t = 32)]
-    pub database_max_connections: u32,
+    /// `max_connections + web_max_connections + cache_max_connections`.
+    #[arg(
+        id = "database-max-connections",
+        long = "database-max-connections",
+        env = "GRADIENT_DATABASE_MAX_CONNECTIONS",
+        default_value_t = 32
+    )]
+    pub max_connections: u32,
 
     /// Minimum connections kept warm in the scheduler / worker pool.
-    #[arg(long, env = "GRADIENT_DATABASE_MIN_CONNECTIONS", default_value_t = 2)]
-    pub database_min_connections: u32,
+    #[arg(
+        long = "database-min-connections",
+        env = "GRADIENT_DATABASE_MIN_CONNECTIONS",
+        default_value_t = 2
+    )]
+    pub min_connections: u32,
 
     /// Maximum connections the cache-query pool may open. Dedicated so a large
     /// eval's worker prefetch storm (one `CacheQuery` per in-flight build) cannot
     /// starve the scheduler/worker pool and stall dispatch.
     #[arg(
-        long,
+        long = "database-cache-max-connections",
         env = "GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS",
         default_value_t = 32
     )]
-    pub database_cache_max_connections: u32,
+    pub cache_max_connections: u32,
 
     /// Minimum connections kept warm in the cache-query pool.
     #[arg(
-        long,
+        long = "database-cache-min-connections",
         env = "GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS",
         default_value_t = 2
     )]
-    pub database_cache_min_connections: u32,
+    pub cache_min_connections: u32,
 
     /// Maximum connections the axum HTTP pool may open.
     #[arg(
-        long,
+        long = "database-web-max-connections",
         env = "GRADIENT_DATABASE_WEB_MAX_CONNECTIONS",
         default_value_t = 16
     )]
-    pub database_web_max_connections: u32,
+    pub web_max_connections: u32,
 
     /// Minimum connections kept warm in the axum HTTP pool.
     #[arg(
-        long,
+        long = "database-web-min-connections",
         env = "GRADIENT_DATABASE_WEB_MIN_CONNECTIONS",
         default_value_t = 1
     )]
-    pub database_web_min_connections: u32,
+    pub web_min_connections: u32,
 }
 
 impl Default for DatabaseArgs {
     fn default() -> Self {
         Self {
-            database_url: None,
-            database_url_file: None,
-            database_max_connections: 32,
-            database_min_connections: 2,
-            database_cache_max_connections: 32,
-            database_cache_min_connections: 2,
-            database_web_max_connections: 16,
-            database_web_min_connections: 1,
+            url: None,
+            url_file: None,
+            max_connections: 32,
+            min_connections: 2,
+            cache_max_connections: 32,
+            cache_min_connections: 2,
+            web_max_connections: 16,
+            web_min_connections: 1,
         }
     }
 }

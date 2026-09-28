@@ -9,7 +9,7 @@
 //! Raw `phase_event` / `worker_sample` rows, `dispatched_job` forensic rows and
 //! settled `outbox` rows are dropped past their configured age; `metric_rollup` minute/hour buckets
 //! are pruned while day/week aggregates are kept indefinitely. All bounds come
-//! from [`MetricsArgs`]; a `0` day-count disables that table's pruning.
+//! from `MetricsArgs` and `SchedulerArgs`; a `0` day-count disables that table's pruning.
 
 use std::time::Duration;
 
@@ -43,8 +43,8 @@ async fn run_retention(ctx: &DbContext) {
     let now = gradient_types::now();
     let db = &ctx.worker_db;
 
-    if cfg.metrics_retention_raw_days > 0 {
-        let cutoff = now - chrono::Duration::days(cfg.metrics_retention_raw_days);
+    if cfg.retention_raw_days > 0 {
+        let cutoff = now - chrono::Duration::days(cfg.retention_raw_days);
         if let Err(e) = gradient_entity::phase_event::Entity::delete_many()
             .filter(gradient_entity::phase_event::Column::At.lt(cutoff))
             .exec(db)
@@ -61,8 +61,9 @@ async fn run_retention(ctx: &DbContext) {
         }
     }
 
-    if cfg.dispatch_retention_days > 0 {
-        let cutoff = now - chrono::Duration::days(cfg.dispatch_retention_days);
+    let dispatch_retention_days = ctx.config.scheduler.dispatch_retention_days;
+    if dispatch_retention_days > 0 {
+        let cutoff = now - chrono::Duration::days(dispatch_retention_days);
         if let Err(e) = gradient_entity::dispatched_job::Entity::delete_many()
             .filter(gradient_entity::dispatched_job::Column::CreatedAt.lt(cutoff))
             .exec(db)
@@ -83,8 +84,8 @@ async fn run_retention(ctx: &DbContext) {
         }
     }
 
-    if cfg.metrics_retention_rollup_days > 0 {
-        let cutoff = now - chrono::Duration::days(cfg.metrics_retention_rollup_days);
+    if cfg.retention_rollup_days > 0 {
+        let cutoff = now - chrono::Duration::days(cfg.retention_rollup_days);
         if let Err(e) = gradient_entity::metric_rollup::Entity::delete_many()
             .filter(gradient_entity::metric_rollup::Column::BucketStart.lt(cutoff))
             .filter(

@@ -271,7 +271,7 @@ pub(super) fn negotiate_capabilities(
     GradientCapabilities {
         core: true,
         cache: true,
-        federate: client.federate && state.config.proto.federate_proto,
+        federate: client.federate && state.config.proto.federate,
         fetch: client.fetch && enabled.enable_fetch,
         eval: client.eval && enabled.enable_eval,
         build: client.build && enabled.enable_build,
@@ -302,7 +302,7 @@ mod tests {
     fn make_state(federate_proto: bool) -> ServerState {
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
         let mut state = Arc::try_unwrap(gradient_test_support::prelude::test_state(db)).unwrap();
-        Arc::make_mut(&mut state.config).proto.federate_proto = federate_proto;
+        Arc::make_mut(&mut state.config).proto.federate = federate_proto;
         state
     }
 

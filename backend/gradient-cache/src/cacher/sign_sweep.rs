@@ -160,7 +160,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
             continue;
         }
         let signer = match CacheSigner::from_cache(
-            &state.config.secrets.crypt_secret_file,
+            &state.config.secrets.crypt_file,
             cache,
             &state.config.server.serve_url,
         ) {

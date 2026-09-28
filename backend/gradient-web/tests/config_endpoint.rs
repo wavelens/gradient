@@ -45,9 +45,9 @@ fn config_reports_a_configured_github_app() {
     run(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres);
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.github_app.github_app_id = Some(1);
-            cli.github_app.github_app_private_key_file = Some("/run/key.pem".into());
-            cli.github_app.github_app_webhook_secret_file = Some("/run/secret".into());
+            cli.github_app.id = Some(1);
+            cli.github_app.private_key_file = Some("/run/key.pem".into());
+            cli.github_app.webhook_secret_file = Some("/run/secret".into());
         });
 
         let res = server.get("/api/v1/config").await;
@@ -62,8 +62,8 @@ fn config_reflects_configured_permissions() {
     run(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres);
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_project = CreatePermission::None;
-            cli.server.create_cache = CreatePermission::Superusers;
+            cli.permissions.create_project = CreatePermission::None;
+            cli.permissions.create_cache = CreatePermission::Superusers;
         });
 
         let res = server.get("/api/v1/config").await;

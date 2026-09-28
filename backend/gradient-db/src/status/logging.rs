@@ -34,7 +34,7 @@ pub async fn finalize_build_log(
         ctx.storage.log_storage.as_ref(),
         log_id,
         &log_text,
-        ctx.config.storage.log_chunk_bytes,
+        ctx.config.log.chunk_bytes,
     )
     .await
     .with_context(|| format!("chunking the build log of attempt {log_id}"))?;

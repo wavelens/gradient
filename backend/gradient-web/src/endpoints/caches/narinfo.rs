@@ -280,7 +280,7 @@ async fn fetch_from_upstream(
     // Built only once we actually have something to serve, so a miss never pays
     // for reading and decrypting the cache's key.
     let signer = match CacheSigner::from_cache(
-        &state.config.secrets.crypt_secret_file,
+        &state.config.secrets.crypt_file,
         cache,
         &state.config.server.serve_url,
     ) {

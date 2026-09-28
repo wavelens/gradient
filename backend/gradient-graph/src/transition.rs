@@ -529,7 +529,7 @@ async fn build_failed(
 
     let derivation_id = anchor.derivation;
     let attempt = anchor.attempt;
-    let max_attempts = ctx.config.eval.build_max_attempts;
+    let max_attempts = ctx.config.build.max_attempts;
 
     // Counted before this failure is recorded, so the breaker decision excludes
     // the attempt we are about to mark.
@@ -541,7 +541,7 @@ async fn build_failed(
         0
     };
 
-    let max_loops = ctx.config.eval.inputs_unavailable_max_loops;
+    let max_loops = ctx.config.build.inputs_unavailable_max_loops;
     let inputs_circuit_open = matches!(kind, BuildFailureKind::InputsUnavailable)
         && policy::inputs_unavailable_circuit_open(prior_inputs_unavailable, max_loops);
     if matches!(kind, BuildFailureKind::InputsUnavailable) && !missing_paths.is_empty() {
@@ -564,7 +564,7 @@ async fn build_failed(
     let substitution = policy::Substitution {
         substitutable: anchor.substitutable,
         misses: substitute_misses(ctx, derivation_build, kind, anchor.substitutable).await,
-        threshold: i64::from(ctx.config.eval.substitute_miss_escalation_threshold),
+        threshold: i64::from(ctx.config.build.substitute_miss_escalation_threshold),
     };
     let outcome = match policy::decide_failure_outcome(kind, attempt, max_attempts, substitution) {
         FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,

@@ -363,7 +363,7 @@ pub async fn post_task_evaluate(
         &state.web_db,
         eval,
         task.project,
-        state.config.storage.max_storage_gb,
+        state.config.cache.max_storage_gb,
     )
     .await?;
     let eval = gradient_ci::park_if_no_workers(&state.web_db, eval, task.project).await?;

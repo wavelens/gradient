@@ -107,7 +107,7 @@ pub async fn run_upload_pass(
         }
     }
 
-    let concurrency = state.config.storage.nar_upload_concurrency.max(1);
+    let concurrency = state.config.nar.upload_concurrency.max(1);
     let mut results = futures::stream::iter(uploads.into_iter().map(|row| {
         let state = Arc::clone(state);
         async move {
@@ -133,7 +133,7 @@ pub async fn run_upload_pass(
     }
 
     if scope == Scope::Tick {
-        let grace = chrono::Duration::hours(state.config.storage.nar_upload_grace_hours.max(0));
+        let grace = chrono::Duration::hours(state.config.gc.nar_upload_grace_hours.max(0));
         let cutoff = gradient_types::now() - grace;
         for row in absent {
             match reconcile_absent(state, &row, cutoff).await {
@@ -417,8 +417,8 @@ mod tests {
             .append_query_results([rows])
             .into_connection();
         test_server_state(store(base), db, |config| {
-            config.storage.nar_upload_grace_hours = 1;
-            config.storage.nar_upload_concurrency = 2;
+            config.gc.nar_upload_grace_hours = 1;
+            config.nar.upload_concurrency = 2;
         })
     }
 
@@ -434,7 +434,7 @@ mod tests {
 
     async fn stage(state: &ServerState, hash: &str, bytes: &[u8]) {
         let claim =
-            std::path::PathBuf::from(&state.config.storage.base_path).join(format!("claim-{hash}"));
+            std::path::PathBuf::from(&state.config.server.base_dir).join(format!("claim-{hash}"));
         tokio::fs::write(&claim, bytes).await.unwrap();
         state
             .nar_storage

@@ -69,13 +69,13 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
     let path = dir.to_string_lossy().into_owned();
     let cli = Cli::try_parse_from([
         "gradient-server",
-        "--crypt-secret-file",
+        "--secrets-crypt-file",
         "test-secret",
-        "--jwt-secret-file",
+        "--secrets-jwt-file",
         "test-jwt",
         "--serve-url",
         "http://127.0.0.1:3000",
-        "--base-path",
+        "--base-dir",
         &path,
     ])
     .expect("test cli");

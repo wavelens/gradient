@@ -61,7 +61,7 @@ fn select_evictions(
 /// by [`select_evictions`], deleting the blob (best-effort) then the DB row.
 /// Errors on a single row are logged and never abort the pass.
 pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {
-    let cfg = &state.config.storage;
+    let cfg = &state.config.eval;
 
     let rows: Vec<(EvalCacheStoreId, i64, NaiveDateTime)> = EEvalCacheStore::find()
         .select_only()
@@ -78,8 +78,8 @@ pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {
 
     let victims = select_evictions(
         &rows,
-        cfg.eval_cache_max_total_bytes,
-        Duration::days(cfg.eval_cache_max_age_days as i64),
+        cfg.cache_max_total_bytes,
+        Duration::days(cfg.cache_max_age_days as i64),
         gradient_types::now(),
     );
 

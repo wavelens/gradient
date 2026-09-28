@@ -4,81 +4,130 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::input::greater_than_zero;
 use clap::Args;
+
+/// Evaluations a freshly created task keeps, before the instance-wide
+/// maximum is applied. Also the default for that maximum.
+pub const DEFAULT_KEEP_EVALUATIONS: i32 = 30;
 
 #[derive(Args, Debug, Clone)]
 pub struct EvalArgs {
-    #[arg(long, env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS", value_parser = greater_than_zero::<usize>, default_value = "10")]
-    pub max_concurrent_evaluations: usize,
-    #[arg(long, env = "GRADIENT_MAX_CONCURRENT_BUILDS", value_parser = greater_than_zero::<usize>, default_value = "1000")]
-    pub max_concurrent_builds: usize,
-    #[arg(long, env = "GRADIENT_EVALUATION_TIMEOUT", value_parser = greater_than_zero::<i64>, default_value = "10")]
-    pub evaluation_timeout: i64,
-    /// Number of long-lived Nix evaluator worker subprocesses to keep around.
-    /// Each worker hosts one persistent embedded `NixEvaluator`, paying the
-    /// libnix init cost only once. Must be at least `1`: in-process evaluation
-    /// is unsafe because the Nix C API `EvalState` is not thread-safe and the
-    /// embedded Boehm GC conflicts with Tokio's signal handling.
-    #[arg(long, env = "GRADIENT_EVAL_WORKERS", value_parser = greater_than_zero::<usize>, default_value = "1")]
-    pub eval_workers: usize,
-    /// Recycle an eval-worker subprocess after it has served this many
-    /// `list` / `resolve` calls. Nix's Boehm GC never releases memory
-    /// back to the OS, so long-lived workers grow monotonically; this
-    /// cap bounds RSS growth by forcing a respawn. Set to 0 to disable.
-    #[arg(long, env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER", default_value = "1")]
-    pub max_evaluations_per_worker: usize,
-    #[arg(long, env = "GRADIENT_BUILD_MAX_ATTEMPTS", value_parser = greater_than_zero::<u32>, default_value = "3")]
-    pub build_max_attempts: u32,
-    /// Penalty-free re-queues of a relay within one evaluation (attempts recorded
-    /// `SubstituteUnavailable`, whichever failure produced them) after which the
-    /// anchor stops being substitutable and is built like any other. This is the
-    /// only bound on that loop: a re-queue deliberately does not spend an attempt.
-    #[arg(long, env = "GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD", value_parser = greater_than_zero::<u32>, default_value = "2")]
-    pub substitute_miss_escalation_threshold: u32,
-    /// Max `InputsUnavailable` self-heal loops per build before the circuit
-    /// breaker opens and the build fails fast instead of churning the cache.
-    #[arg(long, env = "GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS", value_parser = greater_than_zero::<u32>, default_value = "3")]
-    pub inputs_unavailable_max_loops: u32,
-    #[arg(long, env = "GRADIENT_BUILD_RETRY_BACKOFF_SECS", default_value = "30")]
-    pub build_retry_backoff_secs: u64,
+    /// Instance-wide maximum for a task's `keep_evaluations`. New tasks
+    /// start at the lower of [`DEFAULT_KEEP_EVALUATIONS`] and this. `0` disables
+    /// the cap.
     #[arg(
-        long,
-        env = "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS",
-        default_value = "14400"
+        long = "eval-max-keep",
+        env = "GRADIENT_EVAL_MAX_KEEP",
+        default_value_t = DEFAULT_KEEP_EVALUATIONS as usize
     )]
-    pub build_default_timeout_secs: u64,
+    pub max_keep: usize,
+
+    /// Total byte cap for the fleet-shared eval-cache blobs. The periodic
+    /// eviction sweep drops the oldest-`updated_at` rows until the surviving
+    /// total is at or under this. Defaults to 10 GiB.
     #[arg(
-        long,
-        env = "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS",
-        default_value = "3600"
+        long = "eval-cache-max-total-bytes",
+        env = "GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES",
+        default_value_t = 10 * 1024 * 1024 * 1024
     )]
-    pub build_default_max_silent_secs: u64,
-    /// Name of the scheduler scoring policy (`simple`, `resource-aware`).
-    /// Unknown names fall back to `resource-aware`.
+    pub cache_max_total_bytes: u64,
+
+    /// Max age in days for an eval-cache blob; older blobs are evicted by the
+    /// sweep regardless of the size cap. Defaults to 30.
     #[arg(
-        long,
-        env = "GRADIENT_SCHEDULER_SCORING_POLICY",
-        default_value = "resource-aware"
+        long = "eval-cache-max-age-days",
+        env = "GRADIENT_EVAL_CACHE_MAX_AGE_DAYS",
+        default_value_t = 30
     )]
-    pub scheduler_scoring_policy: String,
+    pub cache_max_age_days: u64,
+
+    /// Interval in seconds between eval-cache eviction sweeps. Defaults to 3600.
+    #[arg(
+        long = "eval-cache-sweep-interval-secs",
+        env = "GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS",
+        default_value_t = 3600
+    )]
+    pub cache_sweep_interval_secs: u64,
 }
 
 impl Default for EvalArgs {
     fn default() -> Self {
         Self {
-            max_concurrent_evaluations: 10,
-            max_concurrent_builds: 1000,
-            evaluation_timeout: 10,
-            eval_workers: 1,
-            max_evaluations_per_worker: 1,
-            build_max_attempts: 3,
-            substitute_miss_escalation_threshold: 2,
-            inputs_unavailable_max_loops: 3,
-            build_retry_backoff_secs: 30,
-            build_default_timeout_secs: 14400,
-            build_default_max_silent_secs: 3600,
-            scheduler_scoring_policy: "resource-aware".into(),
+            max_keep: DEFAULT_KEEP_EVALUATIONS as usize,
+            cache_max_total_bytes: 10 * 1024 * 1024 * 1024,
+            cache_max_age_days: 30,
+            cache_sweep_interval_secs: 3600,
         }
+    }
+}
+
+impl EvalArgs {
+    /// The ceiling on a task's `keep_evaluations`, or `None` when the cap is
+    /// disabled. Saturates rather than wrapping: a configured value past
+    /// `i32::MAX` would otherwise become a negative ceiling that rejects
+    /// everything.
+    pub fn keep_evaluations_max(&self) -> Option<i32> {
+        match self.max_keep {
+            0 => None,
+            max => Some(i32::try_from(max).unwrap_or(i32::MAX)),
+        }
+    }
+
+    /// `keep_evaluations` for a freshly created task. Creating a task
+    /// above the ceiling would leave it unsaveable: the frontend sends the whole
+    /// form back and the value it was handed fails validation (#561).
+    pub fn default_keep_evaluations(&self) -> i32 {
+        match self.keep_evaluations_max() {
+            Some(max) => DEFAULT_KEEP_EVALUATIONS.min(max),
+            None => DEFAULT_KEEP_EVALUATIONS,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(max_keep: usize) -> EvalArgs {
+        EvalArgs {
+            max_keep,
+            ..Default::default()
+        }
+    }
+
+    /// The reported bug: with a maximum below the default, a new task was
+    /// still handed the default and every subsequent save was rejected.
+    #[test]
+    fn a_new_task_never_starts_above_the_maximum() {
+        assert_eq!(args(3).default_keep_evaluations(), 3);
+        assert_eq!(args(1).default_keep_evaluations(), 1);
+    }
+
+    /// A maximum above the default raises the ceiling, not the starting point -
+    /// the setting is documented as a cap, not a target.
+    #[test]
+    fn a_higher_maximum_leaves_the_default_alone() {
+        assert_eq!(
+            args(100).default_keep_evaluations(),
+            DEFAULT_KEEP_EVALUATIONS
+        );
+        assert_eq!(args(100).keep_evaluations_max(), Some(100));
+    }
+
+    #[test]
+    fn zero_disables_the_cap() {
+        assert_eq!(args(0).keep_evaluations_max(), None);
+        assert_eq!(args(0).default_keep_evaluations(), DEFAULT_KEEP_EVALUATIONS);
+    }
+
+    /// A maximum past `i32::MAX` must saturate: `as i32` would wrap negative and
+    /// the cap check would then reject every value.
+    #[test]
+    fn an_out_of_range_maximum_saturates() {
+        assert_eq!(args(usize::MAX).keep_evaluations_max(), Some(i32::MAX));
+        assert_eq!(
+            args(usize::MAX).default_keep_evaluations(),
+            DEFAULT_KEEP_EVALUATIONS
+        );
     }
 }

@@ -159,7 +159,7 @@ pub async fn get_config(
             version: env!("CARGO_PKG_VERSION").to_string(),
             oidc_enabled: state.config.oidc.is_some(),
             oidc_required: state.config.oidc.as_ref().is_some_and(|o| o.required),
-            registration_enabled: state.config.registration.enable_registration
+            registration_enabled: state.config.registration.enable
                 && !state.config.oidc.as_ref().is_some_and(|o| o.required),
             email_verification_enabled: state.config.email.is_some()
                 && state
@@ -168,9 +168,9 @@ pub async fn get_config(
                     .as_ref()
                     .is_some_and(|e| e.require_verification),
             smtp_enabled: state.email.is_enabled(),
-            quic: state.config.proto.quic,
-            create_project: state.config.server.create_project,
-            create_cache: state.config.server.create_cache,
+            quic: state.config.server.use_quic,
+            create_project: state.config.permissions.create_project,
+            create_cache: state.config.permissions.create_cache,
             github_app_enabled: state.config.github_app.is_some(),
         },
     };

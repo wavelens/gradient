@@ -25,9 +25,9 @@ use gradient_types::consts::{
 use gradient_types::*;
 
 fn db_url(cli: &Cli) -> Result<String> {
-    if let Some(file) = &cli.database.database_url_file {
+    if let Some(file) = &cli.database.url_file {
         Ok(std::fs::read_to_string(file).context("Failed to read database url from file")?)
-    } else if let Some(url) = &cli.database.database_url {
+    } else if let Some(url) = &cli.database.url {
         Ok(url.clone())
     } else {
         anyhow::bail!("No database url provided")
@@ -42,7 +42,7 @@ fn make_connect_options(
     let mut opt = ConnectOptions::new(db_url(cli)?);
 
     // Only enable SQL logging at trace level
-    if cli.logging.log_level == "trace" {
+    if cli.log.level_default == "trace" {
         opt.sqlx_logging(true)
             .sqlx_logging_level(LevelFilter::Trace);
     } else {
@@ -125,8 +125,8 @@ async fn server_version_num(db: &DatabaseConnection) -> Result<i32> {
 pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     let db = Database::connect(make_connect_options(
         cli,
-        cli.database.database_max_connections,
-        cli.database.database_min_connections,
+        cli.database.max_connections,
+        cli.database.min_connections,
     )?)
     .await
     .context("Failed to connect to database")?;
@@ -223,8 +223,8 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
 pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
     Database::connect(make_connect_options(
         cli,
-        cli.database.database_web_max_connections,
-        cli.database.database_web_min_connections,
+        cli.database.web_max_connections,
+        cli.database.web_min_connections,
     )?)
     .await
     .context("Failed to connect web database pool")
@@ -235,8 +235,8 @@ pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
 pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
     Database::connect(make_connect_options(
         cli,
-        cli.database.database_cache_max_connections,
-        cli.database.database_cache_min_connections,
+        cli.database.cache_max_connections,
+        cli.database.cache_min_connections,
     )?)
     .await
     .context("Failed to connect cache database pool")

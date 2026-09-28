@@ -20,7 +20,7 @@
  *   1 - protocol/transport error
  *
  * After running, verify on the server host:
- *   ls -l "$GRADIENT_BASE_PATH"/nars/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar.zst
+ *   ls -l "$GRADIENT_BASE_DIR"/nars/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.nar.zst
  *   psql -c "select store_path, nar_hash from cached_path where hash like 'aa%'"
  */
 
@@ -174,7 +174,7 @@ async fn main() {
     }
     eprintln!(
         "[probe] VULNERABLE - NarPush/NarUploaded accepted without job ownership.\n\
-         [probe] verify: nars/{}/{} .nar.zst under GRADIENT_BASE_PATH and cached_path row for hash={}",
+         [probe] verify: nars/{}/{} .nar.zst under GRADIENT_BASE_DIR and cached_path row for hash={}",
         &FAKE_HASH[..2],
         &FAKE_HASH[2..],
         FAKE_HASH

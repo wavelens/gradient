@@ -249,7 +249,7 @@ pub async fn put(
         last_check_at: *NULL_TIME,
         created_by: user.id,
         created_at: gradient_types::now(),
-        keep_evaluations: state.config.storage.default_keep_evaluations(),
+        keep_evaluations: state.config.eval.default_keep_evaluations(),
         concurrency: body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
         sign_cache: body.sign_cache.unwrap_or(true),
         ..Default::default()
@@ -531,7 +531,7 @@ impl<'a> TaskPatcher<'a> {
                 "keep_evaluations must be at least 1".to_string(),
             ));
         }
-        if let Some(global_max) = self.state.config.storage.keep_evaluations_max()
+        if let Some(global_max) = self.state.config.eval.keep_evaluations_max()
             && keep > global_max
         {
             return Err(WebError::bad_request(format!(

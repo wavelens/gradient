@@ -11,18 +11,10 @@
 //! re-reviewed, so adding one has to be a deliberate edit here.
 
 use anyhow::{Context as _, Result};
-use gradient_types::{EvalArgs, ProtoArgs, S3Config, StorageArgs};
+use gradient_types::RuntimeConfig;
 use rusqlite::Connection;
 
-/// Takes the four argument groups it actually reads rather than the whole
-/// `Cli`, so the dependency surface is honest and a test can build one.
-pub fn write_config_snapshot(
-    conn: &Connection,
-    eval: &EvalArgs,
-    proto: &ProtoArgs,
-    storage: &StorageArgs,
-    s3: Option<&S3Config>,
-) -> Result<()> {
+pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Result<()> {
     conn.execute(
         "CREATE TABLE config_snapshot (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
         [],
@@ -32,46 +24,49 @@ pub fn write_config_snapshot(
     let mut entries: Vec<(&str, String)> = vec![
         (
             "inputs_unavailable_max_loops",
-            eval.inputs_unavailable_max_loops.to_string(),
+            config.build.inputs_unavailable_max_loops.to_string(),
         ),
-        ("build_max_attempts", eval.build_max_attempts.to_string()),
+        ("build_max_attempts", config.build.max_attempts.to_string()),
         (
             "worker_heartbeat_timeout_secs",
-            proto.worker_heartbeat_timeout_secs.to_string(),
+            config.proto.worker_heartbeat_timeout_secs.to_string(),
         ),
         (
             "nar_storage_open_timeout_secs",
-            proto.nar_storage_open_timeout_secs.to_string(),
+            config.nar.storage_open_timeout_secs.to_string(),
         ),
         (
             "nar_send_chunk_timeout_secs",
-            proto.nar_send_chunk_timeout_secs.to_string(),
+            config.nar.send_chunk_timeout_secs.to_string(),
         ),
         (
             "max_concurrent_nar_serves",
-            proto.max_concurrent_nar_serves.to_string(),
+            config.nar.max_concurrent_serves.to_string(),
         ),
         (
             "upstream_query_concurrency",
-            proto.upstream_query_concurrency.to_string(),
+            config.cache.upstream_query_concurrency.to_string(),
         ),
         (
             "nar_commit_concurrency",
-            proto.nar_commit_concurrency.to_string(),
+            config.nar.commit_concurrency.to_string(),
         ),
-        ("upload_concurrency", proto.upload_concurrency.to_string()),
-        ("upload_bytes_budget", proto.upload_bytes_budget.to_string()),
-        ("nar_ttl_hours", storage.nar_ttl_hours.to_string()),
+        ("upload_concurrency", config.upload.concurrency.to_string()),
+        (
+            "upload_bytes_budget",
+            config.upload.bytes_budget.to_string(),
+        ),
+        ("nar_ttl_hours", config.gc.nar_ttl_hours.to_string()),
         (
             "nar_upload_grace_hours",
-            storage.nar_upload_grace_hours.to_string(),
+            config.gc.nar_upload_grace_hours.to_string(),
         ),
-        ("nar_verify_digest", storage.nar_verify_digest.to_string()),
+        ("nar_verify_digest", config.nar.verify_digest.to_string()),
     ];
 
     // The resolved S3 policy, not the raw arguments, so the file says what the
     // server is actually doing; a local-disk instance says so instead.
-    match s3 {
+    match &config.s3 {
         Some(s3) => {
             entries.push(("storage_backend", "s3".to_owned()));
             entries.push((
@@ -103,18 +98,15 @@ mod tests {
     use super::*;
     use crate::schema::open_report;
 
+    fn config() -> RuntimeConfig {
+        RuntimeConfig::from_cli(&gradient_types::Cli::default()).expect("default config")
+    }
+
     #[test]
     fn config_snapshot_is_an_explicit_key_list_with_no_secret() {
         let dir = tempfile::tempdir().expect("tempdir");
         let conn = open_report(&dir.path().join("r.db")).expect("open");
-        write_config_snapshot(
-            &conn,
-            &EvalArgs::default(),
-            &ProtoArgs::default(),
-            &StorageArgs::default(),
-            None,
-        )
-        .expect("snapshot");
+        write_config_snapshot(&conn, &config()).expect("snapshot");
 
         let keys: Vec<String> = conn
             .prepare("SELECT key FROM config_snapshot")
@@ -137,15 +129,8 @@ mod tests {
     fn the_self_heal_threshold_is_present_and_real() {
         let dir = tempfile::tempdir().expect("tempdir");
         let conn = open_report(&dir.path().join("r.db")).expect("open");
-        let eval = EvalArgs::default();
-        write_config_snapshot(
-            &conn,
-            &eval,
-            &ProtoArgs::default(),
-            &StorageArgs::default(),
-            None,
-        )
-        .expect("snapshot");
+        let config = config();
+        write_config_snapshot(&conn, &config).expect("snapshot");
 
         let value: String = conn
             .query_row(
@@ -154,6 +139,6 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("value");
-        assert_eq!(value, eval.inputs_unavailable_max_loops.to_string());
+        assert_eq!(value, config.build.inputs_unavailable_max_loops.to_string());
     }
 }

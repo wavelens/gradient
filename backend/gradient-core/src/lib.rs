@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InitError {
-    #[error("missing required secret files (--crypt-secret-file / --jwt-secret-file)")]
+    #[error("missing required secret files (--secrets-crypt-file / --secrets-jwt-file)")]
     MissingSecrets,
     #[error("invalid network config: {0}")]
     NetworkConfig(String),
@@ -55,14 +55,14 @@ pub enum InitError {
 }
 
 pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
-    if cli.secrets.crypt_secret_file.is_empty() || cli.secrets.jwt_secret_file.is_empty() {
+    if cli.secrets.crypt_file.is_empty() || cli.secrets.jwt_file.is_empty() {
         return Err(InitError::MissingSecrets);
     }
 
     tracing::info!(
-        ip = %cli.server.ip,
+        ip = %cli.server.listen_addr,
         port = cli.server.port,
-        state_file = ?cli.storage.state_file,
+        state_file = ?cli.state.file,
         "Starting Gradient server bootstrap",
     );
 
@@ -78,10 +78,10 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
 
     let state_result = load_and_apply_state(
         &db,
-        cli.storage.state_file.as_deref(),
-        &cli.secrets.crypt_secret_file,
-        cli.storage.delete_state,
-        cli.email.email_enabled,
+        cli.state.file.as_deref(),
+        &cli.secrets.crypt_file,
+        cli.state.delete,
+        cli.email.enable,
     )
     .await
     .map_err(|e| InitError::StateLoad(e.to_string()))?;
@@ -89,7 +89,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     let oidc_group_roles = Arc::new(state_result.oidc_group_roles);
     let scim_group_roles = Arc::new(state_result.scim_group_roles);
 
-    if let Some(max) = cli.storage.keep_evaluations_max() {
+    if let Some(max) = cli.eval.keep_evaluations_max() {
         let over_limit = ETask::find()
             .filter(CTask::KeepEvaluations.gt(max))
             .all(&db)
@@ -115,14 +115,14 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         }
     }
 
-    let local_log_storage = FileLogStorage::new(Path::new(&cli.storage.base_path))
+    let local_log_storage = FileLogStorage::new(Path::new(&cli.server.base_dir))
         .await
         .map_err(InitError::LogStorage)?;
 
     let http = gradient_util::http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
 
-    let jwt_secret = gradient_types::input::load_secret(&cli.secrets.jwt_secret_file)
-        .map_err(InitError::JwtSecret)?;
+    let jwt_secret =
+        gradient_types::input::load_secret(&cli.secrets.jwt_file).map_err(InitError::JwtSecret)?;
 
     let email_service = EmailService::new(cli.email_config())
         .await
@@ -172,19 +172,19 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         );
         store
     } else {
-        let store = NarStore::local(&cli.storage.base_path)
+        let store = NarStore::local(&cli.server.base_dir)
             .map_err(|e| InitError::LocalStorage(e.to_string()))?;
-        tracing::info!(path = %cli.storage.base_path, "NAR storage: local");
+        tracing::info!(path = %cli.server.base_dir, "NAR storage: local");
         store
     };
 
-    let staged = StagedNars::new(format!("{}/nar-staged", cli.storage.base_path))
+    let staged = StagedNars::new(format!("{}/nar-staged", cli.server.base_dir))
         .map_err(|e| InitError::LocalStorage(e.to_string()))?;
     let nar_storage = nar_storage
         .with_staging(staged)
         .with_hot_cache(HotNarCache::new(
-            cli.storage.hot_nar_cache_bytes,
-            cli.storage.small_nar_bytes,
+            cli.nar.hot_cache_bytes,
+            cli.nar.small_bytes,
         ));
 
     let log_storage: Arc<dyn gradient_storage::LogStorage> = if cli.s3_config().is_some() {
@@ -198,11 +198,11 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         Arc::new(local_log_storage)
     };
 
-    let upstream_query_concurrency = config.proto.upstream_query_concurrency;
-    let nar_commit_concurrency = config.proto.nar_commit_concurrency;
+    let upstream_query_concurrency = config.cache.upstream_query_concurrency;
+    let nar_commit_concurrency = config.nar.commit_concurrency;
     let upload_limits = gradient_storage::admission::Limits {
-        concurrency: config.proto.upload_concurrency.max(1),
-        bytes: config.proto.upload_bytes_budget.max(1),
+        concurrency: config.upload.concurrency.max(1),
+        bytes: config.upload.bytes_budget.max(1),
     };
 
     Ok(Arc::new(ServerState {

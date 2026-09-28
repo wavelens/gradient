@@ -154,7 +154,7 @@ fn server_with_email(
         None => test_cli(),
     };
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(

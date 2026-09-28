@@ -98,9 +98,9 @@ pub async fn handle_cache_socket(
         return;
     }
 
-    let send_chunk_timeout = Duration::from_secs(state.config.proto.nar_send_chunk_timeout_secs);
+    let send_chunk_timeout = Duration::from_secs(state.config.nar.send_chunk_timeout_secs);
     let (mut reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
-    let max_serves = state.config.proto.max_concurrent_nar_serves;
+    let max_serves = state.config.nar.max_concurrent_serves;
     let nar_serve_semaphore = Arc::new(Semaphore::new(max_serves));
     let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
     let cancel = state.shutdown.token();

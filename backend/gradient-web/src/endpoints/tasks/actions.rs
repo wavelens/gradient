@@ -258,7 +258,7 @@ pub async fn create_action(
             url,
             token: Some(plaintext),
         } => {
-            let key = load_secret_bytes(&state.config.secrets.crypt_secret_file)
+            let key = load_secret_bytes(&state.config.secrets.crypt_file)
                 .map_err(|e| WebError::internal(e.to_string()))?;
             let encrypted = encrypt_action_secret(&plaintext, key.expose())
                 .map_err(|e| WebError::internal(e.to_string()))?;
@@ -454,7 +454,7 @@ pub async fn update_action(
                 url,
                 token: Some(plaintext),
             } => {
-                let key = load_secret_bytes(&state.config.secrets.crypt_secret_file)
+                let key = load_secret_bytes(&state.config.secrets.crypt_file)
                     .map_err(|e| WebError::internal(e.to_string()))?;
                 let encrypted = encrypt_action_secret(&plaintext, key.expose())
                     .map_err(|e| WebError::internal(e.to_string()))?;
@@ -685,7 +685,7 @@ pub async fn regenerate_token(
     rand::rng().fill(&mut raw);
     let plaintext_token = format!("gat_{}", URL_SAFE_NO_PAD.encode(raw));
 
-    let key = load_secret_bytes(&state.config.secrets.crypt_secret_file)
+    let key = load_secret_bytes(&state.config.secrets.crypt_file)
         .map_err(|e| WebError::internal(e.to_string()))?;
     let encrypted = encrypt_action_secret(&plaintext_token, key.expose())
         .map_err(|e| WebError::internal(e.to_string()))?;

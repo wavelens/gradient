@@ -1142,7 +1142,7 @@ async fn commit_presigned(
         fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
         return false;
     }
-    let rehash = state.config.storage.nar_verify_digest;
+    let rehash = state.config.nar.verify_digest;
     match state
         .nar_storage
         .verify(hash, file_hash, file_size, rehash)
@@ -1208,10 +1208,10 @@ pub(super) async fn serve_nar_request(
     resume_from: u64,
     client_token: Option<&str>,
 ) -> anyhow::Result<()> {
-    let proto_cfg = &state.config.proto;
+    let nar_cfg = &state.config.nar;
     let timeouts = RelayTimeouts {
-        open: Duration::from_secs(proto_cfg.nar_storage_open_timeout_secs),
-        chunk_read: Duration::from_secs(proto_cfg.nar_send_chunk_timeout_secs),
+        open: Duration::from_secs(nar_cfg.storage_open_timeout_secs),
+        chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs),
     };
     let req = RelayRequest {
         job_id,
@@ -1269,7 +1269,7 @@ async fn awaiting_upload(state: &Arc<ServerState>, hash: &str) -> bool {
     use gradient_entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
     use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _};
 
-    let grace = chrono::Duration::hours(state.config.storage.nar_upload_grace_hours.max(0));
+    let grace = chrono::Duration::hours(state.config.gc.nar_upload_grace_hours.max(0));
     match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
         .one(&state.worker_db)
@@ -2118,7 +2118,7 @@ mod serve_nar_tests {
     async fn serve_answers_a_hot_entry_in_bulk_chunks() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let cli = gradient_test_support::prelude::test_cli();
-        let storage = gradient_storage::NarStore::local(&cli.storage.base_path)
+        let storage = gradient_storage::NarStore::local(&cli.server.base_dir)
             .unwrap()
             .with_hot_cache(gradient_storage::HotNarCache::new(
                 4 * 1024 * 1024,
@@ -2164,12 +2164,12 @@ mod serve_nar_tests {
     async fn serve_reads_a_staged_file_when_the_object_is_absent() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let cli = gradient_test_support::prelude::test_cli();
-        let staged_root = std::path::PathBuf::from(&cli.storage.base_path).join("nar-staged");
-        let storage = gradient_storage::NarStore::local(&cli.storage.base_path)
+        let staged_root = std::path::PathBuf::from(&cli.server.base_dir).join("nar-staged");
+        let storage = gradient_storage::NarStore::local(&cli.server.base_dir)
             .unwrap()
             .with_staging(gradient_storage::StagedNars::new(&staged_root).unwrap());
         let state = gradient_test_support::prelude::test_state_with_storage(db, storage);
-        let claim = std::path::PathBuf::from(&cli.storage.base_path).join("claim");
+        let claim = std::path::PathBuf::from(&cli.server.base_dir).join("claim");
         tokio::fs::write(&claim, b"staged payload").await.unwrap();
         let hash = "abcdefghijklmnopqrstuvwxyz012345";
         state

@@ -35,17 +35,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use gradient_storage::LogStorage;
-use gradient_types::{EvalArgs, ProtoArgs, S3Config, StorageArgs};
+use gradient_types::RuntimeConfig;
 use sea_orm::ConnectionTrait;
 use sea_orm::prelude::Uuid;
 
 /// Everything the generator needs that is not the database or the options.
 pub struct ReportContext<'a> {
     pub logs: &'a dyn LogStorage,
-    pub eval_args: &'a EvalArgs,
-    pub proto_args: &'a ProtoArgs,
-    pub storage_args: &'a StorageArgs,
-    pub s3_config: Option<&'a S3Config>,
+    pub config: &'a RuntimeConfig,
 }
 
 /// Write one evaluation's report to `out`.
@@ -85,10 +82,7 @@ pub async fn generate_report<C: ConnectionTrait>(
 
     let path: PathBuf = out.to_path_buf();
     let evaluation = evaluation.to_string();
-    let eval_args = ctx.eval_args.clone();
-    let proto_args = ctx.proto_args.clone();
-    let storage_args = ctx.storage_args.clone();
-    let s3_config = ctx.s3_config.cloned();
+    let config = ctx.config.clone();
 
     tokio::task::spawn_blocking(move || {
         let conn = open_report(&path)?;
@@ -107,13 +101,7 @@ pub async fn generate_report<C: ConnectionTrait>(
         }
 
         if opts.include_instance {
-            write_config_snapshot(
-                &conn,
-                &eval_args,
-                &proto_args,
-                &storage_args,
-                s3_config.as_ref(),
-            )?;
+            write_config_snapshot(&conn, &config)?;
         }
 
         if let Some(logs) = logs {

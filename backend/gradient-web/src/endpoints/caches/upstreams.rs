@@ -240,11 +240,8 @@ pub async fn put_cache_upstream(
             validate_gradient_proto(&url, &remote_cache, key.as_deref())?;
             let api_key_enc = match key {
                 Some(k) if !k.trim().is_empty() => Some(
-                    gradient_sources::encrypt_secret(
-                        &state.config.secrets.crypt_secret_file,
-                        k.trim(),
-                    )
-                    .map_err(|_| WebError::internal("Failed to encrypt upstream API key"))?,
+                    gradient_sources::encrypt_secret(&state.config.secrets.crypt_file, k.trim())
+                        .map_err(|_| WebError::internal("Failed to encrypt upstream API key"))?,
                 ),
                 _ => None,
             };

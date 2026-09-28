@@ -145,31 +145,18 @@ pub fn make_ctx() -> crate::CiContext {
     }
 
     let cli = gradient_types::Cli {
-        logging: gradient_types::LoggingArgs::default(),
-        server: gradient_types::ServerArgs::default(),
-        database: gradient_types::DatabaseArgs::default(),
-        eval: gradient_types::EvalArgs::default(),
-        storage: gradient_types::StorageArgs {
-            base_path: "/tmp/gradient-test".into(),
+        server: gradient_types::ServerArgs {
+            base_dir: "/tmp/gradient-test".into(),
             ..Default::default()
         },
         secrets: gradient_types::SecretsArgs {
-            crypt_secret_file: "test-secret".into(),
-            jwt_secret_file: "test-jwt".into(),
+            crypt_file: "test-secret".into(),
+            jwt_file: "test-jwt".into(),
         },
-        limits: gradient_types::LimitsArgs::default(),
-        registration: gradient_types::RegistrationArgs::default(),
-        proto: gradient_types::ProtoArgs::default(),
-        oidc: gradient_types::OidcArgs::default(),
-        scim: gradient_types::ScimArgs::default(),
-        email: gradient_types::EmailArgs::default(),
-        s3: gradient_types::S3Args::default(),
-        github_app: gradient_types::GitHubAppArgs::default(),
-        metrics: gradient_types::MetricsArgs::default(),
-        network: gradient_types::NetworkArgs::default(),
+        ..Default::default()
     };
     let config = std::sync::Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
     let db = DbContext {
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),

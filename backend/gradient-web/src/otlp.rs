@@ -6,10 +6,10 @@
 
 //! Optional OpenTelemetry (OTLP) metric push export (#212).
 //!
-//! Enabled by `GRADIENT_OTLP_ENDPOINT`. A background task refreshes a cached
+//! Enabled by `GRADIENT_METRICS_OTLP_ENDPOINT`. A background task refreshes a cached
 //! snapshot of the same values the Prometheus endpoint computes; OTLP observable
 //! gauges (whose callbacks are synchronous and so can't query the DB) read that
-//! cache and are pushed on `GRADIENT_OTLP_PUSH_INTERVAL`.
+//! cache and are pushed on `GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS`.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

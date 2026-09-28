@@ -295,7 +295,7 @@ async fn build_cached_entry(
             let transport = pull_transport(
                 confirmed,
                 size,
-                state.config.storage.small_nar_bytes,
+                state.config.nar.small_bytes,
                 state.nar_storage.presigner_available(),
             );
             let url = match transport {
@@ -346,7 +346,7 @@ async fn build_uncached_push_entry(
 
     let transport = push_transport(
         nar_size,
-        state.config.storage.small_nar_bytes,
+        state.config.nar.small_bytes,
         state.nar_storage.presigner_available(),
     );
     let (url, multipart) = match transport {
@@ -553,7 +553,7 @@ async fn extend_with_gradient_proto_results(
 
     for up in upstreams {
         let api_key = up.api_key_enc.as_deref().and_then(|enc| {
-            gradient_sources::decrypt_secret(&state.config.secrets.crypt_secret_file, enc).ok()
+            gradient_sources::decrypt_secret(&state.config.secrets.crypt_file, enc).ok()
         });
         let found =
             super::cache_consumer::pull_paths(&up.url, &up.remote_cache, api_key.as_deref(), &want)

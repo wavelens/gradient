@@ -7,14 +7,22 @@
 use clap::Args;
 
 /// Both files are required to run the server but deliberately default to empty
-/// so `--validate-state` (a DB-free, secret-free build/CI check) can parse
+/// so `--state-validate` (a DB-free, secret-free build/CI check) can parse
 /// without them; `init_state` rejects an empty value on the live server path.
 #[derive(Args, Debug, Clone, Default)]
 pub struct SecretsArgs {
-    #[arg(long, env = "GRADIENT_CRYPT_SECRET_FILE", default_value = "")]
-    pub crypt_secret_file: String,
-    #[arg(long, env = "GRADIENT_JWT_SECRET_FILE", default_value = "")]
-    pub jwt_secret_file: String,
+    #[arg(
+        long = "secrets-crypt-file",
+        env = "GRADIENT_SECRETS_CRYPT_FILE",
+        default_value = ""
+    )]
+    pub crypt_file: String,
+    #[arg(
+        long = "secrets-jwt-file",
+        env = "GRADIENT_SECRETS_JWT_FILE",
+        default_value = ""
+    )]
+    pub jwt_file: String,
 }
 
 #[cfg(test)]
@@ -28,23 +36,23 @@ mod tests {
             "gradient-server",
             "--state-file",
             "s.json",
-            "--validate-state",
+            "--state-validate",
         ])
-        .expect("--validate-state must parse without secret files");
-        assert!(cli.storage.validate_state);
+        .expect("--state-validate must parse without secret files");
+        assert!(cli.state.validate);
     }
 
     #[test]
     fn secret_files_parse_from_flags() {
         let cli = Cli::try_parse_from([
             "gradient-server",
-            "--crypt-secret-file",
+            "--secrets-crypt-file",
             "/c",
-            "--jwt-secret-file",
+            "--secrets-jwt-file",
             "/j",
         ])
         .expect("explicit secret files must parse");
-        assert_eq!(cli.secrets.crypt_secret_file, "/c");
-        assert_eq!(cli.secrets.jwt_secret_file, "/j");
+        assert_eq!(cli.secrets.crypt_file, "/c");
+        assert_eq!(cli.secrets.jwt_file, "/j");
     }
 }

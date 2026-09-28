@@ -94,7 +94,7 @@ pub(super) async fn mark_nar_stored(
         crate::signing::sign_cached_path(
             &state.worker_db,
             &state.events,
-            &state.config.secrets.crypt_secret_file,
+            &state.config.secrets.crypt_file,
             &state.config.server.serve_url,
             crate::signing::SignRequest {
                 cached_path: committed.cached_path,

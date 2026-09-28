@@ -204,7 +204,7 @@ pub async fn put(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    require_create_permission(state.config.server.create_project, &user)?;
+    require_create_permission(state.config.permissions.create_project, &user)?;
 
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Project Name"));
@@ -226,8 +226,8 @@ pub async fn put(
         return Err(WebError::already_exists("Project Name"));
     }
 
-    let (private_key, public_key) = generate_ssh_key(&state.config.secrets.crypt_secret_file)
-        .map_err(|e| {
+    let (private_key, public_key) =
+        generate_ssh_key(&state.config.secrets.crypt_file).map_err(|e| {
             tracing::error!(error = %e, "Failed to generate SSH key");
             WebError::failed_ssh_key_generation()
         })?;

@@ -139,7 +139,7 @@ fn server_with_pools(
     cli: gradient_types::Cli,
 ) -> TestServer {
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("nar store");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: CacheDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),

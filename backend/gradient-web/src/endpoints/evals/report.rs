@@ -90,10 +90,7 @@ pub async fn get_evaluation_report(
 
     let report_ctx = ReportContext {
         logs: state.log_storage.as_ref(),
-        eval_args: &state.config.eval,
-        proto_args: &state.config.proto,
-        storage_args: &state.config.storage,
-        s3_config: state.config.s3.as_ref(),
+        config: &state.config,
     };
 
     generate_report(

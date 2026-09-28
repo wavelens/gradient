@@ -366,7 +366,7 @@ pub async fn put_integration(
 
     let encrypted_secret = match body.secret.as_deref() {
         Some(s) if !s.is_empty() => Some(
-            encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, s)
+            encrypt_secret_with_file(&state.config.secrets.crypt_file, s)
                 .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
         ),
         _ => None,
@@ -374,7 +374,7 @@ pub async fn put_integration(
 
     let encrypted_token = match body.access_token.as_deref() {
         Some(t) if !t.is_empty() => Some(
-            encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, t)
+            encrypt_secret_with_file(&state.config.secrets.crypt_file, t)
                 .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
         ),
         _ => None,
@@ -523,7 +523,7 @@ pub async fn patch_integration(
             None
         } else {
             Some(
-                encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, &secret)
+                encrypt_secret_with_file(&state.config.secrets.crypt_file, &secret)
                     .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?,
             )
         });
@@ -534,7 +534,7 @@ pub async fn patch_integration(
             None
         } else {
             Some(
-                encrypt_secret_with_file(&state.config.secrets.crypt_secret_file, &token)
+                encrypt_secret_with_file(&state.config.secrets.crypt_file, &token)
                     .map_err(|e| WebError::internal(format!("Failed to encrypt token: {}", e)))?,
             )
         });

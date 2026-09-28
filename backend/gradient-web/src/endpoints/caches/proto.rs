@@ -37,7 +37,7 @@ pub async fn cache_proto(
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
     let anonymous = maybe_user.is_none() && api_key.as_ref().is_none();
-    if anonymous && !state.config.proto.allow_anonymous_cache {
+    if anonymous && !state.config.proto.anonymous_cache_enable {
         return Err(WebError::forbidden("Anonymous cache access is disabled."));
     }
 

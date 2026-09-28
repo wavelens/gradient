@@ -93,11 +93,7 @@ pub async fn flush(ctx: &DbContext, traffic: &CacheTraffic) {
 
 /// The flush pass as a supervised child.
 pub fn child_spec(ctx: DbContext, traffic: Arc<CacheTraffic>) -> ChildSpec {
-    let secs = ctx
-        .config
-        .metrics_args
-        .cache_metric_flush_interval_secs
-        .max(1);
+    let secs = ctx.config.metrics_args.cache_flush_interval_secs.max(1);
 
     ChildSpec::periodic(
         "cache_metric_flush",

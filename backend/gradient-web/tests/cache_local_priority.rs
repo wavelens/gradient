@@ -66,7 +66,7 @@ fn build_server(cache: gradient_entity::cache::Model, peer: &str) -> TestServer 
         .append_query_results([vec![cache]])
         .into_connection();
 
-    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(

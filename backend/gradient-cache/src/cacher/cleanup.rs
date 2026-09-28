@@ -32,7 +32,7 @@ pub struct CleanupReport {
 /// `last_used_at` is older than `nar_ttl_hours` and removes the underlying
 /// payload from `nar_storage`. Disabled when `nar_ttl_hours = 0`.
 pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Result<()> {
-    let ttl_hours = state.config.storage.nar_ttl_hours;
+    let ttl_hours = state.config.gc.nar_ttl_hours;
     if ttl_hours == 0 {
         return Ok(());
     }
@@ -212,8 +212,8 @@ fn keep_hours(ttl_hours: u64, grace_hours: i64) -> i64 {
 /// a rebuild of what this pass just evicted.
 pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
     let keep = keep_hours(
-        state.config.storage.nar_ttl_hours,
-        state.config.storage.nar_upload_grace_hours,
+        state.config.gc.nar_ttl_hours,
+        state.config.gc.nar_upload_grace_hours,
     );
     let scanned_at = now();
     let stale = gradient_db::stale_cached_paths(&state.worker_db, keep)
@@ -400,7 +400,7 @@ const UNREFERENCED_PROBE_BATCH: usize = 5000;
 /// dispatch gate trusts as the cached `.drv` and fails dependents
 /// `InputsUnavailable`. `<= 0` disables the grace (tests only).
 fn past_upload_grace(state: &ServerState, on_disk: &[(String, i64)]) -> Vec<String> {
-    let grace_secs = state.config.storage.nar_upload_grace_hours.max(0) * 3600;
+    let grace_secs = state.config.gc.nar_upload_grace_hours.max(0) * 3600;
     let cutoff = if grace_secs > 0 {
         now().and_utc().timestamp() - grace_secs
     } else {
@@ -484,7 +484,7 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         test_server_state(nar_storage, db, |config| {
-            config.storage.nar_upload_grace_hours = 0;
+            config.gc.nar_upload_grace_hours = 0;
         })
     }
 
@@ -584,7 +584,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut state = make_state(tmp.path(), vec![]);
         Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config)
-            .storage
+            .gc
             .nar_upload_grace_hours = 24;
         let fresh = now().and_utc().timestamp();
         let listed = vec![
@@ -606,7 +606,7 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
         let state = test_server_state(nar_storage, only_the_zombie_load, |config| {
-            config.storage.nar_upload_grace_hours = 24;
+            config.gc.nar_upload_grace_hours = 24;
         });
 
         cleanup_orphaned_cache_files(state)
@@ -693,7 +693,7 @@ mod tests {
     fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
         let nar_storage = NarStore::local(base.to_str().unwrap()).unwrap();
         test_server_state(nar_storage, db, |config| {
-            config.storage.nar_ttl_hours = 24;
+            config.gc.nar_ttl_hours = 24;
         })
     }
 
@@ -753,7 +753,7 @@ mod tests {
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let state = test_server_state(nar_storage, db, |config| {
-            config.storage.nar_ttl_hours = 0;
+            config.gc.nar_ttl_hours = 0;
         });
 
         cleanup_stale_build_request_blobs(state).await.unwrap();

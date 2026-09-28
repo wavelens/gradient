@@ -89,7 +89,7 @@ pub fn resolve_scim_group_roles(
 
 /// Load and validate a state file without touching the database. Returns the
 /// human-readable validation errors (empty `Vec` = valid). Backs the
-/// `--validate-state` CLI flag so config mistakes surface at build/CI time
+/// `--state-validate` CLI flag so config mistakes surface at build/CI time
 /// instead of on server start.
 pub fn validate_state_file(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let config = StateConfiguration::from_file(path)?;

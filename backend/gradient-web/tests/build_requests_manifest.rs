@@ -91,7 +91,7 @@ fn rejects_oversized_total() {
         // Cap the source upload at 20 MiB so the manifest total trips it; the
         // cap is `max_source_upload_size`, not the fixed constant it once was.
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.limits.max_source_upload_size = 20 * 1024 * 1024;
+            cli.http.max_source_upload_size = 20 * 1024 * 1024;
         });
 
         // 20 MiB + 1 byte triggers the cap.

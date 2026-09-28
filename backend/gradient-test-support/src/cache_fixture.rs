@@ -126,7 +126,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
 
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
 
     Arc::new(ServerState {
         web_db: WebDb::new(db),
@@ -191,7 +191,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
 
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
 
     Arc::new(ServerState {
         web_db: WebDb::new(db),
@@ -261,7 +261,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
 
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
 
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
@@ -391,7 +391,7 @@ fn make_state(
 ) -> Arc<ServerState> {
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(
@@ -486,7 +486,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
 
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
 
     Arc::new(ServerState {
         web_db: WebDb::new(db),
@@ -567,7 +567,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
 
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
 
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),

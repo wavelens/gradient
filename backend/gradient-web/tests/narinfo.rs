@@ -150,7 +150,7 @@ async fn narinfo_served_from_db_inner() {
         .into_connection();
 
     let cli = test_cli();
-    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(
@@ -306,7 +306,7 @@ async fn narinfo_unsigned_inner() {
         .into_connection();
 
     let cli = test_cli();
-    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         cache_db: gradient_db::CacheDb::new(

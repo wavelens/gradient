@@ -64,9 +64,7 @@ pub async fn post_basic_register(
     info: RequestInfo,
     Json(body): Json<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.config.registration.enable_registration
-        || state.config.oidc.as_ref().is_some_and(|o| o.required)
-    {
+    if !state.config.registration.enable || state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::registration_disabled());
     }
 

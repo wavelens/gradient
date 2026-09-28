@@ -30,7 +30,7 @@ pub(crate) async fn apply(ctx: &DbContext, scope: RequeueScope) -> anyhow::Resul
 /// gate trusts `Queued` without re-deriving readiness, so an unsettled requeue
 /// dispatches a build against an input nothing can provide.
 async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
-    let base = ctx.config.eval.build_retry_backoff_secs;
+    let base = ctx.config.build.retry_backoff_secs;
     let now = gradient_types::now();
     let transient = EDerivationBuild::find()
         .filter(CDerivationBuild::Status.eq(BuildStatus::FailedTransient))

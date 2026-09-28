@@ -28,7 +28,7 @@ fn empty_mock() -> DatabaseConnection {
 pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
     let config = RuntimeConfig::from_cli(&cli).expect("valid test config");
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
     test_state_with_storage(db, nar_storage)
 }
 
@@ -80,7 +80,7 @@ pub fn test_state_with_storage(db: DatabaseConnection, nar_storage: NarStore) ->
 pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(empty_mock()),
         cache_db: CacheDb::new(db),
@@ -125,7 +125,7 @@ pub fn test_state_with_log_storage(
 ) -> Arc<ServerState> {
     let cli = test_cli();
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&config.server.base_dir).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(empty_mock()),
         cache_db: CacheDb::new(empty_mock()),

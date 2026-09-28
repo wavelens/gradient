@@ -128,19 +128,19 @@ impl Actor for SessionActor {
             }
         };
 
-        let proto_cfg = &state.config.proto;
-        let send_chunk_timeout = Duration::from_secs(proto_cfg.nar_send_chunk_timeout_secs);
-        let partial_ttl = Duration::from_secs(proto_cfg.nar_partial_ttl_secs);
-        let max_partial_bytes = proto_cfg.max_nar_buffer_bytes as u64;
-        let max_serves = proto_cfg.max_concurrent_nar_serves;
+        let nar_cfg = &state.config.nar;
+        let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs);
+        let partial_ttl = Duration::from_secs(nar_cfg.partial_ttl_secs);
+        let max_partial_bytes = nar_cfg.max_buffer_bytes as u64;
+        let max_serves = nar_cfg.max_concurrent_serves;
         let partial_root =
-            std::path::PathBuf::from(format!("{}/nar-partial", state.config.storage.base_path));
+            std::path::PathBuf::from(format!("{}/nar-partial", state.config.server.base_dir));
         let nar = NarReceiveStore::new(
             partial_root,
             &peer_id,
             partial_ttl,
             max_partial_bytes,
-            state.config.storage.small_nar_bytes,
+            state.config.nar.small_bytes,
             state.shutdown.clone(),
         )
         .unwrap_or_else(|e| {
@@ -150,7 +150,7 @@ impl Actor for SessionActor {
                 &peer_id,
                 partial_ttl,
                 max_partial_bytes,
-                state.config.storage.small_nar_bytes,
+                state.config.nar.small_bytes,
                 state.shutdown.clone(),
             )
             .expect("temp partial dir must be creatable")

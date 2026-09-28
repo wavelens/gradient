@@ -229,7 +229,7 @@ fn upstream_misses_sql() -> String {
 
 /// The rollup aggregation pass as a supervised child.
 pub fn child_spec(ctx: DbContext) -> ChildSpec {
-    let secs = ctx.config.metrics_args.metrics_rollup_interval_secs.max(1);
+    let secs = ctx.config.metrics_args.rollup_interval_secs.max(1);
     ChildSpec::periodic(
         "rollup",
         Duration::from_secs(secs),

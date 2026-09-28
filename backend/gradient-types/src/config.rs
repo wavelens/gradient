@@ -14,12 +14,13 @@
 
 use super::Cli;
 use super::cli::{
-    DatabaseArgs, EvalArgs, LimitsArgs, LoggingArgs, MetricsArgs, ProtoArgs, RegistrationArgs,
-    SecretsArgs, ServerArgs, StorageArgs,
+    BuildArgs, CacheArgs, DatabaseArgs, EvalArgs, GcArgs, HttpArgs, LogArgs, MetricsArgs, NarArgs,
+    PermissionsArgs, ProtoArgs, PullRequestsArgs, RegistrationArgs, SchedulerArgs, SecretsArgs,
+    SentryArgs, ServerArgs, StateArgs, UploadArgs,
 };
 use ipnet::IpNet;
 
-/// OIDC configuration - only present when `oidc_enabled` is true and all
+/// OIDC configuration - only present when `oidc.enable` is true and all
 /// required fields are configured.
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
@@ -32,7 +33,7 @@ pub struct OidcConfig {
     pub required: bool,
 }
 
-/// SCIM provisioning configuration - only present when `scim_enabled` is true
+/// SCIM provisioning configuration - only present when `scim.enable` is true
 /// and a token file is configured.
 #[derive(Debug, Clone)]
 pub struct ScimConfig {
@@ -41,7 +42,7 @@ pub struct ScimConfig {
     pub hard_delete: bool,
 }
 
-/// Email/SMTP configuration - only present when `email_enabled` is true and
+/// Email/SMTP configuration - only present when `email.enable` is true and
 /// all required fields are configured.
 #[derive(Debug, Clone)]
 pub struct EmailConfig {
@@ -82,7 +83,7 @@ pub struct MetricsConfig {
     pub token: String,
 }
 
-/// Parsed network allowlists derived from `NetworkArgs`. Both lists are
+/// Parsed network allowlists derived from `HttpArgs`. Both lists are
 /// validated once at startup; malformed CIDR entries abort the process.
 #[derive(Debug, Clone, Default)]
 pub struct NetworkConfig {
@@ -90,7 +91,7 @@ pub struct NetworkConfig {
     pub local_ips: Vec<IpNet>,
 }
 
-/// S3 / object-storage configuration - only present when `s3_bucket` is set.
+/// S3 / object-storage configuration - only present when `s3.bucket` is set.
 #[derive(Debug, Clone)]
 pub struct S3Config {
     pub bucket: String,
@@ -116,43 +117,43 @@ pub struct S3Config {
 impl Cli {
     /// Returns the typed OIDC config when OIDC is enabled and fully configured.
     pub fn oidc_config(&self) -> Option<OidcConfig> {
-        if !self.oidc.oidc_enabled {
+        if !self.oidc.enable {
             return None;
         }
         Some(OidcConfig {
-            client_id: self.oidc.oidc_client_id.clone()?,
-            client_secret_file: self.oidc.oidc_client_secret_file.clone()?,
-            scopes: self.oidc.oidc_scopes.clone(),
-            discovery_url: self.oidc.oidc_discovery_url.clone()?,
-            required: self.oidc.oidc_required,
+            client_id: self.oidc.client_id.clone()?,
+            client_secret_file: self.oidc.client_secret_file.clone()?,
+            scopes: self.oidc.scopes.clone(),
+            discovery_url: self.oidc.discovery_url.clone()?,
+            required: self.oidc.required,
         })
     }
 
     /// Returns the typed SCIM config when SCIM is enabled and a token file is set.
     pub fn scim_config(&self) -> Option<ScimConfig> {
-        if !self.scim.scim_enabled {
+        if !self.scim.enable {
             return None;
         }
         Some(ScimConfig {
-            token_file: self.scim.scim_token_file.clone()?,
-            hard_delete: self.scim.scim_hard_delete,
+            token_file: self.scim.token_file.clone()?,
+            hard_delete: self.scim.hard_delete,
         })
     }
 
     /// Returns the typed email config when email is enabled and fully configured.
     pub fn email_config(&self) -> Option<EmailConfig> {
-        if !self.email.email_enabled {
+        if !self.email.enable {
             return None;
         }
         Some(EmailConfig {
-            smtp_host: self.email.email_smtp_host.clone()?,
-            smtp_port: self.email.email_smtp_port,
-            smtp_username: self.email.email_smtp_username.clone()?,
-            smtp_password_file: self.email.email_smtp_password_file.clone()?,
-            from_address: self.email.email_from_address.clone()?,
-            from_name: self.email.email_from_name.clone(),
-            enable_tls: self.email.email_enable_tls,
-            require_verification: self.email.email_require_verification,
+            smtp_host: self.email.smtp_host.clone()?,
+            smtp_port: self.email.smtp_port,
+            smtp_username: self.email.smtp_username.clone()?,
+            smtp_password_file: self.email.smtp_password_file.clone()?,
+            from_address: self.email.from_address.clone()?,
+            from_name: self.email.from_name.clone(),
+            enable_tls: self.email.smtp_use_tls,
+            require_verification: self.email.require_verification,
         })
     }
 
@@ -160,25 +161,25 @@ impl Cli {
     /// are configured.
     pub fn github_app_config(&self) -> Option<GitHubAppConfig> {
         Some(GitHubAppConfig {
-            app_id: self.github_app.github_app_id?,
-            private_key_file: self.github_app.github_app_private_key_file.clone()?,
-            webhook_secret_file: self.github_app.github_app_webhook_secret_file.clone()?,
+            app_id: self.github_app.id?,
+            private_key_file: self.github_app.private_key_file.clone()?,
+            webhook_secret_file: self.github_app.webhook_secret_file.clone()?,
         })
     }
 
     /// Returns the typed S3 config when an S3 bucket is configured.
     pub fn s3_config(&self) -> Option<S3Config> {
-        self.s3.s3_bucket.as_ref().map(|bucket| S3Config {
+        self.s3.bucket.as_ref().map(|bucket| S3Config {
             bucket: bucket.clone(),
-            region: self.s3.s3_region.clone(),
-            endpoint: self.s3.s3_endpoint.clone(),
-            access_key_id: self.s3.s3_access_key_id.clone(),
-            secret_access_key_file: self.s3.s3_secret_access_key_file.clone(),
-            prefix: self.s3.s3_prefix.clone(),
-            virtual_hosted_style: self.s3.s3_virtual_hosted_style,
-            read_timeout: std::time::Duration::from_secs(self.s3.s3_read_timeout_secs),
-            max_retries: self.s3.s3_max_retries,
-            retry_timeout: std::time::Duration::from_secs(self.s3.s3_retry_timeout_secs),
+            region: self.s3.region.clone(),
+            endpoint: self.s3.endpoint.clone(),
+            access_key_id: self.s3.access_key_id.clone(),
+            secret_access_key_file: self.s3.secret_access_key_file.clone(),
+            prefix: self.s3.prefix.clone(),
+            virtual_hosted_style: self.s3.virtual_hosted_style,
+            read_timeout: std::time::Duration::from_secs(self.s3.read_timeout_secs),
+            max_retries: self.s3.max_retries,
+            retry_timeout: std::time::Duration::from_secs(self.s3.retry_timeout_secs),
         })
     }
 
@@ -186,9 +187,9 @@ impl Cli {
     /// either CIDR list fails to parse.
     pub fn network_config(&self) -> Result<NetworkConfig, ConfigError> {
         Ok(NetworkConfig {
-            trusted_proxies: super::cli::parse_cidr_list(&self.network.trusted_proxies)
+            trusted_proxies: super::cli::parse_cidr_list(&self.http.trusted_proxies)
                 .map_err(ConfigError::TrustedProxies)?,
-            local_ips: super::cli::parse_cidr_list(&self.network.local_ips)
+            local_ips: super::cli::parse_cidr_list(&self.http.local_ips)
                 .map_err(ConfigError::LocalIps)?,
         })
     }
@@ -196,7 +197,7 @@ impl Cli {
     /// Returns the typed metrics config when a token file path is configured
     /// and the file contains a non-empty token after trimming.
     pub fn metrics_config(&self) -> Option<MetricsConfig> {
-        let path = self.metrics.metrics_token_file.as_ref()?;
+        let path = self.metrics.token_file.as_ref()?;
         let raw = std::fs::read_to_string(path).ok()?;
         let token = raw.trim().to_string();
         if token.is_empty() {
@@ -208,9 +209,9 @@ impl Cli {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("GRADIENT_TRUSTED_PROXIES: {0}")]
+    #[error("GRADIENT_HTTP_TRUSTED_PROXIES: {0}")]
     TrustedProxies(#[source] super::cli::CidrParseError),
-    #[error("GRADIENT_LOCAL_IPS: {0}")]
+    #[error("GRADIENT_HTTP_LOCAL_IPS: {0}")]
     LocalIps(#[source] super::cli::CidrParseError),
 }
 
@@ -225,15 +226,24 @@ pub enum ConfigError {
 /// feature is fully usable.
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
-    pub logging: LoggingArgs,
+    pub log: LogArgs,
     pub server: ServerArgs,
-    pub database: DatabaseArgs,
-    pub eval: EvalArgs,
-    pub storage: StorageArgs,
     pub secrets: SecretsArgs,
-    pub limits: LimitsArgs,
+    pub state: StateArgs,
+    pub permissions: PermissionsArgs,
     pub registration: RegistrationArgs,
+    pub sentry: SentryArgs,
+    pub pull_requests: PullRequestsArgs,
+    pub database: DatabaseArgs,
+    pub http: HttpArgs,
     pub proto: ProtoArgs,
+    pub upload: UploadArgs,
+    pub nar: NarArgs,
+    pub cache: CacheArgs,
+    pub gc: GcArgs,
+    pub eval: EvalArgs,
+    pub build: BuildArgs,
+    pub scheduler: SchedulerArgs,
     pub oidc: Option<OidcConfig>,
     pub scim: Option<ScimConfig>,
     pub email: Option<EmailConfig>,
@@ -251,15 +261,24 @@ impl RuntimeConfig {
     /// features collapse to `None` exactly when their accessor methods do.
     pub fn from_cli(cli: &Cli) -> Result<Self, ConfigError> {
         Ok(Self {
-            logging: cli.logging.clone(),
+            log: cli.log.clone(),
             server: cli.server.clone(),
-            database: cli.database.clone(),
-            eval: cli.eval.clone(),
-            storage: cli.storage.clone(),
             secrets: cli.secrets.clone(),
-            limits: cli.limits.clone(),
+            state: cli.state.clone(),
+            permissions: cli.permissions.clone(),
             registration: cli.registration.clone(),
+            sentry: cli.sentry.clone(),
+            pull_requests: cli.pull_requests.clone(),
+            database: cli.database.clone(),
+            http: cli.http.clone(),
             proto: cli.proto.clone(),
+            upload: cli.upload.clone(),
+            nar: cli.nar.clone(),
+            cache: cli.cache.clone(),
+            gc: cli.gc.clone(),
+            eval: cli.eval.clone(),
+            build: cli.build.clone(),
+            scheduler: cli.scheduler.clone(),
             oidc: cli.oidc_config(),
             scim: cli.scim_config(),
             email: cli.email_config(),
@@ -279,61 +298,32 @@ mod tests {
     fn base_cli() -> Cli {
         use crate::cli::*;
         Cli {
-            logging: LoggingArgs {
-                log_level: "error".into(),
+            log: LogArgs {
+                level_default: "error".into(),
                 ..Default::default()
             },
             server: ServerArgs {
                 serve_url: "http://127.0.0.1:3000".into(),
                 use_tls: false,
-                ..Default::default()
-            },
-            database: DatabaseArgs::default(),
-            eval: EvalArgs {
-                max_concurrent_evaluations: 2,
-                max_concurrent_builds: 10,
-                evaluation_timeout: 5,
-                eval_workers: 1,
-                max_evaluations_per_worker: 0,
-                build_max_attempts: 3,
-                substitute_miss_escalation_threshold: 2,
-                inputs_unavailable_max_loops: 3,
-                build_retry_backoff_secs: 30,
-                build_default_timeout_secs: 14400,
-                build_default_max_silent_secs: 3600,
-                scheduler_scoring_policy: "resource-aware".into(),
-            },
-            storage: StorageArgs {
-                base_path: "/tmp/gradient-test".into(),
-                keep_evaluations: 30,
+                base_dir: "/tmp/gradient-test".into(),
                 ..Default::default()
             },
             secrets: SecretsArgs {
-                crypt_secret_file: "test-secret".into(),
-                jwt_secret_file: "test-jwt".into(),
+                crypt_file: "test-secret".into(),
+                jwt_file: "test-jwt".into(),
             },
-            limits: LimitsArgs::default(),
-            registration: RegistrationArgs {
-                enable_registration: false,
-                report_errors: false,
-                sentry_dsn: None,
-            },
+            registration: RegistrationArgs { enable: false },
             proto: ProtoArgs {
-                max_proto_connections: 16,
+                max_connections: 16,
                 discoverable: false,
                 ..Default::default()
             },
-            oidc: OidcArgs::default(),
-            scim: ScimArgs::default(),
             email: EmailArgs {
-                email_from_name: "Gradient Test".into(),
-                email_enable_tls: false,
+                from_name: "Gradient Test".into(),
+                smtp_use_tls: false,
                 ..Default::default()
             },
-            s3: S3Args::default(),
-            github_app: GitHubAppArgs::default(),
-            metrics: MetricsArgs::default(),
-            network: NetworkArgs::default(),
+            ..Default::default()
         }
     }
 
@@ -346,7 +336,7 @@ mod tests {
     #[test]
     fn oidc_config_enabled_missing_fields_returns_none() {
         let mut cli = base_cli();
-        cli.oidc.oidc_enabled = true;
+        cli.oidc.enable = true;
         // oidc_client_id, oidc_client_secret_file, oidc_discovery_url all None
         assert!(cli.oidc_config().is_none());
     }
@@ -354,10 +344,10 @@ mod tests {
     #[test]
     fn oidc_config_fully_configured_returns_some() {
         let mut cli = base_cli();
-        cli.oidc.oidc_enabled = true;
-        cli.oidc.oidc_client_id = Some("client-id".into());
-        cli.oidc.oidc_client_secret_file = Some("/run/secrets/oidc".into());
-        cli.oidc.oidc_discovery_url = Some("https://idp.example.com".into());
+        cli.oidc.enable = true;
+        cli.oidc.client_id = Some("client-id".into());
+        cli.oidc.client_secret_file = Some("/run/secrets/oidc".into());
+        cli.oidc.discovery_url = Some("https://idp.example.com".into());
         let config = cli.oidc_config().expect("should return Some");
         assert_eq!(config.client_id, "client-id");
         assert!(config.scopes.is_none());
@@ -372,7 +362,7 @@ mod tests {
     #[test]
     fn email_config_enabled_missing_host_returns_none() {
         let mut cli = base_cli();
-        cli.email.email_enabled = true;
+        cli.email.enable = true;
         // email_smtp_host is None
         assert!(cli.email_config().is_none());
     }
@@ -380,11 +370,11 @@ mod tests {
     #[test]
     fn email_config_fully_configured_returns_some() {
         let mut cli = base_cli();
-        cli.email.email_enabled = true;
-        cli.email.email_smtp_host = Some("smtp.example.com".into());
-        cli.email.email_smtp_username = Some("user".into());
-        cli.email.email_smtp_password_file = Some("/run/secrets/smtp".into());
-        cli.email.email_from_address = Some("gradient@example.com".into());
+        cli.email.enable = true;
+        cli.email.smtp_host = Some("smtp.example.com".into());
+        cli.email.smtp_username = Some("user".into());
+        cli.email.smtp_password_file = Some("/run/secrets/smtp".into());
+        cli.email.from_address = Some("gradient@example.com".into());
         let config = cli.email_config().expect("should return Some");
         assert_eq!(config.smtp_host, "smtp.example.com");
         assert_eq!(config.smtp_port, 587);
@@ -399,7 +389,7 @@ mod tests {
     #[test]
     fn github_app_config_partial_returns_none() {
         let mut cli = base_cli();
-        cli.github_app.github_app_id = Some(42);
+        cli.github_app.id = Some(42);
         // private_key_file and webhook_secret_file still None
         assert!(cli.github_app_config().is_none());
     }
@@ -407,9 +397,9 @@ mod tests {
     #[test]
     fn github_app_config_fully_configured_returns_some() {
         let mut cli = base_cli();
-        cli.github_app.github_app_id = Some(12345);
-        cli.github_app.github_app_private_key_file = Some("/run/secrets/github-app.pem".into());
-        cli.github_app.github_app_webhook_secret_file = Some("/run/secrets/github-webhook".into());
+        cli.github_app.id = Some(12345);
+        cli.github_app.private_key_file = Some("/run/secrets/github-app.pem".into());
+        cli.github_app.webhook_secret_file = Some("/run/secrets/github-webhook".into());
         let config = cli.github_app_config().expect("should return Some");
         assert_eq!(config.app_id, 12345);
         assert_eq!(config.private_key_file, "/run/secrets/github-app.pem");
@@ -425,7 +415,7 @@ mod tests {
     #[test]
     fn s3_config_with_bucket_returns_some() {
         let mut cli = base_cli();
-        cli.s3.s3_bucket = Some("my-bucket".into());
+        cli.s3.bucket = Some("my-bucket".into());
         let config = cli.s3_config().expect("should return Some");
         assert_eq!(config.bucket, "my-bucket");
         assert_eq!(config.region, "us-east-1");
@@ -439,27 +429,27 @@ mod tests {
         assert!(runtime.email.is_none());
         assert!(runtime.s3.is_none());
         assert!(runtime.github_app.is_none());
-        assert_eq!(runtime.storage.base_path, "/tmp/gradient-test");
+        assert_eq!(runtime.server.base_dir, "/tmp/gradient-test");
     }
 
     #[test]
     fn runtime_config_populates_optional_features_when_configured() {
         let mut cli = base_cli();
-        cli.oidc.oidc_enabled = true;
-        cli.oidc.oidc_required = true;
-        cli.oidc.oidc_client_id = Some("cid".into());
-        cli.oidc.oidc_client_secret_file = Some("/run/secrets/oidc".into());
-        cli.oidc.oidc_discovery_url = Some("https://idp.example.com".into());
-        cli.email.email_enabled = true;
-        cli.email.email_require_verification = true;
-        cli.email.email_smtp_host = Some("smtp.example.com".into());
-        cli.email.email_smtp_username = Some("u".into());
-        cli.email.email_smtp_password_file = Some("/run/secrets/smtp".into());
-        cli.email.email_from_address = Some("g@example.com".into());
-        cli.s3.s3_bucket = Some("bkt".into());
-        cli.github_app.github_app_id = Some(1);
-        cli.github_app.github_app_private_key_file = Some("/k".into());
-        cli.github_app.github_app_webhook_secret_file = Some("/w".into());
+        cli.oidc.enable = true;
+        cli.oidc.required = true;
+        cli.oidc.client_id = Some("cid".into());
+        cli.oidc.client_secret_file = Some("/run/secrets/oidc".into());
+        cli.oidc.discovery_url = Some("https://idp.example.com".into());
+        cli.email.enable = true;
+        cli.email.require_verification = true;
+        cli.email.smtp_host = Some("smtp.example.com".into());
+        cli.email.smtp_username = Some("u".into());
+        cli.email.smtp_password_file = Some("/run/secrets/smtp".into());
+        cli.email.from_address = Some("g@example.com".into());
+        cli.s3.bucket = Some("bkt".into());
+        cli.github_app.id = Some(1);
+        cli.github_app.private_key_file = Some("/k".into());
+        cli.github_app.webhook_secret_file = Some("/w".into());
 
         let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
         let oidc = runtime.oidc.expect("oidc populated");
@@ -481,17 +471,17 @@ mod tests {
     #[test]
     fn network_config_invalid_trusted_proxies_returns_err() {
         let mut cli = base_cli();
-        cli.network.trusted_proxies = "not-a-cidr".into();
+        cli.http.trusted_proxies = "not-a-cidr".into();
         let err = cli.network_config().unwrap_err();
-        assert!(err.to_string().contains("GRADIENT_TRUSTED_PROXIES"));
+        assert!(err.to_string().contains("GRADIENT_HTTP_TRUSTED_PROXIES"));
     }
 
     #[test]
     fn network_config_invalid_local_ips_returns_err() {
         let mut cli = base_cli();
-        cli.network.local_ips = "10.0.0.0/8, banana".into();
+        cli.http.local_ips = "10.0.0.0/8, banana".into();
         let err = cli.network_config().unwrap_err();
-        assert!(err.to_string().contains("GRADIENT_LOCAL_IPS"));
+        assert!(err.to_string().contains("GRADIENT_HTTP_LOCAL_IPS"));
         assert!(err.to_string().contains("banana"));
     }
 
@@ -509,7 +499,7 @@ mod tests {
         let path = tmp.path().to_string_lossy().into_owned();
 
         let mut cli = base_cli();
-        cli.metrics.metrics_token_file = Some(path);
+        cli.metrics.token_file = Some(path);
         assert!(cli.metrics_config().is_none());
     }
 
@@ -521,7 +511,7 @@ mod tests {
         let path = tmp.path().to_string_lossy().into_owned();
 
         let mut cli = base_cli();
-        cli.metrics.metrics_token_file = Some(path);
+        cli.metrics.token_file = Some(path);
 
         let cfg = cli.metrics_config().expect("Some");
         assert_eq!(cfg.token, "s3cret-token");
@@ -535,7 +525,7 @@ mod tests {
         let path = tmp.path().to_string_lossy().into_owned();
 
         let mut cli = base_cli();
-        cli.metrics.metrics_token_file = Some(path);
+        cli.metrics.token_file = Some(path);
         let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
         assert!(runtime.metrics.is_some());
     }
@@ -549,16 +539,16 @@ mod tests {
     #[test]
     fn scim_config_enabled_missing_token_returns_none() {
         let mut cli = base_cli();
-        cli.scim.scim_enabled = true;
+        cli.scim.enable = true;
         assert!(cli.scim_config().is_none());
     }
 
     #[test]
     fn scim_config_fully_configured_returns_some() {
         let mut cli = base_cli();
-        cli.scim.scim_enabled = true;
-        cli.scim.scim_token_file = Some("/run/secrets/scim".into());
-        cli.scim.scim_hard_delete = true;
+        cli.scim.enable = true;
+        cli.scim.token_file = Some("/run/secrets/scim".into());
+        cli.scim.hard_delete = true;
         let cfg = cli.scim_config().expect("should return Some");
         assert_eq!(cfg.token_file, "/run/secrets/scim");
         assert!(cfg.hard_delete);
@@ -567,8 +557,8 @@ mod tests {
     #[test]
     fn runtime_config_scim_propagates() {
         let mut cli = base_cli();
-        cli.scim.scim_enabled = true;
-        cli.scim.scim_token_file = Some("/run/secrets/scim".into());
+        cli.scim.enable = true;
+        cli.scim.token_file = Some("/run/secrets/scim".into());
         let runtime = RuntimeConfig::from_cli(&cli).expect("valid");
         assert!(runtime.scim.is_some());
     }

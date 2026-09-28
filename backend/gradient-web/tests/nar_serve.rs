@@ -108,7 +108,7 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
             .append_query_results([vec![cached_path_row()]])
             .into_connection();
 
-        let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+        let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
         let data = blob();
         nar_storage
             .put(STORE_HASH, data.clone())
@@ -194,7 +194,7 @@ fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
             .append_query_results([vec![cached_path_row()]])
             .into_connection();
 
-        let nar_storage = NarStore::local(&cli.storage.base_path)
+        let nar_storage = NarStore::local(&cli.server.base_dir)
             .expect("create test NarStore")
             .with_hot_cache(gradient_storage::HotNarCache::new(
                 4 * 1024 * 1024,

@@ -299,7 +299,7 @@ where
             repository_override: repository_override.clone(),
             wildcard_override: wildcard_override.clone(),
             source_comment: source_comment.clone(),
-            instance_max_storage_gb: state.config.storage.max_storage_gb,
+            instance_max_storage_gb: state.config.cache.max_storage_gb,
         };
 
         apply_and_record(

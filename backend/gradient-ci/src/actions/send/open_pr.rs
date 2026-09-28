@@ -112,8 +112,8 @@ pub(crate) async fn execute_open_pr(
     let commit = BranchCommit {
         message: title.clone(),
         author: configured_commit_ident(
-            &ctx.db.config.server.pr_commit_name,
-            &ctx.db.config.server.pr_commit_email,
+            &ctx.db.config.pull_requests.commit_name,
+            &ctx.db.config.pull_requests.commit_email,
         ),
         files: vec![CommitFile {
             path: "flake.lock".into(),
@@ -242,8 +242,8 @@ async fn point_eval_at_pushed_commit(
     am.author_name = Set(ctx
         .db
         .config
-        .server
-        .pr_commit_name
+        .pull_requests
+        .commit_name
         .clone()
         .unwrap_or_else(|| "Gradient".to_owned()));
     am.update(&ctx.db.worker_db)
