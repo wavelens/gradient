@@ -101,7 +101,7 @@ impl<'a> DispatchContext<'a> {
         super::tap::publish_inbound(&self.state.events, self.peer_id, &inbound);
         match inbound {
             Inbound::Bulk(frame) => {
-                self.dispatch_bulk(frame, nar, eval_cache).await;
+                self.dispatch_bulk(frame, nar, eval_cache, uploads).await;
                 true
             }
             Inbound::Control(msg) => self.dispatch_control(msg, nar, eval_cache, uploads).await,
@@ -115,6 +115,7 @@ impl<'a> DispatchContext<'a> {
         frame: Frame<ClientMessage>,
         nar: &mut NarReceiveStore,
         eval_cache: &mut EvalCacheReceiveStore,
+        uploads: &mut UploadSession,
     ) {
         trace!(variant = frame.variant_name(), "received bulk frame");
         match frame.archived() {
@@ -123,6 +124,20 @@ impl<'a> DispatchContext<'a> {
             } => {
                 let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
                 self.on_nar_push(&job_id, &store_path, frame, nar).await;
+            }
+            ArchivedClientMessage::UploadChunk {
+                request_id,
+                data,
+                offset,
+                ..
+            } => {
+                self.on_upload_chunk(
+                    request_id.to_native(),
+                    offset.to_native(),
+                    data.as_slice(),
+                    uploads,
+                )
+                .await;
             }
             ArchivedClientMessage::EvalCacheChunk {
                 job_id,

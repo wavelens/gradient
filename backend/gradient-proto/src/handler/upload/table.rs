@@ -12,7 +12,7 @@ use gradient_storage::admission::UploadPermit;
 use gradient_wire::types::UploadObject;
 
 pub(in crate::handler) enum Transfer {
-    Relay(#[expect(dead_code, reason = "written by relay chunks")] Box<PartialWriter>),
+    Relay(Box<PartialWriter>),
     Put,
     Multipart { upload_id: String },
 }
@@ -30,7 +30,6 @@ impl Lease {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "touched by relay chunks"))]
     pub(in crate::handler) fn touch(&mut self, now: Instant) {
         if let Lease::Idle { last, .. } = self {
             *last = now;
@@ -47,7 +46,6 @@ pub(in crate::handler) struct Queued {
 pub(in crate::handler) struct Granted {
     pub job_id: String,
     pub object: UploadObject,
-    #[expect(dead_code, reason = "read by the commit")]
     pub size: u64,
     #[expect(dead_code, reason = "settled by the commit")]
     pub permit: UploadPermit,
@@ -111,7 +109,6 @@ impl UploadTable {
         self.entries.insert(id, Entry::Granted(Box::new(granted)));
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by relay chunks"))]
     pub(in crate::handler) fn granted_mut(&mut self, id: u64) -> Option<&mut Granted> {
         match self.entries.get_mut(&id)? {
             Entry::Granted(g) => Some(g),

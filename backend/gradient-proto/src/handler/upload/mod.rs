@@ -183,6 +183,47 @@ impl DispatchContext<'_> {
         })
     }
 
+    pub(super) async fn on_upload_chunk(
+        &mut self,
+        request_id: u64,
+        offset: u64,
+        data: &[u8],
+        uploads: &mut UploadSession,
+    ) {
+        let verdict = match uploads.table.granted_mut(request_id) {
+            Some(Granted {
+                transfer: Transfer::Relay(writer),
+                size,
+                lease,
+                ..
+            }) => {
+                let bound = *size + *size / 128 + 1024 * 1024;
+                if offset != writer.len() {
+                    Err(format!(
+                        "chunk at offset {offset} follows {} bytes",
+                        writer.len()
+                    ))
+                } else if offset + data.len() as u64 > bound {
+                    Err(format!("upload exceeds {bound} bytes"))
+                } else {
+                    lease.touch(Instant::now());
+                    writer
+                        .append(offset, data)
+                        .await
+                        .map_err(|e| format!("staging failed: {e:#}"))
+                }
+            }
+            _ => Err(format!("request {request_id} holds no relay grant")),
+        };
+        if let Err(reason) = verdict {
+            if let Some(granted) = uploads.table.remove(request_id) {
+                self.abandon(granted).await;
+            }
+            self.settle(request_id, UploadOutcome::Rejected { reason })
+                .await;
+        }
+    }
+
     pub(super) async fn on_upload_cancel(&mut self, request_id: u64, uploads: &mut UploadSession) {
         uploads.admission.cancel(request_id);
         if let Some(granted) = uploads.table.remove(request_id) {
@@ -287,5 +328,47 @@ mod tests {
             }
         ));
         assert_eq!(state.upload_admission.in_flight(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_chunk_before_its_grant_is_rejected_and_not_staged() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_chunk(9, 0, b"bytes", uploads).await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadCommitted {
+                request_id: 9,
+                outcome: UploadOutcome::Rejected { .. }
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_granted_relay_accepts_contiguous_chunks_and_rejects_a_gap() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request(JOB.into(), 1, nar('c'), 1024, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        let _grant = sent.try_recv().unwrap();
+
+        ctx.on_upload_chunk(1, 0, &[0u8; 16], uploads).await;
+        assert!(
+            sent.try_recv().is_err(),
+            "a contiguous chunk is accepted silently"
+        );
+        ctx.on_upload_chunk(1, 32, &[0u8; 16], uploads).await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadCommitted {
+                request_id: 1,
+                outcome: UploadOutcome::Rejected { .. }
+            }
+        ));
+        assert_eq!(state.upload_admission.in_flight(), 0);
     }
 }
