@@ -40,6 +40,8 @@ nav:
       - Quick Start: get-started/quick-start.md
       - First Project: get-started/first-project.md
       - Installation: get-started/installation.md
+  - Concepts:
+      - Overview: concepts/overview.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
