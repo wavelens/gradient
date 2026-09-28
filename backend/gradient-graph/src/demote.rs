@@ -5,22 +5,18 @@
  */
 
 //! Dropping a path's claim on the cache index: one cache's claim, an operator
-//! invalidation, a NAR the index lists but storage lost, or a maintenance sweep.
+//! invalidation, or a NAR the index lists but storage lost.
 
 use anyhow::Result;
-use gradient_db::{DbContext, collect_transitive_dependents};
+use gradient_db::DbContext;
 use gradient_types::events::cache;
 use gradient_types::*;
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
-    TransactionTrait,
-};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use tracing::{info, warn};
 
 use crate::messages::{DemoteReport, Demotion};
 
 pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteReport> {
-    let db = &ctx.worker_db;
     match demotion {
         Demotion::MissingNar { hash } => {
             let producers = gradient_db::demote_cached_output(ctx, &hash).await?;
@@ -32,10 +28,6 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
         }
         Demotion::Path { hash } => {
             let producers = gradient_db::demote_cached_output(ctx, &hash).await?;
-            for derivation in &producers {
-                revoke_cache_derivation_closure(db, *derivation).await?;
-            }
-
             info!(%hash, producers = producers.len(), "invalidated cache for path");
             Ok(DemoteReport {
                 producers,
@@ -78,14 +70,7 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
         .map(|o| o.derivation)
         .collect();
 
-    gradient_db::for_each_chunk(&derivation_ids, |chunk| async move {
-        ECacheDerivation::delete_many()
-            .filter(CCacheDerivation::Cache.eq(cache))
-            .filter(CCacheDerivation::Derivation.is_in(chunk))
-            .exec(db)
-            .await
-    })
-    .await?;
+    gradient_db::revoke_cache_closures(db, &derivation_ids, Some(cache)).await?;
 
     let remaining = ECachedPathSignature::find()
         .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
@@ -107,25 +92,6 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
         others_remain,
         ..Default::default()
     })
-}
-
-/// Remove every `cache_derivation` row touching `derivation` and any of its
-/// transitive dependents, across every cache.
-async fn revoke_cache_derivation_closure<C>(db: &C, derivation: DerivationId) -> Result<()>
-where
-    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
-{
-    let visited = collect_transitive_dependents(db, derivation).await?;
-    let drv_ids: Vec<DerivationId> = visited.into_iter().collect();
-    gradient_db::for_each_chunk(&drv_ids, |chunk| async move {
-        ECacheDerivation::delete_many()
-            .filter(CCacheDerivation::Derivation.is_in(chunk))
-            .exec(db)
-            .await
-    })
-    .await?;
-
-    Ok(())
 }
 
 #[cfg(test)]

@@ -408,8 +408,9 @@ pub struct Retired {
 }
 
 /// Delete `hashes` from `cached_path` and take every anchor that trusted them out
-/// of wholeness: the producers of the deleted paths lose presence, their dependents
-/// over runtime edges count up, and the readiness side follows.
+/// of wholeness: the producers of the deleted paths lose presence and every cache's
+/// claim to their closure, their dependents over runtime edges count up, and the
+/// readiness side follows.
 ///
 /// The anchors that WERE whole are read before the delete, under the anchor lock,
 /// because nothing after it can recover that endpoint. The `cached_path` rows are
@@ -452,6 +453,7 @@ pub async fn retire_outputs(
         txn.execute_raw(SET_OUTPUTS_UNCACHED.bind([deleted.clone().into()]))
             .await?;
     }
+    crate::cache_storage::revoke_cache_closures(txn, &gone, None).await?;
 
     let mut unwhole = was_whole.clone();
     unwhole.extend(ripple_anchors_unwhole(txn, was_whole).await?);

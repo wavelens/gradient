@@ -363,6 +363,61 @@ pub async fn demote_cached_output(
     Ok(producers)
 }
 
+/// Withdraw every cache's claim to hold the closure of `producers`, and every claim
+/// built on one: a `cache_derivation` row asserts the derivation's outputs AND its
+/// whole dependency closure, so it cannot outlive an output leaving the cache.
+/// `cache` narrows the withdrawal to the claims of that cache alone.
+///
+/// The walk follows the claims themselves up the reverse edges, since a dependent
+/// was only ever recorded on top of a recorded dependency.
+pub async fn revoke_cache_closures<C: ConnectionTrait>(
+    db: &C,
+    producers: &[DerivationId],
+    cache: Option<CacheId>,
+) -> Result<u64, sea_orm::DbErr> {
+    if producers.is_empty() {
+        return Ok(0);
+    }
+
+    let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
+    let revoked = match cache {
+        None => {
+            db.execute_raw(REVOKE_CACHE_CLOSURES.bind([ids.into()]))
+                .await?
+        }
+        Some(cache) => {
+            db.execute_raw(REVOKE_CACHE_CLOSURES_IN.bind([ids.into(), cache.into_inner().into()]))
+                .await?
+        }
+    };
+
+    Ok(revoked.rows_affected())
+}
+
+fn revoke_cache_closures_sql(seed_scope: &str) -> String {
+    format!(
+        "WITH RECURSIVE revoked(cache, derivation) AS ( \
+           SELECT cd.cache, cd.derivation FROM cache_derivation cd \
+           WHERE cd.derivation = ANY($1::uuid[]){seed_scope} \
+         UNION \
+           SELECT cd.cache, cd.derivation FROM revoked r \
+           JOIN derivation_dependency e ON e.dependency = r.derivation \
+           JOIN cache_derivation cd ON cd.cache = r.cache AND cd.derivation = e.derivation) \
+         DELETE FROM cache_derivation cd USING revoked r \
+         WHERE cd.cache = r.cache AND cd.derivation = r.derivation"
+    )
+}
+
+crate::sql_fn! {
+    REVOKE_CACHE_CLOSURES = || revoke_cache_closures_sql(""),
+        params = [DerivationIds(64)],
+        tier = Bulk;
+
+    REVOKE_CACHE_CLOSURES_IN = || revoke_cache_closures_sql(" AND cd.cache = $2"),
+        params = [DerivationIds(64), CacheId],
+        tier = Bulk;
+}
+
 /// Demote every cached **output** that directly references `missing_hash`, so its
 /// producer rebuilds and re-pushes the missing path. Only rebuildable output
 /// referrers are demoted ([`OUTPUT_REFERRERS_SELECT`]): a producerless referrer -
@@ -613,7 +668,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                8
+                9
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -630,12 +685,16 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            18,
+            19,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
-             producers of the hash, the wholeness they had, delete, is_cached, anchor \
-             lock, mark, reset, owners, un-promote, and the raised, locked recompute \
-             of what the producers now demand: {log:?}"
+             producers of the hash, the wholeness they had, delete, is_cached, the \
+             cache closures, anchor lock, mark, reset, owners, un-promote, and the \
+             raised, locked recompute of what the producers now demand: {log:?}"
         );
+        let revoke = log
+            .iter()
+            .position(|s| s.contains("DELETE FROM cache_derivation"))
+            .expect("no cache keeps claiming a closure the path has left");
         let paths = log
             .iter()
             .position(|s| s.contains("FROM cached_path WHERE hash = ANY($1)"))
@@ -682,6 +741,10 @@ mod tests {
             whole < retire,
             "which producers were whole is the one endpoint the delete destroys, so it \
              is read under the lock before it: {log:?}"
+        );
+        assert!(
+            retire < revoke && log[revoke].contains(&producer.to_string()),
+            "the claims go with the path, from its producer up: {log:?}"
         );
         assert!(
             mark < reset,
@@ -737,7 +800,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                9
+                10
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -748,10 +811,10 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            21,
+            22,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
              producers of the hash, the wholeness they had, the delete that finds \
-             nothing, anchor lock, mark, ripple, the raised, locked recompute below \
+             nothing, the cache closures, anchor lock, mark, ripple, the raised, locked recompute below \
              what the mark flipped, reset, owners, un-promote, and the raised, locked \
              recompute of what the producers now demand: {log:?}"
         );
@@ -764,6 +827,11 @@ mod tests {
             log.iter()
                 .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
             "the producers of the asked-for hash are still resolved: {log:?}"
+        );
+        assert!(
+            log.iter()
+                .any(|s| s.contains("DELETE FROM cache_derivation")),
+            "no cache keeps claiming the closure of a producer with nothing to serve: {log:?}"
         );
         assert!(
             log.iter().any(|s| s.contains("SET fetchable = false")),

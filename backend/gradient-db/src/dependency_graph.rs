@@ -4,52 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Shared graph walks over the `derivation_dependency` table.
-//!
-//! The `derivation_dependency` row `(derivation, dependency)` means
-//! "`derivation` depends on `dependency`". A *reverse* walk from a starting
-//! derivation therefore yields its transitive **dependents** - every derivation
-//! that (directly or indirectly) needs the start node to be available.
-//!
-//! Two callers historically reimplemented the same BFS with subtly different
-//! shapes (cache invalidation closure revocation, build-failure cascade); this
-//! module hosts the single canonical version, alongside the layering that turns
-//! those edges into the display order a build list is read in.
+//! Graph reads over the `derivation_dependency` table: an evaluation's edges and
+//! the layering that turns them into the display order a build list is read in.
+//! The row `(derivation, dependency)` means "`derivation` depends on
+//! `dependency`".
 
-use crate::graph_sql::{ClosureDirection, dependency_closure_cte};
-use anyhow::{Context, Result};
-use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, FromQueryResult, TransactionTrait};
+use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_types::*;
 
 #[derive(FromQueryResult)]
-struct DerivationRow {
-    derivation: uuid::Uuid,
-}
-
-#[derive(FromQueryResult)]
 struct EdgeRow {
     derivation: uuid::Uuid,
     dependency: uuid::Uuid,
-}
-
-fn collect_transitive_dependents_sql() -> String {
-    format!(
-        "{} SELECT derivation FROM dependents",
-        dependency_closure_cte(
-            "dependents",
-            "SELECT $1::uuid",
-            ClosureDirection::Dependents,
-        )
-    )
-}
-
-crate::sql_fn! {
-    COLLECT_TRANSITIVE_DEPENDENTS = collect_transitive_dependents_sql,
-        params = [DerivationId],
-        tier = Walk,
-        flags = [Walk];
 }
 
 crate::sql! {
@@ -59,36 +27,6 @@ crate::sql! {
            WHERE e.derivation = d.derivation OFFSET 0) s",
         params = [EvaluationId],
         tier = Walk;
-}
-
-/// Returns the set of all transitive dependents of `start`, **including** `start`
-/// itself, as one recursive statement over the reverse `derivation_dependency`
-/// edges.
-///
-/// A start node nothing depends on ⇒ result contains exactly `{start}`.
-pub async fn collect_transitive_dependents<C>(
-    db: &C,
-    start: DerivationId,
-) -> Result<HashSet<DerivationId>>
-where
-    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
-{
-    let walk = crate::graph_sql::begin_walk(db)
-        .await
-        .context("open the reverse-edge walk")?;
-    let rows = DerivationRow::find_by_statement(
-        COLLECT_TRANSITIVE_DEPENDENTS.bind([start.into_inner().into()]),
-    )
-    .all(&walk)
-    .await
-    .context("walk derivation_dependency reverse edges")?;
-    walk.commit().await.context("close the reverse-edge walk")?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| DerivationId::new(r.derivation))
-        .chain(std::iter::once(start))
-        .collect())
 }
 
 /// Every `derivation_dependency` edge whose parent derivation is one an
@@ -170,24 +108,6 @@ pub fn dependency_layers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase};
-
-    /// The walk opens a transaction and raises `work_mem` before its
-    /// statement, so every mock that reaches one owes an exec result.
-    fn raise() -> sea_orm::MockExecResult {
-        sea_orm::MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 0,
-        }
-    }
-
-    fn node(derivation: DerivationId) -> MDerivationDependency {
-        gradient_entity::derivation_dependency::Model {
-            derivation,
-            dependency: derivation,
-            ..Default::default()
-        }
-    }
 
     fn layers(
         nodes: &[DerivationId],
@@ -272,39 +192,5 @@ mod tests {
         let lonely = DerivationId::now_v7();
 
         assert_eq!(layers(&[lonely], &[])[&lonely], 0);
-    }
-
-    /// A derivation nothing depends on still reports itself, so callers can
-    /// treat the result as "everything this change touches" without special
-    /// casing the start node.
-    #[tokio::test]
-    async fn no_dependents_returns_only_start() {
-        let start = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([raise()])
-            .append_query_results([Vec::<MDerivationDependency>::new()])
-            .into_connection();
-
-        let visited = collect_transitive_dependents(&db, start).await.unwrap();
-
-        assert_eq!(visited.len(), 1);
-        assert!(visited.contains(&start));
-    }
-
-    /// The walk seeds itself, so `start` comes back from the database as well as
-    /// from the chain; the set must hold one copy.
-    #[tokio::test]
-    async fn start_is_not_double_counted() {
-        let a = DerivationId::now_v7();
-        let b = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([raise()])
-            .append_query_results([vec![node(a), node(b)]])
-            .into_connection();
-
-        let visited = collect_transitive_dependents(&db, a).await.unwrap();
-
-        assert_eq!(visited.len(), 2);
-        assert!(visited.contains(&a) && visited.contains(&b));
     }
 }
