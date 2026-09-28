@@ -1,42 +1,81 @@
 # Gradient
 
-**Gradient** is a web-based, Nix-native Continuous Integration system developed by [Wavelens GmbH](https://wavelens.io).
+**Nix CI for teams.** Every flake built once, on any machine, cached for everyone.
 
-!!! note
-    This project is in active development. APIs and configuration options may change between releases.
+![The Gradient web interface](assets/screenshots/gradient.png)
 
 ## Features
 
-- **Modern UI**: clean and intuitive user interface
-- **Projects**: multiple projects, which work independently from each other (e.g. different workers, user access)
-- **API**: provides a RESTful API with API-Key management for authentication
-- **Streaming Logs**: real-time log streaming for builds
-- **Rich Task Configuration**: flake updates, check all branches, pull requests, and tags
-- **OAuth2 / OIDC**: integrated single-sign-on support
-- **Binary Cache**: built-in Nix store cache with S3 storage backend support
-- **Proto Workers**: build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
-- **Deployment Module**: Pull-Deployment via gradient-deploy module
-- **Dependency Graph**: interactive visualization of Nix build dependency trees
-- **Actions Integration**: GitHub App, Gitea and Gitlab Integration
+<div class="grid cards" markdown>
 
-## Quick Links
+-   :material-source-branch: **[Forge integration](usage/integration.md)**
 
-| Resource | Link |
-|---|---|
-| Source code | <https://github.com/wavelens/gradient> |
-| Demo | <https://public.gradient.ci> |
-| API Reference (Swagger) | [View on Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml) |
-| NixOS Options Search | <https://wavelens.github.io/gradient-search> |
+    GitHub, Gitea / Forgejo and GitLab: builds on push and pull request. Sends status checks back.
 
-## Binary Cache
+-   :material-console: **[Build before you push](usage/cli.md#build-requests)**
 
-A public binary cache with pre-built Gradient packages is available:
+    Uncommitted changes built on the CI workers with `gradient build`, no local Nix needed.
+
+-   :material-database: **[Built-in binary cache](usage/caches.md)**
+
+    Per-project caches with S3 storage, signing and sharing between projects.
+
+-   :material-server-network: **[Scales with workers](usage/overview.md#workers)**
+
+    Evaluation and builds both run on workers. Each added machine adds capacity.
+
+-   :material-robot: **[MCP server](usage/mcp.md)**
+
+    Failed builds, logs and evaluations, readable by any AI assistant.
+
+-   :material-rocket-launch: **[Pull deployment](usage/pull-deployment.md)**
+
+    Machines fetch and switch to their latest built NixOS configuration on their own.
+
+-   :material-file-code: **[Declarative setup](usage/state.md)**
+
+    Users, projects, caches and workers as NixOS options, validated at build time.
+
+-   :material-account-group: **SSO and teams**
+
+    OIDC login, SCIM provisioning, roles and invites per project and cache.
+
+</div>
+
+## Compared to Hydra
+
+| | [Hydra](https://github.com/NixOS/hydra) | Gradient |
+|---|---|---|
+| Build start | After the whole evaluation finishes | While the evaluation is still running |
+| Evaluation | On the server, limited by one machine | On workers, scales with them |
+| Build outputs | Pass through the server | Large outputs go from worker straight to S3 |
+| Server host | Needs a writable Nix store | Needs no Nix store, fits in a micro-VM |
+| Heavy builds | Static machine list with speed factors | Scoring system places them by predicted memory, learned from past builds |
+| Private caches | One store for the whole instance | Per-project caches with access control |
+| Sign-in | Local accounts, LDAP | OIDC single sign-on, SCIM provisioning |
+| Integrations | Minimal JSON API | REST API, webhooks and MCP server |
+| Web UI | Server-rendered pages | Responsive UI with live log streaming |
+
+## Public binary cache
+
+Pre-built Gradient packages:
 
 ```text
 URL:        https://public.gradient.ci/cache/main
 Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 ```
 
-## License
+## Links
 
-Gradient is released under the [GNU Affero General Public License v3.0 (AGPL-3.0-only)](https://github.com/wavelens/gradient/blob/main/LICENSE).
+- Source code: <https://github.com/wavelens/gradient>
+- API reference: [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
+- NixOS options search: <https://wavelens.github.io/gradient-search>
+- Chat: [#gradient-ci:matrix.org](https://matrix.to/#/#gradient-ci:matrix.org)
+
+!!! note
+    Gradient is in active development. APIs and configuration options may change between releases.
+
+[Get started](quick-start.md){ .md-button .md-button--primary }
+[Try the public instance](https://public.gradient.ci){ .md-button }
+
+Gradient is developed by [Wavelens GmbH](https://wavelens.io) and released under the [AGPL-3.0-only](https://github.com/wavelens/gradient/blob/main/LICENSE) license.
