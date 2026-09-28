@@ -50,6 +50,6 @@ The NixOS build checks the state (`state.validate`, on by default): unknown user
 
 ## Next Steps
 
-- [State reference](../usage/state.md): every option with examples
+- [State reference](../reference/state.md): every option with examples
 - [Add a Remote Worker](remote-worker.md): workers declared next to their projects
 - [Set Up Single Sign-On](sso.md): roles from OIDC and SCIM groups

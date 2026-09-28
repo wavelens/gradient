@@ -45,5 +45,5 @@ With `services.gradient.state.delete` (on by default), users, projects and cache
 
 ## Related
 
-- [State reference](../usage/state.md): every option with examples
+- [State reference](../reference/state.md): every option with examples
 - [Projects and Tasks](projects-and-tasks.md): what the entities mean

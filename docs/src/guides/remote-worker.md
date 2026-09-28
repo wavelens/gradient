@@ -71,7 +71,7 @@ cat /proc/sys/kernel/random/uuid
 - The next evaluation of the project shows builds on the new worker.
 
 !!! tip "One machine, many projects"
-    Register the same worker ID in each project and add each project's peers file entry as its own line. For a worker every project may use, declare a [base worker](../usage/state.md#base-workers) instead.
+    Register the same worker ID in each project and add each project's peers file entry as its own line. For a worker every project may use, declare a [base worker](../reference/state.md#workersname) instead.
 
 ## Peers File
 

@@ -32,7 +32,7 @@
 
     Machines fetch and switch to their latest built NixOS configuration on their own.
 
--   :material-file-code: **[Declarative setup](usage/state.md)**
+-   :material-file-code: **[Declarative setup](reference/state.md)**
 
     Users, projects, caches and workers as NixOS options, validated at build time.
 

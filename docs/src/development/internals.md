@@ -233,7 +233,7 @@ A worker may be authorized for multiple projects simultaneously - it sees job ca
 
 ## State-Managed Resources
 
-See [Declarative State](../usage/state.md#state-managed-resources).
+See [Declarative State](../concepts/declarative-state.md#ui-managed-and-nix-managed).
 
 ---
 

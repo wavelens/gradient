@@ -71,7 +71,6 @@ nav:
       - Overview: usage/overview.md
       - CLI: usage/cli.md
       - API: usage/api.md
-      - State: usage/state.md
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md
       - Events & Webhooks: usage/events.md
@@ -80,6 +79,7 @@ nav:
       - Diagnostic Reports: diagnostic-reports.md
   - Reference:
       - Configuration: reference/configuration.md
+      - Declarative State: reference/state.md
   - Contributors:
       - Architecture: development/architecture.md
       - Internals: development/internals.md

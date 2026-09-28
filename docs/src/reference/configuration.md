@@ -6,7 +6,7 @@ Every option of the `services.gradient` NixOS module, generated from `nix/module
 - `worker.build.maxConcurrent` is `--build-max-concurrent` and `GRADIENT_WORKER_BUILD_MAX_CONCURRENT`.
 - Module-only options (`packages`, `reverseProxy`, `postgres`, ...) have no environment variable; **(part)** marks a variable built from several options.
 
-Declarative entities under `services.gradient.state` are in the [state reference](../usage/state.md).
+Declarative entities under `services.gradient.state` are in the [state reference](state.md).
 
 ## General
 

@@ -37,7 +37,7 @@ A worker only receives jobs from projects that have a cache subscription.
 
 ## Base Workers
 
-A base worker is a server-level worker, declared in [`services.gradient.state.workers`](../usage/state.md#base-workers), that shows up in every project's worker list. Projects can enable or disable a base worker, but cannot edit or delete one.
+A base worker is a server-level worker, declared in [`services.gradient.state.workers`](../reference/state.md#workersname), that shows up in every project's worker list. Projects can enable or disable a base worker, but cannot edit or delete one.
 
 | Setting | Effect |
 |---|---|
