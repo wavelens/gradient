@@ -5,7 +5,7 @@ A second machine that evaluates and builds for a project, next to or instead of 
 **Requirements:**
 
 - A NixOS machine with network access to the Gradient server
-- A project with a cache subscription, see [First project](../get-started/first-project.md)
+- A project with a cache subscription, see [First Project](../get-started/first-project.md)
 
 ## 1. Pick a Worker ID
 

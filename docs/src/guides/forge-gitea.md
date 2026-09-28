@@ -4,7 +4,7 @@ Evaluations on every push and pull request, with commit statuses back on the for
 
 **Requirements:**
 
-- A task whose repository URL points to the Gitea or Forgejo instance, see [First project](../get-started/first-project.md)
+- A task whose repository URL points to the Gitea or Forgejo instance, see [First Project](../get-started/first-project.md)
 - An access token on the forge with write access to the repository
 
 ## 1. Create the Integrations

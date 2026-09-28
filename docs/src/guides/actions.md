@@ -4,7 +4,7 @@ Mails and web requests on evaluation and build events, e.g. a mail to the team o
 
 **Requirements:**
 
-- A task, see [First project](../get-started/first-project.md)
+- A task, see [First Project](../get-started/first-project.md)
 - For mail: [email](../reference/configuration.md#email) configured on the server
 
 ## 1. Add the Action

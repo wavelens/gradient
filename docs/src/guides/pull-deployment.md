@@ -4,7 +4,7 @@ NixOS machines that fetch and switch to their newest configuration built by Grad
 
 **Requirements:**
 
-- A task that builds the machine's `nixosConfigurations`, see [First project](../get-started/first-project.md)
+- A task that builds the machine's `nixosConfigurations`, see [First Project](../get-started/first-project.md)
 - The machine uses the task's cache as a substituter, see [Share a Cache](share-a-cache.md#1-use-the-cache-on-a-machine)
 
 ## 1. Build the System

@@ -54,6 +54,6 @@ A worker in a throwaway VM can announce that the worker is draining: the server 
 
 ## Related
 
-- [Quick start](../get-started/quick-start.md): the local worker
+- [Quick Start](../get-started/quick-start.md): the local worker
 - [Add a Remote Worker](../guides/remote-worker.md): add build machines
 - [Evaluations and Builds](evaluations-and-builds.md): what workers run

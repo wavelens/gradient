@@ -6,7 +6,7 @@ Evaluations on every push and pull request, with status checks on each commit, t
 
 - A Gradient account with the superuser flag
 - Admin rights on the GitHub user or organization that owns the repositories
-- A task whose repository URL points to GitHub, see [First project](../get-started/first-project.md)
+- A task whose repository URL points to GitHub, see [First Project](../get-started/first-project.md)
 
 ## 1. Register the GitHub App
 

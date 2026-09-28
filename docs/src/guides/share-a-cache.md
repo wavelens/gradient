@@ -4,7 +4,7 @@ One cache, used by machines, other projects and other people.
 
 **Requirements:**
 
-- A cache, see [First project](../get-started/first-project.md)
+- A cache, see [First Project](../get-started/first-project.md)
 - The Admin role on the cache, see [Caches](../concepts/caches.md#roles)
 
 ## 1. Use the Cache on a Machine

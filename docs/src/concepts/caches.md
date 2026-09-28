@@ -60,6 +60,6 @@ Custom roles combine single permissions, see [Members and Roles](../ui/members-a
 
 ## Related
 
-- [First project](../get-started/first-project.md): create a cache and subscribe a project
+- [First Project](../get-started/first-project.md): create a cache and subscribe a project
 - [Share a Cache](../guides/share-a-cache.md): share a cache and authenticate clients
 - [Projects and Tasks](projects-and-tasks.md): where builds come from

@@ -15,7 +15,7 @@ flowchart LR
     evaluation --> action([Action])
 ```
 
-## Building blocks
+## Building Blocks
 
 | Concept | Role |
 |---|---|
@@ -28,10 +28,10 @@ flowchart LR
 | [Cache](caches.md) | A Nix binary cache that stores build outputs and serves them to `nix` |
 | Action | Reacts to evaluation and build events: mail, web request, forge status, pull request |
 
-## Shared builds
+## Shared Builds
 
 A derivation is built once across the whole instance. Two projects that depend on the same derivation share one build: the first evaluation to reach the derivation dispatches the build, the others wait for the same result.
 
 ## Related
 
-- [First project](../get-started/first-project.md): create each of these in the UI
+- [First Project](../get-started/first-project.md): create each of these in the UI

@@ -4,7 +4,7 @@ Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, bui
 
 **Requirements:**
 
-- A running instance, see [Quick start](../get-started/quick-start.md)
+- A running instance, see [Quick Start](../get-started/quick-start.md)
 - Prometheus or an OpenTelemetry collector
 
 | | Prometheus | OpenTelemetry |

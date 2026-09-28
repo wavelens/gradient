@@ -4,7 +4,7 @@ Users, projects, tasks and caches declared under `services.gradient.state`, star
 
 **Requirements:**
 
-- A running instance, see [Quick start](../get-started/quick-start.md)
+- A running instance, see [Quick Start](../get-started/quick-start.md)
 - An API key of a superuser account, from **Settings -> API Keys**
 
 ## 1. Export the Running State

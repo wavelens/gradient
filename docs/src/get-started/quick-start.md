@@ -1,4 +1,4 @@
-# Quick start
+# Quick Start
 
 A running Gradient instance with its own worker, on one NixOS host.
 
@@ -7,7 +7,7 @@ A running Gradient instance with its own worker, on one NixOS host.
 - A NixOS host configured through a flake
 - A domain pointing at that host, for example `gradient.example.com`
 
-## 1. Flake input
+## 1. Flake Input
 
 ```nix
 # flake.nix
@@ -69,8 +69,8 @@ The first signs login sessions, the second encrypts secrets stored in the databa
 
 The worker stays in a reconnect loop until the first project with a cache exists. That is expected; the next page creates both.
 
-## Next steps
+## Next Steps
 
-- [First project](first-project.md): a project, a cache and the first green build
+- [First Project](first-project.md): a project, a cache and the first green build
 - [Installation](installation.md): TLS, reverse proxies and production setup
 - [Configuration](../reference/configuration.md): every server and worker option

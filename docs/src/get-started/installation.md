@@ -1,13 +1,13 @@
 # Installation
 
-A production instance: managed secrets, a chosen database, and TLS that fits the network in front of the server. Builds on the [Quick start](quick-start.md) configuration.
+A production instance: managed secrets, a chosen database, and TLS that fits the network in front of the server. Builds on the [Quick Start](quick-start.md) configuration.
 
 **Requirements:**
 
-- A NixOS host configured through a flake, with the Gradient module added ([Quick start, step 1](quick-start.md#1-flake-input))
+- A NixOS host configured through a flake, with the Gradient module added ([Quick Start, step 1](quick-start.md#1-flake-input))
 - PostgreSQL 18 or newer; the server refuses to start against older versions
 
-## 1. Public binary cache
+## 1. Public Binary Cache
 
 Pre-built Gradient packages for substituting instead of compiling:
 
@@ -78,7 +78,7 @@ The files can stay owned by root: the server reads them as systemd credentials.
 
     The file holds a connection URL such as `postgresql://gradient:<password>@db.example.com/gradient`.
 
-## 4. Reverse proxy and TLS
+## 4. Reverse Proxy and TLS
 
 The server serves the API, the worker protocol and the cache; a reverse proxy in front serves the web frontend and TLS.
 
@@ -128,7 +128,7 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
 
 ## 5. Workers
 
-- On the server host: `services.gradient.worker.enable = true`, as in the [Quick start](quick-start.md#3-enable-gradient).
+- On the server host: `services.gradient.worker.enable = true`, as in the [Quick Start](quick-start.md#3-enable-gradient).
 - On other machines: see [Add a Remote Worker](../guides/remote-worker.md).
 
 ## Verify Deployment
@@ -149,9 +149,9 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
 
     Jumbo frames save little CPU and hang large transfers when any hop disagrees on the MTU; enable them only where every hop is under control.
 
-## Next steps
+## Next Steps
 
-- [First project](first-project.md): the first user, project and build
+- [First Project](first-project.md): the first user, project and build
 - [Add a Remote Worker](../guides/remote-worker.md): build machines beyond the server host
 - [Configuration](../reference/configuration.md): every server and worker option
 - [Options search](https://wavelens.github.io/gradient-search): all NixOS options

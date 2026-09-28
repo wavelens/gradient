@@ -56,7 +56,7 @@
 | Integrations | Minimal JSON API | REST API, webhooks and MCP server |
 | Web UI | Server-rendered pages | Responsive UI with live log streaming |
 
-## Public binary cache
+## Public Binary Cache
 
 Pre-built Gradient packages:
 

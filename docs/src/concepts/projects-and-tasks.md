@@ -44,5 +44,5 @@ A task runs one evaluation at a time. A trigger that fires during a running eval
 
 ## Related
 
-- [First project](../get-started/first-project.md): create a project and a task
+- [First Project](../get-started/first-project.md): create a project and a task
 - [Overview](overview.md): how evaluations, builds, workers and caches connect

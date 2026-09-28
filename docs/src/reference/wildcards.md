@@ -50,4 +50,4 @@ The first segment is one of `checks`, `packages`, `formatter`, `legacyPackages`,
 ## Related
 
 - [Projects and Tasks](../concepts/projects-and-tasks.md): where the wildcard lives
-- [First project](../get-started/first-project.md): the wildcard in a new task
+- [First Project](../get-started/first-project.md): the wildcard in a new task

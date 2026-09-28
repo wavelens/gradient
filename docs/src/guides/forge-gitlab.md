@@ -4,7 +4,7 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
 
 **Requirements:**
 
-- A task whose repository URL points to GitLab (gitlab.com or self-hosted), see [First project](../get-started/first-project.md)
+- A task whose repository URL points to GitLab (gitlab.com or self-hosted), see [First Project](../get-started/first-project.md)
 - A GitLab access token with the `api` scope and at least the Developer role on the repository
 
 ## 1. Create the Integrations

@@ -5,7 +5,7 @@ Uncommitted changes built on the CI workers with `gradient build`, with a `resul
 **Requirements:**
 
 - The CLI, logged in, see [CLI](../reference/cli.md#configuration)
-- A project with a cache subscription and a worker, see [First project](../get-started/first-project.md)
+- A project with a cache subscription and a worker, see [First Project](../get-started/first-project.md)
 
 ## 1. Build
 
