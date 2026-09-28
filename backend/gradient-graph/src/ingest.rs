@@ -751,9 +751,9 @@ impl BatchWriter<'_> {
             referrers = referrers.len(),
             "adopted runtime edges recorded before their producers were walked"
         );
-        let moved = gradient_db::recompute_demand(&txn, &referrers).await?;
-        let mut changes = gradient_db::promote(&txn, &moved.gained).await?;
-        changes.extend(gradient_db::unpromote_ungated(&txn, &moved.lost).await?);
+        let mut changes = gradient_db::recompute_and_settle_demand(&txn, &referrers)
+            .await?
+            .changes;
         let seeded = gradient_db::seed_runtime_deps(&txn, &[], &referrers).await?;
         if !seeded.unwhole.is_empty() {
             let lock = gradient_db::lock_anchors(&txn, &seeded.unwhole).await?;
@@ -787,24 +787,11 @@ impl BatchWriter<'_> {
         let mut changes = Vec::new();
         let mut gained_demand = Vec::new();
         for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
-            let moved = gradient_db::recompute_demand(db, chunk)
+            let settled = gradient_db::recompute_and_settle_demand(db, chunk)
                 .await
-                .context("recompute what this batch demands")?;
-            gained_demand.extend_from_slice(&moved.gained);
-            for gained in moved.gained.chunks(gradient_db::IN_CHUNK_SIZE) {
-                changes.extend(
-                    gradient_db::promote(db, gained)
-                        .await
-                        .context("promote what this batch demands")?,
-                );
-            }
-            for lost in moved.lost.chunks(gradient_db::IN_CHUNK_SIZE) {
-                changes.extend(
-                    gradient_db::unpromote_ungated(db, lost)
-                        .await
-                        .context("release undemanded relays")?,
-                );
-            }
+                .context("settle what this batch demands")?;
+            gained_demand.extend_from_slice(&settled.moved.gained);
+            changes.extend(settled.changes);
         }
         gradient_db::emit_transition_effects(self.ctx, &changes).await;
 
@@ -1198,11 +1185,11 @@ pub(crate) async fn apply_upstream_hits(
     let mut changes = Vec::new();
     let mut gained_demand = Vec::new();
     for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let moved = gradient_db::recompute_demand(db, chunk)
+        let settled = gradient_db::recompute_and_settle_demand(db, chunk)
             .await
-            .context("recompute what an upstream hit demands")?;
-        changes.extend(gradient_db::settle_demand(db, &moved).await?);
-        gained_demand.extend_from_slice(&moved.gained);
+            .context("settle what an upstream hit demands")?;
+        changes.extend(settled.changes);
+        gained_demand.extend_from_slice(&settled.moved.gained);
     }
     gradient_db::emit_transition_effects(ctx, &changes).await;
 
@@ -1244,11 +1231,11 @@ pub(crate) async fn mark_probed(
     let mut changes = Vec::new();
     let mut gained_demand = Vec::new();
     for chunk in answered.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let moved = gradient_db::recompute_demand(db, chunk)
+        let settled = gradient_db::recompute_and_settle_demand(db, chunk)
             .await
-            .context("recompute what an answered anchor demands")?;
-        changes.extend(gradient_db::settle_demand(db, &moved).await?);
-        gained_demand.extend_from_slice(&moved.gained);
+            .context("settle what an answered anchor demands")?;
+        changes.extend(settled.changes);
+        gained_demand.extend_from_slice(&settled.moved.gained);
     }
     gradient_db::emit_transition_effects(ctx, &changes).await;
 
@@ -2173,8 +2160,10 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // what the recompute walk found and then wrote, then the relay it queues
+            // what the recompute walk found and then wrote, the thaw that finds
+            // nothing frozen, then the relay it queues
             .append_query_results([vec![demand_row(b.id, true)], vec![demand_row(b.id, true)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![drv_row(b.id)]])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();

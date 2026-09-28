@@ -117,11 +117,11 @@ pub use self::reachability::{
     producers_of_hashes,
 };
 pub use self::readiness::{
-    AnchorLock, DemandMoved, Repaired, SeedLock, advance_fetchable, became_fetchable, lock_anchors,
-    lock_seed_anchors, lost_fetchability, promote, promote_closure, readiness_scope,
-    recompute_demand, recount_demanded, repair_fetchable, repair_readiness, seed_unready_deps,
-    settle_demand, settle_skipped, skip_undemanded, thaw_demanded, unpromote_drv_owners,
-    unpromote_ungated, unwalk_derivations,
+    AnchorLock, DemandMoved, Repaired, SeedLock, SettledDemand, advance_fetchable,
+    became_fetchable, lock_anchors, lock_seed_anchors, lost_fetchability, promote, promote_closure,
+    readiness_scope, recompute_and_settle_demand, recount_demanded, repair_fetchable,
+    repair_readiness, seed_unready_deps, settle_skipped, unpromote_drv_owners, unpromote_ungated,
+    unwalk_derivations,
 };
 pub use self::ready_set::{ReadyMoves, ReadySet};
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};

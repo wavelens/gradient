@@ -180,8 +180,7 @@ pub async fn settle_after_delete(
 
     // Naming is half of what demand means, so a deletion can take it away and an
     // adoption can give it back: recompute below both before the queue is settled.
-    let mut undemanded = Vec::new();
-    let mut demanded = Vec::new();
+    let mut changes = Vec::new();
     for chunk in lost
         .iter()
         .chain(adopted.derivations().iter())
@@ -189,21 +188,15 @@ pub async fn settle_after_delete(
         .collect::<Vec<_>>()
         .chunks(crate::IN_CHUNK_SIZE)
     {
-        let moved = crate::readiness::recompute_demand(db, chunk)
-            .await
-            .context("GC: failed to recompute demand after deleting evaluations")?;
-        undemanded.extend(moved.lost);
-        demanded.extend(moved.gained);
+        changes.extend(
+            crate::readiness::recompute_and_settle_demand(db, chunk)
+                .await
+                .context("GC: failed to settle demand after deleting evaluations")?
+                .changes,
+        );
     }
 
-    let mut changes = Vec::new();
-    for chunk in lost
-        .iter()
-        .chain(undemanded.iter())
-        .copied()
-        .collect::<Vec<_>>()
-        .chunks(crate::IN_CHUNK_SIZE)
-    {
+    for chunk in lost.chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(
             crate::readiness::unpromote_ungated(db, chunk)
                 .await
@@ -211,14 +204,7 @@ pub async fn settle_after_delete(
         );
     }
 
-    for chunk in adopted
-        .derivations()
-        .iter()
-        .chain(demanded.iter())
-        .copied()
-        .collect::<Vec<_>>()
-        .chunks(crate::IN_CHUNK_SIZE)
-    {
+    for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(
             crate::readiness::promote(db, chunk)
                 .await

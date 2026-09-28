@@ -103,7 +103,8 @@ pub async fn reconcile_build_graph(
     let adopted = crate::reachability::adopt_pending_closure(db, evaluation).await?;
     report.adopted = adopted.pairs.len();
     for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
-        crate::readiness::recompute_demand(db, chunk).await?;
+        let settled = crate::readiness::recompute_and_settle_demand(db, chunk).await?;
+        emit_transition_effects(ctx, &settled.changes).await;
     }
     crate::bump_graph_version(db, &adopted.evaluations()).await?;
 

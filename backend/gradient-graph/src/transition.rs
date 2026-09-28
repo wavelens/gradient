@@ -708,11 +708,12 @@ async fn exhaust_substitution(
         to: BuildStatus::Created,
     }];
     // The anchor is a builder again, so demand reaches its whole pending closure.
-    let moved = gradient_db::recompute_demand(db, &[anchor.derivation]).await?;
-    let mut candidates = moved.gained;
-    candidates.push(anchor.derivation);
-    changes.extend(gradient_db::promote(db, &candidates).await?);
-    changes.extend(gradient_db::unpromote_ungated(db, &moved.lost).await?);
+    changes.extend(
+        gradient_db::recompute_and_settle_demand(db, &[anchor.derivation])
+            .await?
+            .changes,
+    );
+    changes.extend(gradient_db::promote(db, &[anchor.derivation]).await?);
     emit_transition_effects(ctx, &changes).await;
 
     if let Ok(Some(drv)) = EDerivation::find_by_id(anchor.derivation).one(db).await {

@@ -58,10 +58,8 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
             gradient_db::insert_runtime_edges(txn, *producer, &referenced).await?;
         }
 
-        let moved = gradient_db::recompute_demand(txn, &producers).await?;
-        let mut changes = gradient_db::promote(txn, &moved.gained).await?;
-        changes.extend(gradient_db::unpromote_ungated(txn, &moved.lost).await?);
-        gradient_db::emit_transition_effects(ctx, &changes).await;
+        let settled = gradient_db::recompute_and_settle_demand(txn, &producers).await?;
+        gradient_db::emit_transition_effects(ctx, &settled.changes).await;
     }
 
     // Wholeness is counted on the anchor, and the seed needs the endpoint this

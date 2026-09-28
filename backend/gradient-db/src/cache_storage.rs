@@ -352,13 +352,8 @@ pub async fn demote_cached_output(
 
     // Clearing `substitutable` turns these producers back into builders, so demand
     // reaches their whole pending closure again and not just one hop.
-    let moved = crate::readiness::recompute_demand(db, &producers).await?;
-    retired
-        .transitions
-        .extend(crate::readiness::promote(db, &moved.gained).await?);
-    retired
-        .transitions
-        .extend(crate::readiness::unpromote_ungated(db, &moved.lost).await?);
+    let settled = crate::readiness::recompute_and_settle_demand(db, &producers).await?;
+    retired.transitions.extend(settled.changes);
     crate::status::emit_transition_effects(ctx, &retired.transitions).await;
 
     if let Err(e) = nar_storage.delete(hash).await {

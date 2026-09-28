@@ -160,25 +160,16 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         // path: a name makes the anchor a demander of its own inputs, and without
         // this the closure below what was just named waits for the NEXT sweep's
         // recount to be queueable at all.
-        let mut moved = crate::readiness::DemandMoved::default();
-        for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
-            let chunk_moved = crate::readiness::recompute_demand(db, chunk).await?;
-            moved.gained.extend(chunk_moved.gained);
-            moved.lost.extend(chunk_moved.lost);
-        }
-
         let mut queued = Vec::new();
-        let promotable: Vec<_> = adopted
-            .derivations()
-            .iter()
-            .chain(moved.gained.iter())
-            .copied()
-            .collect();
-        for chunk in promotable.chunks(crate::IN_CHUNK_SIZE) {
-            queued.extend(crate::readiness::promote(db, chunk).await?);
+        for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+            queued.extend(
+                crate::readiness::recompute_and_settle_demand(db, chunk)
+                    .await?
+                    .changes,
+            );
         }
-        for chunk in moved.lost.chunks(crate::IN_CHUNK_SIZE) {
-            queued.extend(crate::readiness::unpromote_ungated(db, chunk).await?);
+        for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+            queued.extend(crate::readiness::promote(db, chunk).await?);
         }
 
         crate::bump_graph_version(db, &adopted.evaluations()).await?;

@@ -730,7 +730,7 @@ crate::sql! {
 }
 
 /// Settle every `Created` anchor among `candidates` that nothing demands.
-pub async fn skip_undemanded<C: ConnectionTrait>(
+async fn skip_undemanded<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
 ) -> Result<Vec<TransitionChange>, DbErr> {
@@ -746,7 +746,7 @@ pub async fn skip_undemanded<C: ConnectionTrait>(
 
 /// Wake every `Skipped` or `Aborted` anchor among `candidates` that something
 /// wants again.
-pub async fn thaw_demanded<C: ConnectionTrait>(
+async fn thaw_demanded<C: ConnectionTrait>(
     db: &C,
     candidates: &[DerivationId],
 ) -> Result<Vec<TransitionChange>, DbErr> {
@@ -835,8 +835,8 @@ where
     Ok(rows.len() as u64)
 }
 
-/// What a bounded recompute moved: the anchors that gained demand, for [`promote`],
-/// and the ones that lost it, for [`unpromote_ungated`].
+/// What a bounded recompute moved: the anchors that gained demand and the ones that
+/// lost it, which [`settle_demand`] thaws and promotes, or releases and skips.
 #[derive(Debug, Default)]
 pub struct DemandMoved {
     pub gained: Vec<DerivationId>,
@@ -958,7 +958,10 @@ async fn write_demand(
 /// that statement. The split widens the window between reading the graph and writing
 /// what it implied to a statement boundary; only the roots are locked either way, so
 /// the backstop is the same one, and the write still skips a row that already agrees.
-pub async fn recompute_demand<C>(db: &C, roots: &[DerivationId]) -> Result<DemandMoved, DbErr>
+pub(crate) async fn recompute_demand<C>(
+    db: &C,
+    roots: &[DerivationId],
+) -> Result<DemandMoved, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
@@ -1001,7 +1004,7 @@ where
 /// un-promote or it would try to settle a row still `Queued`. One owner, because a
 /// caller that got the order wrong would leave an anchor `Skipped` that something
 /// had started wanting again, and nothing else ever looks at it.
-pub async fn settle_demand<C: ConnectionTrait>(
+pub(crate) async fn settle_demand<C: ConnectionTrait>(
     db: &C,
     moved: &DemandMoved,
 ) -> Result<Vec<TransitionChange>, DbErr> {
@@ -1016,6 +1019,30 @@ pub async fn settle_demand<C: ConnectionTrait>(
     }
 
     Ok(changes)
+}
+
+/// What [`recompute_and_settle_demand`] moved, and the queue transitions it settled
+/// the move with.
+#[derive(Debug, Default)]
+pub struct SettledDemand {
+    pub moved: DemandMoved,
+    pub changes: Vec<TransitionChange>,
+}
+
+/// Recompute demand below `roots` and settle the queue against what moved. The one
+/// way another crate moves demand, so no event can promote what gained it while
+/// leaving a `Skipped` or `Aborted` anchor frozen until the sweep.
+pub async fn recompute_and_settle_demand<C>(
+    db: &C,
+    roots: &[DerivationId],
+) -> Result<SettledDemand, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let moved = recompute_demand(db, roots).await?;
+    let changes = settle_demand(db, &moved).await?;
+
+    Ok(SettledDemand { moved, changes })
 }
 
 /// Queue every `Created` candidate whose gates hold. The gate is embedded, so a
@@ -1889,6 +1916,53 @@ mod tests {
             )),
             "a fetchable entry point seeds nothing: {sql}"
         );
+    }
+
+    /// Every event that moves demand settles the queue against it: an anchor that
+    /// gained demand while `Skipped` or `Aborted` is thawed before the promote reads
+    /// its gate, and one that lost it is released and skipped, instead of both
+    /// waiting for the consistency sweep's table-wide pair.
+    #[tokio::test]
+    async fn a_demand_move_thaws_what_gained_it_and_skips_what_lost_it() {
+        let root = DerivationId::now_v7();
+        let on = DerivationId::now_v7();
+        let off = DerivationId::now_v7();
+        let empty = Vec::<BTreeMap<String, Value>>::new();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0), exec(1)])
+            .append_query_results([vec![demand_row(on, true), demand_row(off, false)]])
+            .append_query_results([vec![demand_row(on, true), demand_row(off, false)]])
+            .append_query_results([vec![transition_row(on, 10, 0)], vec![drv(on)]])
+            .append_query_results([empty, vec![transition_row(off, 0, 10)]])
+            .into_connection();
+
+        let settled = recompute_and_settle_demand(&db, &[root]).await.unwrap();
+
+        assert_eq!(settled.moved.gained, vec![on]);
+        assert_eq!(settled.moved.lost, vec![off]);
+        let moves: Vec<_> = settled
+            .changes
+            .iter()
+            .map(|c| (c.derivation, c.from, c.to))
+            .collect();
+        assert_eq!(
+            moves,
+            vec![
+                (on, BuildStatus::Skipped, BuildStatus::Created),
+                (on, BuildStatus::Created, BuildStatus::Queued),
+                (off, BuildStatus::Created, BuildStatus::Skipped),
+            ]
+        );
+        let log = statements(db.into_transaction_log());
+        let thaw = log
+            .iter()
+            .position(|s| s.contains("db.status IN (5, 10) AND db.demanded"))
+            .expect("what gained demand is thawed");
+        let promote = log
+            .iter()
+            .position(|s| s.contains("queued_at = coalesce(db.queued_at"))
+            .expect("and then promoted");
+        assert!(thaw < promote, "{log:?}");
     }
 
     /// Both directions, over a region that INCLUDES the roots. A thawed anchor's own
