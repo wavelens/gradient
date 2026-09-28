@@ -80,7 +80,7 @@ fn client_builder() -> reqwest::ClientBuilder {
     untimed_client_builder().timeout(DEFAULT_TIMEOUT)
 }
 
-/// Client for API traffic (forges, webhooks, OIDC, upstream narinfo probes).
+/// Client for API traffic (forges, webhooks, OIDC).
 /// Redirects are refused: following one on an authenticated call is an SSRF
 /// pivot, so a 3xx must surface as itself.
 pub fn build_client() -> reqwest::Result<reqwest::Client> {
@@ -89,8 +89,8 @@ pub fn build_client() -> reqwest::Result<reqwest::Client> {
         .build()
 }
 
-/// Client for fetching binary objects - NARs and cache blobs - from object
-/// stores and third-party binary caches.
+/// Client for fetching from object stores and third-party binary caches:
+/// NARs, cache blobs, build logs and upstream narinfo probes.
 ///
 /// Unlike [`build_client`] this follows redirects. Attic, Cachix and every S3
 /// gateway answer a NAR GET with a 3xx to their object storage, and reqwest
