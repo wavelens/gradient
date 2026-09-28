@@ -290,6 +290,10 @@ async fn lookup_row(state: &ServerState, fingerprint: &str) -> Option<eval_cache
 /// [`should_accept_push`] (checked before granting the upload), so this always
 /// records the freshly-stored blob; on conflict it refreshes `storage_path`,
 /// `size_bytes`, and `updated_at`.
+pub(super) async fn record_eval_cache(state: &ServerState, fingerprint: &str, size_bytes: u64) {
+    upsert_eval_cache_row(state, fingerprint, &storage_key(fingerprint), size_bytes).await;
+}
+
 async fn upsert_eval_cache_row(
     state: &ServerState,
     fingerprint: &str,

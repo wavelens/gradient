@@ -427,8 +427,11 @@ impl<'a> DispatchContext<'a> {
                 self.on_upload_cancel(request_id, uploads).await;
                 true
             }
-            ClientMessage::UploadFinished { .. } => {
-                warn!("upload handshake not wired yet");
+            ClientMessage::UploadFinished {
+                request_id,
+                metadata,
+            } => {
+                self.on_upload_finished(request_id, metadata, uploads).await;
                 true
             }
             // Unreachable: `decode` routes these to `dispatch_bulk` still archived.

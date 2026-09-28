@@ -47,7 +47,6 @@ pub(in crate::handler) struct Granted {
     pub job_id: String,
     pub object: UploadObject,
     pub size: u64,
-    #[expect(dead_code, reason = "settled by the commit")]
     pub permit: UploadPermit,
     pub transfer: Transfer,
     pub lease: Lease,

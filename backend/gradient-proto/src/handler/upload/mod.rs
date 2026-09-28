@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+mod commit;
 mod table;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
 use gradient_storage::{PartialStore, StorageTarget, upload_lease};
 use gradient_wire::messages::ServerMessage;
-use gradient_wire::types::{GrantTarget, UploadObject, UploadOutcome};
+use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
 
 use super::dispatch::DispatchContext;
@@ -222,6 +224,47 @@ impl DispatchContext<'_> {
             self.settle(request_id, UploadOutcome::Rejected { reason })
                 .await;
         }
+    }
+
+    pub(super) async fn on_upload_finished(
+        &mut self,
+        request_id: u64,
+        metadata: UploadMetadata,
+        uploads: &mut UploadSession,
+    ) {
+        let Some(granted) = uploads.table.take_granted(request_id) else {
+            return self
+                .settle(
+                    request_id,
+                    UploadOutcome::Rejected {
+                        reason: format!("request {request_id} holds no grant"),
+                    },
+                )
+                .await;
+        };
+        let project_id = match self.scheduler.project_for_job(&granted.job_id).await {
+            Some(id) => Some(id),
+            None => {
+                super::nar::project_for_dispatched_job(
+                    &self.state.worker_db,
+                    self.peer_id,
+                    &granted.job_id,
+                )
+                .await
+            }
+        };
+        let c = commit::Commit {
+            writer: self.writer.clone(),
+            state: Arc::clone(self.state),
+            peer_id: self.peer_id.to_owned(),
+            request_id,
+            project_id,
+            object: granted.object,
+            transfer: granted.transfer,
+            metadata,
+            permit: granted.permit,
+        };
+        self.state.shutdown.spawn(commit::run(c));
     }
 
     pub(super) async fn on_upload_cancel(&mut self, request_id: u64, uploads: &mut UploadSession) {
