@@ -19,8 +19,8 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `Credential` | Short-lived credential, e.g. an SSH key | `kind`, `data` |
 | `NarStreamHeader` | Opens a NAR pull stream | `job_id`, `store_path`, `total_bytes`, `stream_token` |
 | `NarPush` (bulk) | NAR pull chunk, 512 KiB zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
-| `NarUnavailable` | Path cannot be served; no chunks follow | `job_id`, `store_path`, `reason` |
-| `NarAbort` | Pull aborted mid-stream | `job_id`, `store_path`, `reason` |
+| `NarUnavailable` | Storage holds no object for the path; no chunks follow | `job_id`, `store_path`, `reason` |
+| `NarAbort` | Pull failed on a storage error or timeout, before or during the stream; retryable | `job_id`, `store_path`, `reason` |
 | `EvalCachePullResult` | Answer to `EvalCachePull`: miss, presigned URL or inline stream | `job_id`, `outcome` |
 | `EvalCacheChunk` (bulk) | Inline evaluation cache chunk | `job_id`, `data`, `offset`, `is_final` |
 | `CacheStatus` | Answer to `CacheQuery` | `query_id`, `cached` |

@@ -46,7 +46,7 @@ The worker prefetches every input the local store lacks before the build starts.
 | Anything else | Stream over `/proto`, at most `nar.maxConcurrentServes` (8) paths per connection |
 
 - Small NARs come from an in-memory hot cache, `nar.hotCacheBytes` (512 MiB).
-- `NarUnavailable` also removes the stale cache row on the server.
+- `NarUnavailable` also removes the stale cache row on the server; a storage error or timeout answers `NarAbort` and leaves the row and object in place.
 - Substitute builds may get an upstream URL through a single-path `Pull` query with `external`.
 
 ## Logs

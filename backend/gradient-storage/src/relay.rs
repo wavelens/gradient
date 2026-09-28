@@ -31,17 +31,16 @@ pub enum ServeError {
     #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
-    Unavailable(String),
-    #[error("{0}")]
     Aborted(String),
 }
 
-/// Which message a failed transfer sends: [`ServerMessage::NarUnavailable`]
-/// before any bytes have streamed, or [`ServerMessage::NarAbort`] mid-stream.
+/// Which message a failed transfer sends. Only storage's own answer that the
+/// object is absent is [`ServerMessage::NarUnavailable`], which the worker turns
+/// into a demotion that deletes the cached path; a storage error or timeout is
+/// [`ServerMessage::NarAbort`], retried without touching the cache.
 enum FailKind {
-    NotFound,
-    Unavailable,
-    Abort,
+    Missing,
+    Transient,
 }
 
 /// Send the message matching `kind` and return the error every call site
@@ -55,7 +54,7 @@ async fn fail_transfer(
     reason: String,
 ) -> ServeError {
     match kind {
-        FailKind::NotFound | FailKind::Unavailable => {
+        FailKind::Missing => {
             let _ = send_server_msg(
                 writer,
                 &ServerMessage::NarUnavailable {
@@ -66,7 +65,7 @@ async fn fail_transfer(
             )
             .await;
         }
-        FailKind::Abort => {
+        FailKind::Transient => {
             let _ = send_server_msg(
                 writer,
                 &ServerMessage::NarAbort {
@@ -79,9 +78,8 @@ async fn fail_transfer(
         }
     }
     match kind {
-        FailKind::NotFound => ServeError::NotFound(reason),
-        FailKind::Unavailable => ServeError::Unavailable(reason),
-        FailKind::Abort => ServeError::Aborted(reason),
+        FailKind::Missing => ServeError::NotFound(reason),
+        FailKind::Transient => ServeError::Aborted(reason),
     }
 }
 
@@ -91,8 +89,8 @@ async fn fail_transfer(
 /// Hardening notes:
 /// - The initial storage open is wrapped in `storage_open_timeout`. A stalled
 ///   backend (e.g. S3 hung TCP) used to silently consume the dispatch loop's
-///   600 s waiter ceiling; now it surfaces as a `NarUnavailable` within the
-///   open timeout.
+///   600 s waiter ceiling; now it surfaces as a `NarAbort` within the open
+///   timeout.
 /// - The chunked send path uses [`ProtoWriter`], which bounds per-chunk send
 ///   waits via the queue + `send_chunk_timeout` configured at split time.
 ///   A stalled peer is detected as `SendError::Stalled` from `send_server_msg` and
@@ -121,7 +119,7 @@ pub async fn serve_nar(
         .and_then(|s| s.split('-').next())
     else {
         let reason = format!("invalid store path: {store_path}");
-        return Err(fail_transfer(writer, job_id, store_path, FailKind::Unavailable, reason).await);
+        return Err(fail_transfer(writer, job_id, store_path, FailKind::Missing, reason).await);
     };
 
     let open = |offset: u64| async move {
@@ -132,15 +130,13 @@ pub async fn serve_nar(
         Ok(Ok(Some(source))) => source,
         Ok(Ok(None)) => {
             let reason = format!("NAR not found in cache for {store_path}");
-            return Err(
-                fail_transfer(writer, job_id, store_path, FailKind::NotFound, reason).await,
-            );
+            return Err(fail_transfer(writer, job_id, store_path, FailKind::Missing, reason).await);
         }
         Ok(Err(e)) => {
             let reason = format!("nar_storage.open({hash}) failed: {e}");
             error!(%store_path, error = %e, "NAR storage read error");
             return Err(
-                fail_transfer(writer, job_id, store_path, FailKind::Unavailable, reason).await,
+                fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
             );
         }
         Err(_) => {
@@ -150,7 +146,7 @@ pub async fn serve_nar(
             );
             warn!(%store_path, "NAR storage open timed out");
             return Err(
-                fail_transfer(writer, job_id, store_path, FailKind::Unavailable, reason).await,
+                fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
             );
         }
     };
@@ -172,14 +168,9 @@ pub async fn serve_nar(
             }
             _ => {
                 let reason = format!("failed to reopen {store_path} for fresh transfer");
-                return Err(fail_transfer(
-                    writer,
-                    job_id,
-                    store_path,
-                    FailKind::Unavailable,
-                    reason,
-                )
-                .await);
+                return Err(
+                    fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
+                );
             }
         }
     }
@@ -221,7 +212,7 @@ pub async fn serve_nar(
                 );
                 warn!(%store_path, "NAR storage read stall");
                 return Err(
-                    fail_transfer(writer, job_id, store_path, FailKind::Abort, reason).await,
+                    fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
                 );
             }
         };
@@ -231,7 +222,7 @@ pub async fn serve_nar(
                 let reason = format!("NAR storage stream error: {e}");
                 error!(%store_path, error = %e, "NAR storage stream error");
                 return Err(
-                    fail_transfer(writer, job_id, store_path, FailKind::Abort, reason).await,
+                    fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
                 );
             }
         };
@@ -259,9 +250,14 @@ pub async fn serve_nar(
                 .is_err()
                 {
                     let reason = format!("WebSocket send stalled mid-NarPush at offset {offset}");
-                    return Err(
-                        fail_transfer(writer, job_id, store_path, FailKind::Abort, reason).await,
-                    );
+                    return Err(fail_transfer(
+                        writer,
+                        job_id,
+                        store_path,
+                        FailKind::Transient,
+                        reason,
+                    )
+                    .await);
                 }
                 offset += chunk_len;
                 total += chunk_len;
@@ -285,7 +281,7 @@ pub async fn serve_nar(
     .is_err()
     {
         let reason = format!("WebSocket send stalled on final NarPush at offset {offset}");
-        return Err(fail_transfer(writer, job_id, store_path, FailKind::Abort, reason).await);
+        return Err(fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await);
     }
     total += final_len;
     chunks_sent += 1;
@@ -333,6 +329,16 @@ mod tests {
         resume_from: u64,
         client_token: Option<&str>,
     ) -> (Result<u64, ServeError>, Vec<ServerMessage>) {
+        serve_within(store, store_path, resume_from, client_token, timeouts()).await
+    }
+
+    async fn serve_within(
+        store: &NarStore,
+        store_path: &str,
+        resume_from: u64,
+        client_token: Option<&str>,
+        timeouts: RelayTimeouts,
+    ) -> (Result<u64, ServeError>, Vec<ServerMessage>) {
         let (writer, mut sent) = ProtoWriter::spy(Duration::from_secs(5));
         let req = RelayRequest {
             job_id: "build:1",
@@ -340,7 +346,7 @@ mod tests {
             resume_from,
             client_token,
         };
-        let result = serve_nar(store, &writer, req, timeouts()).await;
+        let result = serve_nar(store, &writer, req, timeouts).await;
         drop(writer);
         let mut frames = Vec::new();
         while let Some(bytes) = sent.recv().await {
@@ -418,10 +424,32 @@ mod tests {
     async fn an_invalid_store_path_is_unavailable() {
         let (_dir, store) = stored(10).await;
         let (result, frames) = serve(&store, "not-a-store-path", 0, None).await;
-        assert!(matches!(result, Err(ServeError::Unavailable(_))));
+        assert!(matches!(result, Err(ServeError::NotFound(_))));
         assert!(matches!(
             frames.as_slice(),
             [ServerMessage::NarUnavailable { .. }]
         ));
+    }
+
+    #[tokio::test]
+    async fn a_storage_open_that_times_out_aborts_without_claiming_the_nar_is_gone() {
+        let hung = object_store::throttle::ThrottledStore::new(
+            object_store::memory::InMemory::new(),
+            object_store::throttle::ThrottleConfig {
+                wait_get_per_call: Duration::from_secs(3600),
+                ..Default::default()
+            },
+        );
+        let store = NarStore::over(std::sync::Arc::new(hung));
+        let short = RelayTimeouts {
+            open: Duration::from_millis(50),
+            chunk_read: Duration::from_secs(5),
+        };
+        let (result, frames) = serve_within(&store, PATH, 0, None, short).await;
+        assert!(matches!(result, Err(ServeError::Aborted(_))), "{result:?}");
+        assert!(
+            matches!(frames.as_slice(), [ServerMessage::NarAbort { .. }]),
+            "{frames:?}"
+        );
     }
 }

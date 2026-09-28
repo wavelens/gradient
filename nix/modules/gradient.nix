@@ -555,7 +555,7 @@ in {
           default = 60;
           description = ''
             Seconds to wait for a NAR object stream from storage (for example an S3 GET) before
-            answering the worker with `NarUnavailable`.
+            answering the worker with `NarAbort`, which the worker retries.
           '';
         };
 

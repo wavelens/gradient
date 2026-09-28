@@ -149,7 +149,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `nar.partialTtlSecs` | int | `86400` | `GRADIENT_NAR_PARTIAL_TTL_SECS` | Seconds after its last write that an unfinished NAR upload under `<baseDir>/nar-partial` is deleted. |
 | `nar.sendChunkTimeoutSecs` | int | `30` | `GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS` | Seconds an outbound `NarPush` chunk may wait for the WebSocket to drain before the transfer is aborted with `NarAbort`. |
 | `nar.smallBytes` | int | `1048576` | `GRADIENT_NAR_SMALL_BYTES` | Size in bytes up to which a NAR is served through the server on download instead of a presigned S3 URL, and kept in the in-memory cache. Uploads do not depend on it. |
-| `nar.storageOpenTimeoutSecs` | int | `60` | `GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS` | Seconds to wait for a NAR object stream from storage (for example an S3 GET) before answering the worker with `NarUnavailable`. |
+| `nar.storageOpenTimeoutSecs` | int | `60` | `GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS` | Seconds to wait for a NAR object stream from storage (for example an S3 GET) before answering the worker with `NarAbort`, which the worker retries. |
 | `nar.verifyDigest` | bool | `false` | `GRADIENT_NAR_VERIFY_DIGEST` | Whether to download NARs committed through presigned S3 uploads and verify their hash, catching same-length corruption at the cost of a full object read. |
 
 ## `oidc`

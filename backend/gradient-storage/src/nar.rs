@@ -146,6 +146,19 @@ impl NarStore {
     }
 }
 
+#[cfg(test)]
+impl NarStore {
+    pub(crate) fn over(inner: Arc<dyn ObjectStore>) -> Self {
+        Self {
+            inner,
+            prefix: String::new(),
+            local_base: None,
+            s3_signer: None,
+            hot: Arc::new(HotNarCache::disabled()),
+        }
+    }
+}
+
 impl NarStore {
     /// Create a local-disk-backed store rooted at `base_path`.
     pub fn local(base_path: &str) -> Result<Self> {
