@@ -177,7 +177,8 @@ mod tests {
 
     fn secret_file() -> (tempfile::NamedTempFile, String) {
         let mut file = tempfile::NamedTempFile::new().expect("temp secret");
-        file.write_all(b"test-secret-key-32-bytes-padding!").expect("write secret");
+        file.write_all(b"test-secret-key-32-bytes-padding!")
+            .expect("write secret");
         let path = file.path().to_string_lossy().to_string();
         (file, path)
     }
