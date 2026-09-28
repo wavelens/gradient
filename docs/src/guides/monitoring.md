@@ -28,7 +28,7 @@ services.prometheus.scrapeConfigs = [{
 1.  Any random string, e.g. `openssl rand -base64 32`; without the file `GET /metrics` returns `404`.
 2.  The bundled reverse proxy does not forward `/metrics`; the scraper talks to `listenAddr` and `port` directly.
 
-The endpoint allows 6 requests per second; a 15 s scrape interval fits.
+The endpoint refills one request every 6 s, with a burst of 5; a 15 s scrape interval fits.
 
 ## 2. OpenTelemetry
 
@@ -62,11 +62,18 @@ services.gradient.metrics.otlp = {
 
 ## Alerts
 
-| Alert | Expression |
-|---|---|
-| No workers | `gradient_workers_connected == 0` |
-| Queue grows | `gradient_jobs_pending > 100 and gradient_jobs_active == 0` |
-| Builds fail | `increase(gradient_builds_total{status="Failed"}[1h]) > 10` |
+```yaml
+# prometheus rules
+groups:
+  - name: gradient
+    rules:
+      - alert: GradientNoWorkers
+        expr: gradient_workers_connected == 0
+      - alert: GradientQueueStuck
+        expr: gradient_jobs_pending > 100 and gradient_jobs_active == 0
+      - alert: GradientBuildsFailing
+        expr: increase(gradient_builds_total{status=~"FailedPermanent|FailedTimeout"}[1h]) > 10
+```
 
 ## Next Steps
 
