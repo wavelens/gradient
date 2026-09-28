@@ -1,4 +1,4 @@
-# Build Before You Push
+# Build Before Pushing
 
 Uncommitted changes built on the CI workers with `gradient build`, with a `result` link at the end like `nix build`. The laptop needs no builders and no Nix evaluation.
 

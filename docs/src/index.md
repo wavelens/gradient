@@ -8,35 +8,35 @@
 
 <div class="grid cards" markdown>
 
--   :material-source-branch: **[Forge integration](guides/forge-github.md)**
+-   :material-source-branch: **[Forge Integration](guides/forge-github.md)**
 
     GitHub, Gitea / Forgejo and GitLab: builds on push and pull request. Sends status checks back.
 
--   :material-console: **[Build before you push](guides/build-before-push.md)**
+-   :material-console: **[Build Before Pushing](guides/build-before-push.md)**
 
     Uncommitted changes built on the CI workers with `gradient build`, no local Nix needed.
 
--   :material-database: **[Built-in binary cache](concepts/caches.md)**
+-   :material-database: **[Built-in Binary Cache](concepts/caches.md)**
 
     Per-project caches with S3 storage, signing and sharing between projects.
 
--   :material-server-network: **[Scales with workers](concepts/workers.md)**
+-   :material-server-network: **[Scales With Workers](concepts/workers.md)**
 
     Evaluation and builds both run on workers. Each added machine adds capacity.
 
--   :material-robot: **[MCP server](guides/mcp.md)**
+-   :material-robot: **[MCP Server](guides/mcp.md)**
 
     Failed builds, logs and evaluations, readable by any AI assistant.
 
--   :material-rocket-launch: **[Pull deployment](guides/pull-deployment.md)**
+-   :material-rocket-launch: **[Pull Deployment](guides/pull-deployment.md)**
 
     Machines fetch and switch to their latest built NixOS configuration on their own.
 
--   :material-file-code: **[Declarative setup](reference/state.md)**
+-   :material-file-code: **[Declarative Setup](reference/state.md)**
 
     Users, projects, caches and workers as NixOS options, validated at build time.
 
--   :material-account-group: **[SSO and teams](guides/sso.md)**
+-   :material-account-group: **[SSO and Teams](guides/sso.md)**
 
     OIDC login, SCIM provisioning, roles and invites per project and cache.
 

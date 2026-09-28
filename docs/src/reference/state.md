@@ -81,7 +81,7 @@ services.gradient.state = {
 | `triggers.*.config` | attribute set | `{ }` | Type-specific configuration. |
 | `triggers.*.integration` | null or string | `null` | Name of an inbound integration in the same project backing this trigger. |
 | `triggers.*.type` | one of `polling` `reporter_push` `reporter_pull_request` `time` | - | Trigger kind, which determines the expected `config` and how the trigger fires. |
-| `wildcard` | string | `"packages.x86_64-linux.*"` | Attribute paths to evaluate, as [wildcards](wildcards.md); `packages.x86_64-linux.#` is recommended. |
+| `wildcard` | string | `"packages.x86_64-linux.*"` | Comma-separated Nix attribute paths to evaluate from the flake. A `*` or `#` segment matches any attribute name, and a pattern prefixed with `!` excludes matching paths. See [Evaluation Wildcards](wildcards.md). |
 
 ## `integrations.<name>`
 
@@ -113,7 +113,7 @@ services.gradient.state = {
 | `members.*.role` | string | - | Role name: a built-in `Admin`, `Write` or `View`, or a custom role of this cache. |
 | `members.*.user` | string | - | User name, resolved when the state is applied. |
 | `name` | string | attribute name | Unique cache name. |
-| `priority` | int | `10` | Priority of the cache; lower is preferred, as in Nix. |
+| `priority` | int | `10` | Priority advertised in `nix-cache-info`. Nix queries caches with a lower value first. |
 | `projects` | list of string | `[ ]` | Names of the projects using this cache. |
 | `public` | bool | `false` | Whether the cache is available to all projects. |
 | `roles` | list of submodule | `[ ]` | Custom roles of this cache. |

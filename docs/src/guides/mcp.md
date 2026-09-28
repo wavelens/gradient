@@ -37,7 +37,7 @@ Every tool call runs as this user and sees only the user's projects. `gradient p
 
 ## Verify Deployment
 
-Ask the assistant: "Why did the last evaluation of `web-app` fail?" The assistant walks down the tools:
+Ask the assistant: "Explain the last failed evaluation of `web-app`." The assistant walks down the tools:
 
 ```mermaid
 flowchart LR
