@@ -98,6 +98,7 @@ A build job carries exactly one `BuildSpec`: one shared build (anchor).
 
 - **InputsUnavailable:** an input the cache listed is gone (uncached, `404`/`410` on the URL, or `NarUnavailable`). The server deletes the stale cache row and object, resets the producing build, and retries; after `build.inputsUnavailableMaxLoops` (3) loops the build fails permanently.
 - **DependencyFailed** spreads upward over the dependency graph from `Permanent` and `Timeout` failures, across evaluations.
+- **Eval job outage:** an eval job that failed `Transient` (the server connection dropped, an object PUT or a `CacheQuery` stopped answering) re-queues its evaluation, up to `build.maxAttempts` (3) runs.
 - An evaluation ends `Completed`, or `Failed` when any build failed, was aborted or dependency-failed, or an error message exists.
 
 ## Abort and Lost Workers

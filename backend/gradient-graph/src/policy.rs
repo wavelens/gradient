@@ -192,6 +192,12 @@ pub(crate) fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u3
     prior_failures >= max_loops as i64
 }
 
+/// A failed evaluation re-queues when its worker blamed an outage, until it has
+/// run `max_attempts` times; any other failure is the evaluation's own.
+pub(crate) fn retry_failed_eval(kind: BuildFailureKind, attempts: u64, max_attempts: u32) -> bool {
+    kind == BuildFailureKind::Transient && attempts < u64::from(max_attempts)
+}
+
 /// True when a `FailedTransient` build's exponential backoff window has elapsed
 /// and it is due for re-queue. `attempt` is `>= 1` (it failed at least once);
 /// window = `base_secs * 2^(attempt-1)`.
@@ -234,8 +240,8 @@ mod tests {
     use super::{
         FailureOutcome, Substitution, attempt_outcome, attempt_reason, attempt_reason_for,
         decide_failure_outcome, inputs_unavailable_circuit_open, retry_backoff_elapsed,
-        spends_substitute_budget, terminal_success_outcome, terminal_success_status,
-        truncate_failure_message,
+        retry_failed_eval, spends_substitute_budget, terminal_success_outcome,
+        terminal_success_status, truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -570,5 +576,13 @@ mod tests {
                 AttemptOutcome::Aborted
             );
         }
+    }
+
+    #[test]
+    fn an_outage_requeues_an_evaluation_until_its_attempts_run_out() {
+        assert!(retry_failed_eval(BuildFailureKind::Transient, 1, 3));
+        assert!(retry_failed_eval(BuildFailureKind::Transient, 2, 3));
+        assert!(!retry_failed_eval(BuildFailureKind::Transient, 3, 3));
+        assert!(!retry_failed_eval(BuildFailureKind::Permanent, 1, 3));
     }
 }

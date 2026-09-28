@@ -228,6 +228,15 @@ async fn eval_failed(
         return Ok(());
     }
 
+    if kind == BuildFailureKind::Transient {
+        let attempts = gradient_db::eval_attempts(&ctx.worker_db, evaluation_id).await?;
+        if crate::policy::retry_failed_eval(kind, attempts, ctx.config.build.max_attempts) {
+            warn!(%evaluation_id, attempts, %error, "eval job hit an outage; re-queued");
+            requeue_evaluation(ctx, evaluation_id).await?;
+            return Ok(());
+        }
+    }
+
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.worker_db)
         .await?
@@ -283,6 +292,12 @@ async fn heal_corrupt_eval_cache(
         warn!(%fingerprint, error = %e, "failed to delete corrupt eval-cache object");
     }
 
+    requeue_evaluation(ctx, evaluation_id).await?;
+    info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache blob; re-queued eval for fresh evaluation");
+    Ok(true)
+}
+
+async fn requeue_evaluation(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<()> {
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.worker_db)
         .await?
@@ -294,8 +309,7 @@ async fn heal_corrupt_eval_cache(
         update_evaluation_status(ctx, eval, EvaluationStatus::Queued).await;
     }
 
-    info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache blob; re-queued eval for fresh evaluation");
-    Ok(true)
+    Ok(())
 }
 
 async fn build_output(

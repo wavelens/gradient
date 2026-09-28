@@ -20,7 +20,7 @@ use gradient_types::{CDerivationBuild, CEvaluation};
 use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query, Value};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, IntoActiveModel,
-    Iterable, QueryFilter, QueryOrder, QuerySelect,
+    Iterable, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 use std::collections::HashMap;
 
@@ -146,6 +146,24 @@ pub async fn latest_eval_jobs<C: ConnectionTrait>(
     .await?;
 
     Ok(rows.into_iter().collect())
+}
+
+/// How many times `evaluation`'s eval job ran, the one ending now included:
+/// rejected or lost assignments close as `Abandoned` and never ran.
+pub async fn eval_attempts<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+) -> Result<u64, DbErr> {
+    EDispatchedJob::find()
+        .filter(CDispatchedJob::Kind.eq(DispatchedJobKind::Eval))
+        .filter(CDispatchedJob::EvaluationId.eq(evaluation))
+        .filter(
+            CDispatchedJob::Outcome
+                .is_null()
+                .or(CDispatchedJob::Outcome.ne(DispatchedJobOutcome::Abandoned)),
+        )
+        .count(db)
+        .await
 }
 
 /// Close every open row of `worker_id` dispatched before `before` as
