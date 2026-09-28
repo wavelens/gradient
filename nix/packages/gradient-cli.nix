@@ -108,7 +108,7 @@ in
 craneLib.buildPackage (commonArgs // rec {
   inherit cargoArtifacts;
   pname = "gradient-cli";
-  version = "1.4.0";
+  version = "1.4.1";
   separateDebugInfo = true;
 
   # Same split as the server: the binary keeps the debug output, the suite runs

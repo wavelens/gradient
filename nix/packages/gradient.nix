@@ -115,7 +115,7 @@ in
 craneLib.buildPackage (commonArgs // rec {
   inherit cargoArtifacts;
   pname = "gradient";
-  version = "1.4.0";
+  version = "1.4.1";
   separateDebugInfo = true;
 
   # `separateDebugInfo` exports `NIX_RUSTFLAGS=-g -C strip=none` for the whole
