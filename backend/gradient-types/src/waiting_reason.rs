@@ -28,10 +28,7 @@
 //!   next startup or when draining is disabled.
 //! - `GraphStuck` - workers can satisfy every pending build, yet none is
 //!   dispatchable: nothing in the pending set passes the dispatch gate and no
-//!   in-flight build is left to fire a promotion. The reconciler heals
-//!   on entry, again when `pending_anchors` changes, and otherwise on the
-//!   consistency sweep's cadence; between those, the counters promote the set as
-//!   soon as its gates open.
+//!   in-flight build is left to fire a promotion.
 
 use serde::{Deserialize, Serialize};
 
@@ -76,9 +73,9 @@ pub enum WaitingReason {
     /// dispatchable - nothing in the pending set passes the dispatch gate and no
     /// in-flight build is left to drive promotion. What blocks it is not recorded
     /// here; `pending_anchors` is the blocked count. The reconciler
-    /// heals on entry and when that count changes, the consistency sweep re-heals
-    /// a stably stuck evaluation, and the counters promote the set as soon as its
-    /// gates open.
+    /// heals on entry and when that count changes, the graph-stuck re-heal pass
+    /// re-runs the heal on the consistency sweep's cadence, and the counters
+    /// promote the set as soon as its gates open.
     GraphStuck {
         pending_anchors: u32,
     },

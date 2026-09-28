@@ -13,8 +13,9 @@ use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use gradient_types::*;
 
 /// Evaluations the scheduler re-drives on its own after a restart, so recovery
-/// must leave them alone: `Queued` is re-offered by the eval dispatcher and
-/// `Waiting` (evaluated, builds queued for a free worker) by build reconcile.
+/// must leave them alone: `Queued` is re-offered by the eval dispatcher and a
+/// `Waiting` park is resolved by the waiting-state reconciler or the hook that
+/// owns its reason.
 /// Every other active status was running on a now-disconnected worker and is
 /// genuinely lost.
 fn eval_survives_restart(status: EvaluationStatus) -> bool {
@@ -146,7 +147,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     // builder aborts the eval's builds, so reflect it: Created/Queued/Building
     // anchors referenced only by the now-aborted evals go to Aborted. Anchors a
     // still-live eval also needs are left running (shared-anchor safety). The
-    // force-eval below re-drives them - `requeue_failed_anchors` resets
+    // force-eval below re-drives them - `requeue_failed_closure` resets
     // Aborted -> Created on the next evaluation. The anchors are shared, and an
     // evaluation that was already terminal when the server died still shows them,
     // so the histogram bump is keyed on the derivations rather than on 3b's set.

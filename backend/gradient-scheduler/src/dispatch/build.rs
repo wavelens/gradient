@@ -211,8 +211,8 @@ struct BuildDispatchMaps {
     closure_sizes: HashMap<DerivationId, Option<i64>>,
     /// The sizes this pass computed; the graph actor persists them.
     computed_sizes: HashMap<DerivationId, i64>,
-    /// derivation_id → historical resource prediction (default when the
-    /// derivation has no `pname` or no matching history).
+    /// derivation_id → historical resource prediction by `(history_name,
+    /// architecture)`, default when there is no matching history.
     histories: HashMap<DerivationId, gradient_pool::score::HistoryPrediction>,
     /// derivation_build → the evaluation driving this anchor's dispatch (used for
     /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.

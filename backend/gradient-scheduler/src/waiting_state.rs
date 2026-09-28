@@ -84,10 +84,7 @@ pub(crate) async fn reconcile_waiting_state(
                 .as_ref()
                 .and_then(WaitingReason::from_json);
             if eval.status == EvaluationStatus::Waiting
-                && matches!(
-                    reason,
-                    Some(WaitingReason::Draining)
-                )
+                && matches!(reason, Some(WaitingReason::Draining))
             {
                 continue;
             }
@@ -231,8 +228,8 @@ pub(crate) async fn reconcile_waiting_state(
 
 /// Build-phase reconciliation for one evaluation: decide `Building` vs
 /// `Waiting` from whether the connected pool can satisfy any of the eval's
-/// pending anchors. Returns `None` when the eval has no pending anchor
-/// (nothing to decide).
+/// pending anchors. An evaluation whose named work is all settled is finalized
+/// and returned as `Settled`; one that names no anchor yet is `Unnamed`.
 ///
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
 /// every pending anchor yet none is dispatchable: typically the set is `Created`
@@ -417,9 +414,9 @@ async fn attempt_graph_unstick(
 ) -> Result<BuildPhase> {
     info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing");
 
-    // The healing pipeline in Unstick scope: terminal-failed thaw, unbacked-output
-    // demote, cached-anchor settle with its readiness advance, the closure's
-    // dependency-failed sweep, and promotion (see `gradient_db::reconcile`).
+    // The healing pipeline in Unstick scope: failed-anchor thaw, cached-anchor
+    // settle with its readiness advance, the closure's dependency-failed sweep,
+    // pruned-interior adoption, and promotion (see `gradient_db::reconcile`).
     if let Err(e) = state
         .graph
         .transition(gradient_graph::Transition::Reconcile {
