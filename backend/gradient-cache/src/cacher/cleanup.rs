@@ -169,8 +169,8 @@ gradient_db::sql! {
     /// The candidates no row keeps, probed one index lookup per clause. Outputs stay
     /// gated on build status - they are rebuildable and evicted by
     /// `evict_stale_cached_paths`. The `.drv` and input sources are producerless and
-    /// kept for any anchor regardless of status; only `gc_orphan_derivations`
-    /// reclaims them.
+    /// kept for any anchor regardless of status; only the orphan-derivation pass
+    /// (`run_derivation_gc`) reclaims them.
     UNREFERENCED_HASHES = r#"
     SELECT h.hash AS hash
     FROM unnest($1::text[]) AS h(hash)
@@ -202,9 +202,9 @@ fn keep_hours(ttl_hours: u64, grace_hours: i64) -> i64 {
 }
 
 /// Evict every cached path outside the live closure that nobody fetched within
-/// `nar_ttl_hours`. The live set is the NAR reference closure of every retained
-/// evaluation's outputs and `.drv` files, so what goes here is what no retained
-/// evaluation can reach and what no client has asked for since the bound.
+/// `nar_ttl_hours`. The live set is `gradient_db::graph_sql::live_cached_paths_cte`,
+/// so what goes here is what no retained evaluation can reach and what no client
+/// has asked for since the bound.
 ///
 /// The retire moves the anchor side with the rows it drops, and a terminal-success
 /// producer left with nothing to serve resets to `Created`. Such a producer is
@@ -305,13 +305,6 @@ fn zombie_candidates() -> sea_orm::Select<ECachedPath> {
         .filter(CCachedPath::Confirmed.eq(true))
 }
 
-/// Drop `cached_path` rows whose `file_hash IS NOT NULL` but whose NAR is no
-/// longer in `nar_storage`. `gc_orphan_derivations` and external storage
-/// lifecycle policies (S3 expiration, manual cleanup) can leave the row + its
-/// `cached_path_signature` placeholders behind, which inflates the
-/// `total_packages` / `total_bytes` cache stats and the sign-sweep workload.
-/// `cached_path_signature` cascades from `cached_path`, so a single delete
-/// drops both.
 /// The rows whose object storage says is really gone.
 ///
 /// The listing was taken before these rows were read, so a NAR committed in
@@ -346,6 +339,11 @@ async fn zombie_hashes(state: &Arc<ServerState>, on_disk: &HashSet<String>) -> R
     Ok(zombies)
 }
 
+/// Drop `cached_path` rows whose `file_hash IS NOT NULL` but whose NAR is no
+/// longer in `nar_storage`. External storage lifecycle policies (S3 expiration,
+/// manual cleanup) can leave the row and its `cached_path_signature` placeholders
+/// behind, which inflates the `total_packages` / `total_bytes` cache stats and the
+/// sign-sweep workload.
 async fn purge_zombie_cached_paths(
     state: &Arc<ServerState>,
     on_disk: &HashSet<String>,
