@@ -92,7 +92,7 @@ Nothing below the outputs is fetched: the referenced paths are anchors of their 
 | Worker error | Kind | Server |
 |---|---|---|
 | No upstream serves an output | `SubstituteUnavailable` | Penalty-free requeue to `Queued` |
-| Upstream NAR missing or wrong size | `InputsUnavailable` | Self-heal reconcile, retry |
+| Upstream NAR missing, wrong size or not matching `nar_hash` (`CorruptCachedNar`) | `InputsUnavailable` | Self-heal reconcile, retry |
 | Anything else, hash mismatch included | `Transient` | Retry |
 
 A relay whose `InputsUnavailable` / `Transient` retries run out enters the same budget instead of `FailedPermanent`. At `substituteMissEscalationThreshold` (`GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD`, default 2) misses within one evaluation, `exhaust_substitution` clears `substitutable`, the upstream columns of the outputs, and `attempt`, and sets the anchor `Created`. The anchor then builds through the ordinary gates.

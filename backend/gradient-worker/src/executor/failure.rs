@@ -174,6 +174,9 @@ pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> B
         // stale record instead of this build retrying against it forever.
         tracing::warn!(%build_id, error = %e, "substitute: advertised NAR object missing; InputsUnavailable");
         BuildError::inputs_unavailable(mi.0.clone(), e)
+    } else if let Some(corrupt) = e.chain().find_map(|c| c.downcast_ref::<CorruptCachedNar>()) {
+        tracing::warn!(%build_id, error = %e, "substitute: NAR does not match its nar_hash; InputsUnavailable");
+        BuildError::inputs_unavailable(vec![corrupt.0.clone()], e)
     } else {
         tracing::warn!(%build_id, error = %e, "substitute failed transiently; retrying without escalating");
         BuildError::transient(e)
@@ -376,6 +379,24 @@ mod tests {
         let be = classify_substitute_failure("b1", e);
         assert_eq!(be.kind, BuildFailureKind::InputsUnavailable);
         assert_eq!(be.missing_paths, vec!["/nix/store/a-b".to_owned()]);
+    }
+
+    /// A NAR that does not hash to its recorded `nar_hash` is the same bytes on
+    /// every retry: prefetch and Substitute both hand the path to the server's
+    /// demote self-heal instead of retrying it as Transient.
+    #[test]
+    fn a_corrupt_nar_is_inputs_unavailable_in_prefetch_and_substitute() {
+        use crate::proto::prefetch::CorruptCachedNar;
+        let corrupt =
+            || anyhow::Error::new(CorruptCachedNar("/nix/store/a-b".into())).context("verify NAR");
+
+        for be in [
+            classify_prefetch_error("b1", corrupt()),
+            classify_substitute_failure("b1", corrupt()),
+        ] {
+            assert_eq!(be.kind, BuildFailureKind::InputsUnavailable);
+            assert_eq!(be.missing_paths, vec!["/nix/store/a-b".to_owned()]);
+        }
     }
 
     /// Only a genuine "not on any upstream" miss escalates; a transient relay

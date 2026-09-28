@@ -79,7 +79,7 @@ A build that fails `InputsUnavailable` names its missing paths. `reconcile_missi
 | No producer (`.drv` or source) | Purged only when the object is really gone, then `demote_referrers_of` demotes output referrers, whose rebuild re-pushes the path |
 | No producer and no referrer (absent orphan) | `demote_output_only_cached_deps`: demote the failed build's cached dependencies without `external_url`, forcing a re-walk |
 
-- **Corrupt NAR:** the worker checks every fetched input against its `nar_size` and `nar_hash` (`verify_nar`, `gradient-worker/src/proto/nar_daemon_import.rs`). A mismatch is `CorruptCachedNar`, classified `InputsUnavailable`; the same self-heal rebuilds the producer with consistent metadata.
+- **Corrupt NAR:** the worker checks every fetched input against its `nar_size` and `nar_hash` (`verify_nar`, `gradient-worker/src/proto/nar_daemon_import.rs`). A mismatch is `CorruptCachedNar`, classified `InputsUnavailable` in prefetch and Substitute alike; the same self-heal rebuilds the producer with consistent metadata.
 - **Requeue:** demoted producers in a terminal failure are thawed at once (`requeue_failed_anchors`).
 - **Circuit breaker:** after `build.inputsUnavailableMaxLoops` (`GRADIENT_BUILD_INPUTS_UNAVAILABLE_MAX_LOOPS`, default 3) prior `InputsUnavailable` attempts (`inputs_unavailable_attempt_count`), the build fails without reconciling.
 - **Failure text:** every failure stores the worker's error, capped, on `build_attempt.failure_message`.
