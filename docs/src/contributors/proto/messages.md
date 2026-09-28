@@ -1,145 +1,80 @@
 # Messages
 
-Every message type on the wire, in both directions.
+Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_id`, `dispatch`, peer IDs) are strings on the wire. **Bulk** messages carry payload chunks and travel on the bulk lane, everything else on the control lane.
 
 ## Server -> Worker
 
-```rust
-enum ServerMessage {
-    // Handshake + auth
-    AuthChallenge { peers: Vec<Uuid> },          // "these peers registered you - send tokens"
-    InitAck { version: u16, capabilities: GradientCapabilities, authorized_peers: Vec<Uuid>, failed_peers: Vec<FailedPeer> },
-    AuthUpdate { authorized_peers: Vec<Uuid>, failed_peers: Vec<FailedPeer> },  // reauth result
-    Reject { code: u16, reason: String },       // decline connection (closes after send)
-    Error { code: u16, message: String },
-
-    // Job dispatch
-    JobOffer { candidates: Vec<JobCandidate> },  // delta-only: only new candidates; paginated at 1 000
-    RevokeJob { job_ids: Vec<Uuid> },            // remove candidates assigned to another worker
-    AssignJob { job_id: Uuid, dispatch: Uuid, job: Job },  // dispatch is the dispatched_job id the server minted for this hand-out; the server drops a report whose dispatch is not the one it assigned
-    AbortJob { job_id: Uuid, reason: String },
-    RequestAllScores,                           // startup-only: ask worker to re-send all scores once
-    Draining,                                   // server shutting down; finish and report in-flight work, then reconnect with backoff
-
-    // Credentials (sent before or alongside AssignJob)
-    Credential { kind: CredentialKind, data: Vec<u8> },
-
-    // NAR transfer - direct mode (pull)
-    NarPush { job_id: Uuid, store_path: String, data: Vec<u8>, offset: u64, is_final: bool },
-
-    // Upload admission (see "Upload admission")
-    UploadGrant { request_id: u64, target: GrantTarget },          // Skip | Relay { resume_offset } | Put { url } | Multipart(..)
-    UploadCommitted { request_id: u64, outcome: UploadOutcome },   // Ok | Retry { reason } | Rejected { reason }
-
-    // NAR transfer - failure signals (responses to NarRequest)
-    NarUnavailable { job_id: Uuid, store_path: String, reason: String },  // server cannot serve; no chunks will follow
-    NarAbort       { job_id: Uuid, store_path: String, reason: String },  // in-flight transfer aborted; discard partial buffer
-
-    // Cache queries
-    CacheStatus { job_id: String, cached: Vec<CachedPath> },   // response to CacheQuery
-    CacheError { job_id: String, message: String },            // CacheQuery indeterminate (DB error / over budget) -> worker retries
-
-    // BFS pruning (EvaluateDerivations)
-    /// Response to `QueryKnownDerivations`.  `known` is the subset of the
-    /// requested `.drv` paths that are already in the server's derivation table
-    /// for the owning project.
-    KnownDerivations { query_id: String, known: Vec<String> },
-}
-
-struct FailedPeer { peer_id: Uuid, reason: String }
-enum CredentialKind { SshKey }
-```
+| Message | Purpose | Key fields |
+|---|---|---|
+| `AuthChallenge` | Peers that registered this worker | `peers` |
+| `InitAck` | Handshake accepted | `version`, `capabilities`, `authorized_peers`, `failed_peers` |
+| `AuthUpdate` | Result of a reauth | `authorized_peers`, `failed_peers` |
+| `Reject` | Declines the session, then closes | `code`, `reason` |
+| `Error` | Protocol error | `code`, `message` |
+| `Draining` | Server shutting down; request no more jobs | - |
+| `JobListChunk` | Full candidate list, answer to `RequestJobList` | `candidates`, `is_final` |
+| `JobOffer` | New candidates, up to 1 000 per message | `candidates` |
+| `RevokeJob` | Candidates taken elsewhere; defined, never sent | `job_ids` |
+| `AssignJob` | Assigns a job | `job_id`, `dispatch`, `job` |
+| `AbortJob` | Cancels a job | `job_id`, `reason` |
+| `Credential` | Short-lived credential, e.g. an SSH key | `kind`, `data` |
+| `NarStreamHeader` | Opens a NAR pull stream | `job_id`, `store_path`, `total_bytes`, `stream_token` |
+| `NarPush` (bulk) | NAR pull chunk, 512 KiB zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
+| `NarUnavailable` | Path cannot be served; no chunks follow | `job_id`, `store_path`, `reason` |
+| `NarAbort` | Pull aborted mid-stream | `job_id`, `store_path`, `reason` |
+| `EvalCachePullResult` | Answer to `EvalCachePull`: miss, presigned URL or inline stream | `job_id`, `outcome` |
+| `EvalCacheChunk` (bulk) | Inline evaluation cache chunk | `job_id`, `data`, `offset`, `is_final` |
+| `RequestAllScores` | Asks for every cached score; defined, never sent | - |
+| `CacheStatus` | Answer to `CacheQuery` | `query_id`, `cached` |
+| `KnownDerivations` | Answer to `QueryKnownDerivations` | `query_id`, `known` |
+| `CacheError` | Cache state unknown; the worker retries | `query_id`, `message` |
+| `UploadGrant` | Upload admission: skip, relay (with resume offset), presigned PUT or multipart | `request_id`, `target` |
+| `UploadCommitted` | Upload outcome: ok, retry or rejected | `request_id`, `outcome` |
 
 ## Worker -> Server
 
-```rust
-enum ClientMessage {
-    // Handshake + auth
-    InitConnection { version: u16, capabilities: GradientCapabilities, id: Uuid },
-    AuthResponse { tokens: Vec<(String, String)> },  // [(peer_id, token), ...]
-    ReauthRequest,                              // ask server to re-send AuthChallenge
-    Reject { code: u16, reason: String },       // decline connection after InitAck
-    WorkerCapabilities { architectures: Vec<String>, system_features: Vec<String>, max_concurrent_builds: u32, cpu_count: u32, ram_total_mb: u64, cpu_core_score: u32 },
-    WorkerMetrics { cpu_usage_pct: f32, ram_free_mb: u64, disk_speed_mbps: Option<f32>, network_speed_mbps: Option<f32> },
-    AssignJobResponse { job_id: Uuid, accepted: bool, reason: Option<String> },
+| Message | Purpose | Key fields |
+|---|---|---|
+| `InitConnection` | First message | `version`, `capabilities`, `id` |
+| `AuthResponse` | One token per challenged peer | `tokens` |
+| `ReauthRequest` | Asks for a new `AuthChallenge` | - |
+| `Reject` | Declines after `InitAck`; defined, not sent by the reference worker | `code`, `reason` |
+| `WorkerCapabilities` | Systems, features, slots, CPU, RAM, core score | `architectures`, `system_features`, `max_concurrent_builds`, ... |
+| `WorkerMetrics` | Load heartbeat | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `network_speed_mbps` |
+| `RequestJobList` | Asks for the full candidate list | - |
+| `RequestAllCandidates` | Same answer as `RequestJobList`; not sent by the reference worker | - |
+| `RequestJobChunk` | Score deltas | `scores`, `is_final` |
+| `RequestJob` | One free slot of a kind; repeated every 10 s while idle | `kind` (`Flake` or `Build`) |
+| `AssignJobResponse` | Accepts or declines an `AssignJob` | `job_id`, `accepted`, `reason` |
+| `JobUpdate` | Progress of a job | `job_id`, `dispatch`, `update` |
+| `JobCompleted` | Job done, with the phase timeline | `job_id`, `dispatch`, `spans` |
+| `JobFailed` | Job failed | `job_id`, `dispatch`, `error`, `kind`, `missing_paths`, `spans` |
+| `BuildProgress` | Bytes fetched by a substitute or download | `job_id`, `dispatch`, `build_id`, `downloaded`, `total` |
+| `Draining` | Worker draining | - |
+| `LogChunk` (bulk) | Build log | `job_id`, `task_index`, `data` |
+| `EvalMessage` | Warning or error on the evaluation | `job_id`, `level`, `source`, `message` |
+| `NarRequest` | Pull these paths | `job_id`, `paths` |
+| `NarRequestResume` | Resume a pull from an offset | `job_id`, `store_path`, `received_bytes`, `stream_token` |
+| `EvalCachePull` | Asks for the evaluation cache | `job_id`, `fingerprint` |
+| `CacheQuery` | Bulk cache lookup | `job_id`, `query_id`, `paths`, `mode`, `nar_sizes`, `external` |
+| `QueryKnownDerivations` | Which `.drv` files the server knows, to prune the walk | `job_id`, `query_id`, `drv_paths` |
+| `UploadRequest` | Asks for an upload slot for a NAR or the evaluation cache | `job_id`, `request_id`, `object`, `size` |
+| `UploadChunk` (bulk) | Relayed upload bytes | `request_id`, `data`, `offset`, `is_final` |
+| `UploadFinished` | Upload done, with NAR metadata | `request_id`, `metadata` |
+| `UploadCancel` | Cancels an upload | `request_id` |
 
-    // Job dispatch
-    RequestJobChunk {                           // delta-only: new or changed scores; paginated at 1 000
-        scores: Vec<CandidateScore>,
-        is_final: bool,                         // true on last chunk of each scoring pass
-    },
-    RequestJob { kind: JobKind },               // "I have capacity for one job" - re-sent every 10s as heartbeat
-    RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
-    JobUpdate { job_id: Uuid, dispatch: Uuid, update: JobUpdateKind },  // dispatch echoes the AssignJob id
-    JobCompleted { job_id: Uuid, dispatch: Uuid, spans: Vec<JobPhaseSpan> },  // all steps done; results already sent via JobUpdate. Per-build metrics travel on JobUpdate::BuildOutput
-    JobFailed { job_id: Uuid, dispatch: Uuid, error: String, kind: BuildFailureKind, missing_paths: Vec<String>, spans: Vec<JobPhaseSpan> }, // missing_paths set only for kind=InputsUnavailable
-    Draining,                                   // no more jobs; finishing in-flight work then disconnecting
+## Cache Query Modes
 
-    // Streaming
-    LogChunk { job_id: Uuid, task_index: u32, data: Vec<u8> },
-    BuildProgress { job_id: Uuid, dispatch: Uuid, build_id: Uuid, downloaded: u64, total: Option<u64> },
+| `mode` | Asks |
+|---|---|
+| `Normal` | Which paths the caches hold; no URLs |
+| `Pull` | Held paths with transfer URLs; without a URL the worker streams with `NarRequest`. With `external`, one named path may come from an upstream |
+| `Push` | Which paths still need an upload |
 
-    // NAR transfer
-    NarRequest { job_id: Uuid, paths: Vec<String> },    // "send me these paths"
+## Evaluation Messages
 
-    // Upload admission (see "Upload admission")
-    UploadRequest { job_id: String, request_id: u64, object: UploadObject, size: u64 },  // Nar { store_path } | EvalCache { fingerprint }
-    UploadChunk { request_id: u64, data: Vec<u8>, offset: u64, is_final: bool },       // relayed bytes, bulk lane
-    UploadFinished { request_id: u64, metadata: UploadMetadata },  // Nar(file_hash, file_size, nar_size, nar_hash,
-                                                                   //     references, deriver, ca, multipart) | EvalCache { size_bytes }
-    UploadCancel { request_id: u64 },
+`EvalMessage` attaches a message to the evaluation of the job, shown on the evaluation page.
 
-    // Cache queries
-    CacheQuery { job_id: String, paths: Vec<String>, mode: QueryMode },  // see QueryMode
-
-    // BFS pruning (EvaluateDerivations)
-    /// Ask the server which of the given `.drv` paths are already recorded in
-    /// its derivation table for the project that owns `job_id`.  The server responds
-    /// with `KnownDerivations`.  The worker uses this to skip re-traversing
-    /// subtrees that were fully recorded during a previous evaluation.
-    QueryKnownDerivations { job_id: String, query_id: String, drv_paths: Vec<String> },
-
-    /// Surface an infrastructure-level message on the evaluation that owns
-    /// the given `job_id`.  The server resolves the active job -> evaluation
-    /// and inserts a row into `evaluation_message` so operators see
-    /// transport / prefetch / cache problems on the evaluation page directly,
-    /// without drilling into individual build logs.
-    ///
-    /// **Not** used for build compile failures or user-initiated aborts -
-    /// those stay confined to the build log and `JobFailed`.  Use this only
-    /// for signals the user could not diagnose from a single build's output.
-    EvalMessage {
-        job_id: String,
-        level: EvalMessageLevel,  // Error | Warning | Notice
-        source: String,           // e.g. "build-prefetch", "nar-import"
-        message: String,
-    },
-}
-
-enum QueryMode { Normal, Pull, Push }  // default: Normal
-enum EvalMessageLevel { Error, Warning, Notice }
-```
-
-## EvalMessage
-
-Workers emit `EvalMessage` to attach an error / warning / notice to the
-evaluation that owns the active job.  The server:
-
-1. Looks up `active_job(job_id)` in the scheduler's job tracker.
-2. If found, resolves `PendingJob::evaluation_id()` (both eval and build
-   jobs carry this) and inserts into `evaluation_message` via
-   `db::insert_evaluation_message`.
-3. If the job is not active (already completed or evicted), the message is
-   silently dropped - late infra signals for a finished job have no useful
-   destination.
-
-Because `check_evaluation_done` already treats any error-level
-`evaluation_message` row as a failure signal, an `EvalMessage { level: Error }`
-arriving during a build is enough to mark the whole evaluation `Failed`
-once its builds settle.
-
-Typical producer sites today:
-- worker `prefetch_inputs` (source `"build-prefetch"`) when an input NAR
-  download or daemon import can't complete - the build would otherwise die
-  with "dependency does not exist" in the build log with no evaluation-level
-  breadcrumb.
+- The server stores the message only while the job is active; later messages are dropped.
+- An `Error` message fails the evaluation when the evaluation finishes.
+- Sources in the reference worker: `fetch` (warnings while fetching inputs) and `build-prefetch`.

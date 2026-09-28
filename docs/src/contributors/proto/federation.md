@@ -1,107 +1,60 @@
 # Federation
 
-Gradient servers and `gradient-proxy` acting as workers of another server: aggregation, cache federation and access control.
-
-Federation connects Gradient instances or workers to each other. A server with `federate` enabled can connect to other servers using the same proto protocol - it authenticates using the standard challenge-response, and the remote peer (project, cache, or proxy) sees it as a single worker/cache.
-
-Federation can happen in two ways:
-
- - **`gradient-proxy`** - a gateway that only federates: no projects, no UI, a small Postgres database of its own. Its workers authenticate to it, it authenticates to one upstream server as a single worker, and every worker behind it serves every peer the upstream authorized.
- - **A full Gradient server** - a server with its own projects, tasks, and workers. Its projects and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
-
-## How it works
-
-A federation peer connects to a remote server as a regular worker. A peer on the remote server (project, cache, or proxy) registers the federation peer's ID and issues a token - exactly like registering any worker:
-
-```mermaid
-sequenceDiagram
-    participant S2 as Server B
-    participant S1 as Server A
-
-    Note over S1: Project X on Server A registered Server B's ID
-    S2->>S1: InitConnection { id: server-b, capabilities: {federate, build, cache} }
-    S1->>S2: AuthChallenge { peers: [X] }
-    S2->>S1: AuthResponse { tokens: {X: "tok_x"} }
-    S1->>S2: InitAck { authorized_peers: [X] }
-    Note over S1: Project X sees Server B as a single worker/cache
-```
-
-From Project X's perspective, Server B is just one worker that happens to have a lot of capacity. Server B internally routes jobs to its own workers and serves its own caches - Project X doesn't see or control that.
-
-## `gradient-proxy`
-
-The proxy is one worker to its upstream and an authority to its own workers. Both legs speak this protocol unchanged.
+`gradient-proxy` joins a pool of workers to a Gradient server as one worker. The proxy speaks this protocol on both legs: an authority to its own workers, a worker to its upstream server.
 
 ```mermaid
 graph RL
-    W1[Worker 1] -->|"own id + token"| P[gradient-proxy]
-    W2[Worker 2] -->|"own id + token"| P
-    P -->|"proxy id + peer tokens"| S[Gradient server]
+    W1[Worker 1] -->|own id + token| P[gradient-proxy]
+    W2[Worker 2] -->|own id + token| P
+    P -->|proxy id + peer tokens| S[Gradient server]
 ```
 
-- **Authentication:**
-  - Each worker is a row in the proxy's `authorized_peers` table. The row holds the worker id, an argon2 token hash, and the allowed capabilities.
-  - `AuthChallenge` names only the worker's own id.
-  - Negotiated capabilities are the worker's offer ANDed with the allowed set.
-  - Revoking a row closes the live session.
-- **Upstream identity:**
-  - The server registers the proxy like any worker, with one `worker_id` and a token per peer.
-  - The proxy advertises a fixed capability set at the handshake.
-  - It then sends the aggregate of its workers as `WorkerCapabilities` and `WorkerMetrics` (see Aggregation).
-- **Offers and scores:**
-  - The proxy mirrors the upstream candidate set.
-  - It fans candidates out only to workers that can run them. It learns architectures and features from the `EvalResult`s passing through.
-  - It relays each candidate's best score across workers upstream, sending only changed scores, once per second.
-- **Claims:**
-  - A worker's `RequestJob` is forwarded upstream as a poll.
-  - The proxy hands `AssignJob` to the waiting, capable worker with the best score for that job, keeping the `dispatch` unchanged.
-  - If no worker qualifies, the proxy answers `AssignJobResponse { accepted: false }` itself.
-- **Routing:**
-  - Job reports, NAR frames and eval-cache frames are routed by `job_id`.
-  - Cache and known-derivation queries get a fresh upstream `query_id` and are mapped back.
-  - A report for a job the sending worker does not own is dropped.
-- **Failure handling:**
-  - A worker that disconnects, or stays silent past the proxy's heartbeat deadline, has its jobs reported upstream as `JobFailed { kind: Transient }`.
-  - Losing the upstream sends `AbortJob` for every routed job and `RevokeJob` for the whole offer book.
-  - A forwarded `Draining` closes every worker session once the upstream goes away, so workers come back undrained.
-- **NAR cache in the middle:**
-  - Pull hits are answered locally, presigned from the proxy's own S3 above the small-NAR threshold and relayed below it.
-  - Misses go upstream. Relayed bytes, in either direction, are teed into a partial file. They are committed to the proxy's store only when size and file hash match the metadata.
-  - Transfers that use upstream presigned URLs bypass the proxy and are not cached.
+`gradient-proxy` lives in its own repository with its own NixOS module and `GRADIENT_PROXY_*` configuration. A full Gradient server never connects to another server.
 
-The proxy has a single upstream; several upstreams per proxy are future work. Configuration (`GRADIENT_PROXY_*`) and the NixOS module live in the proxy repository.
+## Upstream Leg
 
-## Full Gradient server as federation peer
+The proxy is a normal worker session: `InitConnection`, `AuthChallenge`, `AuthResponse`, `InitAck`, as on the [connection page](connection.md). The upstream projects register the proxy's ID like any worker.
 
-A full server's projects and caches are independent peers. Each decides whether to register an external worker/server and issue a token:
+| Aspect | Behavior |
+|---|---|
+| Capabilities | A fixed set, `GRADIENT_PROXY_UPSTREAM_CAPABILITIES` (default `fetch,eval,build`) |
+| Hardware | `gradient-pool::aggregate()` over the downstream workers, sent as `WorkerCapabilities` and `WorkerMetrics` |
+| Aggregation | Capabilities OR'd, architectures and features unioned, slots, CPUs and RAM summed, fastest core score |
+| Peer tokens | `GRADIENT_PROXY_UPSTREAM_PEERS_FILE` |
 
-```mermaid
-graph RL
-    W1[Worker 1] -->|"auth against<br/>Server B's peers"| SB[Server B]
-    W2[Worker 2] -->|"auth against<br/>Server B's peers"| SB
-    SB -->|"auth against<br/>Server A's peers"| SA[Server A]
-```
+## Downstream Leg
 
-Workers authenticate against Server B's peers (its projects and caches). Server B authenticates upstream against Server A's peers. Each peer on each server independently controls access.
+The proxy authorizes its own workers from its small Postgres database.
 
-## Aggregation
+- Each authorized worker is a row: ID, name, argon2 token hash and allowed capabilities.
+- `AuthChallenge` names only the worker's own ID; the negotiated capabilities are the worker's offer AND the allowed set, `federate` always off.
+- Revoking a row closes the worker's live session.
+- Every worker behind the proxy serves every peer the upstream authorized.
 
-Both federation forms aggregate downstream when advertising capabilities upstream:
-- `GradientCapabilities`: OR of all downstream workers
-- `system_features`: union of all downstream workers' features
-- `max_concurrent_builds`: sum of all downstream slots
+## Job Relay
 
-The upstream server sees one peer. Internal routing is the federation peer's problem.
+| Step | Proxy behavior |
+|---|---|
+| Offers | Mirrors the upstream offer book and fans candidates out to capable workers |
+| Scores | Relays the best score per candidate, changes only, once per second |
+| `RequestJob` | A worker's poll becomes an upstream poll; the best capable waiting worker gets the `AssignJob`, otherwise the proxy declines |
+| Reports | Routed by `job_id`; queries get a fresh `query_id`; reports for jobs a worker does not own are dropped |
+| Worker lost | Disconnect or 120 s heartbeat timeout reports `JobFailed` (transient) upstream |
+| Upstream lost | Sends `AbortJob` and `RevokeJob` to workers, answers open queries with errors, closes worker sessions with `Draining` |
 
-## Cache federation
+## NAR Cache
 
-Caches behind a federation peer are exposed upstream. When a remote peer's build needs a NAR, the upstream server can request it from the federation peer, which serves it from its cache or downstream workers.
+- Worker pulls are served from the proxy's store first: local (`/var/lib/gradient-proxy/nars`) or S3.
+- With S3, NARs above the small-NAR threshold (1 MiB) go out as presigned URLs; smaller ones are relayed.
+- Relayed bytes from upstream are written to a partial file and committed only when size and hash match.
+- Transfers over upstream presigned URLs bypass the proxy and are not cached.
+- The proxy exposes no cache to its upstream.
 
-## Access control summary
+## Access Control
 
-| | `gradient-proxy` | Full Gradient server |
-|---|---|---|
-| Workers -> peer | Per-worker id and token in the proxy's `authorized_peers` | Challenge-response against server's peers |
-| Peer -> upstream | Challenge-response against upstream's peers | Challenge-response against upstream's peers |
-| What's exposed | Everything - all workers, all caches | Per-peer (project/cache) settings |
-| Upstream sees peer as | One worker/cache | One worker/cache |
+| Level | Controlled by |
+|---|---|
+| Server -> proxy | Per project: the proxy's `worker_registration` rows, tokens and `enable_fetch` / `enable_eval` / `enable_build` |
+| Proxy -> worker | Per worker: `authorized_peers` rows with token hash and allowed capabilities |
+
+The `federate` capability, `proto.federate` on the server and `capabilities.federate` on the worker, is negotiated in the handshake, but no code acts on the flag yet.

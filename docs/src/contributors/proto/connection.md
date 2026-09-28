@@ -84,8 +84,8 @@ A restart loses work in flight, never a queued job.
 
 | Side | Behavior |
 |---|---|
-| Worker | Aborts every running job, keeps its candidates and scores, reconnects with backoff (1 s, doubling up to 60 s) |
-| Worker | Sends a full handshake, then `RequestAllCandidates`, and answers `RequestAllScores` with its cached scores |
+| Worker | Aborts every running job and reconnects with backoff (1 s, doubling up to 60 s) |
+| Worker | Sends a full handshake, then `RequestJobList` and one `RequestJob` per kind |
 | Server | Drops every report whose `job_id` and dispatch ID the current session did not hand out |
 | Server | Before any session opens, `recover_interrupted_work` closes open dispatches, aborts running attempts, re-queues `Building` builds and re-evaluates interrupted evaluations |
 
@@ -108,21 +108,6 @@ sequenceDiagram
 ## Versioning
 
 `PROTO_VERSION` is `19` and rises with every breaking wire change; both sides must match exactly. The check lives once, in `session::handshake::on_init_connection`, for every session kind.
-
-| Version | Change |
-|---|---|
-| 5 | Presigned URLs only in `CacheQuery` replies; `AssignJob.timeout_secs` removed |
-| 7 | `query_id` on cache queries; content address on uploads |
-| 8 | `BuildFailureKind::Aborted` |
-| 11 | Dispatch ID on `AssignJob`, echoed by every job report |
-| 12 | Frames read in place; 512 KiB bulk chunks with a byte-capped write batch |
-| 13 | `nar_sizes` on push queries; small NARs relayed through the server |
-| 14 | `BuildSpec.kind`; `CacheQuery.external`; `QueryMode::PullClosure` removed |
-| 15 | S3 multipart uploads for NARs over 1 GiB |
-| 16 | Unknown NAR sizes never get a multipart upload |
-| 17 | `BuildProgress` for substitute and download bytes |
-| 18 | Output paths on candidates; `outputs_present` on scores |
-| 19 | Per-path upload admission (`UploadRequest`, `UploadGrant`, `UploadChunk`, ...) replaces push grants |
 
 ## Cache Sessions
 

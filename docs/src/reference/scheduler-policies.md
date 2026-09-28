@@ -26,7 +26,7 @@ A job whose total score is negative is not handed out: the worker idles this rou
 | `MissingPathsRule` | Bonus, up to 200 | Worker already holds most of the inputs |
 | `MissingNarSizeRule` | Bonus, up to 500 | Little data to download before the build |
 | `RealisedOutputsRule` | Bonus, 2500 | Worker already holds every output and only uploads them |
-| `DependencyCountRule` | Bonus, up to 50 | Jobs that unblock many others go first |
+| `DependencyCountRule` | Bonus, up to 50 | Builds with many direct inputs |
 | `WaitTimeRule` | Bonus, growing | Long-waiting jobs rise, against starvation; counted from the moment dependencies finished |
 | `BuiltinDeprioritizeRule` | Bonus, 50 or 100 | Real builds before `builtin` downloads; `builtin` jobs still reach workers without systems |
 | `QosRule` | Bonus, 5000 | Prioritized jobs beat every other job |
