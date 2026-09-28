@@ -5,7 +5,7 @@
  */
 
 use std::collections::{HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures::StreamExt as _;
@@ -26,6 +26,8 @@ const NAR_ZSTD_LEVEL: i32 = 6;
 
 const DEFAULT_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
 
+const STORE_DIR: &str = "/nix/store";
+
 fn pool_config() -> PoolConfig {
     PoolConfig {
         max_size: 1,
@@ -38,12 +40,30 @@ fn strip_store_prefix(path: &str) -> &str {
     path.strip_prefix("/nix/store/").unwrap_or(path)
 }
 
-fn canonicalize(path: &str) -> String {
-    if path.starts_with('/') {
-        path.to_owned()
-    } else {
-        format!("/nix/store/{path}")
+fn store_path_of_base(base: &str) -> String {
+    format!("{STORE_DIR}/{}", strip_store_prefix(base))
+}
+
+fn top_level_store_path(path: &Path) -> Option<String> {
+    let name = path.strip_prefix(STORE_DIR).ok()?.components().next()?;
+    Some(store_path_of_base(name.as_os_str().to_str()?))
+}
+
+/// Resolves a command-line argument (a store path, a path inside one, a
+/// symlink such as `./result`, or a bare `<hash>-<name>`) to its store path.
+fn resolve_store_path(arg: &str) -> anyhow::Result<String> {
+    let path = Path::new(arg);
+    if !arg.contains('/') && !path.exists() {
+        return Ok(store_path_of_base(arg));
     }
+
+    let real = std::fs::canonicalize(path).map_err(|e| anyhow::anyhow!("resolve {arg}: {e}"))?;
+    top_level_store_path(&real).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{arg} resolves to {}, which is not in {STORE_DIR}",
+            real.display()
+        )
+    })
 }
 
 async fn query_path_info(
@@ -96,13 +116,13 @@ async fn query_refs(pool: &ConnectionPool, store_path: &str) -> anyhow::Result<V
     Ok(pi
         .references
         .iter()
-        .map(|r: &StorePath| canonicalize(&r.to_string()))
+        .map(|r: &StorePath| store_path_of_base(&r.to_string()))
         .collect())
 }
 
 async fn runtime_closure(pool: &ConnectionPool, seeds: &[String]) -> HashSet<String> {
     let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<String> = seeds.iter().map(|s| canonicalize(s)).collect();
+    let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
     while let Some(path) = queue.pop_front() {
         if !visited.insert(path.clone()) {
             continue;
@@ -134,10 +154,13 @@ fn compress_nar(nar_bytes: &[u8]) -> anyhow::Result<(Vec<u8>, String)> {
 pub async fn upload_paths(args: &UploadArgs, out: Output) {
     let pool = ConnectionPool::new(DEFAULT_SOCKET, pool_config());
 
+    let seeds: Vec<String> = match args.paths.iter().map(|p| resolve_store_path(p)).collect() {
+        Ok(seeds) => seeds,
+        Err(e) => out.err(ExitKind::Usage, e.to_string()),
+    };
     let targets: Vec<String> = if args.no_closure {
-        args.paths.iter().map(|p| canonicalize(p)).collect()
+        seeds
     } else {
-        let seeds: Vec<String> = args.paths.iter().map(|p| canonicalize(p)).collect();
         let mut closure: Vec<String> = runtime_closure(&pool, &seeds).await.into_iter().collect();
         closure.sort();
         closure
@@ -191,6 +214,37 @@ pub async fn upload_paths(args: &UploadArgs, out: Output) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_store_path_follows_a_relative_symlink_instead_of_prefixing_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).expect("target");
+        std::os::unix::fs::symlink(&target, dir.path().join("result")).expect("symlink");
+        let cwd = std::env::current_dir().expect("cwd");
+        let up = "../".repeat(cwd.components().count());
+        let arg = format!("./{up}{}/result", dir.path().display());
+
+        let err = resolve_store_path(&arg).expect_err("a path outside the store is rejected");
+        assert!(err.to_string().contains("not in /nix/store"), "{err}");
+    }
+
+    #[test]
+    fn resolve_store_path_prefixes_a_bare_store_name() {
+        assert_eq!(
+            resolve_store_path("abc123-hello").expect("bare name"),
+            "/nix/store/abc123-hello"
+        );
+    }
+
+    #[test]
+    fn top_level_store_path_trims_a_path_inside_a_store_path() {
+        assert_eq!(
+            top_level_store_path(Path::new("/nix/store/abc123-hello/bin/hello")).as_deref(),
+            Some("/nix/store/abc123-hello")
+        );
+        assert_eq!(top_level_store_path(Path::new("/home/result")), None);
+    }
 
     #[test]
     fn compress_nar_round_trips_and_hashes_compressed_bytes() {
