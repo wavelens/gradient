@@ -108,7 +108,15 @@ pub trait JobReporter: Send {
     /// *before* [`report_eval_result`](Self::report_eval_result) so every source
     /// a downstream build worker prefetches is already cacheable by the time the
     /// server can dispatch that build mid-evaluation.
-    async fn push_drv_closure(&mut self, drv_paths: &[String]) -> Result<()>;
+    ///
+    /// `pushed` carries the paths earlier calls of this evaluation already
+    /// covered: the closure walk stops at them, and every path this call pushes
+    /// or finds cached is added.
+    async fn push_drv_closure(
+        &mut self,
+        drv_paths: &[String],
+        pushed: &mut std::collections::HashSet<String>,
+    ) -> Result<()>;
 
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(

@@ -208,39 +208,54 @@ impl LocalNixStore {
             })
     }
 
-    /// BFS the runtime reference closure of `seeds` via `query_path_info`.
-    ///
-    /// Returns every reachable store path including the seeds themselves,
-    /// each canonicalised to `/nix/store/<hash>-<name>` form so consumers
-    /// (e.g. NAR push) see a single, well-defined string per path.
-    /// Paths that fail individual `query_references` calls (e.g. removed
-    /// between calls) are logged and skipped - the walk continues so the
-    /// caller still gets a best-effort closure for the remaining paths.
-    pub async fn collect_runtime_closure(&self, seeds: &[String]) -> HashSet<String> {
-        let mut visited: HashSet<String> = HashSet::new();
-        let mut queue: VecDeque<String> = VecDeque::new();
-        for s in seeds {
-            queue.push_back(nix_store_path(s));
-        }
-        while let Some(path) = queue.pop_front() {
-            if !visited.insert(path.clone()) {
-                continue;
-            }
-            match self.query_references(&path).await {
-                Ok(refs) => {
-                    for r in refs {
-                        if !visited.contains(&r) {
-                            queue.push_back(r);
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(path = %path, error = %e, "closure walk: skipping unreadable path");
-                }
-            }
-        }
-        visited
+    /// BFS the runtime reference closure of `seeds` via `query_path_info`,
+    /// stopping at `known`. See [`reference_closure`].
+    pub async fn collect_runtime_closure(
+        &self,
+        seeds: &[String],
+        known: &HashSet<String>,
+    ) -> HashSet<String> {
+        reference_closure(seeds, known, |path| async move {
+            self.query_references(&path).await
+        })
+        .await
     }
+}
+
+/// Every store path reachable from `seeds` over `references`, including the
+/// seeds, each canonicalised to `/nix/store/<hash>-<name>` form so consumers
+/// (e.g. NAR push) see a single, well-defined string per path.
+///
+/// A path in `known` is neither returned nor descended into: its whole closure
+/// was covered by an earlier call. Paths whose `references` lookup fails (e.g.
+/// removed between calls) are logged and skipped, so the caller still gets a
+/// best-effort closure for the rest.
+pub(crate) async fn reference_closure<F, Fut>(
+    seeds: &[String],
+    known: &HashSet<String>,
+    mut references: F,
+) -> HashSet<String>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<String>>>,
+{
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<String> = seeds.iter().map(|s| nix_store_path(s)).collect();
+    while let Some(path) = queue.pop_front() {
+        if known.contains(&path) || !visited.insert(path.clone()) {
+            continue;
+        }
+        match references(path.clone()).await {
+            Ok(refs) => queue.extend(
+                refs.into_iter()
+                    .filter(|r| !visited.contains(r) && !known.contains(r)),
+            ),
+            Err(e) => {
+                warn!(path = %path, error = %e, "closure walk: skipping unreadable path");
+            }
+        }
+    }
+    visited
 }
 
 #[async_trait]
@@ -312,5 +327,44 @@ impl PathMetaSource for LocalNixStore {
             deriver,
             ca,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn p(name: &str) -> String {
+        format!("/nix/store/00000000000000000000000000000000-{name}")
+    }
+
+    #[tokio::test]
+    async fn a_known_path_bounds_the_next_closure_walk() {
+        let graph: HashMap<String, Vec<String>> = HashMap::from([
+            (p("a"), vec![p("stdenv")]),
+            (p("b"), vec![p("stdenv"), p("src")]),
+            (p("stdenv"), vec![p("glibc")]),
+            (p("glibc"), vec![]),
+            (p("src"), vec![]),
+        ]);
+        let queried = RefCell::new(Vec::new());
+        let lookup = |path: String| {
+            queried.borrow_mut().push(path.clone());
+            let refs = graph.get(&path).cloned().unwrap_or_default();
+            async move { Ok(refs) }
+        };
+
+        let mut known = HashSet::new();
+        let first = reference_closure(&[p("a")], &known, lookup).await;
+        assert_eq!(first, HashSet::from([p("a"), p("stdenv"), p("glibc")]));
+        known.extend(first);
+        queried.borrow_mut().clear();
+
+        let second = reference_closure(&[p("b")], &known, lookup).await;
+        assert_eq!(second, HashSet::from([p("b"), p("src")]));
+        assert_eq!(*queried.borrow(), vec![p("b"), p("src")]);
     }
 }

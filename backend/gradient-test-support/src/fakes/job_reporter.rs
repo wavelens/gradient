@@ -231,7 +231,11 @@ impl JobReporter for RecordingJobReporter {
         Ok(())
     }
 
-    async fn push_drv_closure(&mut self, drv_paths: &[String]) -> Result<()> {
+    async fn push_drv_closure(
+        &mut self,
+        drv_paths: &[String],
+        _pushed: &mut std::collections::HashSet<String>,
+    ) -> Result<()> {
         self.events.push(ReportedEvent::DrvClosurePush {
             drv_paths: drv_paths.to_vec(),
         });

@@ -46,6 +46,7 @@ sequenceDiagram
 
 - `known` lists the derivations already walked completely; the worker skips their subtrees. A **Full rewalk** gets an empty list.
 - Each batch uploads the `.drv` closure before its `EvalResult`: builds start while the walk goes on.
+- A batch queries and uploads only the part of its closure no earlier batch of the same evaluation covered.
 - The server ingests each batch and promotes ready builds to `Queued` right away.
 - The evaluation turns `Building` on `JobCompleted`; evaluation errors become error messages that fail the evaluation at the end.
 

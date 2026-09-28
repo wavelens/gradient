@@ -80,6 +80,7 @@ async fn query_fetched_paths(
 /// so a downstream build never starts against a source the cache is missing.
 pub(crate) async fn push_drv_closure(
     drv_paths: &[String],
+    pushed: &mut std::collections::HashSet<String>,
     updater: &mut JobUpdater,
     store: &LocalNixStore,
 ) -> Result<()> {
@@ -88,7 +89,7 @@ pub(crate) async fn push_drv_closure(
     }
 
     let mut guard = updater.phase(JobPhase::DrvClosurePush);
-    let mut closure = store.collect_runtime_closure(drv_paths).await;
+    let mut closure = store.collect_runtime_closure(drv_paths, pushed).await;
 
     // The daemon's reference walk drops a `.drv`'s `inputSrcs`, so discover them
     // authoritatively by parsing each `.drv` - mirroring the build-side prefetch
@@ -102,7 +103,12 @@ pub(crate) async fn push_drv_closure(
         .filter(|p| p.ends_with(".drv"))
         .cloned()
         .collect();
-    closure.extend(drv_input_sources(&drv_members).await);
+    closure.extend(
+        drv_input_sources(&drv_members)
+            .await
+            .into_iter()
+            .filter(|p| !pushed.contains(p)),
+    );
 
     if closure.is_empty() {
         return Ok(());
@@ -113,11 +119,13 @@ pub(crate) async fn push_drv_closure(
         "pushing eval closure to cache"
     );
 
-    let paths: Vec<String> = closure.into_iter().collect();
+    let paths: Vec<String> = closure.iter().cloned().collect();
     guard.record(paths.len() as u32, 0);
     let sizes = vec![None; paths.len()];
     let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
-    upload_all(updater, pair_with_store(cache_entries, store), None).await
+    upload_all(updater, pair_with_store(cache_entries, store), None).await?;
+    pushed.extend(closure);
+    Ok(())
 }
 
 /// Every entry paired with the local store it is packed from: the shape

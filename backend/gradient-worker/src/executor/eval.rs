@@ -645,6 +645,9 @@ struct ClosureWalker<'a> {
     /// the batch's runtime closure to the cache *before* its `report_eval_result`
     /// so a mid-eval build dispatch never races the source upload.
     produced_drvs: Vec<String>,
+    /// Store paths this evaluation already pushed or found cached, so each
+    /// flush pushes only what the earlier flushes did not cover.
+    pushed: HashSet<String>,
 }
 
 impl<'a> ClosureWalker<'a> {
@@ -666,6 +669,7 @@ impl<'a> ClosureWalker<'a> {
             walked: 0,
             start: Instant::now(),
             produced_drvs: Vec::new(),
+            pushed: HashSet::new(),
         }
     }
 
@@ -769,7 +773,9 @@ impl<'a> ClosureWalker<'a> {
             // BEFORE reporting it, so once #392 promotes and dispatches these
             // builds mid-eval their sources are already in the cache.
             if self.batch.len() >= EVAL_BATCH_SIZE {
-                updater.push_drv_closure(&self.produced_drvs).await?;
+                updater
+                    .push_drv_closure(&self.produced_drvs, &mut self.pushed)
+                    .await?;
                 self.produced_drvs.clear();
                 debug!(
                     count = self.batch.len(),
@@ -1007,7 +1013,9 @@ pub async fn evaluate_derivations_with(
 
     // Push the trailing batch's closure before its report, same as the mid-walk
     // flushes, so the last builds' sources are cached before dispatch.
-    updater.push_drv_closure(&remaining_drvs).await?;
+    updater
+        .push_drv_closure(&remaining_drvs, &mut walker.pushed)
+        .await?;
     debug!(
         count = remaining.len(),
         warnings = warnings.len(),

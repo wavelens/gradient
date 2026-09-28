@@ -553,12 +553,16 @@ impl JobReporter for JobUpdater {
         .await
     }
 
-    async fn push_drv_closure(&mut self, drv_paths: &[String]) -> Result<()> {
+    async fn push_drv_closure(
+        &mut self,
+        drv_paths: &[String],
+        pushed: &mut std::collections::HashSet<String>,
+    ) -> Result<()> {
         let Some(store) = self.store.clone() else {
             return Ok(());
         };
 
-        crate::executor::push_drv_closure(drv_paths, self, &store).await
+        crate::executor::push_drv_closure(drv_paths, pushed, self, &store).await
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {
