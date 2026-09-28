@@ -51,6 +51,7 @@ nav:
       - Add a Remote Worker: guides/remote-worker.md
       - Connect GitHub: guides/forge-github.md
       - Connect Gitea or Forgejo: guides/forge-gitea.md
+      - Connect GitLab: guides/forge-gitlab.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md

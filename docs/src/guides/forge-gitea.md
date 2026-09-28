@@ -70,6 +70,16 @@ A task created after the integrations, whose repository host matches exactly one
 - A push starts an evaluation within seconds; the forge's webhook page shows a `200` delivery.
 - The commit on the forge shows Gradient's status.
 
+## Pull Requests
+
+| Action on the forge | Effect |
+|---|---|
+| Open or update a pull request | Evaluates the pull request's head commit |
+| Comment `/gradient run` | Starts an evaluation of the pull request |
+| Comment `/gradient approve` or approve the review | Releases a pull request from a fork waiting for maintainer approval |
+
+The approval gate is a task setting: **Require maintainer approval for PRs from non-writers**.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -83,3 +93,4 @@ A task created after the integrations, whose repository host matches exactly one
 ## Next Steps
 
 - [Actions](../usage/actions.md): mail, web requests and flake update pull requests
+- [Connect GitLab](forge-gitlab.md): the same setup for GitLab
