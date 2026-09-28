@@ -160,8 +160,9 @@ pub enum ServerMessage {
     RequestAllScores,
 
     /// Response to [`super::client::ClientMessage::CacheQuery`].
-    /// Paths in the local Gradient cache have `url: None`; paths found in upstream
-    /// external Nix caches have `url: Some(absolute_nar_url)`.
+    /// In `Pull` mode a local hit carries a presigned GET URL, or `url: None` when
+    /// the NAR is pulled over the stream; a path found in an upstream Nix cache
+    /// carries its absolute NAR URL. `Normal` and `Push` answers carry no URLs.
     CacheStatus {
         /// Echoes the [`super::client::ClientMessage::CacheQuery`] `query_id`; it is
         /// the sole correlator, so the worker routes this reply to the exact query
@@ -172,8 +173,8 @@ pub enum ServerMessage {
 
     /// Response to [`super::client::ClientMessage::QueryKnownDerivations`].
     ///
-    /// Contains the subset of the queried `.drv` paths that are already
-    /// recorded in the server's derivation table for the owning project.
+    /// Contains the subset of the queried `.drv` paths whose subtree is already
+    /// recorded in the server's derivation table, across every project.
     /// The worker skips subtree traversal for these paths during BFS.
     KnownDerivations {
         /// Echoes the query's `query_id`; the sole correlator, so a worker can

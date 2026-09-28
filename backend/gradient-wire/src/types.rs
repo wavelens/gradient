@@ -290,11 +290,9 @@ pub enum QueryMode {
     /// the server may also answer from an upstream, for the one path named.
     /// When `url` is `None`, the worker should download via `NarRequest`.
     Pull,
-    /// Return **all** queried paths.  Uncached paths include a presigned S3
-    /// PUT URL in `url` so the worker can upload directly to S3.
-    /// When `url` is `None` for an uncached path, the worker should upload via
-    /// `NarPush`.  Cached paths have `cached: true` and no URL (skip them).
-    /// Used after `FetchFlake` to push fetched inputs to the server cache.
+    /// Return **all** queried paths with only their `cached` flag and no URL.
+    /// The worker uploads each uncached path through `UploadRequest`, which
+    /// the server answers with an `UploadGrant` naming the transport.
     Push,
 }
 

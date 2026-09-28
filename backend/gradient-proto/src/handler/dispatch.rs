@@ -843,8 +843,6 @@ impl RpcContext {
         drv_paths: Vec<String>,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = drv_paths.len(), "QueryKnownDerivations");
-        // Our own cache is output-only, so only `external_url` upstreams (which
-        // serve a complete closure) gate pruning - see `gradient_graph::known`.
         let hashes: Vec<String> = drv_paths
             .iter()
             .map(|p| strip_nix_store_prefix(p))

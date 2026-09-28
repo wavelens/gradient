@@ -49,7 +49,7 @@ pub enum ClientMessage {
     WorkerCapabilities {
         /// Supported architectures as Nix system strings, e.g. `"x86_64-linux"`.
         architectures: Vec<String>,
-        /// Nix system features (e.g. `"kvm"`, `"big-parallel"`), capacity-sorted.
+        /// Nix system features, e.g. `"kvm"`, `"big-parallel"`; the order carries no meaning.
         system_features: Vec<String>,
         /// Maximum number of concurrent builds this peer accepts.
         max_concurrent_builds: u32,
@@ -198,8 +198,10 @@ pub enum ClientMessage {
     /// Server responds with [`super::server::ServerMessage::CacheStatus`].
     /// [`QueryMode`] controls what the server returns beyond the cached flag:
     /// - `Normal` - only paths already in the cache (no URLs).
-    /// - `Pull`   - cached paths with presigned S3 GET URLs (or `url: None` for local).
-    /// - `Push`   - all paths; uncached ones include presigned S3 PUT URLs (or `url: None`).
+    /// - `Pull`   - cached paths with a presigned S3 GET URL, or `url: None` when
+    ///   the NAR is pulled over the stream.
+    /// - `Push`   - every path with only its cached flag; the worker then uploads
+    ///   the uncached ones through `UploadRequest`.
     CacheQuery {
         job_id: String,
         /// Unique per-query id the server echoes in its [`super::server::ServerMessage::CacheStatus`]
@@ -210,8 +212,7 @@ pub enum ClientMessage {
         /// Defaults to [`QueryMode::Normal`] when deserialized from an older client.
         mode: QueryMode,
         /// [`QueryMode::Push`] only: the uncompressed NAR size of `paths[i]`,
-        /// `None` when unknown, so the server can route small NARs over the
-        /// stream and size a multipart upload. Empty in every other mode.
+        /// `None` when unknown. Empty in every other mode.
         nar_sizes: Vec<Option<u64>>,
         /// The server may consult its upstreams for the one path named. Every other
         /// query answers from our cache alone: a build's inputs are here or it fails
@@ -235,8 +236,9 @@ pub enum ClientMessage {
         message: String,
     },
 
-    /// Query which of the given `.drv` paths the server already has recorded in
-    /// its derivation table for the project that owns `job_id`.
+    /// Query which of the given `.drv` paths the server already has recorded,
+    /// with their whole input subtree, in its derivation table. The lookup is
+    /// global, not scoped to the project that owns `job_id`.
     ///
     /// Server responds with [`super::server::ServerMessage::KnownDerivations`].
     /// The worker uses the response to prune BFS subtrees: if a derivation is

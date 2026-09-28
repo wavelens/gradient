@@ -53,7 +53,8 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 /// v18: `JobCandidate.output_paths`; `CandidateScore.outputs_present`.
 /// v19: per-path upload admission: `UploadRequest`/`UploadGrant`/`UploadChunk`/
 ///      `UploadFinished`/`UploadCommitted`/`UploadCancel`; removed `NarUploaded`,
-///      the `NarStreamHeader`/`NarPushResume` push handshake, `EvalCachePush*`,
+///      the worker-to-server push handshake (`NarPushResume`, `NarStreamHeader`
+///      on uploads; pulls still open with it), `EvalCachePush*`,
 ///      `CachedPath.multipart`.
 pub const PROTO_VERSION: u16 = 19;
 
