@@ -382,7 +382,7 @@ pub fn anchor_whole_predicate(alias: &str) -> String {
 /// term lives in [`promotable_predicate`] instead. `m20260908_000002` and
 /// `m20260909_000001` run a demote and a promote in sequence in one transaction and
 /// they cannot interfere only because this never reads the column the demote writes;
-/// the same holds for `readiness::repair_pending`.
+/// the same holds for [`crate::readiness::repair_readiness`].
 pub fn gates_predicate(alias: &str) -> String {
     format!(
         r#"({walked}
@@ -401,7 +401,7 @@ pub fn gates_predicate(alias: &str) -> String {
 /// one rule, which every writer of `Queued` obeys in one of two ways: embed this
 /// predicate in the write, or settle the rows just written with
 /// [`crate::readiness::unpromote_ungated`] in the same call.
-/// [`crate::readiness::repair_pending`] is the backstop for a counter that drifted
+/// [`crate::readiness::repair_readiness`] is the backstop for a counter that drifted
 /// under a lost move.
 pub fn promotable_predicate(alias: &str) -> String {
     format!(
@@ -428,8 +428,8 @@ pub fn eval_closure_cte_body() -> String {
     )
 }
 
-/// Build-dependency closure of the live GC roots (`entry_point` and `build_job`
-/// derivations). A derivation in this set is still needed to build or serve a
+/// Dependency closure, over build and runtime edges alike, of the live GC roots
+/// (`entry_point` and `build_job` derivations). A derivation in this set is still needed to build or serve a
 /// retained closure and must never be reclaimed, even with no `build_job` of
 /// its own: `build_job` rows are pruned with old evals while dependency edges
 /// and anchors persist.
@@ -447,11 +447,10 @@ pub fn reachable_derivations_cte_body() -> String {
     )
 }
 
-/// Every cached path a retained evaluation can reach: the outputs and `.drv`
-/// NARs of the reachable derivations, closed over their references. Input
-/// sources are references of the `.drv` NAR, so the walk from `derivation.hash`
-/// covers them. This is the cache's keep-set; everything outside it is the
-/// eviction pass's to reclaim once past the fetch TTL.
+/// Every cached path a retained evaluation can reach, as [`kept_hashes_cte_body`]
+/// names it over the reachable derivations and their runtime closure. This is the
+/// cache's keep-set; everything outside it is the eviction pass's to reclaim once
+/// past the fetch TTL.
 pub fn live_cached_paths_cte() -> String {
     format!(
         "WITH RECURSIVE {reachable}, {runtime}, {kept}",
@@ -851,7 +850,7 @@ mod tests {
     }
 
     /// The gates must not read the anchor's OWN `status`, or a demote-then-promote
-    /// pair in one transaction (the readiness migrations, `readiness::repair_pending`)
+    /// pair in one transaction (the readiness migrations, `readiness::repair_readiness`)
     /// starts double-moving rows: the demote writes the column the promote would read.
     #[test]
     fn the_gates_never_read_the_anchors_own_status_column() {

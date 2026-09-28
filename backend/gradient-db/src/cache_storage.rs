@@ -289,16 +289,16 @@ crate::sql! {
 ///
 /// Because the clear has to run inside that transaction AND before the retire reads
 /// `substitutable`, this is the one path that would write `derivation_build` before
-/// touching `cached_path`. It opens with [`crate::nar_closure::lock_paths`] instead,
-/// so the class order every other writer follows (`cached_path`, then
-/// `derivation_build`) holds here too and a concurrent TTL or zombie retire cannot
-/// deadlock against it. The retire's own pass then re-acquires a row this
+/// touching `cached_path`. It opens with
+/// [`crate::runtime_readiness::lock_cached_paths`] instead, so the class order every
+/// other writer follows (`cached_path`, then `derivation_build`) holds here too and a
+/// concurrent TTL or zombie retire cannot deadlock against it. The retire's own pass then re-acquires a row this
 /// transaction already holds, which is free.
 ///
 /// [`crate::readiness::lock_anchors`] follows it for the same reason one class down.
 /// The clear names its producers in a single UPDATE, so it acquires them in plan
 /// order, and a hash with several producers can then hold one while
-/// [`crate::readiness::repair_pending`]'s ordered chunk holds another. Taking the
+/// [`crate::readiness::repair_readiness`]'s ordered chunk holds another. Taking the
 /// ordered pass first means every `derivation_build` row this transaction writes is
 /// already held in `derivation` order, and the retire's own anchor pass re-acquires
 /// them for free.
@@ -487,8 +487,9 @@ pub async fn demote_output_only_cached_deps(
     producers.sort_unstable();
     producers.dedup();
 
-    // The demote alone no longer re-walks anything: the walk prunes on `walked`, and
-    // the cache facts it used to read are exactly what a demote clears.
+    // The demote alone no longer re-walks anything: the walk prunes on `walked` and
+    // `unwalked_inputs = 0`, and the cache facts it used to read are exactly what a
+    // demote clears.
     let changes = crate::readiness::unwalk_derivations(ctx, &producers).await?;
     crate::status::emit_transition_effects(ctx, &changes).await;
 

@@ -286,10 +286,10 @@ fn evaluations_to_gc(
 }
 
 /// Derivation GC candidate scan (the mark half of mark-and-sweep): global
-/// `derivation` rows that lie *outside the build-dependency closure of every live
-/// root* - an `entry_point` or a derivation a retained eval's `build_job`
-/// references - and whose grace period has expired. The grace lets rapid
-/// re-evaluations reuse recent derivations.
+/// `derivation` rows that lie *outside the dependency closure, over build and
+/// runtime edges alike, of every live root* - an `entry_point` or a derivation a
+/// retained eval's `build_job` references - and whose grace period has expired. The
+/// grace lets rapid re-evaluations reuse recent derivations.
 ///
 /// Reachability matters because `build_job` rows are pruned with old evals while
 /// `derivation_dependency` edges and anchors persist: a derivation still needed as

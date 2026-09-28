@@ -176,14 +176,14 @@ where
 /// Proactive mirror of [`cascade_dependency_failed`], bounded to one evaluation's
 /// dependency closure. The reactive cascade fires only on a fresh terminal-failure
 /// *transition*, so it cannot reach an anchor that becomes non-terminal **after**
-/// its dependency already failed: `requeue_failed_anchors` /
-/// `requeue_failed_closure_for_eval` thaw a dependent back to `Created` without
+/// its dependency already failed: [`requeue_failed_anchors`] /
+/// [`requeue_failed_closure`] thaw a dependent back to `Created` without
 /// re-checking its (still-failed) dependency, and a concurrent eval can re-fail a
 /// dependency after the dependent was thawed. Such a dependent can never build, yet
 /// sits `Created`/`Queued`/`FailedTransient` forever - its dependency's failure keeps
 /// `unready_deps` above zero, so it is never promoted (or is un-promoted again if it
-/// was), and `check_evaluation_done` never finalizes its evaluation. This walks `derivation_dependency` upward from every terminal-failed
-/// anchor in the closure and fails each reachable non-terminal anchor in one
+/// was), and `check_evaluation_done` never finalizes its evaluation. This walks
+/// `derivation_dependency` upward from every terminal-failed anchor in the closure and fails each reachable non-terminal anchor in one
 /// statement (the recursive term traverses the graph structurally, so a whole
 /// poisoned subtree converges per pass). Returns the changes it made so the caller
 /// can fan out the effects and finalize the now-settled evaluations.
@@ -531,11 +531,11 @@ crate::sql_fn! {
 /// durable cache state - a derivation whose artifacts exist sits `Created` and
 /// blocks its dependents with nothing to build. Cache presence is the ground truth
 /// for "is this built", so trust it here; the reactive heals
-/// (`demote_referrers_of` / absent-orphan recovery) remain the backstop for the
-/// rare case where a cached output's runtime closure is itself incomplete. Returns
-/// the changes it made, so the caller can advance the dependents of what it just
-/// settled; an anchor already terminal-success is left alone, since it has nothing
-/// left for this statement to write.
+/// ([`crate::demote_referrers_of`] / [`crate::demote_output_only_cached_deps`])
+/// remain the backstop for the rare case where a cached output's runtime closure is
+/// itself incomplete. Returns the changes it made, so the caller can advance the
+/// dependents of what it just settled; an anchor already terminal-success is left
+/// alone, since it has nothing left for this statement to write.
 pub async fn reconcile_cached_anchors_for_eval<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,

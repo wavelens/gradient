@@ -268,8 +268,8 @@ pub async fn derivations_with_hashes<C: ConnectionTrait>(
         .collect())
 }
 
-/// Whether any surviving evaluation needs `derivation` (a `build_job` exists).
-/// The refcount source for derivation GC.
+/// Whether any surviving evaluation names `derivation` (a `build_job` exists), so
+/// promotion can schedule it.
 pub async fn derivation_is_reachable<C: ConnectionTrait>(
     db: &C,
     derivation: DerivationId,

@@ -6,22 +6,20 @@
 
 //! Build-graph invariant assertions: one repair pass, then counts. Counts
 //! violations of the invariants the dispatch/promotion gates trust, so a dead zone
-//! surfaces as a warning metric instead of a user-reported stuck evaluation. Reuses the very
-//! gate SQL the reconciler maintains, so a non-zero count means "the healing
-//! pipeline is not converging", never "the checker disagrees with the gates".
-//! Transient non-zero counts between a transition and this pass are expected;
-//! persistent counts are the alert. There is no reconcile tick to wait for: the
-//! event that changes a counter moves it, and this sweep is the only backstop.
+//! surfaces as a warning metric instead of a user-reported stuck evaluation. Reuses
+//! the very gate SQL the reconciler maintains, so a non-zero count means "the
+//! healing pipeline is not converging", never "the checker disagrees with the
+//! gates". Transient non-zero counts between a transition and this pass are
+//! expected; persistent counts are the alert. There is no reconcile tick to wait
+//! for: the event that changes a counter moves it, and this sweep is the only
+//! backstop.
 //!
-//! Two dimensions are not read-only: the readiness counters and the NAR
-//! reference counter are moved rather than derived, so nothing else would ever
-//! notice a lost move. This pass recomputes both over the scope that gates
-//! progress and repairs them in place, so the counts it reports for them are
-//! what was repaired. That makes the sweep those counters' only backstop, so
-//! `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS = 0` leaves them with none.
-//! The counters BELOW zero are counted separately and table-wide: the repair is
-//! bounded to the gating paths, so a row driven negative outside them is exactly
-//! the state the design calls unrecoverable and the drift count cannot see it.
+//! Several columns are moved rather than derived, so nothing else would ever notice
+//! a lost move: the walk bit, runtime wholeness and demand are recounted table-wide,
+//! the readiness pair over the scope that gates progress, each repaired in place, so
+//! the counts reported for them are what was repaired. That makes the sweep their
+//! only backstop, and `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS = 0` leaves
+//! them with none.
 
 use crate::{DbContext, status_sql};
 use gradient_entity::evaluation::EvaluationStatus;
