@@ -14,7 +14,6 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `Draining` | Server shutting down; request no more jobs | - |
 | `JobListChunk` | Full candidate list, answer to `RequestJobList` | `candidates`, `is_final` |
 | `JobOffer` | New candidates, up to 1 000 per message | `candidates` |
-| `RevokeJob` | Candidates taken elsewhere; defined, never sent | `job_ids` |
 | `AssignJob` | Assigns a job | `job_id`, `dispatch`, `job` |
 | `AbortJob` | Cancels a job | `job_id`, `reason` |
 | `Credential` | Short-lived credential, e.g. an SSH key | `kind`, `data` |
@@ -24,7 +23,6 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `NarAbort` | Pull aborted mid-stream | `job_id`, `store_path`, `reason` |
 | `EvalCachePullResult` | Answer to `EvalCachePull`: miss, presigned URL or inline stream | `job_id`, `outcome` |
 | `EvalCacheChunk` (bulk) | Inline evaluation cache chunk | `job_id`, `data`, `offset`, `is_final` |
-| `RequestAllScores` | Asks for every cached score; defined, never sent | - |
 | `CacheStatus` | Answer to `CacheQuery` | `query_id`, `cached` |
 | `KnownDerivations` | Answer to `QueryKnownDerivations` | `query_id`, `known` |
 | `CacheError` | Cache state unknown; the worker retries | `query_id`, `message` |
@@ -42,7 +40,6 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `WorkerCapabilities` | Systems, features, slots, CPU, RAM, core score | `architectures`, `system_features`, `max_concurrent_builds`, ... |
 | `WorkerMetrics` | Load heartbeat | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `network_speed_mbps` |
 | `RequestJobList` | Asks for the full candidate list | - |
-| `RequestAllCandidates` | Same answer as `RequestJobList`; not sent by the reference worker | - |
 | `RequestJobChunk` | Score deltas | `scores`, `is_final` |
 | `RequestJob` | One free slot of a kind; repeated every 10 s while idle | `kind` (`Flake` or `Build`) |
 | `AssignJobResponse` | Accepts or declines an `AssignJob` | `job_id`, `accepted`, `reason` |

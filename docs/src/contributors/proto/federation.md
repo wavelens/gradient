@@ -40,7 +40,7 @@ The proxy authorizes its own workers from its small Postgres database.
 | `RequestJob` | A worker's poll becomes an upstream poll; the best capable waiting worker gets the `AssignJob`, otherwise the proxy declines |
 | Reports | Routed by `job_id`; queries get a fresh `query_id`; reports for jobs a worker does not own are dropped |
 | Worker lost | Disconnect or 120 s heartbeat timeout reports `JobFailed` (transient) upstream |
-| Upstream lost | Sends `AbortJob` and `RevokeJob` to workers, answers open queries with errors, closes worker sessions with `Draining` |
+| Upstream lost | Sends `AbortJob` to workers, answers open queries with errors, closes worker sessions with `Draining` |
 
 ## NAR Cache
 

@@ -42,11 +42,11 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 | Message | When |
 |---|---|
 | `JobListChunk` | Answer to `RequestJobList`: the full candidate list in pages of 1 000, the last one `is_final` |
-| `JobOffer` | New candidates since the last message, up to 1 000 each |
+| `JobOffer` | Candidates not sent to this worker yet, up to 1 000 each; a requeued job is offered again |
 
 - Candidates are evaluations and builds the worker is authorized for and can run.
 - A `JobCandidate` carries `required_paths` (with NAR sizes when cached), `drv_paths` and `output_paths`.
-- The worker scores each candidate against its local store and sends changed scores in `RequestJobChunk`: `missing_count`, `missing_nar_size`, `outputs_present`.
+- The worker keeps no candidate cache. Every offered candidate is scored against the local store and answered in `RequestJobChunk`: `missing_count`, `missing_nar_size`, `outputs_present`.
 
 ## Assignment
 
@@ -62,7 +62,3 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 |---|---|
 | Evaluation | Every 5 s: each `Queued` evaluation without an open dispatch; the worker limits itself with `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` (1) |
 | Build | From the ready set, on a kick (a build turned ready, a capability change, a finished job) or every 5 s, with a full resync every 60 s |
-
-## Unused Messages
-
-`RevokeJob`, `RequestAllScores` and `RequestAllCandidates` are defined but never sent by the server or the reference worker. The worker's candidate cache is therefore never pruned for jobs taken by others during a connection.
