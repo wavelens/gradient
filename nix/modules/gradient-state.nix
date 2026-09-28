@@ -993,6 +993,24 @@
 
   stateType = types.submodule {
     options = {
+      validate = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Validate the generated `state` configuration at build time by running
+          the server binary's `--state-validate` over it. Schema and
+          cross-reference errors (unknown projects, reporter triggers
+          pointing at undeclared integrations, ...) then fail the Nix build
+          instead of the server on first start. No database is touched.
+        '';
+      };
+
+      delete = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Delete all state (users, projects, caches) if not managed anymore by state";
+      };
+
       users = mkOption {
         type = types.attrsOf userType;
         default = { };
