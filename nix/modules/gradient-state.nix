@@ -246,7 +246,7 @@
 
       keep_evaluations = mkOption {
         type = types.ints.positive;
-        default = 1;
+        default = 30;
         description = ''
           Number of finished evaluations kept for metrics and history, regardless of outcome. Older
           ones are garbage collected, and collection pauses while an evaluation runs. Must be at
@@ -419,7 +419,7 @@
 
           `github` requires `installation_id` instead of a secret, token or endpoint, and provisions
           the linked GitHub App installation. GitHub rows are also created when the App is installed
-          on the project, so a declared one is reconciled additively.
+          on the project; a declared one is reconciled additively.
         '';
       };
 
@@ -643,7 +643,7 @@
         description = ''
           Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`,
           `manageCacheSettings`, `manageCacheKeys`, `manageCacheUpstreams`, `manageCacheMembers`,
-          `manageCacheRoles`, `manageCacheSubscriptions` or `deleteCache`.
+          `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`.
         '';
       };
     };
@@ -801,7 +801,7 @@
         default = [ ];
         example = [ "acme-corp" "globex" ];
         description = ''
-          Projects the worker is registered under, one registration per project, so a single worker
+          Projects the worker is registered under, one registration per project. A single worker
           can serve several projects. For a base worker this lists projects to enable up front and
           may be empty; other workers need at least one.
         '';
@@ -977,7 +977,7 @@
         default = true;
         description = ''
           Whether to validate the generated state at build time with the server's
-          `--state-validate`, so schema and reference errors fail the Nix build instead of the first
+          `--state-validate`. Schema and reference errors then fail the Nix build instead of the first
           server start. No database is touched.
         '';
       };

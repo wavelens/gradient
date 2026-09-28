@@ -71,7 +71,7 @@ services.gradient.state = {
 | `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, keyed by input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference overriding this input. |
-| `keep_evaluations` | int | `1` | Number of finished evaluations kept for metrics and history, regardless of outcome. Tasks created in the UI or API keep 30. |
+| `keep_evaluations` | int | `30` | Number of finished evaluations kept for metrics and history, regardless of outcome; capped by `eval.maxKeep`. |
 | `name` | string | attribute name | Unique task name. |
 | `project` | string | - | Name of the project the task belongs to. |
 | `repository` | string | - | Git repository URL of the task. |
