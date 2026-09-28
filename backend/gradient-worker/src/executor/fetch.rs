@@ -525,8 +525,8 @@ fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
 
 /// Verify every store path is present locally via `nix path-info --json`.
 ///
-/// Metadata is no longer surfaced here (the server records it from the
-/// NarUploaded stream); this only confirms the archive/prefetch step actually
+/// Metadata is no longer surfaced here (the server records it from each
+/// `UploadFinished`); this only confirms the archive/prefetch step actually
 /// populated the store before the caller pushes.
 async fn query_path_info(
     paths: &[String],

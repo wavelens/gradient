@@ -37,7 +37,7 @@ pub mod testing;
 mod tests;
 
 pub use self::build_output_metadata::BuildOutputMetadata;
-pub use self::cached_path_info::{CachedPathInfo, UploadTarget};
+pub use self::cached_path_info::CachedPathInfo;
 pub use self::limiter::{PerIpLimiter, ProtoLimiter};
 pub use self::messages::{ClientMessage, PROTO_VERSION, ServerMessage};
 pub use self::session::frame::{Frame, Inbound, WireMessage};

@@ -48,9 +48,7 @@ pub(super) fn publish_inbound(bus: &EventBus, worker_id: &str, inbound: &Inbound
 
 fn bulk_job_id(archived: &ArchivedClientMessage) -> Option<String> {
     match archived {
-        ArchivedClientMessage::NarPush { job_id, .. }
-        | ArchivedClientMessage::EvalCacheChunk { job_id, .. }
-        | ArchivedClientMessage::LogChunk { job_id, .. } => Some(job_id.to_string()),
+        ArchivedClientMessage::LogChunk { job_id, .. } => Some(job_id.to_string()),
         _ => None,
     }
 }

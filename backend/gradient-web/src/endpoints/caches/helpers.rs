@@ -209,8 +209,8 @@ async fn get_nar_by_hash_inner(
         &cache.name,
     );
 
-    // file_hash / file_size live on `cached_path` (written by the worker
-    // during NarUploaded). The legacy mirror on `derivation_output` is
+    // file_hash / file_size live on `cached_path` (written when the worker's
+    // upload commits). The legacy mirror on `derivation_output` is
     // not always populated, so don't rely on it here.
     let file_hash = cached_path_row
         .file_hash

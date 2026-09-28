@@ -825,7 +825,6 @@ mod tests {
             file_size: None,
             nar_size: None,
             url: None,
-            multipart: None,
             nar_hash: None,
             file_hash: None,
             references: None,

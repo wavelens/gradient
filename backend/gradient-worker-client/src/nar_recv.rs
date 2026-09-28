@@ -26,17 +26,12 @@
 //! `NarUnavailable` / `NarAbort` are routed through [`NarReceiver::fail`] so
 //! the waiter resolves with the reason immediately. The on-disk partial is
 //! kept on failure so the next request can resume from where it stopped.
-//!
-//! For uploads, [`NarReceiver::register_push`] installs a one-shot gate that
-//! the dispatch loop resolves on
-//! [`gradient_wire::messages::ServerMessage::NarPushResume`], handing the
-//! pusher the byte offset to seek to.
 
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use gradient_storage::{PartialStore, PartialWriter};
@@ -45,10 +40,6 @@ use gradient_wire::session::frame::{Frame, Inbound};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
-
-/// Ceiling on the push-resume handshake. A server that never answers a
-/// `NarStreamHeader` falls back to a fresh upload from offset 0.
-const PUSH_RESUME_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Frames a staging task may queue before the dispatch loop has to wait. Deep
 /// enough to absorb a burst, shallow enough that a stalled disk becomes
@@ -184,12 +175,10 @@ struct Inner {
     streams: HashMap<Key, mpsc::Sender<Frame<ServerMessage>>>,
     /// Outstanding pull waiters; resolved on `is_final` or on failure.
     waiters: HashMap<Key, Waiter>,
-    /// Outstanding push-resume gates; resolved on `NarPushResume`.
-    push_waiters: HashMap<Key, oneshot::Sender<u64>>,
 }
 
 /// Shared state between the dispatch loop and job tasks for routing inbound
-/// NARs and resolving push-resume handshakes.
+/// NARs.
 #[derive(Clone, Default)]
 pub struct NarReceiver {
     inner: Arc<Mutex<Inner>>,
@@ -220,27 +209,6 @@ pub struct PendingNar {
 impl PendingNar {
     pub fn store_path(&self) -> &str {
         &self.store_path
-    }
-}
-
-/// Gate awaiting a `NarPushResume`, returned by [`NarReceiver::register_push`].
-pub struct PushResumeGate {
-    rx: oneshot::Receiver<u64>,
-}
-
-impl PushResumeGate {
-    /// Await the server's resume offset. A server that never answers falls back
-    /// to a fresh upload from 0; a gate that is *cancelled* (the job was
-    /// aborted, or the connection went away) fails instead, so the uploader
-    /// stops rather than pushing a NAR that has nowhere to land.
-    pub async fn await_resume(self) -> Result<u64> {
-        match tokio::time::timeout(PUSH_RESUME_TIMEOUT, self.rx).await {
-            Ok(Ok(offset)) => Ok(offset),
-            Ok(Err(_)) => Err(anyhow::anyhow!(
-                "NAR push cancelled before the server answered the stream header"
-            )),
-            Err(_) => Ok(0),
-        }
     }
 }
 
@@ -678,33 +646,6 @@ impl NarReceiver {
         }
     }
 
-    /// Install a push-resume gate before sending a `NarStreamHeader`.
-    pub fn register_push(&self, job_id: &str, store_path: &str) -> PushResumeGate {
-        let key = (job_id.to_owned(), store_path.to_owned());
-        let (tx, rx) = oneshot::channel();
-        self.inner.lock().push_waiters.insert(key, tx);
-        PushResumeGate { rx }
-    }
-
-    /// Cancel every push-resume gate of `job_id`. An aborted job's uploads have
-    /// nowhere to land, so they must not sit out the handshake timeout first.
-    pub fn cancel_pushes(&self, job_id: &str) {
-        self.inner
-            .lock()
-            .push_waiters
-            .retain(|(j, _), _| j != job_id);
-    }
-
-    /// Resolve a push-resume gate with the server's `received_bytes`.
-    pub fn resolve_push(&self, job_id: &str, store_path: &str, received_bytes: u64) {
-        let key = (job_id.to_owned(), store_path.to_owned());
-        if let Some(tx) = self.inner.lock().push_waiters.remove(&key) {
-            let _ = tx.send(received_bytes);
-        } else {
-            debug!(%job_id, %store_path, "NarPushResume with no push gate - discarding");
-        }
-    }
-
     /// Drop in-memory state for a job, ending its staging tasks. On-disk
     /// partials (keyed by job and hash) are left for the GC sweep so a later
     /// attempt can still resume.
@@ -712,7 +653,6 @@ impl NarReceiver {
         let mut g = self.inner.lock();
         g.streams.retain(|(j, _), _| j != job_id);
         g.waiters.retain(|(j, _), _| j != job_id);
-        g.push_waiters.retain(|(j, _), _| j != job_id);
     }
 
     /// Route a frame that belongs to a NAR transfer into this receiver; every
@@ -752,14 +692,6 @@ impl NarReceiver {
                 self.note_header(&job_id, &store_path, total_bytes, &stream_token);
                 None
             }
-            Inbound::Control(ServerMessage::NarPushResume {
-                job_id,
-                store_path,
-                received_bytes,
-            }) => {
-                self.resolve_push(&job_id, &store_path, received_bytes);
-                None
-            }
             Inbound::Control(ServerMessage::NarUnavailable {
                 job_id,
                 store_path,
@@ -792,6 +724,7 @@ mod tests {
 
     use super::*;
     use gradient_wire::session::frame::{Inbound, WireMessage};
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn frame(
@@ -1199,34 +1132,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn push_resume_gate_resolves() {
-        let r = NarReceiver::new();
-        let gate = r.register_push("j", "/nix/store/x");
-        r.resolve_push("j", "/nix/store/x", 4096);
-        assert_eq!(gate.await_resume().await.unwrap(), 4096);
-    }
-
-    /// A silent server falls back to a fresh upload. `r` stays alive, so the
-    /// gate can only end by timing out; the paused clock skips the wait.
-    #[tokio::test(start_paused = true)]
-    async fn push_resume_gate_defaults_to_zero_without_answer() {
-        let r = NarReceiver::new();
-        let gate = r.register_push("j", "/nix/store/x");
-        assert_eq!(gate.await_resume().await.unwrap(), 0);
-        drop(r);
-    }
-
-    /// An aborted job releases its gates: the uploader has to fail now, not
-    /// wait out the handshake timeout and then push into a dead session.
-    #[tokio::test]
-    async fn push_resume_gate_fails_when_the_job_is_aborted() {
-        let r = NarReceiver::new();
-        let gate = r.register_push("j", "/nix/store/x");
-        r.cancel_pushes("j");
-        assert!(gate.await_resume().await.is_err());
-    }
-
-    #[tokio::test]
     async fn absorb_feeds_a_pull_stream_into_its_waiter() {
         let r = NarReceiver::new();
         let pending = r.register("j", "/nix/store/p");
@@ -1270,19 +1175,6 @@ mod tests {
         assert!(gone.downcast_ref::<NarUnavailable>().is_some());
         let dropped = r.await_pending(dropped).await.unwrap_err();
         assert!(dropped.downcast_ref::<NarUnavailable>().is_none());
-    }
-
-    #[tokio::test]
-    async fn absorb_resolves_a_push_resume_gate() {
-        let r = NarReceiver::new();
-        let gate = r.register_push("j", "/nix/store/up");
-        let resume = ServerMessage::NarPushResume {
-            job_id: "j".into(),
-            store_path: "/nix/store/up".into(),
-            received_bytes: 7,
-        };
-        assert!(r.absorb(Inbound::Control(resume)).await.is_none());
-        assert_eq!(gate.await_resume().await.unwrap(), 7);
     }
 
     #[tokio::test]

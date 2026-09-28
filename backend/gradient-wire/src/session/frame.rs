@@ -179,10 +179,7 @@ impl WireMessage for ClientMessage {
         let archived = rkyv::access::<ArchivedClientMessage, RkyvError>(&bytes)?;
         if matches!(
             archived,
-            ArchivedClientMessage::NarPush { .. }
-                | ArchivedClientMessage::UploadChunk { .. }
-                | ArchivedClientMessage::EvalCacheChunk { .. }
-                | ArchivedClientMessage::LogChunk { .. }
+            ArchivedClientMessage::UploadChunk { .. } | ArchivedClientMessage::LogChunk { .. }
         ) {
             return Ok(Inbound::Bulk(Frame {
                 bytes,
@@ -199,14 +196,8 @@ impl WireMessage for ClientMessage {
     fn is_bulk(&self) -> bool {
         matches!(
             self,
-            ClientMessage::NarPush { .. }
-                | ClientMessage::UploadChunk { .. }
-                | ClientMessage::NarStreamHeader { .. }
+            ClientMessage::UploadChunk { .. }
                 | ClientMessage::NarRequestResume { .. }
-                | ClientMessage::NarUploaded { .. }
-                | ClientMessage::EvalCachePush { .. }
-                | ClientMessage::EvalCacheChunk { .. }
-                | ClientMessage::EvalCachePushDone { .. }
                 | ClientMessage::LogChunk { .. }
         )
     }
@@ -233,9 +224,7 @@ impl Frame<ClientMessage> {
 
     pub fn variant_name(&self) -> &'static str {
         match self.archived() {
-            ArchivedClientMessage::NarPush { .. } => "NarPush",
             ArchivedClientMessage::UploadChunk { .. } => "UploadChunk",
-            ArchivedClientMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
             ArchivedClientMessage::LogChunk { .. } => "LogChunk",
             _ => "Control",
         }
@@ -273,12 +262,10 @@ impl WireMessage for ServerMessage {
             self,
             ServerMessage::NarPush { .. }
                 | ServerMessage::NarStreamHeader { .. }
-                | ServerMessage::NarPushResume { .. }
                 | ServerMessage::NarUnavailable { .. }
                 | ServerMessage::NarAbort { .. }
                 | ServerMessage::EvalCachePullResult { .. }
                 | ServerMessage::EvalCacheChunk { .. }
-                | ServerMessage::EvalCachePushGrant { .. }
         )
     }
 
@@ -1165,7 +1152,6 @@ mod tests {
                 nar_size: Some(1),
                 // Presigned PUT URLs are the largest field a reply can carry.
                 url: Some(format!("https://s3.example.com{p}?{}", "x".repeat(512))),
-                multipart: None,
                 nar_hash: Some(format!("sha256:{}", "y".repeat(52))),
                 file_hash: Some(format!("sha256:{}", "z".repeat(52))),
                 references: None,
@@ -1206,10 +1192,9 @@ mod codec_tests {
         }
     }
 
-    fn nar_push_client() -> ClientMessage {
-        ClientMessage::NarPush {
-            job_id: "build:1".into(),
-            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+    fn upload_chunk() -> ClientMessage {
+        ClientMessage::UploadChunk {
+            request_id: 1,
             data: vec![9; 4096],
             offset: 7,
             is_final: true,
@@ -1275,57 +1260,12 @@ mod codec_tests {
         let ptr = archive.as_ptr();
         let bytes = Bytes::from_owner(archive);
         assert_eq!(bytes.as_ptr(), ptr);
-        assert!(ClientMessage::decode(nar_push_client().encode().expect("encodes")).is_ok());
+        assert!(ClientMessage::decode(upload_chunk().encode().expect("encodes")).is_ok());
     }
 
     #[test]
     fn garbage_is_rejected() {
         assert!(ClientMessage::decode(Bytes::from_static(b"not an archive")).is_err());
-    }
-
-    #[test]
-    fn nar_uploaded_round_trips_content_address() {
-        let original = ClientMessage::NarUploaded {
-            job_id: "job-1".into(),
-            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12".into(),
-            file_hash: "sha256:abc".into(),
-            file_size: 10,
-            nar_size: 20,
-            nar_hash: "sha256:def".into(),
-            references: vec![],
-            deriver: None,
-            ca: Some("text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944".into()),
-            multipart: None,
-        };
-        let decoded = ClientMessage::decode(original.encode().expect("encodes"))
-            .expect("decodes")
-            .into_message()
-            .expect("deserialises");
-        assert_eq!(decoded, original);
-    }
-
-    #[test]
-    fn nar_uploaded_round_trips_multipart_receipt() {
-        let original = ClientMessage::NarUploaded {
-            job_id: "job-1".into(),
-            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-huge".into(),
-            file_hash: "sha256:abc".into(),
-            file_size: 10,
-            nar_size: 20,
-            nar_hash: "sha256:def".into(),
-            references: vec![],
-            deriver: None,
-            ca: None,
-            multipart: Some(Box::new(crate::types::CompletedMultipart {
-                upload_id: "up-1".into(),
-                etags: vec!["\"e1\"".into(), "\"e2\"".into()],
-            })),
-        };
-        let decoded = ClientMessage::decode(original.encode().expect("encodes"))
-            .expect("decodes")
-            .into_message()
-            .expect("deserialises");
-        assert_eq!(decoded, original);
     }
 }
 

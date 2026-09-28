@@ -277,7 +277,6 @@ async fn build_cached_entry(
             file_size: None,
             nar_size: None,
             url: None,
-            multipart: None,
             nar_hash: None,
             file_hash: None,
             references: None,
@@ -320,7 +319,6 @@ async fn build_cached_entry(
         file_size: file_size.map(|v| v as u64),
         nar_size: nar_size.map(|v| v as u64),
         url,
-        multipart: None,
         nar_hash: fields.nar_hash,
         file_hash: fields.file_hash,
         references: fields.references,
@@ -339,7 +337,6 @@ fn uncached_push_entry(path: &str) -> gradient_wire::types::CachedPath {
         file_size: None,
         nar_size: None,
         url: None,
-        multipart: None,
         nar_hash: None,
         file_hash: None,
         references: None,
@@ -394,7 +391,6 @@ async fn extend_with_persisted_upstream(
             file_size: row.file_size.map(|v| v as u64),
             nar_size: row.nar_size.map(|v| v as u64),
             url: Some(url),
-            multipart: None,
             nar_hash: row.nar_hash.clone(),
             file_hash: row.file_hash.clone(),
             references: expand_references(row.references.as_deref()),
@@ -906,11 +902,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.len(), 2);
-        assert!(
-            result
-                .iter()
-                .all(|c| !c.cached && c.url.is_none() && c.multipart.is_none())
-        );
+        assert!(result.iter().all(|c| !c.cached && c.url.is_none()));
     }
 
     #[tokio::test]

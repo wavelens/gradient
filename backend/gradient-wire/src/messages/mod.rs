@@ -12,10 +12,10 @@ pub mod server;
 pub use crate::types::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec, BuildSpecKind,
     BumpedInputWire, CacheInfo, CachedPath, CandidateScore, CredentialKind, DerivationOutput,
-    DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel,
-    EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep,
-    GradientCapabilities, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan,
-    JobUpdateKind, QueryMode, RequiredPath,
+    DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport,
+    FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities,
+    InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode,
+    RequiredPath,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
@@ -52,7 +52,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 /// v17: `BuildProgress` reports the bytes a Substitute or Download has fetched.
 /// v18: `JobCandidate.output_paths`; `CandidateScore.outputs_present`.
 /// v19: per-path upload admission: `UploadRequest`/`UploadGrant`/`UploadChunk`/
-///      `UploadFinished`/`UploadCommitted`/`UploadCancel`.
+///      `UploadFinished`/`UploadCommitted`/`UploadCancel`; removed `NarUploaded`,
+///      the `NarStreamHeader`/`NarPushResume` push handshake, `EvalCachePush*`,
+///      `CachedPath.multipart`.
 pub const PROTO_VERSION: u16 = 19;
 
 /// How often a worker reports a running download's progress, skipping an

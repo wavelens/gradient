@@ -237,12 +237,13 @@ mod tests {
 
         assert!(reject_reason(&cache_query(QueryMode::Push)).is_some());
         assert!(
-            reject_reason(&ClientMessage::NarPush {
+            reject_reason(&ClientMessage::UploadRequest {
                 job_id: "job".into(),
-                store_path: "/nix/store/x".into(),
-                data: vec![],
-                offset: 0,
-                is_final: true,
+                request_id: 1,
+                object: gradient_wire::types::UploadObject::Nar {
+                    store_path: "/nix/store/x".into(),
+                },
+                size: 1,
             })
             .is_some()
         );

@@ -5,8 +5,8 @@
  */
 
 use crate::types::{
-    BuildFailureKind, CandidateScore, CompletedMultipart, EvalMessageLevel, GradientCapabilities,
-    JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
+    BuildFailureKind, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
+    JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -154,58 +154,6 @@ pub enum ClientMessage {
         paths: Vec<String>,
     },
 
-    /// One chunk of a NAR being pushed from worker to server (direct mode).
-    NarPush {
-        job_id: String,
-        store_path: String,
-        /// zstd-compressed NAR data, 512 KiB chunks (`BULK_CHUNK_SIZE`).
-        data: Vec<u8>,
-        offset: u64,
-        is_final: bool,
-    },
-
-    /// Worker has finished uploading a NAR (via NarPush or presigned S3) and
-    /// reports metadata so the server can update `cached_path` / `derivation_output`.
-    NarUploaded {
-        job_id: String,
-        store_path: String,
-        /// SHA-256 hash of the compressed NAR file (`sha256:<hex>`).
-        file_hash: String,
-        /// Size in bytes of the compressed NAR file.
-        file_size: u64,
-        /// Size in bytes of the uncompressed NAR.
-        nar_size: u64,
-        /// Hash of the uncompressed NAR (`sha256:<nix32>` or SRI format).
-        nar_hash: String,
-        /// Store-path references in hash-name format (without `/nix/store/` prefix).
-        /// Empty when the worker could not query local path info.
-        references: Vec<String>,
-        /// Full deriver `.drv` path that produced this output, if known.
-        /// `None` when the worker could not query local path info or when the
-        /// path has no deriver (e.g. sources, `.drv` files themselves).
-        deriver: Option<String>,
-        /// Content address of the path in narinfo form
-        /// (`text:sha256:<b32>` / `fixed:[r:]sha256:<b32>`), when the path is
-        /// content-addressed. `None` for input-addressed paths.
-        ca: Option<String>,
-        /// Set when the bytes went up as a presigned multipart upload, which
-        /// the server completes before verifying the object.
-        multipart: Option<Box<CompletedMultipart>>,
-    },
-
-    /// Opens a push stream for `store_path`; sent before the first `NarPush`.
-    /// The worker then waits for [`super::server::ServerMessage::NarPushResume`]
-    /// to learn how many compressed bytes the server already holds, then seeks
-    /// its regenerated zstd stream to that offset before sending chunks.
-    NarStreamHeader {
-        job_id: String,
-        store_path: String,
-        /// Known uncompressed nar_size if available, else `None` (informational).
-        total_bytes: Option<u64>,
-        /// zstd identity; a mismatch on resume forces a restart from offset 0.
-        stream_token: String,
-    },
-
     /// Pull resume: the worker already holds `received_bytes` compressed bytes
     /// of this path's `.nar.zst` on disk and asks the server to continue the
     /// download from that offset instead of re-sending from 0.
@@ -221,31 +169,6 @@ pub enum ClientMessage {
     EvalCachePull {
         job_id: String,
         fingerprint: String,
-    },
-
-    /// Announce an eval-cache blob the worker wants to upload.  The server
-    /// answers with [`super::server::ServerMessage::EvalCachePushGrant`]
-    /// granting a presigned PUT, an inline stream, or `Skip`.
-    EvalCachePush {
-        job_id: String,
-        fingerprint: String,
-        size_bytes: u64,
-    },
-
-    /// One chunk of an eval-cache blob being pushed inline (local-FS fallback).
-    EvalCacheChunk {
-        job_id: String,
-        data: Vec<u8>,
-        offset: u64,
-        is_final: bool,
-    },
-
-    /// Confirms a presigned eval-cache PUT completed so the server can record
-    /// the blob for `fingerprint`.
-    EvalCachePushDone {
-        job_id: String,
-        fingerprint: String,
-        size_bytes: u64,
     },
 
     /// Pull-based capacity signal: worker is ready to accept one job of the
@@ -359,14 +282,8 @@ impl ClientMessage {
             | ClientMessage::BuildProgress { job_id, .. }
             | ClientMessage::LogChunk { job_id, .. }
             | ClientMessage::NarRequest { job_id, .. }
-            | ClientMessage::NarPush { job_id, .. }
-            | ClientMessage::NarUploaded { job_id, .. }
-            | ClientMessage::NarStreamHeader { job_id, .. }
             | ClientMessage::NarRequestResume { job_id, .. }
             | ClientMessage::EvalCachePull { job_id, .. }
-            | ClientMessage::EvalCachePush { job_id, .. }
-            | ClientMessage::EvalCacheChunk { job_id, .. }
-            | ClientMessage::EvalCachePushDone { job_id, .. }
             | ClientMessage::CacheQuery { job_id, .. }
             | ClientMessage::EvalMessage { job_id, .. }
             | ClientMessage::QueryKnownDerivations { job_id, .. }
@@ -396,14 +313,8 @@ impl ClientMessage {
             ClientMessage::BuildProgress { .. } => "BuildProgress",
             ClientMessage::LogChunk { .. } => "LogChunk",
             ClientMessage::NarRequest { .. } => "NarRequest",
-            ClientMessage::NarStreamHeader { .. } => "NarStreamHeader",
             ClientMessage::NarRequestResume { .. } => "NarRequestResume",
-            ClientMessage::NarPush { .. } => "NarPush",
-            ClientMessage::NarUploaded { .. } => "NarUploaded",
             ClientMessage::EvalCachePull { .. } => "EvalCachePull",
-            ClientMessage::EvalCachePush { .. } => "EvalCachePush",
-            ClientMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
-            ClientMessage::EvalCachePushDone { .. } => "EvalCachePushDone",
             ClientMessage::RequestJob { .. } => "RequestJob",
             ClientMessage::RequestAllCandidates => "RequestAllCandidates",
             ClientMessage::CacheQuery { .. } => "CacheQuery",

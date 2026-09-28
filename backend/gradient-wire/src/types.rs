@@ -136,7 +136,7 @@ pub enum FlakeStep {
 }
 
 /// Build job: build derivations. The worker always zstd-compresses
-/// uploaded NARs and reports NAR metadata in `NarUploaded`; the server
+/// uploaded NARs and reports NAR metadata in `UploadFinished`; the server
 /// computes and stores narinfo signatures from that metadata.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
@@ -275,24 +275,6 @@ pub enum EvalCachePullOutcome {
     },
 }
 
-/// Result of an eval-cache push grant (`EvalCachePushGrant`).
-///
-/// Mirrors the NAR push modes: the server already holds the blob (`Skip`),
-/// grants a presigned S3 PUT URL (`Presigned` - the worker uploads then sends
-/// `EvalCachePushDone`), or accepts an inline upload of `EvalCacheChunk` frames
-/// (`Inline`, local-FS fallback).
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
-pub enum EvalCachePushMode {
-    /// Server already has this fingerprint; the worker uploads nothing.
-    Skip,
-    /// Presigned S3 PUT URL; the worker uploads then sends `EvalCachePushDone`.
-    Presigned { url: String },
-    /// The worker should stream the blob inline as `EvalCacheChunk` frames.
-    /// `stream_token` guards the chunk stream like the NAR transfer token.
-    Inline { stream_token: String },
-}
-
 /// Query mode for [`CacheQuery`].
 ///
 /// Controls what the server returns in [`CacheStatus`] beyond the basic
@@ -404,17 +386,9 @@ pub struct CachedPath {
     pub file_size: Option<u64>,
     /// Uncompressed NAR size (bytes). `None` if not yet recorded.
     pub nar_size: Option<u64>,
-    /// Presigned S3 URL for direct transfer.
-    ///
-    /// - [`QueryMode::Pull`]: GET URL to download the NAR from S3.
-    /// - [`QueryMode::Push`]: PUT URL to upload the NAR to S3 (only set when
-    ///   `cached` is `false`).
-    /// - `None`: use WebSocket direct transfer (`NarRequest` or `NarPush`),
-    ///   unless `multipart` is set.
+    /// [`QueryMode::Pull`] only: presigned GET URL to download the NAR from
+    /// S3; `None` means the server streams it over `NarRequest`.
     pub url: Option<String>,
-    /// [`QueryMode::Push`] only: a presigned multipart upload, granted instead
-    /// of `url` for a NAR too large for a single PUT.
-    pub multipart: Option<PresignedMultipart>,
     /// SHA-256 of the uncompressed NAR in `sha256:<nix32>` format.
     /// Populated for cached paths in [`QueryMode::Pull`].
     pub nar_hash: Option<String>,

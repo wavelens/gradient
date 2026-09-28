@@ -5,8 +5,8 @@
  */
 
 use crate::types::{
-    CachedPath, CredentialKind, EvalCachePullOutcome, EvalCachePushMode, GradientCapabilities,
-    GrantTarget, Job, JobCandidate, UploadOutcome,
+    CachedPath, CredentialKind, EvalCachePullOutcome, GradientCapabilities, GrantTarget, Job,
+    JobCandidate, UploadOutcome,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -135,16 +135,6 @@ pub enum ServerMessage {
         stream_token: String,
     },
 
-    /// Push resume ack, sent in response to a worker's
-    /// [`super::client::ClientMessage::NarStreamHeader`]. `received_bytes` is
-    /// how many compressed bytes the server already holds in the matching
-    /// `.partial`; `0` means fresh / token mismatch / nothing on disk.
-    NarPushResume {
-        job_id: String,
-        store_path: String,
-        received_bytes: u64,
-    },
-
     /// Result of a [`super::client::ClientMessage::EvalCachePull`].  The
     /// `outcome` carries a miss, a presigned GET URL, or an inline-stream
     /// header; inline blobs then arrive as [`ServerMessage::EvalCacheChunk`].
@@ -160,13 +150,6 @@ pub enum ServerMessage {
         data: Vec<u8>,
         offset: u64,
         is_final: bool,
-    },
-
-    /// Response to a [`super::client::ClientMessage::EvalCachePush`] granting
-    /// a presigned PUT, an inline upload, or `Skip` when the blob is known.
-    EvalCachePushGrant {
-        job_id: String,
-        mode: EvalCachePushMode,
     },
 
     /// Ask a newly connected worker to send its full candidate score set.
@@ -229,10 +212,8 @@ impl ServerMessage {
             | ServerMessage::NarUnavailable { job_id, .. }
             | ServerMessage::NarAbort { job_id, .. }
             | ServerMessage::NarStreamHeader { job_id, .. }
-            | ServerMessage::NarPushResume { job_id, .. }
             | ServerMessage::EvalCachePullResult { job_id, .. }
-            | ServerMessage::EvalCacheChunk { job_id, .. }
-            | ServerMessage::EvalCachePushGrant { job_id, .. } => Some(job_id),
+            | ServerMessage::EvalCacheChunk { job_id, .. } => Some(job_id),
             _ => None,
         }
     }
@@ -258,10 +239,8 @@ impl ServerMessage {
             ServerMessage::NarUnavailable { .. } => "NarUnavailable",
             ServerMessage::NarAbort { .. } => "NarAbort",
             ServerMessage::NarStreamHeader { .. } => "NarStreamHeader",
-            ServerMessage::NarPushResume { .. } => "NarPushResume",
             ServerMessage::EvalCachePullResult { .. } => "EvalCachePullResult",
             ServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
-            ServerMessage::EvalCachePushGrant { .. } => "EvalCachePushGrant",
             ServerMessage::RequestAllScores => "RequestAllScores",
             ServerMessage::CacheStatus { .. } => "CacheStatus",
             ServerMessage::KnownDerivations { .. } => "KnownDerivations",

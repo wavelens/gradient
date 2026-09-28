@@ -6,9 +6,9 @@
 
 use crate::messages::{
     BuildFailureKind, BuildMetrics, BuildOutput, BuildSpec, BuildSpecKind, CachedPath,
-    ClientMessage, EvalCachePullOutcome, EvalCachePushMode, FlakeInputOverride, FlakeJob,
-    FlakeSource, FlakeStep, GradientCapabilities, Job, JobCandidate, JobPhase, JobPhaseSpan,
-    JobUpdateKind, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
+    ClientMessage, EvalCachePullOutcome, FlakeInputOverride, FlakeJob, FlakeSource, FlakeStep,
+    GradientCapabilities, Job, JobCandidate, JobPhase, JobPhaseSpan, JobUpdateKind, PROTO_VERSION,
+    QueryMode, RequiredPath, ServerMessage,
 };
 use crate::messages::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
@@ -280,7 +280,6 @@ fn cache_status_roundtrip() {
                 file_size: Some(1024),
                 nar_size: Some(4096),
                 url: None,
-                multipart: None,
                 nar_hash: Some(
                     "sha256:0000000000000000000000000000000000000000000000000000".into(),
                 ),
@@ -298,7 +297,6 @@ fn cache_status_roundtrip() {
                 file_size: None,
                 nar_size: None,
                 url: Some("https://s3.example.com/nars/bb/bb.nar.zst".into()),
-                multipart: None,
                 nar_hash: None,
                 file_hash: None,
                 references: None,
@@ -333,7 +331,6 @@ fn cached_path_not_cached_no_url() {
         file_size: None,
         nar_size: None,
         url: None,
-        multipart: None,
         nar_hash: None,
         file_hash: None,
         references: None,
@@ -451,19 +448,6 @@ fn handshake_timeout_is_sane() {
 // ── Resumable NAR transfer messages (#225) ───────────────────────────────────
 
 #[test]
-fn nar_stream_header_client_roundtrip() {
-    let original = ClientMessage::NarStreamHeader {
-        job_id: "job-1".into(),
-        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
-        total_bytes: Some(4096),
-        stream_token: "zstd6-fmt1-lib10506".into(),
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-#[test]
 fn nar_request_resume_roundtrip() {
     let original = ClientMessage::NarRequestResume {
         job_id: "job-1".into(),
@@ -490,61 +474,10 @@ fn nar_stream_header_server_roundtrip() {
 }
 
 #[test]
-fn nar_push_resume_roundtrip() {
-    let original = ServerMessage::NarPushResume {
-        job_id: "job-1".into(),
-        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
-        received_bytes: 8_388_608,
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-// ── Eval-cache transfer messages (#386 L3) ───────────────────────────────────
-
-#[test]
 fn eval_cache_pull_roundtrip() {
     let original = ClientMessage::EvalCachePull {
         job_id: "job-1".into(),
         fingerprint: "blake3:deadbeef".into(),
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-#[test]
-fn eval_cache_push_roundtrip() {
-    let original = ClientMessage::EvalCachePush {
-        job_id: "job-1".into(),
-        fingerprint: "blake3:deadbeef".into(),
-        size_bytes: 1_048_576,
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-#[test]
-fn eval_cache_push_done_roundtrip() {
-    let original = ClientMessage::EvalCachePushDone {
-        job_id: "job-1".into(),
-        fingerprint: "blake3:deadbeef".into(),
-        size_bytes: 1_048_576,
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-#[test]
-fn eval_cache_chunk_client_roundtrip() {
-    let original = ClientMessage::EvalCacheChunk {
-        job_id: "job-1".into(),
-        data: vec![1, 2, 3, 4],
-        offset: 8_388_608,
-        is_final: true,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -602,48 +535,6 @@ fn eval_cache_chunk_server_roundtrip() {
     assert_eq!(decoded, original);
 }
 
-#[test]
-fn eval_cache_push_grant_skip_roundtrip() {
-    let original = ServerMessage::EvalCachePushGrant {
-        job_id: "job-1".into(),
-        mode: EvalCachePushMode::Skip,
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-#[test]
-fn eval_cache_push_grant_presigned_roundtrip() {
-    let original = ServerMessage::EvalCachePushGrant {
-        job_id: "job-1".into(),
-        mode: EvalCachePushMode::Presigned {
-            url: "https://s3.example.com/eval-cache/de/deadbeef.sqlite?put".into(),
-        },
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-#[test]
-fn eval_cache_push_grant_inline_roundtrip() {
-    let original = ServerMessage::EvalCachePushGrant {
-        job_id: "job-1".into(),
-        mode: EvalCachePushMode::Inline {
-            stream_token: "evalcache-deadbeef".into(),
-        },
-    };
-    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
-    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
-    assert_eq!(decoded, original);
-}
-
-// Full WebSocket handshake integration tests (InitConnection → InitAck) live in
-// the `web` crate's integration tests where `test-support` is available.
-
-/// A nested timeline survives the rkyv round trip with its parent links and
-/// byte counters intact; without this the board would silently flatten.
 #[test]
 fn job_completed_timeline_roundtrip() {
     let original = ClientMessage::JobCompleted {

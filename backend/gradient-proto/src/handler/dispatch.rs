@@ -342,18 +342,8 @@ impl<'a> DispatchContext<'a> {
                 self.on_upload_finished(request_id, metadata, uploads).await;
                 true
             }
-            ClientMessage::NarStreamHeader { .. }
-            | ClientMessage::NarUploaded { .. }
-            | ClientMessage::EvalCachePush { .. }
-            | ClientMessage::EvalCachePushDone { .. } => {
-                warn!("retired upload message; the worker predates PROTO 19");
-                true
-            }
             // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
-            ClientMessage::NarPush { .. }
-            | ClientMessage::UploadChunk { .. }
-            | ClientMessage::EvalCacheChunk { .. }
-            | ClientMessage::LogChunk { .. } => {
+            ClientMessage::UploadChunk { .. } | ClientMessage::LogChunk { .. } => {
                 warn!("bulk variant deserialised into the control lane");
                 true
             }

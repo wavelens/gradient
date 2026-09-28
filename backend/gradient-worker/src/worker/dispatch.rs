@@ -378,14 +378,10 @@ impl DispatchState {
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
                 self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
             }
-            ServerMessage::EvalCachePushGrant { job_id, .. } => {
-                warn!(%job_id, "EvalCachePushGrant from a server without upload admission; ignored");
-            }
             // Unreachable: the NAR receiver and the bulk lane own these.
             ServerMessage::NarPush { .. }
             | ServerMessage::EvalCacheChunk { .. }
             | ServerMessage::NarStreamHeader { .. }
-            | ServerMessage::NarPushResume { .. }
             | ServerMessage::NarUnavailable { .. }
             | ServerMessage::NarAbort { .. } => {
                 warn!("a NAR or bulk frame reached the control dispatch");
