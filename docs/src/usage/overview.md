@@ -1,13 +1,5 @@
 # Overview
 
-## Getting Started
-
-1. **Register / Log in** - `/` redirects to login automatically.
-2. **Create a project** - projects own tasks, caches, and workers.
-3. **Create a task** - point it at a Git repository and set an evaluation wildcard.
-4. **Configure a worker** - at least one `gradient-worker` must be connected to run jobs. Deploy one co-located on the server or on a dedicated build machine (see [Workers](#workers) below).
-5. **Star what you watch** - a starred task ranks higher in the [Dashboard](dashboard.md#stars) task table, a starred project higher in its rail.
-
 ## Evaluation Wildcard
 
 The wildcard is a dot-separated Nix attribute path selecting which flake outputs to build. Multiple patterns are separated by commas (no spaces). The root level is restricted to: `checks`, `packages`, `formatter`, `legacyPackages`, `nixosConfigurations`, `devShells`, `hydraJobs`.
