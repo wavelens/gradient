@@ -171,7 +171,6 @@ impl Scheduler {
                             log.anchor,
                             log.derivation,
                             log.drv_path,
-                            true,
                         )
                         .await
                         {

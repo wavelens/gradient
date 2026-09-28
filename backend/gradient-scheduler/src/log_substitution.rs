@@ -8,22 +8,21 @@
 //!
 //! A build-once anchor has a single attempt, so there is no sibling to dedup a
 //! log from; the only source is the upstream cache's Hydra-style `/log/{drv}`
-//! endpoint, fetched and appended to the anchor's latest attempt log. Every
-//! failure is non-fatal: log substitution must never break the build pipeline.
+//! endpoint, fetched from the upstreams the project's workers substitute from
+//! and appended to the anchor's latest attempt log. Every failure is non-fatal:
+//! log substitution must never break the build pipeline.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
-use futures::StreamExt;
 use gradient_core::ServerState;
+use gradient_core::upstream_source::{UpstreamSource, fetch_upstream_log};
 use gradient_entity::evaluation::Entity as EEvaluation;
 use gradient_types::ids::{DerivationBuildId, DerivationId, ProjectId};
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
-const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-const LOG_FETCH_MAX_BYTES: usize = 16 * 1024 * 1024;
+const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
 /// Append an upstream cache's build log to `derivation_build`'s latest attempt
 /// log when it has none yet. Always returns `Ok` - failures are logged, never
@@ -33,7 +32,6 @@ pub async fn substitute_log(
     derivation_build: DerivationBuildId,
     derivation_id: DerivationId,
     drv_path: String,
-    allow_upstream_fetch: bool,
 ) -> Result<()> {
     let Some(attempt_id) = gradient_db::latest_attempt_id(&state.worker_db, derivation_build)
         .await
@@ -49,7 +47,7 @@ pub async fn substitute_log(
         .await
         .map(|b| !b.is_empty())
         .unwrap_or(false);
-    if has_log || !allow_upstream_fetch {
+    if has_log {
         return Ok(());
     }
 
@@ -57,37 +55,43 @@ pub async fn substitute_log(
         return Ok(());
     };
 
-    let upstream_urls =
-        match gradient_db::upstream_urls_for_project(&state.worker_db, project_id).await {
-            Ok(urls) if !urls.is_empty() => urls,
-            Ok(_) => return Ok(()),
-            Err(e) => {
-                warn!(error = %e, "substitute_log: upstream URL lookup failed");
-                return Ok(());
-            }
-        };
+    let sources = match gradient_db::upstream_endpoints_for_project(
+        &state.worker_db,
+        project_id,
+        UPSTREAM_WINDOW_MINUTES,
+    )
+    .await
+    {
+        Ok(mut endpoints) => {
+            gradient_core::upstream::order_endpoints(&mut endpoints);
+            endpoints
+                .into_iter()
+                .map(|e| UpstreamSource {
+                    id: e.id,
+                    url: e.url,
+                })
+                .collect::<Vec<_>>()
+        }
+        Err(e) => {
+            warn!(error = %e, "substitute_log: upstream lookup failed");
+            return Ok(());
+        }
+    };
 
     let Some(drv_basename) = std::path::Path::new(&drv_path)
         .file_name()
         .and_then(|n| n.to_str())
-        .map(str::to_owned)
     else {
         return Ok(());
     };
 
-    for upstream in upstream_urls {
-        let url = format!("{}/log/{}", upstream.trim_end_matches('/'), drv_basename);
-        match fetch_log_body(&state.http, &url).await {
-            Ok(Some(body)) => {
-                if let Err(e) = state.log_storage.append(attempt_id, &body).await {
-                    warn!(error = %e, "substitute_log: log_storage.append failed");
-                }
-
-                return Ok(());
+    match fetch_upstream_log(&sources, drv_basename).await {
+        Some(body) => {
+            if let Err(e) = state.log_storage.append(attempt_id, &body).await {
+                warn!(error = %e, "substitute_log: log_storage.append failed");
             }
-            Ok(None) => debug!(%url, "substitute_log: upstream returned no usable body"),
-            Err(e) => debug!(%url, error = %e, "substitute_log: upstream fetch failed"),
         }
+        None => debug!(drv = drv_basename, "substitute_log: no upstream has a log"),
     }
 
     Ok(())
@@ -112,35 +116,4 @@ async fn project_for_derivation(
     }
 
     None
-}
-
-async fn fetch_log_body(http: &reqwest::Client, url: &str) -> anyhow::Result<Option<String>> {
-    let resp = http.get(url).timeout(LOG_FETCH_TIMEOUT).send().await?;
-    if !resp.status().is_success() {
-        return Ok(None);
-    }
-
-    let mut bytes: Vec<u8> = Vec::new();
-    let mut truncated = false;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        let room = LOG_FETCH_MAX_BYTES.saturating_sub(bytes.len());
-        if chunk.len() > room {
-            bytes.extend_from_slice(&chunk[..room]);
-            truncated = true;
-            break;
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    if bytes.is_empty() {
-        return Ok(None);
-    }
-
-    let mut body = String::from_utf8_lossy(&bytes).into_owned();
-    if truncated {
-        body.push_str("\n[truncated]\n");
-    }
-
-    Ok(Some(body))
 }
