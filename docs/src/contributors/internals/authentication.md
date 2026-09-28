@@ -7,7 +7,7 @@ flowchart LR
     req[Request] --> src{"Bearer header<br/>or jwt_token cookie"}
     src -->|"GRAD..."| key[API key: SHA-256 lookup]
     src -->|JWT| jwt[Session JWT: HS256]
-    jwt --> session[(session row: revoked? expired?)]
+    jwt --> session[("session row: revoked or expired")]
     key --> checks["expiry, revocation, pin,<br/>permission mask, allowed_ips"]
 ```
 

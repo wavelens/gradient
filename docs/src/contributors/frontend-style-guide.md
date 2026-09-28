@@ -1,100 +1,68 @@
 # Frontend Style Guide
 
-Gradient ships a developer-facing style guide page that demonstrates every
-shared primitive, color, and layout used in the frontend. It is intended as
-the first stop when building a new feature: prefer reusing a primitive over
-reinventing one in a feature component.
+The frontend ships its own design system page at `/styleguide`: every shared primitive, colour role and layout pattern, live. A new feature reuses a primitive before building a new one.
 
-## Accessing the page
-
-The page is mounted at `/styleguide`, lazy-loaded, and intentionally not
-linked from any navigation. Open it directly in the browser while developing.
-
-There is no auth guard - anyone with the URL can view it. It is read-only and
-purely a reference; no production data is shown.
-
-## What it covers
-
-The page is structured into anchored sections (sticky table of contents on the
-left):
-
-1. **Colors** - palette swatches grouped as Base, Theme, UI, Semantic,
-   Graph/Badge, and Text. Click a swatch to copy its hex.
-2. **Typography** - font families, all `$font-size-*` tokens, headings, links,
-   inline code.
-3. **Spacing & Radius** - visual chips for every `$spacing-*` and
-   `$border-radius-*` token.
-4. **Icons** - Material Symbols sample grid.
-5. **Buttons** - `grButton` severities, variants (icon, text, outlined,
-   rounded), and states (default, disabled, loading).
-6. **Form Primitives** - live demo of `<gr-form-field>`,
-   `<gr-password-input>`, `<gr-message-banner>`, and the `FormFieldsBuilder`
-   service.
-7. **Popups & Overlays** - `<gr-form-dialog>`, `<gr-confirm-dialog>`,
-   toast notifications, and tooltips.
-8. **Feedback** - `<app-loading-spinner>`, `<app-empty-state>`,
-   `<app-stat-card>`, status chips, badges, and the morphing `<gr-status-icon>` with a phase switcher.
-9. **Tables & Lists** - table styles, list rows using the
-   `.gr-grid-rows` utility, breadcrumb.
-10. **Grids** - `.gr-grid-stats`, `.gr-grid-form`, `.gr-grid-cards`,
-    `.gr-grid-rows` utility classes from `app/styles/_grids.scss`.
-11. **Layouts** - `<gr-page-layout>` + `<gr-settings-section>`, the
-    primitives that replace the per-feature page-header / settings-card
-    SCSS scattered across settings pages.
-
-## Form primitives
-
-Located at `frontend/src/app/shared/components/form/`.
-
-| Component / Service | Purpose |
-| --- | --- |
-| `<gr-form-field>` | Wraps `label` + projected control + error + hint. Pass `[control]` to wire validation display. |
-| `<gr-form-error>` | Renders a validation message for a control once touched/dirty. Built-in messages for `required`, `email`, `minlength`, `maxlength`, `min`, `max`, `pattern`, `passwordStrength`, `passwordMatch`, `usernameTaken`. Overridable per-instance via `[messages]`. |
-| `<gr-password-input>` | Password input with a built-in show/hide toggle. Bind to a `FormControl` via `[control]`. |
-| `<gr-message-banner>` | Page-level message with `error / success / warning / info` types. Default icon per type, overridable. |
-| `<gr-form-dialog>` | `<gr-dialog>` wrapper with standardized Cancel / Submit footer, loading state, and disabled state. |
-| `FormFieldsBuilder` | Typed convenience wrapper around `FormBuilder`: `text`, `email`, `password`, `confirm`, `number`, `checkbox`. Inject and call instead of repeating `[Validators.required, ...]` everywhere. Also exports `passwordStrengthValidator` and `passwordMatchValidator` as standalone helpers. |
-
-Import from the barrel:
-
-```ts
-import {
-  FormFieldComponent,
-  FormErrorComponent,
-  PasswordInputComponent,
-  MessageBannerComponent,
-  FormDialogComponent,
-  FormFieldsBuilder,
-} from '@shared/components/form';
+```mermaid
+flowchart LR
+    tokens["Foundations<br/>colour roles, type, spacing"] --> elements["Elements<br/>icons, badges, banners"]
+    elements --> components["Components<br/>buttons, fields, tables"]
+    components --> patterns["Patterns<br/>page shell, row lists, settings"]
 ```
 
-## Layout primitives
+## The Page
 
-Located at `frontend/src/app/shared/components/layout/`.
+- Lazy-loaded at `/styleguide`, deliberately linked from nowhere, without an auth guard; shows no production data.
+- Source: `frontend/src/app/features/styleguide/`, one component per section page.
 
-| Component | Purpose |
-| --- | --- |
-| `<gr-page-layout>` | Page shell with title/subtitle header, optional `[slot=actions]` button row, optional `[slot=banner]` for top-of-page banners, and a content area. |
-| `<gr-settings-section>` | Titled section with optional description; renders content inside a card by default (toggle with `[card]="false"`). |
+| Section | Shows |
+|---|---|
+| Overview | The rules below |
+| Foundations | Colour roles, type scale, spacing, border radius |
+| Elements | Icons, logo, badges, copy fields, read-only rows, message banners, tables, feedback, evaluation status, star button, status icon, charts, toasts |
+| Components | Buttons, form field, name with availability check, selection, panel switcher, table, overlays |
+| Patterns | Page shell, row list, index cards, card grid, settings, sections with an action, settings destinations, danger zone |
 
-## Grid utilities
+## Rules
 
-Located at `frontend/src/app/styles/_grids.scss` and globally registered in
-`src/styles.scss`.
+- Any store path, hash, key, ID or URL is a `gr-copy-field`, never a bare code span.
+- Colour comes from semantic roles: no hex outside the palette, and no component reads a palette token directly.
+- New shared classes go into the design system, never into a component stylesheet.
+- Content shapes are `gr-row-list` or `gr-card-grid`, never named per entity.
+- Every element stays legible in both themes; nothing hard-codes black or white.
+- Text sits at most one step from body: 16px interactive, 14px secondary, 12px badges only.
 
-| Class | Purpose |
-| --- | --- |
-| `.gr-grid-stats` | Auto-fit grid for stat-cards (220px min). |
-| `.gr-grid-form` | Two-column form grid; collapses to one column below `$breakpoint-md`. Use `.gr-grid-form__full` on a child to span both columns. |
-| `.gr-grid-cards` | Auto-fill grid for feature cards (280px min). |
-| `.gr-grid-rows` | Three-column "label / value / actions" row grid. |
-| `.gr-form-actions` | Flex row for form action buttons (`--end` modifier for right alignment). |
+## `gr-ui`
 
-## Migrating existing forms
+`frontend/src/app/shared/ui/`, built on `@angular/cdk`, imported from the barrel:
 
-The current login, register, profile, project-settings,
-task-settings, cache-settings, integrations, api-keys, and admin/github-app
-components each rebuild the same `.form-group` + label + error markup by hand.
-Migrating them onto the primitives is intentionally out of scope for the
-style-guide PR; do migrations incrementally per feature so each diff stays
-small and reviewable.
+```ts
+import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } from '@shared/ui';
+```
+
+| Group | Selectors |
+|---|---|
+| Actions | `button[grButton]`, `a[grButton]`, `gr-star-button`, `gr-menu` |
+| Forms | `gr-form-field`, `input[grInput]`, `textarea[grInput]`, `select[grInput]`, `gr-password-input`, `gr-name-field`, `gr-select`, `gr-select-button`, `gr-checkbox`, `gr-autocomplete`, `gr-label-help` |
+| Display | `gr-badge`, `gr-eval-status-badge`, `gr-status-icon`, `gr-icon`, `gr-logo`, `gr-copy-field`, `gr-field-row`, `gr-stat-card`, `gr-metric-chart`, `gr-table`, `gr-divider` |
+| Feedback | `gr-message-banner`, `gr-toast` (with `MessageService`), `gr-loading-spinner`, `gr-empty-state` |
+| Overlays | `gr-dialog`, `gr-popover`, `[grTooltip]` |
+| Layout | `gr-page-layout`, `gr-settings-section`, `gr-row-list` / `gr-row`, `gr-card-grid`, `gr-nav-card`, `gr-tab-switch`, `[grInView]` |
+
+- `gr-page-layout`: title and subtitle header, breadcrumb, optional `[slot=actions]` buttons and `[slot=banner]`, then the content.
+- `gr-settings-section`: a titled section with an optional description, inside a card unless `[card]="false"`.
+
+## Grid Utilities
+
+`frontend/src/app/styles/_grids.scss`, registered globally in `src/styles.scss`.
+
+| Class | Layout |
+|---|---|
+| `.gr-grid-stats` | Auto-fit grid of stat cards, 220px minimum |
+| `.gr-grid-form` | Two-column form, one column below `$breakpoint-md`; `.gr-grid-form__full` spans both |
+| `.gr-grid-cards` | Auto-fill grid of cards, 280px minimum |
+| `.gr-grid-rows` | Label, value, actions rows |
+| `.gr-form-actions` | Row of form buttons; `--end` aligns right |
+
+## Related
+
+- [Contributing](contributing.md#angular-and-typescript): dependency and lockfile rules

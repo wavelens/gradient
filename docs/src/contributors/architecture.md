@@ -13,7 +13,7 @@ flowchart LR
     end
     worker[gradient-worker] <-->|/proto| proto
     actors --> pg[(PostgreSQL)]
-    actors --> store[(NAR store: file or S3)]
+    actors --> store[("NAR store, file or S3")]
     worker --> daemon[nix-daemon]
 ```
 

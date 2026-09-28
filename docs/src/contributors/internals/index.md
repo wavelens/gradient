@@ -9,8 +9,8 @@ flowchart LR
     worker[Worker] -->|NAR| storage[NAR Storage]
     storage --> serving[Cache Serving]
     serving --> nix[nix clients]
-    eval --> graph[(Graph)]
-    graph --> queries[Graph Queries]
+    eval --> dag[(Graph)]
+    dag --> queries[Graph Queries]
 ```
 
 <div class="grid cards" markdown>
