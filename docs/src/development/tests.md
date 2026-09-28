@@ -40,6 +40,8 @@ nix flake check                         # every check below
 
 VM tests are discovered by directory: any folder added under
 `nix/tests/gradient/` becomes the check `gradient-<folder>` with no wiring.
+Every VM test stores NARs on local disk except `s3`, which runs the server
+against a MinIO bucket so presigned uploads and their commit are exercised.
 
 The cargo suites are checks (`unittest`, `cli-unittest`) rather than the check
 phase of the packages: `nix build .#gradient` produces the binary only. Doc tests
