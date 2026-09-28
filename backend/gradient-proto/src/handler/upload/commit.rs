@@ -29,24 +29,21 @@ pub(super) struct Commit {
     pub permit: UploadPermit,
 }
 
+/// The permit bounds bytes in flight, so it returns once the object sits in
+/// storage; the graph records it afterwards without holding the next upload.
 pub(super) async fn run(c: Commit) {
-    let outcome = match (&c.object, c.metadata) {
-        (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
-            commit_nar(&c.state, c.project_id, store_path, c.transfer, &meta).await
+    let outcome = match place(&c.state, &c.object, c.transfer, &c.metadata).await {
+        Ok(()) => {
+            c.permit.committed();
+            record(&c.state, c.project_id, &c.object, &c.metadata).await
         }
-        (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
-            commit_eval_cache(&c.state, fingerprint, c.transfer, size_bytes).await
+        Err(outcome) => {
+            drop(c.permit);
+            outcome
         }
-        _ => UploadOutcome::Rejected {
-            reason: "metadata does not match the upload object".into(),
-        },
     };
     if !matches!(outcome, UploadOutcome::Ok) {
         warn!(peer_id = %c.peer_id, request_id = c.request_id, ?outcome, "upload commit did not land");
-    }
-    match outcome {
-        UploadOutcome::Ok => c.permit.committed(),
-        _ => drop(c.permit),
     }
     let _ = send_server_msg(
         &c.writer,
@@ -68,39 +65,59 @@ fn rejected(reason: String) -> UploadOutcome {
     UploadOutcome::Rejected { reason }
 }
 
-async fn commit_nar(
+async fn place(
+    state: &Arc<ServerState>,
+    object: &UploadObject,
+    transfer: Transfer,
+    metadata: &UploadMetadata,
+) -> Result<(), UploadOutcome> {
+    match (object, metadata) {
+        (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
+            let Some(ObjectKey::Nar(hash)) = super::object_key(object) else {
+                return Err(rejected(format!("malformed store path {store_path}")));
+            };
+            match transfer {
+                Transfer::Relay(writer) => place_relayed(state, &hash, *writer, meta).await,
+                Transfer::Put | Transfer::Multipart { .. } => {
+                    place_presigned(state, &hash, meta).await
+                }
+            }
+        }
+        (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
+            place_eval_cache(state, fingerprint, transfer, *size_bytes).await
+        }
+        _ => Err(rejected("metadata does not match the upload object".into())),
+    }
+}
+
+async fn record(
     state: &Arc<ServerState>,
     project_id: Option<ProjectId>,
-    store_path: &str,
-    transfer: Transfer,
-    meta: &NarUploadMetadata,
+    object: &UploadObject,
+    metadata: &UploadMetadata,
 ) -> UploadOutcome {
-    let Some(ObjectKey::Nar(hash)) = super::object_key(&UploadObject::Nar {
-        store_path: store_path.to_owned(),
-    }) else {
-        return rejected(format!("malformed store path {store_path}"));
-    };
-    let placed = match transfer {
-        Transfer::Relay(writer) => place_relayed(state, &hash, *writer, meta).await,
-        Transfer::Put | Transfer::Multipart { .. } => place_presigned(state, &hash, meta).await,
-    };
-    if let Err(outcome) = placed {
-        return outcome;
+    match (object, metadata) {
+        (UploadObject::Nar { store_path }, UploadMetadata::Nar(meta)) => {
+            let record = NarUploadRecord {
+                file_hash: &meta.file_hash,
+                file_size: meta.file_size as i64,
+                nar_size: meta.nar_size as i64,
+                nar_hash: &meta.nar_hash,
+                references: &meta.references,
+                deriver: meta.deriver.as_deref(),
+                ca: meta.ca.as_deref(),
+                confirmed: true,
+            };
+            if let Err(e) = mark_nar_stored(state, project_id, store_path, &record).await {
+                return retry(format!("recording {store_path} in the cache index: {e:#}"));
+            }
+            let _ = record_nar_push_metric(state, project_id, meta.file_size as i64).await;
+        }
+        (UploadObject::EvalCache { fingerprint }, UploadMetadata::EvalCache { size_bytes }) => {
+            super::super::eval_cache::record_eval_cache(state, fingerprint, *size_bytes).await;
+        }
+        _ => {}
     }
-    let record = NarUploadRecord {
-        file_hash: &meta.file_hash,
-        file_size: meta.file_size as i64,
-        nar_size: meta.nar_size as i64,
-        nar_hash: &meta.nar_hash,
-        references: &meta.references,
-        deriver: meta.deriver.as_deref(),
-        ca: meta.ca.as_deref(),
-        confirmed: true,
-    };
-    if let Err(e) = mark_nar_stored(state, project_id, store_path, &record).await {
-        return retry(format!("recording {store_path} in the cache index: {e:#}"));
-    }
-    let _ = record_nar_push_metric(state, project_id, meta.file_size as i64).await;
     UploadOutcome::Ok
 }
 
@@ -170,45 +187,35 @@ async fn place_presigned(
     Ok(())
 }
 
-async fn commit_eval_cache(
+async fn place_eval_cache(
     state: &Arc<ServerState>,
     fingerprint: &str,
     transfer: Transfer,
     size_bytes: u64,
-) -> UploadOutcome {
+) -> Result<(), UploadOutcome> {
     match transfer {
         Transfer::Relay(writer) => {
-            let staged = match (*writer).finish().await {
-                Ok(s) => s,
-                Err(e) => return retry(e),
-            };
+            let staged = (*writer).finish().await.map_err(retry)?;
             if staged.len != size_bytes {
-                return rejected(format!(
+                return Err(rejected(format!(
                     "received {} bytes, reported {size_bytes}",
                     staged.len
-                ));
+                )));
             }
-            let bytes = match tokio::fs::read(&staged.path).await {
-                Ok(b) => b,
-                Err(e) => return retry(e),
-            };
+            let bytes = tokio::fs::read(&staged.path).await.map_err(retry)?;
             let _ = tokio::fs::remove_file(&staged.path).await;
-            if let Err(e) = state.nar_storage.put_eval_cache(fingerprint, bytes).await {
-                return retry(e);
-            }
-        }
-        Transfer::Put | Transfer::Multipart { .. } => {
-            if let Err(e) = state
+            state
                 .nar_storage
-                .verify_eval_cache(fingerprint, size_bytes)
+                .put_eval_cache(fingerprint, bytes)
                 .await
-            {
-                return retry(e);
-            }
+                .map_err(retry)
         }
+        Transfer::Put | Transfer::Multipart { .. } => state
+            .nar_storage
+            .verify_eval_cache(fingerprint, size_bytes)
+            .await
+            .map_err(retry),
     }
-    super::super::eval_cache::record_eval_cache(state, fingerprint, size_bytes).await;
-    UploadOutcome::Ok
 }
 
 #[cfg(test)]
@@ -324,6 +331,63 @@ mod tests {
                 outcome: UploadOutcome::Retry { .. }
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn a_placed_nar_frees_its_permit_before_the_graph_records_it() {
+        let Ok(mut unwired) = Arc::try_unwrap(test_state(
+            MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        )) else {
+            panic!("sole owner")
+        };
+        unwired.graph = gradient_core::Graph::new();
+        let state = Arc::new(unwired);
+        let (_session, permit) = granted_permit(&state).await;
+        let dir = tempfile::TempDir::new().unwrap();
+        let partials =
+            gradient_storage::PartialStore::new(dir.path(), std::time::Duration::from_secs(60))
+                .unwrap();
+        let mut writer = partials.open_writer("peer/c", "c", 0, 0).await.unwrap();
+        writer.append(0, b"abc").await.unwrap();
+        let (writer_out, _sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
+
+        let commit = run(Commit {
+            writer: writer_out,
+            state: Arc::clone(&state),
+            peer_id: "w1".into(),
+            request_id: 1,
+            project_id: None,
+            object: UploadObject::Nar {
+                store_path: format!("/nix/store/{}-p", "c".repeat(32)),
+            },
+            transfer: Transfer::Relay(Box::new(writer)),
+            metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
+                file_hash: gradient_storage::file_hash_sri(b"abc"),
+                file_size: 3,
+                nar_size: 3,
+                nar_hash: "sha256:1111".into(),
+                references: Vec::new(),
+                deriver: None,
+                ca: None,
+                multipart: None,
+            })),
+            permit,
+        });
+        tokio::pin!(commit);
+
+        let freed = async {
+            while state.upload_admission.in_flight() != 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::select! {
+                () = &mut commit => panic!("the graph has not recorded the upload yet"),
+                () = freed => {}
+            }
+        })
+        .await
+        .expect("the permit is back once the bytes are stored");
     }
 
     /// A resumed prefix may come from a differently configured encoder; a

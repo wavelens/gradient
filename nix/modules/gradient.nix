@@ -486,7 +486,8 @@ in {
           default = 16;
           description = ''
             Uploads (NARs and eval cache blobs) admitted at once across all workers and REST
-            clients. Further uploads wait for a permit.
+            clients. A permit is held until the object is in storage. Further uploads wait for
+            a permit.
           '';
         };
 
