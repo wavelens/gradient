@@ -54,11 +54,27 @@ pub struct CacheArgs {
 
 impl Default for CacheArgs {
     fn default() -> Self {
-        Self {
-            upstream_query_concurrency: 32,
-            max_storage_gb: 0,
-            sign_sweep_interval_secs: 60,
-            debug_index_interval_secs: 300,
-        }
+        super::clap_defaults()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CacheArgs;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Flags {
+        #[command(flatten)]
+        cache: CacheArgs,
+    }
+
+    #[test]
+    fn the_default_is_what_the_command_line_leaves_unset() {
+        let parsed = Flags::try_parse_from(["gradient-server"]).expect("no flag is required");
+        assert_eq!(
+            format!("{:?}", CacheArgs::default()),
+            format!("{:?}", parsed.cache)
+        );
     }
 }

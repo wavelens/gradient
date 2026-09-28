@@ -60,6 +60,13 @@ pub use server::ServerArgs;
 pub use state::StateArgs;
 pub use upload::UploadArgs;
 
+/// The values a group takes with no flag and no environment: its clap defaults.
+fn clap_defaults<T: clap::Args + clap::FromArgMatches>() -> T {
+    let command = T::augment_args(clap::Command::new("defaults")).mut_args(|arg| arg.env(None));
+    T::from_arg_matches(&command.get_matches_from(["defaults"]))
+        .expect("every option of the group has a default")
+}
+
 #[cfg(test)]
 mod tests {
     use crate::Cli;
