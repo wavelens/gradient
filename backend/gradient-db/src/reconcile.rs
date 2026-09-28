@@ -6,18 +6,20 @@
 
 //! The one graph reconciler: the heals for state no event can reach, run at an
 //! evaluation's stream completion (`Eval`) and when a building evaluation is
-//! graph-stuck (`Unstick`). Both scopes now run the same steps. No scope runs on a tick and nothing here is a
-//! fixpoint; every counter is moved by the event that changes it, and
-//! [`crate::readiness::repair_pending`] is the backstop for a move that was lost.
+//! graph-stuck (`Unstick`). Both scopes run the same steps. No scope runs on a tick
+//! and nothing here is a fixpoint; every counter is moved by the event that changes
+//! it, and [`crate::readiness::repair_readiness`] is the backstop for a move that
+//! was lost.
 //!
 //! Both scopes name an evaluation, so every statement is bounded to that
-//! evaluation's dependency closure. Each step is logged-and-continued on error: a
-//! failing heal must never block the remaining heals.
+//! evaluation's dependency closure. The steps share the graph actor's transaction,
+//! so the first failure ends the pass and fails the transition.
 
 use crate::DbContext;
 use crate::status::{TransitionChange, emit_transition_effects};
 use gradient_types::EvaluationId;
-use tracing::{debug, error};
+use sea_orm::DbErr;
+use tracing::debug;
 
 /// What slice of the graph to heal.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,74 +68,47 @@ impl ReconcileReport {
 /// CI checks, eval finalization) fan out through the one emitter for every anchor
 /// a step moved, so a reconciliation can never move an anchor without its
 /// consequences.
-pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> ReconcileReport {
+pub async fn reconcile_build_graph(
+    ctx: &DbContext,
+    scope: ReconcileScope,
+) -> Result<ReconcileReport, DbErr> {
     let db = &ctx.worker_db;
     let evaluation = scope.evaluation();
     let mut report = ReconcileReport::default();
 
-    match crate::promotion::requeue_failed_closure(db, scope).await {
-        Ok(changes) => {
-            report.thawed = changes.len() as u64;
-            emit_transition_effects(ctx, &changes).await;
-        }
-        Err(e) => error!(error = %e, %evaluation, "reconcile: requeue_failed_closure failed"),
-    }
+    let thawed = crate::promotion::requeue_failed_closure(db, scope).await?;
+    report.thawed = thawed.len() as u64;
+    emit_transition_effects(ctx, &thawed).await;
 
     // Cache presence is the ground truth for "is this built": anchors whose
     // outputs all exist re-complete even after a requeue, cascade or demote, and
     // the anchors they just made servable advance their dependents' counters.
-    match crate::promotion::reconcile_cached_anchors_for_eval(db, evaluation).await {
-        Ok(changes) => {
-            report.cached_reconciled = changes.len();
-            let derivations: Vec<_> = changes.iter().map(|c| c.derivation).collect();
-            emit_transition_effects(ctx, &changes).await;
-            match crate::readiness::advance_fetchable(db, &derivations).await {
-                Ok(advanced) => emit_transition_effects(ctx, &advanced).await,
-                Err(e) => error!(error = %e, %evaluation, "reconcile: advance_fetchable failed"),
-            }
-        }
-        Err(e) => {
-            error!(error = %e, %evaluation, "reconcile: reconcile_cached_anchors_for_eval failed")
-        }
-    }
+    let cached = crate::promotion::reconcile_cached_anchors_for_eval(db, evaluation).await?;
+    report.cached_reconciled = cached.len();
+    emit_transition_effects(ctx, &cached).await;
+    let derivations: Vec<_> = cached.iter().map(|c| c.derivation).collect();
+    let advanced = crate::readiness::advance_fetchable(db, &derivations).await?;
+    emit_transition_effects(ctx, &advanced).await;
 
     // Failure-side backstop, paired with the thaw above: fail every non-terminal
     // anchor in the closure reachable from a terminal failure, including the
     // victims the thaw just re-created.
-    match crate::promotion::reconcile_dependency_failed(db, evaluation).await {
-        Ok(changes) => {
-            emit_transition_effects(ctx, &changes).await;
-            report.dependency_failed = changes;
-        }
-        Err(e) => error!(error = %e, "reconcile: reconcile_dependency_failed failed"),
-    }
+    report.dependency_failed =
+        crate::promotion::reconcile_dependency_failed(db, evaluation).await?;
+    emit_transition_effects(ctx, &report.dependency_failed).await;
 
     // A pruned interior in this closure that a thaw or a reset left with no name
-    // fails the gate the promote embeds; this evaluation names it first.
-    match crate::reachability::adopt_pending_closure(db, evaluation).await {
-        Ok(adopted) => {
-            report.adopted = adopted.pairs.len();
-            // Naming is half of what demand means, so an adoption creates it the way
-            // a thaw does.
-            for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
-                if let Err(e) = crate::readiness::recompute_demand(db, chunk).await {
-                    error!(error = %e, %evaluation, "reconcile: demand recompute after adoption failed");
-                }
-            }
-            if let Err(e) = crate::bump_graph_version(db, &adopted.evaluations()).await {
-                error!(error = %e, %evaluation, "reconcile: graph version bump after adoption failed");
-            }
-        }
-        Err(e) => error!(error = %e, %evaluation, "reconcile: adopt_pending_closure failed"),
+    // fails the gate the promote embeds; this evaluation names it first. Naming is
+    // half of what demand means, so an adoption creates it the way a thaw does.
+    let adopted = crate::reachability::adopt_pending_closure(db, evaluation).await?;
+    report.adopted = adopted.pairs.len();
+    for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
+        crate::readiness::recompute_demand(db, chunk).await?;
     }
+    crate::bump_graph_version(db, &adopted.evaluations()).await?;
 
-    match crate::readiness::promote_closure(db, evaluation).await {
-        Ok(changes) => {
-            emit_transition_effects(ctx, &changes).await;
-            report.promoted = changes;
-        }
-        Err(e) => error!(error = %e, "reconcile: promote_closure failed"),
-    }
+    report.promoted = crate::readiness::promote_closure(db, evaluation).await?;
+    emit_transition_effects(ctx, &report.promoted).await;
 
     if !report.is_noop() {
         debug!(
@@ -147,7 +122,7 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         );
     }
 
-    report
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -193,7 +168,9 @@ mod tests {
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
-        let report = reconcile_build_graph(&ctx, ReconcileScope::Eval(eval)).await;
+        let report = reconcile_build_graph(&ctx, ReconcileScope::Eval(eval))
+            .await
+            .expect("a converging heal succeeds");
         drop(ctx);
 
         assert_eq!(report.adopted, 1);
@@ -231,6 +208,35 @@ mod tests {
         );
     }
 
+    /// Every heal runs in the graph actor's one transaction, which Postgres aborts
+    /// at the first failed statement: a heal that logged and went on would leave
+    /// the actor's COMMIT to roll the whole transition back in silence and would
+    /// hide a deadlock from its retry.
+    #[tokio::test]
+    async fn a_failed_heal_fails_the_reconciliation_and_runs_nothing_after_it() {
+        use sea_orm::{DatabaseBackend, DbErr, MockDatabase, MockExecResult};
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .append_query_errors([DbErr::Custom("deadlock detected".into())])
+            .into_connection();
+
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        let outcome =
+            reconcile_build_graph(&ctx, ReconcileScope::Eval(EvaluationId::now_v7())).await;
+        drop(ctx);
+
+        assert!(outcome.is_err(), "{outcome:?}");
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert!(
+            !log.iter().any(|s| s.contains("SET status = 1")),
+            "no later heal ran: {log:?}"
+        );
+    }
+
     /// An unstick is the same intent asking again, so its thaw keeps a reproducible
     /// failure and the subtree it poisons out; otherwise a permanent failure inside
     /// a runtime closure is rebuilt on every sweep.
@@ -253,7 +259,9 @@ mod tests {
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
-        let report = reconcile_build_graph(&ctx, ReconcileScope::Unstick(eval)).await;
+        let report = reconcile_build_graph(&ctx, ReconcileScope::Unstick(eval))
+            .await
+            .expect("a converged graph heals nothing");
         drop(ctx);
 
         assert!(report.is_noop());
