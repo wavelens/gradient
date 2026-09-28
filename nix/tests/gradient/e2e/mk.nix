@@ -38,15 +38,19 @@
         "@wheel"
       ];
 
-      # One job per core. At 8 the builder kernel-panicked on OOM mid-run
-      # (`compulsory panic_on_oom`) with 2048 MB and four cores, and the
-      # oversubscription bought nothing: the cores were already the limit.
+      # One job per core, here and in the worker's build.maxConcurrent. At 8 jobs,
+      # or at the worker's default 32 builds with its nix-daemon pool of 304
+      # connections, the builder kernel-panicked on OOM (`compulsory panic_on_oom`)
+      # with 2048 MB and four cores.
       max-jobs = lib.mkForce 4;
     };
 
     services.gradient.worker = {
       enable = true;
-      build.metrics = true;
+      build = {
+        maxConcurrent = 4;
+        metrics = true;
+      };
       capabilities = {
         eval  = true;
         build = true;
