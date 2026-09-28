@@ -11,6 +11,8 @@ A flake built by Gradient, with the outputs in a binary cache.
 
 Open `https://gradient.example.com/account/register` and create the first user.
 
+With `registration.enable = false` or `oidc.required`, the server refuses registration: sign in through OIDC, or declare the first user in [`services.gradient.state.users`](../reference/state.md#usersname) instead.
+
 ## 2. Create a Cache
 
 **Caches -> Create Cache**, then pick a name and a visibility.
