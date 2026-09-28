@@ -52,14 +52,14 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
         .then(|| Duration::from_secs((timeout_secs / LIVENESS_POLLS_PER_DEADLINE).max(5)))
 }
 
-/// Bounded repair of the readiness counters plus the read-only alarms: unbacked
-/// trusted outputs, wedged Building evals and reference counters driven below
-/// zero, so a dead zone becomes a warning long before a user reports a stuck
-/// evaluation. Transient non-zero counts right after a transition are normal;
-/// persistent ones are not - except the drift counts, which report rows this pass
-/// already repaired, so the warning can be a successful self-repair. `scope` is
-/// the size of the readiness repair, logged at `info` on the clean branch too,
-/// because a healthy instance is exactly the case whose cost is unmeasured.
+/// Repair of the maintained graph columns plus the read-only alarms: unbacked
+/// trusted outputs and wedged Building evals, so a dead zone becomes a warning long
+/// before a user reports a stuck evaluation. Transient non-zero counts right after
+/// a transition are normal; persistent ones are not - except the drift counts,
+/// which report rows this pass already repaired, so the warning can be a
+/// successful self-repair. `scope` is the size of the readiness repair, logged at
+/// `info` on the clean branch too, because a healthy instance is exactly the case
+/// whose cost is unmeasured.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report = gradient_db::graph_consistency_report(&scheduler.state.db()).await?;
     if report.total() > 0 {
