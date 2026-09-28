@@ -414,4 +414,29 @@ mod tests {
         ));
         assert_eq!(state.upload_admission.in_flight(), 0);
     }
+
+    #[tokio::test]
+    async fn an_expired_grant_is_told_to_retry_and_frees_its_permit() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        uploads.idle_lease = Duration::ZERO;
+        ctx.on_upload_request(JOB.into(), 1, nar('d'), 8, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        let _grant = sent.try_recv().unwrap();
+
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        ctx.sweep_uploads(uploads).await;
+
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadCommitted {
+                request_id: 1,
+                outcome: UploadOutcome::Retry { .. }
+            }
+        ));
+        assert_eq!(state.upload_admission.in_flight(), 0);
+    }
 }
