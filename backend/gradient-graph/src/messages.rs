@@ -83,16 +83,8 @@ pub struct NarCommit {
     pub deriver: Option<String>,
     pub ca: Option<String>,
     pub targets: SignTargets,
-    /// The object is already in `nar_storage`; false for a relayed NAR staged
-    /// for the uploader.
+    /// The object is already in `nar_storage`.
     pub confirmed: bool,
-}
-
-/// The uploader's report that a relayed NAR reached the object store.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NarConfirm {
-    pub hash: String,
-    pub file_hash: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

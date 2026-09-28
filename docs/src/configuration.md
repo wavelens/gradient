@@ -2,7 +2,7 @@
 
 Gradient is configured through its **NixOS modules**: `services.gradient` for the server and `services.gradient.worker` for workers. Every module option maps onto a command-line flag and an environment variable of the same name:
 
-- Server: option `nar.commitConcurrency` is flag `--nar-commit-concurrency` and env `GRADIENT_NAR_COMMIT_CONCURRENCY`.
+- Server: option `upload.bytesBudget` is flag `--upload-bytes-budget` and env `GRADIENT_UPLOAD_BYTES_BUDGET`.
 - Worker: option `worker.build.maxConcurrent` is flag `--build-max-concurrent` and env `GRADIENT_WORKER_BUILD_MAX_CONCURRENT`.
 - An `enable` option maps to `..._ENABLE` / `--...-enable`.
 - Module-only options (`packages`, `reverseProxy`, `postgres`, `domain`, ...) have no env.
@@ -137,12 +137,9 @@ See [Declarative State](usage/state.md) for the entities under `state`.
 | `nar.smallBytes` | `GRADIENT_NAR_SMALL_BYTES` | `1048576` (1 MiB) | NARs up to this size are relayed through the server and admitted to the hot cache; larger ones use presigned S3 URLs, and NARs over 1 GiB upload as multipart. |
 | `nar.hotCacheBytes` | `GRADIENT_NAR_HOT_CACHE_BYTES` | `536870912` (512 MiB) | In-memory NAR cache capacity, ranked by hits per byte. `0` disables it. |
 | `nar.verifyDigest` | `GRADIENT_NAR_VERIFY_DIGEST` | `false` | Re-hash NARs committed through presigned S3 uploads. Relayed and REST uploads are always verified. |
-| `nar.uploadConcurrency` | `GRADIENT_NAR_UPLOAD_CONCURRENCY` | `4` | Background uploads of relayed NARs from `<baseDir>/nar-staged` to S3. |
-| `nar.commitConcurrency` | `GRADIENT_NAR_COMMIT_CONCURRENCY` | `8` | NAR commits (verification, storage placement, cache-index write) running at once. |
 | `nar.storageOpenTimeoutSecs` | `GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS` | `60` | Wait for a NAR object stream before answering `NarUnavailable`. |
 | `nar.sendChunkTimeoutSecs` | `GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS` | `30` | Wait for a `NarPush` chunk to drain before aborting with `NarAbort`. |
 | `nar.maxConcurrentServes` | `GRADIENT_NAR_MAX_CONCURRENT_SERVES` | `8` | NAR serving tasks per worker connection. |
-| `nar.maxBufferBytes` | `GRADIENT_NAR_MAX_BUFFER_BYTES` | `10737418240` (10 GiB) | Max total of unfinished uploads under `<baseDir>/nar-partial`. |
 | `nar.partialTtlSecs` | `GRADIENT_NAR_PARTIAL_TTL_SECS` | `86400` | Age after which an unfinished upload is deleted. `0` disables the cleanup. |
 
 ### `cache`

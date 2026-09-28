@@ -47,10 +47,6 @@ pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Resul
             "upstream_query_concurrency",
             config.cache.upstream_query_concurrency.to_string(),
         ),
-        (
-            "nar_commit_concurrency",
-            config.nar.commit_concurrency.to_string(),
-        ),
         ("upload_concurrency", config.upload.concurrency.to_string()),
         (
             "upload_bytes_budget",

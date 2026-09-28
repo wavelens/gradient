@@ -25,12 +25,10 @@ use ractor::rpc::CallResult;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::dispatch::{ActiveJob, DispatchContext};
-use super::eval_cache::EvalCacheReceiveStore;
 use super::job_events::{JobEvents, SchedulerJobEvents};
-use super::nar_transfer::NarReceiveStore;
 use super::session::on_reauth_notify;
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
@@ -81,8 +79,6 @@ pub struct SessionState {
     writer: ProtoWriter,
     capabilities: GradientCapabilities,
     authorized_peers: HashSet<ProjectId>,
-    nar: NarReceiveStore,
-    eval_cache: EvalCacheReceiveStore,
     uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
     offers_seen: u64,
@@ -137,30 +133,7 @@ impl Actor for SessionActor {
 
         let nar_cfg = &state.config.nar;
         let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs);
-        let max_partial_bytes = nar_cfg.max_buffer_bytes as u64;
         let max_serves = nar_cfg.max_concurrent_serves;
-        let partial_root =
-            std::path::PathBuf::from(format!("{}/nar-partial", state.config.server.base_dir));
-        let nar = NarReceiveStore::new(
-            partial_root,
-            &peer_id,
-            partial_ttl,
-            max_partial_bytes,
-            state.config.nar.small_bytes,
-            state.shutdown.clone(),
-        )
-        .unwrap_or_else(|e| {
-            error!(%peer_id, error = %e, "failed to init NAR partial dir; falling back to temp");
-            NarReceiveStore::new(
-                std::env::temp_dir().join("gradient-nar-partial"),
-                &peer_id,
-                partial_ttl,
-                max_partial_bytes,
-                state.config.nar.small_bytes,
-                state.shutdown.clone(),
-            )
-            .expect("temp partial dir must be creatable")
-        });
         let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
         let writer = writer.with_observer(Arc::new(super::tap::ServerTap {
             bus: state.events.clone(),
@@ -176,7 +149,6 @@ impl Actor for SessionActor {
             &state.shutdown,
             &peer_id,
             SchedulerJobEvents {
-                shutdown: state.shutdown.clone(),
                 scheduler: Arc::clone(&scheduler),
                 writer: writer.clone(),
                 peer_id: peer_id.clone(),
@@ -190,8 +162,6 @@ impl Actor for SessionActor {
             writer,
             capabilities,
             authorized_peers,
-            nar,
-            eval_cache: EvalCacheReceiveStore::new(max_partial_bytes),
             uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
             offers_seen: 0,
@@ -221,8 +191,7 @@ impl Actor for SessionActor {
                         job_events: &st.job_events,
                     };
 
-                    ctx.dispatch(inbound, &mut st.nar, &mut st.eval_cache, &mut st.uploads)
-                        .await
+                    ctx.dispatch(inbound, &mut st.uploads).await
                 };
                 let _ = reply.send(keep);
 
@@ -396,7 +365,7 @@ fn open_uploads(
         admission,
         table: UploadTable::default(),
         partials: gradient_storage::PartialStore::new(
-            format!("{}/upload-partial", state.config.server.base_dir),
+            format!("{}/nar-partial", state.config.server.base_dir),
             partial_ttl,
         )?,
         retain_up_to: state.config.nar.small_bytes,

@@ -23,7 +23,6 @@ use tracing::{debug, error, info, warn};
 
 use gradient_wire::messages::{JobPhaseSpan, JobUpdateKind};
 
-use super::nar_transfer::CommitTracker;
 use super::socket::{ProtoWriter, push_pending_candidates};
 
 const JOB_EVENT_QUEUE: usize = 64;
@@ -38,7 +37,6 @@ pub(super) enum JobEvent {
         job_id: String,
         dispatch: DispatchedJobId,
         spans: Vec<JobPhaseSpan>,
-        commits: Arc<CommitTracker>,
     },
     Failed {
         job_id: String,
@@ -116,7 +114,6 @@ async fn drain(mut rx: mpsc::Receiver<JobEvent>, peer_id: String, handler: impl 
 }
 
 pub(super) struct SchedulerJobEvents {
-    pub shutdown: Shutdown,
     pub scheduler: Arc<Scheduler>,
     pub writer: ProtoWriter,
     pub peer_id: String,
@@ -130,8 +127,7 @@ impl ApplyJobEvent for SchedulerJobEvents {
                 job_id,
                 dispatch,
                 spans,
-                commits,
-            } => self.completed(job_id, dispatch, spans, commits),
+            } => self.completed(job_id, dispatch, spans).await,
             JobEvent::Failed {
                 job_id,
                 error,
@@ -220,31 +216,16 @@ impl SchedulerJobEvents {
         }
     }
 
-    fn completed(
-        &self,
-        job_id: String,
-        dispatch: DispatchedJobId,
-        spans: Vec<JobPhaseSpan>,
-        commits: Arc<CommitTracker>,
-    ) {
-        let writer = self.writer.clone();
-        let scheduler = Arc::clone(&self.scheduler);
-        let peer_id = self.peer_id.clone();
-        self.shutdown.spawn(async move {
-            if !commits.settle(&job_id).await {
-                warn!(%peer_id, %job_id, "a NAR this job pushed never reached the index; the build was failed, not completed");
-                return;
-            }
-
-            info!(%peer_id, %job_id, phases = spans.len(), "job completed");
-            scheduler
-                .close_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans)
-                .await;
-            if let Err(e) = scheduler.handle_job_completed(&peer_id, &job_id).await {
-                error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
-            }
-            push_pending_candidates(&writer, &scheduler, &peer_id).await;
-        });
+    async fn completed(&self, job_id: String, dispatch: DispatchedJobId, spans: Vec<JobPhaseSpan>) {
+        let peer_id = self.peer_id.as_str();
+        info!(%peer_id, %job_id, phases = spans.len(), "job completed");
+        self.scheduler
+            .close_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans)
+            .await;
+        if let Err(e) = self.scheduler.handle_job_completed(peer_id, &job_id).await {
+            error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
+        }
+        push_pending_candidates(&self.writer, &self.scheduler, peer_id).await;
     }
 
     async fn failed(

@@ -157,7 +157,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,
@@ -222,7 +221,6 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,
@@ -292,7 +290,6 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,
@@ -421,7 +418,6 @@ fn make_state(
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,
@@ -517,7 +513,6 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,
@@ -598,7 +593,6 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,

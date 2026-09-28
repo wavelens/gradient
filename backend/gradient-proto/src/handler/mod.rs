@@ -12,7 +12,7 @@ mod dispatch;
 mod eval_cache;
 mod job_events;
 mod nar;
-mod nar_transfer;
+mod nar_serve;
 mod session;
 mod session_actor;
 mod sessions;

@@ -18,7 +18,7 @@ use sea_orm::{
 };
 use tracing::{debug, trace, warn};
 
-use crate::messages::{NarCommit, NarCommitted, NarConfirm, SignTargets};
+use crate::messages::{NarCommit, NarCommitted, SignTargets};
 
 /// Record a stored NAR: the row, the runtime edges its references name, the demand
 /// those edges carry, the anchor wholeness seeded from them and the readiness side
@@ -261,22 +261,6 @@ async fn upsert_cached_path(
             })
         }
     }
-}
-
-/// Mark a relayed path's object as stored. Answers `false` when the row's bytes
-/// moved on since the upload began.
-pub(crate) async fn confirm(ctx: &DbContext, c: &NarConfirm) -> anyhow::Result<bool> {
-    let updated = ECachedPath::update_many()
-        .col_expr(CCachedPath::Confirmed, Expr::value(true))
-        .filter(CCachedPath::Hash.eq(c.hash.as_str()))
-        .filter(CCachedPath::FileHash.eq(normalize_nar_hash(&c.file_hash)))
-        .filter(CCachedPath::Confirmed.eq(false))
-        .exec(&ctx.worker_db)
-        .await
-        .context("confirm cached path")?
-        .rows_affected;
-
-    Ok(updated == 1)
 }
 
 async fn queue_signature_placeholders(
@@ -891,45 +875,6 @@ mod tests {
             bound(update, "confirmed"),
             Value::Bool(Some(false)),
             "{update:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn confirm_updates_only_the_row_whose_bytes_are_still_the_uploaded_ones() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(0)])
-            .into_connection();
-        let (ctx, pool) = ctx(db).await;
-
-        let confirmed = confirm(
-            &ctx,
-            &NarConfirm {
-                hash: HASH.to_owned(),
-                file_hash: "sha256:abc".to_owned(),
-            },
-        )
-        .await
-        .expect("confirm");
-        drop(ctx);
-
-        assert!(!confirmed, "no row matched the uploaded file hash");
-        let log = raw_statements(pool);
-        let update = log.first().expect("one statement");
-        assert!(
-            update
-                .sql
-                .starts_with("UPDATE \"cached_path\" SET \"confirmed\" = "),
-            "{update:?}"
-        );
-        assert_eq!(
-            bound(update, "confirmed"),
-            Value::Bool(Some(true)),
-            "{update:?}"
-        );
-        assert!(update.sql.contains("\"file_hash\" = "), "{update:?}");
-        assert!(
-            format!("{:?}", update.values).contains("Bool(Some(false))"),
-            "only an unconfirmed row matches: {update:?}"
         );
     }
 }

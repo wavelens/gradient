@@ -24,7 +24,7 @@ use tracing::{info, warn};
 use crate::ingest;
 use crate::messages::{
     DemoteReport, Demotion, GcReport, GcRequest, IngestBatch, IngestReport, NarCommit,
-    NarCommitted, NarConfirm, RequeueScope, Transition, TransitionReport, UpstreamHit,
+    NarCommitted, RequeueScope, Transition, TransitionReport, UpstreamHit,
 };
 use crate::{demote, gc, known, nar, requeue, transition};
 
@@ -53,7 +53,6 @@ pub enum GraphMsg {
     UpstreamHits(HashMap<String, UpstreamHit>, Reply<()>),
     UpstreamProbed(Vec<DerivationId>, Reply<()>),
     CommitNar(NarCommit, Reply<NarCommitted>),
-    ConfirmNar(NarConfirm, Reply<bool>),
     Transition(Transition, Reply<TransitionReport>),
     Requeue(RequeueScope, Reply<u64>),
     Demote(Demotion, Reply<DemoteReport>),
@@ -170,16 +169,6 @@ impl Actor for GraphActor {
                     nar::after_commit(&st.ctx, committed, &commit.store_path);
                 }
 
-                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
-                let _ = reply.send(result);
-            }
-            GraphMsg::ConfirmNar(confirm, reply) => {
-                flush(&myself, st).await;
-                let confirm = &confirm;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
-                    nar::confirm(&scoped, confirm).await
-                })
-                .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
                 let _ = reply.send(result);
             }

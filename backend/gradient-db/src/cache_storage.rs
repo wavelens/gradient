@@ -16,8 +16,7 @@ use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::{CacheId, DerivationId, ProjectId};
 use sea_orm::sea_query::{Alias, Expr};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Select,
+    ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect,
 };
 use tracing::warn;
 
@@ -525,68 +524,6 @@ async fn output_referrers_of_hash<C: ConnectionTrait>(
     )
 }
 
-/// A `cached_path` row whose object the uploader still owes to storage.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnconfirmedPath {
-    pub hash: String,
-    pub file_hash: String,
-    pub file_size: u64,
-    pub created_at: chrono::NaiveDateTime,
-}
-
-fn unconfirmed_select(limit: u64) -> Select<ECachedPath> {
-    ECachedPath::find()
-        .filter(CCachedPath::Confirmed.eq(false))
-        .filter(CCachedPath::FileHash.is_not_null())
-        .order_by_asc(CCachedPath::CreatedAt)
-        .limit(limit)
-}
-
-/// The oldest `limit` unconfirmed rows: the uploader's work list.
-pub async fn unconfirmed_cached_paths<C: ConnectionTrait>(
-    db: &C,
-    limit: u64,
-) -> Result<Vec<UnconfirmedPath>, sea_orm::DbErr> {
-    let rows = unconfirmed_select(limit).all(db).await?;
-
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| {
-            Some(UnconfirmedPath {
-                hash: row.hash,
-                file_hash: row.file_hash?,
-                file_size: row.file_size.unwrap_or(0).max(0) as u64,
-                created_at: row.created_at,
-            })
-        })
-        .collect())
-}
-
-/// Which of `hashes` the table still has an unconfirmed row for.
-///
-/// [`unconfirmed_cached_paths`] hands out one page, so a staged file the page
-/// does not name is not evidence that nothing is waiting for it: the orphan
-/// sweep asks this before deleting, or a backlog deeper than the page deletes
-/// the very files it has yet to upload.
-pub async fn unconfirmed_hashes_among<C: ConnectionTrait>(
-    db: &C,
-    hashes: &[String],
-) -> Result<std::collections::HashSet<String>, sea_orm::DbErr> {
-    let found = crate::fetch_in_chunks(hashes, |chunk| async move {
-        ECachedPath::find()
-            .select_only()
-            .column(CCachedPath::Hash)
-            .filter(CCachedPath::Confirmed.eq(false))
-            .filter(CCachedPath::Hash.is_in(chunk))
-            .into_tuple::<String>()
-            .all(db)
-            .await
-    })
-    .await?;
-
-    Ok(found.into_iter().collect())
-}
-
 pub async fn unconfirmed_cached_path_count<C: ConnectionTrait>(
     db: &C,
 ) -> Result<u64, sea_orm::DbErr> {
@@ -988,28 +925,5 @@ mod tests {
     #[test]
     fn both_unlimited_is_max() {
         assert_eq!(headroom(0, 9_999, 0, 9_999), i64::MAX);
-    }
-
-    #[test]
-    fn the_uploader_scan_reads_the_partial_index_oldest_first() {
-        use sea_orm::{DatabaseBackend, QueryTrait};
-
-        let sql = unconfirmed_select(1000)
-            .build(DatabaseBackend::Postgres)
-            .to_string()
-            .to_uppercase();
-        assert!(
-            sql.contains(r#""CACHED_PATH"."CONFIRMED" = FALSE"#),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(r#""CACHED_PATH"."FILE_HASH" IS NOT NULL"#),
-            "{sql}"
-        );
-        assert!(
-            sql.contains(r#"ORDER BY "CACHED_PATH"."CREATED_AT" ASC"#),
-            "{sql}"
-        );
-        assert!(sql.ends_with("LIMIT 1000"), "{sql}");
     }
 }

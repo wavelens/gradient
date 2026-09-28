@@ -90,7 +90,6 @@ fn build_server(
         events: gradient_types::EventBus::default(),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-        nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
                 concurrency: 16,

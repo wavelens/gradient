@@ -19,7 +19,6 @@ pub mod partial;
 pub mod relay;
 pub mod sgr;
 pub mod source_nar;
-pub mod staged;
 
 pub use self::context::StorageCtx;
 pub use self::debug_info::{BuildIdEntry, scan_build_ids};
@@ -30,4 +29,3 @@ pub use self::hot::{HotNarCache, HotNarStats};
 pub use self::log::*;
 pub use self::nar::*;
 pub use self::partial::{PartialStore, PartialWriter, StagedFile};
-pub use self::staged::StagedNars;

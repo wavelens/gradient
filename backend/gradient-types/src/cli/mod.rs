@@ -7,8 +7,8 @@
 //! Typed `clap::Args` clusters that compose the top-level [`super::Cli`].
 //!
 //! Each module is one config group: its NixOS option path, flag and env var
-//! share one name (`nar.commitConcurrency`, `--nar-commit-concurrency`,
-//! `GRADIENT_NAR_COMMIT_CONCURRENCY`).
+//! share one name (`upload.bytesBudget`, `--upload-bytes-budget`,
+//! `GRADIENT_UPLOAD_BYTES_BUDGET`).
 
 mod build;
 mod cache;

@@ -5,7 +5,6 @@
  */
 
 pub mod cacher;
-pub mod uploader;
 
 use gradient_core::ServerState;
 use std::sync::Arc;
@@ -18,11 +17,6 @@ pub async fn start_cache(state: Arc<ServerState>) -> std::io::Result<()> {
             .await
             .map_err(std::io::Error::other)?;
     }
-    state
-        .shutdown
-        .supervise_now(uploader::child_spec(&state))
-        .await
-        .map_err(std::io::Error::other)?;
     Ok(())
 }
 

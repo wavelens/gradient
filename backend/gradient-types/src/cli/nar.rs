@@ -44,24 +44,6 @@ pub struct NarArgs {
     )]
     pub verify_digest: bool,
 
-    /// Background uploads of staged NARs to S3 in flight at once. Defaults to 4.
-    #[arg(
-        long = "nar-upload-concurrency",
-        env = "GRADIENT_NAR_UPLOAD_CONCURRENCY",
-        default_value_t = 4
-    )]
-    pub upload_concurrency: usize,
-
-    /// Maximum NAR commits (staged-file verification, storage placement and
-    /// cache-index write after a `NarUploaded`) running at once across every
-    /// worker session. Further commits queue for a permit.
-    #[arg(
-        long = "nar-commit-concurrency",
-        env = "GRADIENT_NAR_COMMIT_CONCURRENCY",
-        default_value_t = 8
-    )]
-    pub commit_concurrency: usize,
-
     /// Maximum time the server will wait to open a NAR object stream
     /// (e.g. S3 GET) before giving up and emitting `NarUnavailable`. A stalled
     /// backend used to silently block the dispatch loop until the worker's
@@ -94,19 +76,7 @@ pub struct NarArgs {
     )]
     pub max_concurrent_serves: usize,
 
-    /// Maximum total bytes the server may hold across open `*.partial` NAR
-    /// upload files (un-finalized `NarPush` streams staged under
-    /// `<base_dir>/nar-partial`). A rogue worker opening many streams without
-    /// finalizing them would otherwise fill the disk; overflow aborts the
-    /// offending path with `NarAbort`. (See issue #109.)
-    #[arg(
-        long = "nar-max-buffer-bytes",
-        env = "GRADIENT_NAR_MAX_BUFFER_BYTES",
-        default_value_t = 10 * 1024 * 1024 * 1024
-    )]
-    pub max_buffer_bytes: usize,
-
-    /// TTL in seconds for partially-received NAR uploads (`*.partial`) staged
+    /// TTL in seconds for partially-received relayed uploads (`*.partial`)
     /// under `<base_dir>/nar-partial`. A periodic sweep deletes partials whose
     /// last write is older than this so an abandoned resume can't pin disk
     /// forever. Default 86400 (24 h). Set to 0 to disable the sweep.
@@ -125,12 +95,9 @@ impl Default for NarArgs {
             small_bytes: 1024 * 1024,
             hot_cache_bytes: 512 * 1024 * 1024,
             verify_digest: false,
-            upload_concurrency: 4,
-            commit_concurrency: 8,
             storage_open_timeout_secs: 60,
             send_chunk_timeout_secs: 30,
             max_concurrent_serves: 8,
-            max_buffer_bytes: 10 * 1024 * 1024 * 1024,
             partial_ttl_secs: 86400,
         }
     }

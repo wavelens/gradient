@@ -142,7 +142,6 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
             events: gradient_types::EventBus::default(),
             forge: gradient_forge::ForgeRegistry::with_builtin(),
             upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-            nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
             upload_admission: gradient_storage::admission::UploadAdmission::new(
                 gradient_storage::admission::Limits {
                     concurrency: 16,
@@ -234,7 +233,6 @@ fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
             events: gradient_types::EventBus::default(),
             forge: gradient_forge::ForgeRegistry::with_builtin(),
             upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-            nar_commit: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
             upload_admission: gradient_storage::admission::UploadAdmission::new(
                 gradient_storage::admission::Limits {
                     concurrency: 16,

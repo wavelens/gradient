@@ -17,7 +17,7 @@ use gradient_db::{CacheDb, WebDb, WorkerDb, connect_cache_db, connect_db, connec
 use gradient_notify::EmailService;
 use gradient_state::load_and_apply_state;
 use gradient_storage::{FileLogStorage, S3LogStorage};
-use gradient_storage::{HotNarCache, NarStore, StagedNars};
+use gradient_storage::{HotNarCache, NarStore};
 use gradient_types::*;
 use gradient_util::shutdown::Shutdown;
 use sea_orm::{
@@ -178,14 +178,10 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         store
     };
 
-    let staged = StagedNars::new(format!("{}/nar-staged", cli.server.base_dir))
-        .map_err(|e| InitError::LocalStorage(e.to_string()))?;
-    let nar_storage = nar_storage
-        .with_staging(staged)
-        .with_hot_cache(HotNarCache::new(
-            cli.nar.hot_cache_bytes,
-            cli.nar.small_bytes,
-        ));
+    let nar_storage = nar_storage.with_hot_cache(HotNarCache::new(
+        cli.nar.hot_cache_bytes,
+        cli.nar.small_bytes,
+    ));
 
     let log_storage: Arc<dyn gradient_storage::LogStorage> = if cli.s3_config().is_some() {
         tracing::info!("Log storage: S3 (with local cache)");
@@ -199,7 +195,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     };
 
     let upstream_query_concurrency = config.cache.upstream_query_concurrency;
-    let nar_commit_concurrency = config.nar.commit_concurrency;
     let upload_limits = gradient_storage::admission::Limits {
         concurrency: config.upload.concurrency.max(1),
         bytes: config.upload.bytes_budget.max(1),
@@ -219,7 +214,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         upstream_query: Arc::new(tokio::sync::Semaphore::new(
             upstream_query_concurrency.max(1),
         )),
-        nar_commit: Arc::new(tokio::sync::Semaphore::new(nar_commit_concurrency.max(1))),
         upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         shutdown: Shutdown::new(),

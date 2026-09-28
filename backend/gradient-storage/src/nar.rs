@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::HotNarCache;
 use crate::admission::ObjectKey;
-use crate::{HotNarCache, StagedNars};
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
@@ -96,7 +96,6 @@ pub struct NarStore {
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
     /// Relayed NARs awaiting the background upload; `None` on a store built
     /// without staging, whose relay commit writes through synchronously.
-    staged: Option<Arc<StagedNars>>,
     hot: Arc<HotNarCache>,
 }
 
@@ -159,7 +158,6 @@ impl NarStore {
             prefix: String::new(),
             local_base: Some(base_path.to_string()),
             s3_signer: None,
-            staged: None,
             hot: Arc::new(HotNarCache::disabled()),
         })
     }
@@ -224,7 +222,6 @@ impl NarStore {
             prefix: crate::layout::normalize_prefix(prefix),
             local_base: None,
             s3_signer: Some(store),
-            staged: None,
             hot: Arc::new(HotNarCache::disabled()),
         })
     }
@@ -557,18 +554,9 @@ impl NarStore {
         self.s3_signer.is_some()
     }
 
-    pub fn with_staging(mut self, staged: StagedNars) -> Self {
-        self.staged = Some(Arc::new(staged));
-        self
-    }
-
     pub fn with_hot_cache(mut self, hot: HotNarCache) -> Self {
         self.hot = Arc::new(hot);
         self
-    }
-
-    pub fn staged(&self) -> Option<&Arc<StagedNars>> {
-        self.staged.as_ref()
     }
 
     pub fn hot(&self) -> &HotNarCache {
@@ -872,40 +860,11 @@ async fn collect(mut stream: BoxStream<'static, Result<Bytes>>, size: u64) -> Re
 }
 
 impl NarStore {
-    /// Resolve `hash` through the tiers: the hot cache, then a staged file, then
-    /// the object store. A source at offset 0 whose size the cache admits is
+    /// Resolve `hash` through the tiers: the hot cache, then the object store. A source at offset 0 whose size the cache admits is
     /// read once through the single-flight loader and answered from RAM.
     pub async fn open(&self, hash: &str, offset: u64) -> Result<Option<NarSource>> {
         if let Some(bytes) = self.hot.get(hash) {
             return Ok(Some(NarSource::Hot(bytes)));
-        }
-
-        if let Some(staged) = &self.staged
-            && let Some((size, mut file)) = staged.open(hash).await?
-        {
-            if offset == 0 && self.hot.admits(size) {
-                let path = staged.path(hash);
-                let bytes = self
-                    .hot
-                    .get_or_load(hash, async move {
-                        tokio::fs::read(path)
-                            .await
-                            .map(Bytes::from)
-                            .context("read staged NAR")
-                    })
-                    .await?;
-
-                return Ok(Some(NarSource::Hot(bytes)));
-            }
-
-            file.seek(SeekFrom::Start(offset))
-                .await
-                .context("seek staged NAR")?;
-            let stream = tokio_util::io::ReaderStream::with_capacity(file, BULK_CHUNK_SIZE)
-                .map(|chunk| chunk.context("read staged NAR chunk"))
-                .boxed();
-
-            return Ok(Some(NarSource::Stream { size, stream }));
         }
 
         let Some((size, stream)) = self.get_stream_from(hash, offset).await? else {
@@ -1053,7 +1012,6 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let store = NarStore::local(dir.path().to_str().unwrap())
             .expect("local store")
-            .with_staging(StagedNars::new(dir.path().join("nar-staged")).expect("staging"))
             .with_hot_cache(HotNarCache::new(4 * 1024 * 1024, threshold));
         (dir, store)
     }
@@ -1111,28 +1069,6 @@ mod tests {
         assert!(matches!(source, NarSource::Stream { size, .. } if size == payload.len() as u64));
         assert_eq!(collect_source(source).await, payload);
         assert_eq!(store.hot().stats().entries, 0);
-    }
-
-    #[tokio::test]
-    async fn open_prefers_a_staged_file_over_the_object_store() {
-        let (dir, store) = tiered_store(64 * 1024);
-        let claim = dir.path().join("claim");
-        tokio::fs::write(&claim, b"staged bytes")
-            .await
-            .expect("write");
-        store
-            .staged()
-            .expect("staging")
-            .adopt("stagedhash", &claim)
-            .await
-            .expect("adopt");
-
-        let source = store
-            .open("stagedhash", 0)
-            .await
-            .expect("open")
-            .expect("present");
-        assert_eq!(collect_source(source).await, b"staged bytes");
     }
 
     #[tokio::test]

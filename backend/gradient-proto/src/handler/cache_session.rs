@@ -185,7 +185,7 @@ pub async fn handle_cache_socket(
                     let shutdown = state.shutdown.clone();
                     shutdown.spawn(async move {
                         let _permit = permit;
-                        if let Err(e) = super::nar_transfer::serve_nar_request(
+                        if let Err(e) = super::nar_serve::serve_nar_request(
                             &state,
                             &writer,
                             &job_id,

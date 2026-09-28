@@ -10,7 +10,7 @@
 //! abstractions and the underlying constants) moved to
 //! [`gradient_wire::session::frame`]. What remains here are the helpers that need
 //! access to [`ServerState`] / [`Scheduler`]: job-offer pushes and credential
-//! delivery. NAR transfer moved to [`super::nar_transfer`].
+//! delivery. NAR serving lives in [`super::nar_serve`].
 
 use gradient_core::ServerState;
 use gradient_types::ids::ProjectId;

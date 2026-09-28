@@ -6,21 +6,19 @@
 
 //! Server-side handlers for the fleet-shared eval-cache transfer (#386).
 //!
-//! Mirrors the NAR transfer: a worker pulls a flake's serialized eval-cache
-//! blob by `fingerprint` (presigned-S3 URL or inline chunked stream) and pushes
-//! an updated one back, size-guarded so a stale-small blob never clobbers a
+//! A worker pulls a flake's serialized eval-cache blob by `fingerprint`
+//! (presigned-S3 URL or inline chunked stream); pushes go through the upload
+//! handshake and are size-guarded here so a stale-small blob never clobbers a
 //! larger cached one. Blobs live under `eval-cache/<fingerprint>` in object
 //! storage; an `eval_cache_store` row indexes them. Every handler is
 //! best-effort: on any error it logs and sends the safe negative response
-//! (`Miss` / `Skip`) rather than tearing down the connection.
-
-use std::collections::HashMap;
+//! (`Miss`) rather than tearing down the connection.
 
 use gradient_core::ServerState;
 use gradient_entity::eval_cache_store;
 use gradient_types::ids::EvalCacheStoreId;
 use gradient_types::*;
-use gradient_wire::types::{EvalCachePullOutcome, EvalCachePushMode};
+use gradient_wire::types::EvalCachePullOutcome;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, warn};
@@ -65,80 +63,6 @@ fn pull_outcome(
     }
 }
 
-/// Pick the push grant mode from `(existing_row, incoming_size, presigned_url)`:
-/// `Skip` when the size-guard rejects the upload, a presigned PUT when the store
-/// minted one (S3), else an inline upload.
-fn push_mode(
-    existing: Option<i64>,
-    incoming: u64,
-    presigned_url: Option<String>,
-    stream_token: impl FnOnce() -> String,
-) -> EvalCachePushMode {
-    if !should_accept_push(existing, incoming) {
-        return EvalCachePushMode::Skip;
-    }
-
-    match presigned_url {
-        Some(url) => EvalCachePushMode::Presigned { url },
-        None => EvalCachePushMode::Inline {
-            stream_token: stream_token(),
-        },
-    }
-}
-
-// ── Inline upload staging (local-FS fallback) ─────────────────────────────────
-
-#[derive(Default)]
-struct StagedBlob {
-    bytes: Vec<u8>,
-}
-
-/// Per-session in-memory staging for inline eval-cache pushes, keyed by
-/// fingerprint. Eval-cache blobs are small SQLite files, so unlike the
-/// disk-backed `NarReceiveStore` this stays in RAM; a per-session byte budget
-/// (shared with the NAR partial budget) bounds a rogue worker.
-pub(super) struct EvalCacheReceiveStore {
-    max_bytes: u64,
-    active: HashMap<String, StagedBlob>,
-}
-
-impl EvalCacheReceiveStore {
-    pub(super) fn new(max_bytes: u64) -> Self {
-        Self {
-            max_bytes,
-            active: HashMap::new(),
-        }
-    }
-
-    fn open(&mut self, fingerprint: &str) {
-        self.active
-            .insert(fingerprint.to_owned(), StagedBlob::default());
-    }
-
-    /// Append a contiguous chunk for `fingerprint`. Returns `false` (and drops
-    /// the staging) on a non-contiguous offset or a budget overrun.
-    fn append(&mut self, fingerprint: &str, offset: u64, data: &[u8]) -> bool {
-        let total: u64 = self.active.values().map(|b| b.bytes.len() as u64).sum();
-        let Some(blob) = self.active.get_mut(fingerprint) else {
-            return false;
-        };
-
-        if offset != blob.bytes.len() as u64
-            || total.saturating_add(data.len() as u64) > self.max_bytes
-        {
-            self.active.remove(fingerprint);
-            return false;
-        }
-
-        blob.bytes.extend_from_slice(data);
-        true
-    }
-
-    fn finish(&mut self, fingerprint: &str) -> Option<Vec<u8>> {
-        self.active.remove(fingerprint).map(|b| b.bytes)
-    }
-}
-
 // ── Async handlers ────────────────────────────────────────────────────────────
 
 /// `EvalCachePull`: serve the blob for `fingerprint` (presigned URL, inline
@@ -180,89 +104,6 @@ pub(super) async fn handle_eval_cache_pull(
     if inline && let Err(e) = stream_blob_inline(state, writer, &job_id, &key).await {
         warn!(%fingerprint, error = %e, "inline eval-cache stream failed");
     }
-}
-
-/// `EvalCachePush`: grant a presigned PUT, an inline upload, or `Skip` (the
-/// size-guard rejected a stale-small overwrite).
-pub(super) async fn handle_eval_cache_push(
-    state: &ServerState,
-    writer: &ProtoWriter,
-    eval_cache: &mut EvalCacheReceiveStore,
-    job_id: String,
-    fingerprint: String,
-    size_bytes: u64,
-) {
-    let existing = lookup_row(state, &fingerprint).await.map(|r| r.size_bytes);
-
-    let presigned = if should_accept_push(existing, size_bytes) {
-        state
-            .nar_storage
-            .presigned_eval_cache_put_url(&fingerprint, PRESIGN_TTL)
-            .await
-            .unwrap_or_else(|e| {
-                warn!(%fingerprint, error = %e, "presigned eval-cache PUT failed; falling back to inline");
-                None
-            })
-    } else {
-        None
-    };
-
-    let token = stream_token(&fingerprint);
-    let mode = push_mode(existing, size_bytes, presigned, || token.clone());
-
-    if let EvalCachePushMode::Inline { .. } = &mode {
-        eval_cache.open(&fingerprint);
-    }
-
-    let _ = send_server_msg(writer, &ServerMessage::EvalCachePushGrant { job_id, mode }).await;
-}
-
-/// `EvalCacheChunk` (worker→server, inline push body): stage the chunk and, on
-/// the final one, commit the assembled blob and upsert the row.
-pub(super) async fn handle_eval_cache_chunk(
-    state: &ServerState,
-    eval_cache: &mut EvalCacheReceiveStore,
-    job_id: &str,
-    data: &[u8],
-    offset: u64,
-    is_final: bool,
-) {
-    let Some(fingerprint) = fingerprint_for_chunk(eval_cache) else {
-        debug!(%job_id, "EvalCacheChunk for unknown stream; dropping");
-        return;
-    };
-
-    if !eval_cache.append(&fingerprint, offset, data) {
-        warn!(%job_id, %fingerprint, offset, "eval-cache chunk rejected (non-contiguous or over budget)");
-        return;
-    }
-
-    if !is_final {
-        return;
-    }
-
-    let Some(bytes) = eval_cache.finish(&fingerprint) else {
-        return;
-    };
-    let size_bytes = bytes.len() as u64;
-    let key = storage_key(&fingerprint);
-    if let Err(e) = state.nar_storage.put_eval_cache(&fingerprint, bytes).await {
-        warn!(%fingerprint, error = %e, "failed to write eval-cache blob to storage");
-        return;
-    }
-
-    upsert_eval_cache_row(state, &fingerprint, &key, size_bytes).await;
-}
-
-/// `EvalCachePushDone` (after a presigned PUT): upsert the row for the
-/// now-uploaded blob.
-pub(super) async fn handle_eval_cache_push_done(
-    state: &ServerState,
-    fingerprint: String,
-    size_bytes: u64,
-) {
-    let key = storage_key(&fingerprint);
-    upsert_eval_cache_row(state, &fingerprint, &key, size_bytes).await;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -398,18 +239,7 @@ async fn stream_blob_inline(
     Ok(())
 }
 
-/// Inline pushes carry only `job_id` on each chunk, so the active fingerprint is
-/// the one staged by the preceding `EvalCachePush` grant. A worker uploads one
-/// blob at a time per session, so the single active key identifies the stream.
-fn fingerprint_for_chunk(eval_cache: &EvalCacheReceiveStore) -> Option<String> {
-    let mut keys = eval_cache.active.keys();
-    let first = keys.next()?.clone();
-    keys.next().is_none().then_some(first)
-}
-
-/// Stable per-fingerprint stream token. Deterministic so a reconnecting worker's
-/// resume attempt validates against the same value (mirrors the NAR `len-<n>`
-/// token shape).
+/// Stable per-fingerprint stream token for an inline pull.
 fn stream_token(fingerprint: &str) -> String {
     format!("ec-{fingerprint}")
 }
@@ -481,92 +311,10 @@ mod tests {
         );
     }
 
-    // ── push-mode selection ─────────────────────────────────────────────────────
-
-    #[test]
-    fn push_skip_when_guard_rejects() {
-        let mode = push_mode(Some(100), 100, Some("https://s3/x".into()), || "tok".into());
-        assert_eq!(mode, EvalCachePushMode::Skip);
-    }
-
-    #[test]
-    fn push_presigned_when_accepted_and_url_present() {
-        let mode = push_mode(Some(100), 200, Some("https://s3/x".into()), || "tok".into());
-        assert_eq!(
-            mode,
-            EvalCachePushMode::Presigned {
-                url: "https://s3/x".into()
-            }
-        );
-    }
-
-    #[test]
-    fn push_inline_when_accepted_and_no_url() {
-        let mode = push_mode(None, 200, None, || "tok".into());
-        assert_eq!(
-            mode,
-            EvalCachePushMode::Inline {
-                stream_token: "tok".into()
-            }
-        );
-    }
-
-    // ── storage key + token ─────────────────────────────────────────────────────
+    // ── storage key ─────────────────────────────────────────────────────────────
 
     #[test]
     fn storage_key_is_namespaced() {
         assert_eq!(storage_key("abc123"), "eval-cache/abc123");
-    }
-
-    #[test]
-    fn stream_token_is_deterministic() {
-        assert_eq!(stream_token("fp"), stream_token("fp"));
-        assert_ne!(stream_token("fp"), stream_token("fp2"));
-    }
-
-    // ── inline staging ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn staging_appends_contiguous_and_finishes() {
-        let mut s = EvalCacheReceiveStore::new(1024);
-        s.open("fp");
-        assert!(s.append("fp", 0, &[1, 2, 3]));
-        assert!(s.append("fp", 3, &[4, 5]));
-        assert_eq!(s.finish("fp"), Some(vec![1, 2, 3, 4, 5]));
-    }
-
-    #[test]
-    fn staging_rejects_non_contiguous_offset() {
-        let mut s = EvalCacheReceiveStore::new(1024);
-        s.open("fp");
-        assert!(s.append("fp", 0, &[1, 2, 3]));
-        assert!(!s.append("fp", 99, &[4]));
-        assert!(s.finish("fp").is_none());
-    }
-
-    #[test]
-    fn staging_rejects_over_budget() {
-        let mut s = EvalCacheReceiveStore::new(4);
-        s.open("fp");
-        assert!(!s.append("fp", 0, &[0u8; 5]));
-    }
-
-    #[test]
-    fn staging_chunk_needs_open_stream() {
-        let mut s = EvalCacheReceiveStore::new(1024);
-        assert!(!s.append("fp", 0, &[1]));
-    }
-
-    #[test]
-    fn fingerprint_for_chunk_resolves_single_active() {
-        let mut s = EvalCacheReceiveStore::new(1024);
-        assert!(fingerprint_for_chunk(&s).is_none());
-        s.open("fp");
-        assert_eq!(fingerprint_for_chunk(&s).as_deref(), Some("fp"));
-        s.open("fp2");
-        assert!(
-            fingerprint_for_chunk(&s).is_none(),
-            "ambiguous when 2 active"
-        );
     }
 }

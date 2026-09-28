@@ -30,12 +30,9 @@ use gradient_wire::session::frame::{Frame, Inbound};
 
 use super::auth::{expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers};
 use super::cache::handle_cache_query;
-use super::eval_cache::{
-    EvalCacheReceiveStore, handle_eval_cache_chunk, handle_eval_cache_pull, handle_eval_cache_push,
-    handle_eval_cache_push_done,
-};
+use super::eval_cache::handle_eval_cache_pull;
 use super::job_events::{JobEvent, JobEvents};
-use super::nar_transfer::{NarReceiveStore, serve_nar_request};
+use super::nar_serve::serve_nar_request;
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
 };
@@ -94,37 +91,23 @@ impl<'a> DispatchContext<'a> {
     pub async fn dispatch(
         &mut self,
         inbound: Inbound<ClientMessage>,
-        nar: &mut NarReceiveStore,
-        eval_cache: &mut EvalCacheReceiveStore,
         uploads: &mut UploadSession,
     ) -> bool {
         super::tap::publish_inbound(&self.state.events, self.peer_id, &inbound);
         match inbound {
             Inbound::Bulk(frame) => {
-                self.dispatch_bulk(frame, nar, eval_cache, uploads).await;
+                self.dispatch_bulk(frame, uploads).await;
                 true
             }
-            Inbound::Control(msg) => self.dispatch_control(msg, nar, eval_cache, uploads).await,
+            Inbound::Control(msg) => self.dispatch_control(msg, uploads).await,
         }
     }
 
     /// Handle a payload-bearing frame without deserialising it: the chunk is
     /// read as a slice of the buffer the socket delivered.
-    async fn dispatch_bulk(
-        &mut self,
-        frame: Frame<ClientMessage>,
-        nar: &mut NarReceiveStore,
-        eval_cache: &mut EvalCacheReceiveStore,
-        uploads: &mut UploadSession,
-    ) {
+    async fn dispatch_bulk(&mut self, frame: Frame<ClientMessage>, uploads: &mut UploadSession) {
         trace!(variant = frame.variant_name(), "received bulk frame");
         match frame.archived() {
-            ArchivedClientMessage::NarPush {
-                job_id, store_path, ..
-            } => {
-                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
-                self.on_nar_push(&job_id, &store_path, frame, nar).await;
-            }
             ArchivedClientMessage::UploadChunk {
                 request_id,
                 data,
@@ -136,22 +119,6 @@ impl<'a> DispatchContext<'a> {
                     offset.to_native(),
                     data.as_slice(),
                     uploads,
-                )
-                .await;
-            }
-            ArchivedClientMessage::EvalCacheChunk {
-                job_id,
-                data,
-                offset,
-                is_final,
-            } => {
-                handle_eval_cache_chunk(
-                    self.state,
-                    eval_cache,
-                    job_id.as_str(),
-                    data.as_slice(),
-                    offset.to_native(),
-                    *is_final,
                 )
                 .await;
             }
@@ -168,13 +135,7 @@ impl<'a> DispatchContext<'a> {
     }
 
     /// Route a control-plane `ClientMessage` to the appropriate handler.
-    async fn dispatch_control(
-        &mut self,
-        msg: ClientMessage,
-        nar: &mut NarReceiveStore,
-        eval_cache: &mut EvalCacheReceiveStore,
-        uploads: &mut UploadSession,
-    ) -> bool {
+    async fn dispatch_control(&mut self, msg: ClientMessage, uploads: &mut UploadSession) -> bool {
         // Per-message and per-frame lines stay at trace: at debug a closure push
         // logs thousands of lines a second and stalls a test VM on its serial console.
         trace!(variant = msg.variant_name(), "received client message");
@@ -267,8 +228,6 @@ impl<'a> DispatchContext<'a> {
                 dispatch,
                 spans,
             } => {
-                let commits = nar.commits();
-                nar.forget_job(&job_id).await;
                 self.forget_uploads(&job_id, uploads).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     self.active.remove(&job_id);
@@ -277,7 +236,6 @@ impl<'a> DispatchContext<'a> {
                             job_id,
                             dispatch,
                             spans,
-                            commits,
                         })
                         .await;
                 }
@@ -291,10 +249,6 @@ impl<'a> DispatchContext<'a> {
                 missing_paths,
                 spans,
             } => {
-                // The worker drops the uploads still running when a job ends,
-                // so this is the only notice the session gets that their push
-                // streams will never be finished.
-                nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
                     self.active.remove(&job_id);
@@ -332,57 +286,11 @@ impl<'a> DispatchContext<'a> {
                     .await;
                 true
             }
-            ClientMessage::NarStreamHeader {
-                job_id,
-                store_path,
-                total_bytes,
-                stream_token,
-            } => {
-                self.on_push_stream_header(job_id, store_path, total_bytes, stream_token, nar)
-                    .await;
-                true
-            }
-            ClientMessage::NarUploaded {
-                job_id,
-                store_path,
-                file_hash,
-                file_size,
-                nar_size,
-                nar_hash,
-                references,
-                deriver,
-                ca,
-                multipart,
-            } => {
-                self.on_nar_uploaded(
-                    job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
-                    deriver, ca, multipart, nar,
-                )
-                .await;
-                true
-            }
             ClientMessage::EvalCachePull {
                 job_id,
                 fingerprint,
             } => {
                 self.on_eval_cache_pull(job_id, fingerprint).await;
-                true
-            }
-            ClientMessage::EvalCachePush {
-                job_id,
-                fingerprint,
-                size_bytes,
-            } => {
-                self.on_eval_cache_push(job_id, fingerprint, size_bytes, eval_cache)
-                    .await;
-                true
-            }
-            ClientMessage::EvalCachePushDone {
-                job_id: _,
-                fingerprint,
-                size_bytes,
-            } => {
-                self.on_eval_cache_push_done(fingerprint, size_bytes).await;
                 true
             }
             ClientMessage::CacheQuery {
@@ -432,6 +340,13 @@ impl<'a> DispatchContext<'a> {
                 metadata,
             } => {
                 self.on_upload_finished(request_id, metadata, uploads).await;
+                true
+            }
+            ClientMessage::NarStreamHeader { .. }
+            | ClientMessage::NarUploaded { .. }
+            | ClientMessage::EvalCachePush { .. }
+            | ClientMessage::EvalCachePushDone { .. } => {
+                warn!("retired upload message; the worker predates PROTO 19");
                 true
             }
             // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
@@ -528,28 +443,6 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_eval_cache_pull(&mut self, job_id: String, fingerprint: String) {
         handle_eval_cache_pull(self.state, self.writer, job_id, fingerprint).await;
-    }
-
-    async fn on_eval_cache_push(
-        &mut self,
-        job_id: String,
-        fingerprint: String,
-        size_bytes: u64,
-        eval_cache: &mut EvalCacheReceiveStore,
-    ) {
-        handle_eval_cache_push(
-            self.state,
-            self.writer,
-            eval_cache,
-            job_id,
-            fingerprint,
-            size_bytes,
-        )
-        .await;
-    }
-
-    async fn on_eval_cache_push_done(&mut self, fingerprint: String, size_bytes: u64) {
-        handle_eval_cache_push_done(self.state, fingerprint, size_bytes).await;
     }
 
     async fn on_eval_message(
@@ -1090,7 +983,6 @@ pub(in crate::handler) mod fixture {
                 &state.shutdown,
                 "w1",
                 SchedulerJobEvents {
-                    shutdown: state.shutdown.clone(),
                     scheduler: Arc::clone(&scheduler),
                     writer: writer.clone(),
                     peer_id: "w1".into(),
@@ -1205,7 +1097,6 @@ mod assignment_response_tests {
             &state.shutdown,
             "w1",
             SchedulerJobEvents {
-                shutdown: state.shutdown.clone(),
                 scheduler: Arc::clone(&scheduler),
                 writer: writer.clone(),
                 peer_id: "w1".into(),
@@ -1265,7 +1156,6 @@ mod assignment_response_tests {
             &state.shutdown,
             "w1",
             SchedulerJobEvents {
-                shutdown: state.shutdown.clone(),
                 scheduler: Arc::clone(&scheduler),
                 writer: writer.clone(),
                 peer_id: "w1".into(),
@@ -1307,7 +1197,6 @@ mod assignment_response_tests {
             &state.shutdown,
             "w1",
             SchedulerJobEvents {
-                shutdown: state.shutdown.clone(),
                 scheduler: Arc::clone(&scheduler),
                 writer: writer.clone(),
                 peer_id: "w1".into(),
@@ -1360,7 +1249,6 @@ mod assignment_response_tests {
             &state.shutdown,
             "w1",
             SchedulerJobEvents {
-                shutdown: state.shutdown.clone(),
                 scheduler: Arc::clone(&scheduler),
                 writer: writer.clone(),
                 peer_id: "w1".into(),

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::constants::MULTIPART_NAR_BYTES;
 use crate::types::QueryMode;
 
 /// How a NAR crosses between worker and storage: over the proto stream through
@@ -13,30 +12,6 @@ use crate::types::QueryMode;
 pub enum Transport {
     Relay,
     Presigned,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PushTransport {
-    Relay,
-    Put,
-    Multipart(u64),
-}
-
-/// Upload transport for an uncached path: relay unless the store can presign
-/// and the NAR is over the small-NAR threshold; past `MULTIPART_NAR_BYTES` a
-/// single PUT could hit S3's 5 GiB cap, so the upload goes in parts. Parts are
-/// sized from the NAR, so an unknown size gets a single PUT.
-pub fn push_transport(
-    nar_size: Option<u64>,
-    small_nar_bytes: u64,
-    presigner: bool,
-) -> PushTransport {
-    match nar_size {
-        _ if !presigner => PushTransport::Relay,
-        Some(size) if size <= small_nar_bytes => PushTransport::Relay,
-        Some(size) if size > MULTIPART_NAR_BYTES => PushTransport::Multipart(size),
-        _ => PushTransport::Put,
-    }
 }
 
 /// Whether a query may leave our cache. Only a caller that said `external` ever
@@ -70,38 +45,6 @@ pub fn pull_transport(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn push_transport_relays_small_nars_and_presigns_large_ones() {
-        let threshold = 1024 * 1024;
-        assert_eq!(
-            push_transport(Some(1024), threshold, true),
-            PushTransport::Relay
-        );
-        assert_eq!(
-            push_transport(Some(threshold), threshold, true),
-            PushTransport::Relay
-        );
-        assert_eq!(
-            push_transport(Some(threshold + 1), threshold, true),
-            PushTransport::Put
-        );
-        assert_eq!(
-            push_transport(Some(MULTIPART_NAR_BYTES), threshold, true),
-            PushTransport::Put
-        );
-        assert_eq!(
-            push_transport(Some(MULTIPART_NAR_BYTES + 1), threshold, true),
-            PushTransport::Multipart(MULTIPART_NAR_BYTES + 1)
-        );
-        assert_eq!(push_transport(None, threshold, false), PushTransport::Relay);
-    }
-
-    #[test]
-    fn an_unknown_size_gets_a_single_put_never_a_multipart_upload() {
-        let threshold = 1024 * 1024;
-        assert_eq!(push_transport(None, threshold, true), PushTransport::Put);
-    }
 
     #[test]
     fn pull_transport_relays_unconfirmed_small_and_presignerless_paths() {

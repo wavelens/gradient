@@ -10,11 +10,10 @@ use gradient_core::ServerState;
 use gradient_types::ids::{CacheId, CachedPathId, ProjectId};
 use gradient_types::*;
 use gradient_wire::transport::{
-    PushTransport, Transport, external_arity_ok, may_consult_upstreams, pull_transport,
-    push_transport,
+    Transport, external_arity_ok, may_consult_upstreams, pull_transport,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
-use tracing::{error, warn};
+use tracing::warn;
 
 /// Look up the locally-cached `(file_size, nar_size)` for `hashes`.
 ///
@@ -331,49 +330,16 @@ async fn build_cached_entry(
     }
 }
 
-/// Push-mode response for an uncached path: `path` + `cached: false` plus
-/// a presigned PUT URL when the NAR store supports one (S3). Local stores
-/// return `url: None` and the worker uploads via `NarPush` over the
-/// WebSocket. No metadata, no upstream lookup.
-async fn build_uncached_push_entry(
-    state: &ServerState,
-    hash: &str,
-    path: &str,
-    nar_size: Option<u64>,
-    expire: std::time::Duration,
-) -> gradient_wire::types::CachedPath {
-    use gradient_wire::types::CachedPath;
-
-    let transport = push_transport(
-        nar_size,
-        state.config.nar.small_bytes,
-        state.nar_storage.presigner_available(),
-    );
-    let (url, multipart) = match transport {
-        PushTransport::Relay => (None, None),
-        PushTransport::Put => (
-            presign_or_relay(
-                hash,
-                state.nar_storage.presigned_put_url(hash, expire).await,
-            ),
-            None,
-        ),
-        PushTransport::Multipart(nar_size) => (
-            None,
-            presign_or_relay(
-                hash,
-                state.nar_storage.presigned_multipart(hash, nar_size).await,
-            ),
-        ),
-    };
-
-    CachedPath {
+/// Push-mode response for an uncached path: only that the server lacks it. How
+/// the bytes travel is decided per path when the worker asks for an upload.
+fn uncached_push_entry(path: &str) -> gradient_wire::types::CachedPath {
+    gradient_wire::types::CachedPath {
         path: path.to_string(),
         cached: false,
         file_size: None,
         nar_size: None,
-        url,
-        multipart,
+        url: None,
+        multipart: None,
         nar_hash: None,
         file_hash: None,
         references: None,
@@ -381,19 +347,6 @@ async fn build_uncached_push_entry(
         deriver: None,
         ca: None,
     }
-}
-
-/// A failed presign degrades to the relay rather than failing the query.
-fn presign_or_relay<T>(hash: &str, grant: anyhow::Result<Option<T>>) -> Option<T> {
-    grant.unwrap_or_else(|e| {
-        error!(
-            %hash,
-            error = %e,
-            "S3 presigned upload grant failed; worker will fall back to direct NarPush \
-             (this defeats S3 - check S3 credentials / endpoint / region config)"
-        );
-        None
-    })
 }
 
 /// Serve upstream availability resolved once at eval time and persisted onto
@@ -618,11 +571,6 @@ async fn query(
     }
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
-    let size_by_path: HashMap<&str, Option<u64>> = paths
-        .iter()
-        .map(String::as_str)
-        .zip(nar_sizes.iter().copied())
-        .collect();
 
     // One read of `cached_path` feeds both the size map and the Pull metadata;
     // it used to be queried three times over, once here, once for the sizes, and
@@ -674,8 +622,7 @@ async fn query(
                 .await,
             );
         } else if matches!(mode, QueryMode::Push) {
-            let nar_size = size_by_path.get(*path).copied().flatten();
-            result.push(build_uncached_push_entry(state, hash, path, nar_size, expire).await);
+            result.push(uncached_push_entry(path));
         }
     }
 
@@ -945,30 +892,24 @@ mod tests {
         state
     }
 
-    /// The server's routing rule on the wire: a small path relays (no URL), a
-    /// large one gets the presigned PUT.
+    /// A push query only says which paths are missing: no grant rides it, even
+    /// on a store that could presign one.
     #[tokio::test]
-    async fn push_answers_small_paths_without_a_url_and_large_ones_with_one() {
+    async fn push_answers_uncached_paths_without_any_grant() {
         let state = make_s3_state();
         let paths = vec![
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-small".to_string(),
-            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-large".to_string(),
+            format!("/nix/store/{}-small", "a".repeat(32)),
+            format!("/nix/store/{}-large", "b".repeat(32)),
         ];
-        let sizes = [Some(1024), Some(8 * 1024 * 1024)];
+        let sizes = [Some(1024), Some(8 * 1024 * 1024 * 1024)];
         let result = query(&state, None, &paths, &sizes, QueryMode::Push, false)
             .await
             .unwrap();
-        let has_url: HashMap<&str, bool> = result
-            .iter()
-            .map(|c| (c.path.as_str(), c.url.is_some()))
-            .collect();
+        assert_eq!(result.len(), 2);
         assert!(
-            !has_url[paths[0].as_str()],
-            "a small path relays over NarPush"
-        );
-        assert!(
-            has_url[paths[1].as_str()],
-            "a large path uploads on a presigned PUT"
+            result
+                .iter()
+                .all(|c| !c.cached && c.url.is_none() && c.multipart.is_none())
         );
     }
 

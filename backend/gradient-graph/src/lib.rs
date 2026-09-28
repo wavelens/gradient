@@ -207,22 +207,6 @@ impl Graph {
         Ok(committed)
     }
 
-    /// Mark a relayed path's object as stored. `false` means the row's bytes
-    /// moved on since the upload began, so the caller keeps the newer staged file.
-    pub async fn confirm_nar(&self, hash: &str, file_hash: &str) -> anyhow::Result<bool> {
-        #[cfg(feature = "stub")]
-        if self.stub {
-            return Ok(true);
-        }
-
-        let confirm = NarConfirm {
-            hash: hash.to_owned(),
-            file_hash: file_hash.to_owned(),
-        };
-        self.call(|reply| GraphMsg::ConfirmNar(confirm, reply))
-            .await
-    }
-
     pub async fn transition(&self, transition: Transition) -> anyhow::Result<TransitionReport> {
         #[cfg(feature = "stub")]
         if self.stub {

@@ -88,6 +88,9 @@ in {
   imports = [
     ./gradient-state.nix
     ./gradient-worker.nix
+    (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "uploadConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
+    (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "commitConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
+    (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "maxBufferBytes" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
   ];
 
   options = {
@@ -546,21 +549,6 @@ in {
           '';
         };
 
-        uploadConcurrency = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 4;
-          description = "Background uploads of relayed NARs to S3 running at once.";
-        };
-
-        commitConcurrency = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 8;
-          description = ''
-            NAR commits (verification, storage placement and cache index write) running at once
-            across all worker connections. Further commits wait.
-          '';
-        };
-
         storageOpenTimeoutSecs = lib.mkOption {
           type = lib.types.ints.positive;
           default = 60;
@@ -585,16 +573,6 @@ in {
           description = ''
             NAR serving tasks that may run at once per worker connection, bounding memory and
             storage fan-out for large batches.
-          '';
-        };
-
-        maxBufferBytes = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 10 * 1024 * 1024 * 1024;
-          description = ''
-            Maximum total bytes of unfinished NAR uploads staged under
-            {file}`<services.gradient.baseDir>/nar-partial`, so a misbehaving worker cannot fill the
-            disk.
           '';
         };
 
@@ -1308,12 +1286,9 @@ in {
         GRADIENT_NAR_SMALL_BYTES = toString cfg.nar.smallBytes;
         GRADIENT_NAR_HOT_CACHE_BYTES = toString cfg.nar.hotCacheBytes;
         GRADIENT_NAR_VERIFY_DIGEST = lib.boolToString cfg.nar.verifyDigest;
-        GRADIENT_NAR_UPLOAD_CONCURRENCY = toString cfg.nar.uploadConcurrency;
-        GRADIENT_NAR_COMMIT_CONCURRENCY = toString cfg.nar.commitConcurrency;
         GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.nar.storageOpenTimeoutSecs;
         GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.nar.sendChunkTimeoutSecs;
         GRADIENT_NAR_MAX_CONCURRENT_SERVES = toString cfg.nar.maxConcurrentServes;
-        GRADIENT_NAR_MAX_BUFFER_BYTES = toString cfg.nar.maxBufferBytes;
         GRADIENT_NAR_PARTIAL_TTL_SECS = toString cfg.nar.partialTtlSecs;
         GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY = toString cfg.cache.upstreamQueryConcurrency;
         GRADIENT_CACHE_MAX_STORAGE_GB = toString cfg.cache.maxStorageGb;
