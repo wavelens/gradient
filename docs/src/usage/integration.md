@@ -86,7 +86,7 @@ Gradient server. There are three roles to consider:
 
 1. **Server operator** - once per Gradient instance, register the App and put
    its credentials into the server's config. See the
-   [GitHub App setup](../development/github-app-setup.md) operator doc.
+   [Connect GitHub](../guides/forge-github.md) guide.
 2. **Project admin** - once the server has the App configured, install the
    App on the project's GitHub account.
 3. **GitHub repository owner** - installing the App fires the `installation`
