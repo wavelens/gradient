@@ -19,6 +19,7 @@ use gradient_types::ids::{CacheId, CacheUpstreamId, ProjectId};
 pub struct UpstreamEndpoint {
     pub id: CacheUpstreamId,
     pub url: String,
+    pub public_key: Option<String>,
     pub avg_latency_ms: Option<f64>,
     pub hit_rate: Option<f64>,
 }
@@ -108,7 +109,7 @@ pub async fn gradient_proto_upstreams_for_project<C: ConnectionTrait>(
 
 fn upstream_endpoints_sql(window_minutes: i64) -> String {
     format!(
-        "SELECT cu.id AS id, cu.url AS url, \
+        "SELECT cu.id AS id, cu.url AS url, cu.public_key AS public_key, \
                 SUM(um.latency_ms_sum) / NULLIF(SUM(um.request_count), 0) AS avg_latency_ms, \
                 SUM(um.narinfo_hits)::float8 \
                   / NULLIF(SUM(um.narinfo_hits + um.narinfo_misses), 0) AS hit_rate \
@@ -118,7 +119,7 @@ fn upstream_endpoints_sql(window_minutes: i64) -> String {
               AND um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '{window_minutes} minutes' \
          WHERE oc.project = $1 AND oc.mode <> 2 AND cu.kind = 2 \
                AND cu.mode <> 2 AND cu.url IS NOT NULL \
-         GROUP BY cu.id, cu.url",
+         GROUP BY cu.id, cu.url, cu.public_key",
         window_minutes = window_minutes
     )
 }
@@ -150,6 +151,7 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
             Some(UpstreamEndpoint {
                 id: CacheUpstreamId::new(id),
                 url,
+                public_key: r.try_get("", "public_key").ok().flatten(),
                 avg_latency_ms: r.try_get("", "avg_latency_ms").ok(),
                 hit_rate: r.try_get("", "hit_rate").ok(),
             })

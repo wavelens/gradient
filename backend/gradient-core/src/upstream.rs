@@ -201,7 +201,7 @@ async fn probe_one(
 
     let out = match resp {
         Ok(r) if r.status().is_success() => match r.text().await {
-            Ok(body) => match parse_upstream_narinfo(&ep.url, store_path, &body) {
+            Ok(body) => match verified_narinfo(ep, hash, store_path, &body) {
                 Some(cp) => (latency_ms, SampleKind::Hit, Some(cp)),
                 None => (latency_ms, SampleKind::Miss, None),
             },
@@ -262,11 +262,11 @@ pub async fn fetch_narinfo_body(
                 return None;
             }
             let body = resp.ok()?.text().await.ok()?;
-            if !gradient_sources::verify_narinfo_signature(&u.public_key, &body) {
+            if !is_trusted_narinfo(&u.public_key, path_hash, &body) {
                 tracing::warn!(
                     upstream = %u.id,
                     path_hash,
-                    "upstream narinfo Sig did not verify against configured public_key; dropping"
+                    "upstream narinfo is not signed by its configured public_key for this path; dropping"
                 );
                 return None;
             }
@@ -412,6 +412,42 @@ pub async fn probe_batch(
     }
 
     (found, stats)
+}
+
+/// `body` as a hit for `store_path`, but only when it names that path and a
+/// `Sig` verifies against the key `ep` is configured with. Anything else is a
+/// miss: an unsigned or foreign answer must never become substitutable.
+pub fn verified_narinfo(
+    ep: &UpstreamEndpoint,
+    path_hash: &str,
+    store_path: &str,
+    body: &str,
+) -> Option<CachedPath> {
+    let Some(public_key) = ep.public_key.as_deref() else {
+        tracing::warn!(upstream = %ep.id, "upstream has no public_key; ignoring its narinfo");
+        return None;
+    };
+    if !is_trusted_narinfo(public_key, path_hash, body) {
+        tracing::warn!(
+            upstream = %ep.id,
+            path_hash,
+            "upstream narinfo is not signed by its configured public_key for this path; dropping"
+        );
+        return None;
+    }
+    parse_upstream_narinfo(&ep.url, store_path, body)
+}
+
+fn is_trusted_narinfo(public_key: &str, path_hash: &str, body: &str) -> bool {
+    names_path_hash(body, path_hash) && gradient_sources::verify_narinfo_signature(public_key, body)
+}
+
+fn names_path_hash(body: &str, path_hash: &str) -> bool {
+    body.lines()
+        .filter_map(|l| l.strip_prefix("StorePath: "))
+        .next_back()
+        .and_then(|p| gradient_sources::get_hash_from_path(p.trim().to_owned()).ok())
+        .is_some_and(|(hash, _)| hash == path_hash)
 }
 
 /// Parse a narinfo `body` into a [`CachedPath`]. The `URL:` field is resolved
@@ -745,10 +781,79 @@ mod tests {
         assert!(cp.file_size.is_none());
     }
 
+    const SIGNED_HASH: &str = "brj5bb4pny8pnngq3qdymkllwql6z29j";
+    const SIGNED_PATH: &str = "/nix/store/brj5bb4pny8pnngq3qdymkllwql6z29j-hello-2.12";
+
+    /// A narinfo for `store_path` signed by a fresh `upstream-1` key, and that
+    /// key in the `name:base64` form an upstream is configured with.
+    fn signed_narinfo(store_path: &str) -> (String, String) {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let keypair = ed25519_compact::KeyPair::generate();
+        let nar_hash = "sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf";
+        let fingerprint = format!("1;{store_path};{nar_hash};120;");
+        let sig = STANDARD.encode(*keypair.sk.sign(fingerprint, None));
+        let body = format!(
+            "StorePath: {store_path}\nURL: nar/x.nar.xz\nNarHash: {nar_hash}\nNarSize: 120\n\
+             References: \nSig: upstream-1:{sig}\n"
+        );
+        (body, format!("upstream-1:{}", STANDARD.encode(*keypair.pk)))
+    }
+
+    fn keyed_ep(public_key: Option<String>) -> UpstreamEndpoint {
+        UpstreamEndpoint {
+            public_key,
+            ..ep(None, None)
+        }
+    }
+
+    #[test]
+    fn a_narinfo_signed_by_the_upstream_key_is_a_hit() {
+        let (body, key) = signed_narinfo(SIGNED_PATH);
+        let cp = verified_narinfo(&keyed_ep(Some(key)), SIGNED_HASH, SIGNED_PATH, &body)
+            .expect("verified");
+        assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar.xz"));
+    }
+
+    #[test]
+    fn an_unsigned_narinfo_is_a_miss() {
+        let (body, key) = signed_narinfo(SIGNED_PATH);
+        let unsigned: String = body
+            .lines()
+            .filter(|l| !l.starts_with("Sig: "))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert!(
+            verified_narinfo(&keyed_ep(Some(key)), SIGNED_HASH, SIGNED_PATH, &unsigned).is_none()
+        );
+    }
+
+    #[test]
+    fn a_narinfo_signed_by_another_key_is_a_miss() {
+        let (body, _) = signed_narinfo(SIGNED_PATH);
+        let (_, other_key) = signed_narinfo(SIGNED_PATH);
+        assert!(
+            verified_narinfo(&keyed_ep(Some(other_key)), SIGNED_HASH, SIGNED_PATH, &body).is_none()
+        );
+    }
+
+    #[test]
+    fn a_signed_narinfo_for_another_path_is_a_miss() {
+        let other = "/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-evil-1.0";
+        let (body, key) = signed_narinfo(other);
+        assert!(verified_narinfo(&keyed_ep(Some(key)), SIGNED_HASH, SIGNED_PATH, &body).is_none());
+    }
+
+    #[test]
+    fn an_upstream_without_a_key_serves_nothing() {
+        let (body, _) = signed_narinfo(SIGNED_PATH);
+        assert!(verified_narinfo(&keyed_ep(None), SIGNED_HASH, SIGNED_PATH, &body).is_none());
+    }
+
     fn ep(latency: Option<f64>, hit: Option<f64>) -> UpstreamEndpoint {
         UpstreamEndpoint {
             id: CacheUpstreamId::now_v7(),
             url: "https://up.example/".into(),
+            public_key: None,
             avg_latency_ms: latency,
             hit_rate: hit,
         }
