@@ -83,6 +83,7 @@ nav:
       - CLI: reference/cli.md
       - API: reference/api.md
       - Events and Webhooks: reference/events.md
+      - Scheduler Policies: reference/scheduler-policies.md
   - Contributors:
       - Architecture: development/architecture.md
       - Internals: development/internals.md
