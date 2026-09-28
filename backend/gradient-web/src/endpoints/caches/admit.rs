@@ -32,7 +32,7 @@ pub(super) async fn admit(state: &ServerState, size: u64) -> WebResult<RestPermi
 }
 
 async fn admit_within(state: &ServerState, size: u64, wait: Duration) -> WebResult<RestPermit> {
-    let (session, mut admitted) = state.upload_admission.open_session();
+    let (session, mut admitted) = state.upload_admission.open_session("rest");
     session.request(0, ObjectKey::Rest(uuid::Uuid::now_v7().to_string()), size);
     match tokio::time::timeout(wait, admitted.recv()).await {
         Ok(Some(Admitted::Granted { permit, .. })) => Ok(RestPermit {

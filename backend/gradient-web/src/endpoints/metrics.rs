@@ -28,8 +28,8 @@ use gradient_util::metrics::{
     register_process_collector,
 };
 use prometheus::{
-    Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts,
-    Registry,
+    Counter, Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    Opts, Registry,
 };
 use sea_orm::{FromQueryResult, Iterable};
 use subtle::ConstantTimeEq;
@@ -61,6 +61,7 @@ pub(crate) struct Observations {
     pub cache_packages: i64,
     pub cache_nar_bytes_sent_total: i64,
     pub cache_nar_requests_total: i64,
+    pub uploads: gradient_storage::admission::AdmissionStats,
 }
 
 pub(crate) fn render(obs: &Observations) -> String {
@@ -196,6 +197,8 @@ pub(crate) fn render(obs: &Observations) -> String {
 
     reqs.inc_by(obs.cache_nar_requests_total.max(0) as u64);
     registry.register(Box::new(reqs)).expect("register reqs");
+
+    render_uploads(&registry, &obs.uploads);
 
     register_process_collector(&registry);
     encode_text(&registry)
@@ -467,6 +470,57 @@ gradient_db::sql_fn! {
 /// Errors propagate as `WebError`; the handler converts those into 500.
 /// We intentionally never serve a partial response - Prometheus would
 /// treat a 200 with missing series as authoritative and corrupt counters.
+fn render_uploads(registry: &Registry, uploads: &gradient_storage::admission::AdmissionStats) {
+    let in_flight =
+        IntGauge::new("gradient_upload_in_flight", "Uploads holding a permit.").expect("metric");
+    in_flight.set(uploads.in_flight as i64);
+    registry
+        .register(Box::new(in_flight))
+        .expect("register upload in flight");
+
+    let bytes = IntGauge::new(
+        "gradient_upload_bytes_in_flight",
+        "Bytes of admitted uploads.",
+    )
+    .expect("metric");
+    bytes.set(uploads.bytes_in_flight as i64);
+    registry
+        .register(Box::new(bytes))
+        .expect("register upload bytes");
+
+    let depth = IntGaugeVec::new(
+        Opts::new(
+            "gradient_upload_queue_depth",
+            "Upload requests waiting for a permit.",
+        ),
+        &["worker"],
+    )
+    .expect("metric");
+    for (worker, n) in &uploads.queued {
+        depth.with_label_values(&[worker]).set(*n as i64);
+    }
+    registry
+        .register(Box::new(depth))
+        .expect("register upload queue depth");
+
+    let granted = IntCounter::new("gradient_upload_granted_total", "Upload permits granted.")
+        .expect("metric");
+    granted.inc_by(uploads.granted_total);
+    registry
+        .register(Box::new(granted))
+        .expect("register upload grants");
+
+    let waited = Counter::new(
+        "gradient_upload_wait_seconds_total",
+        "Seconds uploads waited for a permit.",
+    )
+    .expect("metric");
+    waited.inc_by(uploads.wait_seconds_total);
+    registry
+        .register(Box::new(waited))
+        .expect("register upload wait");
+}
+
 pub(crate) async fn collect(
     state: &Arc<ServerState>,
     scheduler: &Scheduler,
@@ -480,6 +534,7 @@ pub(crate) async fn collect(
     let mut obs = Observations {
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_seconds: (Utc::now() - state.started_at).num_milliseconds() as f64 / 1000.0,
+        uploads: state.upload_admission.stats(),
         ..Default::default()
     };
 
@@ -611,6 +666,13 @@ mod tests {
             cache_packages: 9,
             cache_nar_bytes_sent_total: 999,
             cache_nar_requests_total: 11,
+            uploads: gradient_storage::admission::AdmissionStats {
+                in_flight: 3,
+                bytes_in_flight: 4096,
+                queued: vec![("w1".into(), 5)],
+                granted_total: 8,
+                wait_seconds_total: 1.5,
+            },
         };
 
         let body = render(&obs);
@@ -628,6 +690,11 @@ mod tests {
             "gradient_evaluations_total{status=\"Completed\"} 5",
             "gradient_evaluations_in_state{status=\"Building\"} 1",
             "gradient_workers_connected 4",
+            "gradient_upload_in_flight 3",
+            "gradient_upload_bytes_in_flight 4096",
+            "gradient_upload_queue_depth{worker=\"w1\"} 5",
+            "gradient_upload_granted_total 8",
+            "gradient_upload_wait_seconds_total 1.5",
             "gradient_jobs_pending 6",
             "gradient_jobs_active 2",
             "gradient_cache_bytes 1024",

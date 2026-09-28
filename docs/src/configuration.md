@@ -321,6 +321,8 @@ All other requests should be handled by a static webserver hosting the files at:
 
 Set `services.gradient.metrics.tokenFile` to enable `GET /metrics` (Prometheus exposition format). When unset, the endpoint returns 404.
 
+Upload admission is reported as `gradient_upload_in_flight`, `gradient_upload_bytes_in_flight`, `gradient_upload_queue_depth{worker}`, `gradient_upload_granted_total` and `gradient_upload_wait_seconds_total` (mean wait is the last divided by the grants).
+
 ```nix
 services.gradient.metrics.tokenFile = "/run/secrets/gradient-metrics";
 ```

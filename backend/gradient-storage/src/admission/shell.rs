@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use gradient_util::sync::Mutex;
 use tokio::sync::mpsc;
@@ -24,10 +25,22 @@ pub enum Admitted {
     },
 }
 
+#[derive(Debug, Default)]
+pub struct AdmissionStats {
+    pub in_flight: usize,
+    pub bytes_in_flight: u64,
+    pub queued: Vec<(String, usize)>,
+    pub granted_total: u64,
+    pub wait_seconds_total: f64,
+}
+
 pub struct UploadAdmission {
     core: Mutex<AdmissionCore>,
-    sessions: Mutex<HashMap<SessionId, mpsc::UnboundedSender<Admitted>>>,
+    sessions: Mutex<HashMap<SessionId, (String, mpsc::UnboundedSender<Admitted>)>>,
+    enqueued_at: Mutex<HashMap<(SessionId, u64), Instant>>,
     next_session: AtomicU64,
+    granted_total: AtomicU64,
+    wait_micros_total: AtomicU64,
 }
 
 impl std::fmt::Debug for UploadAdmission {
@@ -44,14 +57,20 @@ impl UploadAdmission {
         Arc::new(Self {
             core: Mutex::new(AdmissionCore::new(limits)),
             sessions: Mutex::new(HashMap::new()),
+            enqueued_at: Mutex::new(HashMap::new()),
             next_session: AtomicU64::new(1),
+            granted_total: AtomicU64::new(0),
+            wait_micros_total: AtomicU64::new(0),
         })
     }
 
-    pub fn open_session(self: &Arc<Self>) -> (AdmissionSession, mpsc::UnboundedReceiver<Admitted>) {
+    pub fn open_session(
+        self: &Arc<Self>,
+        label: &str,
+    ) -> (AdmissionSession, mpsc::UnboundedReceiver<Admitted>) {
         let id = self.next_session.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::unbounded_channel();
-        self.sessions.lock().insert(id, tx);
+        self.sessions.lock().insert(id, (label.to_owned(), tx));
         (
             AdmissionSession {
                 admission: Arc::clone(self),
@@ -67,6 +86,39 @@ impl UploadAdmission {
 
     pub fn bytes_in_flight(&self) -> u64 {
         self.core.lock().bytes_in_flight()
+    }
+
+    pub fn stats(&self) -> AdmissionStats {
+        let (in_flight, bytes_in_flight, by_session) = {
+            let core = self.core.lock();
+            (
+                core.in_flight(),
+                core.bytes_in_flight(),
+                core.queued_by_session(),
+            )
+        };
+        let sessions = self.sessions.lock();
+        let mut queued: HashMap<String, usize> = HashMap::new();
+        for (session, n) in by_session {
+            if let Some((label, _)) = sessions.get(&session) {
+                *queued.entry(label.clone()).or_default() += n;
+            }
+        }
+        AdmissionStats {
+            in_flight,
+            bytes_in_flight,
+            queued: queued.into_iter().collect(),
+            granted_total: self.granted_total.load(Ordering::Relaxed),
+            wait_seconds_total: self.wait_micros_total.load(Ordering::Relaxed) as f64 / 1e6,
+        }
+    }
+
+    fn record_grant(&self, session: SessionId, id: u64) {
+        if let Some(at) = self.enqueued_at.lock().remove(&(session, id)) {
+            let waited = at.elapsed().as_micros().min(u64::MAX as u128) as u64;
+            self.wait_micros_total.fetch_add(waited, Ordering::Relaxed);
+        }
+        self.granted_total.fetch_add(1, Ordering::Relaxed);
     }
 
     fn apply(self: &Arc<Self>, change: impl FnOnce(&mut AdmissionCore) -> Vec<Decision>) {
@@ -98,7 +150,13 @@ impl UploadAdmission {
             ),
             Decision::Skip(Request { session, id, .. }) => (session, Admitted::Skip { id }),
         };
-        let tx = self.sessions.lock().get(&session).cloned();
+        match &admitted {
+            Admitted::Granted { id, .. } => self.record_grant(session, *id),
+            Admitted::Skip { id } => {
+                self.enqueued_at.lock().remove(&(session, *id));
+            }
+        }
+        let tx = self.sessions.lock().get(&session).map(|(_, tx)| tx.clone());
         if let Some(tx) = tx {
             let _ = tx.send(admitted);
         }
@@ -113,6 +171,10 @@ pub struct AdmissionSession {
 impl AdmissionSession {
     pub fn request(&self, id: u64, object: ObjectKey, size: u64) {
         let session = self.id;
+        self.admission
+            .enqueued_at
+            .lock()
+            .insert((session, id), Instant::now());
         self.admission.apply(|core| {
             core.enqueue(Request {
                 session,
@@ -125,6 +187,7 @@ impl AdmissionSession {
 
     pub fn cancel(&self, id: u64) {
         let session = self.id;
+        self.admission.enqueued_at.lock().remove(&(session, id));
         self.admission.apply(|core| core.cancel(session, id));
     }
 }
@@ -133,6 +196,10 @@ impl Drop for AdmissionSession {
     fn drop(&mut self) {
         self.admission.sessions.lock().remove(&self.id);
         let session = self.id;
+        self.admission
+            .enqueued_at
+            .lock()
+            .retain(|(s, _), _| *s != session);
         self.admission.apply(|core| core.remove_session(session));
     }
 }
@@ -197,7 +264,7 @@ mod tests {
     #[tokio::test]
     async fn a_dropped_permit_grants_the_next_request() {
         let admission = admission(1);
-        let (session, mut rx) = admission.open_session();
+        let (session, mut rx) = admission.open_session("test");
         session.request(1, nar("a"), 1);
         session.request(2, nar("b"), 1);
         let Admitted::Granted { id: 1, permit, .. } = next(&mut rx).await else {
@@ -214,8 +281,8 @@ mod tests {
     #[tokio::test]
     async fn a_committed_permit_skips_the_same_object_in_another_session() {
         let admission = admission(4);
-        let (first, mut first_rx) = admission.open_session();
-        let (second, mut second_rx) = admission.open_session();
+        let (first, mut first_rx) = admission.open_session("test");
+        let (second, mut second_rx) = admission.open_session("test");
         first.request(1, nar("a"), 1);
         second.request(9, nar("a"), 1);
         let Admitted::Granted { permit, .. } = next(&mut first_rx).await else {
@@ -232,8 +299,8 @@ mod tests {
     #[tokio::test]
     async fn a_dropped_session_returns_its_permits_and_grants_the_next_worker() {
         let admission = admission(1);
-        let (first, mut first_rx) = admission.open_session();
-        let (second, mut second_rx) = admission.open_session();
+        let (first, mut first_rx) = admission.open_session("test");
+        let (second, mut second_rx) = admission.open_session("test");
         first.request(1, nar("a"), 1);
         second.request(1, nar("b"), 1);
         let Admitted::Granted { permit, .. } = next(&mut first_rx).await else {
@@ -255,7 +322,7 @@ mod tests {
     #[tokio::test]
     async fn cancelling_a_queued_request_never_grants_it() {
         let admission = admission(1);
-        let (session, mut rx) = admission.open_session();
+        let (session, mut rx) = admission.open_session("test");
         session.request(1, nar("a"), 1);
         session.request(2, nar("b"), 1);
         let Admitted::Granted { permit, .. } = next(&mut rx).await else {
@@ -265,5 +332,19 @@ mod tests {
         drop(permit);
         assert!(idle(&mut rx));
         assert_eq!(admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn stats_report_queue_depth_per_label_and_count_grants() {
+        let admission = admission(1);
+        let (a, _a_rx) = admission.open_session("worker-a");
+        let (b, _b_rx) = admission.open_session("worker-b");
+        a.request(1, nar("x"), 1);
+        b.request(1, nar("y"), 1);
+        b.request(2, nar("z"), 1);
+        let stats = admission.stats();
+        assert_eq!(stats.in_flight, 1);
+        assert_eq!(stats.granted_total, 1);
+        assert!(stats.queued.contains(&("worker-b".to_owned(), 2)));
     }
 }

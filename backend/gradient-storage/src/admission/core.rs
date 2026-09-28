@@ -78,6 +78,10 @@ impl AdmissionCore {
         self.queues.get(&session).map_or(0, VecDeque::len)
     }
 
+    pub fn queued_by_session(&self) -> Vec<(SessionId, usize)> {
+        self.queues.iter().map(|(s, q)| (*s, q.len())).collect()
+    }
+
     pub fn enqueue(&mut self, request: Request) -> Vec<Decision> {
         self.push_back(request);
         self.pump()

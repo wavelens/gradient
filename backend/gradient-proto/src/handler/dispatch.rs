@@ -1103,7 +1103,7 @@ pub(in crate::handler) mod fixture {
                     pending: pending_eval(),
                 },
             )]);
-            let (admission, admitted) = state.upload_admission.open_session();
+            let (admission, admitted) = state.upload_admission.open_session("test");
             let uploads = UploadSession {
                 admission,
                 table: UploadTable::default(),

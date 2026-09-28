@@ -10,4 +10,4 @@ mod core;
 mod shell;
 
 pub use self::core::{AdmissionCore, Decision, Limits, ObjectKey, Outcome, Request, SessionId};
-pub use self::shell::{AdmissionSession, Admitted, UploadAdmission, UploadPermit};
+pub use self::shell::{AdmissionSession, AdmissionStats, Admitted, UploadAdmission, UploadPermit};
