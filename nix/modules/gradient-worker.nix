@@ -230,8 +230,8 @@ in {
         default = null;
         description = ''
           Evaluation subprocesses in the pool, which is the evaluation concurrency. `null` sizes it
-          to the host's core count, capped. Each may use up to
-          {option}`services.gradient.worker.eval.maxRss`.
+          to the host's core count, capped at 16. The pool shrinks further until its size times
+          {option}`services.gradient.worker.eval.maxRss` fits in 75% of the host's RAM.
         '';
       };
 
@@ -239,8 +239,9 @@ in {
         type = lib.types.ints.positive;
         default = 8589934592;
         description = ''
-          Memory in bytes above which an evaluation subprocess is recycled. Keep it above a typical
-          evaluation's heap so warm subprocesses are not recycled mid-evaluation.
+          Memory in bytes above which an evaluation subprocess is recycled after its current call.
+          This is not a hard limit: a subprocess may exceed it while a call runs. Keep it above a
+          typical evaluation's heap so warm subprocesses are not recycled mid-evaluation.
         '';
       };
 

@@ -318,9 +318,9 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `worker.eval.cache.dir` | null or string | `null` | `GRADIENT_WORKER_EVAL_CACHE_DIR` | Eval cache directory, exported to evaluation subprocesses as `NIX_CACHE_HOME`. |
 | `worker.eval.cache.share` | bool | `true` | `GRADIENT_WORKER_EVAL_CACHE_SHARE` | Whether to share eval cache blobs with other workers through the server. |
-| `worker.eval.forkWorkers` | null or (int) | `null` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | Evaluation subprocesses in the pool, which is the evaluation concurrency. |
+| `worker.eval.forkWorkers` | null or (int) | `null` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | Evaluation subprocesses in the pool, which is the evaluation concurrency; `null` uses the core count (at most 16), shrunk until pool size times `maxRss` fits in 75% of RAM. |
 | `worker.eval.maxConcurrent` | int | `1` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | Maximum simultaneous evaluations. |
-| `worker.eval.maxRss` | int | `8589934592` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Memory in bytes above which an evaluation subprocess is recycled. |
+| `worker.eval.maxRss` | int | `8589934592` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Memory in bytes above which an evaluation subprocess is recycled after its current call; not a hard limit. |
 | `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). |
 
 ## `worker.log`
