@@ -253,3 +253,37 @@ fn endpoint_rate_limited() {
         );
     });
 }
+
+#[test]
+fn endpoint_refills_within_a_second() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let mut mock = MockDatabase::new(DatabaseBackend::Postgres);
+        for _ in 0..6 {
+            mock = mock.append_query_results([Vec::<BTreeMap<&str, Value>>::new()]);
+        }
+
+        let state = state_with_metrics(true, mock.into_connection());
+        let server = TestServer::new(create_router(state).expect("router"));
+
+        for _ in 1..=5 {
+            server
+                .get("/metrics")
+                .add_header("Authorization", &format!("Bearer {TOKEN}"))
+                .await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        let refilled = server
+            .get("/metrics")
+            .add_header("Authorization", &format!("Bearer {TOKEN}"))
+            .await;
+        assert_eq!(
+            refilled.status_code(),
+            200,
+            "a scraper waiting a second after a burst must not be throttled"
+        );
+    });
+}

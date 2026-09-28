@@ -93,30 +93,14 @@ impl MakeRequestId for MakeRequestUuid {
     }
 }
 
-/// Per-IP token-bucket config. Refill period in seconds and burst (bucket
-/// capacity). Uses `SmartIpKeyExtractor` so deployments behind a reverse
-/// proxy honor `X-Forwarded-For` / `X-Real-IP`.
-fn rl_per_second(
-    per_second: u64,
+/// Per-IP token bucket: one request is refilled every `refill`, up to `burst`.
+/// `SmartIpOrFallback` honours `X-Forwarded-For` / `X-Real-IP` behind a proxy.
+fn rate_limit(
+    refill: Duration,
     burst: u32,
 ) -> Result<Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>>, InitError> {
     let config = GovernorConfigBuilder::default()
-        .per_second(per_second)
-        .burst_size(burst)
-        .key_extractor(SmartIpOrFallback)
-        .finish()
-        .ok_or_else(|| InitError::NetworkConfig("invalid rate-limit configuration".into()))?;
-
-    Ok(Arc::new(config))
-}
-
-/// Sub-second refill granularity, for tiers needing >1 req/s steady-state.
-fn rl_per_ms(
-    per_millisecond: u64,
-    burst: u32,
-) -> Result<Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>>, InitError> {
-    let config = GovernorConfigBuilder::default()
-        .per_millisecond(per_millisecond)
+        .period(refill)
         .burst_size(burst)
         .key_extractor(SmartIpOrFallback)
         .finish()
@@ -699,7 +683,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/auth/oidc/callback", get(auth::get_oidc_callback))
         .route("/auth/cli/start", post(auth::post_cli_device_start))
         .route("/auth/cli/poll", post(auth::post_cli_device_poll))
-        .route_layer(GovernorLayer::new(rl_per_second(6, 5)?));
+        .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?));
 
     // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
     let webhook_routes = Router::new()
@@ -708,7 +692,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/hooks/{forge}/{project}/{integration_name}",
             post(forge_hooks::forge_webhook),
         )
-        .route_layer(GovernorLayer::new(rl_per_second(1, 30)?));
+        .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(1), 30)?));
 
     let api = Router::new()
         .merge(auth_api)
@@ -755,20 +739,25 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
 
     // Default tier covers everything left under /api/v1 (the bulk authenticated
     // surface) plus the proto WS upgrade.
-    let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)?));
+    let api = api.route_layer(GovernorLayer::new(rate_limit(
+        Duration::from_millis(200),
+        150,
+    )?));
     let api = api.route_layer(axum::middleware::from_fn(metrics::track_http_metrics));
     let api = api.layer(DefaultBodyLimit::max(state.config.http.max_request_size));
 
     let mut app = Router::new()
         .nest("/api/v1", api)
-        .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150)?)))
+        .merge(proto_router().route_layer(GovernorLayer::new(rate_limit(
+            Duration::from_millis(200),
+            150,
+        )?)))
         .layer(axum::Extension(Arc::clone(&scheduler)))
         .layer(axum::Extension(Arc::clone(&proto_limiter)))
         .layer(axum::Extension(Arc::clone(&sessions)));
 
     // Metrics endpoint - root-mounted, only when an operator-configured
-    // bearer token is present. Uses the same rate-limit tier as
-    // auth_sensitive (6 r/s, burst 5).
+    // bearer token is present.
     if state.config.metrics.is_some() {
         let metrics_route = Router::new()
             .route("/metrics", get(endpoints::metrics::get_metrics))
@@ -776,7 +765,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
                 Arc::clone(&state),
                 endpoints::metrics::metrics_auth,
             ))
-            .route_layer(GovernorLayer::new(rl_per_second(6, 5)?))
+            .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(1), 5)?))
             .layer(axum::Extension(Arc::clone(&scheduler)));
         app = app.merge(metrics_route);
     }
@@ -784,7 +773,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     // Public NAR cache surface - substituters issue many requests per build,
     // so the limit is generous: ~50 req/s sustained, burst 3000. The
     // cache-scoped proto WS upgrade shares this same tier.
-    let nar_cache_limit = || rl_per_ms(20, 3000);
+    let nar_cache_limit = || rate_limit(Duration::from_millis(20), 3000);
     let cache_routes = Router::new()
         .route("/cache/{cache}", get(caches::cache_root))
         .route("/cache/{cache}/", get(caches::cache_root))
@@ -808,11 +797,17 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     let cache_inspect = Router::new()
         .route("/cache/{cache}/ls/{hash}", get(caches::ls))
         .route("/cache/{cache}/serve/{hash}/{*path}", get(caches::serve))
-        .route_layer(GovernorLayer::new(rl_per_ms(333, 180)?));
+        .route_layer(GovernorLayer::new(rate_limit(
+            Duration::from_millis(333),
+            180,
+        )?));
 
     let cache_log = Router::new()
         .route("/cache/{cache}/log/{drv}", get(caches::log))
-        .route_layer(GovernorLayer::new(rl_per_ms(333, 900)?));
+        .route_layer(GovernorLayer::new(rate_limit(
+            Duration::from_millis(333),
+            900,
+        )?));
 
     // Cache-scoped read-only proto WebSocket. `authorize_optional` populates
     // MaybeUser/MaybeApiKey/ClientIp so the handler can authorize anon→public
