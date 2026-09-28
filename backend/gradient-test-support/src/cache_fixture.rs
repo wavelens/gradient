@@ -458,6 +458,7 @@ pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([Vec::<gradient_entity::derivation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
         .into_connection();
 
     make_state(db, Arc::new(NoopLogStorage))
@@ -470,6 +471,7 @@ pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
         .into_connection();
 
     make_state(db, Arc::new(NoopLogStorage))
@@ -530,6 +532,7 @@ pub async fn cache_with_unknown_derivation() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([Vec::<gradient_entity::derivation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
         .into_connection();
 
     make_state(db, Arc::new(NoopLogStorage))
