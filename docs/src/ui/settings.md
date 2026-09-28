@@ -2,7 +2,7 @@
 
 Three settings pages: the user's own, a project's and a cache's. Fields of entities [declared in Nix](../guides/manage-with-nix.md) show disabled, with the hint **Managed by Nix**.
 
-<!-- screenshot: project settings page with General, More Settings and Danger Zone -->
+![Project Settings](../assets/screenshots/project_settings.png)
 
 ## User Settings
 

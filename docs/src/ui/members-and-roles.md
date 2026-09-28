@@ -2,7 +2,7 @@
 
 Who can do what in a project or a cache. Projects and caches each have their own members and roles: **Settings -> Members & Roles** on a project, **Members & Roles** on a cache.
 
-<!-- screenshot: project Members & Roles page with members, pending invitations and roles -->
+![Members & Roles](../assets/screenshots/members_and_roles.png)
 
 | Area | Shows | Actions |
 |---|---|---|

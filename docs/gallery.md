@@ -1,5 +1,21 @@
 <h1 align="center">Gradient Gallery</h1>
 
+## Dashboard
+
+![Dashboard](src/assets/screenshots/dashboard.png)
+
+## Closure View
+
+![Closure View](src/assets/screenshots/closure_view.png)
+
+## Members & Roles
+
+![Members & Roles](src/assets/screenshots/members_and_roles.png)
+
+## Project Settings
+
+![Project Settings](src/assets/screenshots/project_settings.png)
+
 ## Job Board: Overview
 
 ![Job Board: Overview](src/assets/screenshots/job_board_overview.png)

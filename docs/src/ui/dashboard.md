@@ -2,7 +2,7 @@
 
 The start page after sign-in: every task that needs attention, across all projects, in one list.
 
-<!-- screenshot: dashboard with stats, filter, task list and rail -->
+![Dashboard](../assets/screenshots/dashboard.png)
 
 | Area | Shows | Actions |
 |---|---|---|

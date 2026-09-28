@@ -2,7 +2,7 @@
 
 Where the size of a build output comes from, as a Sankey diagram of the closure. Useful for trimming ISOs, netboot images and container layers. **View Closure** on an entry point's metrics page opens the closure of the newest build.
 
-<!-- screenshot: closure view Sankey diagram of a NixOS system -->
+![Closure view](../assets/screenshots/closure_view.png)
 
 | Area | Shows | Actions |
 |---|---|---|
