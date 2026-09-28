@@ -18,8 +18,8 @@ pub struct NarArgs {
     )]
     pub max_upload_size: usize,
 
-    /// A NAR at or under this many bytes is relayed through the server on upload,
-    /// pulled through it on download and admitted to the hot cache. Defaults to 1 MiB.
+    /// A NAR at or under this many bytes is served through the server on download
+    /// instead of a presigned S3 URL and kept in the hot cache. Defaults to 1 MiB.
     #[arg(long = "nar-small-bytes", env = "GRADIENT_NAR_SMALL_BYTES", default_value_t = 1024 * 1024)]
     pub small_bytes: u64,
 

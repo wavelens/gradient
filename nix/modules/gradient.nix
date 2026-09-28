@@ -528,8 +528,8 @@ in {
           type = lib.types.ints.unsigned;
           default = 1024 * 1024;
           description = ''
-            Size in bytes up to which a NAR is relayed through the server on upload and download and
-            admitted to the in-memory cache. Larger NARs use presigned S3 URLs.
+            Size in bytes up to which a NAR is served through the server on download instead of a
+            presigned S3 URL, and kept in the in-memory cache. Uploads do not depend on it.
           '';
         };
 
