@@ -159,6 +159,7 @@ pub(crate) async fn download_one_presigned(
     let mut backoff = PRESIGNED_RETRY_BASE;
 
     for attempt in 1..=PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
+        let started = std::time::Instant::now();
         let attempt_err = match http.get(&url).timeout(TRANSFER_TIMEOUT).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
@@ -195,6 +196,8 @@ pub(crate) async fn download_one_presigned(
                         return Ok((path, None));
                     }
 
+                    gradient_worker_client::throughput::NETWORK
+                        .observe_transfer(bytes.len() as u64, started.elapsed());
                     return Ok((path, Some((bytes, cp))));
                 }
             }
@@ -1004,6 +1007,33 @@ mod tests {
         assert_eq!(path, "/nix/store/aaaa-redirected");
         let (bytes, _) = fetched.expect("redirect followed to the object");
         assert_eq!(bytes, b"NAR-BYTES");
+    }
+
+    #[tokio::test]
+    async fn a_presigned_download_feeds_the_network_throughput() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let objects = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"NAR-BYTES".to_vec()))
+            .mount(&objects)
+            .await;
+        let cp = cached(
+            "/nix/store/aaaa-measured",
+            Some(&format!("{}/nar/abc.nar", objects.uri())),
+        );
+
+        let http = gradient_util::http::build_download_client().expect("download client");
+        download_one_presigned(&http, cp, &mut Progress::silent())
+            .await
+            .expect("download");
+
+        assert!(
+            gradient_worker_client::throughput::NETWORK
+                .current()
+                .is_some()
+        );
     }
 
     /// The exact production failure: with redirects refused, the 3xx body is

@@ -5,7 +5,7 @@
  */
 
 //! Thread-safe EWMA accumulators for passively-measured worker throughput.
-//! `NETWORK` (Mbps, from NAR transfers) and `DISK` (MB/s, from per-build cgroup
+//! `NETWORK` (Mbps, from relayed and presigned NAR transfers) and `DISK` (MB/s, from per-build cgroup
 //! io.stat) are read by the heartbeat and reported via `WorkerMetrics`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -50,6 +50,10 @@ impl ThroughputEwma {
         }
     }
 
+    pub fn observe_transfer(&self, bytes: u64, elapsed: std::time::Duration) {
+        self.observe(bytes as f64 * 8.0 / elapsed.as_secs_f64().max(1e-6) / 1_000_000.0);
+    }
+
     /// Current EWMA, or `None` until the first observation.
     pub fn current(&self) -> Option<f32> {
         match self.bits.load(Ordering::Relaxed) {
@@ -90,6 +94,13 @@ mod tests {
         }
         let v = e.current().unwrap();
         assert!(v > 190.0 && v <= 200.0, "expected near 200, got {v}");
+    }
+
+    #[test]
+    fn a_transfer_is_observed_in_megabits_per_second() {
+        let e = ThroughputEwma::new();
+        e.observe_transfer(1_000_000, std::time::Duration::from_secs(1));
+        assert_eq!(e.current(), Some(8.0));
     }
 
     #[test]

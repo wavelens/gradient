@@ -84,10 +84,12 @@ async fn try_put(
     body: Bytes,
     content_type: Option<&str>,
 ) -> std::result::Result<Option<String>, PutError> {
+    let size = body.len() as u64;
     let mut request = crate::http::client().put(url).body(body);
     if let Some(content_type) = content_type {
         request = request.header(CONTENT_TYPE, content_type);
     }
+    let started = std::time::Instant::now();
     let resp = request.send().await.map_err(|e| PutError::Retryable {
         error: anyhow::Error::new(e).context("object PUT failed to send"),
         retry_after: None,
@@ -95,6 +97,7 @@ async fn try_put(
 
     let status = resp.status();
     if status.is_success() {
+        crate::throughput::NETWORK.observe_transfer(size, started.elapsed());
         return Ok(resp
             .headers()
             .get(ETAG)
@@ -163,6 +166,21 @@ mod tests {
 
         assert_eq!(etag.as_deref(), Some("\"obj\""));
         assert_eq!(requests(&server).await, 3);
+    }
+
+    #[tokio::test]
+    async fn a_landed_put_feeds_the_network_throughput() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        put_with(&IMMEDIATE, &server.uri(), Bytes::from_static(b"nar"), None)
+            .await
+            .unwrap();
+
+        assert!(crate::throughput::NETWORK.current().is_some());
     }
 
     #[tokio::test]

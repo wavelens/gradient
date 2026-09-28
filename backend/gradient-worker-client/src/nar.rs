@@ -231,9 +231,7 @@ async fn send_path(
             let mut relay = RelayStream::new(request_id, writer, resume_offset);
             let meta = pack_path_in_parts(store_path, threads, BULK_CHUNK_SIZE, &mut relay).await?;
             let sent = relay.finish().await?;
-            crate::throughput::NETWORK.observe(
-                sent as f64 * 8.0 / started.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
-            );
+            crate::throughput::NETWORK.observe_transfer(sent, started.elapsed());
             Ok((meta, None))
         }
         GrantTarget::Put { url } => {

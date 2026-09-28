@@ -387,9 +387,7 @@ async fn stage_pull(
 
         let staged = sink.len();
         if let Some(start) = started {
-            crate::throughput::NETWORK.observe(
-                staged as f64 * 8.0 / start.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
-            );
+            crate::throughput::NETWORK.observe_transfer(staged, start.elapsed());
         }
 
         if let Some(total) = spec.expected
