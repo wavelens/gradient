@@ -950,7 +950,7 @@ impl CiReporter for GitlabReporter {
         // `synchronize`-style PR webhook does (via `object_attributes.source`),
         // but the GET endpoint omits it. For the comment-driven path we leave
         // `head_clone_url` unset for forks - the existing fan-out keeps using
-        // `task.repository` for the worker fetch. Same-task MRs (the
+        // `task.repository` for the worker fetch. Same-project MRs (the
         // common case) are unaffected.
         Ok(Some(PullRequestSnapshot {
             head_sha: mr.sha,

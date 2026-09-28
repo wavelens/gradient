@@ -572,8 +572,9 @@ pub(crate) mod gitea {
 pub(crate) mod gitlab {
     use super::*;
 
-    fn task_id(owner: &str, repo: &str) -> String {
-        format!("{owner}/{repo}").replace('/', "%2F")
+    fn project_api(base_url: &str, owner: &str, repo: &str) -> String {
+        let id = format!("{owner}/{repo}").replace('/', "%2F");
+        format!("{base_url}/api/v4/projects/{id}")
     }
 
     fn auth(req: reqwest::RequestBuilder, token: &str) -> reqwest::RequestBuilder {
@@ -592,11 +593,11 @@ pub(crate) mod gitlab {
         title: &str,
         body: &str,
     ) -> Result<super::PrRef> {
-        let id = task_id(owner, repo);
+        let project = project_api(base_url, owner, repo);
         let open: Vec<Mr> = send_json(
             auth(
                 client.get(format!(
-                    "{base_url}/api/v4/tasks/{id}/merge_requests?state=opened&source_branch={head}"
+                    "{project}/merge_requests?state=opened&source_branch={head}"
                 )),
                 token,
             ),
@@ -607,10 +608,7 @@ pub(crate) mod gitlab {
         if let Some(mr) = open.into_iter().next() {
             send_ok(
                 auth(
-                    client.put(format!(
-                        "{base_url}/api/v4/tasks/{id}/merge_requests/{}",
-                        mr.iid
-                    )),
+                    client.put(format!("{project}/merge_requests/{}", mr.iid)),
                     token,
                 )
                 .json(&EditMr {
@@ -628,11 +626,7 @@ pub(crate) mod gitlab {
         }
 
         let created: Mr = send_json(
-            auth(
-                client.post(format!("{base_url}/api/v4/tasks/{id}/merge_requests")),
-                token,
-            )
-            .json(&CreateMr {
+            auth(client.post(format!("{project}/merge_requests")), token).json(&CreateMr {
                 source_branch: head,
                 target_branch: base,
                 title,
@@ -655,10 +649,9 @@ pub(crate) mod gitlab {
         owner: &str,
         repo: &str,
     ) -> Result<String> {
-        let id = task_id(owner, repo);
-        let info: TaskInfo = send_json(
-            auth(client.get(format!("{base_url}/api/v4/tasks/{id}")), token),
-            "gitlab get task",
+        let info: ProjectInfo = send_json(
+            auth(client.get(project_api(base_url, owner, repo)), token),
+            "gitlab get project",
         )
         .await?;
 
@@ -695,7 +688,7 @@ pub(crate) mod gitlab {
     }
 
     #[derive(Deserialize)]
-    struct TaskInfo {
+    struct ProjectInfo {
         default_branch: String,
     }
     #[derive(Deserialize)]
@@ -721,5 +714,18 @@ pub(crate) mod gitlab {
     struct EditMr<'a> {
         title: &'a str,
         description: &'a str,
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::project_api;
+
+        #[test]
+        fn project_api_addresses_the_projects_endpoint_by_encoded_path() {
+            assert_eq!(
+                project_api("https://gitlab.example.com", "group/sub", "repo"),
+                "https://gitlab.example.com/api/v4/projects/group%2Fsub%2Frepo"
+            );
+        }
     }
 }
