@@ -4,6 +4,17 @@ Every `gradient` command, generated from the CLI's `--help`. Commands act on the
 
 ## Install
 
+=== "Linux binary"
+
+    ```sh
+    curl -fLo gradient "https://public.gradient.ci/api/v1/tasks/gradient/main/entry-point-downloads?eval=packages.x86_64-linux.gradient-cli-static&filename=gradient"
+    chmod +x gradient && sudo mv gradient /usr/local/bin/
+    ```
+
+    [Download Gradient CLI](https://public.gradient.ci/api/v1/tasks/gradient/main/entry-point-downloads?eval=packages.x86_64-linux.gradient-cli-static&filename=gradient){ .md-button }
+
+    A static x86_64 build without Nix support, built by the public instance from the latest `main`; no Nix needed.
+
 === "NixOS"
 
     ```nix
@@ -20,6 +31,7 @@ Every `gradient` command, generated from the CLI's `--help`. Commands act on the
 |---|---|
 | `gradient-cli` | Every command below except `eval` |
 | `gradient-cli-full` | Also `gradient eval`, which links libnix |
+| `gradient-cli-static` | One static musl binary without Nix support: `gradient build` downloads products into `result/`, `cache upload` takes only `--nar-file` |
 
 ## Configuration
 

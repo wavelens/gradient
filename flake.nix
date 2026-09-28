@@ -5,7 +5,7 @@
  */
 
 {
-  description = "nix-based continuous integration system";
+  description = "Nix-CI for Teams";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -50,6 +50,10 @@
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix {
         inherit craneLib;
         cargoFeatures = [ "nix" ];
+      };
+
+      gradient-cli-static = pkgs.pkgsStatic.callPackage ./nix/packages/gradient-cli.nix {
+        craneLib = crane.mkLib pkgs.pkgsStatic;
       };
 
       gradient-cli-full = pkgs.callPackage ./nix/packages/gradient-cli.nix {

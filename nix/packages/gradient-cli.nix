@@ -87,9 +87,10 @@ let
     ];
 
     buildInputs = [
+      openssl
+    ] ++ lib.optionals (!stdenv.hostPlatform.isStatic) [
       git
       gradient-nix
-      openssl
     ];
   };
 
@@ -129,6 +130,9 @@ craneLib.buildPackage (commonArgs // rec {
       --bash <($out/bin/gradient completion bash) \
       --fish <($out/bin/gradient completion fish) \
       --zsh <($out/bin/gradient completion zsh)
+  '' + lib.optionalString stdenv.hostPlatform.isStatic ''
+    mkdir -p $out/nix-support
+    echo "file binary-dist $out/bin/gradient" >> $out/nix-support/hydra-build-products
   '';
 
   meta = {

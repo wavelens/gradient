@@ -4,7 +4,7 @@ Evaluations, builds and build logs readable by any [Model Context Protocol](http
 
 **Requirements:**
 
-- The CLI: `nix shell github:wavelens/gradient#gradient-cli`
+- The CLI, see [Install](../reference/cli.md#install)
 
 ## 1. Log In
 

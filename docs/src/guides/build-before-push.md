@@ -16,7 +16,7 @@ gradient build .#hello
 ```
 
 - The CLI uploads the tracked files, including uncommitted changes; unchanged files are never sent twice.
-- The server evaluates the upload under the project's `build-request` task and the workers build the result.
+- A worker evaluates the upload under the project's `build-request` task and the workers build the result.
 - Logs stream until every build finishes.
 
 | Target | Evaluates |
@@ -27,7 +27,7 @@ gradient build .#hello
 
 ## 2. Use the Result
 
-The primary output lands in a `result` symlink, fetched from the project cache into the local store; `--no-link` skips the link. Without Nix on the machine, the CLI downloads the build products into a `result/` folder instead.
+The primary output lands in a `result` symlink, fetched from the project cache into the local store; `--no-link` skips the link. The [static binary](../reference/cli.md#install) has no Nix support and downloads the build products into a `result/` folder instead.
 
 ## Override Inputs
 
@@ -35,7 +35,7 @@ The primary output lands in a `result` symlink, fetched from the project cache i
 gradient build .#hello --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable
 ```
 
-Applies to this run only and repeats for several inputs. The evaluation runs on the server: the reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path. For an override on every run, see [Update Flake Inputs](flake-updates.md).
+Applies to this run only and repeats for several inputs. The evaluation runs on a worker: the reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path. For an override on every run, see [Update Flake Inputs](flake-updates.md).
 
 ## Background Runs
 

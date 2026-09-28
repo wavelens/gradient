@@ -28,7 +28,7 @@ gradient cache upload main $(readlink -f result)
 Large NARs go up in 32 MiB chunks, below the reverse proxy's body limit. The server caps a single NAR at [`services.gradient.nar.maxUploadSize`](../reference/configuration.md#nar), 512 MiB by default.
 
 ??? note "Machines Without Nix"
-    A NAR dumped elsewhere uploads together with the matching narinfo:
+    A NAR dumped elsewhere uploads together with the matching narinfo, also the only upload mode of the [static binary](../reference/cli.md#install):
 
     ```sh
     gradient cache upload main --nar-file hello.nar --narinfo hello.narinfo
