@@ -94,19 +94,20 @@ pub fn dependency_closure_cte_body(
     seed_select: &str,
     direction: ClosureDirection,
 ) -> String {
-    bounded_dependency_closure_cte_body(name, seed_select, direction, "")
+    bounded_dependency_closure_cte_body(name, seed_select, direction, "", None)
 }
 
-/// A closure walk confined to a set another CTE in the same statement already
-/// binds (an eval closure, a requeue candidate set). `bound` is an extra
-/// predicate over the edge alias `e`, applied inside the lateral probe so it
-/// prunes at the index lookup rather than after the join; an empty `bound` is
-/// the unrestricted walk.
+/// A closure walk with an extra predicate `bound` over the edge alias `e`,
+/// applied inside the lateral probe so it prunes at the index lookup rather than
+/// after the join; an empty `bound` is the unrestricted walk. `within` names a CTE
+/// of derivations the walk stays inside (an eval closure), tested by
+/// [`within_step`] outside the fenced probe.
 pub fn bounded_dependency_closure_cte_body(
     name: &str,
     seed_select: &str,
     direction: ClosureDirection,
     bound: &str,
+    within: Option<&str>,
 ) -> String {
     let (probe, project) = match direction {
         ClosureDirection::Dependencies => ("e.derivation", "e.dependency"),
@@ -117,17 +118,30 @@ pub fn bounded_dependency_closure_cte_body(
     } else {
         format!(" AND {bound}")
     };
-    format!(
-        "{name}(derivation) AS ({seed_select} UNION {})",
-        lateral_step(
-            name,
-            "s.next",
-            &format!(
-                "SELECT {project} AS next FROM derivation_dependency e \
-                 WHERE {probe} = c.derivation{restrict}"
-            ),
-        )
-    )
+    let step = lateral_step(
+        name,
+        "s.next",
+        &format!(
+            "SELECT {project} AS next FROM derivation_dependency e \
+             WHERE {probe} = c.derivation{restrict}"
+        ),
+    );
+    let step = within_step(step, "t.next", within);
+    format!("{name}(derivation) AS ({seed_select} UNION {step})")
+}
+
+/// Confine a recursive step to the CTE `within` by semi-joining each level's
+/// frontier against it once. Inside the probe the membership is a subplan per
+/// working-table row, and the planner sizes a recursive CTE far past its real
+/// size, so it neither hashes it nor keeps it: every row rescans the whole set.
+fn within_step(step: String, project: &str, within: Option<&str>) -> String {
+    match within {
+        None => step,
+        Some(set) => format!(
+            "SELECT {project} FROM ({step} OFFSET 0) t \
+             WHERE EXISTS (SELECT 1 FROM {set} x WHERE x.derivation = t.next)"
+        ),
+    }
 }
 
 /// One fenced recursive term: join the working table `{name}` (aliased `c`) to
@@ -159,6 +173,7 @@ pub fn runtime_closure_cte_body(name: &str, seed_select: &str) -> String {
         seed_select,
         ClosureDirection::Dependencies,
         "e.kind IN (1, 2)",
+        None,
     )
 }
 
@@ -511,13 +526,7 @@ pub fn open_closure_cte_body(name: &str, seed_select: &str, within: Option<&str>
             open = open_predicate("dep"),
         ),
     );
-    let step = match within {
-        None => step,
-        Some(set) => format!(
-            "SELECT t.evaluation, t.next, t.builder FROM ({step} OFFSET 0) t \
-             WHERE EXISTS (SELECT 1 FROM {set} x WHERE x.derivation = t.next)"
-        ),
-    };
+    let step = within_step(step, "t.evaluation, t.next, t.builder", within);
     format!("{name}(evaluation, derivation, builder) AS ({seed_select} UNION {step})")
 }
 
@@ -927,15 +936,42 @@ mod tests {
             "dependents",
             "SELECT $1::uuid",
             ClosureDirection::Dependents,
-            "e.derivation IN (SELECT derivation FROM closure)",
+            "e.kind IN (1, 2)",
+            None,
         ));
 
-        let probe = "WHERE e.dependency = c.derivation \
-                     AND e.derivation IN (SELECT derivation FROM closure) OFFSET 0) s";
+        let probe = "WHERE e.dependency = c.derivation AND e.kind IN (1, 2) OFFSET 0) s";
 
         assert!(
             cte.contains(probe),
             "the bound belongs inside the fenced probe: {cte}"
+        );
+    }
+
+    /// A walk inside an eval closure semi-joins each level against it outside the
+    /// fence. As a subplan inside the probe, the planner (sizing the recursive CTE
+    /// at millions of rows) rescanned the whole closure per working-table row: an
+    /// unstick of a 10k-name nixos eval ran past 10 minutes, and 7 s this way.
+    #[test]
+    fn a_walk_within_a_closure_semi_joins_it_once_per_level() {
+        let cte = norm(&bounded_dependency_closure_cte_body(
+            "dependents",
+            "SELECT $1::uuid",
+            ClosureDirection::Dependents,
+            "e.kind IN (1, 2)",
+            Some("closure"),
+        ));
+
+        assert!(
+            cte.contains(
+                "AND e.kind IN (1, 2) OFFSET 0) s OFFSET 0) t \
+                 WHERE EXISTS (SELECT 1 FROM closure x WHERE x.derivation = t.next))"
+            ),
+            "the closure test sits outside the fenced probe: {cte}"
+        );
+        assert!(
+            !cte.contains("IN (SELECT derivation FROM closure)"),
+            "no closure membership is a subplan: {cte}"
         );
     }
 

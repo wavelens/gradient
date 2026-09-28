@@ -123,6 +123,7 @@ fn cascade_dependency_failed_sql() -> String {
             "SELECT $1::uuid",
             ClosureDirection::Dependents,
             &unrelayed_predicate("e.derivation"),
+            None,
         )
     );
     format!(
@@ -228,10 +229,8 @@ fn dependency_failed_reconcile_sql() -> String {
                    AND derivation IN (SELECT derivation FROM closure)"
             ),
             ClosureDirection::Dependents,
-            &format!(
-                "e.derivation IN (SELECT derivation FROM closure) AND {}",
-                unrelayed_predicate("e.derivation"),
-            ),
+            &unrelayed_predicate("e.derivation"),
+            Some("closure"),
         ),
     );
 
@@ -409,10 +408,8 @@ fn requeue_ctes(closure_seed: &str) -> String {
                  WHERE dbf.derivation IN (SELECT derivation FROM closure) AND {deterministic}"
             ),
             ClosureDirection::Dependents,
-            &format!(
-                "e.derivation IN (SELECT derivation FROM closure) AND {}",
-                unrelayed_predicate("e.derivation"),
-            ),
+            &unrelayed_predicate("e.derivation"),
+            Some("closure"),
         ),
     )
 }
@@ -776,11 +773,15 @@ mod tests {
             "the seed must be the closure's terminal-failed anchors: {scoped}"
         );
         assert!(
+            scoped.contains("WHERE EXISTS (SELECT 1 FROM closure x WHERE x.derivation = t.next)"),
+            "the walk must stay inside the closure: {scoped}"
+        );
+        assert!(
             scoped
                 .matches("IN (SELECT derivation FROM closure)")
                 .count()
-                >= 3,
-            "seed, walk, and UPDATE must all be bounded to the closure: {scoped}"
+                >= 2,
+            "seed and UPDATE must be bounded to the closure: {scoped}"
         );
     }
 
