@@ -35,6 +35,31 @@ Both kinds live side by side: a declared project can hold tasks created in the U
 
 `services.gradient.state.validate` (on by default) checks the declared state while the NixOS configuration builds: unknown users or projects, duplicate ids and broken references fail the build instead of the server start.
 
+## Secrets
+
+Secrets never go into the Nix store: every `*_file` option points at a file on the server, e.g. from sops-nix or agenix. The server reads the files on start.
+
+| Option | Content | Generate |
+|---|---|---|
+| `users.<name>.password_file` | Argon2id hash of the password | `gradient hash > alice-password` |
+| `projects.<name>.private_key_file` | SSH private key for cloning | `ssh-keygen -t ed25519 -N "" -C gradient-acme -f acme-ssh-key` |
+| `caches.<name>.signing_key_file` | Nix signing key, base64 only | `nix-store --generate-binary-cache-key main main-key main-key.pub`, then `sed -i 's/^[^:]*://' main-key` |
+| `api_keys.<name>.key_file` | SHA-256 hex digest of the token | See below |
+| `workers.<name>.token_file` | Worker registration token | `openssl rand -hex 32` |
+| `integrations.<name>.secret_file` | Webhook secret shared with the forge | `openssl rand -hex 32` |
+| `integrations.<name>.access_token_file` | Forge access token | From the forge |
+
+- `gradient hash` prompts for the password twice and prints the hash. Piping a password through `<<<` hashes a trailing newline, so later sign-ins fail.
+- The public half `acme-ssh-key.pub` goes to the Git host as a deploy key.
+- `nix-store` writes `main:<key>`; Gradient expects the key without the `main:` prefix and derives the public key itself.
+- An API key starts as a random token; the file holds only its digest, and clients send `GRAD<token>`:
+
+    ```sh
+    TOKEN=$(openssl rand -hex 32)
+    printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > ci-key
+    ```
+- A user without `password_file` signs in through OIDC only.
+
 ## Removal
 
 With `services.gradient.state.delete` (on by default), users, projects and caches that disappear from the configuration are deleted from the database. Turned off, they stay and become editable in the UI.
