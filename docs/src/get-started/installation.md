@@ -129,7 +129,7 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
 ## 5. Workers
 
 - On the server host: `services.gradient.worker.enable = true`, as in the [Quick start](quick-start.md#3-enable-gradient).
-- On other machines: see [Remote workers](../configuration.md#remote-workers).
+- On other machines: see [Add a Remote Worker](../guides/remote-worker.md).
 
 ## Verify Deployment
 
@@ -152,6 +152,6 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
 ## Next steps
 
 - [First project](first-project.md): the first user, project and build
-- [Remote workers](../configuration.md#remote-workers): build machines beyond the server host
+- [Add a Remote Worker](../guides/remote-worker.md): build machines beyond the server host
 - [Configuration](../configuration.md): every server and worker option
 - [Options search](https://wavelens.github.io/gradient-search): all NixOS options

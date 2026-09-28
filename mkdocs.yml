@@ -47,6 +47,8 @@ nav:
       - Workers: concepts/workers.md
       - Caches: concepts/caches.md
       - Declarative State: concepts/declarative-state.md
+  - Guides:
+      - Add a Remote Worker: guides/remote-worker.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md

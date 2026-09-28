@@ -35,6 +35,19 @@ Among the matching workers, the scheduler scores each queued job and steers heav
 
 A worker only receives jobs from projects that have a cache subscription.
 
+## Base Workers
+
+A base worker is a server-level worker, declared in [`services.gradient.state.workers`](../usage/state.md#base-workers), that shows up in every project's worker list. Projects can enable or disable a base worker, but cannot edit or delete one.
+
+| Setting | Effect |
+|---|---|
+| `projects` | Projects that start with the worker enabled; others opt in from the UI |
+| `auto_enable` | Every project enables the worker on creation; a project that turns the worker off stays off |
+| `enabled` | Global switch; off hides the worker from every project |
+| `authorize_against` | A fixed UUID the worker authenticates as, instead of one token line per project |
+
+The local worker is a base worker with `auto_enable`. A project that registers its own worker under the same worker ID hides the base worker in that project.
+
 ## Ephemeral Workers
 
 A worker in a throwaway VM can announce that the worker is draining: the server stops sending new jobs, the running jobs finish, and the VM can be replaced by a fresh one.
@@ -42,5 +55,5 @@ A worker in a throwaway VM can announce that the worker is draining: the server 
 ## Related
 
 - [Quick start](../get-started/quick-start.md): the local worker
-- [Remote workers](../configuration.md#remote-workers): add build machines
+- [Add a Remote Worker](../guides/remote-worker.md): add build machines
 - [Evaluations and Builds](evaluations-and-builds.md): what workers run

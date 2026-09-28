@@ -51,4 +51,4 @@ A task is one repository plus the outputs to build from that repository.
 - [Evaluation wildcards](../usage/overview.md#evaluation-wildcard): select exactly the outputs to build
 - [Forge integration](../usage/integration.md): evaluate on every push and pull request
 - [Caches](../usage/caches.md): use the cache from other machines
-- [Remote workers](../configuration.md#remote-workers): add build machines
+- [Add a Remote Worker](../guides/remote-worker.md): add build machines

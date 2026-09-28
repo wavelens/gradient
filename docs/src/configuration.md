@@ -442,67 +442,6 @@ never regenerated; delete the file and restart to rotate it.
 Set `services.gradient.localWorker = false` to opt out and configure
 `worker.id` / `worker.peersFile` by hand, exactly like a remote worker.
 
-### Remote Workers
-
-Deploy `gradient-worker` on dedicated build machines. First register the worker under a project - either declaratively via `state.workers` (see below) or via the API. The `worker_id` must be a **UUID v4**. The worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id`:
-
-```sh
-cat /var/lib/gradient-worker/worker-id
-```
-
-```sh
-curl -X POST https://gradient.example.com/api/v1/projects/myproject/workers \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"worker_id": "550e8400-e29b-41d4-a716-446655440001"}'
-# -> {"error":false,"message":{"peer_id":"<uuid>","token":"<token>"}}
-```
-
-You can optionally pre-generate the token and pass it in the request (`openssl rand -base64 48`); the response will then omit the token field.
-
-Then on the build machine:
-
-```nix
-imports = [ inputs.gradient.nixosModules.gradient-worker ];
-
-services.gradient.worker = {
-  enable    = true;
-  serverUrl = "wss://gradient.example.com/proto";
-  peersFile = "/run/secrets/gradient-worker-peers";
-
-  capabilities = {
-    fetch = true;
-    eval  = true;
-    build = true;
-  };
-
-  build = {
-    maxConcurrent = 8;
-    metrics       = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
-  };
-  eval = {
-    workers       = 2;
-    maxConcurrent = 2;
-  };
-};
-```
-
-Write the registration result to the peers file (one `peer_id:token` pair per line):
-
-```sh
-echo "<peer_id>:<token>" > /run/secrets/gradient-worker-peers
-```
-
-The special peer ID `*` can be used instead of a specific UUID to respond with that token for any peer the server challenges:
-
-```text
-# /run/secrets/gradient-worker-peers
-*:<token>
-```
-
-The token must be the 48-byte random secret returned by the registration API (generated via `openssl rand -base64 48` server-side).
-
-
 ### Worker Options
 
 All options live under `services.gradient.worker`; envs carry the `GRADIENT_WORKER_` prefix.
