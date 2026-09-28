@@ -1,63 +1,40 @@
 # Evaluation Metrics
 
-Eval-workers capture per-evaluation Nix metrics and persist them, mirroring how
-builds capture resource metrics. The data drives the Job Board's "Expensive
-Evals" panel and self-tunes the scheduler so heavy evaluations land on big-RAM
-machines.
+Evaluation workers record Nix metrics per evaluation, the way builds record resource metrics. The numbers feed the Job Board's **Evals** tab and route RAM-heavy evaluations to big machines.
 
-## What's captured
+```mermaid
+flowchart LR
+    sub[eval subprocess] -->|stats delta per request| worker[Worker]
+    worker -->|EvalStats| server[Server]
+    server --> tables[(evaluation_metric,<br/>evaluation_attr_cost,<br/>flake_output_node)]
+    tables --> board[Job Board: Evals]
+    tables --> rule[ResourceFitRule: p95 RAM per task]
+```
 
-Three tables are written per evaluation:
+## Tables
 
-- **`evaluation_metric`** - per-eval aggregate: total thunks, function calls,
-  primop calls, lookups, allocated bytes, peak GC heap (MB), peak RSS (MB),
-  `total_eval_ms` and the `worker_id` that ran it. The three per-phase columns
-  (`fetch_ms`, `eval_flake_ms`, `eval_drv_ms`) are **not** part of the eval
-  stats: they are summed from the job timeline's `fetch`, `eval_flake` and
-  `eval_derivations` spans when the job reports its terminal message. They are
-  therefore 0 for the window between `EvalStats` and job completion, and stay 0
-  for an eval whose worker vanished before reporting. See
-  [the job board](../ui/job-board.md#job-inspection) for the full phase list.
-- **`evaluation_attr_cost`** - per-entry-point hotspots: thunks, function calls,
-  eval wall-clock and allocated bytes bucketed by user entry-point.
-- **`flake_output_node`** - the walked flake-output subgraph: `path`, `parent`,
-  `name`, `kind`, `is_derivation`, `drv_path`.
+| Table | Holds |
+|---|---|
+| `evaluation_metric` | Per evaluation: thunks, function calls, primop calls, lookups, allocated bytes, peak GC heap and RSS (MB), `total_eval_ms`, `worker_id`, and the phase columns `fetch_ms`, `eval_flake_ms`, `eval_drv_ms` |
+| `evaluation_attr_cost` | Per entry point: thunks, function calls, wall clock and allocated bytes, bucketed by the wildcard target |
+| `flake_output_node` | The walked flake-output tree: `path`, `parent`, `name`, `kind`, `is_derivation`, `drv_path` |
 
-## Per-entry-point hotspots
+- The phase columns do not come from the Nix stats: they are summed from the job timeline's `fetch`, `eval_flake` and `eval_derivations` spans when the job reports its terminal message. They are 0 between `EvalStats` and completion, and stay 0 when the worker vanished before reporting. Phase names are on the [Job Board](../ui/job-board.md#job-inspection).
+- Entry-point costs are aggregated in the resolver as each request completes.
+- `flake_output_node` records only what the discovery walk visited; nothing extra is evaluated. The frontend renders the rows as a `nix flake show`-like tree.
 
-Costs are bucketed by the eval's wildcard target (the user entry-point), so you
-can see which outputs are expensive to evaluate rather than just the eval total.
-The aggregation runs in the resolver as each request completes.
+## RAM Routing
 
-## Walked flake graph
+A per-task rolling p95 of `peak_rss_mb` over the last 24 h feeds `ResourceFitRule` (see [Scoring](scheduler/scoring.md)). Tasks whose evaluations needed much RAM go to big-RAM workers; the prediction updates as evaluations finish, with no manual thresholds.
 
-The discovery BFS records every flake output it actually walked - no extra
-evaluation is forced. The subgraph is stored as `flake_output_node` rows and
-served back as a `nix flake show`-like tree for frontend rendering.
+## Endpoints
 
-## Self-tuning RAM-to-machine routing
+| Endpoint | Returns |
+|---|---|
+| `GET /api/v1/board/evals/expensive-by-resource?metric=...&window_days=N` | Top evaluations by `time`, `rss`, `heap`, `thunks`, `fncalls` or `alloc`, project-scoped; `metric` is matched against a closed list |
+| `GET /api/v1/evals/{evaluation}/flake-graph` | The walked flake-output tree of one evaluation |
 
-A per-task rolling window takes the p95 of eval `peak_rss_mb` over the last
-24h and feeds it to the scheduler's `ResourceFitRule` (see
-[scheduler scoring](scheduler/scoring.md)). A task whose evaluations have
-historically needed lots of RAM is routed to big-RAM eval machines, and the
-prediction re-tunes itself as new evals complete - there are no manual
-thresholds.
+## Overhead
 
-## Board endpoints
-
-- `GET /board/evals/expensive-by-resource?metric={time,rss,heap,thunks,fncalls,alloc}&window_days=N`
-  - the top evaluations by a resource, project-scoped. `metric` is matched against a
-  closed allow-list, so it cannot inject SQL.
-- `GET /evals/{evaluation}/flake-graph` - the walked flake-output graph for one
-  evaluation.
-
-Both are surfaced in the Job Board's "Expensive Evals" panel.
-
-## Toggle and overhead
-
-`GRADIENT_WORKER_EVAL_METRICS` (worker-side, default `true`) gates capture.
-When `false`, the eval-worker skips the per-request stats read entirely, so
-there is zero added overhead. Even when enabled the overhead is one cheap
-cumulative-counter read per resolver request, diffed per worker - there is no
-`--count-calls`-style instrumentation.
+- `GRADIENT_WORKER_EVAL_METRICS` (default `true`) gates capture; `false` skips the stats read entirely.
+- Enabled, the cost is one cumulative-counter read per resolver request, diffed per worker; no `--count-calls`-style instrumentation.
