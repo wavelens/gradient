@@ -68,7 +68,7 @@ Per-worker CPU, memory, disk and network history lives under **Project -> Worker
 | Member | Own and public projects in full; other projects' infrastructure only as counts |
 | Signed out | Public project totals |
 
-The resource tabs need build metrics on the workers, see [`services.gradient.worker.build.metrics`](../configuration.md#worker-options). Retention is set under [metrics pipeline and retention](../configuration.md#metrics-pipeline-retention).
+The resource tabs need build metrics on the workers, see [`services.gradient.worker.build.metrics`](../reference/configuration.md#workerbuild). Retention is set under [metrics pipeline and retention](../reference/configuration.md#metrics).
 
 ## Related
 

@@ -97,4 +97,4 @@ Prefer one line per project; use `*` only when every project behind the worker h
 ## Next Steps
 
 - [Workers](../concepts/workers.md): capabilities, matching and access
-- [Worker options](../configuration.md#worker-options): every worker setting
+- [Worker options](../reference/configuration.md#worker): every worker setting

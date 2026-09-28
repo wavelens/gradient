@@ -5,7 +5,7 @@ Mails and web requests on evaluation and build events, e.g. a mail to the team o
 **Requirements:**
 
 - A task, see [First project](../get-started/first-project.md)
-- For mail: [email](../configuration.md#email) configured on the server
+- For mail: [email](../reference/configuration.md#email) configured on the server
 
 ## 1. Add the Action
 
@@ -90,7 +90,7 @@ The signature lets the receiver reject requests that did not come from Gradient.
 
 | Symptom | Fix |
 |---|---|
-| **Send Mail** missing from the type list | Configure [email](../configuration.md#email) on the server |
+| **Send Mail** missing from the type list | Configure [email](../reference/configuration.md#email) on the server |
 | Delivery shows `connection refused` | The URL is unreachable from the server |
 | No deliveries | The action is inactive, or none of the events fired yet |
 

@@ -75,7 +75,7 @@ Members get a role on the cache itself, independent of any project.
     On the cache page, **Members & Roles -> Add Member**, with a user name and a role. The invitee accepts under **Settings -> My Invites**; until then the invitee has no access.
 
     - An invitation expires after 7 days.
-    - With [mail](../configuration.md#email) configured, the invitee also gets a mail with a link.
+    - With [mail](../reference/configuration.md#email) configured, the invitee also gets a mail with a link.
 
 === "Declarative"
 

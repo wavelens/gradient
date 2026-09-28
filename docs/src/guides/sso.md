@@ -90,4 +90,4 @@ In the provider, set the SCIM base URL `https://gradient.example.com/scim/v2`, t
 ## Next Steps
 
 - [Declarative State](../concepts/declarative-state.md): roles, projects and members as NixOS options
-- [Configuration](../configuration.md#oidc): every OIDC and SCIM option
+- [Configuration](../reference/configuration.md#oidc): every OIDC and SCIM option

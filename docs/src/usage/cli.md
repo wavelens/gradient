@@ -176,7 +176,7 @@ server-side, `REF` must be a remote flake ref - `github:`, `gitlab:`,
 `http://`, `flake:`, or `path:/nix/store/...` - local filesystem paths
 (`./foo`, `/abs/path`, `~/foo`, a bare name) are rejected client-side. This is
 a per-run override distinct from a task's persistent [flake input
-overrides](../configuration.md#flake-input-overrides), which apply to every
+overrides](../guides/flake-updates.md#1-track-the-inputs), which apply to every
 run until removed.
 
 `gradient build` also fetches `git+ssh://` flake inputs during evaluation,

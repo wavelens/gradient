@@ -540,7 +540,7 @@ services.gradient.state.workers = {
 moment it is created, and the existing projects are swept once, when the base
 worker first appears or when the flag is switched on. It is only ever additive -
 a project that turns the worker off from the UI stays off across restarts. This
-is what [the co-located worker](../configuration.md#co-located-worker) sets for
+is what [the co-located worker](../reference/configuration.md#local-worker) sets for
 the worker running on the server's own host.
 
 `enabled` is a global gate: setting it to `false` hides the base worker from every project until it is turned back on.

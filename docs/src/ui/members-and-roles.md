@@ -14,7 +14,7 @@ Who can do what in a project or a cache. Projects and caches each have their own
 
 - **Add Member** sends an invitation; the user has no access until accepting under **Settings -> My Invites**.
 - Invitations expire after 7 days; one user holds at most one open invitation per project or cache.
-- With [email](../configuration.md#email) configured, the invitee also gets a link by mail.
+- With [email](../reference/configuration.md#email) configured, the invitee also gets a link by mail.
 - A superuser who already holds the permission adds members directly.
 - Projects and caches [declared in Nix](../guides/manage-with-nix.md) take their members from the configuration only.
 

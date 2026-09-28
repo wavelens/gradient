@@ -153,5 +153,5 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
 
 - [First project](first-project.md): the first user, project and build
 - [Add a Remote Worker](../guides/remote-worker.md): build machines beyond the server host
-- [Configuration](../configuration.md): every server and worker option
+- [Configuration](../reference/configuration.md): every server and worker option
 - [Options search](https://wavelens.github.io/gradient-search): all NixOS options

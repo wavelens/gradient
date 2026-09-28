@@ -63,8 +63,8 @@ the complete log rather than the portion currently on screen.
 
 Evaluations can also be triggered automatically:
 
-- **GitHub App** - when the App is installed, push events from GitHub trigger evaluations instantly (no polling). See [GitHub App](../configuration.md#github-app).
-- **Forge webhooks** - for Gitea, Forgejo, GitLab, or GitHub without the App, configure a per-project push webhook. See [Forge Webhooks](../configuration.md#forge-webhooks-gitea-forgejo-gitlab-github-without-app).
+- **GitHub App** - when the App is installed, push events from GitHub trigger evaluations instantly (no polling). See [GitHub App](../guides/forge-github.md).
+- **Forge webhooks** - for Gitea, Forgejo, GitLab, or GitHub without the App, configure a per-project push webhook. See [Forge Webhooks](../guides/forge-gitea.md).
 - **Polling** - fallback for tasks without webhook configuration; Gradient checks for new commits every 60 seconds.
 
 ## Members & Roles

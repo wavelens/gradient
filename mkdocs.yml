@@ -79,7 +79,7 @@ nav:
       - Cache NARs: usage/cache-nars.md
       - Diagnostic Reports: diagnostic-reports.md
   - Reference:
-      - Configuration: configuration.md
+      - Configuration: reference/configuration.md
   - Contributors:
       - Architecture: development/architecture.md
       - Internals: development/internals.md
