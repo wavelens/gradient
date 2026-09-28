@@ -6,13 +6,12 @@
  * Security probe: connect to a Gradient server's `/proto` endpoint with a
  * never-before-seen worker UUID and zero auth tokens.
  *
- * Per docs/src/development/proto.md ("Server rejects when no peers have
- * registered this worker ID (unknown worker)") the expected outcome is
- * `Reject`. If the server instead returns `InitAck`, an unauthenticated
- * client has been admitted in "open mode" (PeerAuth::Open) - see
- * backend/proto/src/handler/session.rs:154.
+ * Per docs/src/contributors/proto/connection.md (`403` `unknown worker`) the
+ * expected outcome is `Reject`. If the server instead returns `InitAck`, an
+ * unauthenticated client has been admitted in "open mode" (`PeerAuth::Open`,
+ * backend/gradient-pool/src/peer_auth.rs).
  *
- * Usage: cargo run -p proto --example probe_handshake -- ws://127.0.0.1:3000/proto
+ * Usage: cargo run -p gradient-wire --example probe_handshake -- ws://127.0.0.1:3000/proto
  *
  * Exit codes:
  *   0 - server rejected the connection (documented/secure behaviour)
