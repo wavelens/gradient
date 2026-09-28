@@ -102,10 +102,9 @@ impl Scheduler {
         match released.job {
             Some(PendingJob::Eval(j)) => {
                 // Split mode: a fetch-only job just archived the source. Enqueue
-                // the cached eval follow-up instead of finalizing - eval has not run.
+                // the cached eval follow-up under the same `eval:{id}` key, which
+                // the Release above freed, instead of finalizing.
                 if crate::jobs::is_fetch_only(&j.job) {
-                    // Reusing the `eval:{id}` job id is safe: remove_active above
-                    // already evicted it from the active map.
                     let store_path = EEvaluation::find_by_id(j.evaluation_id)
                         .one(&self.state.worker_db)
                         .await?

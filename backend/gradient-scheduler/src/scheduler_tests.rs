@@ -213,6 +213,44 @@ async fn enqueue_signals_offers_with_a_rising_generation() {
     );
 }
 
+/// The cached follow-up of a fetch-only job reuses the `eval:{id}` key, so a
+/// re-enqueue must re-offer it in the delta to workers that saw the fetch job.
+#[tokio::test]
+async fn a_reenqueued_eval_job_is_offered_again_in_the_delta() {
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+
+    let job = eval_job(peer);
+    let job_id = crate::jobs::eval_job_key(job.evaluation_id);
+    scheduler
+        .enqueue_eval_job(job_id.clone(), job.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        scheduler
+            .get_new_job_candidates("w1")
+            .await
+            .candidates
+            .len(),
+        1
+    );
+
+    scheduler
+        .enqueue_eval_job(job_id.clone(), job)
+        .await
+        .unwrap();
+    let offer = scheduler.get_new_job_candidates("w1").await;
+    assert_eq!(
+        offer
+            .candidates
+            .iter()
+            .map(|c| c.job_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![job_id.as_str()]
+    );
+}
+
 /// Reactive dispatch (#359): a kick advances the edge-trigger generation even
 /// when no dispatcher is running yet, so the actor services it on its next
 /// pass instead of losing the wakeup.

@@ -446,11 +446,8 @@ impl Actor for CoreActor {
                 let _ = reply.send(());
             }
             SchedulerMsg::Enqueue { job_id, job, reply } => {
-                let is_build = matches!(job, PendingJob::Build(_));
                 core.tracker.add_pending(job_id.clone(), job);
-                if is_build {
-                    core.pool.remove_sent_candidate(&job_id);
-                }
+                core.pool.remove_sent_candidate(&job_id);
                 core.bump_offers();
                 let _ = reply.send(());
             }
