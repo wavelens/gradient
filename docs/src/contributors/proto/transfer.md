@@ -25,7 +25,7 @@ sequenceDiagram
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
 
 - **Admission** is server-wide and fair across sessions: `upload.concurrency` (16) uploads and `upload.bytesBudget` (8 GiB) at once. Requests for the same object coalesce; followers get `Skip` once the first commits.
-- **Worker side:** `nar.maxConcurrentUploads` (8) slots; `Retry` is retried up to 3 times, `Rejected` fails the upload, a failed transfer sends `UploadCancel`.
+- **Worker side:** `worker.nar.maxConcurrentUploads` (8) slots; `Retry` is retried up to 3 times, `Rejected` fails the upload, a failed transfer sends `UploadCancel`.
 - **Commit:** a relay is checked by length and SHA-256, then moved into the NAR store. A presigned upload completes the multipart and checks the object size; the full digest only with `nar.verifyDigest`.
 - **Leases:** a relay expires after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session releases its uploads.
 - **Evaluation cache blobs** use the same handshake with `UploadObject::EvalCache`.
@@ -53,8 +53,8 @@ The worker prefetches every input the local store lacks before the build starts.
 
 - `LogChunk { job_id, task_index, data }` streams build output on the bulk lane, without acknowledgement.
 - The server appends each chunk to the open attempt of the build at `task_index`; chunks for evaluations or finished attempts are dropped.
-- The worker limits each build's log to `log.burstBytesPerMin` (8 MiB) and `log.sustainedBytesPerHour` (64 MiB), then stops forwarding and adds a truncation note.
-- With `log.fetchFromStore` (on by default), a build already in the store forwards its stored Nix log.
+- The worker limits each build's log to `worker.log.burstBytesPerMin` (8 MiB) and `worker.log.sustainedBytesPerHour` (64 MiB), then stops forwarding and adds a truncation note.
+- With `worker.log.fetchFromStore` (on by default), a build already in the store forwards its stored Nix log.
 - At the end of the build, the log is split into zstd chunks of `log.chunkBytes` (256 KiB) with a chunk index.
 
 ## Download Progress

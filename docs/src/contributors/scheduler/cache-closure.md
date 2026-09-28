@@ -92,7 +92,7 @@ The `cache-maintenance` sweep (`gradient-cache/src/cacher/mod.rs`) runs every `g
 | Pass | Reclaims | Bound |
 |---|---|---|
 | Evaluation GC | Evaluations beyond the task's `keep_evaluations` newest terminal ones | Waits while the task has an active evaluation, unless wedged longer than `gc.wedgedEvalHours` (24) |
-| Derivation GC | `derivation` rows outside the keep-set, their attempt logs | Created before `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` (24) |
+| Derivation GC | `derivation` rows outside the keep-set, their attempt logs | Created before `gc.orphanDerivationHours` (24) |
 | Stale-path eviction | `cached_path` rows outside `live_cached_paths_cte`, then their objects | Last fetch (or commit) older than `max(gc.narTtlHours, gc.narUploadGraceHours)` (336 h) |
 | Zombie purge | Confirmed rows whose object storage no longer holds | Storage probe per row; a probe error preserves |
 | Orphan NAR files | Objects no row references | Older than `gc.narUploadGraceHours` (24 h) |

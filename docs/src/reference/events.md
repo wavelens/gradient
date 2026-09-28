@@ -48,7 +48,7 @@ Webhooks are managed under **Webhooks** in the project settings, on the cache pa
 
 - `events` is a list of globs (`build.*`, `task.star`). Empty receives everything in scope.
 - The signing secret is returned once, on create and on `rotate-secret`.
-- A failed delivery (transport error or non-2xx) retries 6 times, backing off from 30 s to 15 min, then dead-letters.
+- A failed delivery (transport error or non-2xx) is tried 6 times in total, backing off from 30 s to 8 min, then dead-letters.
 - `POST .../{id}/test` sends a `webhook.ping` immediately and returns the recorded delivery.
 
 Request headers:

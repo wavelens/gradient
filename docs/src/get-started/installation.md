@@ -145,6 +145,9 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
 - `https://gradient.example.com` shows the login page with a valid certificate.
 - `journalctl -u gradient-server` shows no database or secret errors.
 
+??? note "Crash Reports"
+    `services.gradient.sentry.enable = true` sends crash reports to the Gradient developers; off by default.
+
 ??? note "Network Tuning for Fast or Distant Links"
     A default deployment needs no tuning. On a high-bandwidth or high-latency link between workers and server, BBR and larger TCP buffers help:
 

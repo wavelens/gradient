@@ -49,7 +49,7 @@ A capability is active only when both sides support the capability; `core` and `
 | `fetch` | Clones repositories and prefetches flake inputs |
 | `eval` | Runs flake evaluations |
 | `build` | Runs Nix builds |
-| `federate` | Relays work and NAR traffic between servers |
+| `federate` | Reserved: negotiated in the handshake, no behavior yet |
 
 New features are gated by capability flags, not by version numbers.
 

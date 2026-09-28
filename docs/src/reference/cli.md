@@ -1,6 +1,6 @@
 # CLI
 
-Every `gradient` command, generated from the CLI's `--help`. Commands act on the selected project and task unless `--project` or an argument names another.
+Every `gradient` command, generated from the CLI's `--help`. Commands act on the selected project and task unless an argument (or `--project` on `gradient build`) names another.
 
 ## Install
 

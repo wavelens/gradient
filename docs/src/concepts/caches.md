@@ -23,13 +23,13 @@ Upstreams are set under **Settings -> Upstream Caches** on the cache page.
 |---|---|---|
 | Internal | Another cache on the same Gradient instance | Read & Write, Read Only, Write Only |
 | Gradient Proto | A cache on another Gradient instance, reached over that instance's cache protocol | Read & Write, Read Only, Write Only |
-| Http | Any Nix binary cache, e.g. `cache.nixos.org` | Read Only |
+| HTTP | Any Nix binary cache, e.g. `cache.nixos.org` | Read Only |
 
 - **Read & Write**: pull through and push results upstream.
 - **Read Only**: pull through only.
 - **Write Only**: push only.
 
-Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and Http upstreams; Gradient Proto upstreams are set in the UI.
+Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstreams; Gradient Proto upstreams are set in the UI.
 
 ## Pull-Through
 

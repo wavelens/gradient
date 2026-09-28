@@ -64,7 +64,7 @@ A subscribed project pushes its outputs to the cache and substitutes from the ca
     services.gradient.state.caches.main.projects = [ "acme" "widgets" ];
     ```
 
-    State-managed subscriptions skip the approval.
+    Declared subscriptions skip the approval.
 
 ## 3. Invite Members
 
@@ -86,7 +86,7 @@ Members get a role on the cache itself, independent of any project.
     ];
     ```
 
-    State-managed members skip the invitation.
+    Declared members skip the invitation.
 
 ## Verify Deployment
 

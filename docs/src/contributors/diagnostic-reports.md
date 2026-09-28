@@ -98,7 +98,7 @@ sqlite3 report.db \
     ORDER BY ms DESC LIMIT 20'
 ```
 
-`dispatched_job.outcome`: `0` completed, `1` failed, null while running or after a silent disconnect.
+`dispatched_job.outcome`: `0` completed, `1` failed, `2` abandoned (disconnect, restart, overdue abort), null while running.
 
 **Cached but not served:** the cache serves a path only with a `cached_path_signature` row for that cache and `signed = 1`. Join both before trusting `derivation_output.is_cached`:
 

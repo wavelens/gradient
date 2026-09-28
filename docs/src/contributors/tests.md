@@ -7,7 +7,7 @@ How testing is structured and which patterns a new test follows. Individual test
 | Layer | Location | Exercises |
 |---|---|---|
 | Backend unit | `#[cfg(test)] mod tests` beside the code | Pure logic, no I/O |
-| Backend integration | `backend/gradient-{web,core,report}/tests/*.rs` | The real router and handlers over a mocked database |
+| Backend integration | `backend/gradient-*/tests/*.rs` | The real router and handlers over a mocked database |
 | Shared harness | `backend/gradient-test-support/` | Fakes, fixtures and the test server every suite reuses |
 | CLI | `cli/tests/*.rs` | The `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | Components and services under vitest |

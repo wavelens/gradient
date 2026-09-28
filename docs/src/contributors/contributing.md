@@ -36,10 +36,10 @@ Gradient is **AGPL-3.0-only**; a contribution is released under the same license
 
     ```sh
     nix run .#frontend # (1)!
-    cd frontend && pnpm install && pnpm run serve
+    cd frontend && pnpm install && pnpm start
     ```
 
-    1.  A VM with a superuser `admin` (password `admin_password`), a project, a task and a worker from declarative state; evaluations and builds run end to end against `pnpm run serve`.
+    1.  A VM with a superuser `admin` (password `admin_password`), a project, a task and a worker from declarative state; evaluations and builds run end to end against `pnpm start`.
 
 `backend/.cargo/config.toml` caps parallel `rustc` jobs at 1 (`[build] jobs = 1`) to bound peak memory; `cargo build -j N` overrides the cap.
 
@@ -58,8 +58,8 @@ CI (`.github/workflows/rust.yml`) runs fmt, the `#[allow]` grep gate and cargo-d
 
 ## Rust
 
-- `cargo fmt` before committing. The toolchain is pinned in `rust-toolchain.toml`, mirrored by the devShell (`flake.lock` is the source of truth); `rustfmt.toml` sets `style_edition = "2024"`.
-- Both workspaces share `deny.toml`, `clippy.toml`, `rustfmt.toml` and `[workspace.lints]`.
+- `cargo fmt` before committing. The toolchain comes from the devShell (`flake.lock`); `rust-toolchain.toml` mirrors it for rustup users; `rustfmt.toml` sets `style_edition = "2024"`.
+- Each workspace carries its own `deny.toml`, `clippy.toml` and `rustfmt.toml`, kept in step; the backend `clippy.toml` adds the `tokio::spawn` and raw `Statement` bans.
 - No `unwrap()` in production paths (`clippy::unwrap_used = "deny"`): use `?`, an explicit error branch, or `.expect("<the invariant>")` where the call cannot fail by construction.
 - Shared state uses `gradient_util::sync::Mutex`, not `std::sync::Mutex`: poisoning is ignored and one panicking critical section does not break every later `lock()`.
 - Log with `tracing` (`info`, `debug`, `warn`, `error`), never `println!`; `#[instrument]` on significant async functions.
@@ -79,7 +79,7 @@ CI (`.github/workflows/rust.yml`) runs fmt, the `#[allow]` grep gate and cargo-d
 ## Angular and TypeScript
 
 - Standalone components with signals (`signal()`, `computed()`), feature folders under `frontend/src/app/features/`.
-- UI components from `gr-ui` (`src/app/shared/ui/`, on `@angular/cdk`), charts through `<app-metric-chart>` (Apache ECharts), colours and spacing from `src/app/styles/_variables.scss`. See the [Frontend Style Guide](frontend-style-guide.md).
+- UI components from `gr-ui` (`src/app/shared/ui/`, on `@angular/cdk`), charts through `<gr-metric-chart>` (Apache ECharts), colours and spacing from `src/app/styles/_variables.scss`. See the [Frontend Style Guide](frontend-style-guide.md).
 - No UI or chart dependency with a field-of-use restriction: the bundle ships under AGPL-3.0, and anything beyond MIT, BSD or Apache-2.0 cannot be passed on.
 - A refreshed `pnpm-lock.yaml` changes the `pnpmDeps` hash in `nix/packages/gradient-frontend.nix`: set `lib.fakeHash`, run `nix build .#gradient-frontend.pnpmDeps`, take the reported hash.
 - `minimumReleaseAge` in `pnpm-workspace.yaml` refuses packages younger than 24 hours; a local `pnpm update` then resolves the same versions the Nix build accepts.

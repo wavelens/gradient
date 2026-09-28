@@ -37,7 +37,7 @@ The worker gets its highest-scoring job whose total is at least 0 and that no ru
 
 ## Rules in `resource-aware` Only
 
-These rules need `services.gradient.worker.build.metrics` on the workers and earlier runs of the same package; without either, they add nothing.
+The memory predictions (`ResourceFitRule`, the out-of-memory check) need `services.gradient.worker.build.metrics` on the workers and earlier runs of the same package. The CPU and memory saturation check uses live worker load.
 
 | Rule | Kind | Effect |
 |---|---|---|

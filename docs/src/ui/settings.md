@@ -17,6 +17,8 @@ Three settings pages: the user's own, a project's and a cache's. Fields of entit
 
 The theme (**System**, **Light**, **Dark**) is stored per browser, not per account.
 
+![API Keys](../assets/screenshots/api_keys.png)
+
 ## Project Settings
 
 **Settings** on the project page.
@@ -42,6 +44,8 @@ A public project shows its evaluations and builds to everyone, signed in or not.
 | Visibility | A public cache serves paths without credentials |
 
 The cache page also holds **Upstreams**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
+
+![Cache NARs](../assets/screenshots/cache_nars.png)
 
 ## Related
 

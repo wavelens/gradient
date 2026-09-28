@@ -18,7 +18,7 @@ The proxy is a normal worker session: `InitConnection`, `AuthChallenge`, `AuthRe
 | Aspect | Behavior |
 |---|---|
 | Capabilities | A fixed set, `GRADIENT_PROXY_UPSTREAM_CAPABILITIES` (default `fetch,eval,build`) |
-| Hardware | `gradient-pool::aggregate()` over the downstream workers, sent as `WorkerCapabilities` and `WorkerMetrics` |
+| Hardware | `gradient_pool::aggregate()` over the downstream workers, sent as `WorkerCapabilities` and `WorkerMetrics` |
 | Aggregation | Capabilities OR'd, architectures and features unioned, slots, CPUs and RAM summed, fastest core score |
 | Peer tokens | `GRADIENT_PROXY_UPSTREAM_PEERS_FILE` |
 

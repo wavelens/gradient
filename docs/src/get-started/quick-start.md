@@ -54,18 +54,16 @@ The first signs login sessions, the second encrypts secrets stored in the databa
     secrets.cryptFile = "/var/lib/gradient-secrets/crypt";
     postgres.enable = true; # (2)!
     worker.enable = true; # (3)!
-    sentry.enable = true; # (4)!
   };
 
-  services.postgresql.package = pkgs.postgresql_18; # (5)!
+  services.postgresql.package = pkgs.postgresql_18; # (4)!
 }
 ```
 
 1.  Served by an nginx virtual host, set up by the module.
 2.  A local PostgreSQL database for Gradient.
 3.  A worker on the same host. Self-registers and joins every project.
-4.  Optional. Sends crash reports to the Gradient developers.
-5.  Gradient needs PostgreSQL 18 or newer; the NixOS default may be older.
+4.  Gradient needs PostgreSQL 18 or newer; the NixOS default may be older.
 
 ## Verify Deployment
 

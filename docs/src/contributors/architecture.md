@@ -60,7 +60,7 @@ root
 | `graph` | Every request-path write to `derivation*`, `build_job`, `build_attempt`, `cached_path`, and the retires of maintenance | [Build Anchors](scheduler/build-anchors.md) |
 | `scheduler-core` | `WorkerPool` and the candidate cache (`JobTracker`); `Scheduler` is a facade, one message per method | [Capabilities and Dispatch](proto/capabilities-and-dispatch.md) |
 | `SessionActor` | One worker connection; the reader delivers one frame per call and TCP backpressure holds | [Connection](proto/connection.md) |
-| `effects` | Outbox delivery: 8 workers, backoff from 30 s doubling to 15 min, dead letter after 6 attempts | [Events and Webhooks](../reference/events.md) |
+| `effects` | Outbox delivery: 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
 
 - **Pull-based dispatch:** a claim is a `dispatched_job` insert in Postgres (`gradient_db::claim_dispatch`); the scheduler actor only caches candidates.
 - **Session signals:** the scheduler reaches a session only through `SessionPort` (`Offers`, `Reauth`, `Abort`, `Drain`, `Close`); a burst of enqueues collapses into one offer per generation.
@@ -74,7 +74,7 @@ root
 - A child that panics or exits is respawned after a backoff of 1 s doubling to 60 s, reset after five healthy minutes.
 - A pass over its budget is cancelled in place and ticks again.
 - Restarts, errors, timeouts and the last good pass per child are on `/api/v1/board/health`.
-- Work that outlives a request runs as a tracked task: shutdown drains the task. Bare `tokio::spawn` is a clippy error in the whole workspace.
+- Work that outlives a request runs as a tracked task: shutdown drains the task. Bare `tokio::spawn` is a clippy error in the backend workspace.
 
 ## Worker
 

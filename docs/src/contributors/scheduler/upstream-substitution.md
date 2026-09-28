@@ -96,7 +96,11 @@ Nothing below the outputs is fetched: the referenced paths are anchors of their 
 | Upstream NAR missing, wrong size or not matching `nar_hash` (`CorruptCachedNar`) | `InputsUnavailable` | Self-heal reconcile, retry |
 | Anything else, hash mismatch included | `Transient` | Retry |
 
-A relay whose `InputsUnavailable` / `Transient` retries run out enters the same budget instead of `FailedPermanent`. At `substituteMissEscalationThreshold` (`GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD`, default 2) misses within one evaluation, `exhaust_substitution` clears `substitutable`, the upstream columns of the outputs, and `attempt`, and sets the anchor `Created`. The anchor then builds through the ordinary gates.
+**Escalation to a build:**
+
+- A relay whose `InputsUnavailable` / `Transient` retries run out enters the same budget instead of `FailedPermanent`.
+- At `build.substituteMissEscalationThreshold` (default 2) misses within one evaluation, `exhaust_substitution` clears `substitutable`, the upstream columns of the outputs and `attempt`, and sets the anchor `Created`.
+- The anchor then builds through the ordinary gates.
 
 ## Cache Endpoints
 
@@ -110,7 +114,12 @@ A relay whose `InputsUnavailable` / `Transient` retries run out enters the same 
 
 ## Build Log Substitution
 
-`gradient-scheduler/src/log_substitution.rs`. After `BuildCompleted` on a `substitutable` anchor, the scheduler fetches `<upstream>/log/<drv basename>` from the project's candidates (`upstream_endpoints_for_project`, best first) through `fetch_upstream_log`, the same fetch the cache log endpoint uses. The first non-empty body (10 s timeout, capped at 16 MiB with a `[truncated]` marker) is appended to the latest `build_attempt` log, only when that log is still empty. Every failure is logged and ignored.
+`gradient-scheduler/src/log_substitution.rs`. After `BuildCompleted` on a `substitutable` anchor, the scheduler fetches the upstream's build log.
+
+- **Source:** `<upstream>/log/<drv basename>` from the project's candidates (`upstream_endpoints_for_project`, best first), through `fetch_upstream_log`, the same fetch the cache log endpoint uses.
+- **Limits:** the first non-empty body wins; 10 s timeout, capped at 16 MiB with a `[truncated]` marker.
+- **Target:** appended to the latest `build_attempt` log, only while that log is still empty.
+- **Errors:** logged and ignored.
 
 ## Related
 

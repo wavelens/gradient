@@ -161,7 +161,7 @@ An unbacked terminal-success output is prevented, not repaired: a failed NAR com
 | Pass | Reclaims |
 |---|---|
 | Evaluation GC (`gc_task_evaluations`, per task, keeps `keep_evaluations`) | Old evaluations; live evaluations adopt pending anchors first (`adopt_pending_closures`) |
-| Derivation GC (`run_derivation_gc`) | Derivations outside the dependency closure of every `entry_point` and `build_job`, after `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` (24); attempt logs removed by hand |
+| Derivation GC (`run_derivation_gc`) | Derivations outside the dependency closure of every `entry_point` and `build_job`, after `gc.orphanDerivationHours` (24); their attempt logs are deleted from log storage by the sweep |
 | Stale-path eviction (`evict_stale_cached_paths`) | Unreachable paths unfetched for `gc.narTtlHours` (336) |
 | Orphan NAR files | Stored NARs no row keeps, probed in batches of 5000, older than `gc.narUploadGraceHours` (24) |
 

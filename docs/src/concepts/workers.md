@@ -21,7 +21,7 @@ One machine can take all three, or the kinds can be split, e.g. a large-memory m
 
 ## Matching Builds
 
-A build only goes to a worker that supports the derivation's system (e.g. `aarch64-linux`) and every required system feature (e.g. `kvm`, `big-parallel`). Workers detect both from their local Nix daemon.
+A build only goes to a worker that supports the derivation's system (e.g. `aarch64-linux`) and every required system feature (e.g. `kvm`, `big-parallel`). Systems come from `worker.system.architectures` (default: the host platform); features are detected from the local Nix unless `worker.system.features` sets them.
 
 Among the matching workers, the scheduler scores each queued job and steers heavy builds and evaluations away from workers without enough free memory for the predicted peak, learned from earlier runs. `services.gradient.worker.build.metrics` records the per-build measurements this prediction needs.
 

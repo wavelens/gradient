@@ -28,7 +28,7 @@ services.prometheus.scrapeConfigs = [{
 1.  Any random string, e.g. `openssl rand -base64 32`; without the file `GET /metrics` returns `404`.
 2.  The bundled reverse proxy does not forward `/metrics`; the scraper talks to `listenAddr` and `port` directly.
 
-The endpoint refills one request every 6 s, with a burst of 5; a 15 s scrape interval fits.
+The endpoint refills one request per second, with a burst of 5.
 
 ## 2. OpenTelemetry
 

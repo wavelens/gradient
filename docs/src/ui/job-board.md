@@ -18,6 +18,18 @@ What the scheduler and the workers do right now and over time: live jobs, why a 
 | Evals | The costliest evaluations by time, peak memory, thunks, function calls and allocations | Pick the time window |
 | System Health | Server runtime, metric pipeline lag, route stats; superusers only | **Run Deep GC**; **Enable Draining** before stopping the server |
 
+=== "Live Jobs"
+
+    ![Live Jobs tab](../assets/screenshots/job_board_live.png)
+
+=== "Scheduler"
+
+    ![Scheduler tab](../assets/screenshots/job_board_scheduler.png)
+
+=== "Jobs"
+
+    ![Jobs tab](../assets/screenshots/job_board_expensive_jobs.png)
+
 Draining stops new dispatches and parks running evaluations for a safe server stop; the next start clears the flag.
 
 ## Job Inspection
