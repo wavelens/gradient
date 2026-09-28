@@ -73,7 +73,7 @@ With `services.gradient.state.delete` (on by default), users, projects and cache
 
 ## Export
 
-`GET /admin/state` returns the running instance in the shape of `services.gradient.state`, to move a UI-built setup into Nix.
+`GET /api/v1/admin/state` returns the running instance in the shape of `services.gradient.state`, to move a UI-built setup into Nix.
 
 ## Related
 

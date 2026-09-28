@@ -34,7 +34,7 @@ packages.x86_64-linux.#   # only the derivations directly under x86_64-linux
 packages.x86_64-linux.*   # the same, plus derivations inside attribute sets one level down
 ```
 
-`#` is the recommended default: flake outputs keep derivations at a fixed depth, and `#` selects exactly that depth. `*` fits outputs with nested package sets, such as `legacyPackages`.
+`#` is recommended over the `*` default: flake outputs keep derivations at a fixed depth, and `#` selects exactly that depth. `*` fits outputs with nested package sets, such as `legacyPackages`.
 
 ## Roots
 

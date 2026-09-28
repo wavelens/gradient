@@ -30,7 +30,7 @@ Gradient stores secrets hashed or encrypted, and the export returns every `*_fil
 | `integrations.<name>.access_token_file` | Forge access token | From the forge |
 | `tasks.<name>.actions.*.config.token_file` | Web request token | `openssl rand -hex 32` |
 
-!!! tip "Superuser through OIDC"
+!!! tip "Superuser Through OIDC"
     A user with `superuser = true` and no `password_file` becomes the superuser on the first OIDC sign-in with a matching username or email.
 
 ## 3. Apply

@@ -28,10 +28,11 @@ One SQLite file with everything that explains a stuck or failed evaluation, read
 | Include build logs | off | On: the full log of every failed or aborted attempt |
 | Include instance context | on | Workers, upstream caches and the server settings; needs the `manageWorkers` permission |
 
+- The API takes the options as query parameters (`anonymize_identities`, `anonymize_packages`, `include_logs`, `include_instance`); there `include_logs` defaults to on.
 - The same name always maps to the same token within one report and dependencies stay readable; two reports cannot be linked.
 - Store hashes stay for checking a path against public caches.
 
-!!! note "Never in the file"
+!!! note "Never in the File"
     API keys, sessions, passwords, worker tokens, upstream cache keys and forge credentials are left out entirely, not redacted.
 
 ## 3. Attach the Report

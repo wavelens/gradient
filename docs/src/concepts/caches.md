@@ -29,6 +29,8 @@ Upstreams are set under **Settings -> Upstream Caches** on the cache page.
 - **Read Only**: pull through only.
 - **Write Only**: push only.
 
+Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and Http upstreams; Gradient Proto upstreams are set in the UI.
+
 ## Pull-Through
 
 A cache serves paths from its upstreams as if the cache held them. A client asking for a missing path gets the upstream's copy through the cache, re-signed with the cache's own key. Clients configure one URL and one key, wherever a path came from.

@@ -611,9 +611,9 @@ impl JobTracker {
 
     /// Assign the best pending job matching `kind` for `worker_id`.
     ///
-    /// Each eligible candidate is scored by `policy`.  The job with the
-    /// highest total score is assigned.  When multiple jobs tie, the one with
-    /// the lexicographically smallest `job_id` is chosen for determinism.
+    /// Each eligible candidate is scored by `policy`. The highest-scoring job
+    /// that no rule vetoed and that reaches the dispatch floor is assigned;
+    /// ties go to the lexicographically smallest `job_id` for determinism.
     ///
     /// This is the ONLY assignment path - the server never assigns without
     /// an explicit `RequestJob` from the worker.
@@ -637,8 +637,8 @@ impl JobTracker {
             &worker_ctx,
         );
         let winner_id = scored
-            .first()
-            .filter(|(_, sc)| wins(sc))
+            .iter()
+            .find(|(_, sc)| wins(sc))
             .map(|(id, _)| id.clone());
 
         // Worker and instance context are identical for every candidate, so they
@@ -662,8 +662,8 @@ impl JobTracker {
         let job_id = winner_id?;
         let (_, winner_sc) = scored
             .into_iter()
-            .next()
-            .expect("a winner implies a first candidate");
+            .find(|(id, _)| *id == job_id)
+            .expect("the winner is a scored candidate");
         let record = self.dispatch_record_for(
             &job_id,
             DispatchedJobId::now_v7(),
@@ -1189,7 +1189,7 @@ impl JobTracker {
     }
 
     /// Increment every pending job's `rescore_count`. Called once per build
-    /// dispatch tick so long-waiting jobs accrue a rescore-wait bonus.
+    /// dispatch tick so the rescore-wait hold on an unmeasured build lapses.
     pub fn bump_rescore_counts(&mut self) {
         for j in self.pending.values_mut() {
             j.set_rescore_count(j.rescore_count() + 1);
@@ -2009,8 +2009,8 @@ mod tests {
         let p = gradient_pool::score::policy_by_name("simple");
         let inst = gradient_pool::score::InstanceContext::default();
 
-        // No scores yet: the build's total is negative (RescoreWaitRule), so the
-        // negative-total gate idles the worker and leaves the job pending.
+        // No scores yet: RescoreWaitRule vetoes the build, so the worker idles
+        // and the job stays pending.
         assert!(
             tracker
                 .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
@@ -2032,6 +2032,60 @@ mod tests {
         assert_eq!(assignment.unwrap().job_id(), "j1");
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
+    }
+
+    #[derive(Debug)]
+    struct PreferAndVeto;
+
+    impl gradient_pool::score::ScoreRule for PreferAndVeto {
+        fn name(&self) -> &'static str {
+            "PreferAndVeto"
+        }
+        fn score(
+            &self,
+            job: &JobContext<'_>,
+            _: &WorkerContext<'_>,
+            _: &gradient_pool::score::InstanceContext,
+        ) -> f64 {
+            if job.job.job_id == "vetoed" {
+                10.0
+            } else {
+                1.0
+            }
+        }
+        fn veto(
+            &self,
+            job: &JobContext<'_>,
+            _: &WorkerContext<'_>,
+            _: &gradient_pool::score::InstanceContext,
+        ) -> bool {
+            job.job.job_id == "vetoed"
+        }
+        fn description(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    #[test]
+    fn a_vetoed_top_candidate_yields_to_the_next_valid_one() {
+        let mut tracker = JobTracker::new();
+        let peer = ProjectId::now_v7();
+        tracker.add_pending("vetoed".into(), build_job(peer, vec![]));
+        tracker.add_pending("valid".into(), build_job(peer, vec![]));
+        let p = gradient_pool::score::RulePolicy::new("test", vec![Box::new(PreferAndVeto)], false);
+        let inst = gradient_pool::score::InstanceContext::default();
+
+        let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &p, &inst);
+
+        assert_eq!(
+            assignment.map(|a| a.job_id().to_owned()).as_deref(),
+            Some("valid")
+        );
+        assert!(tracker.pending_job("vetoed").is_some());
+        assert_eq!(
+            tracker.recent_decisions()[0].winner.as_deref(),
+            Some("valid")
+        );
     }
 
     #[test]

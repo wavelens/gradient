@@ -34,8 +34,8 @@ On the project page, **Create Task**:
 
 A task is one repository plus the outputs to build from that repository.
 
-!!! tip "Private repositories"
-    Each project has its own SSH key under **Settings -> SSH**. Add the public key as a deploy key on the Git host.
+!!! tip "Private Repositories"
+    Each project has its own SSH key under **Settings -> SSH Key**. Add the public key as a deploy key on the Git host.
 
 ## 5. Start an Evaluation
 

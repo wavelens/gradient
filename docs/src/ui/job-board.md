@@ -32,7 +32,7 @@ A job from **Live Jobs** opens with:
 
 The timeline shows where a slow job spent its time, the score shows why the job landed on that worker.
 
-??? note "Timeline phases"
+??? note "Timeline Phases"
     | Phase | Meaning |
     |---|---|
     | `fetch` | Cloning or archiving the flake source |

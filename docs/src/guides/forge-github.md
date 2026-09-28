@@ -59,7 +59,7 @@ The automatic setup covers pushes only; pull requests need the **Pull Request (r
 
 The approval gate is a task setting: **Require maintainer approval for PRs from non-writers**.
 
-??? note "Registering the App by hand"
+??? note "Registering the App by Hand"
     When the manifest flow does not fit, register the App following [GitHub's documentation](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) with these values:
 
     | Setting | Value |

@@ -68,7 +68,7 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 ## Links
 
 - Source code: <https://github.com/wavelens/gradient>
-- API reference: [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
+- API reference: [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/main/docs/gradient-api.yaml)
 - NixOS options search: <https://wavelens.github.io/gradient-search>
 - Chat: [#gradient-ci:matrix.org](https://matrix.to/#/#gradient-ci:matrix.org)
 

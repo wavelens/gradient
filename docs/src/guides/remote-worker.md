@@ -40,7 +40,7 @@ cat /proc/sys/kernel/random/uuid
     ```
 
     1.  Pinned for the worker's peers file, which names the project before the server first starts.
-    2.  Created with `openssl rand -base64 48`; the same token goes into the worker's peers file.
+    2.  Created with `openssl rand -hex 32`; the same token goes into the worker's peers file.
     3.  Declared workers are base workers by default.
 
     The peers file entry on the worker machine is `<project uuid>:<token>`.
