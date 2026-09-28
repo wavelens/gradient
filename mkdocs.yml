@@ -82,6 +82,7 @@ nav:
       - Configuration: reference/configuration.md
       - Declarative State: reference/state.md
       - Evaluation Wildcards: reference/wildcards.md
+      - CLI: reference/cli.md
   - Contributors:
       - Architecture: development/architecture.md
       - Internals: development/internals.md

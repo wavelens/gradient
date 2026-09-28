@@ -76,4 +76,4 @@ Without `--control`, the server is read-only.
 ## Next Steps
 
 - [Evaluations and Builds](../concepts/evaluations-and-builds.md): what the tools return
-- [CLI](../usage/cli.md): the other `gradient` commands
+- [CLI](../reference/cli.md): the other `gradient` commands
