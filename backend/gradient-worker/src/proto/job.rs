@@ -249,9 +249,9 @@ impl JobUpdater {
         Ok(answers.into_iter().find(|cp| cp.cached && cp.url.is_some()))
     }
 
-    /// `CacheQuery { Push }` with each path's uncompressed size, so the server can
-    /// route small NARs over the stream. A size the caller already knows wins; the
-    /// rest come from the store, and without a store they stay unknown.
+    /// `CacheQuery { Push }`: which of `paths` the server already holds, so only
+    /// the rest go through `UploadRequest`. Each path carries its uncompressed
+    /// size; one the caller already knows wins over the store's.
     pub async fn query_push(
         &mut self,
         paths: Vec<String>,
