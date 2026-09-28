@@ -87,7 +87,7 @@ impl Drop for PidGuard {
 }
 
 impl EvalWorker {
-    /// Spawn a new worker by re-execing the current binary with `--eval-worker`
+    /// Spawn a new worker by re-execing the current binary with `--eval-subprocess`
     /// and verify its IPC version byte. The subprocess is single-threaded and
     /// does not fork; pool size is the eval concurrency and RSS is bounded
     /// parent-side (see [`Self::rss_bytes`]).
@@ -101,7 +101,7 @@ impl EvalWorker {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
-        command.arg("--eval-worker");
+        command.arg("--eval-subprocess");
         command.env("NIX_CACHE_HOME", eval_cache_dir);
         for &(k, v) in
             super::eval_stats::eval_worker_stats_env(super::eval_stats::metrics_enabled())

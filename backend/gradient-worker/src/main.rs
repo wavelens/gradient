@@ -44,7 +44,7 @@ fn main() -> Result<()> {
     // would corrupt the frame stream and crash the eval.
     let overrides = log_overrides(&config);
     gradient_util::logging::init(&LogSetup {
-        level: &config.log_level,
+        level: &config.log.level_default,
         overrides: &overrides,
         quiet: &[],
         honor_rust_log: false,
@@ -53,7 +53,7 @@ fn main() -> Result<()> {
 
     // Re-exec as eval subprocess when launched with the internal flag.
     // The Nix C API (Boehm GC) must run single-threaded, isolated from Tokio.
-    if config.eval_worker {
+    if config.eval_subprocess {
         return nix::eval_worker::run_eval_worker().map_err(anyhow::Error::from);
     }
 
@@ -72,7 +72,7 @@ fn main() -> Result<()> {
     // is installed (see issue #232).
     gradient_util::http::init_crypto_provider();
     gradient_worker_client::object_put::limit_concurrent_puts(
-        config.max_concurrent_uploads as usize,
+        config.nar.max_concurrent_uploads as usize,
     );
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -94,12 +94,12 @@ fn main() -> Result<()> {
         let sessions = TaskTracker::new();
 
         // Periodic sweep of stale resumable-download `*.partial` files (#225).
-        if config.nar_partial_ttl_secs > 0 {
+        if config.nar.partial_ttl_secs > 0 {
             let gc_config = config.clone();
             let gc_shutdown = shutdown.clone();
             #[expect(clippy::disallowed_methods, reason = "returns on drain_requested")]
             tokio::spawn(async move {
-                let ttl = std::time::Duration::from_secs(gc_config.nar_partial_ttl_secs);
+                let ttl = std::time::Duration::from_secs(gc_config.nar.partial_ttl_secs);
                 let store = match gradient_storage::PartialStore::new(gc_config.nar_partial_dir(), ttl)
                 {
                     Ok(s) => s,
@@ -109,7 +109,7 @@ fn main() -> Result<()> {
                     }
                 };
                 let period =
-                    std::time::Duration::from_secs((gc_config.nar_partial_ttl_secs / 4).clamp(60, 3600));
+                    std::time::Duration::from_secs((gc_config.nar.partial_ttl_secs / 4).clamp(60, 3600));
                 let mut tick = tokio::time::interval(period);
                 loop {
                     tokio::select! {
@@ -347,8 +347,8 @@ fn log_overrides(config: &WorkerConfig) -> Vec<(&'static str, Option<&str>)> {
         targets.iter().map(move |t| (*t, level))
     }
 
-    area(EVAL_TARGETS, config.eval_log_level.as_deref())
-        .chain(area(BUILD_TARGETS, config.build_log_level.as_deref()))
-        .chain(area(PROTO_TARGETS, config.proto_log_level.as_deref()))
+    area(EVAL_TARGETS, config.log.level_eval.as_deref())
+        .chain(area(BUILD_TARGETS, config.log.level_build.as_deref()))
+        .chain(area(PROTO_TARGETS, config.log.level_proto.as_deref()))
         .collect()
 }

@@ -7,7 +7,7 @@
 //! Long-lived Nix evaluator worker subprocess.
 //!
 //! The parent process spawns one or more copies of the gradient-worker binary
-//! with `--eval-worker` to host a persistent [`NixEvaluator`]. Parent and
+//! with `--eval-subprocess` to host a persistent [`NixEvaluator`]. Parent and
 //! worker exchange rkyv frames over the worker's stdin/stdout (see
 //! [`crate::ipc`]), so the libnix init cost is paid only once per worker.
 //!

@@ -246,14 +246,14 @@ impl Worker<Connected> {
     }
 
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
-        let store = LocalNixStore::connect(config.max_nixdaemon_connections)?;
+        let store = LocalNixStore::connect(config.nix_daemon.max_connections)?;
         let evaluator = WorkerEvaluator::new(
-            config.eval_workers,
-            config.eval_fork_workers,
-            config.max_eval_rss,
-            config.min_free_ram_mb,
+            config.eval.workers,
+            config.eval.fork_workers,
+            config.eval.max_rss,
+            config.system.min_free_ram_mb,
             config.eval_cache_dir(),
-            config.eval_cache_share,
+            config.eval.cache_share,
         );
         let gcroots = crate::nix::gcroots::GcRootKeeper::new(
             &config.gcroots_dir,
@@ -266,20 +266,20 @@ impl Worker<Connected> {
             store,
             evaluator,
             gcroots,
-            config.binpath_nix.clone(),
-            config.binpath_ssh.clone(),
-            config.build_metrics,
-            config.build_cgroup_root.clone(),
+            config.nix_bin.clone(),
+            config.ssh_bin.clone(),
+            config.build.metrics,
+            config.build.cgroup_root.clone(),
             crate::executor::log_limit::LogRateLimits {
-                burst_bytes_per_min: config.log_burst_bytes_per_min,
-                sustained_bytes_per_hour: config.log_sustained_bytes_per_hour,
+                burst_bytes_per_min: config.log.burst_bytes_per_min,
+                sustained_bytes_per_hour: config.log.sustained_bytes_per_hour,
             },
-            config.log_fetch_from_store,
+            config.log.fetch_from_store,
             config.build_cores(),
         );
-        if config.build_metrics {
+        if config.build.metrics {
             tracing::info!(
-                cgroup_root = %config.build_cgroup_root,
+                cgroup_root = %config.build.cgroup_root,
                 "build metrics enabled: CPU from daemon build result, peak RAM/disk sampled from the build cgroup"
             );
         } else {
@@ -295,7 +295,7 @@ async fn perform_setup(
     config: &WorkerConfig,
     direction: &str,
 ) -> Result<()> {
-    let peer_id = load_or_generate_id(&config.data_dir, config.worker_id.as_deref())
+    let peer_id = load_or_generate_id(&config.base_dir, config.id.as_deref())
         .context("failed to load or generate persistent worker ID")?;
     let peer_tokens = config.peer_tokens();
     let handshake = perform_handshake(conn, peer_id, peer_tokens, config.capabilities()).await?;
@@ -308,21 +308,23 @@ async fn perform_setup(
     );
     if handshake.negotiated.build {
         let architectures = config
+            .system
             .architectures
             .clone()
             .unwrap_or_else(|| vec![crate::config::host_system()]);
-        let system_features = match config.system_features.clone() {
+        let system_features = match config.system.features.clone() {
             Some(features) => features,
-            None => detect_system_features(&config.binpath_nix).await,
+            None => detect_system_features(&config.nix_bin).await,
         };
         let host = crate::metrics::host_static();
         let cpu_core_score = config
+            .system
             .cpu_core_score
             .unwrap_or_else(crate::metrics::cpu_core_score);
         info!(
             ?architectures,
             ?system_features,
-            max_concurrent_builds = config.max_concurrent_builds,
+            max_concurrent_builds = config.build.max_concurrent,
             cpu_count = host.cpu_count,
             ram_total_mb = host.ram_total_mb,
             cpu_core_score,
@@ -331,7 +333,7 @@ async fn perform_setup(
         conn.send(ClientMessage::WorkerCapabilities {
             architectures,
             system_features,
-            max_concurrent_builds: config.max_concurrent_builds,
+            max_concurrent_builds: config.build.max_concurrent,
             cpu_count: host.cpu_count,
             ram_total_mb: host.ram_total_mb,
             cpu_core_score,

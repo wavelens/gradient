@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// the worker's `ev.stats()` reads and the subprocess's `NIX_SHOW_STATS`
 /// counters so eval pays zero stats overhead.
 pub fn metrics_enabled() -> bool {
-    std::env::var("GRADIENT_EVAL_METRICS_ENABLED")
+    std::env::var("GRADIENT_WORKER_EVAL_METRICS")
         .map(|v| v != "false" && v != "0")
         .unwrap_or(true)
 }

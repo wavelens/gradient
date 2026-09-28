@@ -251,7 +251,7 @@ impl DispatchState {
     ) -> Self {
         let nar_recv = match gradient_storage::PartialStore::new(
             config.nar_partial_dir(),
-            std::time::Duration::from_secs(config.nar_partial_ttl_secs),
+            std::time::Duration::from_secs(config.nar.partial_ttl_secs),
         ) {
             Ok(store) => gradient_worker_client::nar_recv::NarReceiver::with_partial_store(store),
             Err(e) => {
@@ -271,8 +271,8 @@ impl DispatchState {
                 done_tx,
             },
             done_rx: Some(done_rx),
-            max_eval: config.max_concurrent_evaluations,
-            max_build: config.max_concurrent_builds,
+            max_eval: config.eval.max_concurrent,
+            max_build: config.build.max_concurrent,
             credentials,
             candidates,
             last_scores,
