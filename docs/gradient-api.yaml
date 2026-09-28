@@ -135,12 +135,14 @@ tags:
     description: Worker registration and live status (proto workers connected via WebSocket)
   - name: caches
     description: Binary cache management
+  - name: nix-cache
+    description: Nix binary cache protocol, served at the server root
   - name: commits
     description: Commit records
   - name: actions
     description: Per-task Actions (Send Mail, Send Web Request, Forge Status Report)
   - name: forge-webhooks
-    description: Incoming forge webhooks (external forges → Gradient push triggers)
+    description: Incoming forge webhooks (external forges -> Gradient push triggers)
   - name: integrations
     description: Per-project named forge integrations (inbound HMAC secrets + outbound API credentials)
   - name: admin
@@ -174,6 +176,11 @@ paths:
                 message: "200 ALIVE"
 
   /metrics:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     get:
       tags: [general]
       summary: Prometheus metrics
@@ -235,12 +242,19 @@ paths:
                   github_app_enabled: false
 
   /proto:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     get:
       tags: [general]
       summary: Binary WebSocket protocol endpoint
       description: |-
         Upgrades the connection to a WebSocket carrying rkyv-encoded binary
-        frames. Only available when `GRADIENT_PROTO_DISCOVERABLE=true`.
+        frames. The upgrade always succeeds; a server with
+        `GRADIENT_PROTO_DISCOVERABLE=false` then rejects the handshake of a
+        worker it did not dial itself with a `403` reject frame.
 
         **Protocol flow**
         1. Client sends `ClientMessage::InitConnection { version, features }`.
@@ -249,14 +263,13 @@ paths:
         3. Further message types will be added as the protocol evolves.
 
         Messages are raw rkyv bytes sent as WebSocket binary frames.
-        The `/proto` endpoint is always active.
       security: []
       operationId: protoWebSocket
       responses:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
-        '404':
-          description: Protocol endpoint is disabled (`GRADIENT_PROTO_DISCOVERABLE=false`)
+        '503':
+          description: Connection limit (`GRADIENT_PROTO_MAX_CONNECTIONS`) reached; retry after `Retry-After`
 
   # ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -1886,6 +1899,89 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /projects/public:
+    get:
+      tags: [projects]
+      summary: List public projects
+      description: Returns a paginated list of all public projects, ordered by name. Does not require authentication.
+      security: []
+      operationId: listPublicProjects
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Paginated public project list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Project'
+                          total:
+                            type: integer
+                          page:
+                            type: integer
+                          per_page:
+                            type: integer
+
+  /projects/{project}/public:
+    parameters:
+      - $ref: '#/components/parameters/ProjectSlug'
+    post:
+      tags: [projects]
+      summary: Make project public
+      description: >-
+        Makes the project, its tasks, evaluations and builds readable without
+        authentication. Requires the manage-project-settings permission; rejects
+        state-managed projects.
+      operationId: makeProjectPublic
+      responses:
+        '200':
+          description: Project is now public
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [projects]
+      summary: Make project private
+      description: >-
+        Restricts the project to its members. Requires the
+        manage-project-settings permission; rejects state-managed projects.
+      operationId: makeProjectPrivate
+      responses:
+        '200':
+          description: Project is now private
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /projects/{project}:
     parameters:
       - $ref: '#/components/parameters/ProjectSlug'
@@ -2175,7 +2271,7 @@ paths:
       description: |
         Creates a new role scoped to this project. The caller must hold
         the **manageRoles** permission. The role's permission set is freely
-        chosen from the capabilities returned by `GET /projects/{project}/roles` →
+        chosen from the capabilities returned by `GET /projects/{project}/roles` ->
         `available_permissions`. Built-in role names (Admin, Write, View) and
         any name already used by another role in the same project are rejected
         with `409`.
@@ -2878,6 +2974,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tasks/{project}/{task}/transfer:
+    parameters:
+      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
+    post:
+      tags: [tasks]
+      summary: Move task to another project
+      description: >-
+        Moves the task into the project named in the body. Allowed for the task
+        owner or a member with the edit-task permission, who also needs the
+        create-task permission in the target project. Rejects state-managed
+        tasks and target projects.
+      operationId: transferTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project]
+              properties:
+                project:
+                  type: string
+                  description: Name of the target project
+            example:
+              project: other-project
+      responses:
+        '200':
+          description: Task moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: Ownership transferred
+        '400':
+          description: The task already belongs to the target project
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4811,7 +4952,7 @@ paths:
       summary: Get dependency graph
       description: |-
         Returns the full transitive dependency graph rooted at the given build via BFS,
-        capped at 500 nodes. Each edge `source → target` means `source` must be built
+        capped at 500 nodes. Each edge `source -> target` means `source` must be built
         before `target`.
 
         **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
@@ -5853,6 +5994,28 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /caches/public:
+    get:
+      tags: [caches]
+      summary: List public caches
+      description: Returns every public cache. Does not require authentication.
+      security: []
+      operationId: listPublicCaches
+      responses:
+        '200':
+          description: Public cache list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Cache'
+
   /caches/{cache}:
     parameters:
       - $ref: '#/components/parameters/CacheSlug'
@@ -5968,7 +6131,7 @@ paths:
     post:
       tags: [caches]
       summary: Make cache public
-      description: Makes the cache visible to all authenticated users.
+      description: Makes the cache readable without authentication, by the API and by Nix clients.
       operationId: makeCachePublic
       responses:
         '200':
@@ -5986,7 +6149,7 @@ paths:
     delete:
       tags: [caches]
       summary: Make cache private
-      description: Restricts the cache to its owner only.
+      description: Requires credentials to read the cache, by the API and by Nix clients.
       operationId: makeCachePrivate
       responses:
         '200':
@@ -6889,7 +7052,7 @@ paths:
       description: |
         Creates a new role scoped to this cache. Requires `manageCacheRoles`.
         The role's permission set is chosen from the capabilities returned by
-        `GET /caches/{cache}/roles` → `available_permissions`.
+        `GET /caches/{cache}/roles` -> `available_permissions`.
       operationId: createCacheRole
       requestBody:
         required: true
@@ -7253,6 +7416,547 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  # ── Forge Webhooks (incoming) ────────────────────────────────────────────────
+
+  /hooks/github:
+    post:
+      tags: [forge-webhooks]
+      summary: Receive GitHub App webhook
+      description: |-
+        Receives events from a configured GitHub App. Payloads are authenticated using
+        `X-Hub-Signature-256` HMAC-SHA256 verification against the configured
+        `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
+
+        **Handled events:**
+        - `push` / `pull_request` / `release` - trigger an evaluation on any task whose
+          repository URL matches the matching trigger. A `push` carrying an
+          all-zero `after` SHA (a branch/tag deletion or a forge "test" delivery)
+          is accepted as a `200` no-op rather than rejected.
+        - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
+        - `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.
+        - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
+        - `installation` / `installation_repositories` - stores or clears the GitHub App
+          `installation_id` on the matching Gradient project.
+        - `ping` - always returns 200.
+
+        This endpoint is unauthenticated (verified via HMAC signature).
+      operationId: githubAppWebhook
+      parameters:
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          schema:
+            type: string
+          description: GitHub event type (e.g. `push`, `installation`, `ping`)
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 signature of the body (`sha256=<hex>`)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: GitHub event payload (varies by event type)
+      responses:
+        '200':
+          description: Webhook processed (may include zero queued evaluations)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/WebhookResponse'
+        '400':
+          description: Unparseable JSON payload or unsupported forge
+        '401':
+          description: Invalid webhook signature
+        '404':
+          description: Integration not found
+        '500':
+          description: Internal error
+        '503':
+          description: GitHub App not configured (GitHub endpoint only)
+
+  /hooks/{forge}/{project}/{integration_name}:
+    parameters:
+      - name: forge
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [gitea, forgejo, gitlab]
+        description: >-
+          Forge type path segment. Determines the HMAC scheme; does **not**
+          filter the integration lookup - a single inbound integration can
+          serve all three forges. GitHub deliveries go through
+          `POST /hooks/github` (the App webhook) instead.
+      - name: project
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Gradient project name
+      - name: integration_name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Name of the inbound integration within the project
+    post:
+      tags: [forge-webhooks]
+      summary: Receive forge push webhook
+      description: |-
+        Receives push events for a named inbound integration.
+        Authenticated via the integration's stored HMAC secret.
+
+        Signature header by forge:
+        - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)
+        - `gitlab`: `X-Gitlab-Token` (plain token comparison)
+
+        On a matching push, queues an evaluation for every active task whose
+        `task_integration.inbound_integration` points at this row and whose
+        repository URL matches the webhook payload's clone URL.
+
+        A push carrying an all-zero `after` SHA (a branch/tag deletion or a
+        forge "test" delivery) is accepted as a `200` no-op rather than rejected.
+
+        This endpoint is unauthenticated (verified via forge-specific signature).
+      operationId: forgeWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Forge push event payload
+      responses:
+        '200':
+          description: Webhook processed (may include zero queued evaluations)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/WebhookResponse'
+        '400':
+          description: Unparseable JSON payload or unsupported forge
+        '401':
+          description: Invalid webhook signature
+        '404':
+          description: Integration not found
+        '500':
+          description: Internal error
+
+  # ── Nix Cache Protocol ───────────────────────────────────────────────────────
+  # Served at the server root, not under /api/v1. Public caches need no
+  # credentials; private caches take HTTP Basic auth.
+
+  /cache/{cache}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [nix-cache]
+      summary: Cache root
+      description: >-
+        Redirects to `nix-cache-info`.
+      operationId: getCacheRoot
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '302':
+          description: Redirect to `/cache/{cache}/nix-cache-info`
+
+  /cache/{cache}/nix-cache-info:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [nix-cache]
+      summary: Nix cache info
+      description: >-
+        Cache metadata read by Nix substituters. `Priority` is the cache priority, or the
+        local priority for clients in `GRADIENT_HTTP_LOCAL_IPS`.
+      operationId: getNixCacheInfo
+      security:
+        - {}
+        - cacheBasic: []
+      parameters:
+        - name: json
+          in: query
+          required: false
+          allowEmptyValue: true
+          schema: { type: string }
+          description: Any presence of `json` selects the JSON variant
+      responses:
+        '200':
+          description: Cache metadata
+          content:
+            text/x-nix-cache-info:
+              schema: { type: string }
+              example: |-
+                WantMassQuery: 1
+                StoreDir: /nix/store
+                Priority: 30
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NixCacheInfo'
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/gradient-cache-info:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [nix-cache]
+      summary: Gradient cache info
+      description: >-
+        Gradient version and server URL behind this cache, for clients probing a
+        substituter. Sends `Access-Control-Allow-Origin: *`.
+      operationId: getGradientCacheInfo
+      security:
+        - {}
+        - cacheBasic: []
+      parameters:
+        - name: json
+          in: query
+          required: false
+          allowEmptyValue: true
+          schema: { type: string }
+          description: Any presence of `json` selects the JSON variant
+      responses:
+        '200':
+          description: Gradient metadata
+          content:
+            text/x-gradient-cache-info:
+              schema: { type: string }
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GradientCacheInfo'
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/{path}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: path
+        in: path
+        required: true
+        schema: { type: string }
+        description: '`<hash>.narinfo`; any other key answers `404`'
+    get:
+      tags: [nix-cache]
+      summary: Narinfo
+      description: >-
+        Path info of a store path. A miss here is looked up in the cache's upstreams,
+        re-signed with the cache key. `X-Cache` reports `HIT` (ours) or `MISS` (upstream).
+      operationId: getNarinfo
+      security:
+        - {}
+        - cacheBasic: []
+      parameters:
+        - name: json
+          in: query
+          required: false
+          allowEmptyValue: true
+          schema: { type: string }
+          description: Any presence of `json` selects the JSON variant
+      responses:
+        '200':
+          description: Narinfo
+          content:
+            text/x-nix-narinfo:
+              schema: { type: string }
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NixPathInfo'
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/nar/{path}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: path
+        in: path
+        required: true
+        schema: { type: string }
+        description: '`<file hash>.nar.zst`'
+    get:
+      tags: [nix-cache]
+      summary: NAR
+      description: >-
+        Compressed NAR archive of a store path.
+      operationId: getNar
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '200':
+          description: NAR stream
+          content:
+            application/x-nix-nar:
+              schema: { type: string, format: binary }
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/nar/upstream/{upstream_id}/{path}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: upstream_id
+        in: path
+        required: true
+        schema: { type: string }
+        description: Upstream id named in a proxied narinfo `URL`
+      - name: path
+        in: path
+        required: true
+        schema: { type: string }
+        description: NAR path on the upstream
+    get:
+      tags: [nix-cache]
+      summary: Upstream NAR
+      description: >-
+        Streams a NAR from an upstream of the cache. Any upstream serving the same path
+        is tried when the named one is gone.
+      operationId: getUpstreamNar
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '200':
+          description: NAR stream
+          content:
+            application/x-nix-nar:
+              schema: { type: string, format: binary }
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/debuginfo/{build_id}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: build_id
+        in: path
+        required: true
+        schema: { type: string }
+        description: ELF build id, with or without `.debug`
+    get:
+      tags: [nix-cache]
+      summary: Debug info
+      description: >-
+        DWARF debug info for an ELF build id, in the Nix `index-debug-info` format.
+        Indexed from `separateDebugInfo` outputs; a miss falls through to the
+        upstreams. `X-Cache` reports `HIT` or `MISS`.
+      operationId: getDebugInfo
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '200':
+          description: Debug info redirect
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  archive: { type: string, example: ../nar/0abc.nar.zst }
+                  member: { type: string, example: lib/debug/.build-id/ab/cdef.debug }
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/log/{drv}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: drv
+        in: path
+        required: true
+        schema: { type: string }
+        description: Derivation file name (`<hash>-<name>.drv`)
+    get:
+      tags: [nix-cache]
+      summary: Build log
+      description: >-
+        Build log read by `nix log`. Serves this cache's own log, otherwise the first
+        upstream hit. `X-Cache` reports `HIT` or `MISS`.
+      operationId: getCacheBuildLog
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '200':
+          description: Build log
+          content:
+            text/plain:
+              schema: { type: string }
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/ls/{hash}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: hash
+        in: path
+        required: true
+        schema: { type: string }
+        description: Store path hash
+    get:
+      tags: [nix-cache]
+      summary: NAR listing
+      description: >-
+        File tree of a NAR in the nix-serve `.ls` v1 schema.
+      operationId: getNarListing
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '200':
+          description: NAR listing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NarList'
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/serve/{hash}/{path}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: hash
+        in: path
+        required: true
+        schema: { type: string }
+        description: Store path hash
+      - name: path
+        in: path
+        required: true
+        schema: { type: string }
+        description: Path inside the store path
+    get:
+      tags: [nix-cache]
+      summary: Serve file
+      description: >-
+        A single file of a NAR (content type from the file name), or a directory as
+        `tar.zst`. Responses carry sandboxing headers.
+      operationId: serveNarFile
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '200':
+          description: File or directory archive
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+            application/zstd:
+              schema: { type: string, format: binary }
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
+
+  /cache/{cache}/proto:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [nix-cache]
+      summary: Cache proto WebSocket
+      description: >-
+        Read-only, cache-scoped WebSocket with the `/proto` wire format. Accepts only
+        `CacheQuery` (Normal and Pull) and `NarRequest`. Public caches allow anonymous
+        sessions (`GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE`), capped per IP by
+        `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP`; private caches need
+        `Authorization: Bearer GRAD<key>`.
+      operationId: cacheProtoWebSocket
+      security:
+        - {}
+        - cacheBasic: []
+      responses:
+        '101':
+          description: Switching Protocols - WebSocket upgrade successful
+        '401':
+          description: Private cache and no valid credentials
+        '404':
+          description: Unknown cache, or the cache does not hold the key
 
   # ── Forge Webhooks (incoming) ────────────────────────────────────────────────
 
@@ -8708,6 +9412,11 @@ paths:
   # SCIM is enabled. All routes use the scimBearer token, not user auth.
 
   /scim/v2/ServiceProviderConfig:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     get:
       tags: [scim]
       summary: SCIM service provider configuration
@@ -8726,6 +9435,11 @@ paths:
           $ref: '#/components/responses/ScimUnauthorized'
 
   /scim/v2/ResourceTypes:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     get:
       tags: [scim]
       summary: SCIM resource types
@@ -8744,6 +9458,11 @@ paths:
           $ref: '#/components/responses/ScimUnauthorized'
 
   /scim/v2/Schemas:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     get:
       tags: [scim]
       summary: SCIM schemas
@@ -8762,6 +9481,11 @@ paths:
           $ref: '#/components/responses/ScimUnauthorized'
 
   /scim/v2/Users:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     get:
       tags: [scim]
       summary: List / filter SCIM users
@@ -8812,6 +9536,11 @@ paths:
           $ref: '#/components/responses/ScimConflict'
 
   /scim/v2/Users/{id}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     get:
@@ -8896,6 +9625,11 @@ paths:
           $ref: '#/components/responses/ScimNotFound'
 
   /scim/v2/Groups:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     get:
       tags: [scim]
       summary: List SCIM groups
@@ -8921,6 +9655,11 @@ paths:
           $ref: '#/components/responses/ScimUnauthorized'
 
   /scim/v2/Groups/{id}:
+    servers:
+      - url: http://127.0.0.1:3000
+        description: Local development server
+      - url: https://gradient.example.com
+        description: Production server
     parameters:
       - { name: id, in: path, required: true, schema: { type: string }, description: SCIM group name (IdP group) }
     get:
@@ -8971,6 +9710,10 @@ paths:
 components:
 
   securitySchemes:
+    cacheBasic:
+      type: http
+      scheme: basic
+      description: Any username; a JWT or an API key as the password. Private caches only.
     bearerAuth:
       type: http
       scheme: bearer
@@ -10257,7 +11000,7 @@ components:
       type: string
       description: |
         A capability identifier (camelCase). The full set is enumerated by
-        `GET /projects/{project}/roles` → `available_permissions`. New
+        `GET /projects/{project}/roles` -> `available_permissions`. New
         capabilities may be appended in future releases; existing identifiers
         are stable.
       enum:
@@ -11374,7 +12117,7 @@ components:
           additionalProperties:
             type: string
           description: |-
-            Map of output name → prefix-free store path (e.g. `{"out": "xyz-hello-2.12.1"}`)
+            Map of output name -> prefix-free store path (e.g. `{"out": "xyz-hello-2.12.1"}`)
         created_at:
           type: string
           format: date-time
@@ -11528,7 +12271,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DependencyEdge'
-          description: Dependency edges (`source` → `target` means source must be built before target)
+          description: Dependency edges (`source` -> `target` means source must be built before target)
 
     ClosureNode:
       type: object
@@ -12618,7 +13361,7 @@ components:
       type: string
       description: |
         A cache capability identifier (camelCase). The full set is enumerated by
-        `GET /caches/{cache}/roles` → `available_permissions`.
+        `GET /caches/{cache}/roles` -> `available_permissions`.
       enum:
         - viewCache
         - readStore
