@@ -45,6 +45,7 @@ nav:
       - Projects and Tasks: concepts/projects-and-tasks.md
       - Evaluations and Builds: concepts/evaluations-and-builds.md
       - Workers: concepts/workers.md
+      - Caches: concepts/caches.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
