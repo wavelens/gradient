@@ -1331,6 +1331,7 @@ mod tests {
             "(SELECT count(*) FROM derivation_dependency e \
              LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
              WHERE e.derivation = db.derivation \
+             AND e.kind IN (0, 2) \
              AND (dep.derivation IS NULL OR NOT (dep.fetchable)))"
         );
     }
