@@ -6,7 +6,8 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_test_support::cache_fixture::{
-    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_with_nar, public_cache_with_nar,
+    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_with_nar, public_cache_with_foreign_nar,
+    public_cache_with_nar,
 };
 use gradient_web::create_router;
 use serde_json::Value;
@@ -87,5 +88,26 @@ fn private_cache_ls_requires_auth() {
             ))
             .await;
         resp.assert_status(StatusCode::UNAUTHORIZED);
+    });
+}
+
+/// The blob store is shared by every cache; a path another cache uploaded must
+/// not be readable through this one by its store hash.
+#[test]
+fn ls_refuses_a_nar_this_cache_does_not_serve() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_with_foreign_nar().await;
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+
+        let resp = server
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/ls/{FIXTURE_PATH_HASH}"
+            ))
+            .await;
+        resp.assert_status(StatusCode::NOT_FOUND);
     });
 }

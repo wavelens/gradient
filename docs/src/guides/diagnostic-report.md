@@ -44,10 +44,10 @@ Open an issue at <https://github.com/wavelens/gradient/issues> with what went wr
 The browser downloads `gradient-report-<id>-<date>.db`. The inspector prints the summary maintainers start from:
 
 ```sh
-nix run github:wavelens/gradient/v1.4.0#gradient-report -- gradient-report-*.db summary
+nix run github:wavelens/gradient#gradient-report -- gradient-report-*.db summary
 ```
 
-The inspector reads only the report schema of its own source revision; the tag has to match the server's version.
+The inspector reads only the report schema of its own source revision. A report from an older server needs that release's tag, e.g. `github:wavelens/gradient/v1.4.0#gradient-report`.
 
 ## Next Steps
 

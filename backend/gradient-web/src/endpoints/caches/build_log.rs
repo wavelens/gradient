@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip};
+use super::helpers::{CacheContext, cache_client_ip, cache_served_derivation};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
@@ -43,9 +43,10 @@ pub async fn log(
     }
 }
 
-/// This cache's own log for `drv`, if it holds the derivation and an attempt
-/// produced any output. Deliberately not restricted to successful builds - a
-/// failed build's log is the one most worth reading.
+/// This cache's own log for `drv`, if the cache serves an output of it and an
+/// attempt produced any output. Deliberately not restricted to successful
+/// builds: a rebuild that failed after the first success still has the most
+/// recent log worth reading.
 async fn local_log(
     state: &Arc<ServerState>,
     ctx: &CacheContext,
@@ -55,27 +56,14 @@ async fn local_log(
         return Ok(None);
     };
 
-    let Some(derivation_row) = EDerivation::find()
-        .filter(CDerivation::Hash.eq(drv_hash))
-        .filter(CDerivation::Name.eq(drv_name))
-        .one(&state.web_db)
-        .await?
+    let Some(derivation) =
+        cache_served_derivation(state, ctx.cache.id, &drv_hash, &drv_name).await?
     else {
         return Ok(None);
     };
 
-    let linked = ECacheDerivation::find()
-        .filter(CCacheDerivation::Cache.eq(ctx.cache.id))
-        .filter(CCacheDerivation::Derivation.eq(derivation_row.id))
-        .one(&state.web_db)
-        .await?
-        .is_some();
-    if !linked {
-        return Ok(None);
-    }
-
     let Some(anchor) = EDerivationBuild::find()
-        .filter(CDerivationBuild::Derivation.eq(derivation_row.id))
+        .filter(CDerivationBuild::Derivation.eq(derivation))
         .one(&state.web_db)
         .await?
     else {

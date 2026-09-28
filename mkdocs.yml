@@ -10,6 +10,7 @@ theme:
   features:
     - navigation.tabs
     - navigation.sections
+    - navigation.indexes
     - navigation.top
     - navigation.footer
     - search.suggest
@@ -78,9 +79,11 @@ nav:
       - Events and Webhooks: reference/events.md
       - Scheduler Policies: reference/scheduler-policies.md
   - Contributors:
+      - contributors/index.md
       - Architecture: contributors/architecture.md
       - Internals: contributors/internals.md
       - Scheduler:
+          - contributors/scheduler/index.md
           - Build Anchors: contributors/scheduler/build-anchors.md
           - Promotion and Counters: contributors/scheduler/promotion-and-counters.md
           - Reconciler: contributors/scheduler/reconciler.md
@@ -91,6 +94,7 @@ nav:
       - Eval Worker Setup: contributors/eval-worker.md
       - Migrations: contributors/migrations.md
       - Proto:
+          - contributors/proto/index.md
           - Connection: contributors/proto/connection.md
           - Capabilities and Dispatch: contributors/proto/capabilities-and-dispatch.md
           - Jobs: contributors/proto/jobs.md

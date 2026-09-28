@@ -106,8 +106,8 @@ The `cache-maintenance` sweep (`gradient-cache/src/cacher/mod.rs`) runs every `g
 |---|---|
 | `GET /builds/{build}`, `/log`, `/graph`, `/closure`, `/downloads` | Public project, a member of the build's project, or a member of any project with a `build_job` for the same derivation (`BuildAccessContext::load`, `gradient-web/src/endpoints/builds/mod.rs`) |
 | `GET /builds/{build}/download/{filename}` | The same rule, or a download token for the derivation |
-| Narinfo and NAR on `/cache/{cache}` | The path needs a signed `cached_path_signature` row for that cache (`gradient-web/src/endpoints/caches/helpers.rs`) |
-| `GET /cache/{cache}/log/{drv}` | Own log only with a `cache_derivation` row for the cache, else the upstreams (`caches/build_log.rs`) |
+| Narinfo, NAR, `ls` and `serve` on `/cache/{cache}` | The path needs a signed `cached_path_signature` row for that cache and a `file_hash` (`cache_serves_path`, `gradient-web/src/endpoints/caches/helpers.rs`) |
+| `GET /cache/{cache}/log/{drv}` | Own log only when the cache serves an output of the derivation by the same rule (`cache_served_derivation`), else the upstreams (`caches/build_log.rs`) |
 
 ## Related
 

@@ -233,11 +233,24 @@ pub async fn public_cache_state() -> Arc<ServerState> {
 /// Build a `ServerState` with a public cache and a synthetic NAR stored under
 /// [`FIXTURE_PATH_HASH`]. The NAR contains `bin/hello = "hi"` (2 bytes).
 ///
+/// Public cache serving a synthetic NAR stored under [`FIXTURE_PATH_HASH`].
+///
 /// Mock query order:
 ///   0. ECache::find (by name)
 ///   1. ECachedPath::find (file_hash lookup - returns empty so hash falls
 ///      back to FIXTURE_PATH_HASH directly)
+///   2. the per-cache serving gate
 pub async fn public_cache_with_nar() -> Arc<ServerState> {
+    public_cache_storing_nar(true).await
+}
+
+/// The NAR is in the shared blob store, but this cache holds no signed claim
+/// on it (another cache uploaded it).
+pub async fn public_cache_with_foreign_nar() -> Arc<ServerState> {
+    public_cache_storing_nar(false).await
+}
+
+async fn public_cache_storing_nar(served: bool) -> Arc<ServerState> {
     let cache_row = gradient_entity::cache::Model {
         id: cache_id(),
         name: FIXTURE_CACHE_NAME.into(),
@@ -255,6 +268,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+        .append_query_results([served_gate(served)])
         .into_connection();
 
     let cli = test_cli();
@@ -308,16 +322,17 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
     state
 }
 
+fn served_gate(served: bool) -> Vec<std::collections::BTreeMap<&'static str, sea_orm::Value>> {
+    let row = std::collections::BTreeMap::from([("served", sea_orm::Value::Int(Some(1)))]);
+    if served { vec![row] } else { Vec::new() }
+}
+
 fn anchor_id() -> DerivationBuildId {
     DerivationBuildId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000008").unwrap())
 }
 
 fn attempt_id() -> BuildAttemptId {
     BuildAttemptId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000011").unwrap())
-}
-
-fn cache_derivation_id() -> CacheDerivationId {
-    CacheDerivationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000010").unwrap())
 }
 
 fn cache_row() -> gradient_entity::cache::Model {
@@ -348,15 +363,6 @@ fn derivation_row() -> gradient_entity::derivation::Model {
         architecture: "x86_64-linux".into(),
         created_at: test_date(),
         ..Default::default()
-    }
-}
-
-fn cache_derivation_row() -> gradient_entity::cache_derivation::Model {
-    gradient_entity::cache_derivation::Model {
-        id: cache_derivation_id(),
-        cache: cache_id(),
-        derivation: deriv_id(),
-        cached_at: test_date(),
     }
 }
 
@@ -427,7 +433,7 @@ fn make_state(
     })
 }
 
-/// Public cache + derivation linked via `cache_derivation` + completed build +
+/// Public cache serving an output of the derivation + completed build +
 /// log storage seeded. Returns `(state, expected_log_body)`.
 pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String) {
     let log_body = "build output line 1\nbuild output line 2\n".to_string();
@@ -438,7 +444,6 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
-        .append_query_results([vec![cache_derivation_row()]])
         .append_query_results([vec![anchor_row(
             gradient_entity::build::BuildStatus::Completed,
         )]])
@@ -448,24 +453,22 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
     (make_state(db, log_storage), log_body)
 }
 
-/// Public cache + derivation with no `cache_derivation` link - `/log` must 404.
+/// Public cache serving no output of the derivation - `/log` must 404.
 pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
-        .append_query_results([vec![derivation_row()]])
-        .append_query_results([Vec::<gradient_entity::cache_derivation::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::derivation::Model>::new()])
         .into_connection();
 
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + derivation linked via `cache_derivation` but only a failed
-/// build - `/log` must 404.
+/// Public cache serving an output of the derivation but no build anchor -
+/// `/log` must 404.
 pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
-        .append_query_results([vec![cache_derivation_row()]])
         .append_query_results([Vec::<gradient_entity::derivation_build::Model>::new()])
         .into_connection();
 
@@ -543,7 +546,6 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
-        .append_query_results([vec![cache_derivation_row()]])
         .append_query_results([vec![anchor_row(
             gradient_entity::build::BuildStatus::Completed,
         )]])

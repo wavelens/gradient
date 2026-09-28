@@ -82,10 +82,58 @@ fn cached_path_row() -> gradient_entity::cached_path::Model {
     }
 }
 
+/// The row of the per-cache serving gate: this cache holds a signed claim.
+fn served() -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
+    std::collections::BTreeMap::from([("served", sea_orm::Value::Int(Some(1)))])
+}
+
 /// A blob large enough to span several storage stream chunks, so the test
 /// exercises reassembly rather than a single-chunk read.
 fn blob() -> Vec<u8> {
     (0..256 * 1024).map(|i| (i * 31 + 7) as u8).collect()
+}
+
+fn state(
+    cli: &gradient_types::Cli,
+    db: sea_orm::DatabaseConnection,
+    nar_storage: NarStore,
+) -> Arc<ServerState> {
+    Arc::new(ServerState {
+        web_db: WebDb::new(db),
+        cache_db: gradient_db::CacheDb::new(
+            MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        ),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        config: Arc::new(gradient_types::RuntimeConfig::from_cli(cli).expect("valid config")),
+        log_storage: Arc::new(NoopLogStorage),
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        http: gradient_util::http::build_client().expect("http client"),
+        shutdown: gradient_util::shutdown::Shutdown::new(),
+        last_used_stamps: gradient_core::last_used_stamps(),
+        download_progress: gradient_core::download_progress(),
+        cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
+        jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
+        started_at: chrono::Utc::now(),
+        pending_project_memberships: Arc::new(std::collections::HashMap::new()),
+        oidc_group_roles: Arc::new(std::collections::HashMap::new()),
+        scim_group_roles: Arc::new(Default::default()),
+        events: gradient_types::EventBus::default(),
+        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
+        upload_admission: gradient_storage::admission::UploadAdmission::new(
+            gradient_storage::admission::Limits {
+                concurrency: 16,
+                bytes: u64::MAX,
+            },
+        ),
+        outbox_wake: Default::default(),
+        probe_requests: Default::default(),
+        ready_set: Default::default(),
+        graph: gradient_core::Graph::stub(),
+    })
 }
 
 fn run<F: std::future::Future<Output = ()>>(f: F) {
@@ -101,11 +149,10 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
     run(async {
         let cli = test_cli();
 
-        // Query order: CacheContext::load (ECache by name) → fetch_nar_stream's
-        // single resolve_effective_hash_db (ECachedPath by file_hash).
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![cached_path_row()]])
+            .append_query_results([vec![served()]])
             .into_connection();
 
         let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
@@ -115,44 +162,7 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
             .await
             .expect("seed NAR blob");
 
-        let state = Arc::new(ServerState {
-            web_db: WebDb::new(db),
-            cache_db: gradient_db::CacheDb::new(
-                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            ),
-            worker_db: WorkerDb::new(
-                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            ),
-            config: Arc::new(gradient_types::RuntimeConfig::from_cli(&cli).expect("valid config")),
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            last_used_stamps: gradient_core::last_used_stamps(),
-            download_progress: gradient_core::download_progress(),
-            cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_project_memberships: Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: Arc::new(Default::default()),
-            events: gradient_types::EventBus::default(),
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-            upload_admission: gradient_storage::admission::UploadAdmission::new(
-                gradient_storage::admission::Limits {
-                    concurrency: 16,
-                    bytes: u64::MAX,
-                },
-            ),
-            outbox_wake: Default::default(),
-            probe_requests: Default::default(),
-            ready_set: Default::default(),
-            graph: gradient_core::Graph::stub(),
-        });
+        let state = state(&cli, db, nar_storage);
 
         let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let router = gradient_web::create_router(state)
@@ -189,8 +199,10 @@ fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![cached_path_row()]])
+            .append_query_results([vec![served()]])
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![cached_path_row()]])
+            .append_query_results([vec![served()]])
             .into_connection();
 
         let nar_storage = NarStore::local(&cli.server.base_dir)
@@ -206,44 +218,7 @@ fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
             .expect("seed NAR blob");
         let hot = nar_storage.clone();
 
-        let state = Arc::new(ServerState {
-            web_db: WebDb::new(db),
-            cache_db: gradient_db::CacheDb::new(
-                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            ),
-            worker_db: WorkerDb::new(
-                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            ),
-            config: Arc::new(gradient_types::RuntimeConfig::from_cli(&cli).expect("valid config")),
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            last_used_stamps: gradient_core::last_used_stamps(),
-            download_progress: gradient_core::download_progress(),
-            cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_project_memberships: Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: Arc::new(Default::default()),
-            events: gradient_types::EventBus::default(),
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
-            upload_admission: gradient_storage::admission::UploadAdmission::new(
-                gradient_storage::admission::Limits {
-                    concurrency: 16,
-                    bytes: u64::MAX,
-                },
-            ),
-            outbox_wake: Default::default(),
-            probe_requests: Default::default(),
-            ready_set: Default::default(),
-            graph: gradient_core::Graph::stub(),
-        });
+        let state = state(&cli, db, nar_storage);
 
         let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let router = gradient_web::create_router(state)
@@ -269,5 +244,37 @@ fn nar_serve_answers_from_the_hot_cache_on_the_second_request() {
         );
         assert_eq!(second.as_bytes().as_ref(), data.as_slice());
         assert_eq!(hot.hot().stats().hits, 1, "the second read was a hit");
+    });
+}
+
+/// Every stored NAR shares one blob store; a cache must serve only the paths it
+/// holds a signed claim on, or any cache reader could fetch another cache's
+/// private paths by hash.
+#[test]
+fn a_nar_this_cache_holds_no_claim_on_is_not_served() {
+    run(async {
+        let cli = test_cli();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![cache_row()]])
+            .append_query_results([vec![cached_path_row()]])
+            .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
+            .into_connection();
+        let nar_storage = NarStore::local(&cli.server.base_dir).expect("create test NarStore");
+        nar_storage
+            .put(STORE_HASH, blob())
+            .await
+            .expect("seed NAR blob");
+        let state = state(&cli, db, nar_storage);
+
+        let router = gradient_web::create_router(state)
+            .expect("router")
+            .layer(MockConnectInfo(
+                "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+            ));
+        let resp = TestServer::new(router)
+            .get(&format!("/cache/test-cache/nar/{FILE_HASH_NIX32}.nar.zst"))
+            .await;
+
+        resp.assert_status_not_found();
     });
 }

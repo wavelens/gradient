@@ -36,7 +36,7 @@ pub async fn nar(
     let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
 
     let (effective_hash, size, stream) =
-        super::helpers::fetch_nar_stream(&state, &path_hash).await?;
+        super::helpers::fetch_nar_stream(&state, ctx.cache.id, &path_hash).await?;
 
     super::super::stats::record_nar_traffic(&state, ctx.cache.id, size as i64);
     state.events.publish(NarFetched {
