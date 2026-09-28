@@ -678,9 +678,10 @@ gradient_db::sql! {
 /// The anchor stops being a relay: it forgets the upstream its outputs were
 /// recorded on and goes back to `Created`, where the ordinary build gates apply.
 ///
-/// Clearing the output columns is what makes the next evaluation retry from a clean
-/// slate rather than prune the anchor as upstream-served: `assess_substitutability`
-/// probes the outputs again and finds nothing recorded.
+/// Clearing the output columns drops the upstream offer the relay was built from,
+/// so nothing relays or serves from a record the upstream failed to honour.
+/// `probed` stays set: the anchor is a builder now and demands its inputs at once
+/// rather than after another probe round.
 ///
 /// Both the anchor and its direct inputs are re-gated here rather than left to the
 /// emitter. `Building` to `Created` stays inside the builder statuses, so the

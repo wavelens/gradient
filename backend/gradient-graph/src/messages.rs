@@ -51,7 +51,7 @@ pub struct UpstreamHit {
 pub struct IngestReport {
     pub evaluation: EvaluationId,
     pub task: Option<TaskId>,
-    /// The batch arrived after the evaluation was aborted and was dropped.
+    /// The evaluation was not streaming when the batch arrived, so it was dropped.
     pub skipped: bool,
     /// Derivations whose full record this batch put in.
     pub walked: usize,

@@ -209,8 +209,8 @@ impl BatchWriter<'_> {
 
     /// A stub for every dependency the batch names and does not itself carry.
     /// An unparseable dependency path fails the batch: the source would
-    /// otherwise commit `walked = true` with an edge missing, and `walked`
-    /// never regresses, so no later walk would repair it.
+    /// otherwise commit `walked = true` with an edge missing, and only a lost
+    /// record clears `walked`, so no later walk would repair it.
     async fn insert_stubs(&self, derivations: &[DiscoveredDerivation]) -> Result<()> {
         let walked: HashSet<&str> = derivations.iter().map(|d| d.drv_path.as_str()).collect();
         let mut seen = HashSet::new();
@@ -454,9 +454,9 @@ impl BatchWriter<'_> {
 
     /// Build-once anchors for every named derivation, `ON CONFLICT DO NOTHING`
     /// so an anchor from a prior evaluation is untouched, then this
-    /// evaluation's `build_job` rows, then the idempotent substitution facts:
-    /// `substitutable` is set for an upstream hit and never cleared here, and a
-    /// derivation whole in our cache is `Substituted`.
+    /// evaluation's `build_job` rows. A derivation whole in our cache is
+    /// `Substituted`; `substitutable` is the upstream probe's to set, never a
+    /// batch's.
     async fn resolve_anchors(
         &self,
         ids: &HashMap<String, DerivationId>,
@@ -801,10 +801,9 @@ impl BatchWriter<'_> {
     /// Persist each derivation's `inputSrcs`: build-time source paths (e.g.
     /// `builtins.toFile` configs) that have no producing derivation. Idempotent
     /// on `(derivation, hash)` so a re-seen derivation backfills its sources
-    /// without duplicating. The readiness gate requires every source cached
-    /// before a non-substitutable build dispatches, so a source the eval has not
-    /// pushed yet holds the build instead of letting it dispatch input-blind and
-    /// fail `InputsUnavailable`.
+    /// without duplicating. The GC keeps every source of a reachable derivation
+    /// live; the dispatch gate reads only the `.drv` NAR, whose references the
+    /// sources are.
     async fn persist_input_sources(
         &self,
         derivations: &[DiscoveredDerivation],
