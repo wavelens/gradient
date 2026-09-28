@@ -18,47 +18,43 @@
 in {
   options = {
     system.gradient-deploy = {
-      enable = lib.mkEnableOption "Gradient deployment service";
+      enable = lib.mkEnableOption "pull deployments from Gradient";
       deployFor = lib.mkOption {
         type = lib.types.str;
-        description = "Name of the deployment configuration to use";
         default = config.networking.hostName;
         defaultText = lib.literalExpression "config.networking.hostName";
         example = "my-server";
+        description = "Name of the deployment configuration to deploy.";
       };
 
       server = lib.mkOption {
         type = lib.types.str;
-        description = "Address to listen on for incoming deployment requests";
         example = "https://gradient.example.com";
+        description = "URL of the Gradient server.";
       };
 
       apiKeyFile = lib.mkOption {
         type = lib.types.str;
-        description = "Path to file containing the API key for authenticating deployment requests";
+        description = "File containing the API key used to authenticate against the server.";
       };
 
       task = lib.mkOption {
         type = lib.types.str;
-        description = "Task identifier for the deployments";
         example = "my-project/my-task";
+        description = "Task to deploy from, as `<project>/<task>`.";
       };
 
       waitForBuild = lib.mkOption {
         type = lib.types.bool;
         default = true;
         description = ''
-          Wait for an in-flight evaluation to produce a deployable build instead
-          of giving up when the newest commit is still in CI.
+          Whether to wait for an in-flight evaluation to produce a deployable build instead of
+          giving up while the newest commit is still in CI.
 
-          It stops as soon as the deployment is built, the evaluation or the
-          build fails, or the target is already running the evaluated system,
-          and it never fails the unit for any of those outcomes. How it notices
-          is governed by `websockets`.
-
-          Waiting is unbounded: a run that outlives its timer simply makes
-          systemd skip the next trigger. Disable to exit immediately when
-          nothing is built yet.
+          Waiting ends once the deployment is built, the evaluation or build fails, or the target
+          already runs the evaluated system; none of these fail the unit.
+          {option}`system.gradient-deploy.websockets` controls how progress is observed. Waiting is
+          unbounded: a run that outlives its timer makes systemd skip the next trigger.
         '';
       };
 
@@ -66,12 +62,10 @@ in {
         type = lib.types.bool;
         default = true;
         description = ''
-          Follow the task's live WebSocket while waiting, reacting to each event
-          instead of asking repeatedly. Disable when the path to the server
-          cannot carry a WebSocket upgrade; the service then falls back to
-          re-checking every `pollIntervalSec`.
-
-          Only consulted while `waitForBuild` is enabled.
+          Whether to follow the task's WebSocket while waiting instead of polling. Disable when the
+          connection to the server cannot carry a WebSocket upgrade; the service then polls every
+          {option}`system.gradient-deploy.pollIntervalSec`. Only used with
+          {option}`system.gradient-deploy.waitForBuild`.
         '';
       };
 
@@ -80,8 +74,8 @@ in {
         default = 60;
         example = 300;
         description = ''
-          How often, in seconds, to re-check while waiting with `websockets`
-          disabled. Unused otherwise, since events drive the wait.
+          Seconds between checks while waiting with {option}`system.gradient-deploy.websockets`
+          disabled.
         '';
       };
 
@@ -97,23 +91,18 @@ in {
         default = "04:00";
         example = "daily";
         description = ''
-          How often or when upgrade occurs. For most desktop and server systems
-          a sufficient upgrade frequency is once a day.
-
-          The format is described in
+          How often or when the deployment runs, in the format described in
           {manpage}`systemd.time(7)`.
         '';
       };
 
       randomizedDelaySec = lib.mkOption {
-        default = "0";
         type = lib.types.str;
+        default = "0";
         example = "45min";
         description = ''
-          Add a randomized delay before each automatic upgrade.
-          The delay will be chosen between zero and this value.
-          This value must be a time span in the format specified by
-          {manpage}`systemd.time(7)`
+          Maximum random delay before each deployment, as a time span in the format described in
+          {manpage}`systemd.time(7)`.
         '';
       };
     };

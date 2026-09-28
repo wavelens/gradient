@@ -9,37 +9,45 @@
     options = {
       type = mkOption {
         type = types.enum [ "internal" "external" ];
-        description = "Type of upstream: internal (another Gradient cache) or external (Nix binary cache URL)";
+        description = ''
+          Upstream type: `internal` (another Gradient cache) or `external` (a Nix binary cache URL).
+        '';
       };
 
       cache_name = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Name of the internal Gradient cache to use as upstream (required for internal type)";
+        description = ''
+          Name of the internal Gradient cache to use. Required for `internal` upstreams.
+        '';
       };
 
       display_name = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Display name for the upstream (optional for internal, required for external)";
+        description = "Display name of the upstream. Required for `external` upstreams.";
       };
 
       mode = mkOption {
         type = types.enum [ "ReadWrite" "ReadOnly" "WriteOnly" ];
         default = "ReadWrite";
-        description = "Access mode for internal upstreams (ignored for external, which is always ReadOnly)";
+        description = ''
+          Access mode of an internal upstream. External upstreams are always read-only.
+        '';
       };
 
       url = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "URL of the external Nix binary cache (required for external type)";
+        description = "URL of the external Nix binary cache. Required for `external` upstreams.";
       };
 
       public_key = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Public key of the external Nix binary cache (required for external type)";
+        description = ''
+          Public key of the external Nix binary cache. Required for `external` upstreams.
+        '';
       };
     };
   };
@@ -50,41 +58,40 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique username for the user";
+        description = "Unique user name.";
       };
 
       name = mkOption {
         type = types.str;
         default = config.username;
         defaultText = "config.username";
-        description = "Full name of the user";
+        description = "Full name of the user.";
       };
 
       email = mkOption {
         type = types.str;
-        description = "Email address of the user";
+        description = "Email address of the user.";
       };
 
       password_file = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Path to file containing the hashed password. Leave null for
-          OIDC-only users - the provisioned account will be created without
-          a local password, so the OIDC login flow can claim it by email.
+          File containing the hashed password. `null` creates the account without a local password,
+          so an OIDC login with the same email can claim it.
         '';
       };
 
       email_verified = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the user's email has been verified";
+        description = "Whether the user's email address is verified.";
       };
 
       superuser = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether the user has superuser privileges";
+        description = "Whether the user is a superuser.";
       };
     };
   });
@@ -95,88 +102,75 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique name for the project";
+        description = "Unique project name.";
       };
 
       display_name = mkOption {
         type = types.str;
         default = config.name;
         defaultText = "config.name";
-        description = "Display name for the project";
+        description = "Display name of the project.";
       };
 
       id = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Explicit project UUID. When set, a freshly created
-          project is given this id instead of a server-generated one,
-          so a worker's `peersFile` can reference it (`<id>:<token>`) in a
-          fully declarative deployment without first looking up the
-          auto-generated id. Applied on create only; the id is immutable, so
-          a value conflicting with an existing project is rejected.
-
-          Generate one with `uuidgen`.
+          Project UUID. `null` lets the server generate one. Set it so a worker's
+          {option}`services.gradient.worker.peersFile` can reference the project as `<id>:<token>`
+          in a fully declarative deployment. Only applied on creation; a value conflicting with an
+          existing project is rejected. Generate one with {command}`uuidgen`.
         '';
       };
 
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the project";
+        description = "Description of the project.";
       };
 
       private_key_file = mkOption {
         type = types.str;
-        description = "Path to SSH private key file for Git access";
+        description = "File containing the SSH private key used for Git access.";
       };
 
       public = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether the project is public (visible to all users)";
+        description = "Whether the project is visible to all users.";
       };
 
       hide_build_requests = mkOption {
         type = types.bool;
         default = false;
         description = ''
-          When `true`, the auto-managed `build-request` task for this
-          project is hidden from task listings in the web UI. The
-          task still exists and continues to receive evaluations from the
-          `gradient build` CLI; this is a UI-only opt-out.
+          Whether to hide the project's automatic `build-request` task from task listings in the web
+          UI. The task keeps receiving evaluations from {command}`gradient build`.
         '';
       };
 
       created_by = mkOption {
         type = types.str;
-        description = "Username of the user who created this project";
+        description = "User name of the project's creator.";
       };
 
       members = mkOption {
         type = types.listOf projectMemberType;
         default = [];
-        description = ''
-          Users with role assignments on this project. When empty
-          (the default), legacy behavior applies: `created_by` is added
-          as Admin and no other membership reconciliation happens.
-
-          When non-empty, this list is the source of truth - existing
-          memberships not in the list are revoked on next state apply,
-          and the implicit `created_by`-as-Admin assignment is skipped
-          (list yourself explicitly if you want that role).
-
-          Members referencing users that do not yet exist are skipped
-          silently at provision time and applied automatically when the
-          user later registers (`POST /user`) or signs in via OIDC for
-          the first time.
-        '';
         example = literalExpression ''
           [
             { user = "alice"; role = "Admin"; }
             { user = "bob";   role = "Write"; }
             { user = "carol"; role = "releaser"; }
           ]
+        '';
+        description = ''
+          Users with roles on this project. An empty list keeps the legacy behaviour: `created_by`
+          becomes Admin and no other memberships are reconciled.
+
+          A non-empty list is the source of truth: memberships not listed are revoked on the next
+          state apply, and `created_by` is not made Admin implicitly. Members referring to users
+          that do not exist yet are applied once the user registers or first signs in through OIDC.
         '';
       };
     };
@@ -188,18 +182,16 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Flake reference to use as the override for this input. When
-          null and `keep_url` is true, the input is force-updated using
-          the URL declared in the task's flake.nix.
+          Flake reference overriding this input. `null` together with `keep_url` force-updates the
+          input from the URL declared in the task's {file}`flake.nix`.
         '';
       };
       keep_url = mkOption {
         type = types.bool;
         default = false;
         description = ''
-          When true, force an update of this input using its original
-          flake-declared URL (without changing the URL). Mutually
-          exclusive with `url` - exactly one of the two must be set.
+          Whether to force-update this input from its flake-declared URL. Mutually exclusive with
+          `url`; exactly one of the two must be set.
         '';
       };
     };
@@ -211,54 +203,51 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique name for the task";
+        description = "Unique task name.";
       };
 
       project = mkOption {
         type = types.str;
-        description = "Name of the project this task belongs to";
+        description = "Name of the project the task belongs to.";
       };
 
       display_name = mkOption {
         type = types.str;
         default = config.name;
         defaultText = "config.name";
-        description = "Display name for the task";
+        description = "Display name of the task.";
       };
 
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the task";
+        description = "Description of the task.";
       };
 
       repository = mkOption {
         type = types.str;
-        description = "Git repository URL for the task";
+        description = "Git repository URL of the task.";
       };
 
       wildcard = mkOption {
         type = types.str;
         default = "packages.x86_64-linux.*";
-        description = "Branch or pattern for evaluations";
+        description = "Branch or branch pattern to evaluate.";
       };
 
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the task is active";
+        description = "Whether the task is active.";
       };
 
       keep_evaluations = mkOption {
         type = types.ints.positive;
         default = 1;
         description = ''
-          Number of finished evaluations to retain per task for metrics
-          and history. The most recent finished evaluations are kept regardless
-          of outcome (completed, failed, or aborted), and GC is skipped while the
-          task has an in-progress evaluation. Older evaluations beyond this
-          count are garbage-collected. Must be at least 1; capped at runtime by
-          the global `services.gradient.settings.keepEvaluations`.
+          Number of finished evaluations kept for metrics and history, regardless of outcome. Older
+          ones are garbage collected, and collection pauses while an evaluation runs. Must be at
+          least 1 and is capped by {option}`services.gradient.eval.maxKeep`.
         '';
       };
 
@@ -266,11 +255,9 @@
         type = types.bool;
         default = true;
         description = ''
-          When `false`, build outputs from this task are pushed to the
-          cache but their narinfo signatures are left empty, so external
-          Nix clients won't trust them - keeping the task's outputs
-          private even when the cache itself is public. A path co-produced
-          by another `sign_cache = true` task is still signed.
+          Whether to sign the narinfo of outputs pushed by this task. Unsigned outputs are not
+          trusted by external Nix clients, which keeps them private even in a public cache. A path
+          also produced by a signing task is still signed.
         '';
       };
 
@@ -278,35 +265,19 @@
         type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
         default = "soft_abort";
         description = ''
-          Task-level policy for handling new trigger events while an
-          evaluation is in flight.
+          What a new trigger event does while an evaluation is running.
 
-          - `hard_abort` cancels the running evaluation (and its in-flight
-            builds) and starts a fresh one.
-          - `soft_abort` marks the running evaluation Aborted so the new one
-            becomes canonical, but lets in-flight builds finish; their cached
-            outputs flow into the new evaluation.
-          - `skip` discards the new trigger event.
-          - `all` runs a new evaluation alongside the in-flight one
-            (multi-eval per task).
+          - `hard_abort` cancels the running evaluation and its builds and starts a new one.
+          - `soft_abort` marks the running evaluation aborted so the new one becomes canonical,
+            but lets its builds finish; their outputs flow into the new evaluation.
+          - `skip` discards the new event.
+          - `all` runs the new evaluation alongside the running one.
         '';
       };
 
       triggers = mkOption {
         type = types.nullOr (types.listOf triggerType);
         default = null;
-        description = ''
-          List of evaluation triggers for the task. Each trigger declares
-          *how* and *when* an evaluation runs (polling, forge push, forge PR,
-          cron schedule). When `null`, existing trigger rows are left
-          untouched (back-compat for state files predating this option). When
-          set to `[]`, provisioning errors out - every task must have at
-          least one trigger.
-
-          A new task always receives a default polling trigger
-          (interval 300s) automatically; declaring `triggers` here replaces
-          that default with the listed set.
-        '';
         example = literalExpression ''
           [
             {
@@ -324,37 +295,33 @@
             }
           ]
         '';
+        description = ''
+          Evaluation triggers of the task: polling, forge push, forge pull request or cron schedule.
+          `null` leaves existing triggers untouched. An empty list is rejected, since every task
+          needs a trigger.
+
+          New tasks get a polling trigger every 300 seconds; declaring triggers replaces it.
+        '';
       };
 
       flake_input_overrides = mkOption {
         type = types.attrsOf flakeInputOverrideType;
         default = {};
-        description = ''
-          Per-input overrides applied during flake fetch. The attribute
-          key is the flake input name. Empty (`{}`) means no overrides
-          - flake.lock is used as-is.
-        '';
         example = literalExpression ''
           {
             nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
             flake-utils.keep_url = true;
           }
         '';
+        description = ''
+          Overrides applied when fetching flake inputs, keyed by input name. An empty set uses
+          {file}`flake.lock` as is.
+        '';
       };
 
       actions = mkOption {
         type = types.listOf actionType;
         default = [];
-        description = ''
-          Task actions (email notifications, outbound web requests, forge
-          status reports, pull-request automation). Re-applying state with
-          fewer actions removes the missing ones (matched by `name` within
-          the task).
-
-          Token files for `send_web_request` actions must live at the systemd
-          credential path
-          `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_''${name}_token`.
-        '';
         example = literalExpression ''
           [
             {
@@ -396,11 +363,18 @@
             }
           ]
         '';
+        description = ''
+          Task actions: email notifications, web requests, forge status reports and pull request
+          automation. Actions missing on the next state apply are removed, matched by `name`.
+
+          Token files of `send_web_request` actions must live at the systemd credential path
+          `''${GRADIENT_CREDENTIALS_DIR}/gradient_action_''${name}_token`.
+        '';
       };
 
       created_by = mkOption {
         type = types.str;
-        description = "Username of the user who created this task";
+        description = "User name of the task's creator.";
       };
     };
   });
@@ -411,39 +385,38 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique name for the integration within (project, kind)";
+        description = "Integration name, unique per project and kind.";
       };
 
       display_name = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Human-readable display name for the integration. Defaults to `name` when null.";
+        description = "Display name of the integration. `null` uses `name`.";
       };
 
       project = mkOption {
         type = types.str;
-        description = "Name of the project this integration belongs to";
+        description = "Name of the project the integration belongs to.";
       };
 
       kind = mkOption {
         type = types.enum [ "inbound" "outbound" ];
         description = ''
-          `inbound` - the forge calls Gradient (HMAC-verified webhooks).
-          `outbound` - Gradient calls the forge (CI status reports).
+          Direction of the integration: `inbound` for HMAC-verified webhooks from the forge,
+          `outbound` for CI status reports to the forge.
         '';
       };
 
       forge_type = mkOption {
         type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
         description = ''
-          Which forge this integration targets. For inbound integrations this
-          is display metadata only - a single inbound row can serve
-          Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
+          Forge this integration targets. For inbound integrations it is display metadata only,
+          since one inbound row serves Gitea, Forgejo and GitLab through the webhook URL's forge
+          segment.
 
-          `github` requires `installation_id` (no secret/token/endpoint); it
-          provisions the linked GitHub App installation in place of those
-          credentials. GitHub rows are also auto-created when the App is
-          installed on the project, so a declared one is reconciled additively.
+          `github` requires `installation_id` instead of a secret, token or endpoint, and provisions
+          the linked GitHub App installation. GitHub rows are also created when the App is installed
+          on the project, so a declared one is reconciled additively.
         '';
       };
 
@@ -451,24 +424,23 @@
         type = types.nullOr types.int;
         default = null;
         description = ''
-          GitHub App installation id (trailing number in the installation URL).
-          Required when `forge_type = "github"`, ignored otherwise.
+          GitHub App installation ID, the trailing number of the installation URL. Required for
+          `forge_type = "github"`, ignored otherwise.
         '';
       };
 
       account_login = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "GitHub account login for the installation; naming metadata only.";
+        description = "GitHub account login of the installation, used for naming only.";
       };
 
       secret_file = mkOption {
         type = types.nullOr types.path;
         default = null;
         description = ''
-          Path to a file containing the HMAC signing secret for inbound
-          integrations. Loaded as a systemd credential and encrypted into
-          the database at startup. Ignored for outbound integrations.
+          File containing the HMAC signing secret of an inbound integration. It is loaded as a
+          systemd credential and stored encrypted. Ignored for outbound integrations.
         '';
       };
 
@@ -476,8 +448,8 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Base URL of the forge API for outbound integrations
-          (e.g. `https://gitea.example.com`). Ignored for inbound.
+          Base URL of the forge API for outbound integrations, such as `https://gitea.example.com`.
+          Ignored for inbound integrations.
         '';
       };
 
@@ -485,16 +457,15 @@
         type = types.nullOr types.path;
         default = null;
         description = ''
-          Path to a file containing the forge API token for outbound
-          integrations. Loaded as a systemd credential and encrypted into
-          the database at startup. Not used for GitHub outbound - those
-          credentials come from the server-configured GitHub App.
+          File containing the forge API token of an outbound integration. It is loaded as a systemd
+          credential and stored encrypted. Not used for GitHub, whose credentials come from
+          {option}`services.gradient.githubApp`.
         '';
       };
 
       created_by = mkOption {
         type = types.str;
-        description = "Username of the user who created this integration";
+        description = "User name of the integration's creator.";
       };
     };
   });
@@ -503,24 +474,28 @@
     options = {
       type = mkOption {
         type = types.enum [ "polling" "reporter_push" "reporter_pull_request" "time" ];
-        description = "Trigger kind. Drives which `config` shape is expected and how the dispatch loop fires it.";
+        description = ''
+          Trigger kind, which determines the expected `config` and how the trigger fires.
+        '';
       };
 
       integration = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Name of an inbound integration in the same project that backs
-          this trigger. Required for `reporter_push` and `reporter_pull_request`;
-          ignored for `polling` and `time`. Must name an integration in
-          `services.gradient.state.integrations` or a GitHub App row auto-seeded
-          when the App is installed on the project.
+          Name of an inbound integration in the same project backing this trigger. Required for
+          `reporter_push` and `reporter_pull_request`, ignored for `polling` and `time`. It must
+          name an integration in {option}`services.gradient.state.integrations` or a GitHub App
+          installation of the project.
         '';
       };
 
       config = mkOption {
         type = types.attrs;
         default = { };
+        example = literalExpression ''
+          { interval_secs = 60; }
+        '';
         description = ''
           Type-specific configuration. Shape depends on `type`:
 
@@ -537,9 +512,6 @@
           `/gradient approve` (or `/gradient run`) on the PR. Set to `false` to
           disable the gate and run every PR build automatically.
         '';
-        example = literalExpression ''
-          { interval_secs = 60; }
-        '';
       };
 
       active = mkOption {
@@ -555,15 +527,14 @@
       name = mkOption {
         type = types.str;
         description = ''
-          Action name unique within the task. The provisioner upserts on
-          (task_id, name); changing this string creates a new action and
-          deletes the old one on next reconciliation.
+          Action name, unique within the task. Renaming creates a new action and deletes the old one
+          on the next state apply.
         '';
       };
 
       type = mkOption {
         type = types.enum [ "send_mail" "send_web_request" "forge_status_report" "open_pr" ];
-        description = "Action kind. Drives which `config` shape is expected.";
+        description = "Action kind, which determines the expected `config`.";
       };
 
       active = mkOption {
@@ -576,13 +547,16 @@
         type = types.listOf types.str;
         default = [];
         description = ''
-          Events the action subscribes to. Must be empty for
-          `forge_status_report` (status events are derived from build state).
+          Events the action subscribes to. Must be empty for `forge_status_report`, whose events
+          derive from build state.
         '';
       };
 
       config = mkOption {
         type = types.attrs;
+        example = literalExpression ''
+          { recipients = [ "ops@example.com" ]; }
+        '';
         description = ''
           Type-specific configuration. Shape depends on `type`:
 
@@ -617,9 +591,6 @@
           file `gradient_action_''${name}_token` and stored encrypted with
           the server's crypt key.
         '';
-        example = literalExpression ''
-          { recipients = [ "ops@example.com" ]; }
-        '';
       };
     };
   };
@@ -628,11 +599,13 @@
     options = {
       user = mkOption {
         type = types.str;
-        description = "Username (resolved at provision time).";
+        description = "User name, resolved when the state is applied.";
       };
       role = mkOption {
         type = types.str;
-        description = "Role name (built-in `Admin`/`Write`/`View` or a custom role declared on this cache).";
+        description = ''
+          Role name: a built-in `Admin`, `Write` or `View`, or a custom role of this cache.
+        '';
       };
     };
   };
@@ -642,18 +615,15 @@
       user = mkOption {
         type = types.str;
         description = ''
-          Username to grant membership to. Resolved at provision time;
-          if the user does not yet exist, the membership is recorded as
-          pending and applied automatically when the user later registers
-          (`POST /user`) or signs in via OIDC for the first time.
+          User name to grant membership to. If the user does not exist yet, the membership is
+          applied once they register or first sign in through OIDC.
         '';
       };
       role = mkOption {
         type = types.str;
         description = ''
-          Role name. Either a built-in (`Admin`/`Write`/`View`) or a
-          custom project role declared under
-          `services.gradient.state.roles` for the same project.
+          Role name: a built-in `Admin`, `Write` or `View`, or a custom role of the same project
+          declared in {option}`services.gradient.state.roles`.
         '';
       };
     };
@@ -663,11 +633,15 @@
     options = {
       name = mkOption {
         type = types.str;
-        description = "Custom role name (must not collide with built-ins).";
+        description = "Custom role name, distinct from the built-in roles.";
       };
       permissions = mkOption {
         type = types.listOf types.str;
-        description = "Cache capability identifiers (camelCase). One of: viewCache, readStore, writeStore, manageCacheSettings, manageCacheKeys, manageCacheUpstreams, manageCacheMembers, manageCacheRoles, manageCacheSubscriptions, deleteCache.";
+        description = ''
+          Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`,
+          `manageCacheSettings`, `manageCacheKeys`, `manageCacheUpstreams`, `manageCacheMembers`,
+          `manageCacheRoles`, `manageCacheSubscriptions` or `deleteCache`.
+        '';
       };
     };
   };
@@ -678,41 +652,40 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique name for the cache";
+        description = "Unique cache name.";
       };
 
       display_name = mkOption {
         type = types.str;
         default = config.name;
         defaultText = "config.name";
-        description = "Display name for the cache";
+        description = "Display name of the cache.";
       };
 
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the cache";
+        description = "Description of the cache.";
       };
 
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the cache is active";
+        description = "Whether the cache is active.";
       };
 
       priority = mkOption {
         type = types.ints.positive;
         default = 10;
-        description = "Priority of the cache (higher is more important)";
+        description = "Priority of the cache; higher is preferred.";
       };
 
       local_priority = mkOption {
         type = types.nullOr types.int;
         default = null;
         description = ''
-          Alternate Priority advertised in nix-cache-info to clients whose
-          IP is in `services.gradient.settings.localIps`. Null (or 0)
-          disables the override.
+          Priority advertised in {file}`nix-cache-info` to clients within
+          {option}`services.gradient.http.localIps`. `null` or `0` disables the override.
         '';
       };
 
@@ -720,21 +693,20 @@
         type = types.ints.unsigned;
         default = 0;
         description = ''
-          Max storage for this cache in GB. When all writable caches for an
-          project have less than 10 MiB headroom, new evaluations park in Waiting.
-          0 = unlimited.
+          Storage limit of the cache in GB. When every writable cache of a project has less than 10
+          MiB left, new evaluations wait. `0` disables the limit.
         '';
       };
 
       signing_key_file = mkOption {
         type = types.str;
-        description = "Path to file containing the Nix cache signing key";
+        description = "File containing the Nix cache signing key.";
       };
 
       projects = mkOption {
         type = types.listOf types.str;
         default = [ ];
-        description = "List of project names that can use this cache";
+        description = "Names of the projects using this cache.";
       };
 
       upstreams = mkOption {
@@ -745,8 +717,6 @@
           url = "https://cache.nixos.org";
           public_key = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
         }];
-
-        description = "List of upstream caches (internal Gradient caches or external Nix binary caches) to use as substituters";
         example = literalExpression ''
           [
             {
@@ -762,29 +732,33 @@
             }
           ]
         '';
+        description = ''
+          Upstream caches used as substituters: internal Gradient caches or external Nix binary
+          caches.
+        '';
       };
 
       members = mkOption {
         type = types.listOf cacheMemberType;
         default = [];
-        description = "Users with direct role assignments on this cache.";
+        description = "Users with direct roles on this cache.";
       };
 
       roles = mkOption {
         type = types.listOf cacheRoleType;
         default = [];
-        description = "Custom roles available on this cache.";
+        description = "Custom roles of this cache.";
       };
 
       public = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether the cache is public (available to all projects)";
+        description = "Whether the cache is available to all projects.";
       };
 
       created_by = mkOption {
         type = types.str;
-        description = "Username of the user who created this cache";
+        description = "User name of the cache's creator.";
       };
     };
   });
@@ -795,89 +769,106 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Display name for the worker";
+        description = "Display name of the worker.";
       };
 
       worker_id = mkOption {
         type = types.str;
-        description = "Worker identity string. Must match GRADIENT_WORKER_ID on the worker machine.";
         example = "123e4567-e89b-12d3-a456-426614174000";
+        description = ''
+          Worker identity. Must match {option}`services.gradient.worker.id` on the worker host.
+        '';
       };
 
       url = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "WebSocket URL where the worker accepts incoming server connections. When set, the server connects outbound to this URL. Leave empty for worker-initiated connections.";
         example = "wss://worker.example.com/proto";
+        description = ''
+          WebSocket URL on which the worker accepts server connections. When set, the server
+          connects to the worker; empty lets the worker connect to the server.
+        '';
       };
 
       projects = mkOption {
         type = types.listOf types.str;
         default = [ ];
-        description = ''
-          Projects this worker is registered under. The provisioner
-          creates one `worker_registration` row per
-          (worker_id, project) pair so the same physical worker can
-          serve builds for multiple projects from a single state
-          entry. For a base worker, lists projects to pre-enable;
-          may be empty. Non-base workers must list at least one
-          project (enforced by the server at state-apply time).
-        '';
         example = [ "acme-corp" "globex" ];
+        description = ''
+          Projects the worker is registered under, one registration per project, so a single worker
+          can serve several projects. For a base worker this lists projects to enable up front and
+          may be empty; other workers need at least one.
+        '';
       };
 
       token_file = mkOption {
         type = types.path;
-        description = "Path to a file containing the authentication token for this worker";
+        description = "File containing the worker's authentication token.";
       };
 
       created_by = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Username of the user who created this worker registration. Null leaves the registration unattributed, which is what a host that provisions a worker for itself wants.";
+        description = ''
+          User name of the registration's creator. `null` leaves it unattributed, as for a worker a
+          host provisions for itself.
+        '';
       };
 
       enable_fetch = mkOption {
         type = types.bool;
         default = true;
-        description = "Server-side gate for the worker's `fetch` capability for this registration. When false, the negotiated capability set excludes fetch.";
+        description = ''
+          Whether the server grants this registration the worker's `fetch` capability.
+        '';
       };
 
       enable_eval = mkOption {
         type = types.bool;
         default = true;
-        description = "Server-side gate for the worker's `eval` capability for this registration.";
+        description = "Whether the server grants this registration the worker's `eval` capability.";
       };
 
       enable_build = mkOption {
         type = types.bool;
         default = true;
-        description = "Server-side gate for the worker's `build` capability for this registration.";
+        description = ''
+          Whether the server grants this registration the worker's `build` capability.
+        '';
       };
 
       base_worker = mkOption {
         type = types.bool;
         default = true;
-        description = "When true this entry is a base worker (server-level, available to every project) rather than a per-project registration. `projects` then lists projects to pre-enable.";
+        description = ''
+          Whether this is a base worker available to every project instead of a per-project
+          registration. `projects` then lists projects to enable up front.
+        '';
       };
 
       authorize_against = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Optional fixed UUID identity a base worker authenticates as, instead of the per-project challenge. Ignored for non-base workers.";
         example = "123e4567-e89b-12d3-a456-426614174000";
+        description = ''
+          UUID a base worker authenticates as instead of the per-project challenge. Ignored for
+          other workers.
+        '';
       };
 
       auto_enable = mkOption {
         type = types.bool;
         default = true;
-        description = "When true, every project enables this base worker the moment it is created, instead of opting in from the UI. Ignored for non-base workers.";
+        description = ''
+          Whether every new project enables this base worker on creation instead of opting in
+          through the web UI. Ignored for other workers.
+        '';
       };
 
       enabled = mkOption {
         type = types.bool;
         default = true;
-        description = "Global enable for a base worker. When false the base worker is unavailable to every project. Ignored for non-base workers.";
+        description = "Whether the base worker is available at all. Ignored for other workers.";
       };
     };
   });
@@ -888,47 +879,38 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Name of the API key";
+        description = "Name of the API key.";
       };
 
       key_file = mkOption {
         type = types.str;
         description = ''
-          Path to a file containing the lowercase 64-char SHA-256 hex digest
-          of the API token (without the `GRAD` prefix). The server stores API
-          keys hashed; this hash is what's compared against the digest of the
-          incoming bearer token.
-
-          Generate one with:
-          `printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > /etc/gradient/secrets/<name>`
+          File containing the lowercase hex SHA-256 digest of the API token, without its `GRAD`
+          prefix. The server only stores and compares hashes. Generate it with `printf %s "$TOKEN" |
+          sha256sum | cut -d' ' -f1`.
         '';
       };
 
       owned_by = mkOption {
         type = types.str;
-        description = "Username of the user who owns this API key";
+        description = "User name of the key's owner.";
       };
 
       permissions = mkOption {
         type = types.listOf types.str;
-        description = ''
-          Capability identifiers (camelCase) the API key grants. Must be
-          non-empty. The full catalogue is defined in
-          `gradient_core::permissions::Permission` and exposed at runtime via
-          `GET /user/keys/permissions`. Common identifiers include
-          `viewProject`, `triggerEvaluation`, `editTask`, `manageMembers`.
-        '';
         example = [ "viewProject" "triggerEvaluation" ];
+        description = ''
+          Permissions granted by the key, as camelCase identifiers such as `viewProject`,
+          `triggerEvaluation`, `editTask` or `manageMembers`. Must not be empty. `GET
+          /user/keys/permissions` lists them all.
+        '';
       };
 
       project = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Optional project name to pin the key to. When set, the key is
-          rejected for every other project (the request looks identical
-          to "not a member"). When null, the key works in any project the owning
-          user is a member of.
+          Project the key is restricted to. `null` allows every project the owner is a member of.
         '';
       };
     };
@@ -941,52 +923,43 @@
         default = name;
         defaultText = "<attrset key>";
         description = ''
-          Name of the role. Must not collide with the built-in role names
-          (`Admin`, `Write`, `View`) and must be unique within its
-          project. State-managed roles cannot be modified via the
-          role-management API.
+          Role name, distinct from the built-in `Admin`, `Write` and `View` and unique within its
+          project. Roles managed here cannot be changed through the API.
         '';
       };
 
       project = mkOption {
         type = types.str;
-        description = ''
-          Project the role belongs to. State-managed roles are always
-          project-scoped - there is no way to define a global state-managed
-          role.
-        '';
+        description = "Project the role belongs to. Roles managed here are always project-scoped.";
       };
 
       permissions = mkOption {
         type = types.listOf types.str;
-        description = ''
-          Capability identifiers (camelCase) the role grants. Must be
-          non-empty. See `apiKeyType.permissions` for the catalogue.
-        '';
         example = [ "viewProject" "triggerEvaluation" ];
+        description = ''
+          Permissions granted by the role, as camelCase identifiers. Must not be empty.
+        '';
       };
 
       oidc_group = mkOption {
         type = types.listOf types.str;
         default = [];
-        description = ''
-          OIDC group claims that grant this role on login. A user whose
-          `groups` claim contains any listed group is granted this role in
-          the role's project. Grants are additive - they never remove a
-          membership. Requires the `groups` scope on the OIDC client.
-        '';
         example = [ "platform-team" "ops" ];
+        description = ''
+          OIDC groups granting this role on login. A user whose `groups` claim contains a listed
+          group gets the role in its project. Grants only add memberships. Requires the `groups`
+          scope.
+        '';
       };
 
       scim_group = mkOption {
         type = types.listOf types.str;
         default = [];
-        description = ''
-          SCIM group names that grant this role. A user the IdP adds to a
-          listed SCIM group is granted this role in the role's project.
-          Grants are additive; removal from the group removes the membership.
-        '';
         example = [ "acme-eng" ];
+        description = ''
+          SCIM groups granting this role. Adding a user to a listed group grants the role in its
+          project; removing them removes the membership.
+        '';
       };
     };
   });
@@ -997,48 +970,39 @@
         type = types.bool;
         default = true;
         description = ''
-          Validate the generated `state` configuration at build time by running
-          the server binary's `--state-validate` over it. Schema and
-          cross-reference errors (unknown projects, reporter triggers
-          pointing at undeclared integrations, ...) then fail the Nix build
-          instead of the server on first start. No database is touched.
+          Whether to validate the generated state at build time with the server's
+          `--state-validate`, so schema and reference errors fail the Nix build instead of the first
+          server start. No database is touched.
         '';
       };
 
       delete = mkOption {
         type = types.bool;
         default = true;
-        description = "Delete all state (users, projects, caches) if not managed anymore by state";
+        description = "Whether to delete users, projects and caches no longer declared here.";
       };
 
       users = mkOption {
         type = types.attrsOf userType;
         default = { };
-        description = "Attribute set of users to create, keyed by username";
+        description = "Users to create, keyed by user name.";
       };
 
       projects = mkOption {
         type = types.attrsOf projectType;
         default = { };
-        description = "Attribute set of projects to create, keyed by name";
+        description = "Projects to create, keyed by name.";
       };
 
       tasks = mkOption {
         type = types.attrsOf taskType;
         default = { };
-        description = "Attribute set of tasks to create, keyed by name";
+        description = "Tasks to create, keyed by name.";
       };
 
       integrations = mkOption {
         type = types.attrsOf integrationType;
         default = { };
-        description = ''
-          Attribute set of per-project forge integrations, keyed by name.
-          Each entry inserts a row into `integration`. For inbound integrations,
-          `secret_file` is read as a systemd credential and stored encrypted.
-          For outbound integrations, `access_token_file` is similarly encrypted.
-        '';
-
         example = literalExpression ''
           {
             acme-prod-inbound = {
@@ -1066,41 +1030,35 @@
             };
           }
         '';
+        description = ''
+          Forge integrations per project, keyed by name. Secrets of inbound and tokens of outbound
+          integrations are read as systemd credentials and stored encrypted.
+        '';
       };
 
       caches = mkOption {
         type = types.attrsOf cacheType;
         default = { };
-        description = "Attribute set of caches to create, keyed by name";
+        description = "Caches to create, keyed by name.";
       };
 
       roles = mkOption {
         type = types.attrsOf roleType;
         default = { };
         description = ''
-          Attribute set of state-managed custom roles, keyed by role name.
-          Each entry creates a custom role in the specified project with
-          the given permission set. Managed roles cannot be modified or
-          deleted through the API - only this state file can change them.
+          Custom roles, keyed by role name. They cannot be modified or deleted through the API.
         '';
       };
 
       api_keys = mkOption {
         type = types.attrsOf apiKeyType;
         default = { };
-        description = "Attribute set of API keys to create, keyed by name";
+        description = "API keys to create, keyed by name.";
       };
 
       workers = mkOption {
         type = types.attrsOf workerType;
         default = { };
-        description = ''
-          Attribute set of worker registrations, keyed by worker_id.
-          Each entry inserts a row into worker_registration so the worker
-          can authenticate via challenge-response. The token is read from
-          token_file, hashed, and stored - the plaintext is never persisted.
-        '';
-
         example = literalExpression ''
           {
             builder-1 = {
@@ -1110,6 +1068,10 @@
               created_by = "alice";
             };
           }
+        '';
+        description = ''
+          Worker registrations, keyed by worker ID. The token from `token_file` is stored hashed and
+          never persisted in plain text.
         '';
       };
     };
@@ -1121,7 +1083,6 @@ in
     state = mkOption {
       type = stateType;
       default = { };
-      description = "Gradient state configuration for users, projects, tasks, and caches";
       example = literalExpression ''
         {
           users = {
@@ -1184,6 +1145,7 @@ in
           };
         }
       '';
+      description = "Declarative Gradient state: users, projects, tasks, caches and more.";
     };
   };
 
