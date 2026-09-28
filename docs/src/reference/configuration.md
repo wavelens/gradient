@@ -416,20 +416,9 @@ The RAM-dependent settings are options:
 
 An external database (`database.urlFile`) needs the same seven values set by hand.
 
-## Prometheus Metrics
+## Prometheus and OpenTelemetry
 
-`metrics.tokenFile` enables `GET /metrics` in the Prometheus format; without it the endpoint returns `404`.
-
-```yaml
-scrape_configs:
-  - job_name: gradient
-    scheme: https
-    bearer_token_file: /run/secrets/gradient-metrics
-    static_configs:
-      - targets: [ "gradient.example.com" ]
-```
-
-The endpoint allows 6 requests per second; a 15 s scrape interval fits. Upload admission shows as `gradient_upload_in_flight`, `gradient_upload_bytes_in_flight`, `gradient_upload_queue_depth{worker}`, `gradient_upload_granted_total` and `gradient_upload_wait_seconds_total`.
+Setup, metric names and alert examples are in [Monitor Gradient](../guides/monitoring.md).
 
 ## Hashing
 
