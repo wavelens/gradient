@@ -754,8 +754,8 @@ in {
           description = ''
             Policy ranking queued jobs for a requesting worker. `simple` weighs path availability,
             NAR size, dependency count, waiting time, builtins and fetch worker reservation.
-            `resource-aware` also weighs memory fit, CPU affinity, `preferLocalBuild` and
-            per-project fair share.
+            `resource-aware` also weighs memory fit, worker saturation, CPU, disk and network affinity
+            and `preferLocalBuild`.
           '';
         };
 
