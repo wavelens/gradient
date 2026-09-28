@@ -19,8 +19,8 @@ flowchart LR
 
 | Concept | Role |
 |---|---|
-| Project | Unit of access: members, roles, workers and cache subscriptions |
-| Task | One repository plus the flake outputs to build, selected by a wildcard |
+| [Project](projects-and-tasks.md#project) | Unit of access: members, roles, workers and cache subscriptions |
+| [Task](projects-and-tasks.md#task) | One repository plus the flake outputs to build, selected by a wildcard |
 | Trigger | Starts an evaluation of a task: push, pull request, polling or schedule |
 | Evaluation | One run of a task at one commit, listing every derivation to build |
 | Build | One derivation, built once and shared by every evaluation that needs the same derivation |

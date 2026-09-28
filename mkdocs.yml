@@ -42,6 +42,7 @@ nav:
       - Installation: get-started/installation.md
   - Concepts:
       - Overview: concepts/overview.md
+      - Projects and Tasks: concepts/projects-and-tasks.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
