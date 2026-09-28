@@ -266,27 +266,37 @@ impl MockServerConn {
         self.send(ServerMessage::UploadGrant { request_id, target })
             .await?;
 
+        // The finish rides the control lane and may overtake the relay's final
+        // chunk on the bulk lane, as the real server allows.
+        enum Arrival {
+            Chunk(Vec<u8>, u64, bool),
+            Finished(UploadMetadata),
+        }
         let mut chunks = Vec::new();
-        while relayed && !chunks.last().is_some_and(|(_, _, is_final)| *is_final) {
-            chunks.push(
-                self.recv_until(|msg| match msg {
+        let mut finished = None;
+        while finished.is_none()
+            || (relayed && !chunks.last().is_some_and(|(_, _, is_final)| *is_final))
+        {
+            match self
+                .recv_until(|msg| match msg {
                     ClientMessage::UploadChunk {
                         data,
                         offset,
                         is_final,
                         ..
-                    } => Some((data, offset, is_final)),
+                    } => Some(Arrival::Chunk(data, offset, is_final)),
+                    ClientMessage::UploadFinished { metadata, .. } => {
+                        Some(Arrival::Finished(metadata))
+                    }
                     _ => None,
                 })
-                .await?,
-            );
+                .await?
+            {
+                Arrival::Chunk(data, offset, is_final) => chunks.push((data, offset, is_final)),
+                Arrival::Finished(metadata) => finished = Some(metadata),
+            }
         }
-        let metadata = self
-            .recv_until(|msg| match msg {
-                ClientMessage::UploadFinished { metadata, .. } => Some(metadata),
-                _ => None,
-            })
-            .await?;
+        let metadata = finished.expect("the loop ends only once the upload finished");
         self.send(ServerMessage::UploadCommitted {
             request_id,
             outcome: UploadOutcome::Ok,
