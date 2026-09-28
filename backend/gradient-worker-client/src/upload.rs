@@ -5,13 +5,13 @@
  */
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use anyhow::{Context, Result, bail};
 use gradient_util::sync::Mutex;
 use gradient_wire::messages::{ClientMessage, ServerMessage};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
-use tokio::sync::{Semaphore, SemaphorePermit, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, SemaphorePermit, oneshot};
 
 use crate::connection::ProtoWriter;
 
@@ -27,15 +27,18 @@ struct Waiter {
 struct Inner {
     next_id: u64,
     waiters: HashMap<u64, Waiter>,
+    jobs: HashMap<String, Weak<Semaphore>>,
 }
 
 /// Every upload this worker sends: requested, granted, transferred, then
-/// acknowledged by the server.
+/// acknowledged by the server. One job holds at most half of the slots, so an
+/// evaluation pushing its whole closure never queues build outputs behind it.
 #[derive(Clone)]
 pub struct UploadClient {
     inner: Arc<Mutex<Inner>>,
     writer: ProtoWriter,
     slots: Arc<Semaphore>,
+    per_job: usize,
 }
 
 impl UploadClient {
@@ -44,6 +47,7 @@ impl UploadClient {
             inner: Arc::default(),
             writer,
             slots: Arc::new(Semaphore::new(max_outstanding.max(1))),
+            per_job: (max_outstanding / 2).max(1),
         }
     }
 
@@ -82,14 +86,21 @@ impl UploadClient {
     /// Take one of this worker's upload slots for `object`; drive the returned
     /// [`Upload`] with [`Upload::next_grant`] and [`Upload::settle`].
     pub async fn start(&self, job_id: &str, object: UploadObject, size: u64) -> Result<Upload<'_>> {
+        let job_slot = self
+            .job_slots(job_id)
+            .acquire_owned()
+            .await
+            .context("upload slots closed")?;
         let slot = self.slots.acquire().await.context("upload slots closed")?;
         Ok(Upload {
             client: self,
+            _job_slot: job_slot,
             _slot: slot,
             job_id: job_id.to_owned(),
             object,
             size,
             attempts: 0,
+            waiting: None,
             open: None,
         })
     }
@@ -142,6 +153,17 @@ impl UploadClient {
         (id, grant_rx, outcome_rx)
     }
 
+    fn job_slots(&self, job_id: &str) -> Arc<Semaphore> {
+        let mut inner = self.inner.lock();
+        if let Some(slots) = inner.jobs.get(job_id).and_then(Weak::upgrade) {
+            return slots;
+        }
+        inner.jobs.retain(|_, slots| slots.strong_count() > 0);
+        let slots = Arc::new(Semaphore::new(self.per_job));
+        inner.jobs.insert(job_id.to_owned(), Arc::downgrade(&slots));
+        slots
+    }
+
     fn forget(&self, request_id: u64) {
         self.inner.lock().waiters.remove(&request_id);
     }
@@ -151,42 +173,72 @@ impl UploadClient {
 /// it is dropped.
 pub struct Upload<'a> {
     client: &'a UploadClient,
+    _job_slot: OwnedSemaphorePermit,
     _slot: SemaphorePermit<'a>,
     job_id: String,
     object: UploadObject,
     size: u64,
     attempts: u32,
+    waiting: Option<u64>,
     open: Option<(u64, oneshot::Receiver<UploadOutcome>)>,
 }
 
 impl Upload<'_> {
     /// Request the object and wait for the server's grant; `None` means the
-    /// server already has it and nothing is to be sent.
+    /// server already has it and nothing is to be sent. The server may answer
+    /// before granting (a rejection, or a retry when it cannot open a target).
     pub async fn next_grant(&mut self) -> Result<Option<(u64, GrantTarget)>> {
-        if self.attempts == MAX_UPLOAD_ATTEMPTS {
-            bail!(
-                "upload of {:?} still asked to retry after {MAX_UPLOAD_ATTEMPTS} attempts",
-                self.object
-            );
-        }
-        self.attempts += 1;
-        let (request_id, grant, outcome) = self.client.register(&self.job_id);
-        self.open = Some((request_id, outcome));
-        self.client
-            .writer
-            .send(ClientMessage::UploadRequest {
-                job_id: self.job_id.clone(),
-                request_id,
-                object: self.object.clone(),
-                size: self.size,
-            })
-            .await?;
-        match grant.await.context("upload cancelled before its grant")? {
-            GrantTarget::Skip => {
-                self.close();
-                Ok(None)
+        loop {
+            if self.attempts == MAX_UPLOAD_ATTEMPTS {
+                bail!(
+                    "upload of {:?} still asked to retry after {MAX_UPLOAD_ATTEMPTS} attempts",
+                    self.object
+                );
             }
-            target => Ok(Some((request_id, target))),
+            self.attempts += 1;
+            let (request_id, mut grant, mut outcome) = self.client.register(&self.job_id);
+            self.waiting = Some(request_id);
+            let sent = self
+                .client
+                .writer
+                .send(ClientMessage::UploadRequest {
+                    job_id: self.job_id.clone(),
+                    request_id,
+                    object: self.object.clone(),
+                    size: self.size,
+                })
+                .await;
+            if let Err(e) = sent {
+                self.waiting = None;
+                self.client.forget(request_id);
+                return Err(e);
+            }
+            let answer = tokio::select! {
+                biased;
+                granted = &mut grant => Ok(granted),
+                answered = &mut outcome => Err(answered),
+            };
+            self.waiting = None;
+            match answer {
+                Ok(granted) => {
+                    return match granted.context("upload cancelled before its grant")? {
+                        GrantTarget::Skip => {
+                            self.client.forget(request_id);
+                            Ok(None)
+                        }
+                        target => {
+                            self.open = Some((request_id, outcome));
+                            Ok(Some((request_id, target)))
+                        }
+                    };
+                }
+                Err(answered) => {
+                    self.client.forget(request_id);
+                    if self.stored(answered.context("upload cancelled before its grant")?)? {
+                        return Ok(None);
+                    }
+                }
+            }
         }
     }
 
@@ -219,7 +271,13 @@ impl Upload<'_> {
             Err(e) => Err(e),
         };
         self.client.forget(request_id);
-        match outcome? {
+        self.stored(outcome?)
+    }
+
+    /// `true` once the object is stored, `false` when the server asks for
+    /// another attempt.
+    fn stored(&self, outcome: UploadOutcome) -> Result<bool> {
+        match outcome {
             UploadOutcome::Ok => Ok(true),
             UploadOutcome::Retry { reason } => {
                 tracing::warn!(job_id = %self.job_id, object = ?self.object, attempt = self.attempts, %reason, "upload asked to retry");
@@ -230,17 +288,25 @@ impl Upload<'_> {
             }
         }
     }
-
-    fn close(&mut self) {
-        if let Some((request_id, _)) = self.open.take() {
-            self.client.forget(request_id);
-        }
-    }
 }
 
 impl Drop for Upload<'_> {
     fn drop(&mut self) {
-        self.close();
+        let abandoned = self
+            .waiting
+            .take()
+            .or_else(|| self.open.take().map(|(id, _)| id));
+        if let Some(request_id) = abandoned {
+            self.client.forget(request_id);
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                let writer = self.client.writer.clone();
+                runtime.spawn(async move {
+                    let _ = writer
+                        .send(ClientMessage::UploadCancel { request_id })
+                        .await;
+                });
+            }
+        }
     }
 }
 
@@ -423,6 +489,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_rejection_before_the_grant_fails_the_upload() {
+        let (client, mut server, _pump) = connected(4).await;
+        let upload = tokio::spawn({
+            let client = client.clone();
+            async move { run(&client).await }
+        });
+        let ClientMessage::UploadRequest { request_id, .. } = server.recv().await.unwrap() else {
+            panic!()
+        };
+        server
+            .send(ServerMessage::UploadCommitted {
+                request_id,
+                outcome: UploadOutcome::Rejected {
+                    reason: "job is not running".into(),
+                },
+            })
+            .await
+            .unwrap();
+        let settled = tokio::time::timeout(Duration::from_secs(5), upload)
+            .await
+            .expect("the upload must not wait for a grant that never comes");
+        assert!(settled.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn a_retry_before_the_grant_requests_again() {
+        let (client, mut server, _pump) = connected(4).await;
+        let upload = tokio::spawn({
+            let client = client.clone();
+            async move { run(&client).await }
+        });
+        let ClientMessage::UploadRequest { request_id, .. } = server.recv().await.unwrap() else {
+            panic!()
+        };
+        server
+            .send(ServerMessage::UploadCommitted {
+                request_id,
+                outcome: UploadOutcome::Retry {
+                    reason: "no upload target".into(),
+                },
+            })
+            .await
+            .unwrap();
+        let ClientMessage::UploadRequest {
+            request_id: again, ..
+        } = tokio::time::timeout(Duration::from_secs(5), server.recv())
+            .await
+            .expect("a retry asks again")
+            .unwrap()
+        else {
+            panic!("a second request")
+        };
+        server
+            .send(ServerMessage::UploadGrant {
+                request_id: again,
+                target: GrantTarget::Skip,
+            })
+            .await
+            .unwrap();
+        upload.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_upload_dropped_while_waiting_cancels_its_request() {
+        let (client, mut server, _pump) = connected(4).await;
+        let upload = tokio::spawn({
+            let client = client.clone();
+            async move { run(&client).await }
+        });
+        let ClientMessage::UploadRequest { request_id, .. } = server.recv().await.unwrap() else {
+            panic!()
+        };
+        upload.abort();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), server.recv())
+                .await
+                .expect("the server hears the request is gone")
+                .unwrap(),
+            ClientMessage::UploadCancel { request_id }
+        );
+    }
+
+    #[tokio::test]
     async fn an_aborted_job_cancels_its_queued_uploads() {
         let (client, mut server, _pump) = connected(4).await;
         let upload = tokio::spawn({
@@ -438,6 +587,41 @@ mod tests {
             ClientMessage::UploadCancel { request_id }
         );
         assert!(upload.await.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn one_job_leaves_slots_for_the_others() {
+        let (client, mut server, _pump) = connected(2).await;
+        for _ in 0..2 {
+            let client = client.clone();
+            tokio::spawn(async move {
+                let _ = client.start("eval:1", nar(), 1).await?.next_grant().await;
+                anyhow::Ok(())
+            });
+        }
+        let ClientMessage::UploadRequest { job_id, .. } = server.recv().await.unwrap() else {
+            panic!()
+        };
+        assert_eq!(job_id, "eval:1");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), server.recv())
+                .await
+                .is_err(),
+            "the eval waits on its own share"
+        );
+        tokio::spawn({
+            let client = client.clone();
+            async move { run(&client).await }
+        });
+        let ClientMessage::UploadRequest { job_id, .. } =
+            tokio::time::timeout(Duration::from_secs(5), server.recv())
+                .await
+                .expect("a build output is not queued behind the eval")
+                .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(job_id, "build:1");
     }
 
     #[tokio::test]

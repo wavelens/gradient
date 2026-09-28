@@ -273,7 +273,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `upload.bytesBudget` | int | `8589934592` | `GRADIENT_UPLOAD_BYTES_BUDGET` | Total size in bytes of admitted uploads. |
-| `upload.concurrency` | int | `16` | `GRADIENT_UPLOAD_CONCURRENCY` | Uploads (NARs and eval cache blobs) admitted at once across all workers and REST clients. |
+| `upload.concurrency` | int | `16` | `GRADIENT_UPLOAD_CONCURRENCY` | Uploads (NARs and eval cache blobs) admitted at once across all workers and REST clients. A permit is held until the object is in storage. |
 | `upload.leaseIdleSecs` | int | `300` | `GRADIENT_UPLOAD_LEASE_IDLE_SECS` | Seconds a granted relay upload may go without data before its permit is reclaimed and the worker is told to retry. |
 | `upload.restWaitSecs` | int | `30` | `GRADIENT_UPLOAD_REST_WAIT_SECS` | Seconds a NAR upload to the cache upload endpoint waits for a permit before it is answered with 503 and `Retry-After`. |
 
@@ -339,7 +339,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.nar.maxConcurrentUploads` | int | `8` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests the worker keeps open at once, waiting for a server grant or transferring. |
+| `worker.nar.maxConcurrentUploads` | int | `8` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests the worker keeps open at once, waiting for a server grant or transferring. One job holds at most half of them. |
 | `worker.nar.partialTtlSecs` | int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after its last write that an unfinished NAR download under `<worker.baseDir>/nar-partial` is deleted. |
 
 ## `worker.nixDaemon`

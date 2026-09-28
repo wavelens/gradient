@@ -315,7 +315,9 @@ in {
         default = 8;
         description = ''
           Upload requests the worker keeps open at once, waiting for a server grant or
-          transferring. The server's upload budget decides how many run; this bounds worker memory.
+          transferring. One job holds at most half of them, so build outputs never wait
+          behind an evaluation's closure push. The server's upload budget decides how many
+          run; this bounds worker memory.
         '';
       };
 
