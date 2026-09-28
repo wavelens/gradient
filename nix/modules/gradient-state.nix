@@ -232,7 +232,10 @@
       wildcard = mkOption {
         type = types.str;
         default = "packages.x86_64-linux.*";
-        description = "Branch or branch pattern to evaluate.";
+        description = ''
+          Comma-separated Nix attribute paths to evaluate from the flake. A `*` or `#` segment
+          matches any attribute name, and a pattern prefixed with `!` excludes matching paths.
+        '';
       };
 
       active = mkOption {
@@ -677,7 +680,10 @@
       priority = mkOption {
         type = types.ints.positive;
         default = 10;
-        description = "Priority of the cache; higher is preferred.";
+        description = ''
+          Priority advertised in {file}`nix-cache-info`. Nix queries caches with a lower value
+          first.
+        '';
       };
 
       local_priority = mkOption {
