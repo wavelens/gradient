@@ -53,6 +53,7 @@ nav:
       - Connect Gitea or Forgejo: guides/forge-gitea.md
       - Connect GitLab: guides/forge-gitlab.md
       - Share a Cache: guides/share-a-cache.md
+      - Upload NARs: guides/upload-nars.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
