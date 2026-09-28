@@ -42,7 +42,7 @@ fn compressed_bound(nar_size: u64) -> u64 {
     nar_size.saturating_add(nar_size / 128).saturating_add(MIB)
 }
 
-fn part_ttl(nar_size: u64) -> Duration {
+pub(crate) fn part_ttl(nar_size: u64) -> Duration {
     let transfer = Duration::from_secs(
         compressed_bound(nar_size) / crate::nar::MIN_WRITE_THROUGHPUT_BYTES_PER_SEC,
     );

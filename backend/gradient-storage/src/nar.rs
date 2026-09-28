@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::admission::ObjectKey;
 use crate::{HotNarCache, StagedNars};
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
-use gradient_wire::constants::BULK_CHUNK_SIZE;
+use gradient_wire::constants::{BULK_CHUNK_SIZE, MULTIPART_NAR_BYTES, PRESIGN_TTL};
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
 use std::io::SeekFrom;
@@ -920,11 +921,127 @@ impl NarStore {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum StorageTarget {
+    Relay,
+    Put { url: String },
+    Multipart(gradient_wire::types::PresignedMultipart),
+}
+
+pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Duration> {
+    match target {
+        StorageTarget::Relay => None,
+        StorageTarget::Put { .. } => Some(PRESIGN_TTL),
+        StorageTarget::Multipart(_) => Some(crate::multipart::part_ttl(size)),
+    }
+}
+
+impl NarStore {
+    /// The one transport this backend accepts for `object`: presigned on S3,
+    /// relayed through the server on a local store.
+    pub async fn upload_target(&self, object: &ObjectKey, size: u64) -> Result<StorageTarget> {
+        if !self.presigner_available() {
+            return Ok(StorageTarget::Relay);
+        }
+        let missing = || anyhow::anyhow!("the S3 store could not presign an upload for {object:?}");
+        match object {
+            ObjectKey::Rest(_) => Ok(StorageTarget::Relay),
+            ObjectKey::Nar(hash) if size > MULTIPART_NAR_BYTES => self
+                .presigned_multipart(hash, size)
+                .await?
+                .map(StorageTarget::Multipart)
+                .ok_or_else(missing),
+            ObjectKey::Nar(hash) => self
+                .presigned_put_url(hash, PRESIGN_TTL)
+                .await?
+                .map(|url| StorageTarget::Put { url })
+                .ok_or_else(missing),
+            ObjectKey::EvalCache(fingerprint) => self
+                .presigned_eval_cache_put_url(fingerprint, PRESIGN_TTL)
+                .await?
+                .map(|url| StorageTarget::Put { url })
+                .ok_or_else(missing),
+        }
+    }
+
+    pub async fn verify_eval_cache(&self, fingerprint: &str, size: u64) -> Result<()> {
+        let meta = self
+            .head_object(&self.eval_cache_path(fingerprint))
+            .await?
+            .with_context(|| format!("eval-cache object for {fingerprint} is missing"))?;
+        anyhow::ensure!(
+            meta.size == size,
+            "eval-cache object for {fingerprint} is {} bytes, expected {size}",
+            meta.size
+        );
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::TryStreamExt as _;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn a_local_store_relays_every_upload() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = NarStore::local(dir.path().to_str().unwrap()).unwrap();
+        for object in [
+            ObjectKey::Nar("a".repeat(32)),
+            ObjectKey::EvalCache("fp".into()),
+        ] {
+            assert_eq!(
+                store
+                    .upload_target(&object, 10 * 1024 * 1024 * 1024)
+                    .await
+                    .unwrap(),
+                StorageTarget::Relay
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_s3_store_presigns_nars_and_eval_cache_blobs() {
+        let store = NarStore::s3(
+            "bucket",
+            "us-east-1",
+            Some("http://127.0.0.1:1"),
+            Some("key"),
+            Some("secret"),
+            "",
+            false,
+            S3Timeouts::default(),
+        )
+        .unwrap();
+        let nar = store
+            .upload_target(&ObjectKey::Nar("a".repeat(32)), 1024)
+            .await
+            .unwrap();
+        assert!(matches!(nar, StorageTarget::Put { .. }), "{nar:?}");
+        let blob = store
+            .upload_target(&ObjectKey::EvalCache("fp".into()), 1024)
+            .await
+            .unwrap();
+        assert!(matches!(blob, StorageTarget::Put { .. }), "{blob:?}");
+        assert_eq!(
+            store
+                .upload_target(&ObjectKey::Rest("r".into()), 1)
+                .await
+                .unwrap(),
+            StorageTarget::Relay
+        );
+    }
+
+    #[test]
+    fn a_put_lease_is_the_url_lifetime_and_a_relay_has_none() {
+        assert_eq!(
+            upload_lease(&StorageTarget::Put { url: "u".into() }, 1),
+            Some(gradient_wire::constants::PRESIGN_TTL)
+        );
+        assert_eq!(upload_lease(&StorageTarget::Relay, 1), None);
+    }
 
     fn local_store() -> (TempDir, NarStore) {
         let dir = TempDir::new().expect("tempdir");
