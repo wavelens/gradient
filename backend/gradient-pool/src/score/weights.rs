@@ -44,8 +44,8 @@ pub const REALISED_OUTPUTS_BONUS: f64 = 2500.0;
 pub const REAL_BUILD_BONUS: f64 = 50.0;
 pub const ARCHLESS_BUILTIN_BONUS: f64 = 100.0;
 
-/// DependencyCountRule: cap for unblocking many dependents, baseline multiplier
-/// over the 1h average dependency count, and the fallback average.
+/// DependencyCountRule: cap for a build with many direct inputs, baseline
+/// multiplier over the 1h average input count, and the fallback average.
 pub const DEPENDENCY_COUNT_CAP: f64 = 50.0;
 pub const DEPENDENCY_COUNT_BASELINE_K: f64 = 2.0;
 pub const DEPENDENCY_COUNT_FALLBACK_AVG: f64 = 10.0;

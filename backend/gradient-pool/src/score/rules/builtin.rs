@@ -227,7 +227,7 @@ impl ScoreRule for DependencyCountRule {
     }
 
     fn description(&self) -> &'static str {
-        "Rewards jobs that many other queued builds depend on, so unblocking work is scheduled ahead of leaf builds."
+        "Rewards builds with many direct inputs, relative to the instance's recent average input count."
     }
 }
 
