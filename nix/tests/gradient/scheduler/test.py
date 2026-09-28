@@ -251,6 +251,7 @@ assert all(builds_of("twins", n) == [] for n in ["lib1", "lib2"]), "a twin serve
 only_build("twins", "app1")
 only_build("twins", "app2")
 assert_clean()
+latency_report("twins")
 
 banner("unchanged commit")
 wait_evaluation(evaluate("chain-3"), "Completed")
