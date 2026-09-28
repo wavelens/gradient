@@ -97,3 +97,38 @@ async fn nar_upload_posts_multipart() {
         .await
         .expect("upload");
 }
+
+/// A busy server answers 503 with `Retry-After`; the upload waits and retries
+/// instead of failing the user's command.
+#[tokio::test]
+async fn a_busy_chunk_upload_is_retried_after_the_servers_delay() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/caches/mycache/nars/abc/chunk"))
+        .respond_with(ResponseTemplate::new(503).insert_header("Retry-After", "0"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/caches/mycache/nars/abc/chunk"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+                "received": 3
+            }))),
+        )
+        .mount(&server)
+        .await;
+
+    let client = Client::builder()
+        .base_url(server.uri())
+        .token("t")
+        .build()
+        .unwrap();
+    let received = client
+        .caches()
+        .nar_upload_chunk("mycache", "abc", 0, vec![1, 2, 3])
+        .await
+        .expect("retried past the 503");
+    assert_eq!(received, 3);
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}

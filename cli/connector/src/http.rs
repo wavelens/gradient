@@ -43,6 +43,30 @@ pub(crate) async fn decode<T: DeserializeOwned>(res: Response) -> Result<T, Conn
     })
 }
 
+/// Send an upload, waiting out a busy server: a `503` with `Retry-After`
+/// (the upload budget is full) is sent again after that delay, a bounded
+/// number of times.
+pub(crate) async fn send_upload(
+    build: impl Fn() -> Result<RequestBuilder, ConnectorError>,
+) -> Result<Response, ConnectorError> {
+    const ATTEMPTS: u32 = 20;
+    let mut attempt = 1;
+    loop {
+        let resp = build()?.send().await?;
+        let wait = (resp.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE)
+            .then(|| resp.headers().get(reqwest::header::RETRY_AFTER))
+            .flatten()
+            .and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
+        match wait {
+            Some(secs) if attempt < ATTEMPTS => {
+                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+                attempt += 1;
+            }
+            _ => return Ok(resp),
+        }
+    }
+}
+
 pub(crate) fn build_url(base: &str, path: &str) -> String {
     format!(
         "{}/api/v1/{}",

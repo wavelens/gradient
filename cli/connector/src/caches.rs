@@ -429,22 +429,29 @@ impl CachesApi<'_> {
         nar_bytes: Vec<u8>,
     ) -> Result<(), ConnectorError> {
         let narinfo_json = serde_json::to_string(&narinfo).map_err(ConnectorError::Decode)?;
-        let form = reqwest::multipart::Form::new()
-            .text("narinfo", narinfo_json)
-            .part(
-                "nar",
-                reqwest::multipart::Part::bytes(nar_bytes).file_name("nar"),
-            );
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::POST,
-            &format!("caches/{cache}/nars"),
-            true,
-        )?
-        .multipart(form);
-        let resp = req.send().await?;
+        let nar = bytes::Bytes::from(nar_bytes);
+        let resp = http::send_upload(|| {
+            let form = reqwest::multipart::Form::new()
+                .text("narinfo", narinfo_json.clone())
+                .part(
+                    "nar",
+                    reqwest::multipart::Part::stream_with_length(
+                        reqwest::Body::from(nar.clone()),
+                        nar.len() as u64,
+                    )
+                    .file_name("nar"),
+                );
+            Ok(http::request(
+                self.0.http(),
+                self.0.base_url(),
+                self.0.token(),
+                Method::POST,
+                &format!("caches/{cache}/nars"),
+                true,
+            )?
+            .multipart(form))
+        })
+        .await?;
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(ConnectorError::Unauthorized);
@@ -474,17 +481,21 @@ impl CachesApi<'_> {
         offset: u64,
         chunk: Vec<u8>,
     ) -> Result<u64, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::PUT,
-            &format!("caches/{cache}/nars/{store_hash}/chunk?offset={offset}"),
-            true,
-        )?
-        .header("Content-Type", "application/octet-stream")
-        .body(chunk);
-        let received: ChunkReceived = http::decode(req.send().await?).await?;
+        let chunk = bytes::Bytes::from(chunk);
+        let resp = http::send_upload(|| {
+            Ok(http::request(
+                self.0.http(),
+                self.0.base_url(),
+                self.0.token(),
+                Method::PUT,
+                &format!("caches/{cache}/nars/{store_hash}/chunk?offset={offset}"),
+                true,
+            )?
+            .header("Content-Type", "application/octet-stream")
+            .body(chunk.clone()))
+        })
+        .await?;
+        let received: ChunkReceived = http::decode(resp).await?;
         Ok(received.received)
     }
 
@@ -496,16 +507,19 @@ impl CachesApi<'_> {
         store_hash: &str,
         narinfo: NarinfoUpload,
     ) -> Result<(), ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::POST,
-            &format!("caches/{cache}/nars/{store_hash}/finalize"),
-            true,
-        )?
-        .json(&narinfo);
-        let _: serde_json::Value = http::decode(req.send().await?).await?;
+        let resp = http::send_upload(|| {
+            Ok(http::request(
+                self.0.http(),
+                self.0.base_url(),
+                self.0.token(),
+                Method::POST,
+                &format!("caches/{cache}/nars/{store_hash}/finalize"),
+                true,
+            )?
+            .json(&narinfo))
+        })
+        .await?;
+        let _: serde_json::Value = http::decode(resp).await?;
         Ok(())
     }
 
