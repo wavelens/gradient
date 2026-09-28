@@ -17,7 +17,7 @@ An unknown name falls back to `resource-aware`.
 
 ## Negative Scores
 
-A job whose total score is negative is not handed out: the worker idles this round and the job waits for a better fit. Bonus rules never go below zero; only the penalties in the tables can hold a job back.
+The worker's highest-scoring job is handed out only when its total is at least 0 and no rule vetoes the job. Otherwise the worker idles this round and the job waits for a better fit. Bonus rules never go below zero; only penalties and vetoes can hold a job back.
 
 ## Rules in Both Policies
 
@@ -30,7 +30,7 @@ A job whose total score is negative is not handed out: the worker idles this rou
 | `WaitTimeRule` | Bonus, growing | Long-waiting jobs rise, against starvation; counted from the moment dependencies finished |
 | `BuiltinDeprioritizeRule` | Bonus, 50 or 100 | Real builds before `builtin` downloads; `builtin` jobs still reach workers without systems |
 | `QosRule` | Bonus, 5000 | Prioritized jobs beat every other job |
-| `RescoreWaitRule` | Penalty, -1000 | Holds a build until a worker reported its missing data size; lifted after 4 rounds |
+| `RescoreWaitRule` | Veto | Holds a build until a worker reported its missing data size; lifted after 4 rounds |
 | `ReserveFetchWorkersRule` | Penalty | Keeps fetch-capable workers free for fetching while capacity is short |
 
 **Prioritize** in the task or evaluation menu sets the `QosRule` flag on a build and its dependencies, or on a whole evaluation. The flag clears when the build or evaluation fails or is aborted.
@@ -42,7 +42,7 @@ These rules need `services.gradient.worker.build.metrics` on the workers and ear
 | Rule | Kind | Effect |
 |---|---|---|
 | `ResourceFitRule` | Penalty | Predicted peak memory above the worker's free memory; builds and evaluations |
-| `ResourceSaturationRule` | Penalty, up to -10000 | Worker above 90% CPU or below 10% free memory, or a likely out-of-memory build |
+| `ResourceSaturationRule` | Penalty, up to -10000 | Worker above 80% CPU (90% for `builtin` jobs) or below 10% free memory, or a likely out-of-memory build |
 | `PreferLocalBuildRule` | Bonus | `preferLocalBuild` derivations on a worker holding most of the closure |
 | `NetworkAffinityRule` | Bonus | Fixed-output downloads on workers with fast network |
 | `DiskAffinityRule` | Bonus | Disk-heavy builds on workers with fast disks |
@@ -64,4 +64,4 @@ The Job Board then shows the new rule's share in every dispatch decision, next t
 ## Related
 
 - [Workers](../concepts/workers.md#matching-builds): which workers a job can go to at all
-- [Scheduler internals](../scheduler.md): contexts, windows and adding a rule
+- [Scoring internals](../contributors/scheduler/scoring.md): contexts, windows and adding a rule

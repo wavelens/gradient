@@ -73,4 +73,4 @@ The resource tabs need build metrics on the workers, see [`services.gradient.wor
 ## Related
 
 - [Workers](../concepts/workers.md): capabilities and matching builds
-- [Scheduler](../scheduler.md): the scoring rules in depth
+- [Scheduler Policies](../reference/scheduler-policies.md): the scoring rules

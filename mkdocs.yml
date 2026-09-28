@@ -80,7 +80,14 @@ nav:
   - Contributors:
       - Architecture: contributors/architecture.md
       - Internals: contributors/internals.md
-      - Scheduler: scheduler.md
+      - Scheduler:
+          - Build Anchors: contributors/scheduler/build-anchors.md
+          - Promotion and Counters: contributors/scheduler/promotion-and-counters.md
+          - Reconciler: contributors/scheduler/reconciler.md
+          - Upstream Substitution: contributors/scheduler/upstream-substitution.md
+          - Cache Closure: contributors/scheduler/cache-closure.md
+          - Waiting and Recovery: contributors/scheduler/waiting-and-recovery.md
+          - Scoring: contributors/scheduler/scoring.md
       - Eval Worker Setup: contributors/eval-worker.md
       - Migrations: contributors/migrations.md
       - Proto:
@@ -90,7 +97,6 @@ nav:
           - Messages: contributors/proto/messages.md
           - Transfer: contributors/proto/transfer.md
           - Federation: contributors/proto/federation.md
-      - Scheduler Scoring: development/scheduler-scoring.md
       - Evaluation Metrics: contributors/eval-metrics.md
       - Diagnostic Reports: contributors/diagnostic-reports.md
       - Tests: contributors/tests.md
