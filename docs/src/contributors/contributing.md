@@ -49,7 +49,7 @@ Gradient is **AGPL-3.0-only**; a contribution is released under the same license
 |---|---|
 | Backend tests | `nix build .#checks.x86_64-linux.unittest -L` |
 | CLI tests | `nix build .#checks.x86_64-linux.cli-unittest -L` |
-| Clippy | `nix build .#checks.x86_64-linux.clippy -L`, `...cli-clippy -L` |
+| Clippy | `nix build .#checks.x86_64-linux.clippy -L`, `...cli-clippy -L`, `...cli-static-clippy -L` (the CLI without Nix support) |
 | VM tests | `nix build .#checks.x86_64-linux.gradient-<name> -L` for `api`, `deploy`, `e2e`, `eval`, `local-worker`, `s3`, `scheduler` |
 | Format | `cargo fmt --all --check`, in `backend/` and `cli/` |
 | Licenses and advisories | `cargo deny check`, in `backend/` and `cli/`; GPL-family dependencies are banned |

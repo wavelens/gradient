@@ -37,6 +37,7 @@
       unittest = self.packages.${system}.gradient.tests;
       cli-clippy = self.packages.${system}.gradient-cli-full.clippy;
       cli-unittest = self.packages.${system}.gradient-cli-full.tests;
+      cli-static-clippy = self.packages.${system}.gradient-cli-static.clippy;
       store-spec = import ./nix/tests/store-spec/check.nix { inherit pkgs; inherit (pkgs) lib; };
       test-topologies = import ./nix/tests/harness/check.nix { inherit pkgs; inherit (pkgs) lib; };
     };
