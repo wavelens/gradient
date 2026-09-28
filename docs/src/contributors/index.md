@@ -40,9 +40,9 @@ flowchart LR
 
     The worker protocol on `/proto`: handshake, dispatch, jobs, transfers and federation.
 
--   :material-code-braces: **[Internals](internals.md)**
+-   :material-code-braces: **[Internals](internals/index.md)**
 
-    Key functions inside each crate.
+    Forge webhooks, NAR storage, cache serving, graph queries and authentication.
 
 -   :material-database-arrow-up: **[Migrations](migrations.md)**
 

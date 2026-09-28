@@ -81,7 +81,13 @@ nav:
   - Contributors:
       - contributors/index.md
       - Architecture: contributors/architecture.md
-      - Internals: contributors/internals.md
+      - Internals:
+          - contributors/internals/index.md
+          - Forge Webhooks: contributors/internals/forge-webhooks.md
+          - NAR Storage: contributors/internals/nar-storage.md
+          - Cache Serving: contributors/internals/cache-serving.md
+          - Graph Queries: contributors/internals/graph-queries.md
+          - Authentication: contributors/internals/authentication.md
       - Scheduler:
           - contributors/scheduler/index.md
           - Build Anchors: contributors/scheduler/build-anchors.md

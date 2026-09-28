@@ -1,14 +1,17 @@
 # Contributing
 
-Contributions are welcome. Please read this guide before opening a pull request.
+How to set up a development environment, run the checks and send a change. Everyone follows the [Code of Conduct](https://github.com/wavelens/gradient/blob/main/CODE_OF_CONDUCT.md).
 
-## Code of Conduct
+## Workflow
 
-All participants are expected to follow the [Code of Conduct](https://github.com/wavelens/gradient/blob/main/CODE_OF_CONDUCT.md).
+1. Open an issue to discuss a significant change first.
+2. Fork and branch from `main`.
+3. Implement with tests, see [Tests](tests.md).
+4. Open a pull request against `main`.
 
 ## Licensing
 
-Gradient is licensed under **AGPL-3.0-only**. By submitting a contribution you agree that your work will be released under the same license. All files must carry an SPDX header:
+Gradient is **AGPL-3.0-only**; a contribution is released under the same license. Every file carries an SPDX header:
 
 ```rust
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
@@ -18,121 +21,70 @@ Gradient is licensed under **AGPL-3.0-only**. By submitting a contribution you a
 
 ## Development Setup
 
-**Prerequisites:** Nix with flakes enabled.
+**Requirements:** Nix with flakes.
 
-```sh
-# Backend
-nix run .#backend
-> run_tests()
+=== "Backend"
 
-cd backend
-cargo run
+    ```sh
+    nix run .#backend # (1)!
+    cd backend && cargo run
+    ```
 
-# Tip: parallel `rustc` jobs are capped at 2 in `backend/.cargo/config.toml`
-# (`[build] jobs = 2`) to keep peak memory bounded on dev machines. Override
-# with `cargo build -j N` if you have more headroom.
+    1.  An interactive NixOS test driver; `run_tests()` boots a VM with a packaged server, PostgreSQL 18 forwarded to the host port, a user `test` (password `password`) and a project. `cargo run` in `backend/` then works against that database.
 
-# Frontend
-nix run .#frontend
-> run_tests()
+=== "Frontend"
 
-cd frontend
-pnpm install
-pnpm run serve
-```
+    ```sh
+    nix run .#frontend # (1)!
+    cd frontend && pnpm install && pnpm run serve
+    ```
 
-The frontend VM provisions a superuser `admin` (password `admin_password`),
-a project, a task, and an in-VM worker via declarative state, so
-evaluations and builds run end-to-end against `pnpm run serve`.
+    1.  A VM with a superuser `admin` (password `admin_password`), a project, a task and a worker from declarative state; evaluations and builds run end to end against `pnpm run serve`.
 
-## Integration Tests
+`backend/.cargo/config.toml` caps parallel `rustc` jobs at 1 (`[build] jobs = 1`) to bound peak memory; `cargo build -j N` overrides the cap.
 
-NixOS VM tests:
+## Checks
 
-```sh
-nix build .#checks.x86_64-linux.gradient-api          -L
-nix build .#checks.x86_64-linux.gradient-deploy       -L
-nix build .#checks.x86_64-linux.gradient-e2e          -L
-nix build .#checks.x86_64-linux.gradient-eval         -L
-nix build .#checks.x86_64-linux.gradient-local-worker -L
-```
+| Check | Command |
+|---|---|
+| Backend tests | `nix build .#checks.x86_64-linux.unittest -L` |
+| CLI tests | `nix build .#checks.x86_64-linux.cli-unittest -L` |
+| Clippy | `nix build .#checks.x86_64-linux.clippy -L`, `...cli-clippy -L` |
+| VM tests | `nix build .#checks.x86_64-linux.gradient-<name> -L` for `api`, `deploy`, `e2e`, `eval`, `local-worker`, `s3`, `scheduler` |
+| Format | `cargo fmt --all --check`, in `backend/` and `cli/` |
+| Licenses and advisories | `cargo deny check`, in `backend/` and `cli/`; GPL-family dependencies are banned |
 
-The cargo suites are checks of their own, not part of `nix build .#gradient`:
+CI (`.github/workflows/rust.yml`) runs fmt, the `#[allow]` grep gate and cargo-deny over both workspaces; clippy runs as the flake checks.
 
-```sh
-nix build .#checks.x86_64-linux.unittest     -L   # cargo nextest plus the doc tests
-nix build .#checks.x86_64-linux.cli-unittest -L
-```
+## Rust
 
-## Workflow
+- `cargo fmt` before committing. The toolchain is pinned in `rust-toolchain.toml`, mirrored by the devShell (`flake.lock` is the source of truth); `rustfmt.toml` sets `style_edition = "2024"`.
+- Both workspaces share `deny.toml`, `clippy.toml`, `rustfmt.toml` and `[workspace.lints]`.
+- No `unwrap()` in production paths (`clippy::unwrap_used = "deny"`): use `?`, an explicit error branch, or `.expect("<the invariant>")` where the call cannot fail by construction.
+- Shared state uses `gradient_util::sync::Mutex`, not `std::sync::Mutex`: poisoning is ignored and one panicking critical section does not break every later `lock()`.
+- Log with `tracing` (`info`, `debug`, `warn`, `error`), never `println!`; `#[instrument]` on significant async functions.
 
-1. Open an issue to discuss the change before significant effort.
-2. Fork and create a feature branch from `main`.
-3. Implement with tests where applicable.
-4. Open a pull request against `main`.
+| Change | Also update |
+|---|---|
+| New endpoint in `backend/gradient-web/src/endpoints/` | `docs/gradient-api.yaml`; the handler extracts parameters, checks authorization, queries, responds |
+| New table | A migration in `backend/gradient-migration/src/`, an entity in `backend/gradient-entity/src/`, see [Migrations](migrations.md) |
+| Configuration option | `nix/modules/` and the [Configuration](../reference/configuration.md) reference |
 
-## Code Conventions
+**`#[allow]` policy:**
 
-### Rust
+- `#[allow(unused_imports)]`, `#[allow(unused)]` and `#[allow(dead_code)]` are forbidden (CI grep gate): fix the warning instead.
+- Every other `#[allow(...)]` carries `reason = "..."` (`clippy::allow_attributes_without_reason`). `clippy::too_many_arguments` allows are temporary, tracked in #503.
+- `allow-unwrap-in-tests` only reaches code inside a `#[test]` function. Integration tests and `gradient-test-support` use a crate-level `#![expect(clippy::unwrap_used, reason = "...")]`: `expect` warns once the last `unwrap()` is gone.
 
-- Format with `cargo fmt` before committing.
-- No `unwrap()` in production paths - enforced by `clippy::unwrap_used = "deny"`. Use `?`, an
-  explicit error branch, or `.expect("<the invariant>")` where the call is infallible by
-  construction and the message says why.
-- Shared state uses `gradient_util::sync::Mutex`, not `std::sync::Mutex`: it ignores poisoning,
-  so a panic in one critical section does not become a panic at every later `lock()`.
-- New API endpoints go in `web/src/endpoints/` following the pattern: extract path/query params → check authorization → query DB → return response.
-- New database tables require a migration in `migration/src/` and an entity module in `entity/src/`.
-- Log with `tracing::{info, debug, warn, error}`, not `println!`. Add `#[instrument]` to significant async functions.
-- Update `docs/gradient-api.yaml` whenever an API endpoint is added or changed.
-- Update environment variable documentation and the corresponding `nix/modules/` files when configuration options change.
+## Angular and TypeScript
 
-#### Toolchain, formatting and lints
+- Standalone components with signals (`signal()`, `computed()`), feature folders under `frontend/src/app/features/`.
+- UI components from `gr-ui` (`src/app/shared/ui/`, on `@angular/cdk`), charts through `<app-metric-chart>` (Apache ECharts), colours and spacing from `src/app/styles/_variables.scss`. See the [Frontend Style Guide](frontend-style-guide.md).
+- No UI or chart dependency with a field-of-use restriction: the bundle ships under AGPL-3.0, and anything beyond MIT, BSD or Apache-2.0 cannot be passed on.
+- A refreshed `pnpm-lock.yaml` changes the `pnpmDeps` hash in `nix/packages/gradient-frontend.nix`: set `lib.fakeHash`, run `nix build .#gradient-frontend.pnpmDeps`, take the reported hash.
+- `minimumReleaseAge` in `pnpm-workspace.yaml` refuses packages younger than 24 hours; a local `pnpm update` then resolves the same versions the Nix build accepts.
 
-The toolchain is pinned in `rust-toolchain.toml` (rustup) and mirrored by the nix devShell
-(`flake.lock`), which stays the source of truth. Formatting is pinned via `rustfmt.toml`
-(`style_edition = "2024"`), so `cargo fmt` is reproducible across rustfmt versions.
+## Nix
 
-Both Rust workspaces (`backend/` and `cli/`) carry the same `deny.toml`, `clippy.toml`,
-`rustfmt.toml` and `[workspace.lints]`. Run this from each before pushing (matches CI):
-
-```sh
-cargo fmt --all --check
-cargo deny check                            # license/advisory policy - GPL-family deps are banned
-```
-
-Clippy runs as a flake check per workspace:
-
-```sh
-nix build .#checks.x86_64-linux.clippy -L      # backend
-nix build .#checks.x86_64-linux.cli-clippy -L  # cli
-```
-
-`#[allow]` policy:
-
-- `#[allow(unused_imports)]`, `#[allow(unused)]` and `#[allow(dead_code)]` are **forbidden**
-  (CI grep-gate) - fix the underlying warning instead of silencing it.
-- Every other `#[allow(...)]` must carry a `reason = "..."` (`clippy::allow_attributes_without_reason`).
-  `clippy::too_many_arguments` allows are temporary and tracked in #503.
-- `clippy.toml` sets `allow-unwrap-in-tests`, which only reaches code lexically inside a `#[test]`
-  function. Integration tests and `gradient-test-support` keep their fixture helpers outside one, so
-  those files carry a crate-level `#![expect(clippy::unwrap_used, reason = "...")]` - `expect` rather
-  than `allow` so the attribute itself warns once the last `unwrap()` in the file is gone.
-
-CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny over both workspaces as a
-matrix; clippy runs as the `checks.clippy` and `checks.cli-clippy` flake checks.
-
-### Angular / TypeScript
-
-- Standalone components with Angular signals (`signal()`, `computed()`).
-- Feature-based structure under `frontend/src/app/features/`.
-- `gr-ui` (`src/app/shared/ui/`, built on `@angular/cdk`) for UI components; Apache ECharts (via `<app-metric-chart>`) for every chart; SCSS variables from `src/app/styles/_variables.scss` for colours and spacing.
-- No third-party UI or charting dependency may impose a field-of-use restriction: the bundle ships under AGPL-3.0, so anything beyond MIT / BSD / Apache-2.0 cannot be conveyed downstream.
-- Refreshing `pnpm-lock.yaml` changes the `pnpmDeps` hash in `nix/packages/gradient-frontend.nix`. Set it to `lib.fakeHash`, run `nix build .#gradient-frontend.pnpmDeps`, and take the hash the mismatch reports.
-- `minimumReleaseAge` in `pnpm-workspace.yaml` refuses a package published in the last 24 hours, so a compromised publish is not consumed the day it lands. The Nix build enforces it either way; the setting is in the repo so a local `pnpm update` resolves to the same versions instead of producing a lockfile CI rejects.
-
-### Nix
-
-- All packages and modules live in `nix/`.
-- Server options go in `nix/modules/gradient.nix`; worker options go in `nix/modules/gradient-worker.nix`.
-- New modules need a NixOS VM test in `nix/tests/`.
+- Packages and modules live in `nix/`: server options in `nix/modules/gradient.nix`, worker options in `nix/modules/gradient-worker.nix`, declarative state in `nix/modules/gradient-state.nix`.
+- A new module needs a NixOS VM test under `nix/tests/gradient/`.
