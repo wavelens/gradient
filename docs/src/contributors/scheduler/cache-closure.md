@@ -49,14 +49,16 @@ Runtime edges live in `derivation_dependency` next to build edges (`EdgeKind::Ru
 1. Lock the hashes `FOR UPDATE` in one hash-ordered statement, with the producers' advisory keys exclusive.
 2. Read which producers are whole (`whole_among`) before the delete destroys that endpoint.
 3. Delete the rows (`cached_path_signature` cascades), clear `is_cached` on the outputs.
-4. `ripple_anchors_unwhole` from the anchors that were whole.
-5. `lost_fetchability` over producers and everything un-wholed; reset only the producers of deleted paths to `Created`.
+4. `revoke_cache_closures`: delete every cache's `cache_derivation` claim on the producers and every claim recorded on top of one, walking up the reverse edges through the claims.
+5. `ripple_anchors_unwhole` from the anchors that were whole.
+6. `lost_fetchability` over producers and everything un-wholed; reset only the producers of deleted paths to `Created`.
 
 | Caller | Trigger |
 |---|---|
 | `demote_cached_output` (`gradient-db/src/cache_storage.rs`) | Self-heal, operator invalidation, a cache dropping its last claim, a NAR missing from storage |
 | `GcRequest::Paths` (`gradient-graph/src/gc.rs`) | Stale-path eviction and zombie purge |
 
+- **One cache's claim:** `Demotion::CacheClaim` revokes only that cache's `cache_derivation` claims on the producers and their dependents; the retire follows once no cache signs the path.
 - **Actor only:** every caller runs inside the graph actor; the GC sweeps scan on the pool and hand the deletes to the actor.
 - **Lock order:** `cached_path` rows (by hash), then `derivation_build` rows (by `derivation`), with advisory keys ahead of rows. `demote_cached_output` writes `substitutable` before the retire and takes both lock passes first. Details in [Build Anchors](build-anchors.md#counter-locking).
 
@@ -66,7 +68,7 @@ Runtime edges live in `derivation_dependency` next to build edges (`EdgeKind::Ru
 
 - `recount_missing_runtime_deps`: an absolute, table-wide recount of `missing_runtime_deps` (also the column's backfill).
 - `repair_fetchable` and `repair_readiness`: rewrite `fetchable` and `unready_deps` over the readiness scope (pending anchors and their gating rows).
-- Negative counters are counted table-wide and reported, not repaired.
+- `recount_walk_completeness` and `recount_demanded` recount the walk bit and demand table-wide, then `settle_skipped` settles the queue against demand.
 
 ## Self-Heal
 

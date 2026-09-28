@@ -45,7 +45,7 @@ flowchart LR
 
 ## Graph-Stuck Heal
 
-A `workers` verdict with an empty `unmet` set turns into the heal: `attempt_graph_unstick` sends `Transition::Reconcile { scope: ReconcileScope::Unstick }` to the graph actor, then re-assesses without the memo. `reconcile_build_graph` (`gradient-db/src/reconcile.rs`) runs, each step logged and continued on error:
+A `workers` verdict with an empty `unmet` set turns into the heal: `attempt_graph_unstick` sends `Transition::Reconcile { scope: ReconcileScope::Unstick }` to the graph actor, then re-assesses without the memo. `reconcile_build_graph` (`gradient-db/src/reconcile.rs`) runs, and the first failed step fails the transition:
 
 1. `requeue_failed_closure`: thaws failed anchors in the closure to `Created`; `Unstick` leaves a deterministic build failure and its subtree alone.
 2. `reconcile_cached_anchors_for_eval`: completes anchors whose outputs are all in the cache, then `advance_fetchable` for their dependents.

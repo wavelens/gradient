@@ -47,7 +47,7 @@ Events that promote the anchors they touched (`readiness::promote`, gate embedde
 - An ingest batch: `seed_unready_deps` then `promote` over the batch, plus whatever the batch's demand recompute gained.
 - A dependency turning `fetchable`: `became_fetchable` promotes the dependents that reached zero.
 - A `.drv` NAR arriving: `gradient-graph/src/nar.rs` promotes the `.drv` owners.
-- An upstream hit or a probe answer (`mark_probed`), through `settle_demand`.
+- Any demand gain, through `recompute_and_settle_demand` (see Skipped and Thaw).
 - Stream completion and the graph-stuck heal: `readiness::promote_closure` over the evaluation's closure (see the reconciler).
 
 ## Queued Invariant
@@ -55,7 +55,7 @@ Events that promote the anchors they touched (`readiness::promote`, gate embedde
 - Dispatch reads the status and never re-derives the gates. `Queued` therefore claims the gates held.
 - Every writer of `Queued` embeds `promotable_predicate`, or settles its rows with `readiness::unpromote_ungated` in the same call.
 - `unpromote_ungated` moves only `Queued` rows with no open dispatch; a `Building` anchor is left to finish.
-- `lost_fetchability` raises the dependents' `unready_deps` and demotes `Queued` ones to `Created` in the same statement (`RIPPLE_UP`), then recomputes demand from the flipped anchors.
+- `lost_fetchability` raises the dependents' `unready_deps` and demotes `Queued` ones with no open dispatch to `Created` in the same statement (`RIPPLE_UP`), then recomputes demand from the flipped anchors.
 - `dispatch_record::claim_dispatch` inserts the dispatch row only while the anchor is still `Queued` with the expected `substitutable`; a regressed job is dropped instead of dispatched.
 - `readiness::repair_readiness` is the sweep's backstop for a lost move.
 
@@ -70,10 +70,10 @@ An anchor is **open** (`graph_sql::open_predicate`) when not `fetchable` and not
 - `recompute_demand` walks the region below the given roots (roots included) in one statement, then `WRITE_DEMAND` writes the answer as a bound `unnest` array: a recursive CTE carries no usable row estimate, and a membership subquery degrades to a sequential scan.
 - The write returns each changed row with its new value: gained and lost sets for the caller.
 
-Callers of `recompute_demand`:
+Callers of `recompute_demand`, each followed by `settle_demand`:
 
 - The transition-effects emitter (`status/effects.rs`) for every transition that crosses `BUILDER_STATUSES` in either direction.
-- Events that change demand at an unchanged status: ingest (new builder, new entry point, upstream hit, probe answer), `demote_cached_output`, `lost_fetchability`, new runtime edges from a NAR, the per-task evaluation GC and every adoption.
+- Events that change demand at an unchanged status, through `recompute_and_settle_demand`: ingest (new builder, new entry point, adopted runtime edges, upstream hit, probe answer), `demote_cached_output`, `lost_fetchability`, an exhausted substitution, new runtime edges from a NAR, the per-task evaluation GC and every adoption.
 
 ## Skipped and Thaw
 
@@ -87,7 +87,7 @@ Callers of `recompute_demand`:
 - `Skipped` is settled work: no gate acts on it and no evaluation waits for it.
 - A thaw goes to `Created`, never to `Queued`; the following promote reads the gates.
 - `Aborted` thaws the same way: an abort is no verdict.
-- Only `settle_demand` callers skip and thaw inline; the sweep's `settle_skipped` covers the rest table-wide and reports `skipped_moves`.
+- `recompute_demand` and `settle_demand` are crate-private; other crates call `recompute_and_settle_demand`, so every demand move skips and thaws inline. The sweep's `settle_skipped` is the table-wide backstop and reports `skipped_moves`.
 
 ## Evaluation Verdict
 

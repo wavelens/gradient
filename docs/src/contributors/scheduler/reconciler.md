@@ -28,14 +28,14 @@ flowchart LR
 
 ## Reconcile Steps
 
-Each step logs and continues on error; a failing heal never blocks the rest.
+All steps share the graph actor's transaction. The first failed step ends the pass and fails the transition: the actor rolls back and retries a deadlock or serialization failure.
 
 | # | Function | Effect |
 |---|---|---|
 | 1 | `promotion::requeue_failed_closure` | Resets `FailedPermanent`, `Aborted`, `DependencyFailed`, `FailedTimeout` anchors to `Created`, `attempt = 0` |
 | 2 | `promotion::reconcile_cached_anchors_for_eval`, then `readiness::advance_fetchable` | Anchors whose outputs are all in the cache turn `Completed`; their dependents' counters advance |
 | 3 | `promotion::reconcile_dependency_failed` | Fails every non-terminal anchor reachable from a failure that stays |
-| 4 | `reachability::adopt_pending_closure` | Inserts `build_job` rows for open anchors the evaluation reaches and nobody names; recomputes demand; bumps `graph_version` |
+| 4 | `reachability::adopt_pending_closure` | Inserts `build_job` rows for open anchors the evaluation reaches and nobody names; recomputes and settles demand; bumps `graph_version` |
 | 5 | `readiness::promote_closure` | Promotes the closure to `Queued` |
 
 - Cache presence is the ground truth for "built" in step 2.
