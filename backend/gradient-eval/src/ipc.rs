@@ -35,31 +35,46 @@ use crate::stats::StatsDelta;
 /// changes. Parent and subprocess are the same re-exec'd binary, so a mismatch
 /// only happens when the binary is replaced mid-run; the handshake turns that
 /// from undecodable frames into one clear error.
-pub const EVAL_IPC_VERSION: u8 = 4;
+pub const EVAL_IPC_VERSION: u8 = 5;
 
 /// Upper bound on a single frame's payload. Far above any real message (a
 /// discovery response for a huge flake is a few MiB); its job is to turn a
 /// corrupted length prefix into an immediate error instead of a giant alloc.
 pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
 
+/// One disjoint slice of the requested wildcards. `only` limits the pattern's
+/// first wildcard to these child names; the parent may split it further.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
+pub struct DiscoveryShard {
+    pub pattern: String,
+    #[serde(default)]
+    pub only: Option<Vec<String>>,
+}
+
 /// Request from parent to worker, one frame each.
 #[derive(Debug, Clone, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize)]
 #[rkyv(derive(Debug))]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EvalRequest {
-    /// Split `wildcards` into disjoint sub-patterns (one per first-wildcard
-    /// child) so the parent can fan discovery across the pool, one shard per
-    /// system within each worker's memory budget.
+    /// Split `wildcards` into disjoint shards so the parent can fan discovery
+    /// across the pool. A trailing first wildcard is answered with its child
+    /// names only, never forcing a child.
     Plan {
         repository: String,
         wildcards: Vec<String>,
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
-    /// Discover all attribute paths in `repository` matching `wildcards`.
+    /// Discover all attribute paths in `repository` matching `wildcards`, the
+    /// first wildcard limited to `only` when set.
     List {
         repository: String,
         wildcards: Vec<String>,
+        #[serde(default)]
+        only: Option<Vec<String>>,
         #[serde(default)]
         input_overrides: Vec<(String, String)>,
     },
@@ -98,7 +113,7 @@ pub enum EvalRequest {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EvalResponse {
     PlanOk {
-        sub_patterns: Vec<String>,
+        shards: Vec<DiscoveryShard>,
         errors: Vec<String>,
     },
     ListOk {

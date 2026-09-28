@@ -144,20 +144,18 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                             let _ = walker.commit_cache();
                             Ok((shards, errors))
                         })
-                        .map(|(sub_patterns, errors)| EvalResponse::PlanOk {
-                            sub_patterns,
-                            errors,
-                        }),
+                        .map(|(shards, errors)| EvalResponse::PlanOk { shards, errors }),
                 )
             }),
             EvalRequest::List {
                 repository,
                 wildcards,
+                only,
                 input_overrides,
             } => with_evaluator(&evaluator, |ev| {
                 let (result, warnings) = capture_warnings_during(|| {
                     walkers.with(ev, &repository, &input_overrides, |walker| {
-                        let (attrs, errors) = walker.discover(&wildcards)?;
+                        let (attrs, errors) = walker.discover(&wildcards, only.as_deref())?;
                         let _ = walker.commit_cache();
                         Ok((attrs, errors))
                     })
@@ -371,9 +369,7 @@ fn send<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<()> {
 
 fn response_kind(resp: &EvalResponse) -> String {
     match resp {
-        EvalResponse::PlanOk { sub_patterns, .. } => {
-            format!("PlanOk({} shards)", sub_patterns.len())
-        }
+        EvalResponse::PlanOk { shards, .. } => format!("PlanOk({} shards)", shards.len()),
         EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
         EvalResponse::ResolveItem { item } => format!("ResolveItem({})", item.attr),
         EvalResponse::ResolveEnd { warnings, .. } => {

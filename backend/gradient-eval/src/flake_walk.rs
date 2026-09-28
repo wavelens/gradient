@@ -22,6 +22,7 @@ use nix_bindings::flake::{
 };
 use nix_bindings::{Context, EvalState, Store};
 
+use crate::ipc::DiscoveryShard;
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
 
@@ -58,17 +59,20 @@ impl<'a> FlakeWalker<'a> {
         })
     }
 
-    pub fn discover(&self, wildcards: &[String]) -> Result<(Vec<String>, Vec<String>)> {
+    pub fn discover(
+        &self,
+        wildcards: &[String],
+        only: Option<&[String]>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
         let root = self.root()?;
 
-        Ok(wildcard_walk::discover_patterns(&root, wildcards))
+        Ok(wildcard_walk::discover_patterns(&root, wildcards, only))
     }
 
-    /// Split the include patterns into disjoint sub-patterns for memory-bounded
-    /// parallel discovery (one shard per first-wildcard child). Exclusions are
-    /// dropped here; the caller re-attaches them to every shard so each worker's
-    /// `discover` applies them.
-    pub fn plan_shards(&self, wildcards: &[String]) -> Result<(Vec<String>, Vec<String>)> {
+    /// Split the include patterns into disjoint shards for memory-bounded
+    /// parallel discovery. Exclusions are dropped here; the caller re-attaches
+    /// them to every shard so each worker's `discover` applies them.
+    pub fn plan_shards(&self, wildcards: &[String]) -> Result<(Vec<DiscoveryShard>, Vec<String>)> {
         let root = self.root()?;
         let includes: Vec<Vec<String>> = wildcards
             .iter()
@@ -80,8 +84,11 @@ impl<'a> FlakeWalker<'a> {
         let (shards, errors) = wildcard_walk::plan_shards(&root, &includes);
         Ok((
             shards
-                .iter()
-                .map(|s| wildcard_walk::segments_to_pattern(s))
+                .into_iter()
+                .map(|s| DiscoveryShard {
+                    pattern: wildcard_walk::segments_to_pattern(&s.segments),
+                    only: s.only,
+                })
                 .collect(),
             errors,
         ))

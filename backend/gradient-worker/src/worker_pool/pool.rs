@@ -399,18 +399,18 @@ mod tests {
         let pool = EvalWorkerPool::new(1, 2 * GIB, String::new());
         pool.push_for_test(replying_worker(
             &EvalResponse::PlanOk {
-                sub_patterns: vec![],
+                shards: vec![],
                 errors: vec![],
             },
             "planok",
         ));
 
         let mut worker = pool.acquire().await.expect("acquire");
-        let (sub_patterns, errors) = worker
+        let (shards, errors) = worker
             .plan("repo".into(), vec![], vec![])
             .await
             .expect("plan");
-        assert!(sub_patterns.is_empty() && errors.is_empty());
+        assert!(shards.is_empty() && errors.is_empty());
         drop(worker);
 
         assert_eq!(

@@ -1,6 +1,6 @@
 # Eval Worker Setup
 
-Gradient evaluates flakes in a pool of `--eval-subprocess` processes that drive the embedded Nix C API. One evaluation is split into one shard per system and fanned across the pool; the pool is sized to fit the host's memory. Results land in a persistent eval cache shared by the fleet: a repeat evaluation of the same locked flake is mostly cache hits.
+Gradient evaluates flakes in a pool of `--eval-subprocess` processes that drive the embedded Nix C API. One evaluation is split into shards and fanned across the pool; the pool is sized to fit the host's memory. Results land in a persistent eval cache shared by the fleet: a repeat evaluation of the same locked flake is mostly cache hits.
 
 ```mermaid
 flowchart LR
@@ -14,8 +14,9 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`), the conventions of `/proto`.
-- **Version byte:** the subprocess writes `EVAL_IPC_VERSION` (currently 4) before the first frame; a binary swapped mid-run fails the handshake instead of sending undecodable frames.
+- **Version byte:** the subprocess writes `EVAL_IPC_VERSION` (currently 5) before the first frame; a binary swapped mid-run fails the handshake instead of sending undecodable frames.
 - **Streamed resolve:** `Resolve` answers with one `ResolveItem` per attribute as soon as the attribute resolves, then `ResolveEnd` with the batch's warnings and stats delta. Every other request is one request, one response.
+- **Shards:** `Plan` splits each include at its first wildcard. A wildcard followed by more segments yields one sub-pattern per child (`packages.*.hello` -> `packages.x86_64-linux.hello`). A trailing wildcard yields the unchanged pattern plus its child names (`only`), read without forcing any child; the parent lists those names in batches of `names / (pool * 4)` (at most 64), and `List` limits the first wildcard to the batch.
 - **Warm walker:** a subprocess keeps one walker (locked flake plus open eval cache) across consecutive requests for the same repository; a Plan / List / Resolve sequence pays the lock and the cache open once.
 
 ## Parent Side
@@ -50,7 +51,7 @@ Two layers bound evaluation memory.
 
 | | Gradient | nix-eval-jobs |
 |---|---|---|
-| Parallelism | Long-lived pool; one evaluation sharded by system across the pool | Short-lived children forked from a warm parent |
+| Parallelism | Long-lived pool; one evaluation sharded across the pool | Short-lived children forked from a warm parent |
 | Warmth across runs | Persistent eval cache keyed by flake fingerprint | None; copy-on-write warmth lasts one run |
 | Across machines | Fleet-shared `<fp>.sqlite` cache (pull and push). Staging a pulled blob drops the previous local `-wal` / `-shm` sidecars | None |
 | Concurrent writers | Shards write one cache without deadlock: WAL-append commits, one checkpoint at the end | Not applicable |

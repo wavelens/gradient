@@ -56,7 +56,7 @@ flowchart LR
 
 -   :material-cpu-64-bit: **[Eval Worker Setup](eval-worker.md)**
 
-    The evaluation subprocess pool, sharding per system and the shared eval cache.
+    The evaluation subprocess pool, discovery sharding and the shared eval cache.
 
 -   :material-chart-line: **[Evaluation Metrics](eval-metrics.md)**
 

@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_derivation::{Derivation, parse_drv};
-use gradient_eval::ipc::ResolvedItem;
+use gradient_eval::ipc::{DiscoveryShard, ResolvedItem};
 use gradient_sources::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use gradient_util::store_path::nix_store_path;
 use gradient_util::sync::Mutex;
@@ -23,9 +23,9 @@ use super::pool::{EvalWorkerPool, PooledEvalWorker};
 
 /// `DerivationResolver` impl that drives an [`EvalWorkerPool`].
 ///
-/// `list_flake_derivations` plans per-system shards on one worker and fans
-/// them across the pool; `resolve_derivation_paths` splits attrs into batches
-/// the same way. Both fan-outs run through [`pooled_fan_out`] and recover from
+/// `list_flake_derivations` plans shards on one worker and fans them across
+/// the pool, a trailing wildcard's children in batches; `resolve_derivation_paths`
+/// splits attrs into batches the same way. Both fan-outs run through [`pooled_fan_out`] and recover from
 /// subprocess crashes with the same [`MAX_CRASH_ATTEMPTS`] tolerance: a shard
 /// retries whole (its response is atomic), a resolve batch salvages its
 /// streamed prefix and isolates the exact in-flight attr.
@@ -53,10 +53,57 @@ type IndexedDerivation = (usize, ResolvedDerivation);
 /// subprocess death with the same tolerance.
 const MAX_CRASH_ATTEMPTS: u32 = 2;
 
-/// Upper bound on attrs resolved in a single worker call, so one batch's
-/// eval-heap growth stays small relative to `max_eval_rss` (the worker's heap
-/// persists across batches and is recycled once it crosses the cap).
-const MAX_RESOLVE_BATCH: usize = 64;
+/// Upper bound on attrs listed or resolved in a single worker call, so one
+/// batch's eval-heap growth stays small relative to `max_eval_rss` (the worker's
+/// heap persists across batches and is recycled once it crosses the cap).
+const MAX_BATCH: usize = 64;
+
+/// Batch size for `items` spread over `workers`: ~4 batches per worker leaves
+/// enough slack to steal without paying a walker rebuild per item.
+fn batch_size(items: usize, workers: usize) -> usize {
+    items.div_ceil(workers.max(1) * 4).clamp(1, MAX_BATCH)
+}
+
+/// One `List` call of a discovery fan-out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiscoveryCall {
+    wildcards: Vec<String>,
+    only: Option<Vec<String>>,
+}
+
+/// The `List` calls covering `shards`: one per unrestricted shard, and one per
+/// batch of a restricted shard's names, so a flat attrset of heavy children is
+/// listed across the pool with recycles in between. Exact-path exclusions ride
+/// every call; the caller's dedup mops up cross-call overlap.
+fn discovery_calls(
+    shards: Vec<DiscoveryShard>,
+    excludes: &[String],
+    workers: usize,
+) -> Vec<DiscoveryCall> {
+    let wildcards = |pattern: String| {
+        let mut w = Vec::with_capacity(1 + excludes.len());
+        w.push(pattern);
+        w.extend_from_slice(excludes);
+        w
+    };
+
+    shards
+        .into_iter()
+        .flat_map(|shard| match shard.only {
+            None => vec![DiscoveryCall {
+                wildcards: wildcards(shard.pattern),
+                only: None,
+            }],
+            Some(names) => names
+                .chunks(batch_size(names.len(), workers))
+                .map(|chunk| DiscoveryCall {
+                    wildcards: wildcards(shard.pattern.clone()),
+                    only: Some(chunk.to_vec()),
+                })
+                .collect(),
+        })
+        .collect()
+}
 
 /// Pick `attr`'s owning entry-point: the longest wildcard `pattern` whose
 /// segments all match `attr`'s leading segments (a `*` segment matches any one
@@ -370,15 +417,12 @@ impl WorkerPoolResolver {
     async fn list_shard(
         &self,
         repository: &str,
-        wildcards: Vec<String>,
+        call: DiscoveryCall,
         overrides: &[(String, String)],
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let mut attempt = 0;
         loop {
-            match self
-                .list_once(repository, wildcards.clone(), overrides)
-                .await
-            {
+            match self.list_once(repository, call.clone(), overrides).await {
                 Ok(v) => return Ok(v),
                 Err(crash) => {
                     attempt += 1;
@@ -395,13 +439,18 @@ impl WorkerPoolResolver {
     async fn list_once(
         &self,
         repository: &str,
-        wildcards: Vec<String>,
+        call: DiscoveryCall,
         overrides: &[(String, String)],
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
-        let bucket = self.bucket_of(wildcards.first());
+        let bucket = self.bucket_of(call.wildcards.first());
         let mut worker = self.pool.acquire().await?;
         match worker
-            .list(repository.to_string(), wildcards, overrides.to_vec())
+            .list(
+                repository.to_string(),
+                call.wildcards,
+                call.only,
+                overrides.to_vec(),
+            )
             .await
         {
             Ok((attrs, warnings, errors, stats)) => {
@@ -469,11 +518,10 @@ impl DerivationResolver for WorkerPoolResolver {
             .cloned()
             .collect();
 
-        // Plan the split on one worker (cheap: forces only the prefix attrset),
-        // then discover each shard separately. A single giant discovery of the
-        // whole flake is the call that blows past the RAM budget and never
-        // returns; one shard per system keeps each worker within budget and lets
-        // discovery advance (and persist) system-by-system.
+        // Plan the split on one worker. Planning forces only the prefix
+        // attrsets: a trailing wildcard comes back as child names, never forced,
+        // so a flat attrset of heavy children (NixOS hosts) is listed in batches
+        // across the pool instead of in one call that blows past the RAM budget.
         let (shards, plan_errors) = {
             let mut worker = self.pool.acquire().await?;
             match worker
@@ -488,46 +536,26 @@ impl DerivationResolver for WorkerPoolResolver {
             }
         };
 
-        tracing::info!(
-            shards = shards.len(),
-            pool = self.pool.max(),
-            "discovery split into per-system shards"
-        );
-
-        // Nothing to fan out: one pass, plus the plan-phase errors.
-        if shards.len() <= 1 {
-            let (attrs, warnings, mut errors) =
-                self.list_shard(&repository, wildcards, overrides).await?;
-            errors.extend(plan_errors);
-            errors.sort_unstable();
-            errors.dedup();
-            return Ok(FlakeDiscovery {
-                attrs,
-                warnings,
-                errors,
-            });
-        }
-
-        // Exact-path exclusions ride every shard; the final dedup mops up any
-        // cross-shard overlap.
         let excludes: Vec<String> = wildcards
             .iter()
             .filter(|w| w.starts_with('!'))
             .cloned()
             .collect();
+        let calls = discovery_calls(shards, &excludes, self.pool.max());
+        tracing::info!(
+            calls = calls.len(),
+            pool = self.pool.max(),
+            "discovery split into shard batches"
+        );
 
         let attrs = Mutex::new(Vec::<String>::new());
         let warnings = Mutex::new(Vec::<String>::new());
         let errors = Mutex::new(plan_errors);
         {
             let repo = repository.as_str();
-            let (attrs, warnings, errors, excludes) = (&attrs, &warnings, &errors, &excludes);
-            pooled_fan_out(self.pool.max(), shards, |shard| async move {
-                let mut pattern = Vec::with_capacity(1 + excludes.len());
-                pattern.push(shard);
-                pattern.extend_from_slice(excludes);
-
-                let (a, w, e) = self.list_shard(repo, pattern, overrides).await?;
+            let (attrs, warnings, errors) = (&attrs, &warnings, &errors);
+            pooled_fan_out(self.pool.max(), calls, |call| async move {
+                let (a, w, e) = self.list_shard(repo, call, overrides).await?;
                 attrs.lock().extend(a);
                 warnings.lock().extend(w);
                 errors.lock().extend(e);
@@ -564,16 +592,9 @@ impl DerivationResolver for WorkerPoolResolver {
         }
 
         // Dynamic work queue: split into many small index-tagged batches and let
-        // each pooled worker pull the next as soon as it is free. ~4 batches per
-        // worker leaves enough slack to steal without paying a walker rebuild
-        // per attr; the size cap bounds one batch's eval-heap overshoot past
-        // `max_eval_rss` (the heap persists across batches, so the cap bounds
-        // the per-call overshoot, not the base cost).
+        // each pooled worker pull the next as soon as it is free.
         let n_workers = self.pool.max().min(attrs.len());
-        let batch_size = attrs
-            .len()
-            .div_ceil(n_workers * 4)
-            .clamp(1, MAX_RESOLVE_BATCH);
+        let batch_size = batch_size(attrs.len(), n_workers);
         let batches: Vec<Vec<(usize, String)>> = attrs
             .into_iter()
             .enumerate()
@@ -632,6 +653,40 @@ mod tests {
     use super::*;
     use gradient_util::sync::Mutex;
     use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn a_restricted_shard_is_listed_in_batches_carrying_the_exclusions() {
+        let names: Vec<String> = (0..10).map(|i| format!("host{i}")).collect();
+        let shards = vec![
+            DiscoveryShard {
+                pattern: "hydraJobs.*".into(),
+                only: Some(names.clone()),
+            },
+            DiscoveryShard {
+                pattern: "packages.x86_64-linux.hello".into(),
+                only: None,
+            },
+        ];
+        let excludes = vec!["!hydraJobs.host3".to_string()];
+
+        let calls = discovery_calls(shards, &excludes, 1);
+
+        let batched: Vec<&DiscoveryCall> = calls.iter().filter(|c| c.only.is_some()).collect();
+        assert_eq!(batched.len(), 4, "10 names over 1 worker: batches of 3");
+        let listed: Vec<String> = batched
+            .iter()
+            .flat_map(|c| c.only.clone().unwrap_or_default())
+            .collect();
+        assert_eq!(listed, names);
+        assert!(calls.iter().all(|c| c.wildcards.ends_with(&excludes)));
+        assert!(calls.contains(&DiscoveryCall {
+            wildcards: vec![
+                "packages.x86_64-linux.hello".into(),
+                "!hydraJobs.host3".into()
+            ],
+            only: None,
+        }));
+    }
 
     #[test]
     fn entry_point_longest_prefix_match() {

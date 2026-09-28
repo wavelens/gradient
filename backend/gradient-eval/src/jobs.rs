@@ -74,7 +74,7 @@ pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job
     let attrs = if wildcards.iter().all(|w| is_concrete_attr(w)) {
         wildcards.to_vec()
     } else {
-        walker.discover(wildcards)?.0
+        walker.discover(wildcards, None)?.0
     };
 
     for attr in attrs {

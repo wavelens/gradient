@@ -70,14 +70,23 @@ pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
     (exclude, segs)
 }
 
+/// A disjoint slice of an include pattern. `only` restricts the pattern's
+/// first wildcard to these child names; the planner sets it for a trailing
+/// wildcard, whose children it must not force.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shard {
+    pub segments: Vec<String>,
+    pub only: Option<Vec<String>>,
+}
+
 /// Where the shared traversal emits: full dotted attr paths of matched
-/// derivations (discovery), or one disjoint sub-pattern per first-wildcard
-/// child (shard planning). Keeping both behind one [`traverse`] makes the
+/// derivations (discovery), or one disjoint shard per first-wildcard child
+/// (shard planning). Keeping both behind one [`traverse`] makes the
 /// `*` / `#` / opaque / literal semantics structurally identical, so the
 /// split-then-union invariant holds by construction instead of by test.
 enum Sink<'a> {
     Derivations(&'a mut Vec<String>),
-    Shards(&'a mut Vec<Vec<String>>),
+    Shards(&'a mut Vec<Shard>),
 }
 
 impl Sink<'_> {
@@ -86,8 +95,42 @@ impl Sink<'_> {
     fn emit_leaf(&mut self, path: Vec<String>) {
         match self {
             Sink::Derivations(out) => out.push(path.join(".")),
-            Sink::Shards(out) => out.push(path),
+            Sink::Shards(out) => out.push(Shard {
+                segments: path,
+                only: None,
+            }),
         }
+    }
+
+    /// Planning stops at a trailing wildcard: the names are all it reads.
+    fn restrict_trailing(&mut self, path: &[String], wildcard: &str, names: Vec<String>) -> bool {
+        let Sink::Shards(out) = self else {
+            return false;
+        };
+
+        if !names.is_empty() {
+            let mut segments = path.to_vec();
+            segments.push(wildcard.to_owned());
+            out.push(Shard {
+                segments,
+                only: Some(names),
+            });
+        }
+
+        true
+    }
+}
+
+fn wildcard_children<N: WalkNode>(
+    node: &N,
+    path: &[String],
+    only: Option<&[String]>,
+    diags: &mut Vec<String>,
+) -> Vec<String> {
+    let names = tolerate(node.child_names(), path, diags);
+    match only {
+        Some(only) => names.into_iter().filter(|n| only.contains(n)).collect(),
+        None => names,
     }
 }
 
@@ -108,6 +151,7 @@ fn traverse<N: WalkNode>(
     node: &N,
     path: &[String],
     segs: &[String],
+    only: Option<&[String]>,
     sink: &mut Sink<'_>,
     diags: &mut Vec<String>,
 ) {
@@ -118,10 +162,15 @@ fn traverse<N: WalkNode>(
                     out.push(path.join("."));
                 }
             }
-            Sink::Shards(out) => out.push(path.to_vec()),
+            Sink::Shards(_) => sink.emit_leaf(path.to_vec()),
         },
         Some((seg, rest)) if seg == "*" => {
-            for name in tolerate(node.child_names(), path, diags) {
+            let names = wildcard_children(node, path, only, diags);
+            if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
+                return;
+            }
+
+            for name in names {
                 let mut p = path.to_vec();
                 p.push(name.clone());
                 let Some(child) = tolerate(node.child(&name), &p, diags) else {
@@ -134,22 +183,14 @@ fn traverse<N: WalkNode>(
                     } else if tolerate(child.is_opaque(), &p, diags) {
                         continue;
                     } else {
-                        match sink {
-                            Sink::Derivations(out) => {
-                                for sub in tolerate(child.child_names(), &p, diags) {
-                                    let mut q = p.clone();
-                                    q.push(sub.clone());
-                                    let Some(gc) = tolerate(child.child(&sub), &q, diags) else {
-                                        continue;
-                                    };
-                                    if tolerate(gc.is_derivation(), &q, diags) {
-                                        out.push(q.join("."));
-                                    }
-                                }
-                            }
-                            Sink::Shards(out) => {
-                                p.push("#".to_string());
-                                out.push(p);
+                        for sub in tolerate(child.child_names(), &p, diags) {
+                            let mut q = p.clone();
+                            q.push(sub.clone());
+                            let Some(gc) = tolerate(child.child(&sub), &q, diags) else {
+                                continue;
+                            };
+                            if tolerate(gc.is_derivation(), &q, diags) {
+                                sink.emit_leaf(q);
                             }
                         }
                     }
@@ -161,7 +202,12 @@ fn traverse<N: WalkNode>(
             }
         }
         Some((seg, rest)) if seg == "#" => {
-            for name in tolerate(node.child_names(), path, diags) {
+            let names = wildcard_children(node, path, only, diags);
+            if rest.is_empty() && sink.restrict_trailing(path, seg, names.clone()) {
+                return;
+            }
+
+            for name in names {
                 let mut p = path.to_vec();
                 p.push(name.clone());
                 let Some(child) = tolerate(node.child(&name), &p, diags) else {
@@ -181,7 +227,7 @@ fn traverse<N: WalkNode>(
             let mut p = path.to_vec();
             p.push(seg.clone());
             if let Some(child) = tolerate(node.child(seg), &p, diags) {
-                traverse(&child, &p, rest, sink, diags);
+                traverse(&child, &p, rest, only, sink, diags);
             }
         }
     }
@@ -197,9 +243,12 @@ fn descend<N: WalkNode>(
     match sink {
         Sink::Shards(out) => {
             path.extend_from_slice(rest);
-            out.push(path);
+            out.push(Shard {
+                segments: path,
+                only: None,
+            });
         }
-        Sink::Derivations(_) => traverse(child, &path, rest, sink, diags),
+        Sink::Derivations(_) => traverse(child, &path, rest, None, sink, diags),
     }
 }
 
@@ -211,6 +260,17 @@ pub fn discover<N: WalkNode>(
     includes: &[Vec<String>],
     excludes: &[Vec<String>],
 ) -> (Vec<String>, Vec<String>) {
+    discover_within(root, includes, excludes, None)
+}
+
+/// [`discover`] with each include's first wildcard limited to `only`: the
+/// discovery half of a [`Shard`] the planner restricted.
+pub fn discover_within<N: WalkNode>(
+    root: &N,
+    includes: &[Vec<String>],
+    excludes: &[Vec<String>],
+    only: Option<&[String]>,
+) -> (Vec<String>, Vec<String>) {
     let mut out = Vec::new();
     let mut diags = Vec::new();
     for inc in includes {
@@ -219,6 +279,7 @@ pub fn discover<N: WalkNode>(
             root,
             &[],
             &segs,
+            only,
             &mut Sink::Derivations(&mut out),
             &mut diags,
         );
@@ -241,6 +302,7 @@ pub fn discover<N: WalkNode>(
 pub fn discover_patterns<N: WalkNode>(
     root: &N,
     wildcards: &[String],
+    only: Option<&[String]>,
 ) -> (Vec<String>, Vec<String>) {
     let mut includes = Vec::new();
     let mut excludes = Vec::new();
@@ -253,18 +315,22 @@ pub fn discover_patterns<N: WalkNode>(
         }
     }
 
-    discover(root, &includes, &excludes)
+    discover_within(root, &includes, &excludes, only)
 }
 
-pub fn plan_shards<N: WalkNode>(
-    root: &N,
-    includes: &[Vec<String>],
-) -> (Vec<Vec<String>>, Vec<String>) {
+pub fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> (Vec<Shard>, Vec<String>) {
     let mut shards = Vec::new();
     let mut diags = Vec::new();
     for inc in includes {
         let segs = collapse_stars(inc);
-        traverse(root, &[], &segs, &mut Sink::Shards(&mut shards), &mut diags);
+        traverse(
+            root,
+            &[],
+            &segs,
+            None,
+            &mut Sink::Shards(&mut shards),
+            &mut diags,
+        );
     }
     diags.sort();
     diags.dedup();
@@ -585,8 +651,22 @@ mod tests {
 
     // ── plan_shards ──────────────────────────────────────────────────────────
 
-    fn shards(root: &StubNode, pattern: &[&str]) -> Vec<Vec<String>> {
+    fn shards(root: &StubNode, pattern: &[&str]) -> Vec<Shard> {
         plan_shards(&root, &[segs(pattern)]).0
+    }
+
+    fn residual(parts: &[&str]) -> Shard {
+        Shard {
+            segments: segs(parts),
+            only: None,
+        }
+    }
+
+    fn restricted(parts: &[&str], names: &[&str]) -> Shard {
+        Shard {
+            segments: segs(parts),
+            only: Some(segs(names)),
+        }
     }
 
     /// Discovering each shard and unioning must equal discovering the original
@@ -597,7 +677,16 @@ mod tests {
 
         let mut union = Vec::new();
         for shard in plan_shards(&root, &[segs(pattern)]).0 {
-            union.extend(discover(&root, &[shard], &[]).0);
+            let names = shard.only.clone().unwrap_or_default();
+            let batches: Vec<Option<&[String]>> = match shard.only {
+                Some(_) => names.iter().map(std::slice::from_ref).map(Some).collect(),
+                None => vec![None],
+            };
+            for only in batches {
+                union.extend(
+                    discover_within(&root, std::slice::from_ref(&shard.segments), &[], only).0,
+                );
+            }
         }
         union.sort();
         union.dedup();
@@ -609,15 +698,47 @@ mod tests {
     }
 
     #[test]
-    fn plan_trailing_star_splits_per_child_with_recover_shard() {
+    fn plan_trailing_star_restricts_the_pattern_to_each_child_name() {
         let root = tree();
         assert_eq!(
             shards(&root, &["packages", "*", "*"]),
-            vec![
-                segs(&["packages", "aarch64-linux", "#"]),
-                segs(&["packages", "x86_64-linux", "#"]),
-            ]
+            vec![restricted(
+                &["packages", "*"],
+                &["aarch64-linux", "x86_64-linux"]
+            )]
         );
+    }
+
+    #[test]
+    fn plan_trailing_wildcard_forces_no_child() {
+        let root = StubNode::set(vec![(
+            "hydraJobs",
+            StubNode::set(vec![
+                ("a", StubNode::throwing()),
+                ("b", StubNode::throwing()),
+            ]),
+        )]);
+        for wildcard in ["*", "#"] {
+            let (got, errors) = plan_shards(&&root, &[segs(&["hydraJobs", wildcard])]);
+            assert_eq!(got, vec![restricted(&["hydraJobs", wildcard], &["a", "b"])]);
+            assert!(errors.is_empty(), "no child was forced: {errors:?}");
+        }
+    }
+
+    #[test]
+    fn restricted_shards_match_one_pass_discovery() {
+        let root = StubNode::set(vec![(
+            "jobs",
+            StubNode::set(vec![
+                ("drv", StubNode::drv()),
+                ("set", StubNode::set(vec![("inner", StubNode::drv())])),
+                ("opt", StubNode::opaque(vec![("hidden", StubNode::drv())])),
+                ("bad", StubNode::throwing()),
+            ]),
+        )]);
+        assert_split_equivalent(&root, &["jobs", "*"]);
+        assert_split_equivalent(&root, &["jobs", "#"]);
+        assert_split_equivalent(&root, &["*", "*"]);
     }
 
     #[test]
@@ -626,22 +747,23 @@ mod tests {
         assert_eq!(
             shards(&root, &["packages", "*", "hello"]),
             vec![
-                segs(&["packages", "aarch64-linux", "hello"]),
-                segs(&["packages", "x86_64-linux", "hello"]),
+                residual(&["packages", "aarch64-linux", "hello"]),
+                residual(&["packages", "x86_64-linux", "hello"]),
             ]
         );
     }
 
     #[test]
-    fn plan_hash_terminal_splits_only_derivation_children() {
+    fn plan_hash_terminal_restricts_the_pattern_to_each_child_name() {
         let root = tree();
         assert_eq!(
             shards(&root, &["packages", "x86_64-linux", "#"]),
-            vec![
-                segs(&["packages", "x86_64-linux", "cowsay"]),
-                segs(&["packages", "x86_64-linux", "hello"]),
-            ]
+            vec![restricted(
+                &["packages", "x86_64-linux", "#"],
+                &["cowsay", "hello", "nested"]
+            )]
         );
+        assert_split_equivalent(&root, &["packages", "x86_64-linux", "#"]);
     }
 
     #[test]
@@ -649,7 +771,7 @@ mod tests {
         let root = tree();
         assert_eq!(
             shards(&root, &["packages", "x86_64-linux", "hello"]),
-            vec![segs(&["packages", "x86_64-linux", "hello"])]
+            vec![residual(&["packages", "x86_64-linux", "hello"])]
         );
     }
 
@@ -670,7 +792,7 @@ mod tests {
         )]);
         assert_eq!(
             shards(&root, &["packages", "*", "hello"]),
-            vec![segs(&["packages", "sysB", "hello"])]
+            vec![residual(&["packages", "sysB", "hello"])]
         );
         assert_split_equivalent(&root, &["packages", "*", "hello"]);
         assert_split_equivalent(&root, &["packages", "*", "*"]);
@@ -693,9 +815,8 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                segs(&["packages", "aarch64-linux", "#"]),
-                segs(&["packages", "x86_64-linux", "#"]),
-                segs(&["checks", "x86_64-linux", "#"]),
+                restricted(&["packages", "*"], &["aarch64-linux", "x86_64-linux"]),
+                restricted(&["checks", "*"], &["x86_64-linux"]),
             ]
         );
     }

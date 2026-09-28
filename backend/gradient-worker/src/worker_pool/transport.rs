@@ -19,8 +19,8 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tracing::{debug, trace, warn};
 
 use gradient_eval::ipc::{
-    EVAL_IPC_VERSION, EvalRequest, EvalResponse, MAX_FRAME_BYTES, ResolvedItem, decode_response,
-    encode_request,
+    DiscoveryShard, EVAL_IPC_VERSION, EvalRequest, EvalResponse, MAX_FRAME_BYTES, ResolvedItem,
+    decode_response, encode_request,
 };
 use gradient_eval::stats::StatsDelta;
 
@@ -311,7 +311,7 @@ impl EvalWorker {
         repository: String,
         wildcards: Vec<String>,
         input_overrides: Vec<(String, String)>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<(Vec<DiscoveryShard>, Vec<String>)> {
         self.call(
             EvalRequest::Plan {
                 repository,
@@ -320,10 +320,7 @@ impl EvalWorker {
             },
             "Plan",
             |resp| match resp {
-                EvalResponse::PlanOk {
-                    sub_patterns,
-                    errors,
-                } => Ok((sub_patterns, errors)),
+                EvalResponse::PlanOk { shards, errors } => Ok((shards, errors)),
                 other => Err(Box::new(other)),
             },
         )
@@ -334,12 +331,14 @@ impl EvalWorker {
         &mut self,
         repository: String,
         wildcards: Vec<String>,
+        only: Option<Vec<String>>,
         input_overrides: Vec<(String, String)>,
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>, Option<StatsDelta>)> {
         self.call(
             EvalRequest::List {
                 repository,
                 wildcards,
+                only,
                 input_overrides,
             },
             "List",
