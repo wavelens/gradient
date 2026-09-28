@@ -365,13 +365,6 @@ impl WorkerPoolResolver {
         self.pool.shutdown().await;
     }
 
-    /// Recycle the pooled eval subprocesses so the next evaluation reopens the
-    /// eval cache from disk, dropping a stale/corrupt open handle. Used by the
-    /// corrupt-eval-cache self-heal after the blob file is deleted.
-    pub fn recycle_workers(&self) {
-        self.pool.recycle_idle();
-    }
-
     /// Return `repository`'s eval-cache fingerprint without evaluating it.
     /// `None` for mutable/dirty flakes. A dead worker is marked so it gets
     /// discarded instead of reused.
@@ -628,6 +621,10 @@ impl DerivationResolver for WorkerPoolResolver {
         all_warnings.dedup();
 
         Ok((indexed.into_iter().map(|(_, r)| r).collect(), all_warnings))
+    }
+
+    async fn release_evaluators(&self) {
+        self.pool.release_idle().await;
     }
 
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation> {

@@ -386,7 +386,7 @@ pub async fn evaluate_derivations(
                 );
                 warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; dropping local blob + recycling eval workers");
                 delete_eval_cache_blob(&path).await;
-                evaluator.resolver.recycle_workers();
+                evaluator.resolver.release_evaluators().await;
             }
             return Err(e);
         }
@@ -999,6 +999,7 @@ pub async fn evaluate_derivations_with(
     }
 
     let flake_nodes = flake_nodes_from_roots(&root_drvs);
+    resolver.release_evaluators().await;
 
     // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
     let mut walker = ClosureWalker::new(drv_reader, &root_drvs);
@@ -1316,6 +1317,28 @@ mod tests {
         if let ReportedEvent::EvalResult { warnings, .. } = reporter.last_eval_result().unwrap() {
             assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
         }
+    }
+
+    #[tokio::test]
+    async fn the_evaluators_are_released_before_the_closure_walk() {
+        let fixture = load_store(&fixture_dir());
+        let repo = "https://example.com/repo";
+        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resolver.releases(), 1);
     }
 
     /// Regression (#392): every parsed derivation's `.drv` runtime closure must

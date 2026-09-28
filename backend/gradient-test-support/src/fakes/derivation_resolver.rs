@@ -23,6 +23,7 @@ pub struct FakeDerivationResolver {
     drv_paths: Mutex<HashMap<(String, String), String>>,
     derivations: Mutex<HashMap<String, Derivation>>,
     features: Mutex<HashMap<String, (String, Vec<String>)>>,
+    releases: Mutex<usize>,
 }
 
 impl FakeDerivationResolver {
@@ -62,6 +63,11 @@ impl FakeDerivationResolver {
             .unwrap()
             .insert(drv_path.into(), drv);
         self
+    }
+
+    /// How often `release_evaluators` was called.
+    pub fn releases(&self) -> usize {
+        *self.releases.lock().unwrap()
     }
 
     pub fn with_features(
@@ -126,6 +132,10 @@ impl DerivationResolver for FakeDerivationResolver {
                 .collect(),
             vec![],
         ))
+    }
+
+    async fn release_evaluators(&self) {
+        *self.releases.lock().unwrap() += 1;
     }
 
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation> {

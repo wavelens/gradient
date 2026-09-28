@@ -54,6 +54,11 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
         overrides: &[(String, String)],
     ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)>;
 
+    /// Free the evaluators kept warm between calls. Called once an evaluation
+    /// needs no more Nix evaluation, so their heaps do not sit idle through the
+    /// closure walk; the next call starts a fresh evaluator.
+    async fn release_evaluators(&self);
+
     /// Read and parse a `.drv` file at `drv_path`.
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation>;
 

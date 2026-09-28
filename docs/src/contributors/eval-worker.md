@@ -44,6 +44,7 @@ Two layers bound evaluation memory.
 - The recycle check runs after a call: one unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within a call. The reaper is the guard against that peak.
 - When no evaluation is large enough to cover the shortfall, the pressure comes from elsewhere and nothing is killed (#579: a fixed 1 GiB floor on a 2 GiB host killed evaluations that were never the cause).
 - A killed subprocess closes its pipe and the evaluation fails. One bounded failure replaces a host OOM that could kill the worker and strand the job: the server only registers a clean disconnect.
+- Once an evaluation has resolved its attributes, the idle subprocesses shut down: their heaps do not sit through the closure walk, and the next evaluation starts fresh subprocesses.
 - Under sustained pressure `acquire` serialises evaluations, always letting one proceed.
 - Evaluation subprocesses run with `oom_score_adj = 600` as the kernel's last resort.
 
