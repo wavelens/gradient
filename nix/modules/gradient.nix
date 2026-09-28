@@ -503,6 +503,15 @@ in {
             the worker is told to retry.
           '';
         };
+
+        restWaitSecs = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 30;
+          description = ''
+            Seconds a NAR upload to the cache upload endpoint waits for a permit before it is
+            answered with 503 and `Retry-After`.
+          '';
+        };
       };
 
       nar = {
@@ -1294,6 +1303,7 @@ in {
         GRADIENT_UPLOAD_CONCURRENCY = toString cfg.upload.concurrency;
         GRADIENT_UPLOAD_BYTES_BUDGET = toString cfg.upload.bytesBudget;
         GRADIENT_UPLOAD_LEASE_IDLE_SECS = toString cfg.upload.leaseIdleSecs;
+        GRADIENT_UPLOAD_REST_WAIT_SECS = toString cfg.upload.restWaitSecs;
         GRADIENT_NAR_MAX_UPLOAD_SIZE = toString cfg.nar.maxUploadSize;
         GRADIENT_NAR_SMALL_BYTES = toString cfg.nar.smallBytes;
         GRADIENT_NAR_HOT_CACHE_BYTES = toString cfg.nar.hotCacheBytes;

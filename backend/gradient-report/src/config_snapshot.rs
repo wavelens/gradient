@@ -60,6 +60,10 @@ pub fn write_config_snapshot(conn: &Connection, config: &RuntimeConfig) -> Resul
             "upload_lease_idle_secs",
             config.upload.lease_idle_secs.to_string(),
         ),
+        (
+            "upload_rest_wait_secs",
+            config.upload.rest_wait_secs.to_string(),
+        ),
         ("nar_ttl_hours", config.gc.nar_ttl_hours.to_string()),
         (
             "nar_upload_grace_hours",

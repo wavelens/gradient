@@ -30,6 +30,15 @@ pub struct UploadArgs {
         default_value_t = 300
     )]
     pub lease_idle_secs: u64,
+
+    /// Seconds a REST NAR upload waits for a permit before answering 503 with
+    /// `Retry-After`.
+    #[arg(
+        long = "upload-rest-wait-secs",
+        env = "GRADIENT_UPLOAD_REST_WAIT_SECS",
+        default_value_t = 30
+    )]
+    pub rest_wait_secs: u64,
 }
 
 impl Default for UploadArgs {
@@ -38,6 +47,7 @@ impl Default for UploadArgs {
             concurrency: 16,
             bytes_budget: 8 * 1024 * 1024 * 1024,
             lease_idle_secs: 300,
+            rest_wait_secs: 30,
         }
     }
 }

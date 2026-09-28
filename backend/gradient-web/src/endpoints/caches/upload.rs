@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::admit::admit;
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, record as audit_record};
 use crate::authorization::MaybeApiKey;
@@ -12,7 +13,7 @@ use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::body::Bytes;
 use axum::extract::{Multipart, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use gradient_core::ServerState;
 use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar_reader};
@@ -44,6 +45,7 @@ pub async fn nars_upload(
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache_name): Path<String>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> WebResult<impl IntoResponse> {
     let cache = load_cache(
@@ -58,9 +60,14 @@ pub async fn nars_upload(
     )
     .await?;
 
+    let max = state.config.nar.max_upload_size as u64;
+    let declared = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
+        .unwrap_or(max);
+    let permit = admit(&state, declared.min(max)).await?;
     let upload_store = upload_partial_store(&state)?;
     let stage_key = format!("{}/oneshot-{}", cache.id, uuid::Uuid::now_v7());
-    let max = state.config.nar.max_upload_size as u64;
 
     let mut narinfo: Option<NarinfoPart> = None;
     let mut staged_size: Option<u64> = None;
@@ -157,6 +164,7 @@ pub async fn nars_upload(
     )
     .await
     .map_err(WebError::from)?;
+    permit.committed();
     let _ = upload_store.discard(&stage_key).await;
 
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
@@ -317,7 +325,9 @@ pub async fn nar_chunk(
     // length so the caller resyncs and resends from there.
     let staged = store.received_len(&key, &store_hash).await?;
     let received = if offset == 0 || offset == staged {
+        let permit = admit(&state, body.len() as u64).await?;
         store.append(&key, &store_hash, offset, &body).await?;
+        permit.committed();
         offset + body.len() as u64
     } else {
         staged
@@ -362,6 +372,7 @@ pub async fn nar_finalize(
         ));
     }
 
+    let permit = admit(&state, narinfo.file_size as u64).await?;
     let verify_reader = store
         .open_read(&key)
         .await
@@ -401,6 +412,7 @@ pub async fn nar_finalize(
     )
     .await
     .map_err(WebError::from)?;
+    permit.committed();
     let _ = store.discard(&key).await;
 
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;

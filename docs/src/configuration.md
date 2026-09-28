@@ -127,6 +127,7 @@ See [Declarative State](usage/state.md) for the entities under `state`.
 | `upload.concurrency` | `GRADIENT_UPLOAD_CONCURRENCY` | `16` | Uploads (NARs and eval-cache blobs) admitted at once; further requests wait, round-robin across workers. |
 | `upload.bytesBudget` | `GRADIENT_UPLOAD_BYTES_BUDGET` | `8589934592` (8 GiB) | Sum of admitted upload sizes. An upload that does not fit waits; one larger than the budget runs alone once nothing else is in flight. |
 | `upload.leaseIdleSecs` | `GRADIENT_UPLOAD_LEASE_IDLE_SECS` | `300` | Seconds a granted relay upload may go without data before its permit is reclaimed and the worker is told to retry. |
+| `upload.restWaitSecs` | `GRADIENT_UPLOAD_REST_WAIT_SECS` | `30` | Seconds a REST NAR upload waits for a permit before it is answered with `503` and `Retry-After`. |
 
 ### `nar`
 

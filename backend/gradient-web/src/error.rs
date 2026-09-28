@@ -125,6 +125,8 @@ pub enum WebError {
     UnprocessableEntity(ErrorCode, String),
     #[error("Service Unavailable [{0}]: {1}")]
     ServiceUnavailable(ErrorCode, String),
+    #[error("Upload capacity exhausted; retry after {retry_after:?}")]
+    UploadBusy { retry_after: std::time::Duration },
     /// Referential-integrity mismatch detected at request time (e.g. a build
     /// row whose derivation row was concurrently deleted). Maps to the same
     /// HTTP response as [`Internal`] but is logged at warn level - the
@@ -160,7 +162,9 @@ impl WebError {
             Self::Gone(..) => StatusCode::GONE,
             Self::PayloadTooLarge(..) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnprocessableEntity(..) => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::ServiceUnavailable(..) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::ServiceUnavailable(..) | Self::UploadBusy { .. } => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             Self::DataInconsistency(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -177,6 +181,7 @@ impl WebError {
             | Self::PayloadTooLarge(c, _)
             | Self::UnprocessableEntity(c, _)
             | Self::ServiceUnavailable(c, _) => *c,
+            Self::UploadBusy { .. } => ErrorCode::SERVICE_UNAVAILABLE,
             Self::DataInconsistency(_) | Self::Internal(_) => ErrorCode::INTERNAL,
         }
     }
@@ -239,6 +244,7 @@ impl IntoResponse for WebError {
             | Self::PayloadTooLarge(_, m)
             | Self::UnprocessableEntity(_, m)
             | Self::ServiceUnavailable(_, m) => m.clone(),
+            Self::UploadBusy { .. } => "upload capacity exhausted".to_string(),
         };
 
         let body = Json(ErrorResponseBody {
@@ -247,7 +253,18 @@ impl IntoResponse for WebError {
             message: &message,
         });
 
-        (status, body).into_response()
+        match self {
+            Self::UploadBusy { retry_after } => (
+                status,
+                [(
+                    axum::http::header::RETRY_AFTER,
+                    retry_after.as_secs().max(1).to_string(),
+                )],
+                body,
+            )
+                .into_response(),
+            _ => (status, body).into_response(),
+        }
     }
 }
 
