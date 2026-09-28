@@ -54,6 +54,7 @@ nav:
       - Connect GitLab: guides/forge-gitlab.md
       - Share a Cache: guides/share-a-cache.md
       - Upload NARs: guides/upload-nars.md
+      - Pull Deployment: guides/pull-deployment.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
