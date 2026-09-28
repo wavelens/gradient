@@ -91,6 +91,7 @@ in {
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "uploadConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "commitConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "maxBufferBytes" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
+    (lib.mkRemovedOptionModule [ "services" "gradient" "scheduler" "recordCandidates" ] "runner-up candidates were never recorded")
   ];
 
   options = {
@@ -759,12 +760,6 @@ in {
           '';
         };
 
-        recordCandidates = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = "Whether to record the runner-up candidates of every dispatch decision.";
-        };
-
         dispatchRetentionDays = lib.mkOption {
           type = lib.types.ints.unsigned;
           default = 30;
@@ -1309,7 +1304,6 @@ in {
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.build.defaultTimeoutSecs;
         GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.build.defaultMaxSilentSecs;
         GRADIENT_SCHEDULER_SCORING_POLICY = cfg.scheduler.scoringPolicy;
-        GRADIENT_SCHEDULER_RECORD_CANDIDATES = lib.boolToString cfg.scheduler.recordCandidates;
         GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS = toString cfg.scheduler.dispatchRetentionDays;
         GRADIENT_METRICS_ROLLUP_INTERVAL_SECS = toString cfg.metrics.rollupIntervalSecs;
         GRADIENT_METRICS_RETENTION_RAW_DAYS = toString cfg.metrics.retention.rawDays;

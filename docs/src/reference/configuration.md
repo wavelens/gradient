@@ -243,7 +243,6 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `scheduler.dispatchRetentionDays` | int | `30` | `GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS` | Days to keep dispatch records and delivered outbox entries. |
-| `scheduler.recordCandidates` | bool | `false` | `GRADIENT_SCHEDULER_RECORD_CANDIDATES` | Whether to record the runner-up candidates of every dispatch decision. |
 | `scheduler.scoringPolicy` | one of `simple` `resource-aware` | `"resource-aware"` | `GRADIENT_SCHEDULER_SCORING_POLICY` | Policy ranking queued jobs for a requesting worker. |
 
 ## `scim`

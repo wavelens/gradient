@@ -17,14 +17,6 @@ pub struct SchedulerArgs {
     )]
     pub scoring_policy: String,
 
-    /// Persist runner-up scoring candidates on each `dispatched_job` row.
-    #[arg(
-        long = "scheduler-record-candidates",
-        env = "GRADIENT_SCHEDULER_RECORD_CANDIDATES",
-        default_value_t = false
-    )]
-    pub record_candidates: bool,
-
     /// Days to retain `dispatched_job` forensic rows. 0 = keep forever.
     #[arg(
         long = "scheduler-dispatch-retention-days",
@@ -38,7 +30,6 @@ impl Default for SchedulerArgs {
     fn default() -> Self {
         Self {
             scoring_policy: "resource-aware".into(),
-            record_candidates: false,
             dispatch_retention_days: 30,
         }
     }
