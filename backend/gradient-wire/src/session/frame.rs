@@ -199,6 +199,7 @@ impl WireMessage for ClientMessage {
             ClientMessage::UploadChunk { .. }
                 | ClientMessage::NarRequestResume { .. }
                 | ClientMessage::LogChunk { .. }
+                | ClientMessage::JobCompleted { .. }
         )
     }
 
@@ -1008,12 +1009,12 @@ mod tests {
         );
     }
 
-    /// The worker sends a completion only after every upload was acknowledged,
-    /// so it no longer has to queue behind them on the bulk lane.
+    /// A completion rides behind its job's own log chunks: on the control lane
+    /// it overtook them and the server dropped the tail of the build log.
     #[test]
-    fn a_job_completion_rides_the_control_lane() {
+    fn a_job_completion_rides_behind_its_log_chunks() {
         assert!(
-            !ClientMessage::JobCompleted {
+            ClientMessage::JobCompleted {
                 job_id: "build:1".into(),
                 dispatch: "dispatch-1".into(),
                 spans: Vec::new(),

@@ -732,7 +732,7 @@ Every NAR and eval-cache blob a worker (or a REST client) stores is admitted by 
 | `UploadRequest { job_id, request_id, object, size }` | worker to server | control | Ask for a slot; `object` is `Nar { store_path }` or `EvalCache { fingerprint }` |
 | `UploadGrant { request_id, target }` | server to worker | control | `Skip` (already stored), `Relay { resume_offset }`, `Put { url }` or `Multipart(..)` |
 | `UploadChunk { request_id, data, offset, is_final }` | worker to server | bulk | Relayed bytes, contiguous from the resume offset |
-| `UploadFinished { request_id, metadata }` | worker to server | control | The transfer is done; the server commits |
+| `UploadFinished { request_id, metadata }` | worker to server | control | The transfer is done; a relayed upload commits once its final chunk has also arrived, since the control lane can overtake it |
 | `UploadCommitted { request_id, outcome }` | server to worker | control | `Ok`, `Retry { reason }` or `Rejected { reason }` |
 | `UploadCancel { request_id }` | worker to server | control | The job was aborted or the transfer failed |
 
@@ -740,7 +740,7 @@ Every NAR and eval-cache blob a worker (or a REST client) stores is admitted by 
 - **Dedup:** a request for an object that is already being uploaded waits on that upload; a commit answers the waiter `Skip`, a failure grants it the next turn.
 - **Transport:** S3 is presigned only (`Put`, or `Multipart` above 1 GiB); the file backend is relay only, staged under `<baseDir>/nar-partial` and moved into the store on commit.
 - **Leases:** a relay grant expires after `upload.leaseIdleSecs` without a chunk, a presigned grant with its URL; an expired grant frees its permit and is answered `Retry`.
-- **Worker side:** `nar.maxConcurrentUploads` bounds the requests a worker keeps open. `Retry` is requested again up to three times, `Rejected` fails the job, and `JobCompleted` is sent only after every upload of the job was acknowledged `Ok` or `Skip`, so it rides the control lane.
+- **Worker side:** `nar.maxConcurrentUploads` bounds the requests a worker keeps open. `Retry` is requested again up to three times, `Rejected` fails the job, and `JobCompleted` is sent only after every upload of the job was acknowledged `Ok` or `Skip`. It rides the bulk lane so it cannot overtake the job's last `LogChunk`s.
 - **REST uploads** take a permit of their own and answer `503` with `Retry-After` after `upload.restWaitSecs`.
 - **Metrics:** `gradient_upload_in_flight`, `gradient_upload_bytes_in_flight`, `gradient_upload_queue_depth{worker}`, `gradient_upload_granted_total`, `gradient_upload_wait_seconds_total`.
 
@@ -1609,7 +1609,7 @@ decommission a worker it does not own.
  - v19 replaced push grants in `CacheQuery`, the `NarStreamHeader`/`NarPushResume`
    push handshake, `NarUploaded` and `EvalCachePush*` with per-path upload
    admission (`UploadRequest`, `UploadGrant`, `UploadChunk`, `UploadFinished`,
-   `UploadCommitted`, `UploadCancel`); `JobCompleted` left the bulk lane.
+   `UploadCommitted`, `UploadCancel`).
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---
