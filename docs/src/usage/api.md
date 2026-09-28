@@ -289,6 +289,8 @@ on first use, so no task is created per job.
 | `POST` | `/evals/{id}/prioritize` | Prioritize the evaluation's whole build tree |
 | `GET` | `/evals/{id}/builds` | List builds |
 | `POST` | `/evals/{id}/builds` | Stream all build logs (NDJSON) |
+| `GET` | `/evals/{id}/closure` | Build-time closure with NAR sizes (`ClosureGraph`) |
+| `GET` | `/evals/{id}/runtime-closure` | Runtime reference closure with NAR sizes (`ClosureGraph`) |
 
 ### Builds
 
@@ -298,6 +300,8 @@ on first use, so no task is created per job.
 | `GET` | `/builds/direct/recent` | Recent direct builds |
 | `GET` | `/builds/{id}` | Build with outputs |
 | `POST` | `/builds/{id}/prioritize` | Prioritize the build and its dependency closure |
+| `GET` | `/builds/{id}/closure` | Build-time closure with NAR sizes (`ClosureGraph`) |
+| `GET` | `/builds/{id}/runtime-closure` | Runtime reference closure with NAR sizes (`ClosureGraph`) |
 | `GET/POST` | `/builds/{id}/log` | Get full log / stream live log |
 | `GET` | `/builds/{id}/log/chunks` | Chunk index of a finalized log |
 | `GET` | `/builds/{id}/log/chunk/{index}` | One decompressed chunk (plaintext) |
@@ -310,6 +314,8 @@ on first use, so no task is created per job.
 
 The `/log*` endpoints fall back to the most recent prior build of the same
 derivation for a `Substituted` build (which has no log of its own).
+
+`ClosureGraph` holds `roots`, `total_size_bytes` (always exact), `node_count`, `edge_count`, `truncated`, `nodes` (`id`, `name`, `path`, `nar_size`) and `edges` (`source`, `target`, where `target` depends on `source`). Node ids are derivation UUIDs in the build closure and store path hashes in the runtime closure.
 
 ### Caches
 
