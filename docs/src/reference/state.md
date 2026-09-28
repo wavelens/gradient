@@ -23,7 +23,7 @@ services.gradient.state = {
 | `roles` | attrs of submodule | `{ }` | Custom roles, keyed by role name. |
 | `tasks` | attrs of submodule | `{ }` | Tasks to create, keyed by name. |
 | `users` | attrs of submodule | `{ }` | Users to create, keyed by user name. |
-| `validate` | bool | `true` | Whether to validate the generated state at build time with the server's `--state-validate`, so schema and reference errors fail the Nix build instead of the first server start. |
+| `validate` | bool | `true` | Whether to validate the generated state at build time with the server's `--state-validate`. Schema and reference errors then fail the Nix build instead of the first server start. |
 | `workers` | attrs of submodule | `{ }` | Worker registrations, keyed by worker ID. |
 
 ## `users.<name>`
@@ -71,7 +71,7 @@ services.gradient.state = {
 | `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, keyed by input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference overriding this input. |
-| `keep_evaluations` | int | `1` | Number of finished evaluations kept for metrics and history, regardless of outcome. |
+| `keep_evaluations` | int | `1` | Number of finished evaluations kept for metrics and history, regardless of outcome. Tasks created in the UI or API keep 30. |
 | `name` | string | attribute name | Unique task name. |
 | `project` | string | - | Name of the project the task belongs to. |
 | `repository` | string | - | Git repository URL of the task. |
@@ -81,7 +81,7 @@ services.gradient.state = {
 | `triggers.*.config` | attribute set | `{ }` | Type-specific configuration. |
 | `triggers.*.integration` | null or string | `null` | Name of an inbound integration in the same project backing this trigger. |
 | `triggers.*.type` | one of `polling` `reporter_push` `reporter_pull_request` `time` | - | Trigger kind, which determines the expected `config` and how the trigger fires. |
-| `wildcard` | string | `"packages.x86_64-linux.*"` | Branch or branch pattern to evaluate. |
+| `wildcard` | string | `"packages.x86_64-linux.*"` | Attribute paths to evaluate, as [wildcards](wildcards.md); `packages.x86_64-linux.#` is recommended. |
 
 ## `integrations.<name>`
 
@@ -113,12 +113,12 @@ services.gradient.state = {
 | `members.*.role` | string | - | Role name: a built-in `Admin`, `Write` or `View`, or a custom role of this cache. |
 | `members.*.user` | string | - | User name, resolved when the state is applied. |
 | `name` | string | attribute name | Unique cache name. |
-| `priority` | int | `10` | Priority of the cache; higher is preferred. |
+| `priority` | int | `10` | Priority of the cache; lower is preferred, as in Nix. |
 | `projects` | list of string | `[ ]` | Names of the projects using this cache. |
 | `public` | bool | `false` | Whether the cache is available to all projects. |
 | `roles` | list of submodule | `[ ]` | Custom roles of this cache. |
 | `roles.*.name` | string | - | Custom role name, distinct from the built-in roles. |
-| `roles.*.permissions` | list of string | `[ ]` | Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageCacheUpstreams`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions` or `deleteCache`. |
+| `roles.*.permissions` | list of string | `[ ]` | Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageCacheUpstreams`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. |
 | `signing_key_file` | string | - | File containing the Nix cache signing key. |
 | `upstreams` | list of submodule | cache.nixos.org | Upstream caches used as substituters: internal Gradient caches or external Nix binary caches. |
 | `upstreams.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. |
@@ -161,10 +161,11 @@ services.gradient.state = {
 | `enable_eval` | bool | `true` | Whether the server grants this registration the worker's `eval` capability. |
 | `enable_fetch` | bool | `true` | Whether the server grants this registration the worker's `fetch` capability. |
 | `enabled` | bool | `true` | Whether the base worker is available at all. |
-| `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project, so a single worker can serve several projects. |
+| `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project; a single worker can serve several projects. |
 | `token_file` | path | - | File containing the worker's authentication token. |
 | `url` | null or string | `null` | WebSocket URL on which the worker accepts server connections. |
 | `worker_id` | string | - | Worker identity. |
+
 ## Trigger Types
 
 | `type` | `integration` | `config` |

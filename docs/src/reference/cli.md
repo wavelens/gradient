@@ -115,6 +115,7 @@ gradient login https://gradient.example.com
 |---|---|---|
 | `gradient generate apikey` | - | Generate an API token and its `GRAD` client form; `key_file` needs the digest instead, see [API Key Files](../concepts/declarative-state.md#api-key-files) |
 | `gradient mcp` | `--control` | Serve this Gradient instance to MCP clients over stdio |
+
 ## Interactive Mode
 
 `-i` opens a full-screen view instead of plain output; `--json` ignores the flag.

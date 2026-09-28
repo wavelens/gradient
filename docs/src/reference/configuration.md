@@ -107,7 +107,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `http.localIps` | list of string | `[ "192.168.0.0/16" "172.16.0.0/12" "100.64.0.0/10" "10.0.0.0/8" "fc00::/7" ]` | `GRADIENT_HTTP_LOCAL_IPS` | CIDR ranges whose clients receive a cache's `local_priority`, when that is set and non-zero. |
-| `http.maxRequestSize` | int | `2097152` | `GRADIENT_HTTP_MAX_REQUEST_SIZE` | Maximum HTTP request body size in bytes for most endpoints, so an unbounded body cannot exhaust server memory. |
+| `http.maxRequestSize` | int | `2097152` | `GRADIENT_HTTP_MAX_REQUEST_SIZE` | Maximum HTTP request body size in bytes for most endpoints; an unbounded body cannot exhaust server memory. |
 | `http.maxSourceUploadSize` | int | `536870912` | `GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE` | Maximum size in bytes of a source upload to `POST /build-requests/source` (as sent by `gradient build`) and of a chunked manifest in total. |
 | `http.trustedProxies` | list of string | `[ "127.0.0.1/8" "::1/128" ]` | `GRADIENT_HTTP_TRUSTED_PROXIES` | CIDR ranges of peers allowed to set `X-Forwarded-For`. |
 
@@ -356,7 +356,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.packages.git` | package | `config.programs.git.package` | - | Git package available to the worker for cloning repositories. |
 | `worker.packages.gradient` | package | derived | - | The gradient package to use. |
 | `worker.packages.nix` | package | derived | `GRADIENT_WORKER_NIX_BIN` (part) | Nix package whose `nix` the worker runs for evaluation and fetching. |
-| `worker.packages.ssh` | package | `config.programs.ssh.package` | `GRADIENT_WORKER_SSH_BIN` (part) | OpenSSH package used as `GIT_SSH_COMMAND`, so private flake inputs can be fetched. |
+| `worker.packages.ssh` | package | `config.programs.ssh.package` | `GRADIENT_WORKER_SSH_BIN` (part) | OpenSSH package used as `GIT_SSH_COMMAND` for fetching private flake inputs. |
 
 ## `worker.reverseProxy`
 
@@ -375,6 +375,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.system.cpuCoreScore` | null or (int) | `null` | `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Single-core speed score advertised to the scheduler, higher is faster. |
 | `worker.system.features` | list of string | `[ ]` | `GRADIENT_WORKER_SYSTEM_FEATURES` | Nix system features this worker advertises. |
 | `worker.system.minFreeRamMb` | int | `0` | `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB` | Free memory in MiB below which the worker kills the one evaluation subprocess large enough to restore it, reporting that evaluation as failed instead of letting the host freeze. |
+
 ## Build Failures
 
 | Status | Retried | Cause |
@@ -402,7 +403,7 @@ With `postgres.enable`, the module sets host-independent defaults (each a `mkDef
 | Setting | Default | Reason |
 |---|---|---|
 | `random_page_cost` | `1.1` | SSDs; keeps the planner on index-only scans of the graph tables |
-| `max_connections` | `200` | Covers the three server pools (80 connections by default) plus autovacuum and `psql` |
+| `max_connections` | `200` | Covers the three server pools (56 connections by default) plus autovacuum and `psql` |
 | `max_locks_per_transaction` | `1024` | Graph writes lock every anchor they touch; the server warns below `256` |
 
 The RAM-dependent settings are options:
