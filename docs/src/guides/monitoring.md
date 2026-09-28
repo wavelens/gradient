@@ -26,7 +26,7 @@ services.prometheus.scrapeConfigs = [{
 ```
 
 1.  Any random string, e.g. `openssl rand -base64 32`; without the file `GET /metrics` returns `404`.
-2.  The bundled reverse proxy does not forward `/metrics`, so the scraper talks to `listenAddr` and `port` directly.
+2.  The bundled reverse proxy does not forward `/metrics`; the scraper talks to `listenAddr` and `port` directly.
 
 The endpoint allows 6 requests per second; a 15 s scrape interval fits.
 

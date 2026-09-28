@@ -23,7 +23,7 @@ The runtime closure covers only outputs already in the cache.
 ## Large Closures
 
 - The 500 largest packages show one by one; the rest collapse into an **others** bar under the nearest shown package.
-- Each package shows under one parent only, so the bars add up to the total.
+- Each package shows under one parent only, and the bars add up to the total.
 - The total stays exact, even when the header warns about truncation.
 
 ## Related

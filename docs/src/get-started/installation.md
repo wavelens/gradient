@@ -9,7 +9,7 @@ A production instance: managed secrets, a chosen database, and TLS that fits the
 
 ## 1. Public binary cache
 
-Pre-built Gradient packages, so the host substitutes instead of compiling:
+Pre-built Gradient packages for substituting instead of compiling:
 
 ```nix
 nix.settings = {
@@ -110,7 +110,7 @@ The server serves the API, the worker protocol and the cache; a reverse proxy in
     services.gradient.reverseProxy.nginx.manageTls = false; # (1)!
     ```
 
-    1.  nginx stops requesting a certificate. `useTls` stays `true`, so Gradient still emits `https://` links and secure cookies.
+    1.  nginx stops requesting a certificate. `useTls` stays `true` and Gradient still emits `https://` links and secure cookies.
 
 === "Own proxy"
 

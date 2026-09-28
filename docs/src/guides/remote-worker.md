@@ -39,7 +39,7 @@ cat /proc/sys/kernel/random/uuid
     };
     ```
 
-    1.  Pinned, so the worker's peers file can name the project before the server first starts.
+    1.  Pinned for the worker's peers file, which names the project before the server first starts.
     2.  Created with `openssl rand -base64 48`; the same token goes into the worker's peers file.
     3.  Declared workers are base workers by default.
 
@@ -63,7 +63,7 @@ cat /proc/sys/kernel/random/uuid
 ```
 
 1.  One line per project the worker serves, see [Peers File](#peers-file).
-2.  Optional. Records memory and CPU per build, so the scheduler places heavy builds on machines that fit them.
+2.  Optional. Records memory and CPU per build; the scheduler uses the numbers to place heavy builds on machines that fit them.
 
 ## Verify Deployment
 

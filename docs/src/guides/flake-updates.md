@@ -27,7 +27,7 @@ Pull requests that bump `flake.lock`, opened only after the updated flake builds
 `github`, `gitlab` and `git` inputs are supported, including `git` over SSH with the project's SSH key.
 
 !!! warning
-    An override with a **URL** pins that input and blocks every update run of the task, so no pull request lands while an input is held.
+    An override with a **URL** pins that input and blocks every update run of the task: no pull request lands while an input is held.
 
 ## 2. Add the Open PR Action
 
@@ -62,7 +62,7 @@ flowchart LR
     bump[Bump tracked inputs] --> verify[Evaluate and build] --> pr[Open or update the PR]
 ```
 
-- The branch is force-pushed as one commit on the current base, so the pull request never falls behind.
+- The branch is force-pushed as one commit on the current base; the pull request never falls behind.
 - No change in `flake.lock` means no pull request.
 - A failed build means no pull request with the default `build` gate.
 

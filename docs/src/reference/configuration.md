@@ -383,7 +383,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `FailedTransient` | Yes, `build.maxAttempts` times with a doubling `build.retryBackoffSecs` | Out of memory, full disk, network or substitution failure, builder crash |
 | `FailedTimeout` | No | `build.defaultTimeoutSecs` or `build.defaultMaxSilentSecs` exceeded |
 
-The derivation attributes `timeout`, `maxSilent` and `preferLocalBuild` override the server defaults. `meta.*` attributes never reach the `.drv`, so they have no effect here.
+The derivation attributes `timeout`, `maxSilent` and `preferLocalBuild` override the server defaults. `meta.*` attributes never reach the `.drv` and have no effect here.
 
 ## Local Worker
 
@@ -391,7 +391,7 @@ With `worker.enable`, `localWorker` registers the worker on the same host withou
 
 - A stable worker ID derived from the host name.
 - A token generated on first start in `/var/lib/gradient-worker/local-token`; delete the file and restart both services to rotate the token.
-- A base worker with `auto_enable`, so every project, including later ones, uses the worker.
+- A base worker with `auto_enable`: every project, including later ones, uses the worker.
 
 The worker waits in reconnect backoff (at most 60 s) until a project with a cache subscription exists.
 
@@ -422,4 +422,4 @@ Setup, metric names and alert examples are in [Monitor Gradient](../guides/monit
 
 ## Hashing
 
-NARs and cache files are hashed with SHA-256, so Nix clients need no experimental feature. `blake3:` hashes from older uploads still resolve.
+NARs and cache files are hashed with SHA-256; Nix clients need no experimental feature. `blake3:` hashes from older uploads still resolve.

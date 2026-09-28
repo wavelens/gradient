@@ -35,7 +35,7 @@ openssl rand -base64 48 > /run/secrets/gradient-jwt
 openssl rand -base64 48 > /run/secrets/gradient-crypt
 ```
 
-The first signs login sessions, the second encrypts secrets stored in the database. The worker creates its own token, so it needs nothing here.
+The first signs login sessions, the second encrypts secrets stored in the database. The worker creates its own token and needs nothing here.
 
 !!! tip
     For a production host, manage these files with [sops-nix](https://github.com/Mic92/sops-nix) or [agenix](https://github.com/ryantm/agenix).

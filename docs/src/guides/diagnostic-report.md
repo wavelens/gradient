@@ -28,8 +28,8 @@ One SQLite file with everything that explains a stuck or failed evaluation, read
 | Include build logs | off | On: the full log of every failed or aborted attempt |
 | Include instance context | on | Workers, upstream caches and the server settings; needs the `manageWorkers` permission |
 
-- The same name always maps to the same token within one report, so dependencies stay readable; two reports cannot be linked.
-- Store hashes stay, so maintainers can check a path against public caches.
+- The same name always maps to the same token within one report and dependencies stay readable; two reports cannot be linked.
+- Store hashes stay for checking a path against public caches.
 
 !!! note "Never in the file"
     API keys, sessions, passwords, worker tokens, upstream cache keys and forge credentials are left out entirely, not redacted.
@@ -46,7 +46,7 @@ The browser downloads `gradient-report-<id>-<date>.db`. The inspector prints the
 nix run github:wavelens/gradient/v1.4.0#gradient-report -- gradient-report-*.db summary
 ```
 
-The inspector reads only the report schema of its own source revision, so the tag matches the server's version.
+The inspector reads only the report schema of its own source revision; the tag has to match the server's version.
 
 ## Next Steps
 

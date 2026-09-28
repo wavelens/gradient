@@ -76,7 +76,7 @@ A task created after the integrations, whose repository host matches exactly one
 | Comment `/gradient run` | Starts an evaluation of the merge request |
 | Comment `/gradient approve` | Releases a merge request from a fork waiting for maintainer approval |
 
-The approval gate is a task setting: **Require maintainer approval for PRs from non-writers**. GitLab sends no webhook for review approvals, so the comment is the only way to approve.
+The approval gate is a task setting: **Require maintainer approval for PRs from non-writers**. GitLab sends no webhook for review approvals; the comment is the only way to approve.
 
 ## Troubleshooting
 

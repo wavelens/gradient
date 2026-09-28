@@ -15,11 +15,11 @@ The task's wildcard selects the system of every machine to deploy:
 nixosConfigurations.*.config.system.build.toplevel
 ```
 
-Each machine picks the output named `nixos-system-<hostname>-...`, so the host name in the configuration matches the machine's `deployFor`.
+Each machine picks the output named `nixos-system-<hostname>-...`: the host name in the configuration has to match the machine's `deployFor`.
 
 ## 2. Create an API Key
 
-**Settings -> API Keys -> New API Key**, with **Scope** Project set to the task's project, so a leaked key reaches nothing else. Store the key on the machine as a secret, e.g. `/run/secrets/gradient-deploy-key`.
+**Settings -> API Keys -> New API Key**, with **Scope** Project set to the task's project. A leaked key then reaches nothing else. Store the key on the machine as a secret, e.g. `/run/secrets/gradient-deploy-key`.
 
 ## 3. Enable the Deploy Module
 

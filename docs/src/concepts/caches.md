@@ -13,7 +13,7 @@ flowchart LR
 
 The cache page shows the substituter URL and the public key to add to the Nix configuration. A public cache serves anyone; a private cache needs credentials, see [Authentication](../usage/caches.md#authentication).
 
-Each cache announces a priority to `nix` (lower wins, default `10`) and can announce a different one to clients on the local network, so machines next to the server prefer the Gradient cache over remote ones.
+Each cache announces a priority to `nix` (lower wins, default `10`) and can announce a different one to clients on the local network. Machines next to the server then prefer the Gradient cache over remote ones.
 
 ## Upstream Types
 
@@ -31,7 +31,7 @@ Upstreams are set under **Settings -> Upstream Caches** on the cache page.
 
 ## Pull-Through
 
-A cache serves paths from its upstreams as if the cache held them. A client asking for a missing path gets the upstream's copy through the cache, re-signed with the cache's own key, so clients configure one URL and one key no matter where a path came from.
+A cache serves paths from its upstreams as if the cache held them. A client asking for a missing path gets the upstream's copy through the cache, re-signed with the cache's own key. Clients configure one URL and one key, wherever a path came from.
 
 ## Substitution
 

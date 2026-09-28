@@ -1,6 +1,6 @@
 # Declarative State
 
-Everything created in the UI can also be declared in Nix under `services.gradient.state`. Gradient applies the declared state on every start, and declared entities become read-only in the UI, so the Nix configuration stays the source of truth.
+Everything created in the UI can also be declared in Nix under `services.gradient.state`. Gradient applies the declared state on every start, and declared entities become read-only in the UI. The Nix configuration stays the source of truth.
 
 ```mermaid
 flowchart LR
@@ -49,7 +49,7 @@ Secrets never go into the Nix store: every `*_file` option points at a file on t
 | `integrations.<name>.secret_file` | Webhook secret shared with the forge | `openssl rand -hex 32` |
 | `integrations.<name>.access_token_file` | Forge access token | From the forge |
 
-- `gradient hash` prompts for the password twice and prints the hash. Piping a password through `<<<` hashes a trailing newline, so later sign-ins fail.
+- `gradient hash` prompts for the password twice and prints the hash. A password piped through `<<<` gets a trailing newline hashed with it, and later sign-ins fail.
 - The public half `acme-ssh-key.pub` goes to the Git host as a deploy key.
 - `nix-store` writes `main:<key>`; Gradient expects the key without the `main:` prefix and derives the public key itself.
 - `gradient generate apikey` prints the token for clients and the digest for `key_file`; the file never holds the token itself.

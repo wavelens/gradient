@@ -18,7 +18,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## 2. Fill In the Secrets
 
-Gradient stores secrets hashed or encrypted, so every `*_file` field comes out as `null`. Point each one at a secret on the server:
+Gradient stores secrets hashed or encrypted, and the export returns every `*_file` field as `null`. Point each one at a secret on the server:
 
 | Field | Content | Generate |
 |---|---|---|

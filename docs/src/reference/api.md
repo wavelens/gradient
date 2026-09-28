@@ -82,6 +82,6 @@ At the root, without `/api/v1`. Private caches take HTTP Basic auth with any use
 | `GET` | `/cache/{cache}/ls/{hash}` | File listing of a NAR |
 | `GET` | `/cache/{cache}/serve/{hash}/{path}` | One file, or a directory as `tar.zst`, from a NAR |
 
-- Unknown keys always answer `404`, so Nix moves on to the next substituter.
+- Unknown keys always answer `404`, and Nix moves on to the next substituter.
 - `log` and `debuginfo` fall back to the upstreams for substituted paths.
 - `ls` and `serve` allow 60 requests per minute, `log` about 300.
