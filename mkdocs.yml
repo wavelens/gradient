@@ -71,7 +71,6 @@ nav:
       - Settings: ui/settings.md
   - Using Gradient:
       - Overview: usage/overview.md
-      - API: usage/api.md
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md
       - Events & Webhooks: usage/events.md
@@ -83,6 +82,7 @@ nav:
       - Declarative State: reference/state.md
       - Evaluation Wildcards: reference/wildcards.md
       - CLI: reference/cli.md
+      - API: reference/api.md
   - Contributors:
       - Architecture: development/architecture.md
       - Internals: development/internals.md

@@ -29,4 +29,4 @@ The runtime closure covers only outputs already in the cache.
 ## Related
 
 - [Evaluations and Builds](../concepts/evaluations-and-builds.md): entry points and builds
-- [API](../usage/api.md#builds): the closure endpoints for scripts
+- [API](../reference/api.md#examples): the closure endpoints for scripts
