@@ -50,6 +50,7 @@ nav:
   - Guides:
       - Add a Remote Worker: guides/remote-worker.md
       - Connect GitHub: guides/forge-github.md
+      - Connect Gitea or Forgejo: guides/forge-gitea.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md

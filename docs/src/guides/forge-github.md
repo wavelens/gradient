@@ -31,9 +31,16 @@ services.gradient.githubApp = {
 
 Install the App from its GitHub page on the account that owns the repositories.
 
-Gradient matches the granted repositories against task repository URLs (`https://`, SSH and `github:owner/repo` all match) and creates a `github-<account>` integration pair in each matching project. A task with a matching URL gets a push trigger and a status report action automatically.
+Gradient matches the granted repositories against task repository URLs (`https://`, SSH and `github:owner/repo` all match) and creates a `github-<account>` integration pair in each matching project.
 
 For a project created after the installation: **Integrations -> New Integration**, forge GitHub, with the **Installation ID** from the App's installation page on GitHub.
+
+## 4. Wire the Task
+
+A task with a matching repository URL gets a **Push (reporter)** trigger and a **Forge Status Report** action automatically. Otherwise, on the task:
+
+- **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the `github-<account>` integration.
+- **Actions -> New Action**: **Forge Status Report** with the `github-<account>` integration.
 
 ## Verify Deployment
 
@@ -42,7 +49,7 @@ For a project created after the installation: **Integrations -> New Integration*
 
 ## Pull Requests
 
-The automatic setup covers pushes only. For pull requests, add a trigger on the task: **Triggers -> New Trigger**, type **Pull Request (reporter)**, with the `github-<account>` integration.
+The automatic setup covers pushes only; pull requests need the **Pull Request (reporter)** trigger from step 4.
 
 | Action on GitHub | Effect |
 |---|---|
