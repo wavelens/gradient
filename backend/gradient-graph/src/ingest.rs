@@ -2096,7 +2096,7 @@ mod tests {
             .append_query_results([vec![ripple_row(a.id, true)]])
             .append_query_results([vec![drv_row(a.id)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![transition_row(a.id, 1, 0)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 10])
             .into_connection();
