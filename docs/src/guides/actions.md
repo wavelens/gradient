@@ -81,6 +81,18 @@ A `POST` with a JSON body; receivers read `content`:
 
 The signature lets the receiver reject requests that did not come from Gradient.
 
+## Forge Status Report
+
+The **Forge Status Report** action, set up by the [forge guides](forge-github.md#4-wire-the-task), posts one check per step on each commit and pull request:
+
+| Check | State |
+|---|---|
+| `gradient/<task>: Approval` | Only for pull requests from forks, until a maintainer approves |
+| `gradient/<task>: Evaluation` | Pending while the evaluation runs, then success or failure |
+| `gradient/<task>: Build <entry point>` | One per entry point: pending, running, then success or failure |
+
+A `/gradient run <wildcard>` run reports as `gradient/<task>: Evaluation: <wildcard>` next to the default checks. **Test** checks the integration's access to the repository without posting a status.
+
 ## Verify Deployment
 
 - **Test** on the action row sends a sample event, marked `"synthetic": true`.

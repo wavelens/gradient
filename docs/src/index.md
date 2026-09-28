@@ -8,7 +8,7 @@
 
 <div class="grid cards" markdown>
 
--   :material-source-branch: **[Forge integration](usage/integration.md)**
+-   :material-source-branch: **[Forge integration](guides/forge-github.md)**
 
     GitHub, Gitea / Forgejo and GitLab: builds on push and pull request. Sends status checks back.
 
@@ -16,11 +16,11 @@
 
     Uncommitted changes built on the CI workers with `gradient build`, no local Nix needed.
 
--   :material-database: **[Built-in binary cache](usage/caches.md)**
+-   :material-database: **[Built-in binary cache](concepts/caches.md)**
 
     Per-project caches with S3 storage, signing and sharing between projects.
 
--   :material-server-network: **[Scales with workers](usage/overview.md#workers)**
+-   :material-server-network: **[Scales with workers](concepts/workers.md)**
 
     Evaluation and builds both run on workers. Each added machine adds capacity.
 

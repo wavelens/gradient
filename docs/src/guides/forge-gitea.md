@@ -92,5 +92,5 @@ The approval gate is a task setting: **Require maintainer approval for PRs from 
 
 ## Next Steps
 
-- [Actions](../usage/actions.md): mail, web requests and flake update pull requests
+- [Actions](actions.md): mail, web requests and flake update pull requests
 - [Connect GitLab](forge-gitlab.md): the same setup for GitLab

@@ -91,5 +91,5 @@ The approval gate is a task setting: **Require maintainer approval for PRs from 
 
 ## Next Steps
 
-- [Actions](../usage/actions.md): mail, web requests and flake update merge requests
+- [Actions](actions.md): mail, web requests and flake update merge requests
 - [Connect Gitea or Forgejo](forge-gitea.md): the same setup for Gitea and Forgejo

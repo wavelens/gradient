@@ -49,6 +49,6 @@ A task is one repository plus the outputs to build from that repository.
 ## Next steps
 
 - [Evaluation wildcards](../reference/wildcards.md): select exactly the outputs to build
-- [Forge integration](../usage/integration.md): evaluate on every push and pull request
-- [Caches](../usage/caches.md): use the cache from other machines
+- [Connect GitHub](../guides/forge-github.md): evaluate on every push and pull request
+- [Share a Cache](../guides/share-a-cache.md): use the cache from other machines
 - [Add a Remote Worker](../guides/remote-worker.md): add build machines

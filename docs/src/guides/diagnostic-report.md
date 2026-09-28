@@ -50,5 +50,5 @@ The inspector reads only the report schema of its own source revision; the tag h
 
 ## Next Steps
 
-- [Diagnostic reports in depth](../diagnostic-reports.md): tables, scopes and the `gradient-report` inspector
+- [Diagnostic reports in depth](../contributors/diagnostic-reports.md): tables, scopes and the `gradient-report` inspector
 - [Evaluations and Builds](../concepts/evaluations-and-builds.md): statuses in the summary

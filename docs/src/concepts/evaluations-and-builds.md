@@ -25,6 +25,8 @@ flowchart LR
 
 An evaluation skips every dependency subtree already recorded from earlier runs. **Full rewalk** in the task menu starts an evaluation that walks the whole closure again.
 
+The evaluation page lists the builds grouped by status, each entry point above its dependencies, with the merged live log and **Abort**. Right-clicking a build opens **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) dispatch), **Artefacts** and **Download Log**.
+
 ## Build
 
 A build belongs to the derivation, not to the evaluation. Every evaluation that needs the same derivation, in any project, shares the one build and its log.

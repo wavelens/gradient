@@ -11,7 +11,7 @@ flowchart LR
 
 ## Using a Cache
 
-The cache page shows the substituter URL and the public key to add to the Nix configuration. A public cache serves anyone; a private cache needs credentials, see [Authentication](../usage/caches.md#authentication).
+The cache page shows the substituter URL and the public key to add to the Nix configuration. A public cache serves anyone; a private cache needs credentials, see [Authentication](../guides/share-a-cache.md#1-use-the-cache-on-a-machine).
 
 Each cache announces a priority to `nix` (lower wins, default `10`) and can announce a different one to clients on the local network. Machines next to the server then prefer the Gradient cache over remote ones.
 
@@ -61,5 +61,5 @@ Custom roles combine single permissions, see [Members and Roles](../ui/members-a
 ## Related
 
 - [First project](../get-started/first-project.md): create a cache and subscribe a project
-- [Caches](../usage/caches.md): share a cache and authenticate clients
+- [Share a Cache](../guides/share-a-cache.md): share a cache and authenticate clients
 - [Projects and Tasks](projects-and-tasks.md): where builds come from

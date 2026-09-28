@@ -69,13 +69,6 @@ nav:
       - Closure View: ui/closure-view.md
       - Members and Roles: ui/members-and-roles.md
       - Settings: ui/settings.md
-  - Using Gradient:
-      - Overview: usage/overview.md
-      - Forge Integration: usage/integration.md
-      - Actions: usage/actions.md
-      - Caches: usage/caches.md
-      - Cache NARs: usage/cache-nars.md
-      - Diagnostic Reports: diagnostic-reports.md
   - Reference:
       - Configuration: reference/configuration.md
       - Declarative State: reference/state.md
@@ -90,9 +83,16 @@ nav:
       - Scheduler: scheduler.md
       - Eval Worker Setup: contributors/eval-worker.md
       - Migrations: contributors/migrations.md
-      - Proto: development/proto.md
+      - Proto:
+          - Connection: contributors/proto/connection.md
+          - Capabilities and Dispatch: contributors/proto/capabilities-and-dispatch.md
+          - Jobs: contributors/proto/jobs.md
+          - Messages: contributors/proto/messages.md
+          - Transfer: contributors/proto/transfer.md
+          - Federation: contributors/proto/federation.md
       - Scheduler Scoring: development/scheduler-scoring.md
       - Evaluation Metrics: contributors/eval-metrics.md
+      - Diagnostic Reports: contributors/diagnostic-reports.md
       - Tests: contributors/tests.md
       - Frontend Style Guide: contributors/frontend-style-guide.md
       - Contributing: contributors/contributing.md
