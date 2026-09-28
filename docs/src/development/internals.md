@@ -84,7 +84,7 @@ The proto scheduler's dispatch loop (`proto::scheduler::dispatch`) polls for eli
 **Execution** (on the worker):
 1. Receive `AssignJob` with the full dependency chain in topological order.
 2. Send `NarRequest` for missing input paths (known from scoring).
-3. Receive input NARs via `NarPush` or presigned S3 URLs.
+3. Receive input NARs via `NarPush` frames or presigned S3 URLs.
 4. Build each derivation in order via the local Nix daemon (`build_derivation`).
 5. Stream `JobUpdate::BuildOutput` for each completed derivation.
 6. Compress outputs and send `JobUpdate::Compressing`.
@@ -102,7 +102,7 @@ The server updates `build` and `derivation_output` rows as `JobUpdate` messages 
 **Serving a NAR**
 NARs are served with ZSTD compression. They are stored in `${base_dir}/nars/[first 2 chars of hash]/[rest of the hash].nar.zst`, keyed by the **store-path hash** (so a presigned upload URL can be issued before the worker has computed the content hash). The narinfo advertises `nar/<file_hash>.nar.zst`; `resolve_effective_hash_db` maps that file_hash back to the store-path key on each fetch.
 
-**Idempotent writes.** Server-side ingestion (`ingest_nar` for `nix copy` push, and the `NarPush` commit) goes through `put_nar_idempotent`, which skips the object-store write when a `cached_path` row already records the same `file_hash` and the object is present (`HEAD`). This keeps redundant re-pushes from rewriting an identical object. The NAR object store must **not** retain noncurrent versions: gradient assumes overwrite-on-PUT semantics, so a bucket with versioning (or object-lock / replication, which force it on) accumulates one retained copy per re-upload that no S3-API GC can reclaim. The worker→S3 presigned upload bypasses the server entirely, so the no-versioning requirement is the only guard on that path. NARs over 1 GiB go up as a presigned multipart upload that the server completes on `NarUploaded`; a worker that dies mid-upload leaves the upload open, so the bucket should carry an `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days) to reclaim its parts.
+**Idempotent writes.** Server-side ingestion (`ingest_nar` for `nix copy` push, and the upload commit) goes through `put_nar_idempotent`, which skips the object-store write when a `cached_path` row already records the same `file_hash` and the object is present (`HEAD`). This keeps redundant re-pushes from rewriting an identical object. The NAR object store must **not** retain noncurrent versions: gradient assumes overwrite-on-PUT semantics, so a bucket with versioning (or object-lock / replication, which force it on) accumulates one retained copy per re-upload that no S3-API GC can reclaim. The worker→S3 presigned upload bypasses the server entirely, so the no-versioning requirement is the only guard on that path. NARs over 1 GiB go up as a presigned multipart upload that the server completes on `UploadFinished`; a worker that dies mid-upload leaves the upload open, so the bucket should carry an `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days) to reclaim its parts.
 
 **Signing**
 

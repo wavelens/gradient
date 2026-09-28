@@ -640,20 +640,14 @@ could arise:
 - **A NAR whose commit fails fails its build.** Recording the `cached_path` row was
   the one step of an upload allowed to fail quietly, so a full disk or a database
   error left the bytes in storage, the index without them, and the build reported
-  done. It now fails the build transiently, like every other step of the same
-  commit.
-- **A build is not completed until the NARs it pushed are in the index.** The worker
-  sends `JobCompleted` after its last upload, but that message used to ride the
-  control writer lane, drained ahead of bulk, so it overtook its own `NarUploaded`
-  frames; and the commits themselves run detached from the session read loop,
-  because committing one inline froze every other transfer on the connection. The
-  anchor therefore reached `Completed` before the index had been told the bytes
-  existed, and a commit failing afterwards could not correct it - the build state
-  machine refuses to leave a terminal status, so the failure was dropped. A
-  completion now rides the bulk lane, in FIFO behind its job's own frames, and the
-  session holds it until that job's commits have settled; a commit that failed has
-  already failed the build, and the completion behind it is dropped rather than
-  overwriting that verdict.
+  done. It now answers the upload with `Retry`, and a path that keeps failing
+  fails the build transiently.
+- **A build is not completed until the NARs it pushed are in the index.** Every
+  upload ends in an `UploadCommitted` the server sends after the commit, and the
+  worker sends `JobCompleted` only once each of its uploads was acknowledged `Ok`
+  or skipped, so the anchor never reaches `Completed` before the index knows the
+  bytes exist. A `Retry` is requested again up to three times and a `Rejected`
+  fails the job, so a failed commit never hides behind a completion.
 - **An eval marks an anchor substituted only when every output is already whole
   here.** The partial cache-hit that set an anchor done with one output never
   cached (observed on multi-output CUDA derivations whose `out` was never pushed)
@@ -766,7 +760,7 @@ each), so its cost follows the listing rather than every table the clauses name.
 It reads committed DB rows, so it cannot see a NAR that is
 already on disk but whose `derivation`/`cached_path` rows have not been written yet
 - the in-eval window between the worker's presigned `.drv` PUT and the server
-processing its `NarUploaded`. The orphan-files pass therefore **spares any NAR
+processing its `UploadFinished`. The orphan-files pass therefore **spares any NAR
 younger than the upload grace** (`nar_upload_grace_hours`, its own knob so it no
 longer shares a meaning with the derivation-row grace): reclaiming a just-pushed
 `.drv` in that window
@@ -1012,8 +1006,8 @@ unordered locker deadlocks against however carefully ordered the other side is. 
 ripples are the exception and it is deliberate: each computes its referrer set inside
 its own `UPDATE`, so it locks rows no ordered set covers, in plan order. A commit and
 a concurrent maintenance retire can therefore still deadlock; Postgres detects it, the
-retire retries on its next pass and a killed commit fails a `NarUploaded` the worker
-retries. A detected, retried deadlock is the accepted price of never leaving a row
+retire retries on its next pass and a killed commit answers `Retry`, which the worker
+follows. A detected, retried deadlock is the accepted price of never leaving a row
 whole with a reference that is not. Nothing re-derives the counter by a
 sweep; the consistency pass above recomputes it only for the paths pending anchors
 gate on and repairs what disagrees, and is its only backstop.
@@ -1050,7 +1044,7 @@ producers and desynced. This happens with non-reproducible builds: a path built
 locally (its NAR differs from upstream, e.g. an embedded `.git/index` ctime) can
 end up hosted under a `cached_path` whose hashes were recorded from an
 upstream-substitute relay, because object writes (presigned PUT) and metadata
-writes (`NarUploaded`) are independent. The worker reports the failing path as a
+writes (`UploadFinished`) are independent. The worker reports the failing path as a
 `CorruptCachedNar`, which the executor classifies as `InputsUnavailable` (not a
 transient retry against poison), so `reconcile_missing_inputs` purges the bad
 object and rebuilds the producer with consistent metadata. Verify-on-read makes

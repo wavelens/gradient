@@ -29,8 +29,6 @@ root
 │   abandoned-dispatch-sweep             periodic passes (60s)
 ├── cache-maintenance, sign-sweep,
 │   debug-index, eval-cache-sweep        cache sweeps
-├── nar-uploader                         actor: streams staged NARs to S3,
-│                                        reconciles unconfirmed rows
 ├── effects                              actor: claims outbox rows;
 │                                        effects-workers factory beneath it
 ├── retention, rollup, otlp-snapshot     metrics pipeline
@@ -80,21 +78,15 @@ requests: the sweep scans on the pool, the actor applies each chunk in one short
 transaction after re-checking what became live since the scan. Startup recovery
 and the debug indexer's flag stay outside the actor.
 
-A relayed NAR on the S3 backend is committed before its object exists: the row
-carries `confirmed = false` and the file waits in `nar-staged/`. The
-`nar-uploader` child uploads what this instance staged, confirms each row
-through the graph actor, and on its first pass at boot classifies every
-unconfirmed row: staged file present, upload it; object present with the row's
-size, confirm; neither and older than the upload grace, demote. Served NARs
-resolve through `NarStore::open`: a hits-per-byte RAM cache for small objects,
-then the staged file, then storage.
-
-Each pass reads one capped page of the unconfirmed rows, so its orphan sweep
-cannot treat that page as the whole queue: a staged file the page does not name
-is a candidate, and the table decides. A backlog deeper than the page otherwise
-deletes the files it has yet to upload, and those rows reach the grace with
-neither a file nor an object and demote - the producer rebuilds, stages, and is
-deleted again on the next pass.
+Every upload is admitted before a byte moves: `UploadAdmission` in
+`ServerState` holds one server-wide budget (a count and a byte ceiling) shared
+by worker sessions and REST uploads, grants round-robin across sessions and
+FIFO within one, never lets a later request bypass a blocked head, runs a NAR
+larger than the whole budget alone, and lets a second request for an object
+already in flight wait on the first. S3 is presigned only and the file backend
+relay only, so the server never stages a NAR it will upload later; every commit
+writes `confirmed = true`. Served NARs resolve through `NarStore::open`: a
+hits-per-byte RAM cache for small objects, then storage.
 
 The maintenance deletions are the exception that matters for the cache index. TTL
 eviction, the zombie purge and the orphan GC retire `cached_path` rows in their own
