@@ -55,6 +55,7 @@ nav:
       - Share a Cache: guides/share-a-cache.md
       - Upload NARs: guides/upload-nars.md
       - Pull Deployment: guides/pull-deployment.md
+      - Notify with Actions: guides/actions.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
@@ -64,7 +65,6 @@ nav:
       - MCP Server: usage/mcp.md
       - State: usage/state.md
       - SCIM: usage/scim.md
-      - Pull Deployment: usage/pull-deployment.md
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md
       - Events & Webhooks: usage/events.md

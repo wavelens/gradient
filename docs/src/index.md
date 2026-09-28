@@ -28,7 +28,7 @@
 
     Failed builds, logs and evaluations, readable by any AI assistant.
 
--   :material-rocket-launch: **[Pull deployment](usage/pull-deployment.md)**
+-   :material-rocket-launch: **[Pull deployment](guides/pull-deployment.md)**
 
     Machines fetch and switch to their latest built NixOS configuration on their own.
 
