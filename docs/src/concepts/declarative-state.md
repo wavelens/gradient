@@ -44,7 +44,7 @@ Secrets never go into the Nix store: every `*_file` option points at a file on t
 | `users.<name>.password_file` | Argon2id hash of the password | `gradient hash > alice-password` |
 | `projects.<name>.private_key_file` | SSH private key for cloning | `ssh-keygen -t ed25519 -N "" -C gradient-acme -f acme-ssh-key` |
 | `caches.<name>.signing_key_file` | Nix signing key, base64 only | `nix-store --generate-binary-cache-key main main-key main-key.pub`, then `sed -i 's/^[^:]*://' main-key` |
-| `api_keys.<name>.key_file` | SHA-256 hex digest of the token | `gradient generate apikey` |
+| `api_keys.<name>.key_file` | SHA-256 hex digest of the token, without `GRAD` | See [API Key Files](#api-key-files) |
 | `workers.<name>.token_file` | Worker registration token | `openssl rand -hex 32` |
 | `integrations.<name>.secret_file` | Webhook secret shared with the forge | `openssl rand -hex 32` |
 | `integrations.<name>.access_token_file` | Forge access token | From the forge |
@@ -52,8 +52,20 @@ Secrets never go into the Nix store: every `*_file` option points at a file on t
 - `gradient hash` prompts for the password twice and prints the hash. A password piped through `<<<` gets a trailing newline hashed with it, and later sign-ins fail.
 - The public half `acme-ssh-key.pub` goes to the Git host as a deploy key.
 - `nix-store` writes `main:<key>`; Gradient expects the key without the `main:` prefix and derives the public key itself.
-- `gradient generate apikey` prints the token for clients and the digest for `key_file`; the file never holds the token itself.
 - A user without `password_file` signs in through OIDC only.
+
+### API Key Files
+
+The server stores only a digest of each API key. `key_file` holds that digest; clients send the token with a `GRAD` prefix.
+
+```sh
+TOKEN=$(openssl rand -hex 32)
+printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > ci-key # (1)!
+echo "GRAD$TOKEN" # (2)!
+```
+
+1.  The file for `key_file`. `printf %s` keeps a trailing newline out of the digest.
+2.  The token for clients, e.g. `Authorization: Bearer GRAD...`.
 
 ## Removal
 
