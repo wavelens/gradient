@@ -167,8 +167,10 @@ use gradient_types::{DerivationId, EvaluationId};
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait, Value};
 use std::sync::LazyLock;
 
-/// The value `unready_deps` holds for anchor `{alias}`: its direct dependencies whose
-/// anchor row is absent, or present and not ready by `dep_ready`.
+/// The value `unready_deps` holds for anchor `{alias}`: its direct build dependencies
+/// (`kind IN (0, 2)`) whose anchor row is absent, or present and not ready by
+/// `dep_ready`. A runtime-only edge is not an input of the build; `missing_runtime_deps`
+/// covers it, and counting it here wedged two derivations that share an output.
 ///
 /// One fragment, so the seed and the recount cannot drift on the part that must not:
 /// one count per EDGE, and a `LEFT JOIN` so a dependency with NO anchor row counts as
@@ -186,7 +188,7 @@ fn unready_dependency_count(alias: &str, dep_ready: &str) -> String {
     format!(
         "(SELECT count(*) FROM derivation_dependency e \
          LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
-         WHERE e.derivation = {alias}.derivation \
+         WHERE e.derivation = {alias}.derivation AND e.kind IN (0, 2) \
            AND (dep.derivation IS NULL OR NOT ({dep_ready})))"
     )
 }
@@ -238,7 +240,7 @@ crate::sql! {
     UPDATE derivation_build d
     SET unready_deps = d.unready_deps - c.n
     FROM (SELECT e.derivation, count(*) AS n FROM derivation_dependency e
-          WHERE e.dependency = ANY($1::uuid[]) GROUP BY e.derivation) c
+          WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) GROUP BY e.derivation) c
     WHERE d.derivation = c.derivation
     RETURNING d.derivation, d.unready_deps = 0 AS ready
 "#,
@@ -255,7 +257,8 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
                                THEN (now() AT TIME ZONE 'UTC') ELSE d.updated_at END \
          FROM derivation_build old, \
               (SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
-               WHERE e.dependency = ANY($1::uuid[]) GROUP BY e.derivation) c \
+               WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) \
+               GROUP BY e.derivation) c \
          WHERE d.derivation = c.derivation AND old.id = d.id \
          RETURNING d.derivation, old.status AS from_status, d.status AS to_status",
         unqueue = format!(
@@ -1264,6 +1267,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_build_gate_counts_build_edges_only() {
+        for sql in [
+            SEED_UNREADY.to_string(),
+            RECOUNT_UNREADY.to_string(),
+            RIPPLE_DOWN.text().into_owned(),
+            RIPPLE_UP.to_string(),
+        ] {
+            assert!(sql.contains("e.kind IN (0, 2)"), "{sql}");
+        }
+    }
     use crate::pool::statements;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
