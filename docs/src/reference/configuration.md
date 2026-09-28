@@ -91,6 +91,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `gc.intervalSecs` | int | `3600` | `GRADIENT_GC_INTERVAL_SECS` | Seconds between garbage collection runs. |
 | `gc.narTtlHours` | int | `336` | `GRADIENT_GC_NAR_TTL_HOURS` | Hours a cached path outside the live closure of retained evaluations is kept after its last fetch, or its upload if never fetched. |
 | `gc.narUploadGraceHours` | int | `24` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | Hours before an unreferenced NAR object is deleted, covering the window between its upload and the commit of its database rows. |
+| `gc.orphanDerivationHours` | int | `24` | `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` | Hours before a derivation outside the build closure of every retained evaluation is deleted. |
 | `gc.wedgedEvalHours` | int | `24` | `GRADIENT_GC_WEDGED_EVAL_HOURS` | Hours an evaluation may stay in one phase before it is considered stuck and stops blocking evaluation garbage collection. |
 
 ## `githubApp`

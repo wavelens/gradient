@@ -40,8 +40,8 @@ pub struct GcArgs {
     pub nar_upload_grace_hours: i64,
 
     /// Grace period in hours before the GC pass deletes a `derivation` row
-    /// that no longer has any referencing `build` rows. The grace lets rapid
-    /// re-evaluations reuse a freshly-orphaned derivation without
+    /// outside the build closure of every retained evaluation. The grace lets
+    /// rapid re-evaluations reuse a freshly-orphaned derivation without
     /// re-inserting it. Set to 0 to GC immediately.
     #[arg(
         long = "gc-orphan-derivation-hours",

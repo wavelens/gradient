@@ -651,6 +651,15 @@ in {
           '';
         };
 
+        orphanDerivationHours = lib.mkOption {
+          type = lib.types.ints.unsigned;
+          default = 24;
+          description = ''
+            Hours before a derivation outside the build closure of every retained evaluation is
+            deleted. The grace lets a quick re-evaluation reuse it. `0` deletes it on the next run.
+          '';
+        };
+
         wedgedEvalHours = lib.mkOption {
           type = lib.types.ints.unsigned;
           default = 24;
@@ -1292,6 +1301,7 @@ in {
         GRADIENT_GC_INTERVAL_SECS = toString cfg.gc.intervalSecs;
         GRADIENT_GC_NAR_TTL_HOURS = toString cfg.gc.narTtlHours;
         GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS = toString cfg.gc.narUploadGraceHours;
+        GRADIENT_GC_ORPHAN_DERIVATION_HOURS = toString cfg.gc.orphanDerivationHours;
         GRADIENT_GC_WEDGED_EVAL_HOURS = toString cfg.gc.wedgedEvalHours;
         GRADIENT_EVAL_MAX_KEEP = toString cfg.eval.maxKeep;
         GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES = toString cfg.eval.cache.maxTotalBytes;
