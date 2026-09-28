@@ -245,6 +245,13 @@ only_build("upstream-cached", "app")
 assert_clean()
 latency_report("upstream-cached")
 
+e = phase("twins")
+wait_evaluation(e, "Completed")
+assert all(builds_of("twins", n) == [] for n in ["lib1", "lib2"]), "a twin served upstream was rebuilt"
+only_build("twins", "app1")
+only_build("twins", "app2")
+assert_clean()
+
 banner("unchanged commit")
 wait_evaluation(evaluate("chain-3"), "Completed")
 assert all(daemon(w, "builds") == [] for w in WORKER_NODES), "an unchanged commit rebuilt something"

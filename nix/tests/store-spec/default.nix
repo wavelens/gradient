@@ -23,6 +23,7 @@ let
     preferLocalBuild = false;
     allowSubstitutes = true;
     fixedOutput = false;
+    sameAs = null;
     outputs.out = { };
     build = {
       durationMs = null;
@@ -68,8 +69,12 @@ let
         || fail "${id}: present.workers not closed under ${r}") (references node);
       cacheClosed = all (r: !node.present.cache || spec.derivations.${refNode r}.present.cache
         || fail "${id}: present.cache not closed under ${r}") (references node);
+      twin = spec.derivations.${node.sameAs} or (fail "${id}: sameAs names unknown node ${node.sameAs}");
+      twinShape = node.sameAs == null
+        || (twin.sameAs == null && twin.fixedOutput == node.fixedOutput && attrNames twin.outputs == attrNames node.outputs)
+        || fail "${id}: a twin matches a node that is no twin itself, in kind and output names";
     in
-    depsKnown && refsInClosure && fodShape && workersClosed && cacheClosed;
+    depsKnown && refsInClosure && fodShape && workersClosed && cacheClosed && twinShape;
 
   validate = spec:
     let
@@ -132,7 +137,7 @@ let
     '';
 
   daemonNode = spec: id: node: lib.nameValuePair "${spec.name}/${id}"
-    (removeAttrs node [ "deps" "requiredSystemFeatures" "preferLocalBuild" "allowSubstitutes" ]);
+    (removeAttrs node [ "deps" "requiredSystemFeatures" "preferLocalBuild" "allowSubstitutes" "sameAs" ]);
 
   toDaemonConfig = raws: worker: pkgs.writeText "gradient-daemon-${worker}.json" (builtins.toJSON {
     inherit worker;

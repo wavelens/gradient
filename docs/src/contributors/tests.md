@@ -120,7 +120,7 @@ The prelude also re-exports the protocol doubles: `MockProtoServer` (`gradient-w
 
 | Aspect | Behavior |
 |---|---|
-| Store spec | A plain attrset: `derivations.<id>` with `deps`, `outputs.<o>.references` (`"<node>.<output>"`), `build.outcome` (`success`, `fail`, `hang`), `present.workers`, `present.cache`. Defaults and invariants in `nix/tests/store-spec/default.nix`; presets `chain n`, `diamond`, `fanOut n`, `wide depth width` |
+| Store spec | A plain attrset: `derivations.<id>` with `deps`, `outputs.<o>.references` (`"<node>.<output>"`), `build.outcome` (`success`, `fail`, `hang`), `present.workers`, `present.cache`, `sameAs` (a twin: another `.drv` with the same name, output paths and FOD content). Defaults and invariants in `nix/tests/store-spec/default.nix`; presets `chain n`, `diamond`, `fanOut n`, `wide depth width` |
 | Paths | `derivations.nix` feeds both the published flake and the daemon config; the `store-spec` check asserts drv and output paths agree |
 | Presence | `present.workers` is seeded at boot; `present.cache` becomes a signed file cache used as upstream |
 | Timing | Seeded lognormal delays (median 40 ms); `GRADIENT_DAEMON_SEED` replays a run |

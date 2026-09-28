@@ -13,15 +13,16 @@ let
       referenced = map (part 1) (filter (r: part 0 r == d) (concatMap (o: o.references) (attrValues node.outputs)));
     in
     if referenced == [ ] then [ (head (attrNames spec.derivations.${d}.outputs)) ] else referenced;
-  fodContent = id: "gradient-daemon fod ${spec.name}/${id}\n";
+  identity = id: let twin = spec.derivations.${id}.sameAs or null; in if twin == null then id else twin;
+  fodContent = id: "gradient-daemon fod ${spec.name}/${identity id}\n";
   drvs = mapAttrs (id: node:
     derivation ({
-      inherit (node) name;
+      inherit (spec.derivations.${identity id}) name;
       inherit (spec) system;
       builder = "/bin/sh";
       args = [ "-c" "exit 1" ];
       gradientSpec = spec.name;
-      gradientNode = id;
+      gradientNode = if node.fixedOutput or false then id else identity id;
       deps = concatStringsSep " " (concatMap (d: map (o: "${drvs.${d}.${o}}") (requestedOutputs node d)) node.deps);
       inherit (node) requiredSystemFeatures preferLocalBuild allowSubstitutes;
     } // (if node.fixedOutput then {

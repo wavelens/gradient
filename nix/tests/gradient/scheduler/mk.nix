@@ -19,6 +19,7 @@ let
     cross-worker = ./specs/cross-worker.nix;
     already-present = ./specs/already-present.nix;
     upstream-cached = ./specs/upstream-cached.nix;
+    twins = ./specs/twins.nix;
     hang = ./specs/hang.nix;
     frozen = ./specs/frozen.nix;
     stress = ./specs/stress.nix;
