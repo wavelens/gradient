@@ -414,7 +414,7 @@ A role may list `scim_group` values: IdP group names provisioned via SCIM. When
 the IdP adds a user to a listed SCIM group, that user is granted this role in the
 role's project; removal from the group removes the membership. Grants are
 additive across groups. A SCIM group whose name matches no `scim_group` entry is
-unknown and returns `404`. See [SCIM](scim.md).
+unknown and returns `404`. See [Set Up Single Sign-On](../guides/sso.md).
 
 ```nix
 services.gradient.state.roles.acme-engineer = {

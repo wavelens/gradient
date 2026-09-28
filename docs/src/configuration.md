@@ -326,7 +326,7 @@ services.gradient.scim = {
 };
 ```
 
-Enabling SCIM mounts an instance-level SCIM 2.0 provisioning surface at `https://$domain/scim/v2`, authenticated by the bearer token in `tokenFile` (not user credentials). SCIM provisions passwordless `managed` users that later authenticate via OIDC; SCIM groups map to roles through `scim_group` (see [SCIM](usage/scim.md) and [Declarative State](usage/state.md)).
+Enabling SCIM mounts an instance-level SCIM 2.0 provisioning surface at `https://$domain/scim/v2`, authenticated by the bearer token in `tokenFile` (not user credentials). SCIM provisions passwordless `managed` users that later authenticate via OIDC; SCIM groups map to roles through `scim_group` (see [Set Up Single Sign-On](guides/sso.md) and [Declarative State](usage/state.md)).
 
 | Option | Env | Default | Description |
 |---|---|---|---|

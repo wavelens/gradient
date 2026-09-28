@@ -36,7 +36,7 @@
 
     Users, projects, caches and workers as NixOS options, validated at build time.
 
--   :material-account-group: **SSO and teams**
+-   :material-account-group: **[SSO and teams](guides/sso.md)**
 
     OIDC login, SCIM provisioning, roles and invites per project and cache.
 

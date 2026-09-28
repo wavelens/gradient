@@ -57,6 +57,7 @@ nav:
       - Pull Deployment: guides/pull-deployment.md
       - Notify with Actions: guides/actions.md
       - Update Flake Inputs: guides/flake-updates.md
+      - Set Up Single Sign-On: guides/sso.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
@@ -65,7 +66,6 @@ nav:
       - API: usage/api.md
       - MCP Server: usage/mcp.md
       - State: usage/state.md
-      - SCIM: usage/scim.md
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md
       - Events & Webhooks: usage/events.md
