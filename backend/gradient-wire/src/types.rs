@@ -596,6 +596,24 @@ pub enum JobPhase {
 }
 
 impl JobPhase {
+    pub const ALL: [Self; 15] = [
+        Self::Fetch,
+        Self::PushInputs,
+        Self::EvalFlake,
+        Self::EvalDerivations,
+        Self::EvalCachePull,
+        Self::EvalCachePush,
+        Self::KnownDerivationsWait,
+        Self::DrvClosurePush,
+        Self::Prefetch,
+        Self::SubstituteFetch,
+        Self::Download,
+        Self::Build,
+        Self::Compress,
+        Self::NarPush,
+        Self::CacheQueryWait,
+    ];
+
     /// Stable identifier for the API, the rollup metric key and the DB column.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -746,4 +764,20 @@ pub enum BuildFailureKind {
     /// `Permanent` stamped `AttemptFailureReason::BuilderNonzero` on the
     /// attempt, which permanently blocks every requeue (#572).
     Aborted,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JobPhase;
+
+    #[test]
+    fn every_stored_phase_discriminant_is_listed() {
+        for v in 0..=i16::from(u8::MAX) {
+            let listed = JobPhase::ALL.iter().any(|p| p.as_i16() == v);
+            assert_eq!(JobPhase::from_i16(v).is_some(), listed, "discriminant {v}");
+        }
+        for phase in JobPhase::ALL {
+            assert_eq!(JobPhase::from_i16(phase.as_i16()), Some(phase));
+        }
+    }
 }

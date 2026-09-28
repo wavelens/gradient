@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_util::supervision::ChildSpec;
+use gradient_wire::types::JobPhase;
 use sea_orm::ConnectionTrait;
 use tracing::{debug, warn};
 
@@ -403,14 +404,17 @@ fn build_duration_attempt_sql() -> String {
 /// discriminant 9 (`substitute_relay`), which historical rows still carry.
 fn phase_duration_sql() -> String {
     let ms = "(p.end_ms - p.start_ms)::double precision";
+    let last = JobPhase::ALL.iter().map(|p| p.as_i16()).max().unwrap_or(0);
+    let names = (0..=last)
+        .map(|v| format!("'{}'", JobPhase::name_of(v)))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
          SELECT uuidv7(), \
                 'phase.' || CASE dj.kind WHEN 0 THEN 'eval' ELSE 'build' END || '.' || \
-                  (ARRAY['fetch','push_inputs','eval_flake','eval_derivations','eval_cache_pull', \
-                         'eval_cache_push','known_derivations_wait','drv_closure_push','prefetch', \
-                         'substitute_relay','build','compress','nar_push','cache_query_wait'])[p.phase + 1] || '.ms', \
+                  (ARRAY[{names}])[p.phase + 1] || '.ms', \
                 {minute}, date_trunc('minute', p.created_at), \
                 jsonb_build_object('project', dj.project::text), \
                 hashtextextended(dj.project::text, 0), \
@@ -418,7 +422,7 @@ fn phase_duration_sql() -> String {
          FROM dispatched_job_phase p \
          JOIN dispatched_job dj ON dj.id = p.dispatched_job \
          WHERE p.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
-           AND p.phase BETWEEN 0 AND 13 \
+           AND p.phase BETWEEN 0 AND {last} \
          GROUP BY date_trunc('minute', p.created_at), dj.project, dj.kind, p.phase \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
@@ -426,6 +430,8 @@ fn phase_duration_sql() -> String {
         minute = i16::from(RollupGranularity::Minute),
         window = MINUTE_WINDOW,
         ms = ms,
+        names = names,
+        last = last,
     )
 }
 
@@ -579,6 +585,32 @@ mod tests {
     fn cascade_carries_the_newest_scope() {
         let sql = cascade_sql(RollupGranularity::Day, RollupGranularity::Hour, "2 days");
         assert!(sql.contains("(array_agg(scope ORDER BY bucket_start DESC))[1]"));
+    }
+
+    /// Every phase a worker reports lands in its own series: the filter admits
+    /// its discriminant and the name array names it at that position.
+    #[test]
+    fn every_reported_phase_reaches_its_series() {
+        let sql = phase_duration_sql();
+        let bound: i16 = sql
+            .split("p.phase BETWEEN 0 AND ")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|n| n.parse().ok())
+            .expect("a bounded phase filter");
+        let names: Vec<&str> = sql
+            .split("ARRAY[")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("a phase name array")
+            .split(',')
+            .map(|n| n.trim_matches('\''))
+            .collect();
+        for phase in JobPhase::ALL {
+            let v = phase.as_i16();
+            assert!(v <= bound, "{} is filtered out", phase.as_str());
+            assert_eq!(names[v as usize], phase.as_str());
+        }
     }
 
     /// Derivations are global; build rollups must attribute project through the

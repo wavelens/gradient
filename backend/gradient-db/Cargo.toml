@@ -22,6 +22,7 @@ gradient-entity    = { workspace = true }
 gradient-migration = { workspace = true }
 gradient-types     = { workspace = true }
 gradient-util      = { workspace = true }
+gradient-wire      = { workspace = true }
 gradient-storage   = { workspace = true }
 
 anyhow            = { workspace = true }
