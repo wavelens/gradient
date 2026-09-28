@@ -29,9 +29,10 @@ info:
     - The owning project is **public** - no credentials required.
     - A short-lived (1 h) **download token** is supplied via `?token=<download_token>`.
       Obtain one from `GET /builds/{build}/download-token` while authenticated.
-      Tokens are scoped to a single build and are safe to embed in URLs.
+      Tokens are scoped to the build's derivation and are safe to embed in URLs.
     - A valid session (`jwt_token` cookie or `Authorization: Bearer` header) belonging
-      to a member of the owning project.
+      to a member of the owning project, or of any project with a build of the
+      same derivation (the rule every other build read uses).
 
     ## Rate limiting
 
@@ -5006,7 +5007,8 @@ paths:
         2. `?token=<download_token>` - a short-lived per-build token from
            `GET /builds/{build}/download-token` (1 h validity, safe to embed in URLs).
         3. `jwt_token` cookie or `Authorization: Bearer` header and the caller is a
-           member of the owning project.
+           member of the owning project, or of any project with a build of the
+           same derivation.
       operationId: downloadBuildArtefact
       parameters:
         - name: token

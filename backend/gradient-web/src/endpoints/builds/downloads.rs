@@ -230,6 +230,23 @@ pub async fn get_build_download_token(
     Ok(ok_json(token))
 }
 
+/// A download token stands in for the caller: it was issued to someone
+/// [`BuildAccessContext::load`] admitted for a build of the same derivation.
+async fn load_with_download_token(
+    state: &Arc<ServerState>,
+    build_id: BuildJobId,
+    token: String,
+) -> WebResult<BuildAccessContext> {
+    let ctx = BuildAccessContext::load_unguarded(state, build_id).await?;
+    let claims = decode_download_token(State(Arc::clone(state)), token)
+        .await
+        .map_err(|_| WebError::unauthorized("Invalid download token"))?;
+    if claims.derivation != ctx.build_job.derivation {
+        return Err(WebError::not_found("Build"));
+    }
+    Ok(ctx)
+}
+
 pub async fn get_build_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -237,26 +254,10 @@ pub async fn get_build_download(
     Path((build_id, filename)): Path<(BuildJobId, String)>,
     Query(query): Query<DownloadQuery>,
 ) -> Result<Response, WebError> {
-    let ctx = BuildAccessContext::load_unguarded(&state, build_id).await?;
-
-    if let Some(token_str) = query.token {
-        let claims = decode_download_token(State(Arc::clone(&state)), token_str)
-            .await
-            .map_err(|_| WebError::unauthorized("Invalid download token"))?;
-        if claims.derivation != ctx.build_job.derivation {
-            return Err(WebError::not_found("Build"));
-        }
-    } else if !ctx.project.public {
-        match maybe_user {
-            Some(user) => {
-                use crate::access::is_project_member;
-                if !is_project_member(&state, user.id, ctx.project.id, api_key.as_ref()).await? {
-                    return Err(WebError::not_found("Build"));
-                }
-            }
-            None => return Err(WebError::unauthorized("Authorization required")),
-        }
-    }
+    let ctx = match query.token {
+        Some(token) => load_with_download_token(&state, build_id, token).await?,
+        None => BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?,
+    };
 
     let build_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(ctx.build_job.derivation))
