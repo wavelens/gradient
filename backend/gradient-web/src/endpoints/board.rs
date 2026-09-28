@@ -818,27 +818,58 @@ fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
     )
 }
 
-fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String {
-    let window = format!("(now() AT TIME ZONE 'UTC') - interval '{window_days} days'");
-    let mut clauses = vec![
+fn window_sql(window_days: i64) -> String {
+    format!("(now() AT TIME ZONE 'UTC') - interval '{window_days} days'")
+}
+
+fn latest_build_metric_cte(window_days: i64) -> String {
+    format!(
+        "metric AS ( \
+           SELECT DISTINCT ON (dm.derivation) dm.derivation, dm.build_time_ms, dm.worker_id \
+           FROM derivation_metric dm \
+           WHERE dm.build_time_ms IS NOT NULL AND dm.created_at >= {} \
+           ORDER BY dm.derivation, dm.created_at DESC \
+         )",
+        window_sql(window_days)
+    )
+}
+
+const BUILD_TIME_MS: &str = "coalesce(m.build_time_ms, \
+     EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)";
+
+const BUILD_IS_TIMED: &str = "(m.derivation IS NOT NULL \
+     OR (ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL))";
+
+fn build_time_joins(anchor: &str) -> String {
+    format!(
+        "LEFT JOIN metric m ON m.derivation = {anchor}.derivation \
+         LEFT JOIN LATERAL ( \
+           SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
+           FROM build_attempt ba2 \
+           WHERE ba2.derivation_build = {anchor}.derivation_build AND m.derivation IS NULL \
+           ORDER BY ba2.created_at DESC LIMIT 1 \
+         ) ba ON true"
+    )
+}
+
+fn completed_build_clauses(window_days: i64) -> Vec<String> {
+    vec![
         format!(
             "b.status = {}",
             gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed)
         ),
-        format!("b.created_at >= {window}"),
-    ];
+        format!("b.created_at >= {}", window_sql(window_days)),
+    ]
+}
 
+fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String {
+    let mut clauses = completed_build_clauses(window_days);
     if let Some(list) = project_filter {
         clauses.push(format!("pr.project IN ({list})"));
     }
 
     format!(
-        "WITH metric AS ( \
-           SELECT DISTINCT ON (dm.derivation) dm.derivation, dm.build_time_ms, dm.worker_id \
-           FROM derivation_metric dm \
-           WHERE dm.build_time_ms IS NOT NULL AND dm.created_at >= {window} \
-           ORDER BY dm.derivation, dm.created_at DESC \
-         ), anchor AS ( \
+        "WITH {metric}, anchor AS ( \
            SELECT DISTINCT ON (b.id) bj.id, pr.project, d.name, b.id AS derivation_build, b.derivation \
            FROM build_job bj \
            JOIN derivation_build b ON b.id = bj.derivation_build \
@@ -848,26 +879,19 @@ fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String 
            WHERE {clauses} \
            ORDER BY b.id, bj.created_at DESC \
          ), ranked AS ( \
-           SELECT a.id, a.project, a.name, \
-           coalesce(m.build_time_ms, EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000) AS build_time_ms, \
+           SELECT a.id, a.project, a.name, {BUILD_TIME_MS} AS build_time_ms, \
            coalesce(m.worker_id, dj.worker_id) AS worker \
-           FROM anchor a \
-           LEFT JOIN metric m ON m.derivation = a.derivation \
-           LEFT JOIN LATERAL ( \
-             SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
-             FROM build_attempt ba2 \
-             WHERE ba2.derivation_build = a.derivation_build AND m.derivation IS NULL \
-             ORDER BY ba2.created_at DESC LIMIT 1 \
-           ) ba ON true \
+           FROM anchor a {timing} \
            LEFT JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
-           WHERE m.derivation IS NOT NULL \
-              OR (ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL) \
+           WHERE {BUILD_IS_TIMED} \
            ORDER BY build_time_ms DESC LIMIT 20 \
          ) \
          SELECT r.id, r.project, r.name, r.build_time_ms, r.worker, wn.display_name AS worker_name \
          FROM ranked r {worker_name} \
          ORDER BY r.build_time_ms DESC",
+        metric = latest_build_metric_cte(window_days),
         clauses = clauses.join(" AND "),
+        timing = build_time_joins("a"),
         worker_name = worker_name_sql("r.worker", project_filter),
     )
 }
@@ -1104,26 +1128,26 @@ pub struct TopProjectBuildTime {
     pub build_count: i64,
 }
 
+/// A build shared by several projects counts once toward each of them.
 fn top_projects_by_buildtime_sql(window_days: i64) -> String {
     format!(
-        "SELECT pr.project, p.name AS project_name, \
-         sum(EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)::bigint AS total, \
-         count(*)::bigint AS cnt \
-         FROM build_job bj \
-         JOIN derivation_build b ON b.id = bj.derivation_build \
-         JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN task pr ON pr.id = ev.task \
-         JOIN project p ON p.id = pr.project \
-         JOIN LATERAL ( \
-           SELECT ba2.build_started_at, ba2.build_finished_at \
-           FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
-           ORDER BY ba2.created_at DESC LIMIT 1 \
-         ) ba ON true \
-         WHERE b.status = {completed} \
-           AND ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL \
-           AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window_days} days' \
-         GROUP BY pr.project, p.name ORDER BY total DESC LIMIT 15",
-        completed = gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed),
+        "WITH {metric}, anchor AS ( \
+           SELECT DISTINCT b.id AS derivation_build, b.derivation, pr.project \
+           FROM build_job bj \
+           JOIN derivation_build b ON b.id = bj.derivation_build \
+           JOIN evaluation ev ON ev.id = bj.evaluation \
+           JOIN task pr ON pr.id = ev.task \
+           WHERE {clauses} \
+         ) \
+         SELECT a.project, p.name AS project_name, \
+         sum({BUILD_TIME_MS})::bigint AS total, count(*)::bigint AS cnt \
+         FROM anchor a \
+         JOIN project p ON p.id = a.project {timing} \
+         WHERE {BUILD_IS_TIMED} \
+         GROUP BY a.project, p.name ORDER BY total DESC LIMIT 15",
+        metric = latest_build_metric_cte(window_days),
+        clauses = completed_build_clauses(window_days).join(" AND "),
+        timing = build_time_joins("a"),
     )
 }
 
@@ -1207,9 +1231,14 @@ fn expensive_by_resource_sql(
         .unwrap_or_default();
 
     format!(
-        "WITH ranked AS ( \
-           SELECT dm.derivation, pro.project, d.name, {value_expr} AS value, dm.worker_id \
+        "WITH latest AS ( \
+           SELECT DISTINCT ON (dm.derivation) dm.* \
            FROM derivation_metric dm \
+           WHERE dm.created_at >= {window} \
+           ORDER BY dm.derivation, dm.created_at DESC \
+         ), ranked AS ( \
+           SELECT dm.derivation, pro.project, d.name, {value_expr} AS value, dm.worker_id \
+           FROM latest dm \
            JOIN derivation d ON d.id = dm.derivation \
            JOIN LATERAL ( \
              SELECT pr.project \
@@ -1220,12 +1249,12 @@ fn expensive_by_resource_sql(
              LIMIT 1 \
            ) pro ON true \
            WHERE {value_expr} > 0 \
-             AND dm.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window_days} days' \
            ORDER BY value DESC LIMIT 20 \
          ) \
          SELECT r.derivation, r.project, r.name, r.value, r.worker_id, wn.display_name AS worker_name \
          FROM ranked r {worker_name} \
          ORDER BY r.value DESC",
+        window = window_sql(window_days),
         worker_name = worker_name_sql("r.worker_id", project_filter),
     )
 }
@@ -1822,5 +1851,39 @@ mod tests {
     #[test]
     fn top_projects_carry_the_project_name() {
         assert!(top_projects_by_buildtime_sql(30).contains("p.name AS project_name"));
+    }
+
+    #[test]
+    fn top_projects_count_each_build_once_per_project() {
+        let sql = top_projects_by_buildtime_sql(30);
+        assert!(
+            sql.contains("SELECT DISTINCT b.id AS derivation_build, b.derivation, pr.project"),
+            "sql = {sql}"
+        );
+        assert!(sql.contains("FROM anchor a"), "sql = {sql}");
+        assert!(!sql.contains("count(*) FROM build_job"), "sql = {sql}");
+    }
+
+    #[test]
+    fn top_projects_and_expensive_jobs_share_the_build_time_source() {
+        for sql in [
+            top_projects_by_buildtime_sql(30),
+            expensive_jobs_sql(30, None),
+        ] {
+            assert!(sql.contains(&latest_build_metric_cte(30)), "sql = {sql}");
+            assert!(sql.contains(BUILD_TIME_MS), "sql = {sql}");
+        }
+    }
+
+    #[test]
+    fn expensive_resources_rank_the_latest_metric_per_derivation() {
+        let sql = expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, None);
+        let latest = sql.find("SELECT DISTINCT ON (dm.derivation)").expect(&sql);
+        let ranked = sql.find("ORDER BY value DESC").expect(&sql);
+        assert!(latest < ranked, "sql = {sql}");
+        assert!(
+            sql.contains("ORDER BY dm.derivation, dm.created_at DESC"),
+            "sql = {sql}"
+        );
     }
 }

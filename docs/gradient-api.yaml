@@ -9048,7 +9048,7 @@ paths:
     get:
       tags: [board]
       summary: Most expensive builds by resource
-      description: Top 20 derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from `derivation_metric`, skipping zero values. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.
+      description: Top 20 derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from each derivation's latest `derivation_metric` row in the window, skipping zero values. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.
       operationId: getBoardExpensiveByResource
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string, enum: [ram, cpu, disk, network] } }
@@ -9335,7 +9335,7 @@ paths:
     get:
       tags: [board]
       summary: Top projects by build time (superuser)
-      description: Projects ranked by cumulative completed-build time in a window. Superuser only.
+      description: Projects ranked by cumulative completed-build time in a window. Each derivation build counts once per project that built it, timed like `/board/jobs/expensive`; `build_count` counts derivation builds. Superuser only.
       operationId: getBoardTopProjects
       parameters:
         - { name: window_days, in: query, required: false, schema: { type: integer, default: 30 } }
