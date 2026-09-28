@@ -7958,147 +7958,6 @@ paths:
         '404':
           description: Unknown cache, or the cache does not hold the key
 
-  # ── Forge Webhooks (incoming) ────────────────────────────────────────────────
-
-  /hooks/github:
-    post:
-      tags: [forge-webhooks]
-      summary: Receive GitHub App webhook
-      description: |-
-        Receives events from a configured GitHub App. Payloads are authenticated using
-        `X-Hub-Signature-256` HMAC-SHA256 verification against the configured
-        `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
-
-        **Handled events:**
-        - `push` / `pull_request` / `release` - trigger an evaluation on any task whose
-          repository URL matches the matching trigger. A `push` carrying an
-          all-zero `after` SHA (a branch/tag deletion or a forge "test" delivery)
-          is accepted as a `200` no-op rather than rejected.
-        - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
-        - `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.
-        - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
-        - `installation` / `installation_repositories` - stores or clears the GitHub App
-          `installation_id` on the matching Gradient project.
-        - `ping` - always returns 200.
-
-        This endpoint is unauthenticated (verified via HMAC signature).
-      operationId: githubAppWebhook
-      parameters:
-        - name: X-GitHub-Event
-          in: header
-          required: true
-          schema:
-            type: string
-          description: GitHub event type (e.g. `push`, `installation`, `ping`)
-        - name: X-Hub-Signature-256
-          in: header
-          required: true
-          schema:
-            type: string
-          description: HMAC-SHA256 signature of the body (`sha256=<hex>`)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              description: GitHub event payload (varies by event type)
-      responses:
-        '200':
-          description: Webhook processed (may include zero queued evaluations)
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        $ref: '#/components/schemas/WebhookResponse'
-        '400':
-          description: Unparseable JSON payload or unsupported forge
-        '401':
-          description: Invalid webhook signature
-        '404':
-          description: Integration not found
-        '500':
-          description: Internal error
-        '503':
-          description: GitHub App not configured (GitHub endpoint only)
-
-  /hooks/{forge}/{project}/{integration_name}:
-    parameters:
-      - name: forge
-        in: path
-        required: true
-        schema:
-          type: string
-          enum: [gitea, forgejo, gitlab]
-        description: >-
-          Forge type path segment. Determines the HMAC scheme; does **not**
-          filter the integration lookup - a single inbound integration can
-          serve all three forges. GitHub deliveries go through
-          `POST /hooks/github` (the App webhook) instead.
-      - name: project
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Gradient project name
-      - name: integration_name
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Name of the inbound integration within the project
-    post:
-      tags: [forge-webhooks]
-      summary: Receive forge push webhook
-      description: |-
-        Receives push events for a named inbound integration.
-        Authenticated via the integration's stored HMAC secret.
-
-        Signature header by forge:
-        - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)
-        - `gitlab`: `X-Gitlab-Token` (plain token comparison)
-
-        On a matching push, queues an evaluation for every active task whose
-        `task_integration.inbound_integration` points at this row and whose
-        repository URL matches the webhook payload's clone URL.
-
-        A push carrying an all-zero `after` SHA (a branch/tag deletion or a
-        forge "test" delivery) is accepted as a `200` no-op rather than rejected.
-
-        This endpoint is unauthenticated (verified via forge-specific signature).
-      operationId: forgeWebhook
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              description: Forge push event payload
-      responses:
-        '200':
-          description: Webhook processed (may include zero queued evaluations)
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        $ref: '#/components/schemas/WebhookResponse'
-        '400':
-          description: Unparseable JSON payload or unsupported forge
-        '401':
-          description: Invalid webhook signature
-        '404':
-          description: Integration not found
-        '500':
-          description: Internal error
-
   # ── Nix Cache Protocol ───────────────────────────────────────────────────────
   # These endpoints live outside /api/v1. The server URL for these is the root,
   # e.g. https://gradient.example.com (no /api/v1 prefix).
@@ -8130,9 +7989,9 @@ paths:
 
       | Endpoint | Description |
       |---|---|
-      | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
-      | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
-      | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`). Serves this cache's own log for any build that produced one, successful or failed; otherwise asks the cache's upstreams in order and proxies the first hit, so a pull-through cache exposes logs for paths it substituted rather than built. `X-Cache: HIT` (ours) or `MISS` (upstream). Rate-limited at ~300 req/min. |
+      | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at ~180 req/min, burst 180. |
+      | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at ~180 req/min, burst 180. |
+      | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`). Serves this cache's own log for any build that produced one, successful or failed; otherwise asks the cache's upstreams in order and proxies the first hit, so a pull-through cache exposes logs for paths it substituted rather than built. `X-Cache: HIT` (ours) or `MISS` (upstream). Rate-limited at ~180 req/min, burst 900. |
 
   /projects/{project}/webhooks:
     get:
