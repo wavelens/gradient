@@ -301,13 +301,11 @@ impl WorkerPool {
         }
     }
 
-    /// Mark a batch of job IDs as sent to `worker_id` so they are not
-    /// re-included in the next delta `JobOffer`.
-    pub fn mark_candidates_sent(&mut self, worker_id: &str, job_ids: &[String]) {
+    /// Record the job IDs `worker_id` now holds as offered, replacing the old
+    /// set so jobs that left the pending set drop out of it.
+    pub fn set_sent_candidates(&mut self, worker_id: &str, job_ids: HashSet<String>) {
         if let Some(slot) = self.workers.get_mut(worker_id) {
-            slot.shared_mut()
-                .sent_candidates
-                .extend(job_ids.iter().cloned());
+            slot.shared_mut().sent_candidates = job_ids;
         }
     }
 
@@ -721,7 +719,7 @@ mod tests {
         // sent flag so the next delta push re-offers it (workers re-score it).
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.mark_candidates_sent("w1", &["build:a".to_string(), "build:b".to_string()]);
+        pool.set_sent_candidates("w1", HashSet::from(["build:a".into(), "build:b".into()]));
         assert!(pool.sent_candidates_for("w1").unwrap().contains("build:a"));
 
         pool.remove_sent_candidate("build:a");

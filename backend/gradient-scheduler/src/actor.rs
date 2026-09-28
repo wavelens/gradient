@@ -278,11 +278,11 @@ impl SchedulerCore {
         let mut candidates = self
             .tracker
             .candidates_for_worker(authorized.as_ref(), caps.as_ref());
+        let visible: HashSet<String> = candidates.iter().map(|c| c.job_id.clone()).collect();
         if only_new && let Some(sent) = self.pool.sent_candidates_for(worker) {
             candidates.retain(|c| !sent.contains(&c.job_id));
         }
-        let ids: Vec<String> = candidates.iter().map(|c| c.job_id.clone()).collect();
-        self.pool.mark_candidates_sent(worker, &ids);
+        self.pool.set_sent_candidates(worker, visible);
         Offer {
             candidates,
             generation: self.offers,
@@ -627,5 +627,33 @@ impl Actor for CoreActor {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scheduler_tests::{eval_job, eval_worker_caps, port};
+
+    #[test]
+    fn a_job_that_left_the_pending_set_leaves_every_sent_set() {
+        let mut core = SchedulerCore {
+            pool: WorkerPool::new(),
+            tracker: JobTracker::new(),
+            offers: 0,
+            policy: gradient_pool::score::policy_by_name("simple"),
+        };
+        core.pool
+            .register("w1".into(), eval_worker_caps(), HashSet::new(), port().0);
+        let job = eval_job(ProjectId::now_v7());
+        let job_id = crate::jobs::eval_job_key(job.evaluation_id);
+        core.tracker
+            .add_pending(job_id.clone(), PendingJob::Eval(job));
+        assert_eq!(core.candidates("w1", true).candidates.len(), 1);
+
+        core.tracker.remove_job(&job_id);
+        core.candidates("w1", true);
+
+        assert!(core.pool.sent_candidates_for("w1").unwrap().is_empty());
     }
 }

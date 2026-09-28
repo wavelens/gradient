@@ -50,7 +50,7 @@ async fn test_scheduler_with(db: sea_orm::DatabaseConnection) -> Arc<Scheduler> 
     scheduler
 }
 
-fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
+pub(crate) fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
     let (tx, rx) = mpsc::unbounded_channel();
     (Arc::new(tx), rx)
 }
@@ -69,7 +69,7 @@ async fn register(
     signals
 }
 
-fn eval_job(peer: ProjectId) -> PendingEvalJob {
+pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
     PendingEvalJob {
         evaluation_id: EvaluationId::now_v7(),
         task_id: None,
@@ -141,7 +141,7 @@ fn build_job(
 /// capability gating: `eval` makes it eligible for the eval jobs they enqueue,
 /// and the absence of `fetch` keeps the reserve-fetch-workers rule from
 /// penalizing it into a negative score on the unscored request_job path.
-fn eval_worker_caps() -> GradientCapabilities {
+pub(crate) fn eval_worker_caps() -> GradientCapabilities {
     GradientCapabilities {
         eval: true,
         ..GradientCapabilities::default()

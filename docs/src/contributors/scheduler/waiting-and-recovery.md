@@ -63,7 +63,7 @@ A `workers` verdict with an empty `unmet` set turns into the heal: `attempt_grap
 
 ## Re-Offering Returned Jobs
 
-Offers are deltas: the server sends a worker only candidates missing from its `sent_candidates`. The worker scores every candidate it is offered. A job returned to the pool has its sent flag cleared.
+Offers are deltas: the server sends a worker only candidates missing from its `sent_candidates`. The worker scores every candidate it is offered. Each offer resets the set to the candidates the worker can currently see, and a claimed, finished or aborted job drops out of it. A job returned to the pool has its sent flag cleared.
 
 | Event | Mechanism |
 |---|---|
