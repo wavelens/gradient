@@ -37,7 +37,7 @@ docs_dir: docs/src
 nav:
   - Home: index.md
   - Get Started:
-      - Quick Start: quick-start.md
+      - Quick Start: get-started/quick-start.md
       - Installation: installation.md
   - Using Gradient:
       - Overview: usage/overview.md

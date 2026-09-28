@@ -75,7 +75,7 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 !!! note
     Gradient is in active development. APIs and configuration options may change between releases.
 
-[Get started](quick-start.md){ .md-button .md-button--primary }
+[Get started](get-started/quick-start.md){ .md-button .md-button--primary }
 [Try the public instance](https://public.gradient.ci){ .md-button }
 
 Gradient is developed by [Wavelens GmbH](https://wavelens.io) and released under the [AGPL-3.0-only](https://github.com/wavelens/gradient/blob/main/LICENSE) license.
