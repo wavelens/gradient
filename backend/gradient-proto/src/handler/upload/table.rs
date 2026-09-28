@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use gradient_storage::PartialWriter;
 use gradient_storage::admission::UploadPermit;
-use gradient_wire::types::UploadObject;
+use gradient_wire::types::{UploadMetadata, UploadObject};
 
 pub(in crate::handler) enum Transfer {
     Relay(Box<PartialWriter>),
@@ -50,6 +50,9 @@ pub(in crate::handler) struct Granted {
     pub permit: UploadPermit,
     pub transfer: Transfer,
     pub lease: Lease,
+    /// Metadata of an `UploadFinished` that overtook the final relayed chunk.
+    pub finished: Option<UploadMetadata>,
+    pub final_seen: bool,
 }
 
 enum Entry {
@@ -132,17 +135,39 @@ impl UploadTable {
         }
     }
 
-    pub(in crate::handler) fn forget_job(&mut self, job_id: &str) -> Vec<u64> {
+    /// Remove every request of `job_id`; the granted ones come back so their
+    /// transfers can be abandoned.
+    pub(in crate::handler) fn forget_job(&mut self, job_id: &str) -> Vec<(u64, Option<Granted>)> {
         let ids: Vec<u64> = self
             .entries
             .iter()
             .filter(|(_, e)| e.job_id() == job_id)
             .map(|(id, _)| *id)
             .collect();
-        for id in &ids {
-            self.entries.remove(id);
-        }
-        ids
+        ids.into_iter()
+            .filter_map(|id| {
+                let granted = match self.entries.remove(&id)? {
+                    Entry::Granted(g) => Some(*g),
+                    Entry::Queued(_) => None,
+                };
+                Some((id, granted))
+            })
+            .collect()
+    }
+
+    pub(in crate::handler) fn drain_granted(&mut self) -> Vec<Granted> {
+        self.entries
+            .drain()
+            .filter_map(|(_, e)| match e {
+                Entry::Granted(g) => Some(*g),
+                Entry::Queued(_) => None,
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(in crate::handler) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     pub(in crate::handler) fn expired(&mut self, now: Instant) -> Vec<(u64, Granted)> {
@@ -212,6 +237,8 @@ mod tests {
                     last: start,
                     idle: Duration::from_secs(300),
                 },
+                finished: None,
+                final_seen: false,
             },
         );
 
@@ -251,6 +278,8 @@ mod tests {
                     last: start,
                     idle: Duration::from_secs(300),
                 },
+                finished: None,
+                final_seen: false,
             },
         );
         table
@@ -274,7 +303,11 @@ mod tests {
         table.queue(1, "build:1".into(), nar(0), 1);
         table.queue(2, "build:2".into(), nar(1), 1);
         table.queue(3, "build:1".into(), nar(2), 1);
-        let mut ids = table.forget_job("build:1");
+        let mut ids: Vec<u64> = table
+            .forget_job("build:1")
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
         ids.sort();
         assert_eq!(ids, vec![1, 3]);
         assert!(table.take_queued(2).is_some());

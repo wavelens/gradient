@@ -33,7 +33,7 @@ use super::session::on_reauth_notify;
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
 };
-use super::upload::{UploadSession, UploadTable};
+use super::upload::{UploadSession, UploadTable, abandon_transfer};
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::{Inbound, ProtoReader};
 
@@ -221,6 +221,10 @@ impl Actor for SessionActor {
             }
             SessionMsg::Signal(SessionSignal::Abort { job_id, reason }) => {
                 info!(peer_id = %st.peer_id, %job_id, %reason, "sending AbortJob to worker");
+                {
+                    let (mut ctx, uploads) = split_uploads(st);
+                    ctx.forget_uploads(&job_id, uploads).await;
+                }
                 if send_server_msg(&st.writer, &ServerMessage::AbortJob { job_id, reason })
                     .await
                     .is_err()
@@ -286,6 +290,12 @@ impl Actor for SessionActor {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         st.reader.abort();
+        for granted in st.uploads.table.drain_granted() {
+            let state = Arc::clone(&st.state);
+            st.state
+                .shutdown
+                .spawn(async move { abandon_transfer(&state, granted).await });
+        }
         st.job_events.finish().await;
         st.scheduler.unregister_worker(&st.peer_id).await;
         info!(peer_id = %st.peer_id, "WebSocket connection closed");

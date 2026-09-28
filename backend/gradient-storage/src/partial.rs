@@ -64,11 +64,17 @@ pub struct PartialWriter {
     /// so a resume's full-file read lands on whoever writes the stream rather
     /// than on the caller that opened it.
     pending_prefix: u64,
+    resumed: bool,
     retained: Option<BytesMut>,
     retain_up_to: u64,
 }
 
 impl PartialWriter {
+    /// Whether this writer continues a prefix an earlier attempt left behind.
+    pub fn resumed(&self) -> bool {
+        self.resumed
+    }
+
     /// Bytes staged so far, i.e. the offset the next chunk must carry.
     pub fn len(&self) -> u64 {
         self.len
@@ -265,6 +271,7 @@ impl PartialStore {
             len: resume_from,
             hasher: HashContext::new(Algorithm::SHA256),
             pending_prefix: resume_from,
+            resumed: resume_from > 0,
             retained: (resume_from == 0 && retain_up_to > 0).then(BytesMut::new),
             retain_up_to,
         })

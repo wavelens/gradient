@@ -10,6 +10,7 @@ mod table;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use gradient_core::ServerState;
 use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
 use gradient_storage::{PartialStore, StorageTarget, upload_lease};
 use gradient_wire::messages::ServerMessage;
@@ -121,6 +122,8 @@ impl DispatchContext<'_> {
                                 permit,
                                 transfer,
                                 lease,
+                                finished: None,
+                                final_seen: false,
                             },
                         );
                         self.grant(id, target).await;
@@ -190,6 +193,7 @@ impl DispatchContext<'_> {
         request_id: u64,
         offset: u64,
         data: &[u8],
+        is_final: bool,
         uploads: &mut UploadSession,
     ) {
         let verdict = match uploads.table.granted_mut(request_id) {
@@ -197,6 +201,7 @@ impl DispatchContext<'_> {
                 transfer: Transfer::Relay(writer),
                 size,
                 lease,
+                final_seen,
                 ..
             }) => {
                 let bound = *size + *size / 128 + 1024 * 1024;
@@ -209,6 +214,7 @@ impl DispatchContext<'_> {
                     Err(format!("upload exceeds {bound} bytes"))
                 } else {
                     lease.touch(Instant::now());
+                    *final_seen |= is_final;
                     writer
                         .append(offset, data)
                         .await
@@ -221,8 +227,15 @@ impl DispatchContext<'_> {
             if let Some(granted) = uploads.table.remove(request_id) {
                 self.abandon(granted).await;
             }
-            self.settle(request_id, UploadOutcome::Rejected { reason })
+            return self
+                .settle(request_id, UploadOutcome::Rejected { reason })
                 .await;
+        }
+        if is_final && let Some(granted) = uploads.table.take_granted(request_id) {
+            match granted.finished {
+                Some(_) => self.commit(request_id, granted).await,
+                None => uploads.table.grant(request_id, granted),
+            }
         }
     }
 
@@ -232,7 +245,7 @@ impl DispatchContext<'_> {
         metadata: UploadMetadata,
         uploads: &mut UploadSession,
     ) {
-        let Some(granted) = uploads.table.take_granted(request_id) else {
+        let Some(mut granted) = uploads.table.take_granted(request_id) else {
             return self
                 .settle(
                     request_id,
@@ -241,6 +254,17 @@ impl DispatchContext<'_> {
                     },
                 )
                 .await;
+        };
+        granted.finished = Some(metadata);
+        if matches!(granted.transfer, Transfer::Relay(_)) && !granted.final_seen {
+            return uploads.table.grant(request_id, granted);
+        }
+        self.commit(request_id, granted).await;
+    }
+
+    async fn commit(&self, request_id: u64, granted: Granted) {
+        let Some(metadata) = granted.finished else {
+            return;
         };
         let project_id = match self.scheduler.project_for_job(&granted.job_id).await {
             Some(id) => Some(id),
@@ -275,8 +299,11 @@ impl DispatchContext<'_> {
     }
 
     pub(super) async fn forget_uploads(&mut self, job_id: &str, uploads: &mut UploadSession) {
-        for id in uploads.table.forget_job(job_id) {
+        for (id, granted) in uploads.table.forget_job(job_id) {
             uploads.admission.cancel(id);
+            if let Some(granted) = granted {
+                self.abandon(granted).await;
+            }
         }
     }
 
@@ -297,16 +324,21 @@ impl DispatchContext<'_> {
     }
 
     async fn abandon(&self, granted: Granted) {
-        if let (Transfer::Multipart { upload_id }, Some(ObjectKey::Nar(hash))) =
-            (&granted.transfer, object_key(&granted.object))
-        {
-            self.state
-                .nar_storage
-                .abort_multipart(&hash, upload_id)
-                .await;
-        }
+        abandon_transfer(self.state, granted).await;
     }
+}
 
+/// Abort what a dropped grant leaves behind in storage: an open multipart
+/// upload. A relay partial is left to the TTL sweep so a retry can resume it.
+pub(super) async fn abandon_transfer(state: &ServerState, granted: Granted) {
+    if let (Transfer::Multipart { upload_id }, Some(ObjectKey::Nar(hash))) =
+        (&granted.transfer, object_key(&granted.object))
+    {
+        state.nar_storage.abort_multipart(&hash, upload_id).await;
+    }
+}
+
+impl DispatchContext<'_> {
     async fn grant(&self, request_id: u64, target: GrantTarget) {
         let _ = send_server_msg(
             self.writer,
@@ -332,6 +364,7 @@ mod tests {
     use super::*;
     use crate::handler::dispatch::fixture::{JOB, TestSession, decode};
     use gradient_test_support::state::test_state;
+    use gradient_wire::messages::ClientMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn nar(c: char) -> UploadObject {
@@ -381,7 +414,7 @@ mod tests {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
-        ctx.on_upload_chunk(9, 0, b"bytes", uploads).await;
+        ctx.on_upload_chunk(9, 0, b"bytes", false, uploads).await;
         assert!(matches!(
             decode(sent.try_recv().unwrap()),
             ServerMessage::UploadCommitted {
@@ -402,12 +435,12 @@ mod tests {
             .await;
         let _grant = sent.try_recv().unwrap();
 
-        ctx.on_upload_chunk(1, 0, &[0u8; 16], uploads).await;
+        ctx.on_upload_chunk(1, 0, &[0u8; 16], false, uploads).await;
         assert!(
             sent.try_recv().is_err(),
             "a contiguous chunk is accepted silently"
         );
-        ctx.on_upload_chunk(1, 32, &[0u8; 16], uploads).await;
+        ctx.on_upload_chunk(1, 32, &[0u8; 16], false, uploads).await;
         assert!(matches!(
             decode(sent.try_recv().unwrap()),
             ServerMessage::UploadCommitted {
@@ -441,5 +474,92 @@ mod tests {
             }
         ));
         assert_eq!(state.upload_admission.in_flight(), 0);
+    }
+
+    /// The worker's writer drains the control lane first, so `UploadFinished`
+    /// can overtake the last relayed chunks; the commit must wait for them.
+    #[tokio::test]
+    async fn a_finish_that_overtakes_the_final_chunk_waits_for_it() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        let body = b"compressed nar bytes".to_vec();
+        ctx.on_upload_request(JOB.into(), 1, nar('e'), 64, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        let _grant = sent.try_recv().unwrap();
+
+        ctx.on_upload_chunk(1, 0, &body[..8], false, uploads).await;
+        ctx.on_upload_finished(
+            1,
+            UploadMetadata::Nar(Box::new(gradient_wire::types::NarUploadMetadata {
+                file_hash: gradient_storage::file_hash_sri(&body),
+                file_size: body.len() as u64,
+                nar_size: 64,
+                nar_hash: "sha256:n".into(),
+                references: Vec::new(),
+                deriver: None,
+                ca: None,
+                multipart: None,
+            })),
+            uploads,
+        )
+        .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            sent.try_recv().is_err(),
+            "nothing is committed before the final chunk"
+        );
+
+        ctx.on_upload_chunk(1, 8, &body[8..], false, uploads).await;
+        ctx.on_upload_chunk(1, body.len() as u64, &[], true, uploads)
+            .await;
+        let committed = tokio::time::timeout(Duration::from_secs(5), sent.recv())
+            .await
+            .expect("the commit answers")
+            .unwrap();
+        assert!(
+            !matches!(
+                decode(committed),
+                ServerMessage::UploadCommitted {
+                    outcome: UploadOutcome::Rejected { .. },
+                    ..
+                }
+            ),
+            "the complete relay is not rejected"
+        );
+    }
+
+    /// A failed job's uploads must not keep their permits until a lease runs out.
+    #[tokio::test]
+    async fn a_failed_job_releases_its_granted_and_queued_uploads() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, _sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request(JOB.into(), 1, nar('f'), 8, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        ctx.on_upload_request(JOB.into(), 2, nar('g'), 8, uploads)
+            .await;
+        assert_eq!(state.upload_admission.in_flight(), 2);
+
+        let failed = ClientMessage::JobFailed {
+            job_id: JOB.into(),
+            dispatch: "not-this-dispatch".into(),
+            error: "boom".into(),
+            kind: gradient_wire::messages::BuildFailureKind::Transient,
+            missing_paths: Vec::new(),
+            spans: Vec::new(),
+        };
+        ctx.dispatch(
+            gradient_wire::session::frame::Inbound::Control(failed),
+            uploads,
+        )
+        .await;
+
+        assert_eq!(state.upload_admission.in_flight(), 0);
+        assert!(uploads.table.is_empty());
     }
 }

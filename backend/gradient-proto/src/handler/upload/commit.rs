@@ -110,6 +110,7 @@ async fn place_relayed(
     writer: gradient_storage::PartialWriter,
     meta: &NarUploadMetadata,
 ) -> Result<(), UploadOutcome> {
+    let resumed = writer.resumed();
     let staged = writer.finish().await.map_err(retry)?;
     let mismatch = if staged.len != meta.file_size {
         Some(format!(
@@ -123,7 +124,11 @@ async fn place_relayed(
     };
     if let Some(reason) = mismatch {
         let _ = tokio::fs::remove_file(&staged.path).await;
-        return Err(rejected(reason));
+        return Err(if resumed {
+            retry(reason)
+        } else {
+            rejected(reason)
+        });
     }
     state
         .nar_storage
@@ -319,5 +324,70 @@ mod tests {
                 outcome: UploadOutcome::Retry { .. }
             }
         ));
+    }
+
+    /// A resumed prefix may come from a differently configured encoder; a
+    /// mismatch then starts the upload over instead of failing the job.
+    #[tokio::test]
+    async fn a_resumed_relay_that_fails_its_hash_is_retried_from_scratch() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (_session, permit) = granted_permit(&state).await;
+        let dir = tempfile::TempDir::new().unwrap();
+        tokio::fs::create_dir_all(dir.path().join("peer"))
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("peer/c.partial"), b"ab")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("peer/c.token"), b"c")
+            .await
+            .unwrap();
+        let partials =
+            gradient_storage::PartialStore::new(dir.path(), std::time::Duration::from_secs(60))
+                .unwrap();
+        let mut writer = partials.open_writer("peer/c", "c", 2, 0).await.unwrap();
+        assert!(writer.resumed());
+        writer.append(2, b"c").await.unwrap();
+        let (writer_out, mut sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
+
+        run(Commit {
+            writer: writer_out,
+            state: Arc::clone(&state),
+            peer_id: "w1".into(),
+            request_id: 1,
+            project_id: None,
+            object: UploadObject::Nar {
+                store_path: format!("/nix/store/{}-p", "c".repeat(32)),
+            },
+            transfer: Transfer::Relay(Box::new(writer)),
+            metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
+                file_hash: gradient_storage::file_hash_sri(b"xyz"),
+                file_size: 3,
+                nar_size: 3,
+                nar_hash: "sha256:1111".into(),
+                references: Vec::new(),
+                deriver: None,
+                ca: None,
+                multipart: None,
+            })),
+            permit,
+        })
+        .await;
+
+        let msg = ServerMessage::decode(sent.try_recv().unwrap())
+            .unwrap()
+            .into_message()
+            .unwrap();
+        assert!(matches!(
+            msg,
+            ServerMessage::UploadCommitted {
+                request_id: 1,
+                outcome: UploadOutcome::Retry { .. }
+            }
+        ));
+        assert!(
+            !dir.path().join("peer/c.partial").exists(),
+            "the foreign prefix is gone"
+        );
     }
 }

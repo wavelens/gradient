@@ -112,12 +112,13 @@ impl<'a> DispatchContext<'a> {
                 request_id,
                 data,
                 offset,
-                ..
+                is_final,
             } => {
                 self.on_upload_chunk(
                     request_id.to_native(),
                     offset.to_native(),
                     data.as_slice(),
+                    *is_final,
                     uploads,
                 )
                 .await;
@@ -249,6 +250,7 @@ impl<'a> DispatchContext<'a> {
                 missing_paths,
                 spans,
             } => {
+                self.forget_uploads(&job_id, uploads).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
                     self.active.remove(&job_id);
