@@ -51,8 +51,16 @@ Two secrets, each 48 random bytes in base64: `jwtFile` signs login sessions, `cr
 === "Plain files"
 
     ```sh
-    openssl rand -base64 48 > /run/secrets/gradient-jwt
-    openssl rand -base64 48 > /run/secrets/gradient-crypt
+    install -d -m 700 /var/lib/gradient-secrets
+    openssl rand -base64 48 > /var/lib/gradient-secrets/jwt
+    openssl rand -base64 48 > /var/lib/gradient-secrets/crypt
+    ```
+
+    ```nix
+    services.gradient.secrets = {
+      jwtFile = "/var/lib/gradient-secrets/jwt";
+      cryptFile = "/var/lib/gradient-secrets/crypt";
+    };
     ```
 
 The files can stay owned by root: the server reads them as systemd credentials.
@@ -66,9 +74,10 @@ The files can stay owned by root: the server reads them as systemd credentials.
 
     ```nix
     services.gradient.postgres.enable = true;
+    services.postgresql.package = pkgs.postgresql_18;
     ```
 
-    A PostgreSQL cluster on the same host, with a `gradient` role and database.
+    A PostgreSQL 18 cluster on the same host, with a `gradient` role and database.
 
 === "External"
 
