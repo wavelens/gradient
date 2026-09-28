@@ -43,6 +43,7 @@ nav:
   - Concepts:
       - Overview: concepts/overview.md
       - Projects and Tasks: concepts/projects-and-tasks.md
+      - Evaluations and Builds: concepts/evaluations-and-builds.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md

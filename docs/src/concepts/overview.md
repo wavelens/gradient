@@ -22,8 +22,8 @@ flowchart LR
 | [Project](projects-and-tasks.md#project) | Unit of access: members, roles, workers and cache subscriptions |
 | [Task](projects-and-tasks.md#task) | One repository plus the flake outputs to build, selected by a wildcard |
 | Trigger | Starts an evaluation of a task: push, pull request, polling or schedule |
-| Evaluation | One run of a task at one commit, listing every derivation to build |
-| Build | One derivation, built once and shared by every evaluation that needs the same derivation |
+| [Evaluation](evaluations-and-builds.md#evaluation) | One run of a task at one commit, listing every derivation to build |
+| [Build](evaluations-and-builds.md#build) | One derivation, built once and shared by every evaluation that needs the same derivation |
 | Worker | A machine that evaluates flakes and builds derivations for the projects that enable the worker |
 | Cache | A Nix binary cache that stores build outputs and serves them to `nix` |
 | Action | Reacts to evaluation and build events: mail, web request, forge status, pull request |
