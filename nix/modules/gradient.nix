@@ -711,7 +711,7 @@ in {
         maxAttempts = lib.mkOption {
           type = lib.types.ints.positive;
           default = 3;
-          description = "Build attempts before a transient failure becomes permanent.";
+          description = "Build or eval job attempts before a transient failure becomes permanent.";
         };
 
         substituteMissEscalationThreshold = lib.mkOption {

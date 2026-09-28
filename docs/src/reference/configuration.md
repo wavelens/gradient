@@ -28,7 +28,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `build.defaultMaxSilentSecs` | int | `3600` | `GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS` | Timeout in seconds without build output for derivations that set no `maxSilent`. |
 | `build.defaultTimeoutSecs` | int | `14400` | `GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS` | Build timeout in seconds for derivations that set no `timeout`. |
 | `build.inputsUnavailableMaxLoops` | int | `3` | `GRADIENT_BUILD_INPUTS_UNAVAILABLE_MAX_LOOPS` | Times a build may retry after missing inputs before it fails instead of retrying again. |
-| `build.maxAttempts` | int | `3` | `GRADIENT_BUILD_MAX_ATTEMPTS` | Build attempts before a transient failure becomes permanent. |
+| `build.maxAttempts` | int | `3` | `GRADIENT_BUILD_MAX_ATTEMPTS` | Build or eval job attempts before a transient failure becomes permanent. |
 | `build.retryBackoffSecs` | int | `30` | `GRADIENT_BUILD_RETRY_BACKOFF_SECS` | Seconds before retrying a transient build failure, doubled for every previous attempt. |
 | `build.substituteMissEscalationThreshold` | int | `2` | `GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD` | Free re-queues of a substitutable derivation within one evaluation before it is built like any other. |
 
