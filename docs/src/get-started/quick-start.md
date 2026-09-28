@@ -72,5 +72,5 @@ The worker stays in a reconnect loop until the first project with a cache exists
 ## Next steps
 
 - [First project](first-project.md): a project, a cache and the first green build
-- [Installation](../installation.md): TLS, reverse proxies and production setup
+- [Installation](installation.md): TLS, reverse proxies and production setup
 - [Configuration](../configuration.md): every server and worker option

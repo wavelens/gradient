@@ -39,7 +39,7 @@ nav:
   - Get Started:
       - Quick Start: get-started/quick-start.md
       - First Project: get-started/first-project.md
-      - Installation: installation.md
+      - Installation: get-started/installation.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
