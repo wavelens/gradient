@@ -296,7 +296,7 @@ impl Scheduler {
             .map(|w| (w.architectures, w.system_features))
             .collect();
         let draining = self.draining.load(std::sync::atomic::Ordering::Relaxed);
-        build::reconcile_waiting_state(
+        let unbuildables = build::reconcile_waiting_state(
             &self.state,
             &self.assessments,
             &caps,
@@ -304,7 +304,12 @@ impl Scheduler {
             fetch_capable,
             draining,
         )
-        .await
+        .await?;
+        for unbuildable in unbuildables {
+            self.abort_unbuildable_evaluation(unbuildable).await;
+        }
+
+        Ok(())
     }
 
     /// Every connected worker, including the sampling fields the API masks.

@@ -53,6 +53,7 @@ pub struct TaskResponse {
     pub keep_evaluations: i32,
     pub concurrency: ConcurrencyPolicy,
     pub sign_cache: bool,
+    pub wait_for_workers: bool,
     /// Caller holds `Permission::EditTask` - may edit task configuration.
     pub can_edit: bool,
     /// Caller holds `Permission::TriggerEvaluation` - may start/restart/abort

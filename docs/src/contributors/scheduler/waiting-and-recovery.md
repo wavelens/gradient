@@ -33,7 +33,7 @@ flowchart LR
 | `WaitingReason` | Parked from | Unparked | Owner |
 |---|---|---|---|
 | `eval_workers { capability, connected_workers }` | `Fetching` without a `fetch` worker; `Queued`, `EvaluatingFlake`, `EvaluatingDerivation` without an `eval` worker | To `Queued` once the capability connects | Reconciler |
-| `workers { unmet, connected_workers, available_architectures }` | `Building` when no worker fits any blocking anchor's `(architecture, required_features)` | To `Building` once one fits | Reconciler |
+| `workers { unmet, connected_workers, available_architectures }` | `Building` when no worker fits any blocking anchor's `(architecture, required_features)` | To `Building` once one fits; `Aborted` after 300 s on the same `unmet` set unless the task sets `wait_for_workers` | Reconciler |
 | `graph_stuck { pending_anchors }` | `Building` when every blocking anchor fits a worker but none can dispatch | To `Building` when the heal frees an anchor | Reconciler |
 | `draining` | Every in-flight evaluation while the instance drains | To `Queued` when draining ends or at startup (`unpark_draining_evals`) | Reconciler |
 | `approval`, `no_cache`, `cache_storage_full` | Trigger gates | Webhook and cache hooks (`gradient-ci/src/unpark.rs`) | Never touched by the reconciler |
@@ -41,6 +41,7 @@ flowchart LR
 - **Pre-build parks** ignore builds the evaluation already batched: a stall mid-walk still parks.
 - **Blocking anchors** are the named anchors in a demandable status that `blocks_evaluation` keeps; an anchor nothing demands is left out.
 - **Counters first:** `phase_from_counters` decides without reading an anchor. `named = 0` hands the evaluation to the pre-build rules, `active = 0` finalizes the evaluation through `check_evaluation_done`, `building > 0` keeps `Building`.
+- **Unbuildable abort:** `unbuildable` (`gradient-scheduler/src/unbuildable.rs`) hands a `workers` park with a non-empty `unmet` set back to the scheduler once it is older than 300 s and its task has `wait_for_workers = false`. `abort_unbuildable_evaluation` marks it `Aborted`, records a warning naming each missing architecture and feature set, and aborts its anchors. The grace keeps a server restart or worker redeploy from aborting work before the pool reconnects.
 - **Anchor read:** otherwise `BuildabilityChecker` reads the blocking anchors. `AssessmentMemo` reuses the verdict for up to 60 s while the counters and the pool fingerprint stay equal. An empty read recounts the drifted counters and finalizes.
 
 ## Graph-Stuck Heal

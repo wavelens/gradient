@@ -23,6 +23,7 @@ export interface Task {
   keep_evaluations: number;
   concurrency: ConcurrencyPolicy;
   sign_cache: boolean;
+  wait_for_workers: boolean;
   created_by?: string;
   created_at?: string;
   managed: boolean;

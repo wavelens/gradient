@@ -64,6 +64,7 @@ pub struct Model {
     pub keep_evaluations: i32,
     pub concurrency: ConcurrencyPolicy,
     pub sign_cache: bool,
+    pub wait_for_workers: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

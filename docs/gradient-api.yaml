@@ -11079,6 +11079,14 @@ components:
             keeping the task's outputs private even within a public
             cache. A path also produced by a `sign_cache=true` task is
             still signed (the public producer wins).
+        wait_for_workers:
+          type: boolean
+          default: false
+          description: |
+            When true, an evaluation whose builds need an architecture or
+            system features no connected worker provides waits in `Waiting`
+            for such a worker. When false, the evaluation is aborted with a
+            warning naming the missing architecture and features.
 
     PatchTaskRequest:
       type: object
@@ -11106,6 +11114,10 @@ components:
           type: boolean
           description: |
             See `MakeTaskRequest.sign_cache`. Omit to leave unchanged.
+        wait_for_workers:
+          type: boolean
+          description: |
+            See `MakeTaskRequest.wait_for_workers`. Omit to leave unchanged.
 
     Task:
       type: object
@@ -11141,6 +11153,9 @@ components:
         sign_cache:
           type: boolean
           description: See `MakeTaskRequest.sign_cache`.
+        wait_for_workers:
+          type: boolean
+          description: See `MakeTaskRequest.wait_for_workers`.
         created_by:
           type: string
           format: uuid

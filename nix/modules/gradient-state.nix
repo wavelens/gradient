@@ -264,6 +264,16 @@
         '';
       };
 
+      wait_for_workers = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether an evaluation waits for a worker when its builds need an architecture or system
+          features no connected worker provides. When disabled, such an evaluation is aborted with
+          a warning naming what is missing.
+        '';
+      };
+
       concurrency = mkOption {
         type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
         default = "soft_abort";

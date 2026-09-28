@@ -75,6 +75,16 @@
       />
     </gr-form-field>
 
+    <gr-form-field hint="When off, an evaluation whose builds need an architecture or system features no connected worker provides is aborted with a warning instead of waiting.">
+      <gr-checkbox
+        inputId="task-wait-for-workers"
+        [(ngModel)]="formData.wait_for_workers"
+        [binary]="true"
+        [appManagedDisable]="access()"
+        label="Wait for workers with missing architectures or features"
+      />
+    </gr-form-field>
+
     <div class="form-actions">
       <button
         *appWritable="access()"

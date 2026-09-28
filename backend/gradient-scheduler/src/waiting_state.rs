@@ -30,6 +30,7 @@ const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
 use crate::assessment_memo::AssessmentMemo;
 use crate::buildability::BuildabilityChecker;
+use crate::unbuildable::{Unbuildable, tasks_waiting_for_workers, unbuildable};
 use gradient_db::EvalCounters;
 
 /// Sweep every in-flight evaluation and reconcile its status against the
@@ -46,6 +47,9 @@ use gradient_db::EvalCounters;
 ///   back to `Queued` once the capability returns, `Workers` back to
 ///   `Building` once buildable. `Approval`/`NoCache`/`CacheStorageFull` parks
 ///   are owned by other hooks and left untouched.
+///
+/// Returns the `Workers` parks to abort because their task does not wait for
+/// workers (see [`crate::unbuildable`]).
 pub(crate) async fn reconcile_waiting_state(
     state: &Arc<ServerState>,
     memo: &Mutex<AssessmentMemo>,
@@ -53,7 +57,7 @@ pub(crate) async fn reconcile_waiting_state(
     eval_capable_workers: usize,
     fetch_capable_workers: usize,
     draining: bool,
-) -> Result<()> {
+) -> Result<Vec<Unbuildable>> {
     gradient_db::fold_anchor_deltas(&state.worker_db)
         .await
         .context("fold evaluation anchor deltas")?;
@@ -71,7 +75,7 @@ pub(crate) async fn reconcile_waiting_state(
         .await
         .context("fetch in-flight evaluations")?;
     if evals.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     // Draining: park every in-flight evaluation so the server can be stopped
@@ -104,9 +108,12 @@ pub(crate) async fn reconcile_waiting_state(
             }
         }
 
-        return Ok(());
+        return Ok(Vec::new());
     }
 
+    let waiting_tasks = tasks_waiting_for_workers(state, &evals).await?;
+    let now = gradient_types::now();
+    let mut unbuildables = Vec::new();
     let connected_workers = worker_caps.len() as u32;
     let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
     let counters = gradient_db::in_flight_counters(&state.worker_db, &ids)
@@ -204,6 +211,15 @@ pub(crate) async fn reconcile_waiting_state(
             continue;
         };
 
+        let waits = eval.task.is_some_and(|t| waiting_tasks.contains(&t));
+        if let Some(unmet) = unbuildable(&eval, reason.as_ref(), new_reason.as_ref(), waits, now) {
+            unbuildables.push(Unbuildable {
+                evaluation: eval,
+                unmet,
+            });
+            continue;
+        }
+
         if eval.status != target {
             info!(
                 evaluation_id = %eval.id,
@@ -223,7 +239,7 @@ pub(crate) async fn reconcile_waiting_state(
         }
     }
 
-    Ok(())
+    Ok(unbuildables)
 }
 
 /// Build-phase reconciliation for one evaluation: decide `Building` vs

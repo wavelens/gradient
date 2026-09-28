@@ -54,6 +54,7 @@ impl<'a> StateApplicator<'a> {
                 proj.created_by = Set(created_by_id);
                 proj.concurrency = Set(state_task.concurrency);
                 proj.sign_cache = Set(state_task.sign_cache);
+                proj.wait_for_workers = Set(state_task.wait_for_workers);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!(name = %state_task.name, "Updated managed task");
@@ -78,6 +79,7 @@ impl<'a> StateApplicator<'a> {
                     keep_evaluations: state_task.keep_evaluations,
                     concurrency: state_task.concurrency,
                     sign_cache: state_task.sign_cache,
+                    wait_for_workers: state_task.wait_for_workers,
                     ..Default::default()
                 }
                 .into_active_model();

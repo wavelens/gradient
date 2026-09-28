@@ -189,6 +189,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 triggers: (!task_triggers.is_empty()).then_some(task_triggers),
                 concurrency: p.concurrency,
                 sign_cache: p.sign_cache,
+                wait_for_workers: p.wait_for_workers,
                 flake_input_overrides,
                 actions: task_actions,
             },

@@ -34,6 +34,7 @@ mod dispatch_mode;
 mod eval_metrics;
 mod job_handlers;
 pub(crate) mod trigger_dispatch;
+mod unbuildable;
 mod worker_lifecycle;
 
 use std::sync::Arc;

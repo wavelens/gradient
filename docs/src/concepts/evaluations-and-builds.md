@@ -18,7 +18,7 @@ flowchart LR
 | Fetching | A worker clones the repository and its flake inputs |
 | Evaluating | A worker walks the flake and reports derivations in batches |
 | Building | All derivations are known; builds are running |
-| Waiting | No connected worker can make progress, e.g. none has the needed system or features; resumes on its own |
+| Waiting | No connected worker can make progress, e.g. none has the needed system or features; resumes on its own. Builds needing a system or features no connected worker provides abort the evaluation with a warning after 5 minutes, unless the task opts into waiting for workers |
 | Completed | Every build succeeded |
 | Failed | The evaluation or at least one build failed |
 | Aborted | Stopped by hand or replaced by a newer evaluation |

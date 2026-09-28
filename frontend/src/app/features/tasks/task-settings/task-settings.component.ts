@@ -96,6 +96,7 @@ export class TaskSettingsComponent implements OnInit {
     keep_evaluations: number;
     concurrency: ConcurrencyPolicy;
     sign_cache: boolean;
+    wait_for_workers: boolean;
   } = {
     display_name: '',
     description: '',
@@ -104,6 +105,7 @@ export class TaskSettingsComponent implements OnInit {
     keep_evaluations: 30,
     concurrency: 'soft_abort',
     sign_cache: true,
+    wait_for_workers: false,
   };
 
   concurrencyOptions: { label: string; value: ConcurrencyPolicy; disabled?: boolean }[] = [
@@ -140,6 +142,7 @@ export class TaskSettingsComponent implements OnInit {
           keep_evaluations: task.keep_evaluations,
           concurrency: task.concurrency,
           sign_cache: task.sign_cache,
+          wait_for_workers: task.wait_for_workers,
         };
         this.loading.set(false);
       },

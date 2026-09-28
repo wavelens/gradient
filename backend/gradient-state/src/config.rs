@@ -93,6 +93,11 @@ pub struct StateTask {
     /// won't trust them. Defaults to `true`.
     #[serde(default = "default_true")]
     pub sign_cache: bool,
+    /// When `true`, an evaluation whose builds need an architecture or system
+    /// features no connected worker provides waits for one. Defaults to
+    /// `false`, which aborts it.
+    #[serde(default)]
+    pub wait_for_workers: bool,
     /// Declarative flake input overrides. An absent or empty map deletes all
     /// existing override rows for this task.
     #[serde(default)]

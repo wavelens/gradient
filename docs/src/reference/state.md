@@ -76,6 +76,7 @@ services.gradient.state = {
 | `project` | string | - | Name of the project the task belongs to. |
 | `repository` | string | - | Git repository URL of the task. |
 | `sign_cache` | bool | `true` | Whether to sign the narinfo of outputs pushed by this task. |
+| `wait_for_workers` | bool | `false` | Whether an evaluation waits for a worker when its builds need an architecture or system features no connected worker provides. When disabled, such an evaluation is aborted with a warning naming what is missing. |
 | `triggers` | null or list of submodule | `null` | Evaluation triggers of the task: polling, forge push, forge pull request or cron schedule. |
 | `triggers.*.active` | bool | `true` | Whether the trigger is active. |
 | `triggers.*.config` | attribute set | `{ }` | Type-specific configuration. |

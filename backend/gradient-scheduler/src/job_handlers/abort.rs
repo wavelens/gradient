@@ -11,12 +11,14 @@ use std::time::Duration;
 
 use gradient_db::update_evaluation_status;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation_message::MessageLevel;
 use gradient_graph::Transition;
 use gradient_types::*;
 use tracing::{info, warn};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
+use crate::unbuildable::{Unbuildable, unbuildable_warning};
 
 impl Scheduler {
     // ── Abort ─────────────────────────────────────────────────────────────────
@@ -43,6 +45,33 @@ impl Scheduler {
                 scheduler.log_aborted_jobs(evaluation_id, anchors).await;
             }
         });
+    }
+
+    /// Abort an evaluation parked on systems no connected worker provides and
+    /// warn which ones were missing.
+    pub(crate) async fn abort_unbuildable_evaluation(&self, unbuildable: Unbuildable) {
+        let evaluation_id = unbuildable.evaluation.id;
+        let marked = update_evaluation_status(
+            &self.state.db(),
+            unbuildable.evaluation,
+            EvaluationStatus::Aborted,
+        )
+        .await;
+        if marked.status != EvaluationStatus::Aborted {
+            return;
+        }
+
+        info!(%evaluation_id, unmet = ?unbuildable.unmet, "aborting evaluation: no connected worker provides its systems");
+        gradient_db::record_evaluation_message(
+            &self.state.db(),
+            evaluation_id,
+            MessageLevel::Warning,
+            unbuildable_warning(&unbuildable.unmet),
+            Some("scheduler".to_owned()),
+        )
+        .await;
+        let anchors = self.abort_evaluation_anchors(evaluation_id).await;
+        self.log_aborted_jobs(evaluation_id, anchors).await;
     }
 
     /// Abort the anchors only `evaluation` still needed; the graph actor owns that write.

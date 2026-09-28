@@ -44,6 +44,8 @@ pub struct MakeTaskRequest {
     pub concurrency: Option<ConcurrencyPolicy>,
     #[serde(default)]
     pub sign_cache: Option<bool>,
+    #[serde(default)]
+    pub wait_for_workers: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -56,6 +58,7 @@ pub struct PatchTaskRequest {
     pub keep_evaluations: Option<i32>,
     pub concurrency: Option<ConcurrencyPolicy>,
     pub sign_cache: Option<bool>,
+    pub wait_for_workers: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -174,6 +177,7 @@ pub async fn get(
             created_at: p.created_at,
             managed: p.managed,
             sign_cache: p.sign_cache,
+            wait_for_workers: p.wait_for_workers,
             can_edit,
             can_trigger,
         }
@@ -252,6 +256,7 @@ pub async fn put(
         keep_evaluations: state.config.eval.default_keep_evaluations(),
         concurrency: body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
         sign_cache: body.sign_cache.unwrap_or(true),
+        wait_for_workers: body.wait_for_workers.unwrap_or(false),
         ..Default::default()
     }
     .into_active_model();
@@ -380,6 +385,7 @@ pub async fn get_task(
         keep_evaluations: task.keep_evaluations,
         concurrency: task.concurrency,
         sign_cache: task.sign_cache,
+        wait_for_workers: task.wait_for_workers,
         can_edit,
         can_trigger,
     }))
@@ -419,6 +425,7 @@ pub async fn patch_task(
         ("keep_evaluations", body.keep_evaluations.is_some()),
         ("concurrency", body.concurrency.is_some()),
         ("sign_cache", body.sign_cache.is_some()),
+        ("wait_for_workers", body.wait_for_workers.is_some()),
     ]);
     let mut atask: ATask = task.into();
     let mut patcher = TaskPatcher::new(&state, &mut atask);
@@ -446,6 +453,9 @@ pub async fn patch_task(
     }
     if let Some(sign_cache) = body.sign_cache {
         patcher.apply_sign_cache(sign_cache);
+    }
+    if let Some(wait_for_workers) = body.wait_for_workers {
+        patcher.atask.wait_for_workers = Set(wait_for_workers);
     }
 
     atask.force_evaluation = Set(true);

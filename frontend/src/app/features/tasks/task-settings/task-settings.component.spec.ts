@@ -9,6 +9,7 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Observable, of, throwError } from 'rxjs';
+import { vi } from 'vitest';
 import { TaskSettingsComponent } from './task-settings.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -34,6 +35,7 @@ function taskFor(c: AccessCase) {
     keep_evaluations: 30,
     concurrency: 'soft_abort' as const,
     sign_cache: true,
+    wait_for_workers: false,
     managed: c.managed,
     can_edit: c.canEdit,
     can_trigger: c.canTrigger ?? c.canEdit,
@@ -58,6 +60,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 function setup(
   c: AccessCase,
   checkRepository: () => Observable<string> = () => of('abc1234def5678'),
+  updateTask: (...args: unknown[]) => Observable<string> = () => of('ok'),
 ): ComponentFixture<TaskSettingsComponent> {
   TestBed.configureTestingModule({
     imports: [TaskSettingsComponent],
@@ -68,7 +71,7 @@ function setup(
       { provide: ActivatedRoute, useValue: activatedRouteStub(c) },
       {
         provide: TasksService,
-        useValue: { getTaskInfo: () => of(taskFor(c)), checkRepository },
+        useValue: { getTaskInfo: () => of(taskFor(c)), checkRepository, updateTask },
       },
       {
         provide: ProjectsService,
@@ -141,5 +144,22 @@ describe('TaskSettingsComponent - repository connection test', () => {
   it('is not offered to a viewer', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'test connection')).toBeNull();
+  });
+});
+
+describe('TaskSettingsComponent - waiting for workers', () => {
+  it('saves the opt-in to wait for missing workers', () => {
+    const updateTask = vi.fn(() => of('ok'));
+    const fixture = setup({ managed: false, canEdit: true }, undefined, updateTask);
+    expect(fixture.componentInstance.formData.wait_for_workers).toBe(false);
+
+    fixture.componentInstance.formData.wait_for_workers = true;
+    fixture.componentInstance.saveSettings();
+
+    expect(updateTask).toHaveBeenCalledWith(
+      'acme',
+      'demo',
+      expect.objectContaining({ wait_for_workers: true }),
+    );
   });
 });
