@@ -12,6 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream::UpstreamProbe;
+use gradient_core::upstream_source::substitutes_from;
 use gradient_sources::{CacheSigner, get_hash_from_url};
 use gradient_types::events::cache::NarinfoServed;
 use gradient_types::*;
@@ -257,6 +258,7 @@ async fn fetch_from_upstream(
         .await
         .unwrap_or_default()
         .into_iter()
+        .filter(substitutes_from)
         .filter_map(|upstream| {
             let url = upstream.url?;
             let Some(public_key) = upstream.public_key else {

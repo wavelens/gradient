@@ -1,31 +1,66 @@
 # Eval Worker Setup
 
-Gradient evaluates flakes with a pool of `--eval-subprocess` subprocesses that drive the embedded Nix C API. A single evaluation is split into one shard per system and fanned across the pool, with the pool sized to fit the host's memory. Results are written to a persistent, fleet-shared eval-cache, so a repeat evaluation of the same locked flake is mostly cache hits.
+Gradient evaluates flakes in a pool of `--eval-subprocess` processes that drive the embedded Nix C API. One evaluation is split into one shard per system and fanned across the pool; the pool is sized to fit the host's memory. Results land in a persistent eval cache shared by the fleet: a repeat evaluation of the same locked flake is mostly cache hits.
+
+```mermaid
+flowchart LR
+    worker[gradient-worker] -->|rkyv over stdin/stdout| p1[eval subprocess]
+    worker --> p2[eval subprocess]
+    p1 --> cache[(eval cache)]
+    p2 --> cache
+    cache <-->|upload / download| server[Server]
+```
 
 ## Subprocess IPC
 
-Parent and subprocess speak rkyv over the subprocess's stdin/stdout: each message is a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`), mirroring the main `/proto` protocol's serialization conventions. The subprocess announces a one-byte IPC version before its first frame so a binary swapped mid-run fails the handshake instead of producing undecodable frames. `Resolve` is streamed: the subprocess emits one `ResolveItem` frame per attribute the moment it resolves, terminated by `ResolveEnd` with the batch's warnings and stats delta. Every other request is strictly one request, one response. A subprocess keeps one walker (locked flake + open eval cache) warm across consecutive requests for the same repository, so a Plan/List/Resolve sequence pays the flake lock and cache open once.
+- **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`), the conventions of `/proto`.
+- **Version byte:** the subprocess writes `EVAL_IPC_VERSION` (currently 4) before the first frame; a binary swapped mid-run fails the handshake instead of sending undecodable frames.
+- **Streamed resolve:** `Resolve` answers with one `ResolveItem` per attribute as soon as the attribute resolves, then `ResolveEnd` with the batch's warnings and stats delta. Every other request is one request, one response.
+- **Warm walker:** a subprocess keeps one walker (locked flake plus open eval cache) across consecutive requests for the same repository; a Plan / List / Resolve sequence pays the lock and the cache open once.
 
-The parent side lives in `gradient-worker/src/worker_pool/`, split along its seams: `transport.rs` (subprocess handle + frame wire + typed requests), `pool.rs` (checkout/return lifecycle with test-on-borrow), `memory.rs` (pool-size budget, free-RAM guard, reaper), and `resolver.rs` (the pooled fan-out and crash isolation). The hidden `--eval-driver <file>` flag runs JSONL requests through the real transport against a real subprocess and prints JSON responses; the NixOS VM test uses it to exercise both sides of the binary wire from Python.
+## Parent Side
+
+`gradient-worker/src/worker_pool/`:
+
+| File | Role |
+|---|---|
+| `transport.rs` | Subprocess handle, frame wire, typed requests; sets `oom_score_adj` |
+| `pool.rs` | Checkout and return with test-on-borrow |
+| `memory.rs` | Pool-size budget, free-RAM guard, reaper |
+| `resolver.rs` | Pooled fan-out and crash isolation |
+| `eval_stats.rs` | Per-attribute evaluation statistics |
+| `driver.rs` | The hidden `--eval-driver <file>` harness: JSONL requests through the real transport, JSON responses out; the NixOS VM test drives both sides of the wire through the harness from Python |
+
+## Memory Safety
+
+Two layers bound evaluation memory.
+
+| Layer | Option | Behavior |
+|---|---|---|
+| Pool sizing | `worker.eval.maxRss` (8 GiB) | `pool_size * maxRss` stays within a host-RAM share; a subprocess over the cap is recycled **between** calls |
+| Free-RAM reaper | `worker.system.minFreeRamMb` (`0` = 10% of RAM, clamped to 128 MiB - 1 GiB) | Samples `MemAvailable` every 500 ms; below the margin, SIGKILLs the largest evaluation subprocess whose resident memory covers the whole shortfall, then waits 5 s |
+
+- The recycle check runs after a call: one unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within a call. The reaper is the guard against that peak.
+- When no evaluation is large enough to cover the shortfall, the pressure comes from elsewhere and nothing is killed (#579: a fixed 1 GiB floor on a 2 GiB host killed evaluations that were never the cause).
+- A killed subprocess closes its pipe and the evaluation fails. One bounded failure replaces a host OOM that could kill the worker and strand the job: the server only registers a clean disconnect.
+- Under sustained pressure `acquire` serialises evaluations, always letting one proceed.
+- Evaluation subprocesses run with `oom_score_adj = 600` as the kernel's last resort.
 
 ## Compared to nix-eval-jobs
 
-| Dimension | Gradient | nix-eval-jobs |
+| | Gradient | nix-eval-jobs |
 |---|---|---|
-| Parallelism model | Spawn pool of long-lived eval-workers; one eval is sharded by system and fanned across the pool | Fork short-lived children from a warm parent |
-| Cross-run warmth | Persistent on-disk eval-cache keyed by flake fingerprint, so a repeat eval of the same locked flake is mostly cache hits (skips forcing and daemon round-trips) | None; cold every run, since copy-on-write warmth lives only within one run |
-| Cross-machine cache | Fleet-shared eval-cache (pull and push of `<fp>.sqlite`), so a warm cache propagates across the worker fleet; staging a pulled blob drops the `-wal`/`-shm` sidecars of the previous local eval, which SQLite would otherwise read as belonging to it | None |
-| Concurrent shared cache | Concurrent shards write one eval-cache without deadlock (WAL-append commits plus a single end-of-eval checkpoint) | Not applicable, as there is no shared cache |
-| Memory safety | Automatic pool sizing so `pool_size * maxEvalRss` stays within a host-RAM share; a many-system flake completes even on a small host (degrading to one shard) and never OOMs | Manual `--workers` and `--max-memory-size` |
-| Pipeline integration | Native: discovery feeds DB rows and build dispatch starts mid-eval (incremental flush); the closure walk prunes server-known derivations and marks cache-status substitution | Emits a JSON job stream that the consumer (Hydra and similar) integrates |
-| Per-attribute failure isolation | A bad attribute becomes a per-attribute error and the eval continues; resolve results stream per attribute, so a crash keeps everything already streamed and retries exactly the in-flight attribute | Per-job error reporting via the fork boundary |
-| Crash isolation | Subprocess boundary; the streamed protocol pinpoints the crashing attribute in one step (no bisection rework) | Fork boundary with re-fork |
-| Cross-machine eval compute | Roadmap; today it is a single-host pool | Single-host |
+| Parallelism | Long-lived pool; one evaluation sharded by system across the pool | Short-lived children forked from a warm parent |
+| Warmth across runs | Persistent eval cache keyed by flake fingerprint | None; copy-on-write warmth lasts one run |
+| Across machines | Fleet-shared `<fp>.sqlite` cache (pull and push). Staging a pulled blob drops the previous local `-wal` / `-shm` sidecars | None |
+| Concurrent writers | Shards write one cache without deadlock: WAL-append commits, one checkpoint at the end | Not applicable |
+| Memory | Automatic pool sizing; a many-system flake degrades to one shard and completes | Manual `--workers` and `--max-memory-size` |
+| Pipeline | Discovery writes rows and dispatch starts mid-evaluation; the closure walk prunes server-known derivations | JSON job stream for the consumer (Hydra and similar) |
+| Failure isolation | A bad attribute becomes an error and the evaluation goes on; a crash keeps everything streamed and retries the in-flight attribute | Per-job errors through the fork boundary |
+| Compute across machines | Single-host pool today | Single host |
 
-Gradient's main advantage is treating the eval-cache as a first-class, persistent, fleet-shared artifact, so repeat and CI evaluations of the same locked flake are near-instant across the whole worker fleet, together with automatic memory-budgeted sizing that guarantees an evaluation completes instead of relying on manual worker and memory tuning.
+## Related
 
-## Memory safety
-
-Two layers bound eval memory. **Pool sizing** (`maxEvalRss`, `GRADIENT_WORKER_EVAL_MAX_RSS`, default 8 GiB) caps how many eval subprocesses run at once - `pool_size * maxEvalRss` stays within a host-RAM share - and recycles a worker whose RSS exceeds the cap *between* `list`/`resolve` calls. But that check is post-call: a single evaluation unit (a large aggregate, IFD chains, an accidental recursion blow-up) can balloon the Boehm-GC heap past the cap *within* one call and OOM the host before the recycle runs.
-
-The **free-RAM reaper** is the proactive peak guard. A background loop samples host `MemAvailable` every 500 ms; when it falls below the safety margin (`minFreeRamMb`, `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB`; `0` = adaptive `10% of total RAM, clamped to [128 MiB, 1 GiB]`) it SIGKILLs the **largest live eval subprocess whose resident memory covers the whole shortfall**, then holds off for 5 s so the freed pages are reclaimed before it samples again. When no eval is that large the pressure is not coming from evaluation, so killing one cannot fix it and none is killed - as a 1 GiB *floor* the margin exceeded half of a 2 GiB host, and the reaper spent entire runs killing evals that were never the cause (#579). The victim's parent task sees its pipe close and reports the eval as failed - converting a would-be host OOM (which could kill the worker itself and, because the server only registers a *clean* disconnect, strand the job non-terminal) into a single bounded eval failure. Under sustained pressure `acquire` also back-pressures, serialising evaluations (always letting one proceed, so it can never deadlock). Eval subprocesses keep `oom_score_adj = 600` as a last-resort kernel fallback.
+- [Evaluation Metrics](eval-metrics.md): what the pool records per evaluation
+- [Transfer](proto/transfer.md): eval cache uploads (`UploadObject::EvalCache`)
+- [Configuration](../reference/configuration.md#worker): every worker option

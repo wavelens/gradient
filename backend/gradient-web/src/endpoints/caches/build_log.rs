@@ -11,6 +11,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
+use gradient_core::upstream_source::{fetch_upstream_log, substitution_sources};
 use gradient_sources::parse_drv_hash_name;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -20,9 +21,8 @@ use std::sync::Arc;
 /// for.
 ///
 /// Serves our own log when this cache holds the derivation, and otherwise asks
-/// the cache's upstreams: a pull-through cache substitutes paths it never built,
-/// and reporting those logs as missing is the whole of #547. `X-Cache` reports
-/// which of the two happened.
+/// the upstreams the cache substitutes from: a pull-through cache substitutes
+/// paths it never built (#547). `X-Cache` reports which of the two happened.
 pub async fn log(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,
@@ -36,8 +36,11 @@ pub async fn log(
         return log_response(body, "HIT");
     }
 
-    let upstreams = upstream_urls(&state, ctx.cache.id).await;
-    match fetch_log_from_upstreams(gradient_util::http::download_client(), &upstreams, &drv).await {
+    let upstreams = ECacheUpstream::find()
+        .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
+        .all(&state.web_db)
+        .await?;
+    match fetch_upstream_log(&substitution_sources(&upstreams), &drv).await {
         Some(body) => log_response(body, "MISS"),
         None => Err(WebError::not_found("Log")),
     }
@@ -80,43 +83,6 @@ async fn local_log(
         .await
         .ok()
         .filter(|body| !body.is_empty()))
-}
-
-async fn upstream_urls(state: &Arc<ServerState>, cache: CacheId) -> Vec<String> {
-    ECacheUpstream::find()
-        .filter(CCacheUpstream::Cache.eq(cache))
-        .all(&state.web_db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|upstream| upstream.url)
-        .collect()
-}
-
-/// Ask each upstream in turn for `drv`'s build log and return the first hit.
-///
-/// Logs are plain text and carry no signature, so - unlike narinfos - there is
-/// nothing to verify; an upstream that 404s or errors is skipped.
-pub async fn fetch_log_from_upstreams(
-    client: &reqwest::Client,
-    upstreams: &[String],
-    drv: &str,
-) -> Option<String> {
-    for base_url in upstreams {
-        let url = format!("{}/log/{}", base_url.trim_end_matches('/'), drv);
-        let Ok(response) = client.get(&url).send().await else {
-            continue;
-        };
-        if !response.status().is_success() {
-            continue;
-        }
-        match response.text().await {
-            Ok(body) if !body.is_empty() => return Some(body),
-            _ => continue,
-        }
-    }
-
-    None
 }
 
 fn log_response(body: String, cache_status: &'static str) -> WebResult<Response> {

@@ -12,6 +12,7 @@ use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
+use gradient_core::upstream_source::{UpstreamSource, fetch_from_upstreams, substitution_sources};
 use gradient_sources::get_hash_from_url;
 use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
@@ -71,34 +72,27 @@ pub async fn upstream_nar(
         .all(&state.web_db)
         .await?;
 
-    let bases = upstream_bases(&upstreams, upstream_id);
-    if bases.is_empty() {
+    let sources = named_first(substitution_sources(&upstreams), upstream_id);
+    if sources.is_empty() {
         return Err(WebError::not_found("Upstream"));
     }
 
-    let client = gradient_util::http::download_client();
-    for base in bases {
-        let nar_url = build_upstream_nar_url(&base, &path, query.as_deref());
-        let Ok(resp) = client.get(&nar_url).send().await else {
-            continue;
-        };
-        if !resp.status().is_success() {
-            continue;
-        }
+    let Some(resp) =
+        fetch_from_upstreams(&sources, &upstream_nar_path(&path, query.as_deref()), None).await
+    else {
+        return Err(WebError::not_found("NAR in upstream"));
+    };
 
-        let mut builder = Response::builder().header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-nix-nar"),
-        );
-        if let Some(len) = resp.content_length() {
-            builder = builder.header(header::CONTENT_LENGTH, len);
-        }
-        return builder
-            .body(Body::from_stream(resp.bytes_stream()))
-            .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)));
+    let mut builder = Response::builder().header(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-nix-nar"),
+    );
+    if let Some(len) = resp.content_length() {
+        builder = builder.header(header::CONTENT_LENGTH, len);
     }
-
-    Err(WebError::not_found("NAR in upstream"))
+    builder
+        .body(Body::from_stream(resp.bytes_stream()))
+        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
 /// Which upstreams to try for a proxied NAR, best first.
@@ -109,22 +103,16 @@ pub async fn upstream_nar(
 /// NAR path itself is content-addressed - the filename is a file hash - so any
 /// upstream of this cache that serves that path serves the same bytes. Try the
 /// named one first, then the rest, and only give up when none of them has it.
-fn upstream_bases(upstreams: &[MCacheUpstream], named: Uuid) -> Vec<String> {
-    let mut bases: Vec<String> = Vec::with_capacity(upstreams.len());
-    let named_first = upstreams
-        .iter()
-        .filter(|u| u.id.into_inner() == named)
-        .chain(upstreams.iter().filter(|u| u.id.into_inner() != named));
-
-    for upstream in named_first {
-        let Some(url) = upstream.url.as_deref() else {
-            continue;
-        };
-        if !bases.iter().any(|b| b == url) {
-            bases.push(url.to_owned());
+fn named_first(sources: Vec<UpstreamSource>, named: Uuid) -> Vec<UpstreamSource> {
+    let (mut ordered, rest): (Vec<_>, Vec<_>) = sources
+        .into_iter()
+        .partition(|s| s.id.into_inner() == named);
+    for source in rest {
+        if !ordered.iter().any(|o| o.url == source.url) {
+            ordered.push(source);
         }
     }
-    bases
+    ordered
 }
 
 pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
@@ -176,15 +164,15 @@ fn spawn_fetch_stamp(state: Arc<ServerState>, cache_id: CacheId, hash: String) {
     });
 }
 
-/// Reconstruct the upstream NAR URL. The narinfo we re-served kept the upstream's
-/// own URL query (e.g. hash-routed caches like `cache.nixos-cuda.org` require
-/// `?hash=<storehash>` to resolve the out-hash), but axum's `{*path}` capture
-/// drops the query - so a missing forward made the upstream 404 a NAR it has.
-fn build_upstream_nar_url(base_url: &str, path: &str, query: Option<&str>) -> String {
-    let url = format!("{}/{}", base_url.trim_end_matches('/'), path);
+/// The upstream NAR path with its query. The narinfo we re-served kept the
+/// upstream's own URL query (e.g. hash-routed caches like
+/// `cache.nixos-cuda.org` require `?hash=<storehash>` to resolve the out-hash),
+/// but axum's `{*path}` capture drops the query - so a missing forward made the
+/// upstream 404 a NAR it has.
+fn upstream_nar_path(path: &str, query: Option<&str>) -> String {
     match query {
-        Some(q) if !q.is_empty() => format!("{url}?{q}"),
-        _ => url,
+        Some(q) if !q.is_empty() => format!("{path}?{q}"),
+        _ => path.to_owned(),
     }
 }
 
@@ -199,6 +187,31 @@ mod tests {
             url: url.map(str::to_owned),
             ..Default::default()
         }
+    }
+
+    fn upstream_bases(rows: &[MCacheUpstream], named: Uuid) -> Vec<String> {
+        named_first(substitution_sources(rows), named)
+            .into_iter()
+            .map(|s| s.url)
+            .collect()
+    }
+
+    /// A write-only upstream is one this cache pushes to; the workers never
+    /// substitute from it, and neither may the NAR proxy.
+    #[test]
+    fn a_write_only_upstream_is_never_proxied() {
+        let rows = vec![
+            MCacheUpstream {
+                mode: gradient_entity::project_cache::CacheSubscriptionMode::WriteOnly,
+                ..upstream_row(1, Some("https://push.example"))
+            },
+            upstream_row(2, Some("https://b.example")),
+        ];
+
+        assert_eq!(
+            upstream_bases(&rows, uuid::Uuid::from_u128(1)),
+            vec!["https://b.example"]
+        );
     }
 
     /// The named upstream is still the right first guess: it is the one whose
@@ -321,23 +334,13 @@ mod tests {
     /// `?hash=<storehash>` query the re-served narinfo carried; dropping it 404s a
     /// NAR the upstream has.
     #[test]
-    fn upstream_nar_url_forwards_query_string() {
+    fn upstream_nar_path_forwards_query_string() {
         assert_eq!(
-            build_upstream_nar_url(
-                "https://cache.nixos-cuda.org",
-                "nar/0njia.nar",
-                Some("hash=6713ipl")
-            ),
-            "https://cache.nixos-cuda.org/nar/0njia.nar?hash=6713ipl"
+            upstream_nar_path("nar/0njia.nar", Some("hash=6713ipl")),
+            "nar/0njia.nar?hash=6713ipl"
         );
-        assert_eq!(
-            build_upstream_nar_url("https://up/", "nar/x.nar", None),
-            "https://up/nar/x.nar"
-        );
-        assert_eq!(
-            build_upstream_nar_url("https://up", "nar/x.nar", Some("")),
-            "https://up/nar/x.nar"
-        );
+        assert_eq!(upstream_nar_path("nar/x.nar", None), "nar/x.nar");
+        assert_eq!(upstream_nar_path("nar/x.nar", Some("")), "nar/x.nar");
     }
 
     /// Rows uploaded while issue #132's BLAKE3 default was active carry

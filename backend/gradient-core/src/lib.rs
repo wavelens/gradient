@@ -6,6 +6,7 @@
 
 pub mod state_root;
 pub mod upstream;
+pub mod upstream_source;
 
 pub use gradient_graph::Graph;
 pub use state_root::{

@@ -99,17 +99,17 @@ A relay whose `InputsUnavailable` / `Transient` retries run out enters the same 
 
 ## Cache Endpoints
 
-`gradient-web/src/endpoints/caches/`:
+`gradient-web/src/endpoints/caches/`. Every endpoint asks only the cache's own upstreams that the workers would substitute from (`kind = Http`, a URL, not `WriteOnly`; `substitution_sources` in `gradient-core/src/upstream_source.rs`), skips tripped upstreams and feeds the shared breakers. NAR and log fetches follow redirects.
 
 | Endpoint | Upstream behaviour |
 |---|---|
-| `narinfo.rs` | A narinfo the cache lacks is asked from every upstream with a URL and `public_key` in parallel. The `Sig` must verify against `public_key`. `URL:` is rewritten to `nar/upstream/<id>/...`, and the cache's own `Sig` is appended next to the upstream's |
-| `nar.rs` (`upstream_nar`) | Tries the named upstream first, then every other upstream of the cache; the NAR path is content-addressed and an upstream row may have been deleted |
-| `build_log.rs` | `/log/<drv>` serves the local log (`X-Cache: HIT`), else the first upstream log (`X-Cache: MISS`) |
+| `narinfo.rs` | A narinfo the cache lacks is asked from every such upstream with a `public_key` in parallel. The `Sig` must verify against `public_key`. `URL:` is rewritten to `nar/upstream/<id>/...`, and the cache's own `Sig` is appended next to the upstream's |
+| `nar.rs` (`upstream_nar`) | Tries the named upstream first, then every other one; the NAR path is content-addressed and an upstream row may have been deleted |
+| `build_log.rs` | `/log/<drv>` serves the local log (`X-Cache: HIT`), else the first non-empty upstream log (`X-Cache: MISS`) |
 
 ## Build Log Substitution
 
-`gradient-scheduler/src/log_substitution.rs`. After `BuildCompleted` on a `substitutable` anchor, the scheduler fetches `<upstream>/log/<drv basename>` from the project's `Http` upstreams in turn. The first non-empty body (10 s timeout, capped at 16 MiB with a `[truncated]` marker) is appended to the latest `build_attempt` log, only when that log is still empty. Every failure is logged and ignored.
+`gradient-scheduler/src/log_substitution.rs`. After `BuildCompleted` on a `substitutable` anchor, the scheduler fetches `<upstream>/log/<drv basename>` from the project's candidates (`upstream_endpoints_for_project`, best first) through `fetch_upstream_log`, the same fetch the cache log endpoint uses. The first non-empty body (10 s timeout, capped at 16 MiB with a `[truncated]` marker) is appended to the latest `build_attempt` log, only when that log is still empty. Every failure is logged and ignored.
 
 ## Related
 

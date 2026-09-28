@@ -23,7 +23,7 @@ pub mod subscriptions;
 mod upload;
 mod upstreams;
 
-pub use self::build_log::{fetch_log_from_upstreams, log};
+pub use self::build_log::log;
 pub use self::debuginfo::debuginfo;
 pub use self::keys::{get_cache_key, get_cache_public_key};
 pub use self::management::{
