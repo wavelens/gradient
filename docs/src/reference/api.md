@@ -84,4 +84,4 @@ At the root, without `/api/v1`. Private caches take HTTP Basic auth with any use
 
 - Unknown keys always answer `404`, and Nix moves on to the next substituter.
 - `log` and `debuginfo` fall back to the upstreams for substituted paths.
-- `ls` and `serve` allow 60 requests per minute, `log` about 300.
+- `ls`, `serve` and `log` refill one request every 333 ms (about 180 per minute), with a burst of 180 for `ls` and `serve` and 900 for `log`.
