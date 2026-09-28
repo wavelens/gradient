@@ -45,7 +45,18 @@ cat /proc/sys/kernel/random/uuid
 
     The peers file entry on the worker machine is `<project uuid>:<token>`.
 
-## 3. Configure the Machine
+## 3. Open the Server to Workers
+
+Remote workers connect over a WebSocket on `/proto`. The bundled nginx forwards `/proto` only with `proto.public`:
+
+```nix
+# configuration.nix on the server
+services.gradient.proto.public = true;
+```
+
+The local worker needs none of this; it connects on the loopback address.
+
+## 4. Configure the Machine
 
 ```nix
 # configuration.nix on the worker machine
@@ -70,7 +81,7 @@ cat /proc/sys/kernel/random/uuid
 - **Settings -> Workers** lists the worker as connected, with the detected systems and features.
 - The next evaluation of the project shows builds on the new worker.
 
-!!! tip "One machine, many projects"
+!!! tip "One Machine, Many Projects"
     Register the same worker ID in each project and add each project's peers file entry as its own line. For a worker every project may use, declare a [base worker](../reference/state.md#workersname) instead.
 
 ## Peers File
