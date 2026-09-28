@@ -25,7 +25,7 @@ flowchart LR
 | Part | Purpose |
 |---|---|
 | Repository URL | Where the flake lives |
-| Evaluation Wildcard | Which flake outputs to build, see [wildcards](../usage/overview.md#evaluation-wildcard) |
+| Evaluation Wildcard | Which flake outputs to build, see [wildcards](../reference/wildcards.md) |
 | Triggers | When an evaluation starts and on which branch: push, pull request, polling (every 300 s by default) or a cron schedule |
 | Actions | What happens after: mail, web request, forge status, flake update pull request |
 | Flake Input Overrides | Replace a flake input for every run, e.g. a newer nixpkgs |

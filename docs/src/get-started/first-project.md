@@ -30,7 +30,7 @@ On the project page, **Create Task**:
 | Field | Value |
 |---|---|
 | Repository URL | The flake's Git URL, e.g. `https://github.com/wavelens/gradient` |
-| Evaluation Wildcard | Which flake outputs to build, default `packages.x86_64-linux.*`, see [wildcards](../usage/overview.md#evaluation-wildcard) |
+| Evaluation Wildcard | Which flake outputs to build, e.g. `packages.x86_64-linux.#`, see [wildcards](../reference/wildcards.md) |
 
 A task is one repository plus the outputs to build from that repository.
 
@@ -48,7 +48,7 @@ A task is one repository plus the outputs to build from that repository.
 
 ## Next steps
 
-- [Evaluation wildcards](../usage/overview.md#evaluation-wildcard): select exactly the outputs to build
+- [Evaluation wildcards](../reference/wildcards.md): select exactly the outputs to build
 - [Forge integration](../usage/integration.md): evaluate on every push and pull request
 - [Caches](../usage/caches.md): use the cache from other machines
 - [Add a Remote Worker](../guides/remote-worker.md): add build machines
