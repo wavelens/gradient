@@ -52,6 +52,7 @@ nav:
       - Connect GitHub: guides/forge-github.md
       - Connect Gitea or Forgejo: guides/forge-gitea.md
       - Connect GitLab: guides/forge-gitlab.md
+      - Build Before You Push: guides/build-before-push.md
       - Share a Cache: guides/share-a-cache.md
       - Upload NARs: guides/upload-nars.md
       - Pull Deployment: guides/pull-deployment.md
@@ -70,7 +71,6 @@ nav:
       - Settings: ui/settings.md
   - Using Gradient:
       - Overview: usage/overview.md
-      - CLI: usage/cli.md
       - API: usage/api.md
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md

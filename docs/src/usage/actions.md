@@ -133,7 +133,7 @@ Opens (or updates) a pull request that bumps the task's flake inputs, driven by 
 
 **Wildcards.** An override name may be a glob (`*`, `?`), e.g. `nixpkgs*` or a bare `*` for every input, so one row tracks many inputs. Globs are expanded worker-side against the task's `flake.lock`; a literal override always wins over a glob. Under `per_input` granularity a glob still opens one PR per matched input (the worker discovers the matches, then the server fans out one update per input).
 
-This is distinct from `gradient build`'s per-run [`--override-input`](cli.md#build-requests), which overrides an input for a single build request rather than declaring it tracked for the updater.
+This is distinct from `gradient build`'s per-run [`--override-input`](../guides/build-before-push.md#override-inputs), which overrides an input for a single build request rather than declaring it tracked for the updater.
 
 **When it runs.** An `input_update` evaluation is created whenever a task trigger fires - the periodic polling/time schedule (on every due tick, independent of whether the repository has a new commit, since upstream input bumps never move `HEAD`), a manual *Run trigger*, or a *Start Evaluation* - provided the task has an `open_pr` action and at least one tracked input. It is self-gated, so triggers on tasks without the action are unaffected. The update run is concurrent: it runs alongside the task's normal CI evaluation for the same trigger, and neither aborts the other regardless of the task's concurrency policy.
 

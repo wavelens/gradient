@@ -27,13 +27,11 @@ impl TaskGitContext<'_> {
         let url = git_transport_url(&self.task.repository).to_string();
         let ssh_creds = self.ssh_creds.clone();
 
-        let temp_dir = tempfile::TempDir::new().map_err(|e| SourceError::FileRead {
-            reason: e.to_string(),
-        })?;
-
-        let temp_path = temp_dir.path().to_path_buf();
-
         tokio::task::spawn_blocking(move || {
+            let temp_dir = tempfile::TempDir::new().map_err(|e| SourceError::FileRead {
+                reason: e.to_string(),
+            })?;
+
             let mut callbacks = RemoteCallbacks::new();
             callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
 
@@ -54,12 +52,11 @@ impl TaskGitContext<'_> {
             let mut builder = git2::build::RepoBuilder::new();
             builder.bare(true);
             builder.fetch_options(fo);
-            let repo =
-                builder
-                    .clone(&url, &temp_path)
-                    .map_err(|e| SourceError::GitCommandFailed {
-                        stderr: e.message().to_string(),
-                    })?;
+            let repo = builder.clone(&url, temp_dir.path()).map_err(|e| {
+                SourceError::GitCommandFailed {
+                    stderr: e.message().to_string(),
+                }
+            })?;
 
             let oid = git2::Oid::from_str(&hash_str).map_err(|_| SourceError::GitOutputParsing)?;
             let commit = repo

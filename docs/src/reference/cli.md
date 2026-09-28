@@ -115,6 +115,20 @@ gradient login https://gradient.example.com
 |---|---|---|
 | `gradient generate apikey` | - | Generate an API key: the token for clients and the digest for `state.api_keys.<name>.key_file` |
 | `gradient mcp` | `--control` | Serve this Gradient instance to MCP clients over stdio |
+## Interactive Mode
+
+`-i` opens a full-screen view instead of plain output; `--json` ignores the flag.
+
+| Command | View | Keys |
+|---|---|---|
+| `gradient cache nar list -i` | NAR browser with filter | Type to filter, arrows move, `Esc` quits |
+| `gradient builds graph <id> -i` | Dependency tree, like `nix-tree` | Arrows move, `Enter` expands, `Esc` quits |
+| `gradient builds log <id> -i` | Log pager | Arrows scroll, `f` follows, `/` searches, `Esc` quits |
+
+## Download Filters
+
+`gradient download` picks an evaluation and its build products interactively. `--evaluation` and `--products all` (or `1,3-5`) skip the pickers; a positional `'#packages.x86_64-linux.app'` (comma-separated for several) selects by attribute instead of `--products`.
+
 ## Local Evaluation
 
 `gradient eval` runs the worker's evaluator locally, like `nix-eval-jobs`: one JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.

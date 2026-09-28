@@ -12,7 +12,7 @@
 
     GitHub, Gitea / Forgejo and GitLab: builds on push and pull request. Sends status checks back.
 
--   :material-console: **[Build before you push](usage/cli.md#build-requests)**
+-   :material-console: **[Build before you push](guides/build-before-push.md)**
 
     Uncommitted changes built on the CI workers with `gradient build`, no local Nix needed.
 
