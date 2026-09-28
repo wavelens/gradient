@@ -153,6 +153,18 @@ impl std::fmt::Display for WriterUnavailable {
 }
 impl std::error::Error for WriterUnavailable {}
 
+/// The server or the object store stopped answering in time: an outage, typed
+/// so the job is reported transient rather than failed for good.
+#[derive(Debug)]
+pub struct Unresponsive;
+
+impl std::fmt::Display for Unresponsive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the server or object store did not answer in time")
+    }
+}
+impl std::error::Error for Unresponsive {}
+
 /// Read-only half produced by [`ProtoConnection::split`].
 pub struct ProtoReader {
     inner: ServerReader,

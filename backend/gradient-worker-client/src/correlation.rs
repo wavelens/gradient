@@ -296,11 +296,11 @@ pub async fn cache_query_chunk(
             // Drop the waiter so a late reply doesn't deliver to a closed
             // channel and log a spurious warning later.
             forget_cache_waiter(cache_waiters, &query_id);
-            Err(anyhow::anyhow!(
+            Err(anyhow::Error::new(crate::connection::Unresponsive).context(format!(
                 "CacheQuery for {} paths timed out after {}s waiting for reply (job_id={job_id}, query_id={query_id})",
                 path_count,
                 CACHE_QUERY_TIMEOUT.as_secs(),
-            ))
+            )))
         }
     }
 }

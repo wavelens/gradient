@@ -64,7 +64,12 @@ async fn put_with(
                 tokio::time::sleep(delay).await;
                 attempt += 1;
             }
-            Err(PutError::Retryable { error, .. } | PutError::Fatal(error)) => {
+            Err(PutError::Retryable { error, .. }) => {
+                return Err(error
+                    .context(crate::connection::Unresponsive)
+                    .context(format!("object PUT gave up after {attempt} attempt(s)")));
+            }
+            Err(PutError::Fatal(error)) => {
                 return Err(error.context(format!("object PUT gave up after {attempt} attempt(s)")));
             }
         }
@@ -197,6 +202,11 @@ mod tests {
             .unwrap_err();
 
         assert!(format!("{err:#}").contains("503"), "{err:#}");
+        assert!(
+            err.downcast_ref::<crate::connection::Unresponsive>()
+                .is_some(),
+            "a store that keeps failing is an outage, not a verdict on the job"
+        );
     }
 
     #[tokio::test]
@@ -213,6 +223,10 @@ mod tests {
             .unwrap_err();
 
         assert!(format!("{err:#}").contains("403"), "{err:#}");
+        assert!(
+            err.downcast_ref::<crate::connection::Unresponsive>()
+                .is_none()
+        );
     }
 
     #[test]

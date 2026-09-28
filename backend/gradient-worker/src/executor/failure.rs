@@ -8,7 +8,7 @@
 //! [`BuildFailureKind`] on its way to the server.
 
 use gradient_wire::messages::BuildFailureKind;
-use gradient_worker_client::connection::WriterUnavailable;
+use gradient_worker_client::connection::{Unresponsive, WriterUnavailable};
 
 use crate::executor::eval::CorruptEvalCache;
 use crate::proto::prefetch::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};
@@ -224,7 +224,8 @@ pub(crate) fn wire_failure(e: &anyhow::Error) -> (BuildFailureKind, Vec<String>)
     if e.chain().any(|s| s.is::<JobAborted>()) {
         return (BuildFailureKind::Aborted, Vec::new());
     }
-    if e.chain().any(|s| s.is::<WriterUnavailable>()) {
+    if e.chain().any(|s| s.is::<WriterUnavailable>()) || e.downcast_ref::<Unresponsive>().is_some()
+    {
         return (BuildFailureKind::Transient, Vec::new());
     }
     match e.downcast_ref::<BuildError>() {
@@ -349,6 +350,14 @@ mod tests {
     #[test]
     fn a_severed_server_connection_is_transient() {
         let e = anyhow::Error::new(WriterUnavailable).context("send build log");
+        assert_eq!(wire_failure(&e).0, BuildFailureKind::Transient);
+    }
+
+    #[test]
+    fn an_unresponsive_server_or_store_is_transient() {
+        let e = anyhow::anyhow!("error sending request")
+            .context(Unresponsive)
+            .context("object PUT gave up after 6 attempt(s)");
         assert_eq!(wire_failure(&e).0, BuildFailureKind::Transient);
     }
 
