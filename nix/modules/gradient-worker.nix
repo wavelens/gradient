@@ -225,12 +225,6 @@ in {
         description = "Maximum simultaneous evaluations.";
       };
 
-      workers = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 8;
-        description = "Number of Nix evaluator subprocesses.";
-      };
-
       forkWorkers = lib.mkOption {
         type = lib.types.nullOr lib.types.ints.positive;
         default = null;
@@ -497,7 +491,6 @@ in {
           GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB = toString cfg.system.minFreeRamMb;
           GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS = toString cfg.nixDaemon.maxConnections;
           GRADIENT_WORKER_EVAL_MAX_CONCURRENT = toString cfg.eval.maxConcurrent;
-          GRADIENT_WORKER_EVAL_WORKERS = toString cfg.eval.workers;
           GRADIENT_WORKER_EVAL_MAX_RSS = toString cfg.eval.maxRss;
           GRADIENT_WORKER_EVAL_METRICS = lib.boolToString cfg.eval.metrics;
           GRADIENT_WORKER_EVAL_CACHE_SHARE = lib.boolToString cfg.eval.cache.share;

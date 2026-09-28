@@ -229,7 +229,6 @@ impl Worker<Connected> {
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
         let store = LocalNixStore::connect(config.nix_daemon.max_connections)?;
         let evaluator = WorkerEvaluator::new(
-            config.eval.workers,
             config.eval.fork_workers,
             config.eval.max_rss,
             config.system.min_free_ram_mb,

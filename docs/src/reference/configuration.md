@@ -322,7 +322,6 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.eval.maxConcurrent` | int | `1` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | Maximum simultaneous evaluations. |
 | `worker.eval.maxRss` | int | `8589934592` | `GRADIENT_WORKER_EVAL_MAX_RSS` | Memory in bytes above which an evaluation subprocess is recycled. |
 | `worker.eval.metrics` | bool | `true` | `GRADIENT_WORKER_EVAL_METRICS` | Whether to collect per-evaluation Nix statistics (thunks, heap, peak memory, hotspots, flake graph). |
-| `worker.eval.workers` | int | `8` | `GRADIENT_WORKER_EVAL_WORKERS` | Number of Nix evaluator subprocesses. |
 
 ## `worker.log`
 

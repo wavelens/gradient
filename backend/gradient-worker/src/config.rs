@@ -285,7 +285,6 @@ impl Default for NixDaemonArgs {
 #[derive(Args, Debug, Clone)]
 pub struct EvalArgs {
     /// Maximum number of simultaneous evaluations.
-    /// Defaults to `eval.workers` (one eval job per evaluator subprocess).
     #[arg(
         id = "eval-max-concurrent",
         long = "eval-max-concurrent",
@@ -293,15 +292,6 @@ pub struct EvalArgs {
         default_value_t = 1
     )]
     pub max_concurrent: u32,
-
-    /// Number of parallel Nix evaluator subprocesses.
-    /// Only effective when `--capabilities-eval` is enabled.
-    #[arg(
-        long = "eval-workers",
-        env = "GRADIENT_WORKER_EVAL_WORKERS",
-        default_value_t = 1
-    )]
-    pub workers: usize,
 
     /// Number of parallel eval subprocesses in the pool (the eval concurrency).
     #[arg(long = "eval-fork-workers", env = "GRADIENT_WORKER_EVAL_FORK_WORKERS", default_value_t = default_fork_workers())]
@@ -333,7 +323,6 @@ impl Default for EvalArgs {
     fn default() -> Self {
         Self {
             max_concurrent: 1,
-            workers: 1,
             fork_workers: default_fork_workers(),
             max_rss: 8 * 1024 * 1024 * 1024,
             cache_dir: None,

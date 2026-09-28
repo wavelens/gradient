@@ -214,10 +214,9 @@ pub struct WorkerEvaluator {
 
 impl WorkerEvaluator {
     /// Create a new evaluator. `fork_workers` (env `GRADIENT_WORKER_EVAL_FORK_WORKERS`)
-    /// is the pool size and thus the eval concurrency; `eval.workers` is legacy.
+    /// is the pool size and thus the eval concurrency.
     /// `eval_cache_dir` is exported to every eval worker as `NIX_CACHE_HOME`.
     pub fn new(
-        _eval_workers: usize,
         fork_workers: usize,
         max_eval_rss: u64,
         min_free_ram_mb: u64,
