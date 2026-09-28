@@ -143,8 +143,8 @@ fn upload_error_message(
     match err {
         ConnectorError::Api { status, .. } if status.as_u16() == 413 => format!(
             "Failed to upload {what}: the server rejected it as too large (HTTP 413). \
-             Raise the source upload limit on the server (GRADIENT_MAX_SOURCE_UPLOAD_SIZE, \
-             or services.gradient.settings.maxSourceUploadSize on NixOS; the built-in \
+             Raise the source upload limit on the server (GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE, \
+             or services.gradient.http.maxSourceUploadSize on NixOS; the built-in \
              reverse proxy's client_max_body_size tracks it)."
         ),
         ConnectorError::Api { status, message } if status.as_u16() == 400 => format!(
@@ -155,7 +155,7 @@ fn upload_error_message(
             "Failed to upload {what}: the server closed the connection mid-upload (HTTP {}). \
              The source most likely exceeds the server's upload limit, which drops the \
              connection instead of returning a clean error - raise it \
-             (GRADIENT_MAX_SOURCE_UPLOAD_SIZE, or services.gradient.settings.maxSourceUploadSize \
+             (GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE, or services.gradient.http.maxSourceUploadSize \
              on NixOS); otherwise the server may be down.",
             status.as_u16()
         ),
@@ -300,7 +300,10 @@ mod tests {
         let msg = upload_error_message(&err, 208_685_264, 53318, "acme");
         assert!(msg.contains("199.0 MiB"), "{msg}");
         assert!(msg.contains("53318 files"), "{msg}");
-        assert!(msg.contains("GRADIENT_MAX_SOURCE_UPLOAD_SIZE"), "{msg}");
+        assert!(
+            msg.contains("GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE"),
+            "{msg}"
+        );
         assert!(
             !msg.contains("<html>"),
             "raw proxy HTML must be suppressed: {msg}"

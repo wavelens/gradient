@@ -234,7 +234,7 @@ api("PUT", "tasks/myproject", token=token, expect_error=True, body=json.dumps({
 assert api("GET", "tasks/myproject/mytask", token=token)["id"] == proj_id
 assert any(p["id"] == proj_id for p in api("GET", "tasks/myproject", token=token)["items"])
 
-# A new task must not start above GRADIENT_KEEP_EVALUATIONS (5 here). It used
+# A new task must not start above GRADIENT_EVAL_MAX_KEEP (5 here). It used
 # to be created at the hardcoded 30, so the very first save - the frontend sends
 # the whole form back - was rejected by the server's own value (#561).
 fresh = api("GET", "tasks/myproject/mytask", token=token)

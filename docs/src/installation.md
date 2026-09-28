@@ -48,11 +48,11 @@ In your `configuration.nix`:
     domain        = "gradient.example.com";
 
     # Secrets - we recommend sops-nix or agenix
-    cryptSecretFile = "/var/lib/gradient/crypt-secret"; # base64-encoded password
-    jwtSecretFile   = "/var/lib/gradient/jwt-secret";   # random alphanumeric RS256 secret
+    secrets.cryptFile = "/var/lib/gradient/crypt-secret"; # base64-encoded password
+    secrets.jwtFile   = "/var/lib/gradient/jwt-secret";   # random alphanumeric RS256 secret
 
     # Convenience options
-    configurePostgres         = true;
+    postgres.enable           = true;
     reverseProxy.nginx.enable = true;
   };
 }

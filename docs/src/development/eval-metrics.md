@@ -56,7 +56,7 @@ Both are surfaced in the Job Board's "Expensive Evals" panel.
 
 ## Toggle and overhead
 
-`GRADIENT_EVAL_METRICS_ENABLED` (worker-side, default `true`) gates capture.
+`GRADIENT_WORKER_EVAL_METRICS` (worker-side, default `true`) gates capture.
 When `false`, the eval-worker skips the per-request stats read entirely, so
 there is zero added overhead. Even when enabled the overhead is one cheap
 cumulative-counter read per resolver request, diffed per worker - there is no

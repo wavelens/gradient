@@ -63,7 +63,7 @@ only the paths named on the command line.
 ### Size cap
 
 The server enforces a maximum upload size per NAR. The default is 512 MiB
-and is controlled by the `GRADIENT_MAX_NAR_UPLOAD_SIZE` environment variable
+and is controlled by the `GRADIENT_NAR_MAX_UPLOAD_SIZE` environment variable
 on the server.
 
 The bundled reverse proxy (nginx/Caddy) caps each HTTP request body at 100 MiB.

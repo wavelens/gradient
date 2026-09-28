@@ -41,16 +41,16 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
     enable                    = true;
     frontend.enable           = true;
     domain                    = "gradient.example.com";
-    jwtSecretFile             = "/run/secrets/gradient-jwt";
-    cryptSecretFile           = "/run/secrets/gradient-crypt";
-    configurePostgres         = true;
+    secrets.jwtFile           = "/run/secrets/gradient-jwt";
+    secrets.cryptFile         = "/run/secrets/gradient-crypt";
+    postgres.enable           = true;
     reverseProxy.nginx.enable = true;
-    reportErrors              = true; # optional: ships crash reports to upstream Wavelens. Override via `settings.sentryDsn = "your-dsn"`.
+    sentry.enable             = true; # optional: ships crash reports to upstream Wavelens. Override via `sentry.dsn = "your-dsn"`.
   };
 
   services.gradient.worker = {
     enable = true;
-    settings.buildMetrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
+    build.metrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
   };
 }
 ```

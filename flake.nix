@@ -110,12 +110,12 @@
       GRADIENT_DEBUG = "true";
       GRADIENT_SERVE_URL = "http://localhost:3000";
       GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
-      GRADIENT_MAX_CONCURRENT_EVALUATIONS = 1;
-      GRADIENT_MAX_CONCURRENT_BUILDS = 8;
+      GRADIENT_WORKER_EVAL_MAX_CONCURRENT = 1;
+      GRADIENT_WORKER_BUILD_MAX_CONCURRENT = 8;
       GRADIENT_STORE_PATH = "./testing/store";
-      GRADIENT_CRYPT_SECRET_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK";
-      GRADIENT_JWT_SECRET_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
-      GRADIENT_REPORT_ERRORS = "false";
+      GRADIENT_SECRETS_CRYPT_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK";
+      GRADIENT_SECRETS_JWT_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
+      GRADIENT_SENTRY_ENABLE = "false";
     };
   }) // {
     lib.tests = {

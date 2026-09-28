@@ -136,7 +136,7 @@ asynchronously and any `derivation_output.is_cached` rows for it flip to
 
 Uploading requires the `writeStore` cache permission. The server enforces a
 maximum NAR upload size (default 512 MiB, configurable via
-`GRADIENT_MAX_NAR_UPLOAD_SIZE`). See [Managing cached NARs](cache-nars.md)
+`GRADIENT_NAR_MAX_UPLOAD_SIZE`). See [Managing cached NARs](cache-nars.md)
 for full upload documentation.
 
 ### Build Requests
@@ -187,7 +187,7 @@ Requirements and limits:
 
 - Run from inside a git working tree (bare repos are not supported).
 - Only files git tracks are uploaded; untracked files and `.git/` are skipped.
-- Total source size is capped by `settings.maxSourceUploadSize` (512 MiB
+- Total source size is capped by `http.maxSourceUploadSize` (512 MiB
   default); the source is streamed in bounded chunks, so no single request
   hits the reverse proxy's body limit.
 - The default flow streams logs from all queued builds until they complete;

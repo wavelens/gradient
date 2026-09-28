@@ -199,7 +199,7 @@ The server allows only **one WebSocket connection per worker ID per instance**. 
 The `GET /api/v1/workers` endpoint shows all connected workers and their status. Access is controlled by:
 
  - **Superuser users** - users with the `superuser` flag set on their account can always access the endpoint
- - **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** - when set, the workers/stats endpoints are publicly visible without authentication
+ - **`GRADIENT_PUBLIC_STATS=true`** - when set, the workers/stats endpoints are publicly visible without authentication
 
 The per-project listing `GET /api/v1/projects/{project}/workers` returns one entry per worker registration owned by that project. The `live` field on each entry is only populated when the worker is currently connected **and** the project's UUID is in the worker's `authorized_peers` set (i.e. the worker actually presented a valid token for this project during the handshake). A worker that registered with several projects but only authenticated for a subset will therefore appear as connected for the projects it authenticated for, and as disconnected (`live: null`) for the others.
 
@@ -227,11 +227,11 @@ Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) -
 The reference worker (`gradient-worker`) auto-detects both fields at startup: `architectures` defaults to the host system (`std::env::consts::ARCH` + OS, with `macos` mapped to `darwin`), and `system_features` defaults to the daemon's resolved set read from `nix config show system-features` - which includes the CPU-derived `gccarch-*` levels a static config can't enumerate. Both are overridable via env vars / CLI flags:
 
 ```text
-GRADIENT_WORKER_ARCHITECTURES=x86_64-linux,aarch64-linux,builtin
+GRADIENT_WORKER_SYSTEM_ARCHITECTURES=x86_64-linux,aarch64-linux,builtin
 GRADIENT_WORKER_SYSTEM_FEATURES=kvm,big-parallel,nixos-test
 ```
 
-When set, each **replaces** its auto-detected default entirely (so e.g. setting `GRADIENT_WORKER_ARCHITECTURES` on an aarch64 host without including `aarch64-linux` refuses all native builds - list every system you want to accept). Leave `GRADIENT_WORKER_SYSTEM_FEATURES` unset so the worker advertises exactly what its daemon can build; the dispatcher then never routes a `gccarch-skylake`- or `kvm`-requiring build to a worker whose daemon can't run it.
+When set, each **replaces** its auto-detected default entirely (so e.g. setting `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` on an aarch64 host without including `aarch64-linux` refuses all native builds - list every system you want to accept). Leave `GRADIENT_WORKER_SYSTEM_FEATURES` unset so the worker advertises exactly what its daemon can build; the dispatcher then never routes a `gccarch-skylake`- or `kvm`-requiring build to a worker whose daemon can't run it.
 
 When the server dispatches a build, it checks that the build's target architecture is present in the worker's `architectures` and all `required_features` are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with `"aarch64-linux"` in `architectures` and `"kvm"` in `system_features`. Builds whose `architecture` is the special string `"builtin"` (e.g. `builtin:fetchurl`) are always assignable, regardless of the worker's `architectures` list.
 
@@ -520,7 +520,6 @@ FlakeJob {
     steps: Vec<FlakeStep>,               // [FetchFlake, EvaluateFlake, EvaluateDerivations] - subset per worker capability
     source: FlakeSource,                 // where to get the flake source (see below)
     wildcards: Vec<String>,              // attribute patterns for EvaluateFlake (e.g. ["packages.*.*"])
-    timeout_secs: Option<u64>,           // None = use server default (GRADIENT_EVALUATION_TIMEOUT)
 }
 
 enum FlakeSource {
@@ -720,7 +719,7 @@ The flow for getting any store path (fetched flake input, evaluated `.drv`, or b
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
  3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, and `deriver` (the full `.drv` path, when the daemon knows one). `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) - for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
  4. **Server commits atomically on `NarUploaded`**: in local mode it pops the buffered `NarPush` chunks, validates the buffer length against the reported `file_size`, writes the compressed bytes to `nar_storage` in a tracked task per upload, and **only then** asks the graph actor to record `cached_path` metadata with its `CommitNar` message (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one). The commit is also where a built output's runtime edges are learned: every reference whose hash has a producing derivation becomes a `derivation_dependency` row of kind `Runtime` from the committed path's own producer, and the anchor's `missing_runtime_deps` is seeded from them. A reference whose producer is still an unwalked stub is adopted later, by the walk that writes that stub's outputs. The per-connection commit semaphore is gone: the actor already serialises every write to the index. If the size check fails or `nar_storage.put` errors, the server stops the worker and marks the build `FailedTransient` so the dispatcher re-queues it (bounded by the attempt cap); the WebSocket connection is left intact so the worker's other in-flight jobs continue. No `cached_path` row ever claims bytes that aren't actually stored. In S3 mode there are no buffered chunks; the worker uploaded directly to object storage and `NarUploaded` only records metadata. No local re-packing, re-compression, or re-hashing ever happens. On the local backend the staged file is renamed into `nars/` and the row is committed with `confirmed = true`. On S3 it is renamed into `nar-staged/`, the row is committed with `confirmed = false`, and the `nar-uploader` child streams it to the bucket and confirms the row afterwards; the path is signed, dispatchable and servable from the moment of the commit. A relayed NAR at or under `smallNarBytes` also enters the server's hot RAM cache from the bytes its staging task retained, and the commit invalidates the cache entry for any other NAR. A presigned upload is unchanged and is born confirmed after its HEAD check; a multipart one is first completed from the reported ETags, and aborted if completion fails.
- 5. **Signing** happens on arrival. `mark_nar_stored` inserts one `cached_path_signature` row per project-cache with `signature = NULL`, then wakes the signature sweep (`state.sign_signal`). The sweep (`cache::cacher::sign_sweep`) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature - reusing one signer per cache per pass, and re-arming itself while a full batch remains. The periodic tick is now an hourly fallback (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`, default 3600) covering subscription placeholders and the `cache_derivation` backfill. Paths whose every producing task has `sign_cache = false` are skipped, except the reserved `build-request` task, which is always signed so `gradient build` outputs stay substitutable. New project ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the project owns, back-filled by the same sweep.
+ 5. **Signing** happens on arrival. `mark_nar_stored` inserts one `cached_path_signature` row per project-cache with `signature = NULL`, then wakes the signature sweep (`state.sign_signal`). The sweep (`cache::cacher::sign_sweep`) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature - reusing one signer per cache per pass, and re-arming itself while a full batch remains. The periodic tick is now an hourly fallback (`GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS`, default 3600) covering subscription placeholders and the `cache_derivation` backfill. Paths whose every producing task has `sign_cache = false` are skipped, except the reserved `build-request` task, which is always signed so `gradient build` outputs stay substitutable. New project ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the project owns, back-filled by the same sweep.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
 
@@ -1248,7 +1247,7 @@ AssignJob {
 When the timeout expires, the server sends `AbortJob { reason: "timeout" }`. The worker must stop and respond with `JobFailed`. If the worker is unreachable, the server marks the job as `Failed` after the grace period.
 
 Default timeouts:
-- FlakeJob (evaluation): `GRADIENT_EVALUATION_TIMEOUT` (default: 600s)
+- FlakeJob (evaluation): none.
 - BuildJob: `GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS` (default: 3600s wall-clock) and `GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS` (default: 1800s silent-output). Per-derivation `timeout` / `maxSilent` attributes override the server defaults. Either limit set to `0` disables that check. A timeout triggers `FailedTimeout` (terminal).
 
 ---
@@ -1629,10 +1628,10 @@ Access is gated by the cache's visibility setting:
 
 | Cache visibility | Auth required | How to authenticate |
 |---|---|---|
-| PUBLIC | No (`GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE=true`, default) | Connect without credentials |
+| PUBLIC | No (`GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE=true`, default) | Connect without credentials |
 | PRIVATE | Yes | `Authorization: GRAD<key>` HTTP header on the upgrade request |
 
-`GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE` (default `true`) controls whether anonymous access to public caches is permitted server-wide. Set it to `false` to require a key for every cache-proto connection.
+`GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE` (default `true`) controls whether anonymous access to public caches is permitted server-wide. Set it to `false` to require a key for every cache-proto connection.
 
 ### Minimal handshake
 
@@ -1669,8 +1668,8 @@ To prevent abuse from unauthenticated callers, anonymous sessions on public cach
 
 | Env var | Default | Description |
 |---|---|---|
-| `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP` | `32` | Maximum simultaneous open WebSocket connections per source IP |
+| `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP` | `32` | Maximum simultaneous open WebSocket connections per source IP |
 
-Connections that exceed `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP` receive `503 Service Unavailable` on the HTTP upgrade. The upgrade request itself is per-IP rate-limited on the same generous token-bucket tier as the NAR-download cache surface (~50 req/s, burst 3000).
+Connections that exceed `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP` receive `503 Service Unavailable` on the HTTP upgrade. The upgrade request itself is per-IP rate-limited on the same generous token-bucket tier as the NAR-download cache surface (~50 req/s, burst 3000).
 
-Authenticated sessions (PRIVATE caches with a valid API key) are not subject to the per-IP anonymous caps. **Every** cache-proto session - anonymous or authenticated - additionally counts against the global `/proto` connection semaphore (`GRADIENT_MAX_PROTO_CONNECTIONS`); once it is exhausted the upgrade is rejected with `503`. A session with no NAR transfer in flight is closed after 120 s of inactivity so a silent peer cannot pin a connection slot.
+Authenticated sessions (PRIVATE caches with a valid API key) are not subject to the per-IP anonymous caps. **Every** cache-proto session - anonymous or authenticated - additionally counts against the global `/proto` connection semaphore (`GRADIENT_PROTO_MAX_CONNECTIONS`); once it is exhausted the upgrade is rejected with `503`. A session with no NAR transfer in flight is closed after 120 s of inactivity so a silent peer cannot pin a connection slot.

@@ -34,7 +34,7 @@ unset, and unknown names log a warning and fall back to `resource-aware`.
     speed).
   - `InstanceContext` - instance-wide 5m/1h/24h windowed averages plus live
     counts (active/pending builds, total/idle workers), recomputed every
-    `GRADIENT_INSTANCE_METRICS_INTERVAL` seconds (default 30) and used to make
+    `GRADIENT_METRICS_INSTANCE_INTERVAL_SECS` seconds (default 30) and used to make
     soft-rule thresholds instance-relative.
 - `ScoredJob` exposes lazy providers (`closure_size`, `history`) so a policy
   pays for closure/history lookups only when a rule reads them.

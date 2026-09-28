@@ -394,7 +394,7 @@ The dependency walk is generated once, by
 per-evaluation sweeps and the GC keep-set.
 
 A consistency sweep (`graph_consistency_report`, interval
-`GRADIENT_GRAPH_CONSISTENCY_INTERVAL`, default 300s) is the only backstop for the
+`GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS`, default 300s) is the only backstop for the
 counters, because every one of them is moved rather than derived and nothing else
 would ever notice a lost move. It recounts `derivation.unwalked_inputs` and
 `derivation_build.missing_runtime_deps` table-wide, recomputes `fetchable` over
@@ -904,7 +904,7 @@ URL extension, because upstreams disagree with themselves - attic serves
 Upstreams are probed in hit-rate-then-latency order (most-likely cache first; never-probed
 upstreams are tried last) so the first hit wins cheaply. The lowest-latency holder's URL is
 persisted on `derivation_output.external_url`. Total outbound probe concurrency is bounded
-server-wide by `GRADIENT_UPSTREAM_QUERY_CONCURRENCY` (default 32).
+server-wide by `GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY` (default 32).
 
 As the worker walks the graph it pushes each produced `.drv`'s runtime closure
 to the cache before reporting its batch, so a build dispatched mid-evaluation
@@ -1094,7 +1094,7 @@ reconciles the cache so the next eval rebuilds the input; a genuinely unrecovera
 input turns that into a hot loop that re-purges and re-pushes the same closure
 forever. `inputs_unavailable_attempt_count` counts the anchor's prior
 `InputsUnavailable` attempts (a distinct `build_attempt.reason`), and once it
-reaches `GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS` (default 3) the build fails fast
+reaches `GRADIENT_BUILD_INPUTS_UNAVAILABLE_MAX_LOOPS` (default 3) the build fails fast
 without reconciling - the eval reports a clear permanent failure instead of
 churning the cache. Every failure also persists the worker's error on
 `build_attempt.failure_message` (capped, full text still in the log) so the cause

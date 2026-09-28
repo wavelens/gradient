@@ -163,7 +163,7 @@ Workers are `gradient-worker` processes that connect to the server over WebSocke
 | `POST` | `/projects/{project}/workers` | Register a worker - returns `peer_id` and optionally a one-time `token` |
 | `GET` | `/projects/{project}/workers` | List registered workers (merges live state) |
 | `DELETE` | `/projects/{project}/workers/{worker_id}` | Unregister a worker |
-| `GET` | `/admin/workers` | List all currently connected workers (superuser or `GRADIENT_GLOBAL_STATS_PUBLIC`) |
+| `GET` | `/admin/workers` | List all currently connected workers (superuser or `GRADIENT_PUBLIC_STATS`) |
 
 All endpoints under `/admin/*` require the calling user to have the
 `superuser` flag set on their account.
@@ -388,7 +388,7 @@ and `gdb`'s debuginfod client resolve symbols straight from a Gradient cache:
 root. The index is built by walking the NAR of every cached
 `separateDebugInfo` output - store paths whose name ends in `-debug`, the only
 ones nixpkgs puts a `lib/debug/.build-id` tree in. Uploads index themselves;
-`GRADIENT_DEBUG_INDEX_INTERVAL_SECS` paces the backfill that covers paths cached
+`GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS` paces the backfill that covers paths cached
 before the index existed.
 
 For a path the cache substituted rather than built, the lookup falls through to

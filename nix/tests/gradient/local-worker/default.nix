@@ -22,11 +22,11 @@ in {
           enable = true;
           frontend.enable = false;
           useTls = false;
-          configurePostgres = true;
+          postgres.enable = true;
           domain = "gradient.local";
-          jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
-          cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
-          settings.logLevel.default = "debug";
+          secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4");
+          secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+          log.level.default = "debug";
 
           state.users.admin = {
             email = "admin@gradient.local";
@@ -37,7 +37,7 @@ in {
         };
 
         # The whole point of the test: enabling the worker is the entire
-        # configuration. No workerId, no token, no peers file, no UI step.
+        # configuration. No worker id, no token, no peers file, no UI step.
         services.gradient.worker.enable = true;
       };
     };

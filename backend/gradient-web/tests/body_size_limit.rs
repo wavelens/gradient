@@ -7,7 +7,7 @@
 //! Regression for #51: oversized request bodies must be rejected with
 //! 413 Payload Too Large *before* the handler can buffer them, so a 10 GB
 //! webhook payload cannot exhaust server memory. The cap is configurable
-//! via `--max-request-size` (default 2 MiB) and applied as a
+//! via `--http-max-request-size` (default 2 MiB) and applied as a
 //! `DefaultBodyLimit` layer on the API router; the per-route override on
 //! `POST /api/v1/build-requests/{session}/blobs` raises it to
 //! `MAX_BUILD_REQUEST_SIZE` (20 MiB) for blob uploads.

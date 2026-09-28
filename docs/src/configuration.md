@@ -1,22 +1,28 @@
 # Configuration
 
-Gradient is configured exclusively through its **NixOS module**. There is no configuration file or command-line flags - all options are set in your NixOS configuration under `services.gradient`.
+Gradient is configured through its **NixOS modules**: `services.gradient` for the server and `services.gradient.worker` for workers. Every module option maps onto a command-line flag and an environment variable of the same name:
+
+- Server: option `nar.commitConcurrency` is flag `--nar-commit-concurrency` and env `GRADIENT_NAR_COMMIT_CONCURRENCY`.
+- Worker: option `worker.build.maxConcurrent` is flag `--build-max-concurrent` and env `GRADIENT_WORKER_BUILD_MAX_CONCURRENT`.
+- An `enable` option maps to `..._ENABLE` / `--...-enable`.
+- Module-only options (`packages`, `reverseProxy`, `postgres`, `domain`, ...) have no env.
 
 ## Minimal Setup
 
 ```nix
 services.gradient = {
-  enable            = true;
-  frontend.enable   = true;
-  configurePostgres = true;
+  enable = true;
+  domain = "gradient.example.com";
+  postgres.enable = true;
   reverseProxy.nginx.enable = true;
-  domain            = "gradient.example.com";
-  jwtSecretFile     = "/run/secrets/gradient-jwt";
-  cryptSecretFile   = "/run/secrets/gradient-crypt";
+  secrets = {
+    jwtFile = "/run/secrets/gradient-jwt";
+    cryptFile = "/run/secrets/gradient-crypt";
+  };
 };
 ```
 
-`configurePostgres` creates a local PostgreSQL database and user. `reverseProxy` adds a virtual host that proxies `/api/`, `/proto`, and `/cache/` to the backend and serves the frontend SPA (either with `nginx` or `caddy` as a reverse proxy)
+`postgres.enable` creates a local PostgreSQL database and user. `reverseProxy` adds a virtual host that proxies `/api/`, `/proto`, and `/cache/` to the backend and serves the frontend SPA (either with `nginx` or `caddy` as a reverse proxy).
 
 ## Secrets
 
@@ -33,83 +39,148 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 !!! warning
     Never commit secret files to version control. Use [sops-nix](https://github.com/Mic92/sops-nix) or [agenix](https://github.com/ryantm/agenix) to manage them.
 
-## All Options
+## Server Options
 
-| Option | Default | Description |
-|---|---|---|
-| `domain` | - | Public hostname (required) |
-| `baseDir` | `/var/lib/gradient` | Data directory |
-| `listenAddr` | `127.0.0.1` | Bind address |
-| `port` | `3000` | HTTP port |
-| `jwtSecretFile` | - | Path to JWT secret file (required) |
-| `cryptSecretFile` | - | Path to encryption secret file (required) |
-| `metricsTokenFile` | `null` | When set, enables `GET /metrics` (Prometheus exposition). The file's contents must be presented as `Authorization: Bearer <token>` by scrapers. When `null`, the endpoint returns 404. |
-| `databaseUrl` | `postgresql://gradient@localhost/gradient?host=/run/postgresql` | PostgreSQL connection string. The role must be named explicitly: the local socket authenticates by peer, so it has to match the service's system user. |
-| `databaseUrlFile` | auto | Override the PostgreSQL connection string file |
-| `databaseMaxConnections` | `32` | Max connections in the scheduler / worker pool (`GRADIENT_DATABASE_MAX_CONNECTIONS`). Total per process is `databaseMaxConnections + databaseWebMaxConnections + databaseCacheMaxConnections`; raise only if Postgres `max_connections` has headroom. |
-| `databaseMinConnections` | `2` | Min connections kept warm in the scheduler / worker pool (`GRADIENT_DATABASE_MIN_CONNECTIONS`). |
-| `databaseCacheMaxConnections` | `32` | Max connections in the dedicated cache-query pool (`GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS`). Isolated from the scheduler/worker pool so a large eval's worker prefetch storm cannot starve dispatch. |
-| `databaseCacheMinConnections` | `2` | Min connections kept warm in the cache-query pool (`GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS`). |
-| `databaseWebMaxConnections` | `16` | Max connections in the axum HTTP pool (`GRADIENT_DATABASE_WEB_MAX_CONNECTIONS`). |
-| `databaseWebMinConnections` | `1` | Min connections kept warm in the axum HTTP pool (`GRADIENT_DATABASE_WEB_MIN_CONNECTIONS`). |
-| `reportErrors` | `false` | Send errors to Sentry |
-| `settings.sentryDsn` | `null` | Override the Sentry DSN used when `reportErrors` is true. `null` ships reports to the upstream Wavelens instance at `reports.wavelens.io`; set your own DSN to keep reports in-house. (`GRADIENT_SENTRY_DSN`) |
-| `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |
-| `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections; further upgrades return `503 Service Unavailable` with `Retry-After: 10` until a slot frees |
-| `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per task. Caps the per-task setting, and a new task starts at the lower of `30` and this. `0` disables the cap. (`GRADIENT_KEEP_EVALUATIONS`) |
-| `settings.logChunkBytes` | `262144` (256 KiB) | Target uncompressed size for each zstd build-log chunk written on finalize. Chunks split on line boundaries, so an over-long line may exceed this. (`GRADIENT_LOG_CHUNK_BYTES`) |
-| `settings.maxStorageGb` | `0` | Instance-wide cap on total cached NAR storage, in GB. When all writable caches for a project have less than 10 MiB headroom, new evaluations park in `Waiting`. `0` = unlimited; per-cache `max_storage_gb` limits still apply. (`GRADIENT_MAX_STORAGE_GB`) |
-| `settings.evalCacheMaxTotalBytes` | `10737418240` (10 GiB) | Total byte cap for fleet-shared eval-cache blobs. The eviction sweep drops oldest-`updated_at` rows until the surviving total is at or under this. (`GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES`) |
-| `settings.evalCacheMaxAgeDays` | `30` | Max age in days for an eval-cache blob; older blobs are evicted by the sweep regardless of the size cap. (`GRADIENT_EVAL_CACHE_MAX_AGE_DAYS`) |
-| `settings.evalCacheSweepIntervalSecs` | `3600` | Interval in seconds between eval-cache eviction sweeps. (`GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS`) |
-| `settings.maxRequestSize` | `2097152` (2 MiB) | Max HTTP request body in bytes for most endpoints (caps webhook/JSON payloads to prevent OOM). The per-chunk build-request blob endpoint uses a fixed 20 MiB cap. |
-| `settings.maxNarUploadSize` | `536870912` (512 MiB) | Max body in bytes for `POST /caches/{cache}/nars`; overrides the general `maxRequestSize` cap for NAR uploads. (`GRADIENT_MAX_NAR_UPLOAD_SIZE`) |
-| `settings.maxSourceUploadSize` | `536870912` (512 MiB) | Max total bytes for the source `gradient build` uploads: the single-shot `POST /build-requests/source`, the chunked `source/{upload}/chunk` staged total, and the chunked manifest total. `gradient build` streams the source in bounded chunks, so this caps the assembled size, not one request. The built-in reverse proxy's `client_max_body_size` is derived from the largest configured upload limit. (`GRADIENT_MAX_SOURCE_UPLOAD_SIZE`) |
-| `settings.logLevel.default` | `info` | Log level: `trace` `debug` `info` `warn` `error`. Targets `gradient_*`; dependency noise (`hyper`, `sqlx`, …) is pinned to `warn`. `RUST_LOG` overrides everything. |
-| `settings.logLevel.cache` | null | `gradient_cache` log level override (null inherits default) |
-| `settings.logLevel.web` | null | `gradient_web` log level override (null inherits default) |
-| `settings.logLevel.proto` | null | `gradient_proto` and `gradient_wire` log level override (null inherits default) |
-| `settings.logLevel.scheduler` | null | `gradient_scheduler` and `gradient_pool` log level override (null inherits default) |
-| `settings.enableRegistration` | `true` | Allow new user self-registration |
-| `settings.createProject` | `everyone` | Who may create projects via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Project" button accordingly. (`GRADIENT_CREATE_PROJECT`) |
-| `settings.createCache` | `everyone` | Who may create caches via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Cache" button accordingly. (`GRADIENT_CREATE_CACHE`) |
-| `settings.prCommitName` | `null` | Git author/committer name for the commits the `open_pr` action pushes. `null` lets each forge pick attribution: GitHub credits the App bot and signs it verified; Gitea/Forgejo and GitLab use the token owner (needs the `read:user` / `read_user` scope), falling back to a `Gradient <gradient@users.noreply.HOST>` bot identity when that scope is missing. Set both this and `prCommitEmail` to force an explicit identity. (`GRADIENT_PR_COMMIT_NAME`) |
-| `settings.prCommitEmail` | `null` | Git author/committer email for `open_pr` commits; see `prCommitName`. (`GRADIENT_PR_COMMIT_EMAIL`) |
-| `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
-| `settings.cacheTtlHours` | `336` | Hours a cached path outside the live closure is kept after its last fetch or commit (0 = only `narUploadGraceHours`) |
-| `settings.cacheMaintenanceIntervalSecs` | `3600` | Interval in seconds between cache maintenance GC passes. (`GRADIENT_CACHE_MAINTENANCE_INTERVAL_SECS`) |
-| `settings.signSweepIntervalSecs` | `3600` | Fallback interval between NAR signature backfill sweeps; a freshly uploaded NAR is signed in place by the upload handler, so this only covers subscription placeholders and any row left unsigned. (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`) |
-| `settings.debugIndexIntervalSecs` | `300` | Interval between DWARF build-id index backfill passes; uploads index their own NAR in place, so this only catches paths cached before the index existed and walks lost to a restart. (`GRADIENT_DEBUG_INDEX_INTERVAL_SECS`) |
-| `settings.narVerifyDigest` | `false` | When set, the S3 presigned NAR commit path GETs the uploaded object and rehashes it against the reported `file_hash` before marking it cached, catching same-length corruption at the cost of a full object read. Off by default: the presigned path still HEAD-checks size; the relayed and REST upload paths always content-verify since they already hold the bytes in memory. (`GRADIENT_NAR_VERIFY_DIGEST`) |
-| `settings.smallNarBytes` | `1048576` (1 MiB) | A NAR at or under this many bytes is relayed through the server on upload, pulled through it on download and admitted to the hot RAM cache; larger NARs keep their presigned S3 URLs, and NARs over 1 GiB upload as presigned S3 multipart. (`GRADIENT_SMALL_NAR_BYTES`) |
-| `settings.hotNarCacheBytes` | `536870912` (512 MiB) | Capacity of the in-memory NAR cache, ranked by hits per byte so a 1 MiB entry must earn a hundred times the hits of a 10 KiB one to stay. `0` disables it. (`GRADIENT_HOT_NAR_CACHE_BYTES`) |
-| `settings.narUploadConcurrency` | `4` | Background uploads of relayed NARs from `<baseDir>/nar-staged` to S3 in flight at once. (`GRADIENT_NAR_UPLOAD_CONCURRENCY`) |
-| `settings.narUploadGraceHours` | `24` | Grace before the orphan-files GC reclaims a NAR object no DB row references (covers the upload commit window). Also the age past which an unconfirmed `cached_path` with neither a staged file nor an object is demoted by the `nar-uploader`. (`GRADIENT_NAR_UPLOAD_GRACE_HOURS`) |
-| `settings.gcWedgedEvalHours` | `24` | Hours an active evaluation may stay in one phase before it is presumed wedged and stops blocking evaluation GC; measured on the phase it entered, not on when its row was last written, so a stuck run that still takes writes is caught. The wedged eval itself is never deleted (0 = block forever). (`GRADIENT_GC_WEDGED_EVAL_HOURS`) |
-| `s3.readTimeoutSecs` | `60` | Seconds an S3 response may stall before the request fails. An inactivity timer reset by every received chunk, not a cap on transfer duration - a multi-GB NAR streams for as long as it progresses. Gradient sets no total request timeout: object-store's 30s default cancelled any slower download and then spent the retry budget re-running a request certain to be cancelled again. (`GRADIENT_S3_READ_TIMEOUT_SECS`) |
-| `s3.maxRetries` | `3` | How many times a failed S3 request is retried. (`GRADIENT_S3_MAX_RETRIES`) |
-| `s3.retryTimeoutSecs` | `250` | Total seconds from the first attempt after which no further S3 retry starts. Keep above `(maxRetries + 1) * readTimeoutSecs`, or a request dying on the read timeout is never retried - the budget is spent before the first attempt fails. Only consulted on error, so it never interrupts a progressing transfer. Stay under 5 minutes: retries reuse the original credentials and payload. (`GRADIENT_S3_RETRY_TIMEOUT_SECS`) |
-| `settings.narStorageOpenTimeoutSecs` | `60` | Max seconds the server will wait to open a NAR object stream (e.g. an S3 GET) before emitting `NarUnavailable`. Caps how long a stalled storage backend can block a `NarRequest`. |
-| `settings.narSendChunkTimeoutSecs` | `30` | Max seconds a single outbound `NarPush` chunk may sit in the per-connection writer queue waiting for the WebSocket sink to drain before the transfer is aborted with `NarAbort`. |
-| `settings.maxConcurrentNarServes` | `8` | Max NAR-serving tasks running concurrently per worker connection. Bounds memory and storage-backend fan-out when a worker requests many paths in a single batch. |
-| `settings.maxNarBufferBytes` | `10737418240` (10 GiB) | Max total bytes the server may hold across open `*.partial` NAR upload files (un-finalised `NarPush` streams staged under `<baseDir>/nar-partial`). Prevents a rogue worker from filling the disk by opening many uploads without finalising them (issue #109). |
-| `settings.narPartialTtlSecs` | `86400` (24 h) | TTL in seconds for partially-received NAR uploads (`*.partial`) staged under `<baseDir>/nar-partial`. A periodic sweep deletes partials older than this so an abandoned resumable transfer can't pin disk forever (issue #225). `0` disables the sweep. (`GRADIENT_NAR_PARTIAL_TTL_SECS`) |
-| `settings.workerHeartbeatTimeoutSecs` | `120` | Seconds a connected worker may go silent before the server declares it dead and re-queues its in-flight jobs. The worker heartbeats every 10 s; liveness is stamped when the connection's reader receives a frame, so it measures the connection rather than how long a handler is taking and a briefly stalled server cannot false-declare a healthy worker dead. This is the only detector for a worker that dies without a clean TCP close (hard OOM-kill, frozen host, network partition); a graceful disconnect is handled immediately regardless. `0` disables the liveness watchdog. (`GRADIENT_WORKER_HEARTBEAT_TIMEOUT_SECS`) |
-| `settings.upstreamQueryConcurrency` | `32` | Max simultaneous outbound upstream narinfo probes server-wide (latency ordering). (`GRADIENT_UPSTREAM_QUERY_CONCURRENCY`) |
-| `settings.narCommitConcurrency` | `8` | Max NAR upload commits (staged-file verification, storage placement, cache-index write after `NarUploaded`) running at once across all worker connections. Further commits queue for a permit. (`GRADIENT_NAR_COMMIT_CONCURRENCY`) |
-| `settings.uploadConcurrency` | `16` | Uploads (NARs and eval-cache blobs) admitted at once across all workers and REST clients. Further requests wait for a permit, round-robin across workers. (`GRADIENT_UPLOAD_CONCURRENCY`) |
-| `settings.uploadBytesBudget` | `8589934592` (8 GiB) | Sum of admitted upload sizes. A request that does not fit waits and nothing bypasses it; one larger than the budget runs alone once nothing else is in flight. (`GRADIENT_UPLOAD_BYTES_BUDGET`) |
-| `settings.allowAnonymousCache` | `true` | Allow unauthenticated clients to use `GET /cache/{cache}/proto` for public caches. When `false`, anonymous handshakes are rejected with 403. Private caches always require an API key regardless. (`GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE`) |
-| `settings.anonMaxConnectionsPerIp` | `32` | Maximum simultaneous anonymous `/cache/proto` connections per client IP. (`GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`) |
-| `settings.trustedProxies` | `127.0.0.1/32,::1/128` | Comma-separated CIDR allowlist of peers permitted to set `X-Forwarded-For` (`GRADIENT_TRUSTED_PROXIES`). |
-| `settings.localIps` | `10.0.0.0/8` | Comma-separated CIDR allowlist whose resolved client IPs receive each cache's `local_priority` value (`GRADIENT_LOCAL_IPS`). |
-| `settings.buildMaxAttempts` | `3` | Maximum number of build attempts before a transient failure is promoted to `FailedPermanent`. (`GRADIENT_BUILD_MAX_ATTEMPTS`) |
-| `settings.substituteMissEscalationThreshold` | `2` | Penalty-free re-queues of a relay within one evaluation (attempts recorded `SubstituteUnavailable`, whichever failure produced them) after which the anchor stops being substitutable and is built like any other. The only bound on that loop: a re-queue deliberately does not spend a build attempt. (`GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD`) |
-| `settings.inputsUnavailableMaxLoops` | `3` | Max `InputsUnavailable` self-heal loops per build before the circuit breaker opens and the build fails fast instead of churning the cache. (`GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS`) |
-| `settings.buildRetryBackoffSecs` | `30` | Base back-off in seconds before retrying a transient build failure; doubled after each prior attempt (exponential). (`GRADIENT_BUILD_RETRY_BACKOFF_SECS`) |
-| `settings.buildDefaultTimeoutSecs` | `14400` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
-| `settings.buildDefaultMaxSilentSecs` | `3600` | Default silent-output timeout (seconds) for builds whose `.drv` does not set a `maxSilent` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS`) |
-| `settings.schedulerScoringPolicy` | `resource-aware` | Scheduler scoring policy ranking queued jobs against a requesting worker (`GRADIENT_SCHEDULER_SCORING_POLICY`). Values: `simple`, `resource-aware`. `simple` is the basic rule set, weighing path availability, NAR size, dependency count, wait-time anti-starvation, builtin de-prioritization and fetch-worker reservation. `resource-aware` adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-project fair-share on top, and is the default. Unknown values fall back to `resource-aware`. See [scheduler scoring](development/scheduler-scoring.md). |
+All options live under `services.gradient`.
+
+### General
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `domain` | - | - | Public hostname (required); `GRADIENT_SERVE_URL` is derived from it and `useTls`. |
+| `listenAddr` | `GRADIENT_LISTEN_ADDR` | `127.0.0.1` | Bind address. |
+| `port` | `GRADIENT_PORT` | `3000` | HTTP port. |
+| `baseDir` | `GRADIENT_BASE_DIR` | `/var/lib/gradient` | Data directory. |
+| `useTls` | `GRADIENT_USE_TLS` | `true` | Emit `https://` URLs and mark session cookies `Secure`. |
+| `useQuic` | `GRADIENT_USE_QUIC` | `false` | Advertise HTTP/3 to clients (`GET /api/v1/config`); the reverse proxy must serve it. |
+| `frontend.url` | `GRADIENT_FRONTEND_URL` | `https://<domain>` | Public frontend URL used in CI status links. |
+| - | `GRADIENT_STORE_PATH` | - | Nix store path override. |
+| - | `GRADIENT_PUBLIC_STATS` | `false` | Expose `GET /api/v1/workers` and worker stats without authentication. |
+
+### `secrets`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `secrets.jwtFile` | `GRADIENT_SECRETS_JWT_FILE` | - | File with the JWT signing key (required). |
+| `secrets.cryptFile` | `GRADIENT_SECRETS_CRYPT_FILE` | - | File with the database encryption key (required). |
+
+### `state`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `state.validate` | flag `--state-validate` only | `true` | Validate the generated state at build time. |
+| `state.delete` | `GRADIENT_STATE_DELETE` | `true` | Remove entities no longer declared in `state`. |
+| - | `GRADIENT_STATE_FILE` | - | State file, set by the module. |
+
+See [Declarative State](usage/state.md) for the entities under `state`.
+
+### `registration`, `permissions`, `sentry`, `pullRequests`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `registration.enable` | `GRADIENT_REGISTRATION_ENABLE` | `true` | Allow self-registration. |
+| `permissions.createProject` | `GRADIENT_PERMISSIONS_CREATE_PROJECT` | `everyone` | Who may create projects via the API: `none` (only the declarative state), `superusers` or `everyone`. The frontend hides the button accordingly. |
+| `permissions.createCache` | `GRADIENT_PERMISSIONS_CREATE_CACHE` | `everyone` | Same for caches. |
+| `sentry.enable` | `GRADIENT_SENTRY_ENABLE` | `false` | Send errors to Sentry. |
+| `sentry.dsn` | `GRADIENT_SENTRY_DSN` | `null` | Sentry DSN; `null` reports to the upstream Wavelens instance. |
+| `pullRequests.commitName` | `GRADIENT_PULL_REQUESTS_COMMIT_NAME` | `null` | Author name of `open_pr` commits. `null` lets each forge pick attribution: GitHub credits the App bot and signs it verified; Gitea/Forgejo and GitLab use the token owner (needs the `read:user` / `read_user` scope), falling back to `Gradient <gradient@users.noreply.HOST>`. |
+| `pullRequests.commitEmail` | `GRADIENT_PULL_REQUESTS_COMMIT_EMAIL` | `null` | Author email of `open_pr` commits. |
+
+### `database`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `database.url` | `GRADIENT_DATABASE_URL` | `postgresql://gradient@localhost/gradient?host=/run/postgresql` | Connection string. The role must be named explicitly: the local socket authenticates by peer. |
+| `database.urlFile` | `GRADIENT_DATABASE_URL_FILE` | from `database.url` | File with the connection string. |
+| `database.maxConnections` | `GRADIENT_DATABASE_MAX_CONNECTIONS` | `16` | Scheduler / worker pool size. Total per process is `database.maxConnections + database.web.maxConnections + database.cache.maxConnections`. |
+| `database.minConnections` | `GRADIENT_DATABASE_MIN_CONNECTIONS` | `2` | Warm connections in that pool. |
+| `database.cache.maxConnections` | `GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS` | `32` | Cache-query pool size, isolated so a prefetch storm cannot starve dispatch. |
+| `database.cache.minConnections` | `GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS` | `2` | Warm connections in that pool. |
+| `database.web.maxConnections` | `GRADIENT_DATABASE_WEB_MAX_CONNECTIONS` | `8` | HTTP API pool size. |
+| `database.web.minConnections` | `GRADIENT_DATABASE_WEB_MIN_CONNECTIONS` | `1` | Warm connections in that pool. |
+
+### `http`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `http.maxRequestSize` | `GRADIENT_HTTP_MAX_REQUEST_SIZE` | `2097152` (2 MiB) | Max request body for most endpoints. Build-request blobs use a fixed 20 MiB cap. |
+| `http.maxSourceUploadSize` | `GRADIENT_HTTP_MAX_SOURCE_UPLOAD_SIZE` | `536870912` (512 MiB) | Max assembled size of a `gradient build` source upload (single-shot, chunked staged total and chunked manifest total). The built-in reverse proxy's `client_max_body_size` follows the largest upload limit. |
+| `http.trustedProxies` | `GRADIENT_HTTP_TRUSTED_PROXIES` | loopback | CIDR list of peers allowed to set `X-Forwarded-For`. |
+| `http.localIps` | `GRADIENT_HTTP_LOCAL_IPS` | private ranges | CIDR list whose clients receive each cache's `local_priority`. |
+
+### `proto`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `proto.discoverable` | `GRADIENT_PROTO_DISCOVERABLE` | `true` | Accept incoming `/proto` connections from workers. |
+| `proto.federate` | `GRADIENT_PROTO_FEDERATE` | `false` | Accept federated servers on `/proto`; requires `proto.discoverable`. |
+| `proto.public` | - | `false` | Expose `/proto` through the reverse proxy. |
+| `proto.maxConnections` | `GRADIENT_PROTO_MAX_CONNECTIONS` | `256` | Max simultaneous `/proto` connections; further upgrades get `503` with `Retry-After: 10`. |
+| `proto.workerHeartbeatTimeoutSecs` | `GRADIENT_PROTO_WORKER_HEARTBEAT_TIMEOUT_SECS` | `120` | Silence after which a worker is declared dead and its jobs re-queued. Workers heartbeat every 10 s; this is the only detector for a worker lost without a clean TCP close. `0` disables it. |
+| `proto.anonymousCache.enable` | `GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE` | `true` | Allow unauthenticated `GET /cache/{cache}/proto` on public caches. |
+| `proto.anonymousCache.maxConnectionsPerIp` | `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP` | `32` | Max anonymous cache connections per client IP. |
+
+### `upload`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `upload.concurrency` | `GRADIENT_UPLOAD_CONCURRENCY` | `16` | Uploads (NARs and eval-cache blobs) admitted at once; further requests wait, round-robin across workers. |
+| `upload.bytesBudget` | `GRADIENT_UPLOAD_BYTES_BUDGET` | `8589934592` (8 GiB) | Sum of admitted upload sizes. An upload that does not fit waits; one larger than the budget runs alone once nothing else is in flight. |
+
+### `nar`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `nar.maxUploadSize` | `GRADIENT_NAR_MAX_UPLOAD_SIZE` | `536870912` (512 MiB) | Max body of `POST /caches/{cache}/nars`. |
+| `nar.smallBytes` | `GRADIENT_NAR_SMALL_BYTES` | `1048576` (1 MiB) | NARs up to this size are relayed through the server and admitted to the hot cache; larger ones use presigned S3 URLs, and NARs over 1 GiB upload as multipart. |
+| `nar.hotCacheBytes` | `GRADIENT_NAR_HOT_CACHE_BYTES` | `536870912` (512 MiB) | In-memory NAR cache capacity, ranked by hits per byte. `0` disables it. |
+| `nar.verifyDigest` | `GRADIENT_NAR_VERIFY_DIGEST` | `false` | Re-hash NARs committed through presigned S3 uploads. Relayed and REST uploads are always verified. |
+| `nar.uploadConcurrency` | `GRADIENT_NAR_UPLOAD_CONCURRENCY` | `4` | Background uploads of relayed NARs from `<baseDir>/nar-staged` to S3. |
+| `nar.commitConcurrency` | `GRADIENT_NAR_COMMIT_CONCURRENCY` | `8` | NAR commits (verification, storage placement, cache-index write) running at once. |
+| `nar.storageOpenTimeoutSecs` | `GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS` | `60` | Wait for a NAR object stream before answering `NarUnavailable`. |
+| `nar.sendChunkTimeoutSecs` | `GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS` | `30` | Wait for a `NarPush` chunk to drain before aborting with `NarAbort`. |
+| `nar.maxConcurrentServes` | `GRADIENT_NAR_MAX_CONCURRENT_SERVES` | `8` | NAR serving tasks per worker connection. |
+| `nar.maxBufferBytes` | `GRADIENT_NAR_MAX_BUFFER_BYTES` | `10737418240` (10 GiB) | Max total of unfinished uploads under `<baseDir>/nar-partial`. |
+| `nar.partialTtlSecs` | `GRADIENT_NAR_PARTIAL_TTL_SECS` | `86400` | Age after which an unfinished upload is deleted. `0` disables the cleanup. |
+
+### `cache`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `cache.upstreamQueryConcurrency` | `GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY` | `32` | Simultaneous narinfo requests to upstream caches server-wide. |
+| `cache.maxStorageGb` | `GRADIENT_CACHE_MAX_STORAGE_GB` | `0` | Instance-wide NAR storage cap in GB; when every writable cache of a project has less than 10 MiB left, new evaluations park in `Waiting`. `0` = unlimited; per-cache limits still apply. |
+| `cache.signSweepIntervalSecs` | `GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS` | `3600` | Fallback signature backfill interval; uploads are signed immediately. |
+| `cache.debugIndexIntervalSecs` | `GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS` | `300` | DWARF build-id index backfill interval; uploads are indexed immediately. |
+
+### `gc`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `gc.intervalSecs` | `GRADIENT_GC_INTERVAL_SECS` | `3600` | Interval between garbage collection passes. |
+| `gc.narTtlHours` | `GRADIENT_GC_NAR_TTL_HOURS` | `336` | Hours a cached path outside the live closure is kept after its last fetch or commit. `gc.narUploadGraceHours` always applies on top. |
+| `gc.narUploadGraceHours` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | `24` | Grace before an unreferenced NAR object is reclaimed (covers the upload commit window). Also the age past which an unconfirmed `cached_path` with neither staged file nor object is demoted. |
+| - | `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` | `24` | Grace before an unreferenced `derivation` row is deleted. |
+| `gc.wedgedEvalHours` | `GRADIENT_GC_WEDGED_EVAL_HOURS` | `24` | Hours an evaluation may stay in one phase before it stops blocking evaluation GC. `0` blocks forever. |
+
+### `eval`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `eval.maxKeep` | `GRADIENT_EVAL_MAX_KEEP` | `30` | Maximum evaluations kept per task. Caps the per-task setting; new tasks start at the lower of `30` and this. `0` disables the cap. |
+| `eval.cache.maxTotalBytes` | `GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES` | `10737418240` (10 GiB) | Total size of shared eval-cache blobs. |
+| `eval.cache.maxAgeDays` | `GRADIENT_EVAL_CACHE_MAX_AGE_DAYS` | `30` | Age after which an eval-cache blob is evicted. |
+| `eval.cache.sweepIntervalSecs` | `GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS` | `3600` | Interval between eval-cache evictions. |
+
+### `build`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `build.maxAttempts` | `GRADIENT_BUILD_MAX_ATTEMPTS` | `3` | Attempts before a transient failure becomes `FailedPermanent`. |
+| `build.substituteMissEscalationThreshold` | `GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD` | `2` | Free re-queues of a relay within one evaluation before it is built like any other. A re-queue does not spend an attempt. |
+| `build.inputsUnavailableMaxLoops` | `GRADIENT_BUILD_INPUTS_UNAVAILABLE_MAX_LOOPS` | `3` | `InputsUnavailable` self-heal loops per build before it fails fast. |
+| `build.retryBackoffSecs` | `GRADIENT_BUILD_RETRY_BACKOFF_SECS` | `30` | Base back-off before retrying a transient failure, doubled per attempt. |
+| `build.defaultTimeoutSecs` | `GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS` | `14400` | Timeout for derivations without a `timeout` attribute. `0` disables. |
+| `build.defaultMaxSilentSecs` | `GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS` | `3600` | Silent-output timeout for derivations without `maxSilent`. `0` disables. |
 
 ### Build failure states and retries
 
@@ -119,11 +190,47 @@ Builds can fail in three distinct ways:
 |---|---|---|
 | `FailedPermanent` | Yes | Builder exited non-zero; no retry will be attempted |
 | `FailedTransient` | No | Transient error (OOM, disk full, network/substitution failure, builder crash); scheduler will re-queue automatically |
-| `FailedTimeout` | Yes | Exceeded `buildDefaultTimeoutSecs` or `buildDefaultMaxSilentSecs` |
+| `FailedTimeout` | Yes | Exceeded `build.defaultTimeoutSecs` or `build.defaultMaxSilentSecs` |
 
-`FailedTransient` is non-terminal: the build is re-queued automatically with an exponential back-off until `buildMaxAttempts` is exhausted, at which point the status is promoted to `FailedPermanent`. API entry-point queries treat `FailedTransient` as in-progress; the frontend renders all three variants as "Failed".
+`FailedTransient` is non-terminal: the build is re-queued automatically with an exponential back-off until `build.maxAttempts` is exhausted, at which point the status is promoted to `FailedPermanent`. API entry-point queries treat `FailedTransient` as in-progress; the frontend renders all three variants as "Failed".
 
 Per-derivation `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild` override the server defaults when present on a derivation. Note that Nix `meta.*` attributes do **not** propagate to the `.drv`; these must be set as top-level derivation attributes.
+
+
+### `scheduler`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `scheduler.scoringPolicy` | `GRADIENT_SCHEDULER_SCORING_POLICY` | `resource-aware` | `simple` weighs path availability, NAR size, dependency count, wait time, builtins and fetch-worker reservation; `resource-aware` adds RAM fit, CPU affinity, `preferLocalBuild` and per-project fair share. Unknown values fall back to `resource-aware`. See [scheduler scoring](development/scheduler-scoring.md). |
+| `scheduler.recordCandidates` | `GRADIENT_SCHEDULER_RECORD_CANDIDATES` | `false` | Persist runner-up candidates per dispatch. |
+| `scheduler.dispatchRetentionDays` | `GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS` | `30` | Retention of `dispatched_job` rows and settled `outbox` rows. `0` keeps them forever. |
+
+### `log`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `log.level.default` | `GRADIENT_LOG_LEVEL_DEFAULT` | `info` | Level for `gradient_*` targets; dependency noise is pinned to `warn`. `RUST_LOG` overrides everything. |
+| `log.level.cache` | `GRADIENT_LOG_LEVEL_CACHE` | `null` | `gradient_cache` override. |
+| `log.level.web` | `GRADIENT_LOG_LEVEL_WEB` | `null` | `gradient_web` override. |
+| `log.level.proto` | `GRADIENT_LOG_LEVEL_PROTO` | `null` | `gradient_proto` and `gradient_wire` override. |
+| `log.level.scheduler` | `GRADIENT_LOG_LEVEL_SCHEDULER` | `null` | `gradient_scheduler` and `gradient_pool` override. |
+| `log.chunkBytes` | `GRADIENT_LOG_CHUNK_BYTES` | `262144` (256 KiB) | Target uncompressed size of a stored build-log chunk. |
+
+### `s3`
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `s3.enable` | - | `false` | Store NARs in S3. |
+| `s3.bucket` | `GRADIENT_S3_BUCKET` | - | Bucket name; the bucket must not be versioned. |
+| `s3.region` | `GRADIENT_S3_REGION` | `us-east-1` | Bucket region. |
+| `s3.endpoint` | `GRADIENT_S3_ENDPOINT` | `null` | S3-compatible endpoint (MinIO, R2, ...). |
+| `s3.accessKeyId` | `GRADIENT_S3_ACCESS_KEY_ID` | `null` | Access key; `null` uses instance credentials. |
+| `s3.secretAccessKeyFile` | `GRADIENT_S3_SECRET_ACCESS_KEY_FILE` | `null` | File with the secret key. |
+| `s3.prefix` | `GRADIENT_S3_PREFIX` | `""` | Key prefix inside the bucket. |
+| `s3.virtualHostedStyle` | `GRADIENT_S3_VIRTUAL_HOSTED_STYLE` | `false` | Virtual-hosted instead of path-style addressing for a custom endpoint. |
+| `s3.readTimeoutSecs` | `GRADIENT_S3_READ_TIMEOUT_SECS` | `60` | Inactivity timeout of an S3 response, reset by every chunk, so large NARs stream as long as they progress. |
+| `s3.maxRetries` | `GRADIENT_S3_MAX_RETRIES` | `3` | Retries of a failed request. |
+| `s3.retryTimeoutSecs` | `GRADIENT_S3_RETRY_TIMEOUT_SECS` | `250` | Seconds after the first attempt past which no retry starts. Keep it above `(maxRetries + 1) * readTimeoutSecs` and below 5 minutes. |
 
 ## Postgres Sizing
 
@@ -133,7 +240,7 @@ indexes, of which `derivation_dependency` alone holds several GB, so a stock 128
 `shared_buffers` cannot keep even the hot index set resident and every recursive
 graph walk re-reads it from the page cache.
 
-With `configurePostgres = true` the module owns the cluster and sets the sizing
+With `postgres.enable = true` the module owns the cluster and sets the sizing
 that does not depend on the host, every value a `mkDefault` you can override:
 
 | setting | module default | why |
@@ -148,17 +255,17 @@ default, so they are options instead. A module that guessed them would size a
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `postgresSharedBuffers` | `"512MB"` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. The default is a floor, not a target: it is one fixed allocation rather than a per-node one, so it cannot multiply the way the two below can. Raise it on anything larger than 2 GB. |
-| `postgresEffectiveCacheSize` | `null` | `effective_cache_size`: three quarters of the host's RAM, so `"12GB"` on a 16 GB host. A planner hint about what the kernel will cache, not an allocation. |
-| `postgresWorkMem` | `null` | `work_mem`: the floor every ordinary query gets, which the graph walks raise above inside the transaction each one opens. Charged per sort or hash node, so the real ceiling is this times every concurrent query's node count. `"32MB"` suits a host sized for the 80 pooled connections below. |
-| `postgresMaintenanceWorkMem` | `null` | `maintenance_work_mem`: index builds and the autovacuum passes over the edge tables. Each of `autovacuum_max_workers` can claim this much at once, so `"1GB"` wants RAM to spare. |
+| `postgres.sharedBuffers` | `"512MB"` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. The default is a floor, not a target: it is one fixed allocation rather than a per-node one, so it cannot multiply the way the two below can. Raise it on anything larger than 2 GB. |
+| `postgres.effectiveCacheSize` | `null` | `effective_cache_size`: three quarters of the host's RAM, so `"12GB"` on a 16 GB host. A planner hint about what the kernel will cache, not an allocation. |
+| `postgres.workMem` | `null` | `work_mem`: the floor every ordinary query gets, which the graph walks raise above inside the transaction each one opens. Charged per sort or hash node, so the real ceiling is this times every concurrent query's node count. `"32MB"` suits a host sized for the 80 pooled connections below. |
+| `postgres.maintenanceWorkMem` | `null` | `maintenance_work_mem`: index builds and the autovacuum passes over the edge tables. Each of `autovacuum_max_workers` can claim this much at once, so `"1GB"` wants RAM to spare. |
 
-When `databaseUrl` points at a cluster this module does not configure, set the
+When `database.url` points at a cluster this module does not configure, set the
 same seven values there by hand.
 
 `max_connections` has to cover every server process's three pools at once:
-`databaseMaxConnections` plus `databaseWebMaxConnections` plus
-`databaseCacheMaxConnections` (80 in total by default), with headroom for
+`database.maxConnections` plus `database.web.maxConnections` plus
+`database.cache.maxConnections` (80 in total by default), with headroom for
 `maintenance_work_mem`-sized autovacuum workers and for `psql`. The stock 100 is
 enough for one server, not for two.
 
@@ -197,7 +304,7 @@ The nixos module provides two preconfigured reverse proxies:
 |--------|---------|-------------|
 | `reverseProxy.caddy.enable` | `false` | Whether to enable caddy as the reverse proxy |
 | `reverseProxy.caddy.useACMEHost` | `null` | Passed directly to [`services.caddy.virtualHosts.<name>.useACMEHost`](https://search.nixos.org/options?channel=unstable&query=services.caddy.virtualHosts.&show=option:services.caddy.virtualHosts.%3Cname%3E.useACMEHost) |
-| `reversePorxy.caddy.extraConfig` | `""` | Caddy config options written to [`services.caddy.virtualHosts.<name>.extraConfig`](https://search.nixos.org/options?channel=unstable&query=services.caddy.virtualHosts.&show=option:services.caddy.virtualHosts.%3Cname%3E.extraConfig) after the reverse proxy setup |
+| `reverseProxy.caddy.extraConfig` | `""` | Caddy config options written to [`services.caddy.virtualHosts.<name>.extraConfig`](https://search.nixos.org/options?channel=unstable&query=services.caddy.virtualHosts.&show=option:services.caddy.virtualHosts.%3Cname%3E.extraConfig) after the reverse proxy setup |
 
 ### Custom Reverse Proxy
 
@@ -210,10 +317,10 @@ All other requests should be handled by a static webserver hosting the files at:
 
 ## Metrics
 
-Set `services.gradient.metricsTokenFile` to a file path to enable `GET /metrics` (Prometheus exposition format). When unset, the endpoint returns 404.
+Set `services.gradient.metrics.tokenFile` to enable `GET /metrics` (Prometheus exposition format). When unset, the endpoint returns 404.
 
 ```nix
-services.gradient.metricsTokenFile = "/run/secrets/gradient-metrics";
+services.gradient.metrics.tokenFile = "/run/secrets/gradient-metrics";
 ```
 
 Generate a token with `openssl rand -base64 32`. Configure your Prometheus scraper with `bearer_token_file: /run/secrets/gradient-metrics` (or pass the token directly via `Authorization: Bearer <token>` for ad-hoc curls). The endpoint is rate-limited at 6 req/s with a burst of 5; a 15s scrape interval is comfortable.
@@ -222,22 +329,23 @@ The MVP exposes build/evaluation status counts, scheduler queue depth, connected
 
 ### Metrics pipeline & retention
 
-The Job Board records build/eval phase timings, dispatch decisions (with scoring breakdown), and worker statistics into dedicated tables. A background task prunes them so they stay bounded; all settings live under `services.gradient.settings`:
+The Job Board records build/eval phase timings, dispatch decisions (with scoring breakdown), and worker statistics into dedicated tables. A background task prunes them so they stay bounded:
 
-| Option / env var | Default | Purpose |
-| --- | --- | --- |
-| `metricsRollupIntervalSecs` / `GRADIENT_METRICS_ROLLUP_INTERVAL` | 60 | Rollup-aggregator pass interval. Each pass also recounts the stored bytes per cache (`cache_usage`) that the dashboard's cache-size tile sums. |
-| `cacheMetricFlushIntervalSecs` / `GRADIENT_CACHE_METRIC_FLUSH_INTERVAL` | 10 | How often served NAR bytes and counts, accumulated in memory per cache and minute, are added into `cache_metric`. A serve never writes that row itself, so a failed flush costs at most this much traffic telemetry and never a request. |
-| `metricsRetentionRawDays` / `GRADIENT_METRICS_RETENTION_RAW_DAYS` | 14 | Retention for raw `phase_event` / `worker_sample` rows (0 = forever). |
-| `metricsRetentionRollupDays` / `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | 400 | Retention for minute/hour rollups; day/week kept (0 = forever). |
-| `dispatchRetentionDays` / `GRADIENT_DISPATCH_RETENTION_DAYS` | 30 | Retention for `dispatched_job` forensic rows and settled `outbox` rows, delivered and dead-lettered alike (0 = forever). |
-| `workerSampleIntervalSecs` / `GRADIENT_WORKER_SAMPLE_INTERVAL` | 15 | Worker live-metric sampling interval. |
-| `metricsLabelTopn` / `GRADIENT_METRICS_LABEL_TOPN` | 20 | Per-dimension cardinality cap for rollup labels. |
-| `otlpEndpoint` / `GRADIENT_OTLP_ENDPOINT` | null | OTLP collector endpoint for metric push (null disables). |
-| `otlpPushIntervalSecs` / `GRADIENT_OTLP_PUSH_INTERVAL` | 30 | OTLP push interval. |
-| `dispatchRecordCandidates` / `GRADIENT_DISPATCH_RECORD_CANDIDATES` | false | Persist runner-up scoring candidates per dispatch. |
-| `instanceMetricsIntervalSecs` / `GRADIENT_INSTANCE_METRICS_INTERVAL` | 30 | InstanceContext window recomputation interval. |
-| `graphConsistencyIntervalSecs` / `GRADIENT_GRAPH_CONSISTENCY_INTERVAL` | 300 | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it recounts `derivation.unwalked_inputs`, `derivation_build.missing_runtime_deps` and `demanded` table-wide, recounts `fetchable` and `unready_deps` over the pending anchors and their direct dependencies, settles the queue against them, names for the live evaluations the pending anchors they reach that no evaluation names any more, and re-heals graph-stuck evaluations. 0 disables all of that. |
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `metrics.tokenFile` | `GRADIENT_METRICS_TOKEN_FILE` | `null` | Bearer token file for `GET /metrics`. |
+| `metrics.rollupIntervalSecs` | `GRADIENT_METRICS_ROLLUP_INTERVAL_SECS` | `60` | Rollup interval. Each pass also recounts the stored bytes per cache (`cache_usage`) that the dashboard's cache-size tile sums. |
+| `metrics.cacheFlushIntervalSecs` | `GRADIENT_METRICS_CACHE_FLUSH_INTERVAL_SECS` | `10` | How often served NAR bytes and counts, accumulated in memory, are added into `cache_metric`. A failed flush costs at most this much telemetry and never a request. |
+| `metrics.retention.rawDays` | `GRADIENT_METRICS_RETENTION_RAW_DAYS` | `14` | Retention of raw `phase_event` / `worker_sample` rows (`0` = forever). |
+| `metrics.retention.rollupDays` | `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | `400` | Retention of minute/hour rollups; day/week are kept (`0` = forever). |
+| `metrics.workerSampleIntervalSecs` | `GRADIENT_METRICS_WORKER_SAMPLE_INTERVAL_SECS` | `15` | Worker sampling interval. |
+| `metrics.labelTopn` | `GRADIENT_METRICS_LABEL_TOPN` | `20` | Cardinality cap per rollup label dimension. |
+| `metrics.instanceIntervalSecs` | `GRADIENT_METRICS_INSTANCE_INTERVAL_SECS` | `30` | InstanceContext window recomputation interval. |
+| `metrics.graphConsistencyIntervalSecs` | `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS` | `300` | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it recounts `derivation.unwalked_inputs`, `derivation_build.missing_runtime_deps` and `demanded` table-wide, recounts `fetchable` and `unready_deps` over the pending anchors and their direct dependencies, settles the queue against them, names for the live evaluations the pending anchors they reach that no evaluation names any more, and re-heals graph-stuck evaluations. `0` disables all of that. |
+| `metrics.otlp.endpoint` | `GRADIENT_METRICS_OTLP_ENDPOINT` | `null` | OTLP collector endpoint (`null` disables). |
+| `metrics.otlp.pushIntervalSecs` | `GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS` | `30` | OTLP push interval. |
+
+See also `scheduler.recordCandidates` and `scheduler.dispatchRetentionDays`.
 
 ## OIDC
 
@@ -271,7 +379,7 @@ Enabling SCIM mounts an instance-level SCIM 2.0 provisioning surface at `https:/
 
 | Option | Env | Default | Description |
 |---|---|---|---|
-| `scim.enable` | `GRADIENT_SCIM_ENABLED` | `false` | Mount the `/scim/v2` provisioning endpoints |
+| `scim.enable` | `GRADIENT_SCIM_ENABLE` | `false` | Mount the `/scim/v2` provisioning endpoints |
 | `scim.tokenFile` | `GRADIENT_SCIM_TOKEN_FILE` | - | Path to the file holding the SCIM bearer token (required when enabled) |
 | `scim.hardDelete` | `GRADIENT_SCIM_HARD_DELETE` | `false` | Hard-delete (cascade) on `DELETE /Users/{id}`; default soft-disables (`active=false`) |
 
@@ -281,12 +389,16 @@ Enabling SCIM mounts an instance-level SCIM 2.0 provisioning surface at `https:/
 services.gradient.email = {
   enable              = true;
   requireVerification = true;
-  smtpHost            = "smtp.example.com";
-  smtpPort            = 587;
-  smtpUsername        = "gradient@example.com";
-  smtpPasswordFile    = "/run/secrets/gradient-smtp";
-  fromAddress         = "gradient@example.com";
-  fromName            = "Gradient";
+  smtp = {
+    host         = "smtp.example.com";
+    port         = 587;
+    username     = "gradient@example.com";
+    passwordFile = "/run/secrets/gradient-smtp";
+  };
+  from = {
+    address = "gradient@example.com";
+    name    = "Gradient";
+  };
 };
 ```
 
@@ -296,10 +408,10 @@ A GitHub App provides automatic webhook delivery and CI status reporting without
 
 ### Setup
 
-1. Create a GitHub App at `github.com → Settings → Developer settings → GitHub Apps → New GitHub App`.
+1. Create a GitHub App at `github.com -> Settings -> Developer settings -> GitHub Apps -> New GitHub App`.
    - **Webhook URL**: `https://gradient.example.com/api/v1/hooks/github`
    - **Webhook secret**: generate a random value and note it
-   - **Permissions**: Repository → Commit statuses (Read & Write), Repository → Contents (Read)
+   - **Permissions**: Repository -> Commit statuses (Read & Write), Repository -> Contents (Read)
    - **Subscribe to events**: Push, Installation
 
 2. After creation note the **App ID** and download the **private key** PEM.
@@ -309,7 +421,7 @@ A GitHub App provides automatic webhook delivery and CI status reporting without
 ```nix
 services.gradient.githubApp = {
   enable             = true;
-  appId              = 123456;
+  id                 = 123456;
   privateKeyFile     = "/run/secrets/gradient-github-app-key";
   webhookSecretFile  = "/run/secrets/gradient-github-app-webhook-secret";
 };
@@ -323,7 +435,7 @@ services.gradient.githubApp = {
 
 For non-GitHub forges or GitHub without the App, configure a per-project webhook secret via the UI:
 
-1. Open **Project → Settings → Forge Webhooks** and click **Generate Webhook Secret**.
+1. Open **Project -> Settings -> Forge Webhooks** and click **Generate Webhook Secret**.
 2. Copy the displayed **Webhook URL** and **Secret**.
 3. In your forge, create a push webhook pointing to the URL, using the secret for HMAC-SHA256 signing.
 
@@ -350,7 +462,7 @@ A worker on the server's own machine needs no credentials of its own:
 ```nix
 services.gradient.worker = {
   enable = true;
-  settings.buildMetrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
+  build.metrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
 };
 ```
 
@@ -377,7 +489,7 @@ never regenerated; delete the file and restart to rotate it.
     until a project exists *and* has a cache; it joins on the next attempt.
 
 Set `services.gradient.localWorker = false` to opt out and configure
-`workerId` / `peersFile` by hand, exactly like a remote worker.
+`worker.id` / `worker.peersFile` by hand, exactly like a remote worker.
 
 ### Remote Workers
 
@@ -392,7 +504,7 @@ curl -X POST https://gradient.example.com/api/v1/projects/myproject/workers \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"worker_id": "550e8400-e29b-41d4-a716-446655440001"}'
-# → {"error":false,"message":{"peer_id":"<uuid>","token":"<token>"}}
+# -> {"error":false,"message":{"peer_id":"<uuid>","token":"<token>"}}
 ```
 
 You can optionally pre-generate the token and pass it in the request (`openssl rand -base64 48`); the response will then omit the token field.
@@ -411,14 +523,15 @@ services.gradient.worker = {
     fetch = true;
     eval  = true;
     build = true;
-    sign  = true;
   };
 
-  settings = {
-    maxConcurrentBuilds      = 8;
-    evalWorkers              = 2;
-    maxConcurrentEvaluations = 2;
-    buildMetrics             = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
+  build = {
+    maxConcurrent = 8;
+    metrics       = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
+  };
+  eval = {
+    workers       = 2;
+    maxConcurrent = 2;
   };
 };
 ```
@@ -438,48 +551,50 @@ The special peer ID `*` can be used instead of a specific UUID to respond with t
 
 The token must be the 48-byte random secret returned by the registration API (generated via `openssl rand -base64 48` server-side).
 
+
 ### Worker Options
 
-| Option | Default | Description |
-|---|---|---|
-| `serverUrl` | `null` | WebSocket URL of the server's `/proto` endpoint (required) |
-| `workerId` | `null` | Override the worker UUID (`GRADIENT_WORKER_ID`). When null, the ID is read from `$StateDirectory/worker-id` or auto-generated on first start |
-| `peersFile` | `null` | Path to peers file (`peer_id:token` per line, `*` = any peer) |
-| `useTls` | `true` | Serve Gradient over HTTPS: emit `https://` URLs (`GRADIENT_SERVE_URL`, OIDC redirect) and mark session cookies `Secure`. With `reverseProxy.nginx.manageTls` also enables ACME + forceSSL on the nginx vhost. Set `false` only for plain-HTTP deployments |
-| `discoverable` | `false` | Accept incoming connections from the server (reverse-proxy mode) |
-| `listenAddr` | `127.0.0.1` | Bind address for the worker listener |
-| `port` | `3100` | Listener port when `discoverable` is enabled |
-| `capabilities.fetch` | `false` | Prefetch flake inputs |
-| `capabilities.eval` | `false` | Run Nix evaluations |
-| `capabilities.build` | `false` | Execute Nix builds |
-| `capabilities.sign` | `false` | Sign store paths |
-| `capabilities.federate` | `false` | Act as a federation relay (requires `discoverable`) |
-| `settings.maxConcurrentBuilds` | `64` | Parallel build slots |
-| `settings.maxBuildCores` | `null` | Cap on CPU cores a single build may use (nix `--cores` / `NIX_BUILD_CORES`, `GRADIENT_WORKER_MAX_BUILD_CORES`). When null, a build may use all available cores |
-| `settings.evalWorkers` | `1` | Number of evaluator subprocesses |
-| `settings.maxConcurrentEvaluations` | `1` | Parallel evaluations |
-| `settings.cpuCoreScore` | `null` | Override the advertised single-core speed score (higher is faster, `GRADIENT_WORKER_CPU_CORE_SCORE`). When null, the worker benchmarks the host at startup |
-| `settings.evalForkWorkers` | `null` | Number of parallel eval subprocesses in the pool (the eval concurrency). When null, auto-sizes to the host core count capped at 16, then bounded so `evalForkWorkers * maxEvalRss` fits host RAM. Per-system shards share one eval-cache safely (per-shard commits append to the WAL; one checkpoint folds it in at end-of-eval). (`GRADIENT_EVAL_FORK_WORKERS`) |
-| `settings.maxEvalRss` | `8589934592` (8 GiB) | Safety cap on an eval subprocess's resident memory: once its RSS exceeds this many bytes it is recycled (parent-side). Keep it above a typical eval's heap so warm workers are not recycled mid-evaluation (`GRADIENT_MAX_EVAL_RSS`) |
-| `settings.minFreeRamMb` | `0` (adaptive) | Free-RAM safety margin in MiB for the eval-subprocess reaper. When host `MemAvailable` falls below this, the worker SIGKILLs the one live eval subprocess holding enough resident memory to bring it back above the margin (the parent then reports the eval as failed instead of the machine freezing); when no eval is that large the pressure is not coming from evaluation and nothing is killed. `0` selects an adaptive margin of `10% of total RAM, clamped to [128 MiB, 1 GiB]`. `maxEvalRss` only recycles between calls; this is the proactive peak guard. (`GRADIENT_MIN_FREE_RAM_MB`) |
-| `settings.evalCacheDir` | `null` | Eval-cache directory exported to eval workers as `NIX_CACHE_HOME`. When null, resolves to `{baseDir}/eval-cache` (`GRADIENT_EVAL_CACHE_DIR`) |
-| `settings.evalCacheShare` | `true` | Enable fleet eval-cache sharing (pull/push of `<fingerprint>.sqlite` blobs across workers, issue #386) (`GRADIENT_EVAL_CACHE_SHARE`) |
-| `settings.evalMetricsEnabled` | `true` | Capture per-evaluation Nix metrics (thunks, heap, peak RSS, per-entry-point hotspots, flake graph). When false, eval-workers skip the stats read (zero overhead). (`GRADIENT_EVAL_METRICS_ENABLED`) |
-| `settings.maxConcurrentUploads` | `8` | PUTs to object storage (presigned NAR uploads, multipart parts, eval-cache blobs) in flight at once across all jobs. A throttled (503/429), 5xx or dropped PUT retries up to 6 times with jittered backoff (honouring `Retry-After`, max 30 s) before the job fails transiently (`GRADIENT_MAX_CONCURRENT_UPLOADS`) |
-| `settings.maxNixdaemonConnections` | `maxConcurrentBuilds * 9 + 16` | Worker's local nix-daemon connection pool size. Each build holds one for its run plus up to 8 for parallel NAR imports |
-| `settings.narPartialTtlSecs` | `86400` (24 h) | TTL in seconds for partially-received NAR downloads (`*.partial`) staged under `<baseDir>/nar-partial`. A periodic sweep deletes partials older than this so an abandoned resumable transfer can't pin disk forever (issue #225). `0` disables the sweep. (`GRADIENT_NAR_PARTIAL_TTL_SECS`) |
-| `settings.drainTimeoutSecs` | `600` (10 min) | How long a SIGINT/SIGTERM drain waits for in-flight jobs. The worker stops accepting work at once, sends `Draining`, finishes and reports what is running, then exits; whatever is still running at the deadline is aborted and re-queued server-side. A second signal skips the wait. The unit's `TimeoutStopSec` is derived as `drainTimeoutSecs + 30`. `0` waits without limit (`TimeoutStopSec = infinity`), so a wedged build then holds `systemctl stop` until a second signal (`systemctl kill -s TERM gradient-worker`) aborts it. (`GRADIENT_WORKER_DRAIN_TIMEOUT_SECS`) |
-| `settings.maxProtoConnections` | `16` | Max simultaneous WebSocket connections (for discoverable mode) |
-| `settings.gcrootsDir` | `/nix/var/nix/gcroots/gradient` | Directory for worker-held indirect GC roots. One symlink per active build (drv + outputs) pins inputs and just-built outputs through the daemon so a concurrent `nix-collect-garbage` cannot race the build. Empty string disables |
-| `settings.buildMetrics` | `false` | Capture per-build resource metrics (`GRADIENT_WORKER_BUILD_METRICS`) that feed the resource-aware scheduler's RAM/CPU/disk predictions for smarter job placement. Off by default because it turns on Nix's experimental `cgroups` feature + `use-cgroups` on the daemon and delegates the cgroup-v2 controllers to `nix-daemon.service` (`Delegate=yes`) so `memory.peak`/`io.stat` are exposed. CPU time comes from the daemon build result; peak RAM and disk I/O are sampled live from the build's `nix-build@<drv-hash>-<uid>` cgroup. That naming and the controller delegation come from the gradient nix fork, so the module defaults `nix.package` to `packages.nix`. Wall-clock build time is always reported |
-| `settings.buildCgroupRoot` | `/sys/fs/cgroup/system.slice/nix-daemon.service` | The nix daemon's cgroup, in which it creates each build's cgroup (`GRADIENT_WORKER_BUILD_CGROUP_ROOT`) |
-| `settings.logBurstBytesPerMin` | `8388608` (8 MiB) | Burst token bucket: max build-log bytes forwarded to the server per build in any 1-minute window. On trip the worker appends a truncation marker and stops forwarding that build's log (the build still runs). (`GRADIENT_LOG_BURST_BYTES_PER_MIN`) |
-| `settings.logSustainedBytesPerHour` | `67108864` (64 MiB) | Sustained token bucket: max build-log bytes forwarded per build in any 1-hour window. (`GRADIENT_LOG_SUSTAINED_BYTES_PER_HOUR`) |
-| `settings.logFetchFromStore` | `true` | When a derivation is already built locally (no fresh log), read nix's stored `.bz2` build log and forward it so the UI still shows output. (`GRADIENT_LOG_FETCH_FROM_STORE`) |
-| `settings.logLevel.default` | `info` | Worker log level |
-| `settings.logLevel.eval` | null | Evaluator log level override |
-| `settings.logLevel.build` | null | Builder log level override |
-| `settings.logLevel.proto` | null | Protocol log level override |
+All options live under `services.gradient.worker`; envs carry the `GRADIENT_WORKER_` prefix.
+
+| Option | Env | Default | Description |
+|---|---|---|---|
+| `serverUrl` | `GRADIENT_WORKER_SERVER_URL` | `null` | WebSocket URL of the server's `/proto` endpoint. |
+| `id` | `GRADIENT_WORKER_ID` | `null` | Worker UUID; `null` reads or generates `<baseDir>/worker-id`. |
+| `peersFile` | `GRADIENT_WORKER_PEERS_FILE` | `null` | Peers file (`peer_id:token` per line, `*` = any peer). |
+| `baseDir` | `GRADIENT_WORKER_BASE_DIR` | `/var/lib/gradient-worker` | State directory. |
+| `discoverable` | `GRADIENT_WORKER_DISCOVERABLE` | `false` | Accept incoming connections from the server. |
+| `listenAddr` | `GRADIENT_WORKER_LISTEN_ADDR` | `127.0.0.1` | Listener bind address. |
+| `port` | `GRADIENT_WORKER_PORT` | `3100` | Listener port. |
+| `drainTimeoutSecs` | `GRADIENT_WORKER_DRAIN_TIMEOUT_SECS` | `60` | How long a stop waits for running jobs; the worker stops accepting work, sends `Draining`, finishes and reports what runs, then exits. `TimeoutStopSec` is `drainTimeoutSecs + 30`; `0` waits without limit. A second signal skips the wait. |
+| `gcrootsDir` | `GRADIENT_WORKER_GCROOTS_DIR` | `/nix/var/nix/gcroots/gradient` | Indirect GC roots pinning each running build. Empty disables. |
+| `packages.nix` / `packages.ssh` | `GRADIENT_WORKER_NIX_BIN` / `GRADIENT_WORKER_SSH_BIN` | fork / OpenSSH | Binaries used for evaluation, fetching and private inputs. |
+| `capabilities.fetch` | `GRADIENT_WORKER_CAPABILITIES_FETCH` | `true` | Prefetch flake inputs. |
+| `capabilities.eval` | `GRADIENT_WORKER_CAPABILITIES_EVAL` | `true` | Run evaluations. |
+| `capabilities.build` | `GRADIENT_WORKER_CAPABILITIES_BUILD` | `true` | Run builds. |
+| `capabilities.federate` | `GRADIENT_WORKER_CAPABILITIES_FEDERATE` | `false` | Relay work and NARs; requires `discoverable`. |
+| `system.architectures` | `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` | host system | Systems this worker builds for. |
+| `system.features` | `GRADIENT_WORKER_SYSTEM_FEATURES` | detected | System features; empty detects them from `nix config show system-features`. |
+| `system.cpuCoreScore` | `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | `null` | Single-core speed score; `null` benchmarks at startup. |
+| `system.minFreeRamMb` | `GRADIENT_WORKER_SYSTEM_MIN_FREE_RAM_MB` | `0` (adaptive) | Free-RAM margin of the eval reaper: below it, the one eval subprocess large enough to restore the margin is killed and its eval reported failed. `0` = 10% of RAM clamped to 128 MiB to 1 GiB. |
+| `nixDaemon.maxConnections` | `GRADIENT_WORKER_NIX_DAEMON_MAX_CONNECTIONS` | `build.maxConcurrent * 9 + 16` | Local nix-daemon pool size. |
+| `eval.maxConcurrent` | `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` | `1` | Parallel evaluations. |
+| `eval.workers` | `GRADIENT_WORKER_EVAL_WORKERS` | `8` | Evaluator subprocesses. |
+| `eval.forkWorkers` | `GRADIENT_WORKER_EVAL_FORK_WORKERS` | `null` | Eval pool size; `null` sizes to the core count capped at 16, bounded so `forkWorkers * maxRss` fits RAM. |
+| `eval.maxRss` | `GRADIENT_WORKER_EVAL_MAX_RSS` | `8589934592` (8 GiB) | RSS above which an eval subprocess is recycled between calls. |
+| `eval.metrics` | `GRADIENT_WORKER_EVAL_METRICS` | `true` | Collect per-evaluation Nix statistics. |
+| `eval.cache.dir` | `GRADIENT_WORKER_EVAL_CACHE_DIR` | `null` | Eval cache directory (`NIX_CACHE_HOME`); `null` = `<baseDir>/eval-cache`. |
+| `eval.cache.share` | `GRADIENT_WORKER_EVAL_CACHE_SHARE` | `true` | Share eval-cache blobs across workers. |
+| `build.maxConcurrent` | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` | `32` | Parallel build slots. |
+| `build.maxCores` | `GRADIENT_WORKER_BUILD_MAX_CORES` | `null` | Cores per build (`--cores`); `null` = all. |
+| `build.metrics` | `GRADIENT_WORKER_BUILD_METRICS` | `false` | Record per-build peak RAM, CPU time and disk I/O for the resource-aware scheduler. Enables Nix's experimental `cgroups` feature and `use-cgroups`, delegates cgroup controllers to `nix-daemon.service`, and defaults `nix.package` to `packages.nix`. |
+| `build.cgroupRoot` | `GRADIENT_WORKER_BUILD_CGROUP_ROOT` | `/sys/fs/cgroup/system.slice/nix-daemon.service` | Daemon cgroup containing the per-build cgroups. |
+| `nar.maxConcurrentUploads` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | `8` | Object-storage PUTs in flight; throttled or failed PUTs retry up to 6 times with jittered backoff. |
+| `nar.partialTtlSecs` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | `86400` | Age after which an unfinished download under `<baseDir>/nar-partial` is deleted. `0` disables. |
+| `log.level.default` | `GRADIENT_WORKER_LOG_LEVEL_DEFAULT` | `info` | Worker log level. |
+| `log.level.eval` / `.build` / `.proto` | `GRADIENT_WORKER_LOG_LEVEL_EVAL` / `_BUILD` / `_PROTO` | `null` | Per-component overrides. |
+| `log.burstBytesPerMin` | `GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN` | `8388608` (8 MiB) | Build-log bytes forwarded per build per minute; past it a truncation marker is appended and forwarding stops. |
+| `log.sustainedBytesPerHour` | `GRADIENT_WORKER_LOG_SUSTAINED_BYTES_PER_HOUR` | `67108864` (64 MiB) | Build-log bytes forwarded per build per hour. |
+| `log.fetchFromStore` | `GRADIENT_WORKER_LOG_FETCH_FROM_STORE` | `true` | Forward the stored log of an already-built derivation. |
 
 ### Hashing
 

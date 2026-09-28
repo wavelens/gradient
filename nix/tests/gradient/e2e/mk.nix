@@ -46,7 +46,7 @@
 
     services.gradient.worker = {
       enable = true;
-      settings.buildMetrics = true;
+      build.metrics = true;
       capabilities = {
         eval  = true;
         build = true;
@@ -168,21 +168,21 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         gradient = {
           enable = true;
           reverseProxy.nginx.enable = true;
-          configurePostgres = true;
+          postgres.enable = true;
           # Pinned so the module's production-sized default does not size a
           # 2 GB guest that also runs the server, nginx and a git daemon.
-          postgresSharedBuffers = "128MB";
+          postgres.sharedBuffers = "128MB";
           domain = "gradient.local";
           proto.public = true;
-          jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
-          cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
-          settings = {
-            logLevel.default = "debug";
-            # Phase 10i waits out a cache-maintenance pass, and the hourly
-            # default would outlast the test. Every step of that pass is a
-            # no-op at this scale except the one the phase drives.
-            cacheMaintenanceIntervalSecs = 20;
-            cacheTtlHours = 1;
+          secrets.jwtFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
+          secrets.cryptFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
+          log.level.default = "debug";
+          # Phase 10i waits out a cache-maintenance pass, and the hourly
+          # default would outlast the test. Every step of that pass is a
+          # no-op at this scale except the one the phase drives.
+          gc = {
+            intervalSecs = 20;
+            narTtlHours = 1;
           };
           state = {
             users = {
@@ -2695,7 +2695,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             f"WHERE cached_path IN (SELECT id FROM cached_path WHERE hash IN ('{listed}'));")
 
     # 26 hours, not 2: the bound is the fetch TTL floored at the upload grace
-    # (`cacheTtlHours = 1`, `narUploadGraceHours = 24`), so a closure member is
+    # (`gc.narTtlHours = 1`, `gc.narUploadGraceHours = 24`), so a closure member is
     # never reclaimed between its own commit and its referrer's.
     age([upload_hash], 26)
     poll(f"SELECT count(*) FROM cached_path WHERE hash = '{upload_hash}';", "0",

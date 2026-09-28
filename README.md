@@ -89,11 +89,11 @@ Configure Gradient in your `configuration.nix`:
     worker.enable             = true;
     frontend.enable           = true;
     domain                    = "gradient.example.com";
-    jwtSecretFile             = "/run/secrets/gradient-jwt"; # openssl rand -base64 48 > /run/secrets/gradient-jwt
-    cryptSecretFile           = "/run/secrets/gradient-crypt"; # openssl rand -base64 48 > /run/secrets/gradient-crypt
-    configurePostgres         = true;
+    secrets.jwtFile           = "/run/secrets/gradient-jwt"; # openssl rand -base64 48 > /run/secrets/gradient-jwt
+    secrets.cryptFile         = "/run/secrets/gradient-crypt"; # openssl rand -base64 48 > /run/secrets/gradient-crypt
+    postgres.enable           = true;
     reverseProxy.nginx.enable = true; # you can also use caddy with: reverseProxy.caddy.enable = true
-    reportErrors              = true; # optional: will send crash reports to us
+    sentry.enable             = true; # optional: will send crash reports to us
   };
 }
 ```

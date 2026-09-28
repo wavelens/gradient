@@ -19,7 +19,7 @@
 
     services.gradient.worker = {
       serverUrl = "ws://server/proto";
-      workerId = worker.id;
+      id = worker.id;
       peersFile = "/etc/gradient/secrets/worker_peers";
     };
   }) workers;

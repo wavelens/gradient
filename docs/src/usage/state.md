@@ -2,16 +2,16 @@
 
 `services.gradient.state` lets you declare users, projects, tasks, caches, and API keys in Nix. Gradient reconciles this state on every startup.
 
-When `settings.deleteState = true` (default), entities that are removed from `state` are also deleted from the database. Set it to `false` to make them editable by users in the frontend instead.
+When `state.delete = true` (default), entities that are removed from `state` are also deleted from the database. Set it to `false` to make them editable by users in the frontend instead.
 
 ## Build-time validation
 
-`services.gradient.validateState` (default `true`) checks the generated state at **build time** by running the server binary's `--validate-state` over it. Schema and cross-reference errors - unknown projects or users, reporter triggers pointing at an undeclared inbound integration, duplicate project ids, and so on - then fail the Nix build instead of the server on first start. No database is touched and no secret files are required, so it is safe to run in CI. Set it to `false` to skip the check.
+`services.gradient.state.validate` (default `true`) checks the generated state at **build time** by running the server binary's `--state-validate` over it. Schema and cross-reference errors - unknown projects or users, reporter triggers pointing at an undeclared inbound integration, duplicate project ids, and so on - then fail the Nix build instead of the server on first start. No database is touched and no secret files are required, so it is safe to run in CI. Set it to `false` to skip the check.
 
 To validate a state file by hand:
 
 ```sh
-gradient-server --state-file ./gradient-state.json --validate-state
+gradient-server --state-file ./gradient-state.json --state-validate
 ```
 
 ## State-Managed Resources
@@ -215,7 +215,7 @@ services.gradient.state.tasks = {
 | `repository` | - | Git URL (required) |
 | `wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator. The legacy name `evaluation_wildcard` is still accepted as an alias |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
-| `keep_evaluations` | `30` | Number of finished evaluations to retain per task. The most recent finished evaluations are kept regardless of outcome - completed, failed, and aborted runs are treated equally, since failed/aborted runs can still hold successfully-built NARs. GC is skipped entirely while the task has any in-progress evaluation, so an in-flight run never loses NARs it is about to reuse. Must be at least 1. Capped at runtime by the global `services.gradient.settings.keepEvaluations` |
+| `keep_evaluations` | `30` | Number of finished evaluations to retain per task. The most recent finished evaluations are kept regardless of outcome - completed, failed, and aborted runs are treated equally, since failed/aborted runs can still hold successfully-built NARs. GC is skipped entirely while the task has any in-progress evaluation, so an in-flight run never loses NARs it is about to reuse. Must be at least 1. Capped at runtime by the global `services.gradient.eval.maxKeep` |
 | `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`, `all`). Applies to all triggers on the task |
 | `sign_cache` | `true` | When `false`, build outputs from this task are pushed to the cache but their narinfo signatures are left empty. External Nix clients won't trust them, keeping the task's outputs private even when the cache itself is public. A path co-produced by another `sign_cache=true` task is still signed |
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |
@@ -285,7 +285,7 @@ services.gradient.state.caches = {
     display_name     = "Main";
     description      = "Production binary cache";
     priority         = 10;
-    local_priority   = 1;    # served to clients in services.gradient.settings.localIps
+    local_priority   = 1;    # served to clients in services.gradient.http.localIps
     max_storage_gb   = 0;    # 0 = unlimited
     public           = false;
     signing_key_file = "/run/secrets/cache-signing-key";
@@ -338,7 +338,7 @@ Without this, startup fails with
 | `description` | `null` | Optional description |
 | `active` | `true` | Set false to disable serving without deleting |
 | `priority` | `10` | Lower wins when multiple caches contain the same path |
-| `local_priority` | `null` | Alternate priority returned in `nix-cache-info` for clients whose IP matches `services.gradient.settings.localIps`. Null or 0 disables the override. |
+| `local_priority` | `null` | Alternate priority returned in `nix-cache-info` for clients whose IP matches `services.gradient.http.localIps`. Null or 0 disables the override. |
 | `max_storage_gb` | `0` | Max storage for this cache in GB. When all writable caches for a project have less than 10 MiB headroom, new evaluations park in `Waiting`. 0 = unlimited. |
 | `signing_key_file` | - | Path to the (de-prefixed) base64 Ed25519 signing key (required) |
 | `projects` | `[]` | Project names allowed to use this cache |
@@ -346,7 +346,7 @@ Without this, startup fails with
 | `upstreams` | `[ cache.nixos.org ]` | Substituters consulted on cache miss. See below |
 | `created_by` | - | Username of creator (required) |
 
-When `local_priority` is set to a non-null, non-zero integer, clients whose resolved IP falls within the `services.gradient.settings.localIps` CIDR list receive that value as the `Priority` field in the `nix-cache-info` response instead of the regular `priority`. This allows LAN clients to prefer a local cache over remote substituters without altering the priority seen by external clients. Null or 0 disables the override entirely.
+When `local_priority` is set to a non-null, non-zero integer, clients whose resolved IP falls within the `services.gradient.http.localIps` CIDR list receive that value as the `Priority` field in the `nix-cache-info` response instead of the regular `priority`. This allows LAN clients to prefer a local cache over remote substituters without altering the priority seen by external clients. Null or 0 disables the override entirely.
 
 ### Upstream options
 
@@ -382,7 +382,7 @@ services.gradient.state.roles = {
 
 Managed roles are immutable through the role-management API: `PATCH` and
 `DELETE` return `403 Forbidden`. Removing the entry from the state file
-unmarks the role (or deletes it, when `settings.deleteState = true`).
+unmarks the role (or deletes it, when `state.delete = true`).
 
 Role names must not collide with the built-in roles (`Admin`, `Write`,
 `View`) or with another state-managed role in the same project -
@@ -505,15 +505,15 @@ The token file must contain a single plaintext token - the server hashes it and 
 openssl rand -base64 48 > /run/secrets/builder-1-token
 ```
 
-`worker_id` is required and must match the `GRADIENT_WORKER_ID` environment variable (or `workerId` option) on the worker machine. Unlike API registration, state-managed workers are not restricted to UUID v4 - any stable string is accepted, though using a UUID is conventional.
+`worker_id` is required and must match the `GRADIENT_WORKER_ID` environment variable (or `services.gradient.worker.id` option) on the worker machine. Unlike API registration, state-managed workers are not restricted to UUID v4 - any stable string is accepted, though using a UUID is conventional.
 
-To ensure the worker uses the same ID that was pre-registered, set `workerId` in the worker module:
+To ensure the worker uses the same ID that was pre-registered, set `id` in the worker module:
 
 ```nix
-services.gradient.worker.workerId = "550e8400-e29b-41d4-a716-446655440001";
+services.gradient.worker.id = "550e8400-e29b-41d4-a716-446655440001";
 ```
 
-State-managed worker registrations are deleted automatically when removed from `state.workers`, and per-(worker_id, project) rows are deleted when a project is dropped from `projects` (subject to `settings.deleteState`).
+State-managed worker registrations are deleted automatically when removed from `state.workers`, and per-(worker_id, project) rows are deleted when a project is dropped from `projects` (subject to `state.delete`).
 
 On the worker machine, the `peersFile` authenticates with `<project_id>:<token>` lines. The `project_id` is the project's UUID - to know it ahead of the first server start, pin it with `state.projects.<name>.id` and reference that same value in the worker's `peersFile`. The `*:<token>` wildcard remains the alternative when a single token may serve any project.
 

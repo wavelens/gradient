@@ -66,7 +66,7 @@ env vars as below.
 
 | Env var | Nix option | Description |
 |---|---|---|
-| `GRADIENT_GITHUB_APP_ID` | `services.gradient.githubApp.appId` | Numeric App ID |
+| `GRADIENT_GITHUB_APP_ID` | `services.gradient.githubApp.id` | Numeric App ID |
 | `GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE` | `services.gradient.githubApp.privateKeyFile` | Path to the PEM file |
 | `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE` | `services.gradient.githubApp.webhookSecretFile` | Path to the webhook secret file |
 

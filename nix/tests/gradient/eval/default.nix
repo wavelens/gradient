@@ -74,7 +74,7 @@
       ]
       DRIVER = (
           "HOME=/root GRADIENT_WORKER_SERVER_URL=ws://dummy/proto "
-          "GRADIENT_EVAL_CACHE_DIR=/root/eval-cache "
+          "GRADIENT_WORKER_EVAL_CACHE_DIR=/root/eval-cache "
           "${worker} --eval-driver"
       )
 
