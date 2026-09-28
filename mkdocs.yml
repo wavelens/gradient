@@ -52,6 +52,7 @@ nav:
       - Connect GitHub: guides/forge-github.md
       - Connect Gitea or Forgejo: guides/forge-gitea.md
       - Connect GitLab: guides/forge-gitlab.md
+      - Share a Cache: guides/share-a-cache.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
