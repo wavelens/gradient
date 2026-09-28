@@ -250,15 +250,21 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
     format!(
         "UPDATE derivation_build d \
          SET unready_deps = d.unready_deps + c.n, \
-             status = CASE WHEN d.status = {queued} THEN {created} ELSE d.status END, \
-             updated_at = CASE WHEN d.status = {queued} \
+             status = CASE WHEN {unqueue} THEN {created} ELSE d.status END, \
+             updated_at = CASE WHEN {unqueue} \
                                THEN (now() AT TIME ZONE 'UTC') ELSE d.updated_at END \
          FROM derivation_build old, \
               (SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
                WHERE e.dependency = ANY($1::uuid[]) GROUP BY e.derivation) c \
          WHERE d.derivation = c.derivation AND old.id = d.id \
          RETURNING d.derivation, old.status AS from_status, d.status AS to_status",
-        queued = status_sql::build(BuildStatus::Queued),
+        unqueue = format!(
+            "d.status = {queued} AND {not_in_flight}",
+            queued = status_sql::build(BuildStatus::Queued),
+            not_in_flight = crate::dispatch_record::no_open_dispatch_predicate(
+                &crate::dispatch_record::build_job_key_sql("d.id")
+            ),
+        ),
         created = status_sql::build(BuildStatus::Created),
     )
 });
@@ -653,7 +659,8 @@ where
 
 /// Flip the locked anchors to not fetchable where the predicate no longer holds,
 /// increment their direct dependents' counters, and pull the queued dependents back to
-/// `Created`; a dependent that was `Created`, `Building` or terminal only counts up.
+/// `Created`; a dependent that was `Created`, `Building` or terminal, or whose job is
+/// already in flight, only counts up.
 ///
 /// An anchor that stops being fetchable is open again, so the walk below it is
 /// re-opened here too: demand is recomputed from the flipped anchors and the queue
@@ -1517,11 +1524,11 @@ mod tests {
         );
         assert!(
             log[2].contains("unready_deps + c.n")
-                && log[2].contains("CASE WHEN d.status = 1 THEN 0"),
+                && log[2].contains("status = CASE WHEN d.status = 1 AND NOT EXISTS"),
             "{log:?}"
         );
         assert!(
-            log[2].contains("updated_at = CASE WHEN d.status = 1"),
+            log[2].contains("updated_at = CASE WHEN d.status = 1 AND NOT EXISTS"),
             "a dependent that only counted up keeps its updated_at: a FailedTransient \
              row's retry backoff is measured from that column, so bumping it here \
              restarts the window a dependency's regression had nothing to do with: {log:?}"
@@ -1629,6 +1636,25 @@ mod tests {
         ] {
             assert!(norm(sql).contains(&gate), "{sql}");
         }
+    }
+
+    /// The ripple still counts the lost dependency on an anchor whose job is in
+    /// flight, but only the un-promotes' reason may move its status.
+    #[test]
+    fn a_ripple_up_counts_an_in_flight_anchor_without_unqueueing_it() {
+        let gate = norm(&crate::dispatch_record::no_open_dispatch_predicate(
+            &crate::dispatch_record::build_job_key_sql("d.id"),
+        ));
+        let sql = norm(&RIPPLE_UP);
+        for column in ["status", "updated_at"] {
+            assert!(
+                sql.contains(&format!(
+                    "{column} = CASE WHEN d.status = 1 AND {gate} THEN"
+                )),
+                "{sql}"
+            );
+        }
+        assert!(sql.contains("unready_deps = d.unready_deps + c.n"), "{sql}");
     }
 
     /// Both recounts are bounded by the chunk their lock named, never by a subquery a

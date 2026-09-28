@@ -1,115 +1,84 @@
-# Diagnostic reports
+# Diagnostic Reports
 
-When an evaluation misbehaves, most of what explains it is in tables the UI
-never shows: the dispatch-gate flags on `derivation_build`, the
-`InputsUnavailable` attempt history behind a self-heal loop, `worker_connection`
-disconnect reasons, upstream probe metrics, and the resolved server settings
-that decide how any of it should be read.
+A diagnostic report is one SQLite file with the tables the UI never shows: dispatch gates on `derivation_build`, the attempt history behind a self-heal loop, disconnect reasons, upstream probe metrics and the resolved server settings. Generating and attaching one is in [Report a Bug](../guides/diagnostic-report.md); this page covers what the file holds and how to read it.
 
-A diagnostic report packages all of that into one SQLite file you can attach to
-a bug report, so a maintainer can answer the question without access to your
-instance.
-
-## Generating one
-
-On a task page, open the three-dot menu on the evaluation panel and choose
-**Diagnostic report**. Four independent options control what goes in; every box
-ticked is the fullest report you may generate. The download starts when you
-press Generate, and building one takes a few minutes on a large evaluation.
-
-The same thing over the API. The endpoint asks what to *anonymise*, which is the
-inverse of what the dialog asks:
-
-```sh
-curl -sO -J -H "Authorization: Bearer $TOKEN" \
-  "https://gradient.example/api/v1/evals/$EVAL_ID/report?anonymize_packages=true"
+```mermaid
+flowchart LR
+    eval[Evaluation] --> export[Extractor]
+    export --> db[(report .db)]
+    db --> sqlite[sqlite3]
+    db --> insp[gradient-report]
 ```
 
-## What the options do
+## Code
 
-| Option | Default | API parameter | Effect |
-| --- | --- | --- | --- |
-| Include identities | off | `anonymize_identities=true` | Off by default: repository URLs, project and task names, user emails, worker names and ids become per-report tokens (`repo-a1b2`, `worker-7f3c`). |
-| Include package names | on | `anonymize_packages=false` | On by default, because knowing *which* package broke is usually what makes a report useful. Unticked, the name half of store paths and flake attribute paths becomes a token. |
-| Include build logs | off | `include_logs=false` | Off by default: the full log of every failed or aborted attempt, carrying whatever the build printed. Successful builds are never included. |
-| Include instance context | on | `include_instance=true` | Worker fleet, upstream caches and the resolved server config. Requires the `ManageWorkers` permission. |
+| Part | Path | Role |
+|---|---|---|
+| Extractor | `backend/gradient-report` | Writes the SQLite file: `schema.rs` (tables, `SCHEMA_VERSION`), `extract.rs`, `redact.rs`, `logs.rs`, `config_snapshot.rs` |
+| Inspector | `nix/tools/report-inspector` | The `gradient-report` tool: Python stdlib only, runs on any maintainer machine; pytest suite in `tests/`, run by the package build |
 
-The API keeps its own defaults for callers that omit a parameter
-(`anonymize_identities=true`, `anonymize_packages=false`, `include_logs=true`,
-`include_instance=true`); the dialog always sends all four explicitly.
+## Anonymisation
 
-Anonymisation is stable pseudonymisation, not deletion. The same input always
-maps to the same token within one report, so dependency and closure reasoning
-still works; a fresh salt per report means two reports of the same instance
-cannot be correlated. The salt is never written to the file.
+- Stable pseudonyms, not deletion: the same input maps to the same token within one report (`repo-a1b2`, `worker-7f3c`), and dependency reasoning still works.
+- A fresh salt per report: two reports of one instance cannot be correlated. The salt is never written.
+- Free text (build logs, commit messages) is rewritten against every pseudonym in one pass, shared across all logs; the cost grows with the report size, not size times package count.
+- Nix store **hashes always stay**: they are one-way and let a maintainer check a path against a public cache.
 
-Free text - build logs and commit messages - is rewritten against every
-pseudonym the report has minted, in one pass over the text. Both the pass and
-the pseudonym set it is compiled from are shared across every log, so the cost
-of anonymising a report grows with its size rather than with its size times its
-package count.
+| API parameter | Default without the parameter |
+|---|---|
+| `anonymize_identities` | `true` |
+| `anonymize_packages` | `false` |
+| `include_logs` | `true` |
+| `include_instance` | `true`, needs `manageWorkers` |
 
-Nix store **hashes are always preserved**, even with everything anonymised.
-They are one-way, and they are what lets a maintainer check whether a path is
-available on a public cache, which is exactly the class of bug that motivates
-most reports.
+The dialog always sends all four explicitly.
 
-## What is never in the file
+## Never Exported
 
-API keys, sessions, device-authorization records, worker registration token
-hashes, upstream cache API keys, user password hashes and forge app credentials
-are absent, not redacted. Every exported column is named explicitly in the
-extractor, so a table that later gains a secret column cannot start exporting
-it.
+- API keys, sessions, device-authorization records, worker token hashes, upstream cache keys, password hashes and forge credentials are absent, not redacted.
+- Every exported column is named in the extractor: a table that later gains a secret column cannot start exporting it.
+- `cached_path_signature` exports only whether a signature exists, never the signature.
 
-The `report_manifest` table records, for every table included, how many rows it
-holds against how many existed, what its scope selected and which filter was
-applied. A report generated without logs says so; it never looks like an
-evaluation that had none.
+## Scope
 
-Read the `scope` column before drawing conclusions from a count. Only the
-evaluation's own tables are the evaluation's alone: builds hang off
-`derivation_build` anchors that are shared with every other evaluation that
-built the same derivation, so `build_attempt`, `phase_event` and the
-`derivation*` tables carry rows made for other evaluations, and the file will
-show attempts older than the evaluation itself. `dispatched_job_phase` is not
-one of those: it hangs off this evaluation's own dispatched jobs.
-`worker_registration`, `base_worker` and
-`upstream_metric` describe the whole instance; `project_base_worker` names the
-base workers this project opted into; `worker_connection` and `worker_sample`
-cover the workers that ran this evaluation, from its creation until it finished
-(or until the report was taken, if it had not).
+`report_manifest` records per table the rows included against the rows existing, the scope and the filter. A report without logs says so and never looks like an evaluation that had none.
 
-## What closes over what
+| Scope | Tables |
+|---|---|
+| This evaluation only | The evaluation's own rows, `dispatched_job`, `dispatched_job_phase` |
+| Shared anchors | `build_attempt`, `phase_event`, `derivation*`: rows made for other evaluations of the same derivation, older attempts included |
+| Whole instance | `worker_registration`, `base_worker`, `upstream_metric` |
+| This project | `project_base_worker` |
+| Workers of this evaluation | `worker_connection`, `worker_sample`, from creation until finish or the report |
 
-The readiness counters are counts over edges, so the far end of every edge is in
-the file. That is what lets you recompute them offline, and what makes an absent
-row mean the *instance* never had the path rather than the export never asked
-for it - a distinction the whole diagnosis of an unwhole closure rests on.
+- Read the `scope` column before trusting a count.
+- `worker_connection` and `worker_sample` carry no project: telemetry describes the worker.
+- With a base-worker fleet `worker_registration` is empty; the names are in `base_worker`.
+
+## Closure Boundary
+
+The readiness counters count edges; the far end of every edge is in the file. An absent row then means the *instance* never had the path, not that the export skipped it.
 
 | Table | Carries |
-| --- | --- |
-| `derivation`, `derivation_build`, `derivation_output` | the evaluation's derivations **and their direct dependencies** |
-| `derivation_dependency` | the evaluation's own edges with their `kind`, both ends exported |
-| `cached_path` | those derivations' output hashes **and every path they reference** |
-| `build_job` | the evaluation's jobs **and every job an exported attempt was made under** |
+|---|---|
+| `derivation`, `derivation_build`, `derivation_output` | The evaluation's derivations **and their direct dependencies** |
+| `derivation_dependency` | The evaluation's own edges with `kind`, both ends exported |
+| `cached_path` | Those derivations' outputs **and every path they reference** |
+| `build_job` | The evaluation's jobs **and every job an exported attempt ran under** |
 
-One hop is the whole requirement, not an arbitrary cut. `unready_deps` counts one
-per build edge and reads a dependency's own anchor, outputs and cached paths; a
-dependency's *own* dependencies are already summarised in its stored
-`unready_deps`. `missing_runtime_deps` is the same count over the runtime edges
-(`derivation_dependency.kind IN (1, 2)`), and the same holds for
-`missing_runtime_deps` over the runtime edges. So the file is a boundary, not a closure, and a
-dependency row in it is evidence about this evaluation's work rather than work of
-its own - it has no `build_job` row, which is how `why-stuck` tells the two apart.
+- One hop is enough: `unready_deps` counts one per build edge and reads the dependency's own anchor, outputs and cached paths. Deeper levels are summarised in the dependency's stored `unready_deps`.
+- `missing_runtime_deps` is the same count over the runtime edges (`derivation_dependency.kind IN (1, 2)`).
+- A dependency row without a `build_job` row is evidence, not work of its own; `why-stuck` tells the two apart this way.
+- `build_job` reaches past the evaluation: the substitute-miss budget is scoped per `(anchor, evaluation)` through `build_attempt.build_job`.
 
-`build_job` reaches past this evaluation because an attempt's substitute-miss
-budget is scoped per `(anchor, evaluation)` through `build_attempt.build_job`.
-Without those rows a retry history cannot be bucketed at all, and a loop running
-hundreds of misses against a threshold of two reads as ordinary churn:
+## Queries
+
+Any SQLite client opens the file.
+
+**Substitute-miss loops** per anchor and evaluation:
 
 ```sh
-sqlite3 gradient-report-01a05a38-2026-09-01.db \
+sqlite3 report.db \
   'SELECT d.name, j.evaluation, count(*) AS misses
      FROM build_attempt a
      JOIN build_job j ON j.id = a.build_job
@@ -119,153 +88,85 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
     GROUP BY 1, 2 HAVING misses > 2 ORDER BY misses DESC'
 ```
 
-`worker_connection` and `worker_sample` carry no project: a worker's telemetry
-describes the worker, whichever project it served. On an instance whose fleet is
-base workers `worker_registration` is empty, so read `base_worker` for the names.
-Reports older than schema 17 were written while base workers recorded no
-telemetry at all.
-
-## Reading one
-
-The file is an ordinary SQLite database, so any client opens it:
+**Where a job's time went:** `dispatched_job_phase` holds one row per span, nested through `parent_seq`; `phase` is the numeric discriminant, named on the [Job Board](../ui/job-board.md#job-inspection).
 
 ```sh
-sqlite3 gradient-report-01a05a38-2026-09-01.db \
-  "SELECT name, status FROM derivation_build JOIN derivation ON derivation.id = derivation_build.derivation"
-```
-
-`dispatched_job_phase` holds the worker's phase timeline, one row per span,
-nested through `parent_seq`. `phase` is the numeric discriminant; the names are
-listed in [the job board page](../ui/job-board.md#job-inspection). To see where a job's time
-actually went:
-
-```sh
-sqlite3 gradient-report-01a05a38-2026-09-01.db \
+sqlite3 report.db \
   'SELECT j.worker_id, p.phase, p.end_ms - p.start_ms AS ms
      FROM dispatched_job_phase p
      JOIN dispatched_job j ON j.id = p.dispatched_job
     ORDER BY ms DESC LIMIT 20'
 ```
 
-`dispatched_job.outcome` says how each job ended (0 completed, 1 failed); it is
-null for a job still running when the report was taken, and for one whose worker
-disconnected without reporting.
+`dispatched_job.outcome`: `0` completed, `1` failed, null while running or after a silent disconnect.
 
-`cached_path_signature` is the gate the binary cache actually serves on: a path
-is only fetchable if it has a row here for the asking cache with `signed = 1`.
-A `cached_path` row with no matching signature row is a path every other table
-calls cached and the cache still 404s, so join the two before trusting
-`derivation_output.is_cached`:
+**Cached but not served:** the cache serves a path only with a `cached_path_signature` row for that cache and `signed = 1`. Join both before trusting `derivation_output.is_cached`:
 
 ```sh
-sqlite3 gradient-report-01a05a38-2026-09-01.db \
+sqlite3 report.db \
   'SELECT cp.package, s.cache_name, s.signed
      FROM cached_path cp
      LEFT JOIN cached_path_signature s ON s.cached_path = cp.id
     WHERE s.id IS NULL OR s.signed = 0'
 ```
 
-The raw signature is never exported, only whether one exists.
-
-Wholeness is an anchor fact, not a path one. `derivation_build` carries
-`missing_runtime_deps`, the number of the anchor's runtime edges leading to
-something that is not whole itself; an anchor is *whole* - what `fetchable`, and so
-every dispatch gate, reads - when every output has a NAR here and that counter is
-zero. A non-zero counter is an anchor no dispatch will trust, and a negative one is
-a ripple that was lost:
+**Unwhole anchors:** an anchor is *whole* (what `fetchable` and every dispatch gate read) when every output has a NAR and `missing_runtime_deps` is zero. Non-zero means no dispatch trusts the anchor; negative means a lost ripple.
 
 ```sh
-sqlite3 gradient-report-01a05a38-2026-09-01.db \
+sqlite3 report.db \
   'SELECT d.name, b.missing_runtime_deps
      FROM derivation_build b JOIN derivation d ON d.id = b.derivation
     WHERE b.missing_runtime_deps <> 0
     ORDER BY b.missing_runtime_deps DESC'
 ```
 
-`cached_path.references` is the narinfo `References:` line the wholeness walk was
-built from, so the same closure is readable per path when a counter has to be
-checked by hand. The running server recounts the column table-wide on every
-consistency sweep and reports what disagreed as `runtime_drift` on its warning
-line.
+- `cached_path.references` is the narinfo `References:` line the count was built from, for checking a counter by hand. The server recounts table-wide on every consistency sweep and logs mismatches as `runtime_drift`.
+- `commit` is a reserved word: query `"commit"` in quotes.
 
-An evaluation still in `EvaluatingFlake` or `EvaluatingDerivation` whose newest
-eval job carries a `finished_at` is one whose terminal report never landed. The
-scheduler's `eval-completion-watchdog` pass re-drives that transition, so the
-shape should not survive a running server for long.
+## Signs in the Data
 
-`evaluation_input_update` is present only for a flake-lock evaluation, and names
-the inputs it holds. While such an evaluation is active no further input-update
-run is created for its task, so a wedged one silently stops the flake updater.
+| Shape | Meaning |
+|---|---|
+| Evaluation in `EvaluatingFlake` / `EvaluatingDerivation`, newest eval job has `finished_at` | The terminal report never landed; the `eval-completion-watchdog` pass re-drives the transition |
+| `evaluation_input_update` row on an active evaluation | While active, no further input-update run starts for the task; a wedged one stops the flake updater |
+| Anchor `Created`, `substitutable`, undemanded | Nothing will fetch the anchor; a cached output referencing the path stays unwhole |
 
-`commit` is a reserved word in SQLite, so the revision table needs quoting:
+## Inspector
 
-```sh
-sqlite3 gradient-report-01a05a38-2026-09-01.db \
-  'SELECT hash, author_name, message FROM "commit"'
-```
+`gradient-report` is on `PATH` in `nix develop` and runs as `nix run .#gradient-report`.
 
-The inspector adds curated views over the same file. It is called
-`gradient-report`, is on `PATH` inside `nix develop`, and runs standalone as
-`nix run .#gradient-report`:
+| Command | Shows |
+|---|---|
+| `summary` | Status, timings, build and failure counts (default) |
+| `timeline` | Phase events, dispatches and attempts in order |
+| `why-stuck` | Which gate holds each waiting anchor |
+| `failed` | Failed attempts; `--log ATTEMPT` dumps one log |
+| `workers` | Registration and connection history |
+| `manifest` | What the report contains and what the report left out |
+| `sql "QUERY"` | Raw access |
+| `store-spec -o FILE` | A `gradient-daemon` store spec replaying the evaluation |
 
-```
-gradient-report REPORT summary      status, timings, build and failure counts
-gradient-report REPORT timeline     phase events, dispatches and attempts in order
-gradient-report REPORT why-stuck    which gate each waiting anchor is held by
-gradient-report REPORT failed       failed attempts; --log ATTEMPT dumps one
-gradient-report REPORT workers      registration and connection history
-gradient-report REPORT manifest     what the report contains and what it left out
-gradient-report REPORT sql "QUERY"  raw access
-```
+**`why-stuck`** is the first stop on a hung evaluation. For every anchor the evaluation drove that never finished, the command names the gate (`walked`, `demanded`, `unready_deps`), lists every dependency below that is not `fetchable`, and says when the only gate left is the `.drv` wholeness the report does not carry.
 
-`why-stuck` is the one to reach for first on a hung evaluation: for every anchor
-this evaluation drove that never reached a terminal state it names which of
-`walked`, `demanded` and `unready_deps` holds it, lists every dependency
-underneath it that is not `fetchable`, and says plainly when the only gate left
-is the one the report does not carry, whether the anchor's own `.drv` is whole.
-
-`demanded` is the gate to read twice. It sits outside the `(substitutable OR
-unready_deps = 0)` arm, and demand walks build edges through anchors that will
-themselves be built - so it stops at a relay and at a finished build. An anchor
-that is `Created`, `substitutable` and undemanded is one nothing will ever fetch,
-and if a cached output references its store path, that path stays absent and the
-referrer stays unwhole forever:
-
-```
-ed-1.22.5: Created, waiting on demanded
-```
-
-A dependency the file does not carry prints as `not in this report` rather than
-being dropped, so a count is never left with nothing under it. A closed export
-has none; a report from before schema 12 is full of them.
-
-Two more dependency lines name an incomplete walk. `is a stub: never walked` is a
-derivation a walk named but never read, and `walked over N unwalked inputs` is
-`derivation.unwalked_inputs`: a walked derivation with a non-zero count sits above
-an input whose subtree was never recorded, which is what a walk abandoned between
-batches leaves behind. Both mean the graph under that anchor is not the graph the
-evaluation needs, and the walk, not the build, is where to look:
-
-```
+```text
 vendor-registry: Queued, waiting on walked, unready_deps = 1
     dep openssl-3.6.3 is a stub: never walked
     dep curl-8.21.0 walked over 2 unwalked inputs
 ```
 
-The inspector reads exactly one report schema version and refuses every other,
-rather than answering from whichever columns still happen to line up. The export
-has both added and dropped columns over its life, so this cuts both ways: a
-refusal means the report is newer than the tool, or older than it. The message
-says which, and names both schemas.
+| Dependency line | Meaning |
+|---|---|
+| `not in this report` | The file lacks the row; a closed export has none, reports before schema 12 many |
+| `is a stub: never walked` | A walk named the derivation but never read the derivation |
+| `walked over N unwalked inputs` | `derivation.unwalked_inputs`: a subtree below was never recorded, as after a walk abandoned between batches |
 
-The schema moves on its own, not with the release - it went 12 to 16 inside
-1.3.0 - so neither the report's `gradient_version` nor the inspector's own
-version tells you which build reads which report. Build the inspector from the
-source revision that wrote the report:
+- `demanded` sits outside the `(substitutable OR unready_deps = 0)` arm and stops at relays and finished builds: `ed-1.22.5: Created, waiting on demanded` is an anchor nothing will ever fetch.
+- A stub or unwalked line points at the walk, not the build.
 
-```sh
-nix build .#gradient-report
-```
+## Schema Versions
 
-A `nix develop` shell entered before a schema bump is the usual cause: it keeps
-the inspector it was instantiated with until you re-enter it.
+- The inspector reads exactly one schema (currently 17) and refuses every other; the message names both schemas.
+- A schema bump changes `SCHEMA_VERSION` in `backend/gradient-report/src/schema.rs` and `SUPPORTED_SCHEMA` in `nix/tools/report-inspector/gradient_report/db.py` together; the inspector package fails to evaluate while the two differ.
+- The schema moves on its own, not with the release (12 to 16 inside 1.3.0). Build the inspector from the revision that wrote the report: `nix build .#gradient-report`.
+- A `nix develop` shell entered before a schema bump keeps the old inspector until re-entered.
+- Reports before schema 17 carry no base-worker telemetry.

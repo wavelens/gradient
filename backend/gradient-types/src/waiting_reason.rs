@@ -72,10 +72,6 @@ pub enum WaitingReason {
     /// The instance is draining: scheduling is paused and this evaluation is
     /// parked until draining is disabled or the server restarts.
     Draining,
-    /// The evaluation is being aborted: it is parked first so the dispatcher
-    /// stops handing out its builds, then its builds are aborted and the eval
-    /// transitions to `Aborted`. The reconciler never unparks this reason.
-    Aborting,
     /// The connected pool can build every pending anchor, but none is
     /// dispatchable - nothing in the pending set passes the dispatch gate and no
     /// in-flight build is left to drive promotion. What blocks it is not recorded

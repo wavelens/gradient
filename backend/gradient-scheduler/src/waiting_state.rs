@@ -86,7 +86,7 @@ pub(crate) async fn reconcile_waiting_state(
             if eval.status == EvaluationStatus::Waiting
                 && matches!(
                     reason,
-                    Some(WaitingReason::Draining) | Some(WaitingReason::Aborting)
+                    Some(WaitingReason::Draining)
                 )
             {
                 continue;
@@ -125,8 +125,8 @@ pub(crate) async fn reconcile_waiting_state(
             .and_then(WaitingReason::from_json);
 
         // Approval, no-cache and storage-full parks are owned by webhook +
-        // cache hooks; an Aborting park is owned by the abort path. The
-        // reconciler must not unpark any of them just because workers showed up.
+        // cache hooks. The reconciler must not unpark any of them just because
+        // workers showed up.
         if eval.status == EvaluationStatus::Waiting
             && reason.as_ref().is_some_and(|r| {
                 matches!(
@@ -134,7 +134,6 @@ pub(crate) async fn reconcile_waiting_state(
                     WaitingReason::Approval { .. }
                         | WaitingReason::NoCache
                         | WaitingReason::CacheStorageFull
-                        | WaitingReason::Aborting
                 )
             })
         {

@@ -84,6 +84,7 @@ mod m20260926_000003_webhook;
 mod m20260927_000000_foreign_key_indexes;
 mod m20260927_000001_derivation_metric_architecture;
 mod m20260927_000002_adopt_referenced_outputs;
+mod m20260928_000000_settle_aborting_parks;
 
 pub struct Migrator;
 
@@ -164,6 +165,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260927_000000_foreign_key_indexes::Migration),
             Box::new(m20260927_000001_derivation_metric_architecture::Migration),
             Box::new(m20260927_000002_adopt_referenced_outputs::Migration),
+            Box::new(m20260928_000000_settle_aborting_parks::Migration),
         ]
     }
 }
