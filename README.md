@@ -22,6 +22,9 @@
 
 <p align="center"><a href="./docs/gallery.md">📸 Screenshot Gallery</a></p>
 
+
+https://github.com/user-attachments/assets/bd733d97-fd8b-4439-b880-04387ba1e073
+
 Gradient evaluates and builds Nix flakes on a pool of workers, starts builds while the evaluation is still running and serves every result from a built-in binary cache.
 
 ## Features
