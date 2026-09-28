@@ -1,6 +1,6 @@
 # Gradient
 
-**Nix CI for teams.** Every flake built once, on any machine, cached for everyone.
+**Nix-CI for Teams.** Every flake built once, on any machine, cached for everyone.
 
 ![The Gradient web interface](assets/screenshots/gradient.png)
 
@@ -53,8 +53,9 @@
 | Heavy builds | Static machine list with speed factors | Scoring system places them by predicted memory, learned from past builds |
 | Private caches | One store for the whole instance | Per-project caches with access control |
 | Sign-in | Local accounts, LDAP | OIDC single sign-on, SCIM provisioning |
-| Integrations | Minimal JSON API | REST API, webhooks and MCP server |
+| Integrations | Minimal JSON API | REST API, webhooks, Git Integrations and MCP server |
 | Web UI | Server-rendered pages | Responsive UI with live log streaming |
+| Stars | ![](https://img.shields.io/github/stars/NixOS/hydra?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=high) | ![](https://img.shields.io/github/stars/wavelens/gradient?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=low) |
 
 ## Public Binary Cache
 
@@ -71,9 +72,6 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 - API reference: [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/main/docs/gradient-api.yaml)
 - NixOS options search: <https://wavelens.github.io/gradient-search>
 - Chat: [#gradient-ci:matrix.org](https://matrix.to/#/#gradient-ci:matrix.org)
-
-!!! note
-    Gradient is in active development. APIs and configuration options may change between releases.
 
 [Get started](get-started/quick-start.md){ .md-button .md-button--primary }
 [Try the public instance](https://public.gradient.ci){ .md-button }

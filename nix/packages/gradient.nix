@@ -163,7 +163,7 @@ craneLib.buildPackage (commonArgs // rec {
   });
 
   meta = {
-    description = "Nix Continuous Integration System Backend";
+    description = "Nix-CI for Teams (backend)";
     homepage = "https://github.com/wavelens/gradient";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.unix;

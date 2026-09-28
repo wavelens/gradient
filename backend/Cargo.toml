@@ -222,7 +222,7 @@ sqlx-sqlite      = { git = "https://github.com/launchbadge/sqlx", rev = "b54008a
 
 [package]
 name        = "gradient-server"
-description = "Nix-based Continuous Integration System"
+description = "Nix-CI for Teams"
 version.workspace     = true
 edition.workspace     = true
 license.workspace     = true

@@ -55,7 +55,7 @@
   '';
 
   meta = {
-    description = "Nix Continuous Integration System Frontend";
+    description = "Nix-CI for Teams (frontend)";
     homepage = "https://github.com/wavelens/gradient";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.unix;

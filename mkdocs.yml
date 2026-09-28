@@ -1,5 +1,5 @@
 site_name: Gradient
-site_description: Nix-based Continuous Integration System
+site_description: Nix-CI for Teams
 site_url: https://wavelens.github.io/gradient
 repo_url: https://github.com/wavelens/gradient
 repo_name: wavelens/gradient

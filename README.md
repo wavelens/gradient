@@ -1,13 +1,15 @@
-<h1 align="center">Gradient - Modern Nix-CI System</h1>
+<h1 align="center">Gradient</h1>
+
+<p align="center"><b>Nix-CI for Teams.</b> Every flake built once, on any machine, cached for everyone.</p>
 
 <p align="center">
-  <a href="https://public.gradient.ci">🚀 Public Instance</a>
+  <a href="https://wavelens.github.io/gradient/get-started/quick-start/">🚀 Quick Start</a>
   •
   <a href="https://wavelens.github.io/gradient">📖 Documentation</a>
   •
-  <a href="https://wavelens.github.io/gradient-search">🔍 Options Search</a>
+  <a href="https://public.gradient.ci">🌐 Public Instance</a>
   •
-  <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml">🛠️ API Docs</a>
+  <a href="https://wavelens.github.io/gradient-search">🔍 Options Search</a>
   •
   <a href="https://matrix.to/#/#gradient-ci:matrix.org">💬 Matrix Chat</a>
   •
@@ -16,179 +18,75 @@
   </a></sup>
 </p>
 
-
-> [!IMPORTANT]
-> If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
-
-## Features
-
 ![Gradient](./docs/src/assets/screenshots/gradient.png)
 
 <p align="center"><a href="./docs/gallery.md">📸 Screenshot Gallery</a></p>
 
-- **Modern UI**: clean and intuitive user interface
-- **Projects**: multiple projects, which work independently from each other (e.g. different workers, user access)
-- **API**: provides a RESTful API with API-Key management for authentication
-- **Streaming Logs**: real-time log streaming for builds
-- **Rich Task Configuration**: flake updates, check all branches, pull requests, and tags
-- **OAuth2 / OIDC**: integrated single-sign-on support
-- **Binary Cache**: built-in Nix store cache with S3 storage backend support
-- **Proto Workers**: build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
-- **Deployment Module**: Pull-Deployment via gradient-deploy module
-- **Dependency Graph**: interactive visualization of Nix build dependency trees
-- **Actions Integration**: GitHub App, Gitea and Gitlab Integration
+Gradient evaluates and builds Nix flakes on a pool of workers, starts builds while the evaluation is still running and serves every result from a built-in binary cache.
+
+## Features
+
+| | |
+|---|---|
+| **[Forge Integration](https://wavelens.github.io/gradient/guides/forge-github/)** | GitHub, Gitea / Forgejo and GitLab: builds on push and pull request, status checks sent back |
+| **[Build Before Pushing](https://wavelens.github.io/gradient/guides/build-before-push/)** | Uncommitted changes built on the CI workers with `gradient build` |
+| **[Built-in Binary Cache](https://wavelens.github.io/gradient/concepts/caches/)** | Per-project caches with S3 storage, signing and sharing between projects |
+| **[Scales With Workers](https://wavelens.github.io/gradient/concepts/workers/)** | Evaluation and builds both run on workers; each added machine adds capacity |
+| **[MCP Server](https://wavelens.github.io/gradient/guides/mcp/)** | Failed builds, logs and evaluations, readable by any AI assistant |
+| **[Pull Deployment](https://wavelens.github.io/gradient/guides/pull-deployment/)** | Machines fetch and switch to their latest built NixOS configuration on their own |
+| **[Declarative Setup](https://wavelens.github.io/gradient/reference/state/)** | Users, projects, caches and workers as NixOS options, validated at build time |
+| **[SSO and Teams](https://wavelens.github.io/gradient/guides/sso/)** | OIDC login, SCIM provisioning, roles and invites per project and cache |
+
+## CLI
+
+[Download Gradient CLI](https://public.gradient.ci/api/v1/tasks/gradient/main/entry-point-downloads?eval=packages.x86_64-linux.gradient-cli-static&filename=gradient): a static Linux binary, no Nix needed. Build uncommitted changes on the CI workers:
+
+```sh
+# Install Gradient
+curl -fLo gradient "https://public.gradient.ci/api/v1/tasks/gradient/main/entry-point-downloads?eval=packages.x86_64-linux.gradient-cli-static&filename=gradient"
+chmod +x gradient && sudo mv gradient /usr/local/bin/
+# or via Nix: nix run github:wavelens/gradient#gradient-cli-full -- [flags]
+
+gradient login https://gradient.example.com
+gradient build .#hello
+```
+
+All commands: [CLI Reference](https://wavelens.github.io/gradient/reference/cli/).
+
+## Compared to Hydra
+
+| | [Hydra](https://github.com/NixOS/hydra) | Gradient |
+|---|---|---|
+| Build start | After the whole evaluation finishes | While the evaluation is still running |
+| Evaluation | On the server, limited by one machine | On workers, scales with them |
+| Build outputs | Pass through the server | Large outputs go from worker straight to S3 |
+| Server host | Needs a writable Nix store | Needs no Nix store, fits in a micro-VM |
+| Heavy builds | Static machine list with speed factors | Scoring system places them by predicted memory, learned from past builds |
+| Private caches | One store for the whole instance | Per-project caches with access control |
+| Sign-in | Local accounts, LDAP | OIDC single sign-on, SCIM provisioning |
+| Integrations | Minimal JSON API | REST API, webhooks, Git Integrations and MCP server |
+| Web UI | Server-rendered pages | Responsive UI with live log streaming |
+| Stars | ![](https://img.shields.io/github/stars/NixOS/hydra?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=high) | ![](https://img.shields.io/github/stars/wavelens/gradient?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=low) |
 
 ## Installation
 
-Please refer to the [Quick Start Guide](https://wavelens.github.io/gradient/quick-start/) for a step-by-step installation guide.
-Add Cache for prebuilt Gradient packages (optional):
-```
-URL: https://public.gradient.ci/cache/main
+A NixOS module sets up the server, a local worker, PostgreSQL and the reverse proxy. The [Quick Start](https://wavelens.github.io/gradient/get-started/quick-start/) walks through the setup in five steps.
+
+Pre-built Gradient packages:
+
+```text
+URL:        https://public.gradient.ci/cache/main
 Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 ```
 
-Extend your `flake.nix` with Gradient module:
+## API
 
-```nix
-{
-  inputs.gradient.url = "github:wavelens/gradient";
-  # optional, not necessary for the module
-  # inputs.gradient.inputs.nixpkgs.follows = "nixpkgs";
-  # inputs.gradient.inputs.flake-utils.follows = "flake-utils";
-
-  outputs = { self, nixpkgs, gradient, ... }: let
-    pkgs = import nixpkgs {
-      inherit system;
-      overlays = [ gradient.overlays.default ];
-    };
-  in {
-    # change `yourhostname` to your actual hostname
-    nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
-      # customize to your system
-      system = "x86_64-linux";
-      modules = [
-        ./configuration.nix
-        gradient.nixosModules.default
-        # for pull deployment use:
-        gradient.nixosModules.deploy
-      ];
-    };
-  };
-}
-```
-
-Configure Gradient in your `configuration.nix`:
-
-> [!NOTE]
-> All configuration options here: [Options Search](https://wavelens.github.io/gradient-search)
-
-```nix
-{
-  services.gradient = {
-    enable                    = true;
-    worker.enable             = true;
-    frontend.enable           = true;
-    domain                    = "gradient.example.com";
-    secrets.jwtFile           = "/run/secrets/gradient-jwt"; # openssl rand -base64 48 > /run/secrets/gradient-jwt
-    secrets.cryptFile         = "/run/secrets/gradient-crypt"; # openssl rand -base64 48 > /run/secrets/gradient-crypt
-    postgres.enable           = true;
-    reverseProxy.nginx.enable = true; # you can also use caddy with: reverseProxy.caddy.enable = true
-    sentry.enable             = true; # optional: will send crash reports to us
-  };
-}
-```
-
-## Usage
-Gradient can be used via the web interface, API, and CLI.
-
-### API
-
-The API is a RESTful API that can be used to interact with Gradient programmatically.
-OpenAPI documentation is available at `/docs/gradient-api.yaml` or via [Swagger Editor](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
-
-### Web Interface
-
-The web interface is the primary way to interact with Gradient. It also just uses the main API.
-
-### CLI
-
-The CLI is also based on the API and can be used to interact with Gradient from the command line.
-
-Install the CLI:
-
-```nix
-{
-  inputs.gradient.url = "github:wavelens/gradient";
-  # optional, not necessary for the module
-  # inputs.gradient.inputs.nixpkgs.follows = "nixpkgs";
-  # inputs.gradient.inputs.flake-utils.follows = "flake-utils";
-
-  outputs = { self, nixpkgs, gradient, ... }: let
-    pkgs = import nixpkgs {
-      inherit system;
-      overlays = [ gradient.overlays.gradient-cli ];
-      # or use the default overlay
-    };
-  in {
-    # change `yourhostname` to your actual hostname
-    nixosConfigurations.yourhostname = pkgs.lib.nixosSystem {
-      # customize to your system
-      system = "x86_64-linux";
-      modules = [
-        ./configuration.nix
-
-        # or define in the configuration.nix
-        {
-          config = {
-            environment.systemPackages = [ pkgs.gradient-cli ];
-          };
-        }
-      ];
-    };
-  };
-}
-```
-
-or
-
-```sh
-nix run github:wavelens/gradient#gradient-cli
-```
-
-## Pull Deployment
-Gradient supports pull deployment, which allows you to deploy your code to a server by pulling it from the Gradient server. This is useful for deploying NixOS configurations to systems that don't have much compute power or should run without disturbing the system.
-
-To use pull deployment, you need to enable the `gradient-deploy` module in your NixOS configuration. This module will set up a systemd service that will pull the latest code from the Gradient server and deploy it to your system daily at 04:00 am.
-
-```nix
-{
-  system.gradient-deploy = {
-    enable = true;
-    server = "https://gradient.example.com";
-    apiKeyFile = "/var/lib/gradient-deploy/api-key";
-    task = "project/task";
-  };
-}
-```
-
-After enabling the module, you can trigger a update manually by running:
-
-```sh
-sudo gradient-update
-```
+A REST API backs the web UI and the CLI: [OpenAPI spec](./docs/gradient-api.yaml), [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/main/docs/gradient-api.yaml).
 
 ## Contributing
 
-We welcome contributions to this project. Please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
+Contributions are welcome: see the [Contributing Guidelines](CONTRIBUTING.md) and the [Contributor Docs](https://wavelens.github.io/gradient/contributors/).
 
 ## License
 
-This project is under the **GNU Affero General Public License v3.0** (AGPL-3.0-only; as published by the Free Software Foundation):
-
-The [GNU Affero General Public License v3.0 (AGPL-3.0-only)](./LICENSE) is a free software license that ensures your freedom to use, modify, and distribute the software, with the condition that any modified versions of the software must also be distributed under the same license.
-
-The license notice follows the [REUSE guidelines](https://reuse.software/) to ensure clarity and consistency.
-
-## Acknowledgements
-
-Developed by Wavelens GmbH. Support us by contributing.
+[AGPL-3.0-only](./LICENSE), with license notices following the [REUSE guidelines](https://reuse.software/). Developed by [Wavelens GmbH](https://wavelens.io).
