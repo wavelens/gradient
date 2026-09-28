@@ -35,7 +35,7 @@ in {
         default = config.programs.ssh.package;
         defaultText = lib.literalExpression "config.programs.ssh.package";
         description = ''
-          OpenSSH package used as {env}`GIT_SSH_COMMAND`, so private flake inputs can be fetched.
+          OpenSSH package used as {env}`GIT_SSH_COMMAND` to fetch private flake inputs.
         '';
       };
     };
@@ -145,7 +145,7 @@ in {
       description = ''
         Seconds a stop waits for running jobs. The worker stops accepting work, finishes and reports
         what is running, then exits; jobs still running at the deadline are aborted and re-queued.
-        The unit's `TimeoutStopSec` is derived from it. `0` waits without limit, so a stuck build
+        The unit's `TimeoutStopSec` is derived from it. `0` waits without limit: a stuck build
         blocks {command}`systemctl stop` until a second signal.
       '';
     };
@@ -299,7 +299,7 @@ in {
           Whether to record per-build peak memory, CPU time and disk I/O. This enables Nix's
           experimental `cgroups` feature and `use-cgroups`, and delegates cgroup controllers to
           {file}`nix-daemon.service`. Peak memory and disk I/O need Gradient's Nix fork on the
-          daemon, so {option}`nix.package` defaults to its package. Wall-clock time is always
+          daemon; {option}`nix.package` defaults to its package. Wall-clock time is always
           recorded.
         '';
       };

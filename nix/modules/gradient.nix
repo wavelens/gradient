@@ -226,7 +226,7 @@ in {
             Size it to a quarter of the host's RAM: Gradient's working set is the build graph's
             indexes, which the stock 128 MB cannot keep resident.
 
-            Unlike `work_mem` and `maintenance_work_mem` this is one fixed allocation, so the
+            Unlike `work_mem` and `maintenance_work_mem` this is one fixed allocation. The
             default of a quarter of the smallest supported host is a floor to raise on larger hosts.
             `null` keeps the PostgreSQL default.
           '';
@@ -250,7 +250,7 @@ in {
           description = ''
             `work_mem` of the cluster set up by {option}`services.gradient.postgres.enable`. It is
             the floor every query gets; graph walks raise their own ceiling for a single statement.
-            It is charged per sort or hash node, so `"32MB"` suits a host sized for the three server
+            It is charged per sort or hash node: `"32MB"` suits a host sized for the three server
             pools and is too much for a small one. `null` keeps the PostgreSQL default.
           '';
         };
@@ -404,8 +404,8 @@ in {
           type = lib.types.ints.positive;
           default = 2 * 1024 * 1024;
           description = ''
-            Maximum HTTP request body size in bytes for most endpoints, so an unbounded body cannot
-            exhaust server memory. Build request blob uploads use a fixed 20 MiB cap.
+            Maximum HTTP request body size in bytes for most endpoints, keeping an unbounded body from
+            exhausting server memory. Build request blob uploads use a fixed 20 MiB cap.
           '';
         };
 
@@ -454,7 +454,7 @@ in {
           default = 120;
           description = ''
             Seconds a connected worker may stay silent before the server declares it dead and
-            re-queues its jobs. Workers heartbeat every 10 seconds, so the default tolerates twelve
+            re-queues its jobs. Workers heartbeat every 10 seconds; the default tolerates twelve
             missed beats. This is the only detection for a worker lost without a clean TCP close
             (OOM kill, frozen host, network partition). `0` disables the watchdog.
           '';
@@ -610,7 +610,7 @@ in {
           type = lib.types.ints.positive;
           default = 3600;
           description = ''
-            Seconds between NAR signature backfill runs. Uploads are signed immediately, so this
+            Seconds between NAR signature backfill runs. Uploads are signed immediately; this
             only catches subscription placeholders and unsigned leftovers.
           '';
         };
@@ -619,7 +619,7 @@ in {
           type = lib.types.ints.positive;
           default = 300;
           description = ''
-            Seconds between DWARF build ID index backfill runs. Uploads are indexed immediately, so
+            Seconds between DWARF build ID index backfill runs. Uploads are indexed immediately;
             this only catches paths cached before the index existed or interrupted by a restart.
           '';
         };
@@ -718,7 +718,7 @@ in {
           default = 2;
           description = ''
             Free re-queues of a substitutable derivation within one evaluation before it is built
-            like any other. A re-queue does not count as a build attempt, so this is the only bound
+            like any other. A re-queue does not count as a build attempt: this is the only bound
             on that loop.
           '';
         };
@@ -840,7 +840,7 @@ in {
           default = 300;
           description = ''
             Seconds between build graph consistency checks. The check also repairs the NAR reference
-            counter, so `0` disables both.
+            counter; `0` disables both.
           '';
         };
 
@@ -916,7 +916,7 @@ in {
           default = 262144;
           description = ''
             Target uncompressed size in bytes of a stored build log chunk. Chunks split on line
-            boundaries, so a long line may exceed it.
+            boundaries: a long line may exceed the target.
           '';
         };
       };
@@ -1033,7 +1033,7 @@ in {
           default = "";
           description = ''
             Name of the S3 bucket. The bucket must not have versioning, object lock or replication
-            enabled: Gradient overwrites objects in place and never removes old versions, so a
+            enabled: Gradient overwrites objects in place and never removes old versions, and a
             versioned bucket keeps an unreclaimable copy per upload.
           '';
         };
@@ -1090,7 +1090,7 @@ in {
           default = 60;
           description = ''
             Seconds an S3 response may stall before the request fails. Every received chunk resets
-            the timer, so large NARs stream as long as they make progress.
+            the timer: large NARs stream as long as they make progress.
           '';
         };
 
@@ -1135,7 +1135,7 @@ in {
     assertions = [
       {
         assertion = cfg.localWorker -> cfg.worker.enable;
-        message = "services.gradient.localWorker provisions credentials for a worker on this host, so it requires services.gradient.worker.enable.";
+        message = "services.gradient.localWorker provisions credentials for a worker on this host and requires services.gradient.worker.enable.";
       }
       {
         assertion = cfg.proto.federate -> cfg.proto.discoverable;
