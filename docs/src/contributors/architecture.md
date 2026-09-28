@@ -115,7 +115,7 @@ WebSocket; the scheduler, cache and CI code are libraries the tree drives.
 
 ### Proxy
 
-`gradient-proxy` (a separate, closed-source repository) is a federation gateway: one worker to its upstream server, an authority to its own workers. It reuses `gradient-wire` (protocol, handshake, limiter), `gradient-worker-client` (upstream session, reconnect, test peer), `gradient-pool` (worker pool and aggregate), `gradient-storage` (`NarStore`, partial transfers, relay serving) and `gradient-util`, and path-depends on them from `../backend`. See the Federation section of [Proto](../development/proto.md).
+`gradient-proxy` (a separate, closed-source repository) is a federation gateway: one worker to its upstream server, an authority to its own workers. It reuses `gradient-wire` (protocol, handshake, limiter), `gradient-worker-client` (upstream session, reconnect, test peer), `gradient-pool` (worker pool and aggregate), `gradient-storage` (`NarStore`, partial transfers, relay serving) and `gradient-util`, and path-depends on them from `../backend`. See [Federation](proto/federation.md).
 
 ### Server has no Nix daemon
 
