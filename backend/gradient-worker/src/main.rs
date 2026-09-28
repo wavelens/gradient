@@ -320,7 +320,7 @@ async fn next_stop_signal() {
 ///
 /// `log_level` is the global default. The optional per-area overrides
 /// (`eval_log_level`, `build_log_level`, `proto_log_level`) are appended as
-/// per-target directives so e.g. `settings.logLevel.eval = "trace"` enables
+/// per-target directives so e.g. `log.level.eval = "trace"` enables
 /// trace logging only for the evaluator-related modules.
 fn log_overrides(config: &WorkerConfig) -> Vec<(&'static str, Option<&str>)> {
     const EVAL_TARGETS: &[&str] = &[

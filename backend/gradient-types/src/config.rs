@@ -218,7 +218,7 @@ pub enum ConfigError {
 /// Resolved runtime configuration carried by `AppState`.
 ///
 /// Built once at startup from a parsed [`Cli`]. Handlers depend on the slice
-/// they need (`state.config.<group>.<field>`) instead of the full 65-field
+/// they need (`state.config.<group>.<field>`) instead of the whole
 /// parser DTO.
 ///
 /// Optional features (`oidc`, `email`, `s3`, `github_app`) are `None` when

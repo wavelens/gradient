@@ -6,7 +6,7 @@
 
 use clap::Args;
 
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Args, Debug, Clone)]
 pub struct StateArgs {
     #[arg(long = "state-file", env = "GRADIENT_STATE_FILE")]
     pub file: Option<String>,
@@ -22,4 +22,14 @@ pub struct StateArgs {
         default_value = "true"
     )]
     pub delete: bool,
+}
+
+impl Default for StateArgs {
+    fn default() -> Self {
+        Self {
+            file: None,
+            validate: false,
+            delete: true,
+        }
+    }
 }

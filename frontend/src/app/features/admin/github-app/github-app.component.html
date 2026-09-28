@@ -67,7 +67,7 @@
         <h3>Server configuration</h3>
         <pre><code>services.gradient.githubApp = {{ '{' }}
   enable = true;
-  appId = {{ c.id }};
+  id = {{ c.id }};
   privateKeyFile = "/run/secrets/gradient-github-app.pem";
   webhookSecretFile = "/run/secrets/gradient-github-app-webhook";
 {{ '}' }};</code></pre>

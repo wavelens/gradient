@@ -239,7 +239,7 @@ paths:
       summary: Binary WebSocket protocol endpoint
       description: |-
         Upgrades the connection to a WebSocket carrying rkyv-encoded binary
-        frames. Only available when `GRADIENT_DISCOVERABLE=true`.
+        frames. Only available when `GRADIENT_PROTO_DISCOVERABLE=true`.
 
         **Protocol flow**
         1. Client sends `ClientMessage::InitConnection { version, features }`.
@@ -255,7 +255,7 @@ paths:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
         '404':
-          description: Protocol endpoint is disabled (`GRADIENT_DISCOVERABLE=false`)
+          description: Protocol endpoint is disabled (`GRADIENT_PROTO_DISCOVERABLE=false`)
 
   # ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -5328,7 +5328,7 @@ paths:
         WebSocket, including their capabilities and assigned job counts.
 
         Requires the caller to have the `superuser` flag, unless the server
-        is started with `GRADIENT_GLOBAL_STATS_PUBLIC=true`.
+        is started with `GRADIENT_PUBLIC_STATS=true`.
       operationId: listWorkers
       security:
         - bearerAuth: []
@@ -6165,7 +6165,7 @@ paths:
         enqueues a signature for this cache. Re-uploading an existing store path
         reuses the cached path and only adds this cache's signature.
 
-        The route's body limit is `GRADIENT_MAX_NAR_UPLOAD_SIZE` (default 512 MiB).
+        The route's body limit is `GRADIENT_NAR_MAX_UPLOAD_SIZE` (default 512 MiB).
         The bundled reverse proxy additionally caps each request body at 100 MiB,
         so NARs above that must use the chunked endpoints
         (`PUT .../nars/{hash}/chunk` + `POST .../nars/{hash}/finalize`).
@@ -6210,6 +6210,13 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '503':
+          description: Upload capacity exhausted; retry after the given delay.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before retrying.
 
   /caches/{cache}/nars/{hash}/chunk:
     parameters:
@@ -6274,7 +6281,14 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '413':
-          description: Chunk would push the NAR past `GRADIENT_MAX_NAR_UPLOAD_SIZE`.
+          description: Chunk would push the NAR past `GRADIENT_NAR_MAX_UPLOAD_SIZE`.
+        '503':
+          description: Upload capacity exhausted; retry after the given delay.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before retrying.
 
   /caches/{cache}/nars/{hash}/finalize:
     parameters:
@@ -6333,6 +6347,13 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '503':
+          description: Upload capacity exhausted; retry after the given delay.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before retrying.
 
   /caches/{cache}/nars/stats:
     parameters:
@@ -7397,7 +7418,7 @@ paths:
 
       | Endpoint | Description |
       |---|---|
-      | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are capped per IP by `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`; the upgrade request shares the NAR-download cache rate-limit tier. Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
+      | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ANONYMOUS_CACHE_ENABLE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are capped per IP by `GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP`; the upgrade request shares the NAR-download cache rate-limit tier. Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
 
       ### Inspection surface
 
@@ -10332,7 +10353,7 @@ components:
           minimum: 1
           description: >-
             Number of completed evaluations to retain for metrics and history.
-            Rejected with `400` when it exceeds `GRADIENT_KEEP_EVALUATIONS`, the
+            Rejected with `400` when it exceeds `GRADIENT_EVAL_MAX_KEEP`, the
             instance-wide maximum.
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
@@ -10369,7 +10390,7 @@ components:
           description: >-
             Number of completed evaluations retained for metrics and history. A
             new task starts at the lower of 30 and the instance-wide maximum
-            (`GRADIENT_KEEP_EVALUATIONS`).
+            (`GRADIENT_EVAL_MAX_KEEP`).
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
         sign_cache:
@@ -12796,7 +12817,7 @@ components:
       nullable: true
       description: |
         Instance-wide windowed averages and live counts at dispatch time,
-        recomputed every `GRADIENT_INSTANCE_METRICS_INTERVAL` seconds. `null`
+        recomputed every `GRADIENT_METRICS_INSTANCE_INTERVAL_SECS` seconds. `null`
         for jobs dispatched before the first snapshot.
       properties:
         wait_secs: { $ref: '#/components/schemas/Windowed' }

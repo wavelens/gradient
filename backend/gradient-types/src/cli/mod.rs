@@ -6,10 +6,9 @@
 
 //! Typed `clap::Args` clusters that compose the top-level [`super::Cli`].
 //!
-//! Each module groups the flags of one feature so handlers and tests can
-//! depend on a narrow slice instead of the full 65-field god struct. Field
-//! names, env vars, defaults and doc comments are preserved verbatim - only
-//! the Rust access path changes (e.g. `cli.port` → `cli.server.port`).
+//! Each module is one config group: its NixOS option path, flag and env var
+//! share one name (`nar.commitConcurrency`, `--nar-commit-concurrency`,
+//! `GRADIENT_NAR_COMMIT_CONCURRENCY`).
 
 mod build;
 mod cache;

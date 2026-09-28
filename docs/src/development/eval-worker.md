@@ -1,6 +1,6 @@
 # Eval worker setup
 
-Gradient evaluates flakes with a pool of `--eval-worker` subprocesses that drive the embedded Nix C API. A single evaluation is split into one shard per system and fanned across the pool, with the pool sized to fit the host's memory. Results are written to a persistent, fleet-shared eval-cache, so a repeat evaluation of the same locked flake is mostly cache hits.
+Gradient evaluates flakes with a pool of `--eval-subprocess` subprocesses that drive the embedded Nix C API. A single evaluation is split into one shard per system and fanned across the pool, with the pool sized to fit the host's memory. Results are written to a persistent, fleet-shared eval-cache, so a repeat evaluation of the same locked flake is mostly cache hits.
 
 ## Subprocess IPC
 

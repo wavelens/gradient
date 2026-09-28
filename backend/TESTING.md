@@ -147,40 +147,21 @@ the main reason tests go stale (they stop compiling when a field is added).
 
 pub fn test_cli() -> Cli {
     Cli {
-        log_level: "error".into(),   // suppress noise in test output
-        ip: "127.0.0.1".into(),
-        port: 3000,
-        serve_url: "http://127.0.0.1:3000".into(),
-        database_url: None,
-        database_url_file: None,
-        max_concurrent_evaluations: 2,
-        max_concurrent_builds: 10,
-        evaluation_timeout: 5,
-        store_path: None,
-        base_path: "/tmp/gradient-test".into(),
-        enable_registration: false,
-        oidc_enabled: false,
-        oidc_required: false,
-        oidc_client_id: None,
-        oidc_client_secret_file: None,
-        oidc_scopes: None,
-        oidc_discovery_url: None,
-        crypt_secret_file: "test-secret".into(),   // tests/fixtures/test-secret
-        jwt_secret_file: "test-jwt".into(),        // tests/fixtures/test-jwt
-        report_errors: false,
-        email_enabled: false,
-        email_require_verification: false,
-        email_smtp_host: None,
-        email_smtp_port: 587,
-        email_smtp_username: None,
-        email_smtp_password_file: None,
-        email_from_address: None,
-        email_from_name: "Gradient Test".into(),
-        email_enable_tls: false,
-        state_file: None,
-        delete_state: true,
-        keep_evaluations: 30,
-        nar_ttl_hours: 0,
+        log: LogArgs {
+            level_default: "error".into(), // suppress noise in test output
+            ..Default::default()
+        },
+        server: ServerArgs {
+            serve_url: "http://127.0.0.1:3000".into(),
+            base_dir: "/tmp/gradient-test".into(),
+            ..Default::default()
+        },
+        secrets: SecretsArgs {
+            crypt_file: "test-secret".into(), // tests/fixtures/test-secret
+            jwt_file: "test-jwt".into(),      // tests/fixtures/test-jwt
+        },
+        registration: RegistrationArgs { enable: false },
+        ..Default::default()
     }
 }
 

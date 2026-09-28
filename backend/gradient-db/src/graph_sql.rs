@@ -47,7 +47,7 @@ use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, TransactionTrait};
 /// expensive no-op: a raise to the number the floor already sits at buys the
 /// walk nothing. Raising that floor instead is the wrong trade, since it
 /// multiplies by every sort node of every concurrent query, which is why the
-/// module leaves it to `services.gradient.server.postgresWorkMem` rather than
+/// module leaves it to `services.gradient.postgres.workMem` rather than
 /// guessing it.
 pub const WALK_WORK_MEM: &str = "SET LOCAL work_mem = '64MB'";
 

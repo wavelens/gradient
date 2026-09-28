@@ -129,7 +129,7 @@ To tighten or clear the allowlist on an existing key, `PATCH` with
 `"allowed_ips": [...]` (use `[]` to wipe).
 
 The source IP is resolved from the connection peer with `X-Forwarded-For`
-honored only when the peer is in `GRADIENT_NETWORK_TRUSTED_PROXIES`.
+honored only when the peer is in `GRADIENT_HTTP_TRUSTED_PROXIES`.
 
 ### Cache pinning
 

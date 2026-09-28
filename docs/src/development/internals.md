@@ -206,7 +206,7 @@ Nothing needs to change for that to become an option. `derivation` is already a 
 
 ## Authentication
 
-**JWT** - `HS256` signed with `GRADIENT_JWT_SECRET`. Payload contains `sub: user_uuid`. Regular tokens expire after 24 hours; `remember_me` tokens after 30 days. Generated in `web::authorization::encode_jwt`.
+**JWT** - `HS256` signed with the key in `GRADIENT_SECRETS_JWT_FILE`. Payload contains `sub: user_uuid`. Regular tokens expire after 24 hours; `remember_me` tokens after 30 days. Generated in `web::authorization::encode_jwt`.
 
 **API keys** - 32 random bytes encoded as hex, stored hashed in `api.key`, prefixed with `GRAD` when returned to the user. The `authorization::authorize` middleware accepts both token types in the `Authorization: Bearer` header.
 

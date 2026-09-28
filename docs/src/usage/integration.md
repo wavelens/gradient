@@ -189,7 +189,7 @@ Forge IP ranges to allowlist:
 - **Gitea / Forgejo**: typically self-hosted; allowlist your own forge's egress IPs.
 
 The source IP is resolved from the connection peer with `X-Forwarded-For`
-honored only when the peer is in `GRADIENT_NETWORK_TRUSTED_PROXIES`.
+honored only when the peer is in `GRADIENT_HTTP_TRUSTED_PROXIES`.
 
 ## Troubleshooting
 

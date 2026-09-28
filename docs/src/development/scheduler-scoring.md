@@ -7,9 +7,9 @@ rules, and the active policy is selected at startup.
 
 ## Selecting a policy
 
-Set the server option `settings.schedulerScoringPolicy` (env
+Set the server option `scheduler.scoringPolicy` (env
 `GRADIENT_SCHEDULER_SCORING_POLICY`, clap field
-`EvalArgs.scheduler_scoring_policy`). Values: `simple` (the basic rule set) and
+`SchedulerArgs.scoring_policy`). Values: `simple` (the basic rule set) and
 `resource-aware`. `resource-aware` is the default selected when the env var is
 unset, and unknown names log a warning and fall back to `resource-aware`.
 `policy_by_name` (`backend/score/src/policy.rs`) resolves the string to an
