@@ -50,28 +50,28 @@ gradient login https://gradient.example.com
 
 | Command | Options | Description |
 |---|---|---|
-| `gradient project select <PROJECT>` | - | Select the default project |
-| `gradient project create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>` | Create a project |
+| `gradient project select <PROJECT>` | - | Select the project later commands act on |
+| `gradient project create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>` | Create a project; missing fields open in `$EDITOR` |
 | `gradient project show` | - | Show the selected project |
-| `gradient project list` | - | List projects |
-| `gradient project edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>` | Edit a project |
-| `gradient project delete` | - | Delete a project |
+| `gradient project list` | - | List the projects of the current user |
+| `gradient project edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>` | Edit the selected project |
+| `gradient project delete` | - | Delete the selected project |
 | `gradient project user list` | - | List members |
-| `gradient project user add <USER> [ROLE]` | - | Invite a member |
+| `gradient project user add <USER> [ROLE]` | - | Add a member |
 | `gradient project user remove <USER>` | - | Remove a member |
-| `gradient project ssh show` | - | Show the project's public SSH key |
-| `gradient project ssh recreate` | - | Generate a new SSH key; the old key stops working |
+| `gradient project ssh show` | - | Print the public SSH key used to fetch repositories |
+| `gradient project ssh recreate` | - | Replace the SSH key pair and print the new public key |
 | `gradient project cache list` | - | List subscribed caches |
 | `gradient project cache add <CACHE>` | - | Subscribe to a cache |
 | `gradient project cache remove <CACHE>` | - | Unsubscribe from a cache |
-| `gradient task select <TASK>` | - | Select the default task |
-| `gradient task show` | - | Show the selected task and stream its newest evaluation |
-| `gradient task log` | - | Stream the logs of the task's newest evaluation |
-| `gradient task create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Create a task |
-| `gradient task list` | - | List tasks |
-| `gradient task edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Edit a task |
-| `gradient task delete` | - | Delete a task |
-| `gradient task evaluate` | - | Start an evaluation |
+| `gradient task select <TASK>` | - | Select the task later commands act on, within the selected project |
+| `gradient task show` | - | Show the selected task with its last evaluation and builds |
+| `gradient task log` | - | Stream the logs of the selected task's last evaluation |
+| `gradient task create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Create a task in the selected project; missing fields open in `$EDITOR` |
+| `gradient task list` | - | List the tasks of the selected project |
+| `gradient task edit` | `--new-name <NEW_NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--repository <REPOSITORY>`, `--wildcard <WILDCARD>` | Edit the selected task |
+| `gradient task delete` | - | Delete the selected task |
+| `gradient task evaluate` | - | Start an evaluation of the selected task |
 
 ## Builds and Evaluations
 
@@ -82,19 +82,19 @@ gradient login https://gradient.example.com
 | `gradient logs <EVALUATION>` | - | Print the full logs of every build in an evaluation |
 | `gradient download [FLAKE_REF]` | `--evaluation <EVALUATION>`, `--task <TASK>`, `--products <PRODUCTS>`, `--out <OUT>` | Download evaluation artefacts |
 | `gradient builds graph <ID>` | `--interactive` | Show a build's dependency graph |
-| `gradient eval <PATTERN>...` | - | Evaluate a flake to derivations locally, one JSON line per attribute; only in `gradient-cli-full`, see [below](#local-evaluation) |
 | `gradient builds log <ID>` | `--interactive`, `--lines <LINES>`, `--search <SEARCH>`, `--case` | View a build's log |
+| `gradient eval <PATTERN>...` | - | Evaluate a flake to derivations locally, one JSON line per attribute; only in `gradient-cli-full`, see [below](#local-evaluation) |
 
 ## Caches
 
 | Command | Options | Description |
 |---|---|---|
-| `gradient cache create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--priority <PRIORITY>`, `--max-storage-gb <MAX_STORAGE_GB>` | Create a cache |
-| `gradient cache list` | - | List caches |
+| `gradient cache create` | `--name <NAME>`, `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--priority <PRIORITY>`, `--max-storage-gb <MAX_STORAGE_GB>` | Create a cache; missing fields open in `$EDITOR` |
+| `gradient cache list` | - | List the caches of the current user |
 | `gradient cache edit <NAME>` | `--display-name <DISPLAY_NAME>`, `--description <DESCRIPTION>`, `--priority <PRIORITY>`, `--max-storage-gb <MAX_STORAGE_GB>` | Edit a cache |
 | `gradient cache delete <NAME>` | - | Delete a cache |
-| `gradient cache show <NAME>` | - | Show a cache |
-| `gradient cache install-netrc --server <SERVER> --cache <CACHE>` | `--server <SERVER>`, `--token <TOKEN>`, `--cache <CACHE>`, `--netrc-file <NETRC_FILE>` | Build a netrc entry locally for a cache and install it into a netrc file. No request is sent to the server - bring your own API key (issued via the frontend or `gradient` UI). Intended to be run as root (e.g. sudo) to install into /etc/nix/netrc |
+| `gradient cache show <NAME>` | - | Print the public key of a cache |
+| `gradient cache install-netrc --server <SERVER> --cache <CACHE>` | `--server <SERVER>`, `--token <TOKEN>`, `--cache <CACHE>`, `--netrc-file <NETRC_FILE>` | Write a netrc entry for a cache with an existing API key, without contacting the server; run as root to write `/etc/nix/netrc` |
 | `gradient cache nar list <CACHE>` | `--hash <HASH>`, `--package <PACKAGE>`, `--sort <SORT>`, `--order <ORDER>`, `--page <PAGE>`, `--per-page <PER_PAGE>`, `--interactive` | List NARs in a cache |
 | `gradient cache nar show <CACHE> <HASH>` | - | Show a NAR's full metadata |
 | `gradient cache nar delete <CACHE> <HASH>` | `--yes` | Delete a NAR from a cache |
@@ -113,7 +113,7 @@ gradient login https://gradient.example.com
 
 | Command | Options | Description |
 |---|---|---|
-| `gradient generate apikey` | - | Generate an API token and the digest for `key_file`, see [API Key Files](../concepts/declarative-state.md#api-key-files) |
+| `gradient generate apikey` | - | Generate an API token and the digest for a declarative `api_keys.<name>.key_file`, see [API Key Files](../concepts/declarative-state.md#api-key-files) |
 | `gradient mcp` | `--control` | Serve this Gradient instance to MCP clients over stdio |
 
 ## Interactive Mode
