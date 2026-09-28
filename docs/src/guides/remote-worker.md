@@ -54,7 +54,7 @@ Remote workers connect over a WebSocket on `/proto`. The bundled nginx forwards 
 services.gradient.proto.public = true;
 ```
 
-The local worker needs none of this; it connects on the loopback address.
+The local worker needs none of this and connects on the loopback address.
 
 ## 4. Configure the Machine
 

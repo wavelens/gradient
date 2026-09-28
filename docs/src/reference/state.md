@@ -124,7 +124,7 @@ services.gradient.state = {
 | `upstreams.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. |
 | `upstreams.*.display_name` | null or string | `null` | Display name of the upstream. |
 | `upstreams.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Access mode of an internal upstream. |
-| `upstreams.*.public_key` | null or string | `null` | Public key of the external Nix binary cache. |
+| `upstreams.*.public_key` | null or string | `null` | Public key of the external Nix binary cache. Required for `external` upstreams. |
 | `upstreams.*.type` | one of `internal` `external` | - | Upstream type: `internal` (another Gradient cache) or `external` (a Nix binary cache URL). |
 | `upstreams.*.url` | null or string | `null` | URL of the external Nix binary cache. |
 

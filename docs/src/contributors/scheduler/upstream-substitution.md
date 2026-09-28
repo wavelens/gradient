@@ -59,6 +59,7 @@ An anchor with `probed = false` is not a builder. Nothing below the anchor is de
 | Rule | Detail |
 |---|---|
 | Candidates | `cache_upstream` rows with `kind = Http`, a URL, neither upstream nor project subscription `WriteOnly` (`upstream_endpoints_for_project`) |
+| Trust | A hit needs a `Sig` that verifies against the upstream's `public_key` and a `StorePath` matching the asked hash (`verified_narinfo`); an upstream without a key never hits |
 | Order | Hit rate, then average latency over the last 60 min of `upstream_metric`; unmeasured upstreams last |
 | At most 4 upstreams | Asked in parallel; the lowest-latency hit wins |
 | More than 4 | Asked in order; the first hit wins |
@@ -103,7 +104,7 @@ A relay whose `InputsUnavailable` / `Transient` retries run out enters the same 
 
 | Endpoint | Upstream behaviour |
 |---|---|
-| `narinfo.rs` | A narinfo the cache lacks is asked from every such upstream with a `public_key` in parallel. The `Sig` must verify against `public_key`. `URL:` is rewritten to `nar/upstream/<id>/...`, and the cache's own `Sig` is appended next to the upstream's |
+| `narinfo.rs` | A narinfo the cache lacks is asked from every such upstream with a `public_key` in parallel. The `Sig` must verify against `public_key`, and the `StorePath` must match the asked hash. `URL:` is rewritten to `nar/upstream/<id>/...`, and the cache's own `Sig` is appended next to the upstream's |
 | `nar.rs` (`upstream_nar`) | Tries the named upstream first, then every other one; the NAR path is content-addressed and an upstream row may have been deleted |
 | `build_log.rs` | `/log/<drv>` serves the local log (`X-Cache: HIT`), else the first non-empty upstream log (`X-Cache: MISS`) |
 

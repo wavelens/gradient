@@ -87,7 +87,7 @@ Callers of `recompute_demand`, each followed by `settle_demand`:
 - `Skipped` is settled work: no gate acts on it and no evaluation waits for it.
 - A thaw goes to `Created`, never to `Queued`; the following promote reads the gates.
 - `Aborted` thaws the same way: an abort is no verdict.
-- `recompute_demand` and `settle_demand` are crate-private; other crates call `recompute_and_settle_demand`, so every demand move skips and thaws inline. The sweep's `settle_skipped` is the table-wide backstop and reports `skipped_moves`.
+- `recompute_demand` and `settle_demand` are crate-private; other crates call `recompute_and_settle_demand`: every demand move skips and thaws inline. The sweep's `settle_skipped` is the table-wide backstop and reports `skipped_moves`.
 
 ## Evaluation Verdict
 

@@ -33,7 +33,7 @@ services.gradient.oidc = {
 ```
 
 1.  Gradient reads every endpoint from `<discoveryUrl>/.well-known/openid-configuration`.
-2.  `groups` is not in the default scopes; add it for [role mapping](#3-map-groups-to-roles) when the provider knows the scope.
+2.  `groups` is not in the default scopes; add `groups` for [role mapping](#3-map-groups-to-roles) when the provider knows the scope.
 3.  Hides the username and password login; leave out to offer both.
 
 ## 3. Map Groups to Roles
