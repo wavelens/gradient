@@ -21,6 +21,15 @@ pub struct UploadArgs {
     /// larger than the whole budget runs alone once nothing else is in flight.
     #[arg(long = "upload-bytes-budget", env = "GRADIENT_UPLOAD_BYTES_BUDGET", default_value_t = 8 * 1024 * 1024 * 1024)]
     pub bytes_budget: u64,
+
+    /// Seconds a granted relay upload may go without a chunk before its permit
+    /// is reclaimed and the worker is told to retry.
+    #[arg(
+        long = "upload-lease-idle-secs",
+        env = "GRADIENT_UPLOAD_LEASE_IDLE_SECS",
+        default_value_t = 300
+    )]
+    pub lease_idle_secs: u64,
 }
 
 impl Default for UploadArgs {
@@ -28,6 +37,7 @@ impl Default for UploadArgs {
         Self {
             concurrency: 16,
             bytes_budget: 8 * 1024 * 1024 * 1024,
+            lease_idle_secs: 300,
         }
     }
 }

@@ -1,0 +1,291 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+mod table;
+
+use std::time::{Duration, Instant};
+
+use gradient_storage::admission::{AdmissionSession, Admitted, ObjectKey};
+use gradient_storage::{PartialStore, StorageTarget, upload_lease};
+use gradient_wire::messages::ServerMessage;
+use gradient_wire::types::{GrantTarget, UploadObject, UploadOutcome};
+use tracing::warn;
+
+use super::dispatch::DispatchContext;
+use super::socket::send_server_msg;
+pub(super) use table::{Granted, Lease, Transfer, UploadTable};
+
+pub(super) struct UploadSession {
+    pub admission: AdmissionSession,
+    pub table: UploadTable,
+    pub partials: PartialStore,
+    pub retain_up_to: u64,
+    pub idle_lease: Duration,
+}
+
+pub(super) fn object_key(object: &UploadObject) -> Option<ObjectKey> {
+    match object {
+        UploadObject::Nar { store_path } => {
+            let name = store_path.strip_prefix("/nix/store/")?;
+            let hash = name.split('-').next()?;
+            (hash.len() == 32).then(|| ObjectKey::Nar(hash.to_owned()))
+        }
+        UploadObject::EvalCache { fingerprint } => Some(ObjectKey::EvalCache(fingerprint.clone())),
+    }
+}
+
+fn key_name(key: &ObjectKey) -> &str {
+    match key {
+        ObjectKey::Nar(s) | ObjectKey::EvalCache(s) | ObjectKey::Rest(s) => s,
+    }
+}
+
+impl DispatchContext<'_> {
+    pub(super) async fn on_upload_request(
+        &mut self,
+        job_id: String,
+        request_id: u64,
+        object: UploadObject,
+        size: u64,
+        uploads: &mut UploadSession,
+    ) {
+        let Some(key) = object_key(&object) else {
+            return self
+                .settle(
+                    request_id,
+                    UploadOutcome::Rejected {
+                        reason: format!("malformed upload object {object:?}"),
+                    },
+                )
+                .await;
+        };
+        if !self.active.contains_key(&job_id) {
+            return self
+                .settle(
+                    request_id,
+                    UploadOutcome::Rejected {
+                        reason: format!("job {job_id} is not running on this session"),
+                    },
+                )
+                .await;
+        }
+        if let UploadObject::EvalCache { fingerprint } = &object
+            && !super::eval_cache::accepts_push(self.state, fingerprint, size).await
+        {
+            return self.grant(request_id, GrantTarget::Skip).await;
+        }
+        if !uploads.table.queue(request_id, job_id, object, size) {
+            return self
+                .settle(
+                    request_id,
+                    UploadOutcome::Rejected {
+                        reason: format!("request {request_id} is already open"),
+                    },
+                )
+                .await;
+        }
+        uploads.admission.request(request_id, key, size);
+    }
+
+    pub(super) async fn on_upload_admitted(
+        &mut self,
+        admitted: Admitted,
+        uploads: &mut UploadSession,
+    ) {
+        match admitted {
+            Admitted::Skip { id } => {
+                uploads.table.take_queued(id);
+                self.grant(id, GrantTarget::Skip).await;
+            }
+            Admitted::Granted {
+                id,
+                object: key,
+                permit,
+            } => {
+                let Some(queued) = uploads.table.take_queued(id) else {
+                    return;
+                };
+                match self.open_transfer(&key, queued.size, uploads).await {
+                    Ok((target, transfer, lease)) => {
+                        uploads.table.grant(
+                            id,
+                            Granted {
+                                job_id: queued.job_id,
+                                object: queued.object,
+                                size: queued.size,
+                                permit,
+                                transfer,
+                                lease,
+                            },
+                        );
+                        self.grant(id, target).await;
+                    }
+                    Err(e) => {
+                        warn!(peer_id = %self.peer_id, request_id = id, error = %e, "upload target failed");
+                        drop(permit);
+                        self.settle(
+                            id,
+                            UploadOutcome::Retry {
+                                reason: format!("{e:#}"),
+                            },
+                        )
+                        .await;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn open_transfer(
+        &self,
+        key: &ObjectKey,
+        size: u64,
+        uploads: &UploadSession,
+    ) -> anyhow::Result<(GrantTarget, Transfer, Lease)> {
+        let target = self.state.nar_storage.upload_target(key, size).await?;
+        let now = Instant::now();
+        let lease = match upload_lease(&target, size) {
+            Some(ttl) => Lease::Until(now + ttl),
+            None => Lease::Idle {
+                last: now,
+                idle: uploads.idle_lease,
+            },
+        };
+        Ok(match target {
+            StorageTarget::Relay => {
+                let token = key_name(key);
+                let partial = format!("{}/{token}", self.peer_id);
+                let received = uploads.partials.received_len(&partial, token).await?;
+                let writer = uploads
+                    .partials
+                    .open_writer(&partial, token, received, uploads.retain_up_to)
+                    .await?;
+                (
+                    GrantTarget::Relay {
+                        resume_offset: received,
+                    },
+                    Transfer::Relay(Box::new(writer)),
+                    lease,
+                )
+            }
+            StorageTarget::Put { url } => (GrantTarget::Put { url }, Transfer::Put, lease),
+            StorageTarget::Multipart(grant) => {
+                let upload_id = grant.upload_id.clone();
+                (
+                    GrantTarget::Multipart(grant),
+                    Transfer::Multipart { upload_id },
+                    lease,
+                )
+            }
+        })
+    }
+
+    pub(super) async fn on_upload_cancel(&mut self, request_id: u64, uploads: &mut UploadSession) {
+        uploads.admission.cancel(request_id);
+        if let Some(granted) = uploads.table.remove(request_id) {
+            self.abandon(granted).await;
+        }
+    }
+
+    pub(super) async fn forget_uploads(&mut self, job_id: &str, uploads: &mut UploadSession) {
+        for id in uploads.table.forget_job(job_id) {
+            uploads.admission.cancel(id);
+        }
+    }
+
+    pub(super) async fn sweep_uploads(&mut self, uploads: &mut UploadSession) {
+        for (id, granted) in uploads.table.expired(Instant::now()) {
+            self.abandon(granted).await;
+            self.settle(
+                id,
+                UploadOutcome::Retry {
+                    reason: "upload lease expired".into(),
+                },
+            )
+            .await;
+        }
+    }
+
+    async fn abandon(&self, granted: Granted) {
+        if let (Transfer::Multipart { upload_id }, Some(ObjectKey::Nar(hash))) =
+            (&granted.transfer, object_key(&granted.object))
+        {
+            self.state
+                .nar_storage
+                .abort_multipart(&hash, upload_id)
+                .await;
+        }
+    }
+
+    async fn grant(&self, request_id: u64, target: GrantTarget) {
+        let _ = send_server_msg(
+            self.writer,
+            &ServerMessage::UploadGrant { request_id, target },
+        )
+        .await;
+    }
+
+    pub(super) async fn settle(&self, request_id: u64, outcome: UploadOutcome) {
+        let _ = send_server_msg(
+            self.writer,
+            &ServerMessage::UploadCommitted {
+                request_id,
+                outcome,
+            },
+        )
+        .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::handler::dispatch::fixture::{JOB, TestSession, decode};
+    use gradient_test_support::state::test_state;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    fn nar(c: char) -> UploadObject {
+        UploadObject::Nar {
+            store_path: format!("/nix/store/{}-p", c.to_string().repeat(32)),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_request_for_a_job_this_session_does_not_run_is_rejected() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, mut sent, _admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request("build:unknown".into(), 1, nar('a'), 1, uploads)
+            .await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadCommitted {
+                request_id: 1,
+                outcome: UploadOutcome::Rejected { .. }
+            }
+        ));
+        assert_eq!(state.upload_admission.in_flight(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_request_on_the_local_backend_is_granted_a_relay() {
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
+        let (mut ctx, uploads) = session.split();
+        ctx.on_upload_request(JOB.into(), 1, nar('b'), 1024, uploads)
+            .await;
+        ctx.on_upload_admitted(admitted.recv().await.unwrap(), uploads)
+            .await;
+        assert!(matches!(
+            decode(sent.try_recv().unwrap()),
+            ServerMessage::UploadGrant {
+                request_id: 1,
+                target: GrantTarget::Relay { resume_offset: 0 }
+            }
+        ));
+        assert_eq!(state.upload_admission.in_flight(), 1);
+    }
+}

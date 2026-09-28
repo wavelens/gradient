@@ -39,6 +39,7 @@ use super::nar_transfer::{NarReceiveStore, serve_nar_request};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
 };
+use super::upload::UploadSession;
 use gradient_wire::auth::validate_tokens;
 
 // ── Dispatch context ──────────────────────────────────────────────────────────
@@ -95,6 +96,7 @@ impl<'a> DispatchContext<'a> {
         inbound: Inbound<ClientMessage>,
         nar: &mut NarReceiveStore,
         eval_cache: &mut EvalCacheReceiveStore,
+        uploads: &mut UploadSession,
     ) -> bool {
         super::tap::publish_inbound(&self.state.events, self.peer_id, &inbound);
         match inbound {
@@ -102,7 +104,7 @@ impl<'a> DispatchContext<'a> {
                 self.dispatch_bulk(frame, nar, eval_cache).await;
                 true
             }
-            Inbound::Control(msg) => self.dispatch_control(msg, nar, eval_cache).await,
+            Inbound::Control(msg) => self.dispatch_control(msg, nar, eval_cache, uploads).await,
         }
     }
 
@@ -156,6 +158,7 @@ impl<'a> DispatchContext<'a> {
         msg: ClientMessage,
         nar: &mut NarReceiveStore,
         eval_cache: &mut EvalCacheReceiveStore,
+        uploads: &mut UploadSession,
     ) -> bool {
         // Per-message and per-frame lines stay at trace: at debug a closure push
         // logs thousands of lines a second and stalls a test VM on its serial console.
@@ -251,6 +254,7 @@ impl<'a> DispatchContext<'a> {
             } => {
                 let commits = nar.commits();
                 nar.forget_job(&job_id).await;
+                self.forget_uploads(&job_id, uploads).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     self.active.remove(&job_id);
                     self.job_events
@@ -394,13 +398,25 @@ impl<'a> DispatchContext<'a> {
                 self.on_eval_message(job_id, level, source, message).await;
                 true
             }
-            // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
-            ClientMessage::UploadRequest { .. }
-            | ClientMessage::UploadFinished { .. }
-            | ClientMessage::UploadCancel { .. } => {
+            ClientMessage::UploadRequest {
+                job_id,
+                request_id,
+                object,
+                size,
+            } => {
+                self.on_upload_request(job_id, request_id, object, size, uploads)
+                    .await;
+                true
+            }
+            ClientMessage::UploadCancel { request_id } => {
+                self.on_upload_cancel(request_id, uploads).await;
+                true
+            }
+            ClientMessage::UploadFinished { .. } => {
                 warn!("upload handshake not wired yet");
                 true
             }
+            // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
             ClientMessage::NarPush { .. }
             | ClientMessage::UploadChunk { .. }
             | ClientMessage::EvalCacheChunk { .. }
@@ -988,37 +1004,22 @@ impl RpcContext {
 }
 
 #[cfg(test)]
-mod dispatch_id_tests {
-    use super::dispatch_matches;
-    use gradient_types::ids::DispatchedJobId;
-
-    /// The stale-worker case: a report carrying another dispatch's id, an
-    /// unknown job, or garbage is dropped; only the exact id is accepted.
-    #[test]
-    fn only_the_current_dispatch_is_accepted() {
-        let current = DispatchedJobId::now_v7();
-        let other = DispatchedJobId::now_v7();
-        assert!(dispatch_matches(Some(current), &current.to_string()));
-        assert!(!dispatch_matches(Some(current), &other.to_string()));
-        assert!(!dispatch_matches(None, &current.to_string()));
-        assert!(!dispatch_matches(Some(current), "not-a-uuid"));
-    }
-}
-
-#[cfg(test)]
-mod assignment_response_tests {
+pub(in crate::handler) mod fixture {
     use super::*;
     use crate::handler::job_events::SchedulerJobEvents;
+    use crate::handler::upload::{UploadSession, UploadTable};
+    use bytes::Bytes;
     use gradient_scheduler::jobs::PendingEvalJob;
-    use gradient_test_support::prelude::*;
-    use gradient_types::events::Event;
+    use gradient_storage::admission::Admitted;
     use gradient_types::ids::{CommitId, EvaluationId};
     use gradient_wire::session::frame::WireMessage as _;
     use gradient_wire::types::{FlakeJob, FlakeSource, FlakeStep};
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
     use std::time::Duration;
+    use tokio::sync::mpsc;
 
-    fn pending_eval() -> PendingJob {
+    pub(in crate::handler) const JOB: &str = "j1";
+
+    pub(in crate::handler) fn pending_eval() -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
             evaluation_id: EvaluationId::now_v7(),
             task_id: None,
@@ -1045,6 +1046,121 @@ mod assignment_response_tests {
             prioritized: false,
         })
     }
+
+    pub(in crate::handler) struct TestSession {
+        pub writer: ProtoWriter,
+        pub state: Arc<ServerState>,
+        pub scheduler: Arc<Scheduler>,
+        pub semaphore: Arc<Semaphore>,
+        pub job_events: JobEvents,
+        pub active: HashMap<String, ActiveJob>,
+        pub uploads: UploadSession,
+    }
+
+    impl TestSession {
+        pub(in crate::handler) async fn new(
+            state: &Arc<ServerState>,
+        ) -> (
+            Self,
+            mpsc::Receiver<Bytes>,
+            mpsc::UnboundedReceiver<Admitted>,
+        ) {
+            let scheduler = Arc::new(Scheduler::new(Arc::clone(state)));
+            scheduler.spawn_core(None).await.expect("core actor");
+            let (writer, sent) = ProtoWriter::spy(Duration::from_secs(5));
+            let job_events = JobEvents::spawn(
+                &state.shutdown,
+                "w1",
+                SchedulerJobEvents {
+                    shutdown: state.shutdown.clone(),
+                    scheduler: Arc::clone(&scheduler),
+                    writer: writer.clone(),
+                    peer_id: "w1".into(),
+                },
+            );
+            let active = HashMap::from([(
+                JOB.to_owned(),
+                ActiveJob {
+                    dispatch: DispatchedJobId::now_v7(),
+                    pending: pending_eval(),
+                },
+            )]);
+            let (admission, admitted) = state.upload_admission.open_session();
+            let uploads = UploadSession {
+                admission,
+                table: UploadTable::default(),
+                partials: gradient_storage::PartialStore::new(
+                    tempfile::TempDir::new().unwrap().keep(),
+                    Duration::from_secs(3600),
+                )
+                .unwrap(),
+                retain_up_to: 0,
+                idle_lease: Duration::from_secs(300),
+            };
+            let session = Self {
+                writer,
+                state: Arc::clone(state),
+                scheduler,
+                semaphore: Arc::new(Semaphore::new(1)),
+                job_events,
+                active,
+                uploads,
+            };
+            (session, sent, admitted)
+        }
+
+        pub(in crate::handler) fn split(&mut self) -> (DispatchContext<'_>, &mut UploadSession) {
+            (
+                DispatchContext {
+                    writer: &self.writer,
+                    state: &self.state,
+                    scheduler: &self.scheduler,
+                    peer_id: "w1",
+                    nar_serve_semaphore: &self.semaphore,
+                    active: &mut self.active,
+                    job_events: &self.job_events,
+                },
+                &mut self.uploads,
+            )
+        }
+    }
+
+    pub(in crate::handler) fn decode(bytes: Bytes) -> ServerMessage {
+        ServerMessage::decode(bytes)
+            .expect("decode ServerMessage")
+            .into_message()
+            .expect("deserialise ServerMessage")
+    }
+}
+
+#[cfg(test)]
+mod dispatch_id_tests {
+    use super::dispatch_matches;
+    use gradient_types::ids::DispatchedJobId;
+
+    /// The stale-worker case: a report carrying another dispatch's id, an
+    /// unknown job, or garbage is dropped; only the exact id is accepted.
+    #[test]
+    fn only_the_current_dispatch_is_accepted() {
+        let current = DispatchedJobId::now_v7();
+        let other = DispatchedJobId::now_v7();
+        assert!(dispatch_matches(Some(current), &current.to_string()));
+        assert!(!dispatch_matches(Some(current), &other.to_string()));
+        assert!(!dispatch_matches(None, &current.to_string()));
+        assert!(!dispatch_matches(Some(current), "not-a-uuid"));
+    }
+}
+
+#[cfg(test)]
+mod assignment_response_tests {
+    use super::fixture::pending_eval;
+    use super::*;
+    use crate::handler::job_events::SchedulerJobEvents;
+    use gradient_test_support::prelude::*;
+    use gradient_types::events::Event;
+    use gradient_wire::session::frame::WireMessage as _;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use std::time::Duration;
 
     fn detached_writer() -> ProtoWriter {
         ProtoWriter::spy(Duration::from_secs(1)).0

@@ -267,6 +267,11 @@ pub(super) async fn handle_eval_cache_push_done(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+pub(super) async fn accepts_push(state: &ServerState, fingerprint: &str, size_bytes: u64) -> bool {
+    let existing = lookup_row(state, fingerprint).await.map(|r| r.size_bytes);
+    should_accept_push(existing, size_bytes)
+}
+
 async fn lookup_row(state: &ServerState, fingerprint: &str) -> Option<eval_cache_store::Model> {
     match EEvalCacheStore::find()
         .filter(eval_cache_store::Column::Fingerprint.eq(fingerprint))

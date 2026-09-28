@@ -494,6 +494,15 @@ in {
             than the budget runs alone once nothing else is in flight.
           '';
         };
+
+        leaseIdleSecs = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 300;
+          description = ''
+            Seconds a granted relay upload may go without data before its permit is reclaimed and
+            the worker is told to retry.
+          '';
+        };
       };
 
       nar = {
@@ -1284,6 +1293,7 @@ in {
         GRADIENT_PROTO_ANONYMOUS_CACHE_MAX_CONNECTIONS_PER_IP = toString cfg.proto.anonymousCache.maxConnectionsPerIp;
         GRADIENT_UPLOAD_CONCURRENCY = toString cfg.upload.concurrency;
         GRADIENT_UPLOAD_BYTES_BUDGET = toString cfg.upload.bytesBudget;
+        GRADIENT_UPLOAD_LEASE_IDLE_SECS = toString cfg.upload.leaseIdleSecs;
         GRADIENT_NAR_MAX_UPLOAD_SIZE = toString cfg.nar.maxUploadSize;
         GRADIENT_NAR_SMALL_BYTES = toString cfg.nar.smallBytes;
         GRADIENT_NAR_HOT_CACHE_BYTES = toString cfg.nar.hotCacheBytes;

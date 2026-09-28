@@ -35,6 +35,7 @@ use super::session::on_reauth_notify;
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
 };
+use super::upload::{UploadSession, UploadTable};
 use gradient_wire::messages::{ClientMessage, GradientCapabilities, ServerMessage};
 use gradient_wire::session::frame::{Inbound, ProtoReader};
 
@@ -51,6 +52,8 @@ pub enum SessionMsg {
     Reattach,
     ReaderClosed,
     DrainDeadline,
+    Admitted(gradient_storage::admission::Admitted),
+    SweepUploads,
 }
 
 #[derive(Clone)]
@@ -80,6 +83,7 @@ pub struct SessionState {
     authorized_peers: HashSet<ProjectId>,
     nar: NarReceiveStore,
     eval_cache: EvalCacheReceiveStore,
+    uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
     offers_seen: u64,
     active: HashMap<String, ActiveJob>,
@@ -108,6 +112,9 @@ impl Actor for SessionActor {
             capabilities,
             authorized_peers,
         } = args;
+        let partial_ttl = Duration::from_secs(state.config.nar.partial_ttl_secs);
+        let uploads = open_uploads(&state, &myself, partial_ttl)
+            .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
         let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
         let registered = match scheduler
             .register_worker(
@@ -130,7 +137,6 @@ impl Actor for SessionActor {
 
         let nar_cfg = &state.config.nar;
         let send_chunk_timeout = Duration::from_secs(nar_cfg.send_chunk_timeout_secs);
-        let partial_ttl = Duration::from_secs(nar_cfg.partial_ttl_secs);
         let max_partial_bytes = nar_cfg.max_buffer_bytes as u64;
         let max_serves = nar_cfg.max_concurrent_serves;
         let partial_root =
@@ -186,6 +192,7 @@ impl Actor for SessionActor {
             authorized_peers,
             nar,
             eval_cache: EvalCacheReceiveStore::new(max_partial_bytes),
+            uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
             offers_seen: 0,
             active: HashMap::new(),
@@ -214,7 +221,8 @@ impl Actor for SessionActor {
                         job_events: &st.job_events,
                     };
 
-                    ctx.dispatch(inbound, &mut st.nar, &mut st.eval_cache).await
+                    ctx.dispatch(inbound, &mut st.nar, &mut st.eval_cache, &mut st.uploads)
+                        .await
                 };
                 let _ = reply.send(keep);
 
@@ -223,6 +231,14 @@ impl Actor for SessionActor {
                 } else if st.draining && st.active.is_empty() {
                     myself.stop(Some("drained".into()));
                 }
+            }
+            SessionMsg::Admitted(admitted) => {
+                let (mut ctx, uploads) = split_uploads(st);
+                ctx.on_upload_admitted(admitted, uploads).await;
+            }
+            SessionMsg::SweepUploads => {
+                let (mut ctx, uploads) = split_uploads(st);
+                ctx.sweep_uploads(uploads).await;
             }
             SessionMsg::Signal(SessionSignal::Offers(generation)) => {
                 if generation > st.offers_seen && !st.draining && !offer_jobs(st).await {
@@ -367,6 +383,58 @@ async fn read_loop(
     }
 
     let _ = session.send_message(SessionMsg::ReaderClosed);
+}
+
+fn open_uploads(
+    state: &Arc<ServerState>,
+    myself: &ActorRef<SessionMsg>,
+    partial_ttl: Duration,
+) -> anyhow::Result<UploadSession> {
+    let (admission, mut admitted) = state.upload_admission.open_session();
+    let uploads = UploadSession {
+        admission,
+        table: UploadTable::default(),
+        partials: gradient_storage::PartialStore::new(
+            format!("{}/upload-partial", state.config.server.base_dir),
+            partial_ttl,
+        )?,
+        retain_up_to: state.config.nar.small_bytes,
+        idle_lease: Duration::from_secs(state.config.upload.lease_idle_secs),
+    };
+    let forward = myself.clone();
+    state.shutdown.spawn(async move {
+        while let Some(a) = admitted.recv().await {
+            if forward.send_message(SessionMsg::Admitted(a)).is_err() {
+                break;
+            }
+        }
+    });
+    let sweep = myself.clone();
+    state.shutdown.spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            tick.tick().await;
+            if sweep.send_message(SessionMsg::SweepUploads).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(uploads)
+}
+
+fn split_uploads(st: &mut SessionState) -> (DispatchContext<'_>, &mut UploadSession) {
+    (
+        DispatchContext {
+            writer: &st.writer,
+            state: &st.state,
+            scheduler: &st.scheduler,
+            peer_id: &st.peer_id,
+            nar_serve_semaphore: &st.nar_serve_semaphore,
+            active: &mut st.active,
+            job_events: &st.job_events,
+        },
+        &mut st.uploads,
+    )
 }
 
 #[cfg(test)]
