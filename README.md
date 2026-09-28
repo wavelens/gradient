@@ -22,7 +22,7 @@
 
 ## Features
 
-![Gradient](./docs/gallery/gradient.png)
+![Gradient](./docs/src/assets/screenshots/gradient.png)
 
 <p align="center"><a href="./docs/gallery.md">📸 Screenshot Gallery</a></p>
 

@@ -6,16 +6,40 @@ repo_name: wavelens/gradient
 copyright: Copyright &copy; 2026 Wavelens GmbH
 
 theme:
-  name: readthedocs
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
 
 docs_dir: docs/src
 
 nav:
   - Home: index.md
-  - Quick Start: quick-start.md
-  - Installation: installation.md
-  - Configuration: configuration.md
-  - Usage:
+  - Get Started:
+      - Quick Start: quick-start.md
+      - Installation: installation.md
+  - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
       - Job Board: usage/job-board.md
@@ -31,11 +55,15 @@ nav:
       - Caches: usage/caches.md
       - Invites: usage/invites.md
       - Cache NARs: usage/cache-nars.md
+      - Cache Roles: usage/cache-roles.md
       - Closure View: usage/closure-view.md
       - Diagnostic Reports: diagnostic-reports.md
-  - Development:
+  - Reference:
+      - Configuration: configuration.md
+  - Contributors:
       - Architecture: development/architecture.md
       - Internals: development/internals.md
+      - Scheduler: scheduler.md
       - Eval Worker Setup: development/eval-worker.md
       - Migrations: migrations.md
       - Proto: development/proto.md
@@ -43,17 +71,21 @@ nav:
       - Evaluation Metrics: development/eval-metrics.md
       - Tests: development/tests.md
       - GitHub App setup: development/github-app-setup.md
+      - Frontend Style Guide: development/frontend-style-guide.md
       - Contributing: development/contributing.md
 
 plugins:
   - search
-  - mermaid2
 
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
+  - def_list
   - toc:
       permalink: true
   - fenced_code
+  - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -64,4 +96,9 @@ markdown_extensions:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:mermaid2.fence_mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
