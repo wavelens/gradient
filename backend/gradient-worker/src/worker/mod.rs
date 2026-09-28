@@ -24,13 +24,10 @@ mod dispatch;
 mod id;
 mod scoring;
 
-use gradient_util::sync::Mutex;
-use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_wire::messages::{ClientMessage, JobCandidate, JobKind};
+use gradient_wire::messages::{ClientMessage, JobKind};
 use tracing::info;
 
 use crate::config::WorkerConfig;
@@ -62,10 +59,6 @@ pub struct Worker<S> {
     executor: JobExecutor,
     scorer: JobScorer,
     credentials: CredentialStore,
-    /// Local cache of job candidates - updated on `JobListChunk` / `JobOffer`.
-    candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
-    /// Last known score per candidate - used for delta filtering.
-    last_scores: Arc<Mutex<HashMap<String, gradient_wire::messages::CandidateScore>>>,
     /// Connection state: [`Connected`] or [`Disconnected`].
     conn_state: S,
     _marker: PhantomData<S>,
@@ -119,8 +112,6 @@ impl Worker<Connected> {
             executor,
             scorer,
             credentials: CredentialStore::new(),
-            candidates: Arc::new(Mutex::new(HashMap::new())),
-            last_scores: Arc::new(Mutex::new(HashMap::new())),
             conn_state: Connected { conn },
             _marker: PhantomData,
         }
@@ -146,8 +137,6 @@ impl Worker<Disconnected> {
             executor,
             scorer,
             credentials,
-            candidates,
-            last_scores,
             ..
         } = self;
 
@@ -156,8 +145,6 @@ impl Worker<Disconnected> {
             executor,
             scorer,
             credentials,
-            candidates,
-            last_scores,
             conn_state: Connected { conn },
             _marker: PhantomData,
         }
@@ -183,8 +170,6 @@ impl Worker<Connected> {
             executor,
             scorer,
             credentials,
-            candidates,
-            last_scores,
             conn_state: Connected { conn },
             ..
         } = self;
@@ -196,8 +181,6 @@ impl Worker<Connected> {
             executor.clone(),
             scorer,
             credentials.clone(),
-            Arc::clone(&candidates),
-            Arc::clone(&last_scores),
         );
         let outcome = dispatch::run_dispatch_loop(state, reader, shutdown.clone()).await;
 
@@ -215,8 +198,6 @@ impl Worker<Connected> {
             executor,
             scorer,
             credentials,
-            candidates,
-            last_scores,
             conn_state: Disconnected,
             _marker: PhantomData,
         };

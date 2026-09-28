@@ -7,14 +7,12 @@
 //! Background scoring tasks: compute `missing_count` per candidate and send
 //! `RequestJobChunk` messages back to the server.
 
-use gradient_util::sync::Mutex;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use gradient_wire::messages::{CandidateScore, JobCandidate, JobKind};
+use gradient_wire::traits::WorkerStore;
 use tracing::warn;
 
-use crate::nix::store::LocalNixStore;
 use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::ProtoWriter;
 
@@ -22,27 +20,22 @@ use gradient_worker_client::connection::ProtoWriter;
 
 /// Spawn a background scoring task.
 ///
-/// Scores `candidates` using `scorer`, applies delta filtering when
-/// `delta_filter` is `true`, and sends `RequestJobChunk` messages to
-/// the server.  The final chunk always carries `is_final = true`; the
-/// server uses that to know the full submission is complete.
+/// Scores every candidate in `candidates` and sends the scores as
+/// `RequestJobChunk` messages. The server offers a job again only once it has
+/// dropped the scores it held for it, so nothing offered is ever skipped. With
+/// `is_final` the last chunk carries `is_final = true`; the server uses that to
+/// know the full submission is complete.
 ///
 /// After the scores are sent, a `RequestJob` is emitted for each kind in
 /// `request_after` (capacity-gated by the caller). Scoring a fresh offer is what
 /// clears the server's rescore gate, so requesting here - rather than waiting for
 /// the next 10s heartbeat - lets a serial dependency chain advance at round-trip
 /// speed instead of one level per heartbeat.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "arg-heavy; refactor tracked in #503"
-)]
-pub(super) fn spawn_scoring_task(
+pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
     scorer: JobScorer,
-    store: Arc<LocalNixStore>,
-    last_scores: Arc<Mutex<HashMap<String, CandidateScore>>>,
+    store: Arc<S>,
     writer: ProtoWriter,
     candidates: Vec<JobCandidate>,
-    delta_filter: bool,
     is_final: bool,
     request_after: Vec<JobKind>,
 ) {
@@ -53,7 +46,7 @@ pub(super) fn spawn_scoring_task(
     tokio::spawn(async move {
         let started = std::time::Instant::now();
         let count = candidates.len();
-        let scores = match scorer.score_candidates(&*store, &candidates).await {
+        let to_send = match scorer.score_candidates(&*store, &candidates).await {
             Ok(s) => s,
             Err(e) => {
                 warn!(error = %e, count, "score_candidates failed in spawned task");
@@ -61,21 +54,8 @@ pub(super) fn spawn_scoring_task(
             }
         };
 
-        let to_send: Vec<CandidateScore> = {
-            let mut g = last_scores.lock();
-            let mut out = Vec::with_capacity(scores.len());
-            for s in scores {
-                if !delta_filter || g.get(&s.job_id) != Some(&s) {
-                    g.insert(s.job_id.clone(), s.clone());
-                    out.push(s);
-                }
-            }
-            out
-        };
-
         tracing::debug!(
             scored = count,
-            sending = to_send.len(),
             elapsed_ms = started.elapsed().as_millis() as u64,
             is_final,
             "scoring task complete"
@@ -118,7 +98,7 @@ pub(super) fn spawn_scoring_task(
 ///
 /// Always sends at least one message (even when `scores` is empty) so the
 /// server sees the `is_final` sentinel.
-pub(super) async fn send_score_chunks(
+async fn send_score_chunks(
     writer: &ProtoWriter,
     scores: Vec<CandidateScore>,
 ) -> anyhow::Result<()> {
@@ -143,4 +123,41 @@ pub(super) async fn send_score_chunks(
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_test_support::prelude::{FakeWorkerStore, MockProtoServer};
+    use gradient_worker_client::connection::ProtoConnection;
+
+    /// A requeued job is offered again after the server dropped every score it
+    /// held for it; a worker that stays silent on the repeat is vetoed for it.
+    #[tokio::test]
+    async fn a_candidate_offered_again_is_scored_again() {
+        let server = MockProtoServer::bind().await;
+        let (mut sc, conn) = tokio::join!(server.accept(), ProtoConnection::open(server.url()));
+        let (writer, _reader, _flush) = conn.expect("the mock server accepts").split();
+        let store = Arc::new(FakeWorkerStore::new());
+        let candidate = JobCandidate {
+            job_id: "build:1".to_owned(),
+            required_paths: vec![],
+            drv_paths: vec!["/nix/store/zzzz-target.drv".to_owned()],
+            output_paths: vec![],
+        };
+
+        for offer in ["first", "repeated"] {
+            spawn_scoring_task(
+                JobScorer::new(),
+                Arc::clone(&store),
+                writer.clone(),
+                vec![candidate.clone()],
+                true,
+                Vec::new(),
+            );
+            let scores = sc.scores().await.expect("the worker answers");
+            let ids: Vec<&str> = scores.iter().map(|s| s.job_id.as_str()).collect();
+            assert_eq!(ids, ["build:1"], "the {offer} offer is scored");
+        }
+    }
 }

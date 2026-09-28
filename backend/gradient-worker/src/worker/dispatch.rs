@@ -216,9 +216,8 @@ impl JobRegistry {
 // ── Per-connection state ──────────────────────────────────────────────────────
 
 /// Owned per-connection dispatch state. Everything the message handlers need
-/// lives here; the shared caches (`credentials`, `candidates`, `last_scores`)
-/// are cheap `Arc` handles onto state the [`super::Worker`] keeps across
-/// reconnects.
+/// lives here; `credentials` is a cheap handle onto the store the
+/// [`super::Worker`] keeps across reconnects.
 pub(super) struct DispatchState {
     writer: ProtoWriter,
     cache_waiters: CacheWaiters,
@@ -231,8 +230,6 @@ pub(super) struct DispatchState {
     max_eval: u32,
     max_build: u32,
     credentials: CredentialStore,
-    candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
-    last_scores: Arc<Mutex<HashMap<String, gradient_wire::messages::CandidateScore>>>,
     scorer: JobScorer,
     executor: JobExecutor,
     config: WorkerConfig,
@@ -247,8 +244,6 @@ impl DispatchState {
         executor: JobExecutor,
         scorer: JobScorer,
         credentials: CredentialStore,
-        candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
-        last_scores: Arc<Mutex<HashMap<String, gradient_wire::messages::CandidateScore>>>,
     ) -> Self {
         let nar_recv = match gradient_storage::PartialStore::new(
             config.nar_partial_dir(),
@@ -280,8 +275,6 @@ impl DispatchState {
             max_eval: config.eval.max_concurrent,
             max_build: config.build.max_concurrent,
             credentials,
-            candidates,
-            last_scores,
             scorer,
             executor,
             config,
@@ -529,19 +522,11 @@ impl DispatchState {
         if self.draining {
             return;
         }
-        {
-            let mut g = self.candidates.lock();
-            for c in &cands {
-                g.insert(c.job_id.clone(), c.clone());
-            }
-        }
         spawn_scoring_task(
             self.scorer,
             Arc::clone(&self.executor.store),
-            Arc::clone(&self.last_scores),
             self.writer.clone(),
             cands,
-            false,
             is_final,
             Vec::new(),
         );
@@ -549,58 +534,32 @@ impl DispatchState {
 
     fn on_job_offer(&mut self, cands: Vec<JobCandidate>) {
         debug!(count = cands.len(), "received job offer");
-        if self.draining {
+        if self.draining || cands.is_empty() {
             return;
         }
-        let new_candidates: Vec<JobCandidate> = {
-            let mut g = self.candidates.lock();
-            cands
-                .into_iter()
-                .filter(|c| {
-                    let changed = g.get(&c.job_id) != Some(c);
-                    if changed {
-                        g.insert(c.job_id.clone(), c.clone());
-                    }
-                    changed
-                })
-                .collect()
-        };
-        if !new_candidates.is_empty() {
-            let mut request_after = Vec::new();
-            if self.jobs.active(JobKind::Build) < self.max_build {
-                request_after.push(JobKind::Build);
-            }
-            if self.jobs.active(JobKind::Flake) < self.max_eval {
-                request_after.push(JobKind::Flake);
-            }
-
-            spawn_scoring_task(
-                self.scorer,
-                Arc::clone(&self.executor.store),
-                Arc::clone(&self.last_scores),
-                self.writer.clone(),
-                new_candidates,
-                true,
-                true,
-                request_after,
-            );
-        }
+        let request_after: Vec<JobKind> = [
+            (JobKind::Build, self.max_build),
+            (JobKind::Flake, self.max_eval),
+        ]
+        .into_iter()
+        .filter(|(kind, max)| self.jobs.active(kind.clone()) < *max)
+        .map(|(kind, _)| kind)
+        .collect();
+        spawn_scoring_task(
+            self.scorer,
+            Arc::clone(&self.executor.store),
+            self.writer.clone(),
+            cands,
+            true,
+            request_after,
+        );
     }
 
     // ── Job lifecycle ─────────────────────────────────────────────────────────
 
-    /// Drop a job from the local candidate + score caches so a later server
-    /// re-offer is treated as new and re-scored (the delta filter skips
-    /// unchanged cached entries).
-    fn forget_candidate(&self, job_id: &str) {
-        self.candidates.lock().remove(job_id);
-        self.last_scores.lock().remove(job_id);
-    }
-
     async fn on_assign_job(&mut self, job_id: String, dispatch: String, job: Job) -> Result<()> {
         if self.jobs.readopt(&job_id, &dispatch) {
             warn!(%job_id, %dispatch, "job assigned again while still running; reporting under the new dispatch id");
-            self.forget_candidate(&job_id);
             self.writer
                 .send(ClientMessage::AssignJobResponse {
                     job_id,
@@ -611,11 +570,8 @@ impl DispatchState {
             return Ok(());
         }
 
-        // The candidate cache is dropped on a reject too: the server re-offers
-        // a rejected job and the delta filter would otherwise never re-score it.
         if self.draining {
             warn!(%job_id, "rejecting assigned job - draining");
-            self.forget_candidate(&job_id);
             self.writer
                 .send(ClientMessage::AssignJobResponse {
                     job_id,
@@ -635,7 +591,6 @@ impl DispatchState {
 
         if active_count >= max {
             warn!(%job_id, ?kind, active = active_count, limit = max, "rejecting assigned job - at capacity");
-            self.forget_candidate(&job_id);
             self.writer
                 .send(ClientMessage::AssignJobResponse {
                     job_id,
@@ -657,7 +612,6 @@ impl DispatchState {
 
         let (dispatch, abort_rx, timeline) =
             self.jobs.register(job_id.clone(), kind.clone(), dispatch);
-        self.forget_candidate(&job_id);
 
         let executor = self.executor.clone();
         let job_store = Arc::clone(&executor.store);
