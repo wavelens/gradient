@@ -18,6 +18,7 @@ use crate::messages::{
     ServerMessage,
 };
 use crate::session::frame::WireMessage;
+use crate::types::{GrantTarget, NarUploadMetadata, UploadMetadata, UploadObject, UploadOutcome};
 use anyhow::{Context, Result};
 use futures::{SinkExt, StreamExt};
 use std::time::Duration;
@@ -103,7 +104,35 @@ impl MockServerConn {
 
 pub const SCRIPT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// A NAR a peer relayed to the mock, with the metadata its `NarUploaded` carried.
+/// One upload the mock granted: what was asked, the relayed chunks (empty for a
+/// presigned grant) and the metadata the peer finished with.
+#[derive(Debug)]
+pub struct ServedUpload {
+    pub job_id: String,
+    pub request_id: u64,
+    pub object: UploadObject,
+    pub size: u64,
+    pub chunks: Vec<(Vec<u8>, u64, bool)>,
+    pub metadata: UploadMetadata,
+}
+
+impl ServedUpload {
+    pub fn relayed(&self) -> Vec<u8> {
+        self.chunks
+            .iter()
+            .flat_map(|(data, ..)| data.clone())
+            .collect()
+    }
+
+    pub fn nar(&self) -> &NarUploadMetadata {
+        match &self.metadata {
+            UploadMetadata::Nar(meta) => meta,
+            other => panic!("expected NAR metadata, got {other:?}"),
+        }
+    }
+}
+
+/// A NAR a peer relayed to the mock, with the metadata its `UploadFinished` carried.
 #[derive(Debug)]
 pub struct PushedNar {
     pub job_id: String,
@@ -219,50 +248,74 @@ impl MockServerConn {
         .await
     }
 
-    pub async fn receive_push(&mut self) -> Result<PushedNar> {
-        let (job_id, store_path) = self
+    /// Grant the next upload request with `target`, collect its relayed chunks
+    /// and acknowledge its `UploadFinished` with `UploadCommitted{Ok}`.
+    pub async fn serve_upload(&mut self, target: GrantTarget) -> Result<ServedUpload> {
+        let (job_id, request_id, object, size) = self
             .recv_until(|msg| match msg {
-                ClientMessage::NarStreamHeader {
-                    job_id, store_path, ..
-                } => Some((job_id, store_path)),
+                ClientMessage::UploadRequest {
+                    job_id,
+                    request_id,
+                    object,
+                    size,
+                } => Some((job_id, request_id, object, size)),
                 _ => None,
             })
             .await?;
-        self.send(ServerMessage::NarPushResume {
-            job_id: job_id.clone(),
-            store_path: store_path.clone(),
-            received_bytes: 0,
-        })
-        .await?;
+        let relayed = matches!(target, GrantTarget::Relay { .. });
+        self.send(ServerMessage::UploadGrant { request_id, target })
+            .await?;
 
-        let mut compressed = Vec::new();
-        loop {
-            let (data, is_final) = self
-                .recv_until(|msg| match msg {
-                    ClientMessage::NarPush { data, is_final, .. } => Some((data, is_final)),
+        let mut chunks = Vec::new();
+        while relayed && !chunks.last().is_some_and(|(_, _, is_final)| *is_final) {
+            chunks.push(
+                self.recv_until(|msg| match msg {
+                    ClientMessage::UploadChunk {
+                        data,
+                        offset,
+                        is_final,
+                        ..
+                    } => Some((data, offset, is_final)),
                     _ => None,
                 })
-                .await?;
-            compressed.extend(data);
-            if is_final {
-                break;
-            }
+                .await?,
+            );
         }
-
-        let (nar_size, nar_hash) = self
+        let metadata = self
             .recv_until(|msg| match msg {
-                ClientMessage::NarUploaded {
-                    nar_size, nar_hash, ..
-                } => Some((nar_size, nar_hash)),
+                ClientMessage::UploadFinished { metadata, .. } => Some(metadata),
                 _ => None,
             })
             .await?;
-        Ok(PushedNar {
+        self.send(ServerMessage::UploadCommitted {
+            request_id,
+            outcome: UploadOutcome::Ok,
+        })
+        .await?;
+        Ok(ServedUpload {
             job_id,
-            store_path,
-            compressed,
-            nar_size,
-            nar_hash,
+            request_id,
+            object,
+            size,
+            chunks,
+            metadata,
+        })
+    }
+
+    pub async fn receive_push(&mut self) -> Result<PushedNar> {
+        let served = self
+            .serve_upload(GrantTarget::Relay { resume_offset: 0 })
+            .await?;
+        let UploadObject::Nar { store_path } = &served.object else {
+            anyhow::bail!("expected a NAR upload, got {:?}", served.object);
+        };
+        let meta = served.nar();
+        Ok(PushedNar {
+            job_id: served.job_id.clone(),
+            store_path: store_path.clone(),
+            compressed: served.relayed(),
+            nar_size: meta.nar_size,
+            nar_hash: meta.nar_hash.clone(),
         })
     }
 
@@ -386,31 +439,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_relayed_push_is_resumed_from_zero_and_assembled() {
+    async fn a_relayed_push_is_granted_from_zero_and_assembled() {
         let (mut conn, mut socket) = connected().await;
+        let store_path = format!("/nix/store/{}-p", "a".repeat(32));
         let peer = async {
             socket
-                .send_client_msg(&ClientMessage::NarStreamHeader {
+                .send_client_msg(&ClientMessage::UploadRequest {
                     job_id: "j".into(),
-                    store_path: "/nix/store/p".into(),
-                    total_bytes: None,
-                    stream_token: "t".into(),
+                    request_id: 7,
+                    object: UploadObject::Nar {
+                        store_path: store_path.clone(),
+                    },
+                    size: 9,
                 })
                 .await
                 .unwrap();
-            let resume = socket.recv_server_msg().await.unwrap();
-            assert!(matches!(
-                resume,
-                ServerMessage::NarPushResume {
-                    received_bytes: 0,
-                    ..
+            let grant = socket.recv_server_msg().await.unwrap();
+            assert_eq!(
+                grant,
+                ServerMessage::UploadGrant {
+                    request_id: 7,
+                    target: GrantTarget::Relay { resume_offset: 0 },
                 }
-            ));
+            );
             for (data, offset, is_final) in [(b"ab".to_vec(), 0, false), (Vec::new(), 2, true)] {
                 socket
-                    .send_client_msg(&ClientMessage::NarPush {
-                        job_id: "j".into(),
-                        store_path: "/nix/store/p".into(),
+                    .send_client_msg(&ClientMessage::UploadChunk {
+                        request_id: 7,
                         data,
                         offset,
                         is_final,
@@ -418,25 +473,33 @@ mod tests {
                     .await
                     .unwrap();
             }
-
             socket
-                .send_client_msg(&ClientMessage::NarUploaded {
-                    job_id: "j".into(),
-                    store_path: "/nix/store/p".into(),
-                    file_hash: "sha256:f".into(),
-                    file_size: 2,
-                    nar_size: 9,
-                    nar_hash: "sha256:n".into(),
-                    references: vec![],
-                    deriver: None,
-                    ca: None,
-                    multipart: None,
+                .send_client_msg(&ClientMessage::UploadFinished {
+                    request_id: 7,
+                    metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
+                        file_hash: "sha256:f".into(),
+                        file_size: 2,
+                        nar_size: 9,
+                        nar_hash: "sha256:n".into(),
+                        references: vec![],
+                        deriver: None,
+                        ca: None,
+                        multipart: None,
+                    })),
                 })
                 .await
                 .unwrap();
+            assert_eq!(
+                socket.recv_server_msg().await.unwrap(),
+                ServerMessage::UploadCommitted {
+                    request_id: 7,
+                    outcome: UploadOutcome::Ok,
+                }
+            );
         };
         let (pushed, ()) = tokio::join!(conn.receive_push(), peer);
         let pushed = pushed.unwrap();
+        assert_eq!(pushed.store_path, store_path);
         assert_eq!(pushed.compressed, b"ab");
         assert_eq!((pushed.nar_size, pushed.nar_hash.as_str()), (9, "sha256:n"));
     }

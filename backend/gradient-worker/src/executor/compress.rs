@@ -45,7 +45,7 @@ pub async fn push_outputs(
             NarSource::Path { .. } => None,
         })
         .collect();
-    let entries = super::query_fetched_paths(updater, paths, sizes).await;
+    let entries = super::query_fetched_paths(updater, paths, sizes).await?;
     let mut sources: HashMap<String, NarSource<'_>> = outputs
         .into_iter()
         .map(|o| (nix_store_path(&o.store_path), o.source))
@@ -80,8 +80,8 @@ mod tests {
     use gradient_test_support::prelude::MockProtoServer;
     use gradient_util::sync::Mutex;
     use gradient_wire::messages::{CachedPath, ClientMessage, ServerMessage};
+    use gradient_wire::types::{GrantTarget, UploadObject, UploadOutcome};
 
-    use crate::executor::UPLOAD_CONCURRENCY;
     use crate::executor::timeline::JobTimeline;
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
     use crate::proto::job::JobUpdater;
@@ -89,6 +89,7 @@ mod tests {
     use gradient_worker_client::correlation::{CacheWaiters, DispatchHandle, deliver_cache_reply};
     use gradient_worker_client::nar::NarSource;
     use gradient_worker_client::nar_recv::NarReceiver;
+    use gradient_worker_client::upload::UploadClient;
 
     use super::{OutputNar, push_outputs};
 
@@ -109,122 +110,130 @@ mod tests {
         }
     }
 
-    /// Stand in for the dispatch loop. It routes the resume a stream waits on AND
-    /// the `CacheStatus` a query waits on: [`push_outputs`] asks the cache first,
-    /// and a pump that drops that answer leaves the query to time out and every
-    /// path to be reported uncached.
-    fn pump_resumes(
+    /// Stand in for the dispatch loop. It routes the upload handshake AND the
+    /// `CacheStatus` a query waits on: [`push_outputs`] asks the cache first,
+    /// and a pump that drops that answer leaves the query to time out.
+    fn pump(
         mut reader: ProtoReader,
-        nar_recv: NarReceiver,
         cache_waiters: CacheWaiters,
+        uploads: UploadClient,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             while let Some(inbound) = reader.recv().await {
-                if let Some(gradient_wire::Inbound::Control(ServerMessage::CacheStatus {
-                    query_id,
-                    cached,
-                })) = nar_recv.absorb(inbound).await
-                {
-                    deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
+                match inbound {
+                    gradient_wire::Inbound::Control(ServerMessage::CacheStatus {
+                        query_id,
+                        cached,
+                    }) => {
+                        deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
+                    }
+                    gradient_wire::Inbound::Control(msg) => uploads.deliver(msg),
+                    gradient_wire::Inbound::Bulk(_) => {}
                 }
             }
         })
     }
 
-    /// Six paths, one job: the uploader must open exactly `UPLOAD_CONCURRENCY`
-    /// streams before any resume answer comes back, which is what hides the
-    /// per-path round trip on an eval that pushes hundreds of small NARs.
-    #[tokio::test]
-    async fn uploads_open_a_window_of_streams_before_any_resume() {
-        const PATHS: usize = 6;
-        const JOB: &str = "job-upload-window";
+    fn updater(
+        job: &str,
+        writer: gradient_worker_client::connection::ProtoWriter,
+        cache_waiters: CacheWaiters,
+        uploads: UploadClient,
+    ) -> JobUpdater {
+        JobUpdater::new(
+            job.to_owned(),
+            DispatchHandle::new("dispatch-1".to_owned()),
+            writer,
+            cache_waiters,
+            Arc::new(Mutex::new(HashMap::new())),
+            NarReceiver::new(),
+            EvalCacheReceiver::new(),
+            None,
+            JobTimeline::new(),
+            uploads,
+        )
+    }
 
-        let dir = tempfile::TempDir::new().unwrap();
-        let store_paths: Vec<String> = (0..PATHS)
-            .map(|i| {
-                let path = dir.path().join(format!("{}-p{i}", "a".repeat(32)));
-                std::fs::create_dir_all(&path).unwrap();
-                std::fs::write(path.join("hello"), format!("payload {i}")).unwrap();
-                path.to_str().unwrap().to_owned()
-            })
-            .collect();
+    /// A job is only complete once every upload was acknowledged: upload_all
+    /// must still be pending while one commit is outstanding.
+    #[tokio::test]
+    async fn the_uploads_settle_before_upload_all_returns() {
+        const PATHS: usize = 3;
 
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
-
-            // Answer nothing while the window fills: whatever arrives before
-            // the first resume IS the window.
-            let mut window: Vec<String> = Vec::new();
-            while let Ok(msg) = tokio::time::timeout(Duration::from_millis(500), sc.recv()).await {
-                match msg.unwrap() {
-                    ClientMessage::NarStreamHeader { store_path, .. } => window.push(store_path),
-                    other => panic!("expected NarStreamHeader, got {other:?}"),
+            let mut finished = Vec::new();
+            while finished.len() < PATHS {
+                match sc.recv().await.unwrap() {
+                    ClientMessage::UploadRequest { request_id, .. } => sc
+                        .send(ServerMessage::UploadGrant {
+                            request_id,
+                            target: GrantTarget::Relay { resume_offset: 0 },
+                        })
+                        .await
+                        .unwrap(),
+                    ClientMessage::UploadChunk { .. } => {}
+                    ClientMessage::UploadFinished { request_id, .. } => finished.push(request_id),
+                    other => panic!("unexpected {other:?}"),
                 }
             }
-
-            let opened = window.len();
-            let mut uploaded = 0usize;
-            for store_path in window {
-                sc.send(ServerMessage::NarPushResume {
-                    job_id: JOB.to_owned(),
-                    store_path,
-                    received_bytes: 0,
+            let withheld = finished.pop().unwrap();
+            for request_id in finished {
+                sc.send(ServerMessage::UploadCommitted {
+                    request_id,
+                    outcome: UploadOutcome::Ok,
                 })
                 .await
                 .unwrap();
             }
-
-            while uploaded < PATHS {
-                match sc.recv().await.unwrap() {
-                    ClientMessage::NarStreamHeader { store_path, .. } => sc
-                        .send(ServerMessage::NarPushResume {
-                            job_id: JOB.to_owned(),
-                            store_path,
-                            received_bytes: 0,
-                        })
-                        .await
-                        .unwrap(),
-                    ClientMessage::NarPush { .. } => {}
-                    ClientMessage::NarUploaded { .. } => uploaded += 1,
-                    other => panic!("unexpected {other:?}"),
-                }
-            }
-
-            opened
+            release_rx.await.unwrap();
+            sc.send(ServerMessage::UploadCommitted {
+                request_id: withheld,
+                outcome: UploadOutcome::Ok,
+            })
+            .await
+            .unwrap();
         });
 
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
-        let nar_recv = NarReceiver::new();
+        let uploads = UploadClient::new(writer.clone(), 8);
         let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
-        let updater = JobUpdater::new(
-            JOB.to_owned(),
-            DispatchHandle::new("dispatch-1".to_owned()),
+        let updater = updater(
+            "job-upload-settle",
             writer,
             cache_waiters.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            nar_recv.clone(),
-            EvalCacheReceiver::new(),
-            None,
-            JobTimeline::new(),
+            uploads.clone(),
         );
-        let pump = pump_resumes(reader, nar_recv, cache_waiters);
+        let pump = pump(reader, cache_waiters, uploads);
 
-        let entries: Vec<CachedPath> = store_paths.iter().map(|p| uncached(p)).collect();
-        crate::executor::upload_all(
-            &updater,
-            entries
-                .into_iter()
-                .map(|cp| (cp, NarSource::Path { meta: None }))
-                .collect(),
-            None,
-        )
-        .await
-        .unwrap();
+        let task = tokio::spawn(async move {
+            let sources = (0..PATHS)
+                .map(|i| {
+                    let cp = uncached(&format!("/nix/store/{}-p{i}", "a".repeat(32)));
+                    let source = NarSource::Raw {
+                        nar: b"nar bytes".to_vec(),
+                        references: Vec::new(),
+                        deriver: None,
+                        ca: None,
+                    };
+                    (cp, source)
+                })
+                .collect();
+            crate::executor::upload_all(&updater, sources, None).await
+        });
 
-        assert_eq!(server_task.await.unwrap(), UPLOAD_CONCURRENCY);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !task.is_finished(),
+            "an unacknowledged upload keeps the job open"
+        );
+        release_tx.send(()).unwrap();
+        task.await.unwrap().unwrap();
+        server_task.await.unwrap();
         pump.abort();
     }
 
@@ -262,17 +271,28 @@ mod tests {
                             .await
                             .unwrap();
                     }
-                    ClientMessage::NarStreamHeader { store_path, .. } => {
-                        opened.push(store_path.clone());
-                        sc.send(ServerMessage::NarPushResume {
-                            job_id: JOB.to_owned(),
-                            store_path,
-                            received_bytes: 0,
+                    ClientMessage::UploadRequest {
+                        request_id,
+                        object: UploadObject::Nar { store_path },
+                        ..
+                    } => {
+                        opened.push(store_path);
+                        sc.send(ServerMessage::UploadGrant {
+                            request_id,
+                            target: GrantTarget::Relay { resume_offset: 0 },
                         })
                         .await
                         .unwrap();
                     }
-                    ClientMessage::NarUploaded { .. } => break,
+                    ClientMessage::UploadFinished { request_id, .. } => {
+                        sc.send(ServerMessage::UploadCommitted {
+                            request_id,
+                            outcome: UploadOutcome::Ok,
+                        })
+                        .await
+                        .unwrap();
+                        break;
+                    }
                     _ => {}
                 }
             }
@@ -281,20 +301,10 @@ mod tests {
 
         let conn = ProtoConnection::open(&url).await.unwrap();
         let (writer, reader, _flush) = conn.split();
-        let nar_recv = NarReceiver::new();
+        let uploads = UploadClient::new(writer.clone(), 8);
         let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
-        let mut updater = JobUpdater::new(
-            JOB.to_owned(),
-            DispatchHandle::new("dispatch-1".to_owned()),
-            writer,
-            cache_waiters.clone(),
-            Arc::new(Mutex::new(HashMap::new())),
-            nar_recv.clone(),
-            EvalCacheReceiver::new(),
-            None,
-            JobTimeline::new(),
-        );
-        let pump = pump_resumes(reader, nar_recv, cache_waiters);
+        let mut updater = updater(JOB, writer, cache_waiters.clone(), uploads.clone());
+        let pump = pump(reader, cache_waiters, uploads);
         let (_tx, abort) = tokio::sync::watch::channel(false);
 
         push_outputs(

@@ -13,24 +13,23 @@
 //! [`super::job::JobUpdater::pull_eval_cache`] registers a [`PendingPull`] then
 //! sends `EvalCachePull`; the dispatch loop routes `EvalCachePullResult` via
 //! [`EvalCacheReceiver::deliver_pull_result`] and inline-stream `EvalCacheChunk`
-//! frames via [`EvalCacheReceiver::deliver_pull_chunk`]. The push leg registers
-//! a [`PendingPush`] then sends `EvalCachePush`; the grant is routed via
-//! [`EvalCacheReceiver::deliver_push_grant`].
+//! frames via [`EvalCacheReceiver::deliver_pull_chunk`]. Pushes go through the
+//! connection's upload handshake instead.
 //!
 //! Mirrors [`super::nar_recv`] but simpler: the executor runs one eval at a
-//! time so a single in-flight pull *or* push per `job_id` is enough.
+//! time so a single in-flight pull per `job_id` is enough.
 
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use gradient_wire::messages::{EvalCachePullOutcome, EvalCachePushMode, TRANSFER_TIMEOUT};
+use gradient_wire::messages::{EvalCachePullOutcome, TRANSFER_TIMEOUT};
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
 
-/// Per-job in-flight transfer state. The executor is sequential so at most one
-/// pull or push is live for a given `job_id` at a time.
+/// Per-job in-flight pull state. The executor is sequential so at most one pull
+/// is live for a given `job_id` at a time.
 enum Pending {
     /// Awaiting `EvalCachePullResult`; on `Inline` it transitions to `PullStream`.
     Pull {
@@ -40,10 +39,6 @@ enum Pending {
     PullStream {
         buf: Vec<u8>,
         bytes_tx: oneshot::Sender<Result<Vec<u8>, String>>,
-    },
-    /// Awaiting `EvalCachePushGrant`.
-    Push {
-        grant_tx: oneshot::Sender<EvalCachePushMode>,
     },
 }
 
@@ -63,13 +58,6 @@ pub struct EvalCacheReceiver {
 pub struct PendingPull {
     job_id: String,
     result_rx: oneshot::Receiver<EvalCachePullOutcome>,
-    recv: EvalCacheReceiver,
-}
-
-/// Push handle returned by [`EvalCacheReceiver::register_push`].
-pub struct PendingPush {
-    job_id: String,
-    grant_rx: oneshot::Receiver<EvalCachePushMode>,
     recv: EvalCacheReceiver,
 }
 
@@ -134,27 +122,6 @@ impl PendingPull {
     }
 }
 
-impl PendingPush {
-    /// Await the `EvalCachePushGrant` mode, bounded by [`TRANSFER_TIMEOUT`].
-    pub async fn await_grant(&mut self) -> Result<EvalCachePushMode> {
-        match tokio::time::timeout(TRANSFER_TIMEOUT, &mut self.grant_rx).await {
-            Ok(Ok(mode)) => Ok(mode),
-            Ok(Err(_)) => Err(anyhow::anyhow!(
-                "eval-cache push waiter dropped (job_id={}) - connection closed?",
-                self.job_id
-            )),
-            Err(_) => {
-                self.recv.forget_job(&self.job_id);
-                Err(anyhow::anyhow!(
-                    "eval-cache push for job_id={} timed out after {}s",
-                    self.job_id,
-                    TRANSFER_TIMEOUT.as_secs(),
-                ))
-            }
-        }
-    }
-}
-
 impl EvalCacheReceiver {
     pub fn new() -> Self {
         Self::default()
@@ -170,20 +137,6 @@ impl EvalCacheReceiver {
         PendingPull {
             job_id: job_id.to_owned(),
             result_rx,
-            recv: self.clone(),
-        }
-    }
-
-    /// Install a push waiter for `job_id` before sending `EvalCachePush`.
-    pub fn register_push(&self, job_id: &str) -> PendingPush {
-        let (grant_tx, grant_rx) = oneshot::channel();
-        self.inner
-            .lock()
-            .pending
-            .insert(job_id.to_owned(), Pending::Push { grant_tx });
-        PendingPush {
-            job_id: job_id.to_owned(),
-            grant_rx,
             recv: self.clone(),
         }
     }
@@ -232,19 +185,6 @@ impl EvalCacheReceiver {
             && bytes_tx.send(Ok(buf)).is_err()
         {
             debug!(%job_id, "eval-cache inline waiter went away before delivery");
-        }
-    }
-
-    /// Route an `EvalCachePushGrant` to its waiter.
-    pub fn deliver_push_grant(&self, job_id: &str, mode: EvalCachePushMode) {
-        let pending = self.inner.lock().pending.remove(job_id);
-        match pending {
-            Some(Pending::Push { grant_tx }) => {
-                if grant_tx.send(mode).is_err() {
-                    debug!(%job_id, "eval-cache push waiter went away before delivery");
-                }
-            }
-            _ => warn!(%job_id, "EvalCachePushGrant with no push waiter - discarding"),
         }
     }
 
@@ -361,17 +301,6 @@ mod tests {
         assert!(matches!(
             pull.await_outcome().await.unwrap(),
             EvalCachePullOutcome::Miss
-        ));
-    }
-
-    #[tokio::test]
-    async fn push_grant_routes() {
-        let r = EvalCacheReceiver::new();
-        let mut push = r.register_push("j");
-        r.deliver_push_grant("j", EvalCachePushMode::Skip);
-        assert!(matches!(
-            push.await_grant().await.unwrap(),
-            EvalCachePushMode::Skip
         ));
     }
 

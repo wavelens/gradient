@@ -11,12 +11,11 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
-    EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel, EvalStatsReport, JobPhase,
-    JobUpdateKind, QueryMode,
+    EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
 use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use gradient_worker_client::correlation::{
@@ -31,8 +30,10 @@ use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::prefetch::MissingInputs;
 use crate::proto::progress::{BuildProgressSink, Progress};
 use gradient_wire::traits::JobReporter;
+use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject};
 use gradient_worker_client::connection::ProtoWriter;
 use gradient_worker_client::nar_recv::{NarPayload, NarReceiver, NarUnavailable};
+use gradient_worker_client::upload::UploadClient;
 
 /// Typed sender for reporting job progress back to the server.
 ///
@@ -55,8 +56,8 @@ pub struct JobUpdater {
     /// Routes incoming `NarPush` chunks back to the job task that requested
     /// them via `NarRequest`. Cloneable; cheap.
     pub(crate) nar_recv: NarReceiver,
-    /// Routes `EvalCachePullResult` / `EvalCacheChunk` / `EvalCachePushGrant`
-    /// back to the job task during the eval-cache pull/push handshake.
+    /// Routes `EvalCachePullResult` / `EvalCacheChunk` back to the job task
+    /// during the eval-cache pull.
     pub(crate) eval_cache_recv: EvalCacheReceiver,
     /// Local store, set for jobs that push NARs (eval closure, build outputs).
     /// `None` in proto round-trip unit tests that never touch the store.
@@ -64,6 +65,37 @@ pub struct JobUpdater {
     /// The job's phase timeline. Shared with the dispatch loop so the terminal
     /// message can carry it after the job task is gone.
     pub(crate) timeline: Arc<JobTimeline>,
+    /// The connection's upload handshake, shared by every job it runs.
+    pub(crate) uploads: UploadClient,
+}
+
+async fn relay_blob(
+    writer: &ProtoWriter,
+    request_id: u64,
+    bytes: &[u8],
+    resume_offset: u64,
+) -> Result<()> {
+    let start = (resume_offset as usize).min(bytes.len());
+    let mut offset = start as u64;
+    for chunk in bytes[start..].chunks(BULK_CHUNK_SIZE) {
+        writer
+            .send(ClientMessage::UploadChunk {
+                request_id,
+                data: chunk.to_vec(),
+                offset,
+                is_final: false,
+            })
+            .await?;
+        offset += chunk.len() as u64;
+    }
+    writer
+        .send(ClientMessage::UploadChunk {
+            request_id,
+            data: Vec::new(),
+            offset,
+            is_final: true,
+        })
+        .await
 }
 
 impl JobUpdater {
@@ -81,6 +113,7 @@ impl JobUpdater {
         eval_cache_recv: EvalCacheReceiver,
         store: Option<Arc<LocalNixStore>>,
         timeline: Arc<JobTimeline>,
+        uploads: UploadClient,
     ) -> Self {
         Self {
             job_id,
@@ -92,6 +125,7 @@ impl JobUpdater {
             eval_cache_recv,
             store,
             timeline,
+            uploads,
         }
     }
 
@@ -142,59 +176,39 @@ impl JobUpdater {
         let size_bytes = bytes.len() as u64;
         let mut guard = self.phase(JobPhase::EvalCachePush);
         guard.record(0, size_bytes);
-        let mut pending = self.eval_cache_recv.register_push(&self.job_id);
-        self.writer
-            .send(ClientMessage::EvalCachePush {
-                job_id: self.job_id.clone(),
-                fingerprint: fingerprint.to_owned(),
-                size_bytes,
-            })
-            .await?;
+        let object = UploadObject::EvalCache {
+            fingerprint: fingerprint.to_owned(),
+        };
+        let mut upload = self.uploads.start(&self.job_id, object, size_bytes).await?;
+        while let Some((request_id, target)) = upload.next_grant().await? {
+            let sent = self
+                .send_eval_cache(request_id, &bytes, target)
+                .await
+                .map(|()| UploadMetadata::EvalCache { size_bytes });
+            if upload.settle(sent).await? {
+                break;
+            }
+        }
+        Ok(())
+    }
 
-        match pending.await_grant().await? {
-            EvalCachePushMode::Skip => Ok(()),
-            EvalCachePushMode::Presigned { url } => {
-                gradient_worker_client::object_put::put_object(&url, bytes.into(), None)
+    async fn send_eval_cache(
+        &self,
+        request_id: u64,
+        bytes: &[u8],
+        target: GrantTarget,
+    ) -> Result<()> {
+        match target {
+            GrantTarget::Relay { resume_offset } => {
+                relay_blob(self.uploads.writer(), request_id, bytes, resume_offset).await
+            }
+            GrantTarget::Put { url } => {
+                gradient_worker_client::object_put::put_object(&url, bytes.to_vec().into(), None)
                     .await
                     .with_context(|| format!("eval-cache PUT {url}"))?;
-                self.writer
-                    .send(ClientMessage::EvalCachePushDone {
-                        job_id: self.job_id.clone(),
-                        fingerprint: fingerprint.to_owned(),
-                        size_bytes,
-                    })
-                    .await?;
                 Ok(())
             }
-            EvalCachePushMode::Inline { .. } => {
-                let mut offset: u64 = 0;
-                let mut chunks = bytes.chunks(BULK_CHUNK_SIZE).peekable();
-                if chunks.peek().is_none() {
-                    self.writer
-                        .send(ClientMessage::EvalCacheChunk {
-                            job_id: self.job_id.clone(),
-                            data: Vec::new(),
-                            offset: 0,
-                            is_final: true,
-                        })
-                        .await?;
-                }
-
-                while let Some(chunk) = chunks.next() {
-                    let is_final = chunks.peek().is_none();
-                    self.writer
-                        .send(ClientMessage::EvalCacheChunk {
-                            job_id: self.job_id.clone(),
-                            data: chunk.to_vec(),
-                            offset,
-                            is_final,
-                        })
-                        .await?;
-                    offset += chunk.len() as u64;
-                }
-
-                Ok(())
-            }
+            other => bail!("an eval-cache upload cannot use {other:?}"),
         }
     }
 
@@ -637,6 +651,7 @@ mod tests {
         conn: gradient_worker_client::connection::ProtoConnection,
     ) -> (JobUpdater, gradient_worker_client::connection::ProtoReader) {
         let (writer, reader, _flush) = conn.split();
+        let writer_for_uploads = writer.clone();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
@@ -651,6 +666,7 @@ mod tests {
             eval_cache_recv,
             None,
             JobTimeline::new(),
+            UploadClient::new(writer_for_uploads, 8),
         );
         (updater, reader)
     }

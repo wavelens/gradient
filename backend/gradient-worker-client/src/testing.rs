@@ -20,8 +20,9 @@ use tokio::task::JoinHandle;
 
 use crate::connection::handshake::perform_handshake;
 use crate::connection::{ProtoConnection, ProtoWriter};
-use crate::nar::{NarSink, NarSource, upload_nar};
+use crate::nar::{NarSource, upload_nar};
 use crate::nar_recv::NarReceiver;
+use crate::upload::UploadClient;
 
 pub struct PeerSpec {
     pub id: String,
@@ -60,6 +61,7 @@ pub struct ProtoPeer {
     writer: ProtoWriter,
     inbox: mpsc::UnboundedReceiver<ServerMessage>,
     nar_recv: NarReceiver,
+    uploads: UploadClient,
     pump: JoinHandle<()>,
 }
 
@@ -83,6 +85,8 @@ impl ProtoPeer {
         let nar_recv = NarReceiver::new();
         let (tx, inbox) = mpsc::unbounded_channel();
         let routed = nar_recv.clone();
+        let uploads = UploadClient::new(writer.clone(), 8);
+        let delivered = uploads.clone();
 
         #[expect(
             clippy::disallowed_methods,
@@ -90,10 +94,17 @@ impl ProtoPeer {
         )]
         let pump = tokio::spawn(async move {
             while let Some(inbound) = reader.recv().await {
-                if let Some(Inbound::Control(msg)) = routed.absorb(inbound).await
-                    && tx.send(msg).is_err()
-                {
-                    break;
+                match routed.absorb(inbound).await {
+                    Some(Inbound::Control(
+                        msg @ (ServerMessage::UploadGrant { .. }
+                        | ServerMessage::UploadCommitted { .. }),
+                    )) => delivered.deliver(msg),
+                    Some(Inbound::Control(msg)) => {
+                        if tx.send(msg).is_err() {
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
             }
         });
@@ -103,6 +114,7 @@ impl ProtoPeer {
             writer,
             inbox,
             nar_recv,
+            uploads,
             pump,
         };
         if peer.handshake.negotiated.build {
@@ -226,10 +238,7 @@ impl ProtoPeer {
             deriver: None,
             ca: None,
         };
-        let sink = NarSink::Relay {
-            nar_recv: &self.nar_recv,
-        };
-        upload_nar(job_id, store_path, source, sink, &self.writer).await
+        upload_nar(&self.uploads, job_id, store_path, source).await
     }
 
     pub async fn pull_nar(&self, job_id: &str, store_path: &str) -> Result<Vec<u8>> {

@@ -319,8 +319,8 @@ in {
         type = lib.types.ints.positive;
         default = 8;
         description = ''
-          Uploads to object storage (presigned NARs, multipart parts, eval cache blobs) running at
-          once across all jobs. Throttled uploads retry with backoff.
+          Upload requests the worker keeps open at once, waiting for a server grant or
+          transferring. The server's upload budget decides how many run; this bounds worker memory.
         '';
       };
 

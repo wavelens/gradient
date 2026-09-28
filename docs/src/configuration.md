@@ -592,7 +592,7 @@ All options live under `services.gradient.worker`; envs carry the `GRADIENT_WORK
 | `build.maxCores` | `GRADIENT_WORKER_BUILD_MAX_CORES` | `null` | Cores per build (`--cores`); `null` = all. |
 | `build.metrics` | `GRADIENT_WORKER_BUILD_METRICS` | `false` | Record per-build peak RAM, CPU time and disk I/O for the resource-aware scheduler. Enables Nix's experimental `cgroups` feature and `use-cgroups`, delegates cgroup controllers to `nix-daemon.service`, and defaults `nix.package` to `packages.nix`. |
 | `build.cgroupRoot` | `GRADIENT_WORKER_BUILD_CGROUP_ROOT` | `/sys/fs/cgroup/system.slice/nix-daemon.service` | Daemon cgroup containing the per-build cgroups. |
-| `nar.maxConcurrentUploads` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | `8` | Object-storage PUTs in flight; throttled or failed PUTs retry up to 6 times with jittered backoff. |
+| `nar.maxConcurrentUploads` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | `8` | Upload requests the worker keeps open at once (waiting for a server grant or transferring). The server's `upload.concurrency` / `upload.bytesBudget` decide how many run; this bounds worker memory. Throttled or failed PUTs retry up to 6 times with jittered backoff. |
 | `nar.partialTtlSecs` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | `86400` | Age after which an unfinished download under `<baseDir>/nar-partial` is deleted. `0` disables. |
 | `log.level.default` | `GRADIENT_WORKER_LOG_LEVEL_DEFAULT` | `info` | Worker log level. |
 | `log.level.eval` / `.build` / `.proto` | `GRADIENT_WORKER_LOG_LEVEL_EVAL` / `_BUILD` / `_PROTO` | `null` | Per-component overrides. |

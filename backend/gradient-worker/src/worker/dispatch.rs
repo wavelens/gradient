@@ -225,6 +225,7 @@ pub(super) struct DispatchState {
     known_derivation_waiters: KnownDerivationWaiters,
     nar_recv: gradient_worker_client::nar_recv::NarReceiver,
     eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
+    uploads: gradient_worker_client::upload::UploadClient,
     jobs: JobRegistry,
     done_rx: Option<mpsc::UnboundedReceiver<(String, Result<()>)>>,
     max_eval: u32,
@@ -260,7 +261,12 @@ impl DispatchState {
             }
         };
         let (done_tx, done_rx) = mpsc::unbounded_channel();
+        let uploads = gradient_worker_client::upload::UploadClient::new(
+            writer.clone(),
+            config.nar.max_concurrent_uploads as usize,
+        );
         Self {
+            uploads,
             writer,
             cache_waiters: Arc::new(Mutex::new(HashMap::new())),
             known_derivation_waiters: Arc::new(Mutex::new(HashMap::new())),
@@ -321,7 +327,7 @@ impl DispatchState {
                 self.on_assign_job(job_id, dispatch, job).await?;
             }
             ServerMessage::AbortJob { job_id, reason } => {
-                self.on_abort_job(job_id, reason);
+                self.on_abort_job(job_id, reason).await;
             }
             ServerMessage::Credential { kind, data } => {
                 self.on_credential(kind, data);
@@ -363,8 +369,8 @@ impl DispatchState {
             ServerMessage::CacheError { query_id, message } => {
                 self.on_cache_error(query_id, message);
             }
-            ServerMessage::UploadGrant { .. } | ServerMessage::UploadCommitted { .. } => {
-                warn!("upload handshake not wired yet");
+            msg @ (ServerMessage::UploadGrant { .. } | ServerMessage::UploadCommitted { .. }) => {
+                self.uploads.deliver(msg);
             }
             ServerMessage::KnownDerivations { query_id, known } => {
                 self.on_known_derivations(query_id, known);
@@ -372,8 +378,8 @@ impl DispatchState {
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
                 self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
             }
-            ServerMessage::EvalCachePushGrant { job_id, mode } => {
-                self.eval_cache_recv.deliver_push_grant(&job_id, mode);
+            ServerMessage::EvalCachePushGrant { job_id, .. } => {
+                warn!(%job_id, "EvalCachePushGrant from a server without upload admission; ignored");
             }
             // Unreachable: the NAR receiver and the bulk lane own these.
             ServerMessage::NarPush { .. }
@@ -430,6 +436,7 @@ impl DispatchState {
         );
         self.nar_recv.forget_job(&job_id);
         self.eval_cache_recv.forget_job(&job_id);
+        self.uploads.forget_job(&job_id);
         self.credentials.clear();
 
         let completed_kind = job.kind;
@@ -704,6 +711,7 @@ impl DispatchState {
         let job_known_derivation_waiters = Arc::clone(&self.known_derivation_waiters);
         let job_nar_recv = self.nar_recv.clone();
         let job_eval_cache_recv = self.eval_cache_recv.clone();
+        let job_uploads = self.uploads.clone();
         let job_done_tx = self.jobs.done_tx.clone();
         let jid = job_id.clone();
 
@@ -722,6 +730,7 @@ impl DispatchState {
                 job_eval_cache_recv,
                 Some(job_store),
                 timeline,
+                job_uploads,
             );
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
             let _ = job_done_tx.send((jid, result));
@@ -734,14 +743,12 @@ impl DispatchState {
         Ok(())
     }
 
-    fn on_abort_job(&mut self, job_id: String, reason: String) {
+    async fn on_abort_job(&mut self, job_id: String, reason: String) {
         warn!(%job_id, %reason, "job aborted by server");
         if !self.jobs.abort(&job_id) {
             debug!(%job_id, "abort for a job this session does not run");
         }
-        // An upload parked on its resume handshake would otherwise sit out the
-        // 30 s timeout and then push a NAR the server has already abandoned.
-        self.nar_recv.cancel_pushes(&job_id);
+        self.uploads.cancel_job(&job_id).await;
     }
 
     // ── Credentials ───────────────────────────────────────────────────────────

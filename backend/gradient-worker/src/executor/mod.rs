@@ -30,7 +30,6 @@ use gradient_wire::messages::{
 use tokio::sync::watch;
 use tracing::instrument;
 
-use gradient_wire::CachedPathInfo;
 use gradient_wire::messages::JobPhase;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
@@ -44,39 +43,18 @@ pub use eval::WorkerEvaluator;
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
-/// Query the server for which fetched input paths are already cached, falling
-/// back to "treat everything as uncached" when the query fails.
+/// Ask the server which of `all_paths` it still needs. A failed query fails the
+/// push: every upload needs the server's grant anyway, so there is nothing to
+/// fall back to.
 async fn query_fetched_paths(
     updater: &mut JobUpdater,
     all_paths: Vec<String>,
     sizes: Vec<Option<u64>>,
-) -> Vec<CachedPath> {
+) -> Result<Vec<CachedPath>> {
     if all_paths.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
-    match updater.query_push(all_paths.clone(), sizes).await {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(error = %e, "CacheQuery failed; will attempt direct push for all paths");
-            all_paths
-                .iter()
-                .map(|p| CachedPath {
-                    path: p.clone(),
-                    cached: false,
-                    file_size: None,
-                    nar_size: None,
-                    url: None,
-                    multipart: None,
-                    nar_hash: None,
-                    file_hash: None,
-                    references: None,
-                    signatures: None,
-                    deriver: None,
-                    ca: None,
-                })
-                .collect()
-        }
-    }
+    updater.query_push(all_paths, sizes).await
 }
 
 /// Push the runtime closure of every `.drv` produced during eval to the
@@ -138,7 +116,7 @@ pub(crate) async fn push_drv_closure(
     let paths: Vec<String> = closure.into_iter().collect();
     guard.record(paths.len() as u32, 0);
     let sizes = vec![None; paths.len()];
-    let cache_entries = query_fetched_paths(updater, paths, sizes).await;
+    let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
     upload_all(updater, pair_with_store(cache_entries, store), None).await
 }
 
@@ -190,45 +168,25 @@ async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<St
         .collect()
 }
 
-/// Paths one job uploads at once. The per-path resume round trip dominates a
-/// push of many small `.drv` and source NARs, and the server stages by
-/// `(peer, job, hash)`, so overlapping streams cannot collide.
-pub(crate) const UPLOAD_CONCURRENCY: usize = 4;
-
-/// Upload one path's NAR using the method the server advertised in its
-/// `CacheQuery {Push}` response: a presigned S3 PUT straight to object storage
-/// when available, else the chunked WS `NarPush` fallback (local stores).
-/// Already-cached paths are skipped. Errors are returned so the caller decides
-/// whether they are fatal.
-///
-/// The `source` says where the bytes come from: a path of the local store, or a
-/// raw NAR already in memory.
+/// Upload one path's NAR through the server's grant, unless the `CacheQuery`
+/// already found it cached. Errors are returned so the caller decides whether
+/// they are fatal.
 pub(crate) async fn upload_one_nar(
     updater: &JobUpdater,
     cp: &CachedPath,
     source: nar::NarSource<'_>,
 ) -> Result<()> {
-    match cp.as_info() {
-        CachedPathInfo::Cached { .. } => {
-            tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
-            Ok(())
-        }
-        CachedPathInfo::Uncached { path, upload } => {
-            nar::upload_nar(
-                &updater.job_id,
-                path,
-                source,
-                nar::NarSink::from_upload_target(upload, &updater.nar_recv),
-                &updater.writer,
-            )
-            .await
-        }
+    if cp.cached {
+        tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
+        return Ok(());
     }
+    nar::upload_nar(&updater.uploads, &updater.job_id, &cp.path, source).await
 }
 
-/// Upload every uncached entry, at most [`UPLOAD_CONCURRENCY`] at once, failing
-/// the whole set on the first error. `abort` is re-checked before each path so a
-/// server-side `AbortJob` stops the remaining uploads.
+/// Upload every uncached entry, failing the whole set on the first error. All
+/// of them start at once: the worker's [`gradient_worker_client::upload::UploadClient`]
+/// bounds how many requests are open, and the server decides which run. `abort`
+/// is re-checked before each path so a server-side `AbortJob` stops the rest.
 pub(crate) async fn upload_all(
     updater: &JobUpdater,
     uploads: Vec<(CachedPath, nar::NarSource<'_>)>,
@@ -247,21 +205,14 @@ pub(crate) async fn upload_all(
     let mut guard = updater.phase(JobPhase::NarPush);
     guard.record(pending as u32, 0);
 
-    let mut queued = uploads.into_iter();
-    let mut running = FuturesUnordered::new();
-    loop {
-        while running.len() < UPLOAD_CONCURRENCY {
-            let Some((cp, source)) = queued.next() else {
-                break;
-            };
-            running.push(upload_unless_aborted(updater, cp, source, abort));
-        }
-
-        match running.next().await {
-            Some(result) => result?,
-            None => return Ok(()),
-        }
+    let mut running: FuturesUnordered<_> = uploads
+        .into_iter()
+        .map(|(cp, source)| upload_unless_aborted(updater, cp, source, abort))
+        .collect();
+    while let Some(result) = running.next().await {
+        result?;
     }
+    Ok(())
 }
 
 async fn upload_unless_aborted(
@@ -278,7 +229,7 @@ async fn upload_unless_aborted(
     if result.is_err()
         && let Some(abort) = abort
     {
-        // An abort cancels the push-resume gate mid-upload, so re-check before
+        // An abort cancels the job's open uploads mid-flight, so re-check before
         // blaming the path: the failure is the abort, and it must stay typed.
         check_abort(abort)?;
     }
@@ -443,7 +394,7 @@ impl JobExecutor {
 
                     let sizes = vec![None; outcome.archived_paths.len()];
                     let cache_entries =
-                        query_fetched_paths(updater, outcome.archived_paths.clone(), sizes).await;
+                        query_fetched_paths(updater, outcome.archived_paths.clone(), sizes).await?;
                     {
                         let mut push = updater.phase(JobPhase::PushInputs);
                         push.record(cache_entries.len() as u32, 0);

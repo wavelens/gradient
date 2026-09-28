@@ -19,3 +19,4 @@ pub mod reconnect;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod throughput;
+pub mod upload;

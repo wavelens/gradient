@@ -391,9 +391,8 @@ impl Default for BuildArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct NarArgs {
-    /// Maximum number of PUTs to object storage (presigned NAR uploads,
-    /// multipart parts, eval-cache blobs) in flight at once across all jobs.
-    /// Throttled or failed PUTs retry with backoff and count only while sending.
+    /// Upload requests this worker keeps open at once (queued at the server or
+    /// transferring). Bounds memory: a presigned PUT holds its compressed NAR.
     #[arg(long = "nar-max-concurrent-uploads", env = "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS", default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
     pub max_concurrent_uploads: u32,
 

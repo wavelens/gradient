@@ -4,31 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Every PUT this worker sends to object storage: bounded by one worker-wide
-//! permit pool across all jobs, and retried with jittered exponential backoff
-//! when the store throttles (503 / 429), errors (5xx) or drops the connection.
+//! Every PUT this worker sends to object storage, retried with jittered
+//! exponential backoff when the store throttles (503 / 429), errors (5xx) or
+//! drops the connection. How many run at once is the server's upload grant.
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use bytes::Bytes;
 use reqwest::header::{CONTENT_TYPE, ETAG, HeaderMap, RETRY_AFTER};
-use tokio::sync::Semaphore;
-
-const DEFAULT_CONCURRENT_PUTS: usize = 8;
-
-static PERMITS: OnceLock<Semaphore> = OnceLock::new();
-
-pub fn limit_concurrent_puts(limit: usize) {
-    if PERMITS.set(Semaphore::new(limit)).is_err() {
-        tracing::warn!(limit, "object PUT limit already set; keeping the first");
-    }
-}
-
-fn permits() -> &'static Semaphore {
-    PERMITS.get_or_init(|| Semaphore::new(DEFAULT_CONCURRENT_PUTS))
-}
 
 pub struct Backoff {
     pub attempts: u32,
@@ -61,11 +45,10 @@ pub async fn put_object(
     body: Bytes,
     content_type: Option<&str>,
 ) -> Result<Option<String>> {
-    put_with(permits(), &OBJECT_STORE_BACKOFF, url, body, content_type).await
+    put_with(&OBJECT_STORE_BACKOFF, url, body, content_type).await
 }
 
 async fn put_with(
-    permits: &Semaphore,
     backoff: &Backoff,
     url: &str,
     body: Bytes,
@@ -73,14 +56,7 @@ async fn put_with(
 ) -> Result<Option<String>> {
     let mut attempt = 1;
     loop {
-        let outcome = {
-            let _permit = permits
-                .acquire()
-                .await
-                .context("object PUT limiter closed")?;
-            try_put(url, body.clone(), content_type).await
-        };
-        match outcome {
+        match try_put(url, body.clone(), content_type).await {
             Ok(etag) => return Ok(etag),
             Err(PutError::Retryable { error, retry_after }) if attempt < backoff.attempts => {
                 let delay = backoff.delay(attempt, retry_after);
@@ -181,15 +157,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let etag = put_with(
-            &Semaphore::new(1),
-            &IMMEDIATE,
-            &server.uri(),
-            Bytes::from_static(b"nar"),
-            None,
-        )
-        .await
-        .unwrap();
+        let etag = put_with(&IMMEDIATE, &server.uri(), Bytes::from_static(b"nar"), None)
+            .await
+            .unwrap();
 
         assert_eq!(etag.as_deref(), Some("\"obj\""));
         assert_eq!(requests(&server).await, 3);
@@ -204,15 +174,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = put_with(
-            &Semaphore::new(1),
-            &IMMEDIATE,
-            &server.uri(),
-            Bytes::from_static(b"nar"),
-            None,
-        )
-        .await
-        .unwrap_err();
+        let err = put_with(&IMMEDIATE, &server.uri(), Bytes::from_static(b"nar"), None)
+            .await
+            .unwrap_err();
 
         assert!(format!("{err:#}").contains("503"), "{err:#}");
     }
@@ -226,43 +190,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = put_with(
-            &Semaphore::new(1),
-            &IMMEDIATE,
-            &server.uri(),
-            Bytes::from_static(b"nar"),
-            None,
-        )
-        .await
-        .unwrap_err();
+        let err = put_with(&IMMEDIATE, &server.uri(), Bytes::from_static(b"nar"), None)
+            .await
+            .unwrap_err();
 
         assert!(format!("{err:#}").contains("403"), "{err:#}");
-    }
-
-    #[tokio::test]
-    async fn a_put_waits_for_a_free_permit() {
-        let server = MockServer::start().await;
-        Mock::given(method("PUT"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-        let permits = Semaphore::new(1);
-        let held = permits.acquire().await.unwrap();
-        let url = server.uri();
-
-        let (put, sent_while_held) = tokio::join!(
-            put_with(&permits, &IMMEDIATE, &url, Bytes::from_static(b"nar"), None),
-            async {
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                let sent = requests(&server).await;
-                drop(held);
-                sent
-            }
-        );
-
-        put.unwrap();
-        assert_eq!(sent_while_held, 0);
-        assert_eq!(requests(&server).await, 1);
     }
 
     #[test]
