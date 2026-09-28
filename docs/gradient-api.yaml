@@ -11615,6 +11615,9 @@ components:
         - `cache_storage_full`: every writable cache for the project is
           within the headroom threshold of its (or the instance-wide)
           max-storage limit, so build outputs would have nowhere to land.
+        - `draining`: a superuser put the instance into draining; every
+          in-flight evaluation is parked until draining is disabled or the
+          server restarts.
         - `graph_stuck`: the connected pool can build every pending anchor, but
           none is dispatchable - the whole pending set is blocked behind the
           dependency-closure gate with no in-flight build to drive promotion. The
@@ -11626,6 +11629,7 @@ components:
         - $ref: '#/components/schemas/WaitingReasonApproval'
         - $ref: '#/components/schemas/WaitingReasonNoCache'
         - $ref: '#/components/schemas/WaitingReasonCacheStorageFull'
+        - $ref: '#/components/schemas/WaitingReasonDraining'
         - $ref: '#/components/schemas/WaitingReasonGraphStuck'
       discriminator:
         propertyName: kind
@@ -11635,6 +11639,7 @@ components:
           approval: '#/components/schemas/WaitingReasonApproval'
           no_cache: '#/components/schemas/WaitingReasonNoCache'
           cache_storage_full: '#/components/schemas/WaitingReasonCacheStorageFull'
+          draining: '#/components/schemas/WaitingReasonDraining'
           graph_stuck: '#/components/schemas/WaitingReasonGraphStuck'
 
     WaitingReasonWorkers:
@@ -11715,6 +11720,14 @@ components:
         kind:
           type: string
           enum: [cache_storage_full]
+
+    WaitingReasonDraining:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [draining]
 
     WaitingReasonGraphStuck:
       type: object

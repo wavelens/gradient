@@ -282,6 +282,15 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.waitingTitle({ kind: 'cache_storage_full' })).toBe('Cache Storage Full');
     });
 
+    it('titles and explains a draining instance', () => {
+      const { cmp } = setup();
+      const reason = { kind: 'draining' } as const;
+      expect(cmp.waitingTitle(reason)).toBe('Instance Draining');
+      expect(cmp.formatWaitingReason(reason)).toBe(
+        'The instance is draining. This evaluation resumes when draining is disabled or the server restarts.',
+      );
+    });
+
     it('titles and explains a graph-stuck stall', () => {
       const { cmp } = setup();
       const reason = { kind: 'graph_stuck', pending_anchors: 9 } as const;

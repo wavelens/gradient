@@ -1538,6 +1538,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         return 'No cache is configured for this project. Configure a cache before this evaluation can run.';
       case 'cache_storage_full':
         return 'Every writable cache for this project is full. Free space or raise the limit before this evaluation can run.';
+      case 'draining':
+        return 'The instance is draining. This evaluation resumes when draining is disabled or the server restarts.';
       case 'graph_stuck': {
         const buildWord = reason.pending_anchors === 1 ? 'build is' : 'builds are';
         return `Workers are available, but ${reason.pending_anchors} ${buildWord} blocked on dependencies. Recovering automatically.`;
@@ -1551,6 +1553,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       case 'approval': return 'Awaiting Approval';
       case 'no_cache': return 'No Cache Configured';
       case 'cache_storage_full': return 'Cache Storage Full';
+      case 'draining': return 'Instance Draining';
       case 'graph_stuck': return 'Recovering Build Graph';
       default: return 'Waiting for Workers';
     }

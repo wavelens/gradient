@@ -143,6 +143,7 @@ export type WaitingReason =
   | ApprovalWaitingReason
   | NoCacheWaitingReason
   | CacheStorageFullWaitingReason
+  | DrainingWaitingReason
   | GraphStuckWaitingReason;
 
 export interface WorkersWaitingReason {
@@ -174,6 +175,10 @@ export interface NoCacheWaitingReason {
 
 export interface CacheStorageFullWaitingReason {
   kind: 'cache_storage_full';
+}
+
+export interface DrainingWaitingReason {
+  kind: 'draining';
 }
 
 export interface GraphStuckWaitingReason {
