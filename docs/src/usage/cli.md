@@ -343,7 +343,7 @@ gradient mcp --control
 ```
 
 Reuses the stored login, so an assistant can list evaluations and read build
-logs without separate credentials. See [MCP Server](mcp.md).
+logs without separate credentials. See [Connect an AI Assistant](../guides/mcp.md).
 
 ### Utilities
 

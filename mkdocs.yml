@@ -59,13 +59,13 @@ nav:
       - Update Flake Inputs: guides/flake-updates.md
       - Set Up Single Sign-On: guides/sso.md
       - Manage Gradient with Nix: guides/manage-with-nix.md
+      - Connect an AI Assistant: guides/mcp.md
   - Using Gradient:
       - Overview: usage/overview.md
       - Dashboard: usage/dashboard.md
       - Job Board: usage/job-board.md
       - CLI: usage/cli.md
       - API: usage/api.md
-      - MCP Server: usage/mcp.md
       - State: usage/state.md
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md

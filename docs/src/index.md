@@ -24,7 +24,7 @@
 
     Evaluation and builds both run on workers. Each added machine adds capacity.
 
--   :material-robot: **[MCP server](usage/mcp.md)**
+-   :material-robot: **[MCP server](guides/mcp.md)**
 
     Failed builds, logs and evaluations, readable by any AI assistant.
 
