@@ -87,6 +87,7 @@ mod m20260927_000002_adopt_referenced_outputs;
 mod m20260928_000000_settle_aborting_parks;
 mod m20260928_000001_drop_cache_derivation;
 mod m20260928_000002_task_wait_for_workers;
+mod m20260928_000003_drop_twin_runtime_edges;
 
 pub struct Migrator;
 
@@ -170,6 +171,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260928_000000_settle_aborting_parks::Migration),
             Box::new(m20260928_000001_drop_cache_derivation::Migration),
             Box::new(m20260928_000002_task_wait_for_workers::Migration),
+            Box::new(m20260928_000003_drop_twin_runtime_edges::Migration),
         ]
     }
 }

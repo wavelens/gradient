@@ -9,6 +9,11 @@
 //! A reference whose hash has no producing derivation yet is either an `inputSrc`
 //! the evaluation pushed itself or an output of a stub the walk has not reached,
 //! so the walk that gives a stub its outputs adopts the references naming them.
+//!
+//! Two derivations that produce the same output paths (twins: `.drv`s equal modulo
+//! their fixed-output inputs) never get an edge between them. Each one's reference to
+//! the shared path is a reference to its own output; as an edge it made each twin's
+//! wholeness wait on the other's, and neither could ever become fetchable.
 
 use gradient_types::ids::DerivationId;
 use sea_orm::{ConnectionTrait, DbErr, Value};
@@ -18,10 +23,14 @@ use crate::readiness::ids;
 crate::sql! {
     /// One row per producer, add-only: an edge the walk already wrote as a build
     /// edge is upgraded to `Both` rather than duplicated, and a path that
-    /// references its own producer's other output is not an edge at all.
+    /// references its own producer's (or a twin's) output is not an edge at all.
     INSERT_RUNTIME_EDGES = r#"
 INSERT INTO derivation_dependency (derivation, dependency, kind)
-SELECT $1, d.dependency, 1 FROM unnest($2::uuid[]) AS d(dependency) WHERE d.dependency <> $1
+SELECT $1, d.dependency, 1 FROM unnest($2::uuid[]) AS d(dependency)
+WHERE d.dependency <> $1
+  AND NOT EXISTS (SELECT 1 FROM derivation_output own
+                  JOIN derivation_output twin ON twin.hash = own.hash
+                  WHERE own.derivation = $1 AND twin.derivation = d.dependency)
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 "#,
         params = [DerivationId, DerivationIds(64)];
@@ -45,6 +54,8 @@ JOIN LATERAL (
 JOIN LATERAL (SELECT p.derivation FROM derivation_output p WHERE p.hash = h.hash OFFSET 0) r
   ON r.derivation <> o.derivation
 WHERE o.derivation = ANY($1::uuid[])
+  AND NOT EXISTS (SELECT 1 FROM derivation_output own
+                  WHERE own.derivation = r.derivation AND own.hash = o.hash)
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 RETURNING derivation
 "#,
@@ -127,6 +138,21 @@ mod tests {
             "{sql}"
         );
         assert!(sql.contains("WHERE d.dependency <> $1"), "{sql}");
+    }
+
+    #[test]
+    fn neither_writer_links_a_derivation_to_a_twin_sharing_its_output() {
+        let insert = INSERT_RUNTIME_EDGES.text();
+        assert!(
+            insert.contains("JOIN derivation_output twin ON twin.hash = own.hash")
+                && insert.contains("WHERE own.derivation = $1 AND twin.derivation = d.dependency"),
+            "{insert}"
+        );
+        let adopt = ADOPT_REFERENCED_OUTPUTS.text();
+        assert!(
+            adopt.contains("WHERE own.derivation = r.derivation AND own.hash = o.hash"),
+            "{adopt}"
+        );
     }
 
     #[test]
