@@ -2275,7 +2275,7 @@ mod tests {
 
     /// A dependency path that is not a derivation path fails the batch instead
     /// of dropping the edge: the source would otherwise commit `walked = true`
-    /// dependency-blind, and `walked` never regresses.
+    /// dependency-blind, and only a lost record clears `walked`.
     #[tokio::test]
     async fn an_unparseable_dependency_fails_the_batch() {
         let evaluation = EvaluationId::now_v7();
