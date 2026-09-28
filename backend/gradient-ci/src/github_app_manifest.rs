@@ -63,6 +63,7 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "release",
             "check_run",
             "issue_comment",
+            "pull_request_review",
         ],
     })
 }
@@ -155,6 +156,16 @@ mod tests {
         assert!(
             m.get("setup_url").is_none() || m["setup_url"].is_null(),
             "setup_url must be absent so the post-install redirect doesn't loop back to /admin/github-app"
+        );
+    }
+
+    #[test]
+    fn build_manifest_subscribes_to_review_approvals() {
+        let m = build_manifest("https://gradient.example.com");
+        let events = m["default_events"].as_array().unwrap();
+        assert!(
+            events.iter().any(|e| e == "pull_request_review"),
+            "a native review approval must reach the approval gate: {events:?}"
         );
     }
 
