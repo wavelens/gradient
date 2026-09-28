@@ -64,6 +64,8 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `PATCH` | `/user/keys/{api_id}` | Update an API key's name / permissions / project pin |
 | `GET` | `/user/settings` | Get profile settings |
 | `PATCH` | `/user/settings` | Update profile settings |
+| `GET` | `/user/invites` | Open invitations to projects and caches |
+| `POST` | `/user/invites/accept`, `/user/invites/decline` | Accept or decline an invitation |
 | `GET` | `/user/stars` | Starred projects, tasks and caches the user can still read |
 | `PUT` / `DELETE` | `/user/stars/projects/{project}` | Star / unstar a project (idempotent) |
 | `PUT` / `DELETE` | `/user/stars/tasks/{project}/{task}` | Star / unstar a task (idempotent) |
@@ -149,7 +151,10 @@ on the target cache. Use the `availableCache` field on
 | `GET` | `/projects/{project}` | Get project |
 | `PATCH` | `/projects/{project}` | Update project |
 | `DELETE` | `/projects/{project}` | Delete project |
-| `GET/POST/PATCH/DELETE` | `/projects/{project}/users` | Manage members |
+| `GET/POST/PATCH/DELETE` | `/projects/{project}/users` | Manage members; `POST` sends an invitation |
+| `GET/DELETE` | `/projects/{project}/invitations` | List / revoke open invitations |
+| `GET/POST` | `/projects/{project}/roles` | List roles with `available_permissions` / create a custom role |
+| `GET/PATCH/DELETE` | `/projects/{project}/roles/{role_id}` | Get / update / delete a custom role |
 | `GET/POST` | `/projects/{project}/ssh` | Get / regenerate SSH key |
 | `GET` | `/projects/{project}/subscribe` | List subscribed caches |
 | `POST/DELETE` | `/projects/{project}/subscribe/{cache}` | Subscribe / unsubscribe |
@@ -326,6 +331,12 @@ derivation for a `Substituted` build (which has no log of its own).
 | `GET/PATCH/DELETE` | `/caches/{cache}` | Get / update / delete |
 | `POST/DELETE` | `/caches/{cache}/active` | Enable / disable |
 | `GET` | `/caches/{cache}/key` | Public signing key |
+| `GET/POST/PATCH/DELETE` | `/caches/{cache}/members` | Manage members; `POST` sends an invitation |
+| `GET/DELETE` | `/caches/{cache}/invitations` | List / revoke open invitations |
+| `GET/POST` | `/caches/{cache}/roles` | List roles with `available_permissions` / create a custom role |
+| `GET/PATCH/DELETE` | `/caches/{cache}/roles/{role_id}` | Get / update / delete a custom role |
+| `GET` | `/caches/{cache}/subscription-requests` | Pending project subscription requests |
+| `POST/DELETE` | `/caches/{cache}/subscription-requests/{project}` | Approve / deny a request |
 
 ### Commits
 

@@ -21,7 +21,7 @@ for every cache it happens to proxy.
 A project subscribes to a cache to use it as a substituter and to push its build
 outputs there. When the person subscribing does not administer the cache, the
 call records a request instead and a cache admin approves it from the cache's
-**Subscriptions** page. See [Invites](invites.md) for the full flow.
+**Subscriptions** page. See [Share a Cache](../guides/share-a-cache.md#2-share-with-another-project) for the full flow.
 
 ## Authentication
 

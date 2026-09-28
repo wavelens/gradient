@@ -56,7 +56,7 @@ A project subscribes to a cache to push outputs there and substitute from there.
 | Write | Read and upload paths |
 | View | See the cache and download paths |
 
-Custom roles combine single permissions, see [cache permissions](../usage/cache-roles.md).
+Custom roles combine single permissions, see [Members and Roles](../ui/members-and-roles.md#cache-roles).
 
 ## Related
 

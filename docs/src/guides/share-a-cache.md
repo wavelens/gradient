@@ -101,5 +101,5 @@ nix store info --store https://gradient.example.com/cache/main
 ## Next Steps
 
 - [Caches](../concepts/caches.md): upstreams, pull-through and substitution order
-- [Cache roles](../usage/cache-roles.md): custom roles with single permissions
+- [Members and Roles](../ui/members-and-roles.md#cache-roles): custom roles with single permissions
 - [Upload NARs](../usage/cache-nars.md): push paths built outside Gradient

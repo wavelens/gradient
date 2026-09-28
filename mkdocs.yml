@@ -65,6 +65,7 @@ nav:
       - Dashboard: ui/dashboard.md
       - Job Board: ui/job-board.md
       - Closure View: ui/closure-view.md
+      - Members and Roles: ui/members-and-roles.md
   - Using Gradient:
       - Overview: usage/overview.md
       - CLI: usage/cli.md
@@ -74,9 +75,7 @@ nav:
       - Actions: usage/actions.md
       - Events & Webhooks: usage/events.md
       - Caches: usage/caches.md
-      - Invites: usage/invites.md
       - Cache NARs: usage/cache-nars.md
-      - Cache Roles: usage/cache-roles.md
       - Diagnostic Reports: diagnostic-reports.md
   - Reference:
       - Configuration: configuration.md
