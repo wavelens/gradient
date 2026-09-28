@@ -6,7 +6,7 @@
 
 //! Explains every statement `gradient_db::sql!` registered, against the cache
 //! VM's own database amplified to production scale, and fails on a pathological
-//! plan. `docs/src/development/tests.md` documents where it runs and why.
+//! plan. `docs/src/contributors/tests.md` documents where it runs and why.
 
 mod amplify;
 mod explain;

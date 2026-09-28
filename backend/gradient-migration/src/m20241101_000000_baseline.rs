@@ -12,7 +12,7 @@
 //! `prune_removed_migrations` (gradient-db connection.rs) has already dropped
 //! the deleted files' `seaql_migrations` rows. Databases that stopped mid-way
 //! through the pre-globalization chain must first upgrade through a release
-//! that still ships it (see docs/src/migrations.md).
+//! that still ships it (see docs/src/contributors/migrations.md).
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::{ConnectionTrait, Statement};
