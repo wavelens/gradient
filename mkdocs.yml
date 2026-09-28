@@ -63,9 +63,9 @@ nav:
       - Report a Bug: guides/diagnostic-report.md
   - Using the UI:
       - Dashboard: ui/dashboard.md
+      - Job Board: ui/job-board.md
   - Using Gradient:
       - Overview: usage/overview.md
-      - Job Board: usage/job-board.md
       - CLI: usage/cli.md
       - API: usage/api.md
       - State: usage/state.md

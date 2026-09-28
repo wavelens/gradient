@@ -136,7 +136,7 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
 
 `dispatched_job_phase` holds the worker's phase timeline, one row per span,
 nested through `parent_seq`. `phase` is the numeric discriminant; the names are
-listed in [the job board page](usage/job-board.md). To see where a job's time
+listed in [the job board page](ui/job-board.md#job-inspection). To see where a job's time
 actually went:
 
 ```sh

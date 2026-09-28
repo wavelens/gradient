@@ -17,7 +17,7 @@ Three tables are written per evaluation:
   `eval_derivations` spans when the job reports its terminal message. They are
   therefore 0 for the window between `EvalStats` and job completion, and stay 0
   for an eval whose worker vanished before reporting. See
-  [the job board](../usage/job-board.md) for the full phase list.
+  [the job board](../ui/job-board.md#job-inspection) for the full phase list.
 - **`evaluation_attr_cost`** - per-entry-point hotspots: thunks, function calls,
   eval wall-clock and allocated bytes bucketed by user entry-point.
 - **`flake_output_node`** - the walked flake-output subgraph: `path`, `parent`,
