@@ -6,9 +6,8 @@
 
 //! Build task - invoke the local nix-daemon to build a single derivation.
 //!
-//! Unlike the server's `SshBuildExecutor`, the worker builds directly against
-//! its own local nix-daemon (no SSH tunneling). Dependencies are already
-//! present in the local store (placed there by the server via NarPush or S3).
+//! Dependencies are already in the local store, prefetched from the Gradient
+//! cache before the build starts.
 //!
 //! The build pipeline is encoded as a type-state chain:
 //!

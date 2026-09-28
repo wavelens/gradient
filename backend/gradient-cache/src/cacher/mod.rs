@@ -6,10 +6,9 @@
 
 //! Server-side cache maintenance.
 //!
-//! The server no longer packs, compresses, or signs NARs - the worker does
-//! all of that locally and uploads the compressed bytes with metadata and
-//! per-cache signatures attached. This module only runs periodic cleanup /
-//! GC passes against the cache's DB and NAR store.
+//! Workers pack and compress NARs; the server signs them on upload. This
+//! module runs the periodic sweeps: cleanup, signature and debug-index
+//! backfills, eval cache eviction and the deep GC.
 
 mod cleanup;
 mod debug_index;
