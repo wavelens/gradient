@@ -66,6 +66,7 @@ nav:
       - Job Board: ui/job-board.md
       - Closure View: ui/closure-view.md
       - Members and Roles: ui/members-and-roles.md
+      - Settings: ui/settings.md
   - Using Gradient:
       - Overview: usage/overview.md
       - CLI: usage/cli.md
