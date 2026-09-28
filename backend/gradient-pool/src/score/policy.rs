@@ -172,12 +172,12 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
     enabled(resource_aware_table())
 }
 
-/// `(name, description)` for every known scoring rule, so the board UI can show
-/// what each rule does. Built from the superset policy and deduplicated by name.
+/// `(name, description)` for every known scoring rule, disabled ones included,
+/// so the board UI can explain any rule a recorded breakdown names.
 pub fn rule_catalog() -> Vec<(&'static str, &'static str)> {
-    let mut catalog: Vec<(&'static str, &'static str)> = resource_aware_rules()
+    let mut catalog: Vec<(&'static str, &'static str)> = resource_aware_table()
         .iter()
-        .map(|r| (r.name(), r.description()))
+        .map(|s| (s.rule.name(), s.rule.description()))
         .collect();
     catalog.sort_by_key(|(name, _)| *name);
     catalog.dedup_by_key(|(name, _)| *name);
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn rule_catalog_covers_every_rule_with_a_description() {
         let catalog = rule_catalog();
-        let rules = resource_aware_rules();
+        let rules: Vec<_> = resource_aware_table().into_iter().map(|s| s.rule).collect();
 
         assert_eq!(
             catalog.len(),
