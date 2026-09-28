@@ -63,13 +63,12 @@ A `workers` verdict with an empty `unmet` set turns into the heal: `attempt_grap
 
 ## Re-Offering Returned Jobs
 
-Offers and scores are deltas: the server sends a worker only candidates missing from its `sent_candidates`, and the worker scores only candidates new to its cache. A job returned to the pool needs both sides cleared.
+Offers are deltas: the server sends a worker only candidates missing from its `sent_candidates`. The worker scores every candidate it is offered. A job returned to the pool has its sent flag cleared.
 
-| Side | Mechanism |
+| Event | Mechanism |
 |---|---|
-| Server, enqueue | `SchedulerMsg::Enqueue` of a build job calls `remove_sent_candidate` for every worker |
-| Server, reject | `SchedulerMsg::Rejected` returns the job to pending and clears its sent flag |
-| Worker, reject | `on_assign_job` calls `forget_candidate` before answering `accepted: false` (draining or at capacity) |
+| Enqueue | `SchedulerMsg::Enqueue` calls `remove_sent_candidate` for every worker, also for the cached follow-up that reuses `eval:{id}` |
+| Reject | `SchedulerMsg::Rejected` returns the job to pending and clears its sent flag |
 | Dispatch pass | `SchedulerMsg::ReOffer` bumps the offer generation while any job is pending; sessions then pull the delta |
 
 ## Startup Recovery

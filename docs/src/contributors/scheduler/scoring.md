@@ -71,7 +71,7 @@ flowchart LR
 ## Dispatch Floor and Vetoes
 
 - Candidates are sorted by `total`, ties broken by the smaller job id.
-- Only the first candidate is checked by `wins`: not vetoed and `total >= DISPATCH_FLOOR` (0.0). Otherwise the worker idles this round.
+- The first candidate that passes `wins` is assigned: not vetoed and `total >= DISPATCH_FLOOR` (0.0). A vetoed higher candidate stays pending. Without a passing candidate the worker idles this round.
 - A veto is a hold independent of the sum: large bonuses cannot outvote the veto. `RescoreWaitRule` is the only vetoing rule: score 0, and a hold on a build while `missing_nar_size` is `None` and `rescore_count < 4`.
 - Every decision, rejected candidates included, goes into a 200-entry ring for the [Job Board](../../ui/job-board.md#job-inspection).
 
@@ -79,12 +79,11 @@ flowchart LR
 
 | Signal | Measured in | Formula |
 |---|---|---|
-| `network_speed_mbps` | Relayed NAR upload (`nar.rs`) and NAR receive (`nar_recv.rs`) | bits / elapsed seconds / 10^6 |
+| `network_speed_mbps` | Relayed NAR upload (`nar.rs`), NAR receive (`nar_recv.rs`), presigned PUT (`object_put.rs`) and presigned download (`download_one_presigned`) | bits / elapsed seconds / 10^6 |
 | `disk_speed_mbps` | `build_metrics.rs` after each build | cgroup `disk_read_bytes + disk_write_bytes` in MiB / build seconds |
 | `cpu_core_score` | Startup micro-benchmark, or `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` | Static, sent with `WorkerCapabilities` |
 
 - Network and disk are EWMAs (`alpha = 0.3`) in `gradient-worker-client/src/throughput.rs`, `None` until the first sample.
-- Presigned (direct S3) transfers feed no network sample.
 - `cpu_core_score_mean` is the mean over connected workers with a non-zero score.
 
 ## Adding a Rule
@@ -95,7 +94,7 @@ flowchart LR
 4. A new policy also needs a `policy_by_name` arm, `uses_history = true` when a rule reads history, and the enum value in `nix/modules/gradient.nix`.
 5. Unit tests sit next to the rule in `#[cfg(test)] mod tests`.
 
-`rule_catalog` (`GET /board/scoring/rules`) lists only the enabled `resource-aware` rules; a rule outside that table has no description on the board.
+`rule_catalog` (`GET /board/scoring/rules`) lists every rule of the `resource-aware` table, disabled ones included, for the board to explain any rule a recorded breakdown names.
 
 ## Related
 

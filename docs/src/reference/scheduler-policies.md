@@ -17,7 +17,7 @@ An unknown name falls back to `resource-aware`.
 
 ## Negative Scores
 
-The worker's highest-scoring job is handed out only when its total is at least 0 and no rule vetoes the job. Otherwise the worker idles this round and the job waits for a better fit. Bonus rules never go below zero; only penalties and vetoes can hold a job back.
+The worker gets its highest-scoring job whose total is at least 0 and that no rule vetoes. A vetoed or negative job waits for a better fit; without any eligible job the worker idles this round. Bonus rules never go below zero; only penalties and vetoes can hold a job back.
 
 ## Rules in Both Policies
 
