@@ -24,7 +24,7 @@ flowchart LR
 | Trigger | Starts an evaluation of a task: push, pull request, polling or schedule |
 | [Evaluation](evaluations-and-builds.md#evaluation) | One run of a task at one commit, listing every derivation to build |
 | [Build](evaluations-and-builds.md#build) | One derivation, built once and shared by every evaluation that needs the same derivation |
-| Worker | A machine that evaluates flakes and builds derivations for the projects that enable the worker |
+| [Worker](workers.md) | A machine that evaluates flakes and builds derivations for the projects that enable the worker |
 | Cache | A Nix binary cache that stores build outputs and serves them to `nix` |
 | Action | Reacts to evaluation and build events: mail, web request, forge status, pull request |
 
