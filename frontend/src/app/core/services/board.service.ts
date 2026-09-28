@@ -217,6 +217,7 @@ export interface ExpensiveBuild {
   name: string;
   build_time_ms: number;
   worker: string | null;
+  worker_name: string | null;
 }
 
 export interface MetricPoint {
@@ -368,6 +369,7 @@ export interface DurationsHeatmap {
 
 export interface TopProjectBuildTime {
   project: string;
+  project_name: string;
   total_build_ms: number;
   build_count: number;
 }
@@ -379,6 +381,7 @@ export interface ExpensiveResource {
   value: number;
   unit: string;
   worker: string;
+  worker_name: string | null;
 }
 
 export interface ExpensiveEval {

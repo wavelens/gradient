@@ -799,42 +799,76 @@ pub struct ExpensiveBuild {
     pub name: String,
     pub build_time_ms: i64,
     pub worker: Option<String>,
+    pub worker_name: Option<String>,
+}
+
+/// A `LEFT JOIN` yielding `wn.display_name` for the worker id in `worker_col`.
+/// Scoped callers only learn names registered by one of their own projects.
+fn worker_name_sql(worker_col: &str, project_filter: Option<&str>) -> String {
+    let scope = project_filter
+        .map(|list| format!(" AND wr.peer_id IN ({list})"))
+        .unwrap_or_default();
+
+    format!(
+        "LEFT JOIN LATERAL ( \
+           SELECT wr.display_name FROM worker_registration wr \
+           WHERE wr.worker_id = {worker_col} AND wr.display_name <> ''{scope} \
+           ORDER BY wr.active DESC, wr.created_at DESC LIMIT 1 \
+         ) wn ON true"
+    )
 }
 
 fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String {
+    let window = format!("(now() AT TIME ZONE 'UTC') - interval '{window_days} days'");
     let mut clauses = vec![
-        "ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL".to_string(),
         format!(
             "b.status = {}",
             gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed)
         ),
+        format!("b.created_at >= {window}"),
     ];
 
     if let Some(list) = project_filter {
         clauses.push(format!("pr.project IN ({list})"));
     }
 
-    clauses.push(format!(
-        "b.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window_days} days'"
-    ));
-
     format!(
-        "SELECT bj.id, pr.project, d.name, \
-         EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000 AS build_time_ms, \
-         dj.worker_id AS worker \
-         FROM build_job bj \
-         JOIN derivation_build b ON b.id = bj.derivation_build \
-         JOIN derivation d ON d.id = bj.derivation \
-         JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN task pr ON pr.id = ev.task \
-         JOIN LATERAL ( \
-           SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
-           FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
-           ORDER BY ba2.created_at DESC LIMIT 1 \
-         ) ba ON true \
-         JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
-         WHERE {} ORDER BY build_time_ms DESC LIMIT 20",
-        clauses.join(" AND ")
+        "WITH metric AS ( \
+           SELECT DISTINCT ON (dm.derivation) dm.derivation, dm.build_time_ms, dm.worker_id \
+           FROM derivation_metric dm \
+           WHERE dm.build_time_ms IS NOT NULL AND dm.created_at >= {window} \
+           ORDER BY dm.derivation, dm.created_at DESC \
+         ), anchor AS ( \
+           SELECT DISTINCT ON (b.id) bj.id, pr.project, d.name, b.id AS derivation_build, b.derivation \
+           FROM build_job bj \
+           JOIN derivation_build b ON b.id = bj.derivation_build \
+           JOIN derivation d ON d.id = b.derivation \
+           JOIN evaluation ev ON ev.id = bj.evaluation \
+           JOIN task pr ON pr.id = ev.task \
+           WHERE {clauses} \
+           ORDER BY b.id, bj.created_at DESC \
+         ), ranked AS ( \
+           SELECT a.id, a.project, a.name, \
+           coalesce(m.build_time_ms, EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000) AS build_time_ms, \
+           coalesce(m.worker_id, dj.worker_id) AS worker \
+           FROM anchor a \
+           LEFT JOIN metric m ON m.derivation = a.derivation \
+           LEFT JOIN LATERAL ( \
+             SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
+             FROM build_attempt ba2 \
+             WHERE ba2.derivation_build = a.derivation_build AND m.derivation IS NULL \
+             ORDER BY ba2.created_at DESC LIMIT 1 \
+           ) ba ON true \
+           LEFT JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
+           WHERE m.derivation IS NOT NULL \
+              OR (ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL) \
+           ORDER BY build_time_ms DESC LIMIT 20 \
+         ) \
+         SELECT r.id, r.project, r.name, r.build_time_ms, r.worker, wn.display_name AS worker_name \
+         FROM ranked r {worker_name} \
+         ORDER BY r.build_time_ms DESC",
+        clauses = clauses.join(" AND "),
+        worker_name = worker_name_sql("r.worker", project_filter),
     )
 }
 
@@ -875,6 +909,7 @@ pub async fn get_expensive_jobs(
             name: r.try_get("", "name").unwrap_or_default(),
             build_time_ms: r.try_get("", "build_time_ms").unwrap_or(0),
             worker: r.try_get("", "worker").ok(),
+            worker_name: r.try_get("", "worker_name").ok(),
         })
         .collect();
 
@@ -1064,19 +1099,21 @@ pub async fn get_scoring_summary(
 #[derive(Serialize)]
 pub struct TopProjectBuildTime {
     pub project: Uuid,
+    pub project_name: String,
     pub total_build_ms: i64,
     pub build_count: i64,
 }
 
 fn top_projects_by_buildtime_sql(window_days: i64) -> String {
     format!(
-        "SELECT pr.project, \
+        "SELECT pr.project, p.name AS project_name, \
          sum(EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)::bigint AS total, \
          count(*)::bigint AS cnt \
          FROM build_job bj \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN task pr ON pr.id = ev.task \
+         JOIN project p ON p.id = pr.project \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at \
            FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
@@ -1085,7 +1122,7 @@ fn top_projects_by_buildtime_sql(window_days: i64) -> String {
          WHERE b.status = {completed} \
            AND ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL \
            AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window_days} days' \
-         GROUP BY pr.project ORDER BY total DESC LIMIT 15",
+         GROUP BY pr.project, p.name ORDER BY total DESC LIMIT 15",
         completed = gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed),
     )
 }
@@ -1117,6 +1154,7 @@ pub async fn get_top_projects_by_buildtime(
         .into_iter()
         .map(|r| TopProjectBuildTime {
             project: r.try_get("", "project").unwrap_or_default(),
+            project_name: r.try_get("", "project_name").unwrap_or_default(),
             total_build_ms: r.try_get("", "total").unwrap_or(0),
             build_count: r.try_get("", "cnt").unwrap_or(0),
         })
@@ -1139,44 +1177,64 @@ pub struct ExpensiveResource {
     pub value: f64,
     pub unit: &'static str,
     pub worker: String,
+    pub worker_name: Option<String>,
+}
+
+/// Maps a resource metric key to its SQL value expression + unit, a closed
+/// allow-list so the metric param can never inject SQL.
+fn resource_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
+    Some(match metric {
+        "ram" => ("dm.peak_ram_mb::double precision", "MB"),
+        "cpu" => ("dm.cpu_time_ms::double precision", "ms"),
+        "disk" => (
+            "(coalesce(dm.disk_read_bytes,0) + coalesce(dm.disk_write_bytes,0))::double precision",
+            "bytes",
+        ),
+        "network" => ("dm.peak_network_mbps", "Mbps"),
+        _ => return None,
+    })
 }
 
 /// Derivations are global, so attribute each metric row to one producing project
 /// (an in-scope one when scoped) via the build -> evaluation -> task chain.
 fn expensive_by_resource_sql(
     value_expr: &str,
-    not_null: &str,
     window_days: i64,
-    project_filter: &str,
+    project_filter: Option<&str>,
 ) -> String {
-    let clauses = [
-        not_null.to_string(),
-        format!("dm.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window_days} days'"),
-    ];
+    let project_scope = project_filter
+        .map(|list| format!(" AND pr.project IN ({list})"))
+        .unwrap_or_default();
 
     format!(
-        "SELECT dm.derivation, pro.project, d.name, {value_expr} AS value, dm.worker_id \
-         FROM derivation_metric dm \
-         JOIN derivation d ON d.id = dm.derivation \
-         JOIN LATERAL ( \
-           SELECT pr.project \
-           FROM build_job bj \
-           JOIN evaluation ev ON ev.id = bj.evaluation \
-           JOIN task pr ON pr.id = ev.task \
-           WHERE bj.derivation = dm.derivation{project_filter} \
-           LIMIT 1 \
-         ) pro ON true \
-         WHERE {} ORDER BY value DESC LIMIT 20",
-        clauses.join(" AND ")
+        "WITH ranked AS ( \
+           SELECT dm.derivation, pro.project, d.name, {value_expr} AS value, dm.worker_id \
+           FROM derivation_metric dm \
+           JOIN derivation d ON d.id = dm.derivation \
+           JOIN LATERAL ( \
+             SELECT pr.project \
+             FROM build_job bj \
+             JOIN evaluation ev ON ev.id = bj.evaluation \
+             JOIN task pr ON pr.id = ev.task \
+             WHERE bj.derivation = dm.derivation{project_scope} \
+             LIMIT 1 \
+           ) pro ON true \
+           WHERE {value_expr} > 0 \
+             AND dm.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window_days} days' \
+           ORDER BY value DESC LIMIT 20 \
+         ) \
+         SELECT r.derivation, r.project, r.name, r.value, r.worker_id, wn.display_name AS worker_name \
+         FROM ranked r {worker_name} \
+         ORDER BY r.value DESC",
+        worker_name = worker_name_sql("r.worker_id", project_filter),
     )
 }
 
 gradient_db::sql_fn! {
     EXPENSIVE_BY_RESOURCE = || expensive_by_resource_sql(
         "dm.peak_ram_mb::double precision",
-        "dm.peak_ram_mb IS NOT NULL",
         30,
-        " AND pr.project IN ('11111111-1111-1111-1111-111111111111')",
+        Some("'11111111-1111-1111-1111-111111111111'"),
     ),
         params = [],
         tier = Bulk;
@@ -1189,43 +1247,23 @@ pub async fn get_expensive_by_resource(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Query(params): Query<ResourceParams>,
 ) -> WebResult<Json<BaseResponse<Vec<ExpensiveResource>>>> {
+    let (value_expr, unit) =
+        resource_metric_expr(&params.metric).ok_or_else(|| WebError::not_found("Metric"))?;
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
-    let (value_expr, unit, not_null): (&str, &'static str, &str) = match params.metric.as_str() {
-        "ram" => (
-            "dm.peak_ram_mb::double precision",
-            "MB",
-            "dm.peak_ram_mb IS NOT NULL",
-        ),
-        "cpu" => (
-            "dm.cpu_time_ms::double precision",
-            "ms",
-            "dm.cpu_time_ms IS NOT NULL",
-        ),
-        "disk" => (
-            "(coalesce(dm.disk_read_bytes,0) + coalesce(dm.disk_write_bytes,0))::double precision",
-            "bytes",
-            "(dm.disk_read_bytes IS NOT NULL OR dm.disk_write_bytes IS NOT NULL)",
-        ),
-        "network" => (
-            "dm.peak_network_mbps",
-            "Mbps",
-            "dm.peak_network_mbps IS NOT NULL",
-        ),
-        _ => return Err(WebError::not_found("Metric")),
-    };
 
-    let project_filter = match scope.project_in_list() {
-        Some(list) if list.is_empty() => return Ok(ok_json(vec![])),
-        Some(list) => format!(" AND pr.project IN ({list})"),
-        None => String::new(),
-    };
+    let project_filter = scope.project_in_list();
+    if let Some(list) = &project_filter
+        && list.is_empty()
+    {
+        return Ok(ok_json(vec![]));
+    }
 
     let window = params.window_days.unwrap_or(30).max(1);
 
     let rows = state
         .web_db
         .query_all_raw(EXPENSIVE_BY_RESOURCE.bind_built(
-            expensive_by_resource_sql(value_expr, not_null, window, &project_filter),
+            expensive_by_resource_sql(value_expr, window, project_filter.as_deref()),
             [],
         ))
         .await?;
@@ -1239,6 +1277,7 @@ pub async fn get_expensive_by_resource(
             value: r.try_get("", "value").unwrap_or(0.0),
             unit,
             worker: r.try_get("", "worker_id").unwrap_or_default(),
+            worker_name: r.try_get("", "worker_name").ok(),
         })
         .collect();
 
@@ -1724,5 +1763,64 @@ mod tests {
         assert_eq!(node.kind, "derivation");
         assert!(node.is_derivation);
         assert_eq!(node.drv_path.as_deref(), Some("abc-hello.drv"));
+    }
+
+    const SCOPE: &str = "'11111111-1111-1111-1111-111111111111'";
+
+    #[test]
+    fn expensive_jobs_are_one_row_per_derivation_build() {
+        let sql = expensive_jobs_sql(30, Some(SCOPE));
+        assert!(sql.contains("DISTINCT ON (b.id)"), "sql = {sql}");
+        assert!(
+            sql.contains(&format!("pr.project IN ({SCOPE})")),
+            "sql = {sql}"
+        );
+    }
+
+    #[test]
+    fn expensive_jobs_prefer_the_worker_measured_build_time() {
+        let sql = expensive_jobs_sql(30, None);
+        assert!(sql.contains("FROM derivation_metric dm"), "sql = {sql}");
+        assert!(
+            sql.contains("coalesce(m.build_time_ms, EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))"),
+            "sql = {sql}"
+        );
+    }
+
+    #[test]
+    fn expensive_resources_skip_zero_values_for_every_metric() {
+        for metric in ["ram", "cpu", "disk", "network"] {
+            let (value_expr, _) = resource_metric_expr(metric).unwrap();
+            let sql = expensive_by_resource_sql(value_expr, 30, None);
+            assert!(sql.contains(&format!("{value_expr} > 0")), "sql = {sql}");
+        }
+        assert!(resource_metric_expr("bogus").is_none());
+    }
+
+    #[test]
+    fn worker_names_come_from_the_callers_own_registrations() {
+        let scoped = worker_name_sql("r.worker", Some(SCOPE));
+        assert!(scoped.contains("wr.worker_id = r.worker"), "sql = {scoped}");
+        assert!(
+            scoped.contains(&format!("wr.peer_id IN ({SCOPE})")),
+            "sql = {scoped}"
+        );
+        assert!(!worker_name_sql("r.worker", None).contains("peer_id"));
+
+        for sql in [
+            expensive_jobs_sql(30, Some(SCOPE)),
+            expensive_by_resource_sql("dm.cpu_time_ms::double precision", 30, Some(SCOPE)),
+        ] {
+            assert!(sql.contains("AS worker_name"), "sql = {sql}");
+            assert!(
+                sql.contains(&format!("wr.peer_id IN ({SCOPE})")),
+                "sql = {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn top_projects_carry_the_project_name() {
+        assert!(top_projects_by_buildtime_sql(30).contains("p.name AS project_name"));
     }
 }

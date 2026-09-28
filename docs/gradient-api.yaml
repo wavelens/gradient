@@ -9023,19 +9023,32 @@ paths:
     get:
       tags: [board]
       summary: Most expensive builds
-      description: Top builds by wall-clock build time.
+      description: Top 20 completed derivation builds by build time, one row per derivation build. The time is the worker-measured `derivation_metric.build_time_ms`, falling back to the latest attempt's start and finish stamps when no metric exists. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.
       operationId: getBoardExpensiveJobs
       parameters:
         - { name: window_days, in: query, schema: { type: integer } }
       responses:
         '200':
           description: Top builds by build time
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    build_id: { type: string, format: uuid }
+                    project: { type: string, format: uuid }
+                    name: { type: string }
+                    build_time_ms: { type: integer, format: int64 }
+                    worker: { type: string, nullable: true }
+                    worker_name: { type: string, nullable: true }
 
   /board/jobs/expensive-by-resource:
     get:
       tags: [board]
       summary: Most expensive builds by resource
-      description: Top derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from `derivation_metric`. Project-scoped.
+      description: Top 20 derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from `derivation_metric`, skipping zero values. Project-scoped; `worker_name` is shown only when the worker is registered by a project the caller can see.
       operationId: getBoardExpensiveByResource
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string, enum: [ram, cpu, disk, network] } }
@@ -9043,6 +9056,20 @@ paths:
       responses:
         '200':
           description: Top builds by resource
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    derivation: { type: string, format: uuid }
+                    project: { type: string, format: uuid }
+                    name: { type: string }
+                    value: { type: number }
+                    unit: { type: string, enum: [MB, ms, bytes, Mbps] }
+                    worker: { type: string }
+                    worker_name: { type: string, nullable: true }
         '404':
           description: Unknown metric
 
@@ -9315,6 +9342,17 @@ paths:
       responses:
         '200':
           description: Top projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    project: { type: string, format: uuid }
+                    project_name: { type: string }
+                    total_build_ms: { type: integer, format: int64 }
+                    build_count: { type: integer, format: int64 }
         '403':
           description: Superuser required
 
