@@ -14,38 +14,57 @@ use connector::tasks::{MakeTaskRequest, PatchTaskRequest};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Select the task later commands act on, within the selected project
     Select {
+        /// Task name
         #[arg(add = ArgValueCompleter::new(completion::complete_tasks))]
         task: String,
     },
+    /// Show the selected task with its last evaluation and builds
     Show,
+    /// Stream the logs of the selected task's last evaluation
     Log,
+    /// Create a task in the selected project; missing fields open in $EDITOR
     Create {
+        /// Name
         #[arg(short, long)]
         name: Option<String>,
+        /// Display name
         #[arg(short, long)]
         display_name: Option<String>,
+        /// Description
         #[arg(short = 'c', long)]
         description: Option<String>,
+        /// Git repository URL
         #[arg(short, long)]
         repository: Option<String>,
+        /// Flake attribute wildcard to evaluate
         #[arg(short = 'w', long)]
         wildcard: Option<String>,
     },
+    /// List the tasks of the selected project
     List,
+    /// Edit the selected task
     Edit {
+        /// New name
         #[arg(short, long)]
         new_name: Option<String>,
+        /// New display name
         #[arg(short, long)]
         display_name: Option<String>,
+        /// New description
         #[arg(short = 'c', long)]
         description: Option<String>,
+        /// New Git repository URL
         #[arg(short, long)]
         repository: Option<String>,
+        /// New flake attribute wildcard
         #[arg(short = 'w', long)]
         wildcard: Option<String>,
     },
+    /// Delete the selected task
     Delete,
+    /// Start an evaluation of the selected task
     Evaluate,
 }
 

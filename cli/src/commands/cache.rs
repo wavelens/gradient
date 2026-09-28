@@ -16,38 +16,53 @@ use std::fs;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Create a cache; missing fields open in $EDITOR
     Create {
+        /// Name
         #[arg(short, long)]
         name: Option<String>,
+        /// Display name
         #[arg(short, long)]
         display_name: Option<String>,
+        /// Description
         #[arg(short = 'c', long)]
         description: Option<String>,
+        /// Priority advertised to Nix; lower is preferred
         #[arg(short, long)]
         priority: Option<i32>,
         /// Max cache storage in GB. 0 = unlimited (default); otherwise at least 1.
         #[arg(short = 'm', long, default_value_t = 0)]
         max_storage_gb: i32,
     },
+    /// List the caches of the current user
     List,
+    /// Edit a cache
     Edit {
+        /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
+        /// New display name
         #[arg(short, long)]
         display_name: Option<String>,
+        /// New description
         #[arg(short = 'c', long)]
         description: Option<String>,
+        /// New priority; lower is preferred by Nix
         #[arg(short, long)]
         priority: Option<i32>,
         /// Max cache storage in GB. 0 = unlimited; otherwise at least 1.
         #[arg(short = 'm', long)]
         max_storage_gb: Option<i32>,
     },
+    /// Delete a cache
     Delete {
+        /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },
+    /// Print the public key of a cache
     Show {
+        /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         name: String,
     },

@@ -10,6 +10,7 @@ use rand::distr::{Alphanumeric, SampleString};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Generate an API token and the digest for a declarative `api_keys.<name>.key_file`
     Apikey,
 }
 

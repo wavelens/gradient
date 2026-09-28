@@ -17,37 +17,53 @@ use connector::{Client, ConnectorError};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Select the project later commands act on
     Select {
+        /// Project name
         #[arg(add = ArgValueCompleter::new(completion::complete_projects))]
         project: String,
     },
+    /// Create a project; missing fields open in $EDITOR
     Create {
+        /// Name
         #[arg(short, long)]
         name: Option<String>,
+        /// Display name
         #[arg(short, long)]
         display_name: Option<String>,
+        /// Description
         #[arg(short = 'c', long)]
         description: Option<String>,
     },
+    /// Show the selected project
     Show,
+    /// List the projects of the current user
     List,
+    /// Edit the selected project
     Edit {
+        /// New name
         #[arg(short, long)]
         new_name: Option<String>,
+        /// New display name
         #[arg(short, long)]
         display_name: Option<String>,
+        /// New description
         #[arg(short = 'c', long)]
         description: Option<String>,
     },
+    /// Delete the selected project
     Delete,
+    /// Manage members of the selected project
     User {
         #[command(subcommand)]
         cmd: UserCommands,
     },
+    /// Manage the SSH key of the selected project
     Ssh {
         #[command(subcommand)]
         cmd: SshCommands,
     },
+    /// Manage the caches the selected project pushes to
     Cache {
         #[command(subcommand)]
         cmd: CacheCommands,
@@ -56,12 +72,18 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum UserCommands {
+    /// List members
     List,
+    /// Add a member
     Add {
+        /// Username
         user: String,
+        /// Role: View, Write or Admin (default: Write)
         role: Option<String>,
     },
+    /// Remove a member
     Remove {
+        /// Username
         #[arg(add = ArgValueCompleter::new(completion::complete_project_users))]
         user: String,
     },
@@ -69,18 +91,25 @@ pub enum UserCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum SshCommands {
+    /// Print the public SSH key used to fetch repositories
     Show,
+    /// Replace the SSH key pair and print the new public key
     Recreate,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum CacheCommands {
+    /// List subscribed caches
     List,
+    /// Subscribe to a cache
     Add {
+        /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
     },
+    /// Unsubscribe from a cache
     Remove {
+        /// Cache name
         #[arg(add = ArgValueCompleter::new(completion::complete_subscribed_caches))]
         cache: String,
     },
