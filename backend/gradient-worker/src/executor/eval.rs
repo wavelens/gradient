@@ -277,6 +277,7 @@ impl Clone for WorkerEvaluator {
 ///
 /// Attr discovery is done inside [`evaluate_derivations`] since the server
 /// only cares about the final [`DiscoveredDerivation`] list.
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result<()> {
     // Rebind as &JobUpdater so the inherent &self method wins over the &mut self
     // trait method that async_trait generates.
@@ -308,6 +309,7 @@ const EVAL_BATCH_SIZE: usize = 50;
 /// 5. Every `EVAL_BATCH_SIZE` derivations: send `EvalResult` so the server can
 ///    start queuing builds while the walk continues
 /// 6. Final flush with any remainder + accumulated warnings/errors
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
     job: &FlakeJob,
@@ -535,6 +537,7 @@ fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(
 /// A read or parse failure is a hard error - silently dropping a derivation
 /// drops its entire dep subtree, causing the dispatcher to release the parent
 /// prematurely and the nix-daemon to die with "1 dependency failed".
+#[tracing::instrument(level = "debug", skip_all, fields(size = wave.len()))]
 async fn parse_drv_wave(
     drv_reader: &dyn DrvReader,
     wave: &[(Option<String>, String)],
@@ -700,6 +703,7 @@ impl<'a> ClosureWalker<'a> {
     }
 
     /// Drain one concurrent wave from the front of the queue and process it.
+    #[tracing::instrument(name = "wave", level = "debug", skip_all, fields(queued = self.queue.len()))]
     async fn process_wave(&mut self, updater: &mut dyn JobReporter) -> Result<()> {
         let wave_size = self.queue.len().min(DRV_READ_CONCURRENCY);
         let wave: Vec<_> = (0..wave_size)

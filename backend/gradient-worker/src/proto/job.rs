@@ -493,6 +493,7 @@ impl JobReporter for JobUpdater {
         .await
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(job_id = %self.job_id, paths = drv_paths.len()))]
     async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
         let mut guard = self.phase(JobPhase::KnownDerivationsWait);
         guard.record(drv_paths.len() as u32, 0);
@@ -539,6 +540,7 @@ impl JobReporter for JobUpdater {
         self.send_update(JobUpdateKind::EvaluatingDerivations).await
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(job_id = %self.job_id, derivations = derivations.len()))]
     async fn report_eval_result(
         &mut self,
         derivations: Vec<DiscoveredDerivation>,
