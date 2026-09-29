@@ -626,7 +626,7 @@ impl NarStore {
         let Some(s3) = &self.s3_signer else {
             return Ok(None);
         };
-        crate::multipart::presign(s3, &self.object_path(hash), nar_size)
+        crate::multipart::presign(s3, &STATS, &self.object_path(hash), nar_size)
             .await
             .map(Some)
     }
@@ -640,7 +640,7 @@ impl NarStore {
             .s3_signer
             .as_ref()
             .context("multipart upload reported to a store without S3")?;
-        crate::multipart::complete(s3, &self.object_path(hash), receipt).await
+        crate::multipart::complete(s3, &STATS, &self.object_path(hash), receipt).await
     }
 
     pub async fn abort_multipart(&self, hash: &str, upload_id: &str) {
