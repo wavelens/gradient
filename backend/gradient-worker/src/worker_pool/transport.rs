@@ -103,6 +103,9 @@ impl EvalWorker {
         let mut command = Command::new(&exe);
         command.arg("--eval-subprocess");
         command.env("NIX_CACHE_HOME", eval_cache_dir);
+        if let Some(dir) = gradient_util::trace_file::active_dir() {
+            command.env("GRADIENT_WORKER_LOG_TRACE_DIR", dir);
+        }
         for &(k, v) in
             super::eval_stats::eval_worker_stats_env(super::eval_stats::metrics_enabled())
         {

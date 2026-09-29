@@ -69,7 +69,7 @@ def reset_to_cold():
     server.systemctl("start gradient-server.service")
     server.wait_for_unit("gradient-server.service")
     for node in WORKER_NODES:
-        node.succeed("rm -rf /var/lib/gradient-worker/eval-cache /var/lib/gradient-worker/.cache/nix")
+        node.succeed("rm -rf /var/lib/gradient-worker/eval-cache /var/lib/gradient-worker/www/.cache/nix")
         node.systemctl("start gradient-worker.service")
     wait_workers_since(epoch)
 

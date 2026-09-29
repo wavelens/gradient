@@ -53,9 +53,11 @@ def start_profilers(run):
                       f"{out}/perf.data")
 
     pid = worker.succeed("systemctl show -p MainPID --value gradient-worker").strip()
+    evals = worker.succeed("pgrep -f '[-]-eval-subprocess' || true").split()
+    attach = " ".join(f"-p {p}" for p in [pid, *evals])
     out = run_dir(worker, run)
     start_capture(worker, "cap-strace",
-                  f"strace -f -ff -tt -T -o {out}/strace/worker -p {pid}",
+                  f"strace -f -ff -tt -T -o {out}/strace/worker {attach}",
                   f"{out}/strace/worker.{pid}")
 
 

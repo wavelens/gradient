@@ -10,17 +10,19 @@
 use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
 use std::io::{LineWriter, Write as _};
-use std::path::Path;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Level, Subscriber};
-use tracing_subscriber::filter::Targets;
-use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::filter::{FilterExt as _, Targets, filter_fn};
+use tracing_subscriber::layer::{Context, Filter, Layer};
 use tracing_subscriber::registry::LookupSpan;
+
+static ACTIVE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct TraceFileLayer {
     out: Mutex<LineWriter<File>>,
@@ -67,6 +69,7 @@ pub fn layer(dir: &Path, process: &str) -> std::io::Result<TraceFileLayer> {
         .append(true)
         .open(dir.join(format!("{process}-{pid}.jsonl")))?;
 
+    let _ = ACTIVE_DIR.set(dir.to_owned());
     Ok(TraceFileLayer {
         out: Mutex::new(LineWriter::new(file)),
         process: process.to_owned(),
@@ -74,8 +77,15 @@ pub fn layer(dir: &Path, process: &str) -> std::io::Result<TraceFileLayer> {
     })
 }
 
-pub fn filter() -> Targets {
-    Targets::new().with_target("gradient", Level::DEBUG)
+/// The directory this process traces into, for child processes to trace beside it.
+pub fn active_dir() -> Option<&'static Path> {
+    ACTIVE_DIR.get().map(PathBuf::as_path)
+}
+
+pub fn filter<S: Subscriber>() -> impl Filter<S> + use<S> {
+    Targets::new()
+        .with_target("gradient", Level::DEBUG)
+        .and(filter_fn(|meta| meta.is_span()))
 }
 
 fn wall_clock_us() -> u64 {
@@ -186,6 +196,24 @@ mod tests {
         });
 
         assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn an_opened_trace_dir_is_remembered_for_child_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        layer(dir.path(), "worker").expect("open trace file");
+        assert!(active_dir().is_some());
+    }
+
+    #[test]
+    fn events_are_not_enabled_by_the_span_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let subscriber = tracing_subscriber::registry()
+            .with(layer(dir.path(), "server").unwrap().with_filter(filter()));
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(!tracing::event_enabled!(tracing::Level::DEBUG));
+            assert!(tracing::span_enabled!(tracing::Level::DEBUG));
+        });
     }
 
     #[test]
