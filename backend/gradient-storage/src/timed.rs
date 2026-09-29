@@ -191,7 +191,7 @@ impl ObjectStore for TimedStore {
         self.inner
             .delete_stream(locations)
             .inspect(move |item| match item {
-                Ok(_) => stats.record(
+                Ok(_) | Err(object_store::Error::NotFound { .. }) => stats.record(
                     metric::STORAGE_OP_MS,
                     "delete",
                     started.elapsed().as_secs_f64() * 1000.0,
@@ -319,6 +319,7 @@ mod tests {
             .put_multipart(&Path::from("a"))
             .await
             .expect("multipart");
+
         drop(upload.put_part(PutPayload::from_static(b"x")));
 
         assert_eq!(count(stats, metric::STORAGE_OP_MS, "multipart_create"), 1);
