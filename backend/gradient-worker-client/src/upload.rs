@@ -31,8 +31,10 @@ struct Inner {
 }
 
 /// Every upload this worker sends: requested, granted, transferred, then
-/// acknowledged by the server. One job holds at most half of the slots, so an
-/// evaluation pushing its whole closure never queues build outputs behind it.
+/// acknowledged by the server. A slot bounds the transfer, not the commit after
+/// it, so the server's graph sees a burst of commits it can batch. One job holds
+/// at most half of the slots, so an evaluation pushing its whole closure never
+/// queues build outputs behind it.
 #[derive(Clone)]
 pub struct UploadClient {
     inner: Arc<Mutex<Inner>>,
@@ -86,16 +88,9 @@ impl UploadClient {
     /// Take one of this worker's upload slots for `object`; drive the returned
     /// [`Upload`] with [`Upload::next_grant`] and [`Upload::settle`].
     pub async fn start(&self, job_id: &str, object: UploadObject, size: u64) -> Result<Upload<'_>> {
-        let job_slot = self
-            .job_slots(job_id)
-            .acquire_owned()
-            .await
-            .context("upload slots closed")?;
-        let slot = self.slots.acquire().await.context("upload slots closed")?;
         Ok(Upload {
             client: self,
-            _job_slot: job_slot,
-            _slot: slot,
+            slots: Some(self.acquire_slots(job_id).await?),
             job_id: job_id.to_owned(),
             object,
             size,
@@ -153,6 +148,19 @@ impl UploadClient {
         (id, grant_rx, outcome_rx)
     }
 
+    async fn acquire_slots(&self, job_id: &str) -> Result<Slots<'_>> {
+        let job = self
+            .job_slots(job_id)
+            .acquire_owned()
+            .await
+            .context("upload slots closed")?;
+        let worker = self.slots.acquire().await.context("upload slots closed")?;
+        Ok(Slots {
+            _job: job,
+            _worker: worker,
+        })
+    }
+
     fn job_slots(&self, job_id: &str) -> Arc<Semaphore> {
         let mut inner = self.inner.lock();
         if let Some(slots) = inner.jobs.get(job_id).and_then(Weak::upgrade) {
@@ -169,12 +177,16 @@ impl UploadClient {
     }
 }
 
-/// One object's way through the handshake, holding a worker upload slot until
-/// it is dropped.
+struct Slots<'a> {
+    _job: OwnedSemaphorePermit,
+    _worker: SemaphorePermit<'a>,
+}
+
+/// One object's way through the handshake, holding a worker upload slot from
+/// its request until its transfer is finished.
 pub struct Upload<'a> {
     client: &'a UploadClient,
-    _job_slot: OwnedSemaphorePermit,
-    _slot: SemaphorePermit<'a>,
+    slots: Option<Slots<'a>>,
     job_id: String,
     object: UploadObject,
     size: u64,
@@ -188,6 +200,9 @@ impl Upload<'_> {
     /// server already has it and nothing is to be sent. The server may answer
     /// before granting (a rejection, or a retry when it cannot open a target).
     pub async fn next_grant(&mut self) -> Result<Option<(u64, GrantTarget)>> {
+        if self.slots.is_none() {
+            self.slots = Some(self.client.acquire_slots(&self.job_id).await?);
+        }
         loop {
             if self.attempts == MAX_UPLOAD_ATTEMPTS {
                 bail!(
@@ -266,6 +281,7 @@ impl Upload<'_> {
                 Err(e)
             }
         };
+        self.slots = None;
         let outcome = match finished {
             Ok(()) => outcome.await.context("upload cancelled before its commit"),
             Err(e) => Err(e),
@@ -401,6 +417,50 @@ mod tests {
             .await
             .unwrap();
         upload.await.unwrap().unwrap();
+    }
+
+    /// A slot held through the commit capped an evaluation at one commit in
+    /// flight per job slot, so the server's graph never saw a burst to batch.
+    #[tokio::test]
+    async fn an_upload_waiting_for_its_commit_frees_its_slot() {
+        let (client, mut server, _pump) = connected(2).await;
+        let first = tokio::spawn({
+            let client = client.clone();
+            async move { run(&client).await }
+        });
+        let ClientMessage::UploadRequest { request_id, .. } = server.recv().await.unwrap() else {
+            panic!("request first")
+        };
+        server
+            .send(ServerMessage::UploadGrant {
+                request_id,
+                target: GrantTarget::Put { url: "u".into() },
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            server.recv().await.unwrap(),
+            ClientMessage::UploadFinished { .. }
+        ));
+
+        let second = tokio::spawn({
+            let client = client.clone();
+            async move { run(&client).await }
+        });
+        let next = tokio::time::timeout(Duration::from_secs(5), server.recv())
+            .await
+            .expect("the second upload is requested while the first awaits its commit");
+        assert!(matches!(next.unwrap(), ClientMessage::UploadRequest { .. }));
+
+        server
+            .send(ServerMessage::UploadCommitted {
+                request_id,
+                outcome: UploadOutcome::Ok,
+            })
+            .await
+            .unwrap();
+        first.await.unwrap().unwrap();
+        second.abort();
     }
 
     #[tokio::test]
