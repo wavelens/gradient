@@ -7,7 +7,13 @@
 //! One tracing setup for every Gradient binary: a base level, dependency
 //! noise pinned to `warn`, per-target overrides and an optional `RUST_LOG`.
 
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use std::path::Path;
+
+use tracing::Subscriber;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+
+use crate::trace_file;
 
 /// Dependency targets pinned to `warn` so a plain `info` log stays readable.
 pub const NOISY_DEPS: &[&str] = &[
@@ -25,6 +31,12 @@ pub struct LogSetup<'a> {
     pub quiet: &'a [&'a str],
     pub honor_rust_log: bool,
     pub writer: LogWriter,
+    pub trace: Option<TraceSetup<'a>>,
+}
+
+pub struct TraceSetup<'a> {
+    pub dir: &'a Path,
+    pub process: &'a str,
 }
 
 pub fn directive(setup: &LogSetup<'_>) -> String {
@@ -57,12 +69,31 @@ pub fn effective_directive(setup: &LogSetup<'_>, rust_log: Option<&str>) -> Stri
 pub fn init(setup: &LogSetup<'_>) {
     let rust_log = std::env::var("RUST_LOG").ok();
     let filter = EnvFilter::new(effective_directive(setup, rust_log.as_deref()));
-    let layer = fmt::layer().with_target(true).with_thread_ids(true);
-    let registry = tracing_subscriber::registry().with(filter);
-    match setup.writer {
-        LogWriter::Stdout => registry.with(layer).init(),
-        LogWriter::Stderr => registry.with(layer.with_writer(std::io::stderr)).init(),
-    }
+    let console = fmt::layer().with_target(true).with_thread_ids(true);
+    let console = match setup.writer {
+        LogWriter::Stdout => console.boxed(),
+        LogWriter::Stderr => console.with_writer(std::io::stderr).boxed(),
+    };
+
+    tracing_subscriber::registry()
+        .with(console.with_filter(filter))
+        .with(setup.trace.as_ref().and_then(trace_layer))
+        .init();
+}
+
+fn trace_layer<S>(setup: &TraceSetup<'_>) -> Option<impl Layer<S> + use<S>>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    trace_file::layer(setup.dir, setup.process)
+        .inspect_err(|e| {
+            eprintln!(
+                "trace dir {}: {e}; spans are not traced to a file",
+                setup.dir.display()
+            )
+        })
+        .ok()
+        .map(|layer| layer.with_filter(trace_file::filter()))
 }
 
 #[cfg(test)]
@@ -79,6 +110,7 @@ mod tests {
             quiet,
             honor_rust_log: false,
             writer: LogWriter::Stderr,
+            trace: None,
         }
     }
 
@@ -111,5 +143,15 @@ mod tests {
         assert_eq!(effective_directive(&honoured, Some("debug")), "debug");
         assert_eq!(effective_directive(&honoured, Some("=[bad")), "info");
         assert_eq!(effective_directive(&honoured, None), "info");
+    }
+
+    #[test]
+    fn an_unopenable_trace_dir_leaves_logging_without_a_trace_layer() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let setup = TraceSetup {
+            dir: file.path(),
+            process: "server",
+        };
+        assert!(trace_layer::<tracing_subscriber::Registry>(&setup).is_none());
     }
 }
