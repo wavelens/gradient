@@ -30,6 +30,7 @@ pub mod eval_watchdog;
 pub mod events;
 pub mod gc;
 pub mod graph_sql;
+pub mod infra_metric;
 pub mod outbox;
 pub mod permissions;
 pub mod pool;
