@@ -90,9 +90,11 @@ async fn main() -> Result<()> {
         amplify::run(&db, cli.scale).await?;
     }
 
-    db.execute_unprepared("ANALYZE")
+    // Production's autovacuum keeps the visibility map set; a freshly amplified
+    // database has none, and every index-only scan would read the heap anyway.
+    db.execute_unprepared("VACUUM (ANALYZE)")
         .await
-        .context("ANALYZE before measuring")?;
+        .context("VACUUM (ANALYZE) before measuring")?;
 
     let rows = explain::run_all(&bounded(&url).await?).await?;
     print!("{}", report::render(&rows));
