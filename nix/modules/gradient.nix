@@ -109,6 +109,17 @@ in {
         description = "Domain under which Gradient is served.";
       };
 
+      serveUrl = lib.mkOption {
+        type = lib.types.str;
+        default = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
+        defaultText = lib.literalExpression ''"http''${lib.optionalString config.services.gradient.useTls "s"}://''${config.services.gradient.domain}"'';
+        example = "http://localhost:8080";
+        description = ''
+          Public URL under which clients reach Gradient. Set it when the URL differs from
+          {option}`services.gradient.domain`, for example behind a port mapping.
+        '';
+      };
+
       listenAddr = lib.mkOption {
         type = lib.types.str;
         default = "127.0.0.1";
@@ -195,8 +206,8 @@ in {
         enable = lib.mkEnableOption "the Gradient web frontend" // { default = true; };
         url = lib.mkOption {
           type = lib.types.str;
-          default = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
-          defaultText = lib.literalExpression ''http''${lib.optionalString config.services.gradient.useTls "s"}://''${config.services.gradient.domain}'';
+          default = cfg.serveUrl;
+          defaultText = lib.literalExpression "config.services.gradient.serveUrl";
           example = "https://gradient.example.com";
           description = "Public URL of the Gradient frontend, used for links in CI status reports.";
         };
@@ -1270,7 +1281,7 @@ in {
         XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
         GRADIENT_LISTEN_ADDR = cfg.listenAddr;
         GRADIENT_PORT = toString cfg.port;
-        GRADIENT_SERVE_URL = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
+        GRADIENT_SERVE_URL = cfg.serveUrl;
         GRADIENT_FRONTEND_URL = cfg.frontend.url;
         GRADIENT_BASE_DIR = cfg.baseDir;
         GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
