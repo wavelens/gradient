@@ -75,10 +75,11 @@ pub fn init(setup: &LogSetup<'_>) {
         LogWriter::Stderr => console.with_writer(std::io::stderr).boxed(),
     };
 
-    tracing_subscriber::registry()
-        .with(console.with_filter(filter))
-        .with(setup.trace.as_ref().and_then(trace_layer))
-        .init();
+    let registry = tracing_subscriber::registry().with(console.with_filter(filter));
+    match setup.trace.as_ref().and_then(trace_layer) {
+        Some(trace) => registry.with(trace).init(),
+        None => registry.init(),
+    }
 }
 
 fn trace_layer<S>(setup: &TraceSetup<'_>) -> Option<impl Layer<S> + use<S>>

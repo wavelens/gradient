@@ -49,6 +49,14 @@ class Summarize(unittest.TestCase):
         names = {e["args"]["name"] for e in trace["traceEvents"] if e["ph"] == "M"}
         self.assertEqual(names, {"server (11)", "worker (22)", "eval (33)"})
 
+    def test_processes_of_different_vms_with_one_pid_stay_apart(self):
+        spans = summarize.load_spans(FIXTURES / "samepid" / "trace")
+        trace = summarize.chrome_trace(spans, 0)
+        names = {e["args"]["name"] for e in trace["traceEvents"] if e["ph"] == "M"}
+        self.assertEqual(names, {"server (7)", "worker (7)"})
+        pids = {e["name"]: e["pid"] for e in trace["traceEvents"] if e["ph"] == "X"}
+        self.assertNotEqual(pids["flush"], pids["wave"])
+
     def test_the_stage_table_is_ordered_by_total_time(self):
         table = summarize.stage_table(self.skewed)
         self.assertEqual(table[0]["name"], "job")

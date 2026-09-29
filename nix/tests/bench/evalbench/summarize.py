@@ -81,26 +81,27 @@ def lanes(spans):
 
 
 def chrome_trace(spans, offset_us):
-    shifted = [
-        {
-            "name": s["name"],
-            "cat": s["process"],
-            "ph": "X",
-            "ts": s["ts_us"] + (0 if s["process"] in SERVER_CLOCK else offset_us),
-            "dur": s["dur_us"],
-            "pid": s["pid"],
-            "args": s.get("fields", {}),
-        }
-        for s in spans
-    ]
+    processes = sorted({(s["process"], s["pid"]) for s in spans})
     events = []
-    for pid in sorted({s["pid"] for s in shifted}):
-        own = [s for s in shifted if s["pid"] == pid]
+    for index, (process, pid) in enumerate(processes, start=1):
+        own = [
+            {
+                "name": s["name"],
+                "cat": process,
+                "ph": "X",
+                "ts": s["ts_us"] + (0 if process in SERVER_CLOCK else offset_us),
+                "dur": s["dur_us"],
+                "pid": index,
+                "args": s.get("fields", {}),
+            }
+            for s in spans
+            if (s["process"], s["pid"]) == (process, pid)
+        ]
         events.append({
             "ph": "M",
             "name": "process_name",
-            "pid": pid,
-            "args": {"name": f"{own[0]['cat']} ({pid})"},
+            "pid": index,
+            "args": {"name": f"{process} ({pid})"},
         })
         events.extend({**span, "tid": lane} for lane, span in lanes(own))
     return {"traceEvents": events, "displayTimeUnit": "ms"}
