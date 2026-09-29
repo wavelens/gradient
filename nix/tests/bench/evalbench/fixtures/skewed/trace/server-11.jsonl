@@ -1,0 +1,4 @@
+{"name":"assign_job","target":"gradient_proto::handler::dispatch","ts_us":1000000,"dur_us":100,"pid":11,"process":"server","fields":{"job_id":"j1"}}
+{"name":"job_event","target":"gradient_proto::handler::job_events","ts_us":1101500,"dur_us":8000,"pid":11,"process":"server","fields":{"job_id":"j1","kind":"eval_result","queue_wait_us":500}}
+{"name":"flush","target":"gradient_graph::actor","ts_us":1102000,"dur_us":6000,"pid":11,"process":"server","fields":{"batches":1,"rows":50}}
+{"name":"job_event","target":"gradient_proto::handler::job_events","ts_us":1200000,"dur_us":100,"pid":11,"process":"server","fields":{"job_id":"j1","kind":"completed","queue_wait_us":0}}

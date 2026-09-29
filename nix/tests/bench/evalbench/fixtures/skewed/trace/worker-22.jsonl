@@ -1,0 +1,5 @@
+{"name":"job","target":"gradient_worker::executor","ts_us":751100,"dur_us":300000,"pid":22,"process":"worker","fields":{"job_id":"j1"}}
+{"name":"query_known_derivations","target":"gradient_worker::proto::job","ts_us":800000,"dur_us":3000,"pid":22,"process":"worker","fields":{"job_id":"j1","paths":10}}
+{"name":"query_known_derivations","target":"gradient_worker::proto::job","ts_us":801000,"dur_us":3000,"pid":22,"process":"worker","fields":{"job_id":"j1","paths":10}}
+{"name":"report_eval_result","target":"gradient_worker::proto::job","ts_us":850000,"dur_us":200,"pid":22,"process":"worker","fields":{"job_id":"j1","derivations":50}}
+{"name":"report_eval_res
