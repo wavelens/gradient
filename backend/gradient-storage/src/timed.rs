@@ -48,7 +48,7 @@ impl fmt::Display for TimedStore {
     }
 }
 
-struct OpGuard {
+pub(crate) struct OpGuard {
     stats: &'static MinuteStats,
     op: &'static str,
     started: Instant,
@@ -56,7 +56,7 @@ struct OpGuard {
 }
 
 impl OpGuard {
-    fn start(stats: &'static MinuteStats, op: &'static str) -> Self {
+    pub(crate) fn start(stats: &'static MinuteStats, op: &'static str) -> Self {
         Self {
             stats,
             op,
@@ -65,20 +65,24 @@ impl OpGuard {
         }
     }
 
-    fn finish<T>(mut self, result: Result<T>) -> Result<T> {
-        self.done = true;
-        match &result {
-            Ok(_) | Err(object_store::Error::NotFound { .. }) => {
-                let ms = self.started.elapsed().as_secs_f64() * 1000.0;
-                self.stats.record(metric::STORAGE_OP_MS, self.op, ms);
-            }
-            Err(_) => {
-                self.stats
-                    .record(metric::STORAGE_OP_ERRORS, format!("{}/error", self.op), 1.0);
-            }
-        }
-
+    fn finish<T>(self, result: Result<T>) -> Result<T> {
+        self.finish_with(matches!(
+            result,
+            Ok(_) | Err(object_store::Error::NotFound { .. })
+        ));
         result
+    }
+
+    /// `answered` is false only for a backend failure; a missing object is an answer.
+    pub(crate) fn finish_with(mut self, answered: bool) {
+        self.done = true;
+        if answered {
+            let ms = self.started.elapsed().as_secs_f64() * 1000.0;
+            self.stats.record(metric::STORAGE_OP_MS, self.op, ms);
+        } else {
+            self.stats
+                .record(metric::STORAGE_OP_ERRORS, format!("{}/error", self.op), 1.0);
+        }
     }
 }
 
@@ -94,10 +98,10 @@ impl Drop for OpGuard {
     }
 }
 
-fn watch_stream(
-    stream: BoxStream<'static, Result<Bytes>>,
+pub(crate) fn watch_stream<E: Send + 'static>(
+    stream: BoxStream<'static, Result<Bytes, E>>,
     stats: &'static MinuteStats,
-) -> BoxStream<'static, Result<Bytes>> {
+) -> BoxStream<'static, Result<Bytes, E>> {
     stream
         .inspect(move |item| {
             if item.is_err() {
@@ -121,7 +125,9 @@ impl fmt::Debug for TimedUpload {
 #[async_trait]
 impl MultipartUpload for TimedUpload {
     fn put_part(&mut self, data: PutPayload) -> UploadPart {
-        self.inner.put_part(data)
+        let guard = OpGuard::start(self.stats, "put_part");
+        let part = self.inner.put_part(data);
+        Box::pin(async move { guard.finish(part.await) })
     }
 
     async fn complete(&mut self) -> Result<PutResult> {
@@ -151,7 +157,8 @@ impl ObjectStore for TimedStore {
         location: &Path,
         opts: PutMultipartOptions,
     ) -> Result<Box<dyn MultipartUpload>> {
-        let inner = self.inner.put_multipart_opts(location, opts).await?;
+        let guard = OpGuard::start(self.stats, "multipart_create");
+        let inner = guard.finish(self.inner.put_multipart_opts(location, opts).await)?;
         Ok(Box::new(TimedUpload {
             inner,
             stats: self.stats,
@@ -303,6 +310,22 @@ mod tests {
         let mut stream = watch_stream(failing, stats);
         assert!(stream.next().await.expect("item").is_err());
         assert_eq!(count(stats, metric::STORAGE_OP_ERRORS, "read/error"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_part_upload_counts_as_cancelled() {
+        let (store, stats) = timed();
+        let mut upload = store
+            .put_multipart(&Path::from("a"))
+            .await
+            .expect("multipart");
+        drop(upload.put_part(PutPayload::from_static(b"x")));
+
+        assert_eq!(count(stats, metric::STORAGE_OP_MS, "multipart_create"), 1);
+        assert_eq!(
+            count(stats, metric::STORAGE_OP_ERRORS, "put_part/cancelled"),
+            1
+        );
     }
 
     #[tokio::test]
