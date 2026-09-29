@@ -33,6 +33,25 @@ What the scheduler and the workers do right now and over time: live jobs, why a 
 
 Draining stops new dispatches and parks running evaluations for a safe server stop; the next start clears the flag.
 
+## Storage Metrics
+
+The **Storage** tab reads these metric keys. Counts are summed per bucket; an empty bucket means zero events.
+
+| Key | Labels | Unit | Chart |
+|---|---|---|---|
+| `storage.op_ms` | Operation: `get`, `head`, `put`, `put_part`, `multipart_create`, `multipart_complete`, `delete` | ms per call | Storage latency |
+| `storage.op_errors` | `<op>/error`, `<op>/cancelled`, `read/error` | count | Storage errors |
+| `proto.bulk_lane_fill` | `bulk` | peak fill 0-1, shown as % | Writer lanes |
+| `proto.control_lane_fill` | `control` | peak fill 0-1, shown as % | Writer lanes |
+| `proto.send_stalls` | `bulk`, `control` | count | Writer lanes (bars) |
+| `nar.serves_waiting` | `waiting` | peak serves | NAR serves |
+| `nar.serves_active` | `active` | peak serves | NAR serves |
+| `nar.serve_failures` | `not_found`, `storage_timeout`, `storage_error`, `send_stalled` | count | NAR serves (bars) |
+
+- A `cancelled` call was dropped before it finished, usually by a timeout on a hung backend.
+- Lane fill and send stalls cover every protocol session, worker and cache alike; a stall is a send that waited past `send_chunk_timeout` for lane capacity.
+- Build log objects on S3 go through the same store and share the storage operation labels.
+
 ## Job Inspection
 
 ![Job score breakdown](../assets/screenshots/job_board_job_score.png)
