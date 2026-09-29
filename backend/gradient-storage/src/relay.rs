@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
+use gradient_util::telemetry::{STATS, metric};
 use gradient_wire::constants::BULK_CHUNK_SIZE;
 use gradient_wire::messages::ServerMessage;
 use gradient_wire::session::frame::{ProtoWriter, send_server_msg};
@@ -34,53 +35,66 @@ pub enum ServeError {
     Aborted(String),
 }
 
-/// Which message a failed transfer sends. Only storage's own answer that the
-/// object is absent is [`ServerMessage::NarUnavailable`], which the worker turns
-/// into a demotion that deletes the cached path; a storage error or timeout is
+/// Why a transfer failed. Only [`Failure::NotFound`], storage's own answer that
+/// the object is absent, is [`ServerMessage::NarUnavailable`], which the worker
+/// turns into a demotion that deletes the cached path; every other failure is
 /// [`ServerMessage::NarAbort`], retried without touching the cache.
-enum FailKind {
-    Missing,
-    Transient,
+enum Failure {
+    NotFound,
+    StorageTimeout,
+    StorageError,
+    SendStalled,
 }
 
-/// Send the message matching `kind` and return the error every call site
-/// returns. Centralizes the abort-and-return idiom `serve_nar_request` used to
-/// repeat at every error exit.
+impl Failure {
+    fn is_missing(&self) -> bool {
+        matches!(self, Self::NotFound)
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::StorageTimeout => "storage_timeout",
+            Self::StorageError => "storage_error",
+            Self::SendStalled => "send_stalled",
+        }
+    }
+}
+
 async fn fail_transfer(
     writer: &ProtoWriter,
     job_id: &str,
     store_path: &str,
-    kind: FailKind,
+    failure: Failure,
     reason: String,
 ) -> ServeError {
-    match kind {
-        FailKind::Missing => {
-            let _ = send_server_msg(
-                writer,
-                &ServerMessage::NarUnavailable {
-                    job_id: job_id.to_owned(),
-                    store_path: store_path.to_owned(),
-                    reason: reason.clone(),
-                },
-            )
-            .await;
-        }
-        FailKind::Transient => {
-            let _ = send_server_msg(
-                writer,
-                &ServerMessage::NarAbort {
-                    job_id: job_id.to_owned(),
-                    store_path: store_path.to_owned(),
-                    reason: reason.clone(),
-                },
-            )
-            .await;
-        }
+    STATS.record(metric::NAR_SERVE_FAILURES, failure.label(), 1.0);
+
+    if failure.is_missing() {
+        let _ = send_server_msg(
+            writer,
+            &ServerMessage::NarUnavailable {
+                job_id: job_id.to_owned(),
+                store_path: store_path.to_owned(),
+                reason: reason.clone(),
+            },
+        )
+        .await;
+
+        return ServeError::NotFound(reason);
     }
-    match kind {
-        FailKind::Missing => ServeError::NotFound(reason),
-        FailKind::Transient => ServeError::Aborted(reason),
-    }
+
+    let _ = send_server_msg(
+        writer,
+        &ServerMessage::NarAbort {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            reason: reason.clone(),
+        },
+    )
+    .await;
+
+    ServeError::Aborted(reason)
 }
 
 /// Stream a single requested NAR from `store` to the peer, resuming at
@@ -119,7 +133,7 @@ pub async fn serve_nar(
         .and_then(|s| s.split('-').next())
     else {
         let reason = format!("invalid store path: {store_path}");
-        return Err(fail_transfer(writer, job_id, store_path, FailKind::Missing, reason).await);
+        return Err(fail_transfer(writer, job_id, store_path, Failure::NotFound, reason).await);
     };
 
     let open = |offset: u64| async move {
@@ -130,13 +144,13 @@ pub async fn serve_nar(
         Ok(Ok(Some(source))) => source,
         Ok(Ok(None)) => {
             let reason = format!("NAR not found in cache for {store_path}");
-            return Err(fail_transfer(writer, job_id, store_path, FailKind::Missing, reason).await);
+            return Err(fail_transfer(writer, job_id, store_path, Failure::NotFound, reason).await);
         }
         Ok(Err(e)) => {
             let reason = format!("nar_storage.open({hash}) failed: {e}");
             error!(%store_path, error = %e, "NAR storage read error");
             return Err(
-                fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
+                fail_transfer(writer, job_id, store_path, Failure::StorageError, reason).await,
             );
         }
         Err(_) => {
@@ -146,7 +160,7 @@ pub async fn serve_nar(
             );
             warn!(%store_path, "NAR storage open timed out");
             return Err(
-                fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
+                fail_transfer(writer, job_id, store_path, Failure::StorageTimeout, reason).await,
             );
         }
     };
@@ -168,9 +182,14 @@ pub async fn serve_nar(
             }
             _ => {
                 let reason = format!("failed to reopen {store_path} for fresh transfer");
-                return Err(
-                    fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
-                );
+                return Err(fail_transfer(
+                    writer,
+                    job_id,
+                    store_path,
+                    Failure::StorageError,
+                    reason,
+                )
+                .await);
             }
         }
     }
@@ -211,9 +230,14 @@ pub async fn serve_nar(
                     chunk_read_timeout.as_secs()
                 );
                 warn!(%store_path, "NAR storage read stall");
-                return Err(
-                    fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
-                );
+                return Err(fail_transfer(
+                    writer,
+                    job_id,
+                    store_path,
+                    Failure::StorageTimeout,
+                    reason,
+                )
+                .await);
             }
         };
         let bytes = match item {
@@ -221,9 +245,14 @@ pub async fn serve_nar(
             Err(e) => {
                 let reason = format!("NAR storage stream error: {e}");
                 error!(%store_path, error = %e, "NAR storage stream error");
-                return Err(
-                    fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await,
-                );
+                return Err(fail_transfer(
+                    writer,
+                    job_id,
+                    store_path,
+                    Failure::StorageError,
+                    reason,
+                )
+                .await);
             }
         };
 
@@ -254,7 +283,7 @@ pub async fn serve_nar(
                         writer,
                         job_id,
                         store_path,
-                        FailKind::Transient,
+                        Failure::SendStalled,
                         reason,
                     )
                     .await);
@@ -281,7 +310,7 @@ pub async fn serve_nar(
     .is_err()
     {
         let reason = format!("WebSocket send stalled on final NarPush at offset {offset}");
-        return Err(fail_transfer(writer, job_id, store_path, FailKind::Transient, reason).await);
+        return Err(fail_transfer(writer, job_id, store_path, Failure::SendStalled, reason).await);
     }
     total += final_len;
     chunks_sent += 1;
@@ -451,5 +480,37 @@ mod tests {
             matches!(frames.as_slice(), [ServerMessage::NarAbort { .. }]),
             "{frames:?}"
         );
+    }
+
+    fn failures(label: &str) -> i64 {
+        gradient_util::telemetry::STATS
+            .snapshot()
+            .iter()
+            .filter(|(k, _)| {
+                k.metric == gradient_util::telemetry::metric::NAR_SERVE_FAILURES && k.label == label
+            })
+            .map(|(_, a)| a.count)
+            .sum()
+    }
+
+    #[tokio::test]
+    async fn a_missing_nar_is_recorded_as_not_found() {
+        let before = failures("not_found");
+        let (_dir, store) = empty_store();
+        let _ = serve(&store, PATH, 0, None).await;
+
+        assert!(failures("not_found") > before);
+    }
+
+    #[test]
+    fn only_not_found_answers_unavailable() {
+        assert!(Failure::NotFound.is_missing());
+        for f in [
+            Failure::StorageTimeout,
+            Failure::StorageError,
+            Failure::SendStalled,
+        ] {
+            assert!(!f.is_missing(), "{}", f.label());
+        }
     }
 }
