@@ -361,6 +361,14 @@ export const routes: Routes = [
               ),
           },
           {
+            path: 'storage',
+            canActivate: [adminGuard],
+            loadComponent: () =>
+              import('./features/board/storage/storage.component').then(
+                (m) => m.BoardStorageComponent
+              ),
+          },
+          {
             path: 'expensive',
             loadComponent: () =>
               import('./features/board/expensive-jobs/expensive-jobs.component').then(

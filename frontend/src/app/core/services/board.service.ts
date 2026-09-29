@@ -358,8 +358,40 @@ export interface BoardHealth {
   draining: boolean;
   supervised: SupervisedLoop[];
   proto_sessions: number;
+  unconfirmed_nars: number;
   outbox_pending: number;
   outbox_failed: number;
+  hot_nar_cache: HotNarCacheHealth;
+}
+
+export interface HotNarCacheHealth {
+  entries: number;
+  bytes: number;
+  hits: number;
+  misses: number;
+  evictions: number;
+}
+
+export interface LabelledPoint {
+  bucket_start: string;
+  count: number;
+  avg: number;
+  max: number;
+}
+
+export interface LabelledSeries {
+  label: string;
+  points: LabelledPoint[];
+}
+
+export interface BoardStorage {
+  granularity: 'minute' | 'hour' | 'day';
+  op_latency: LabelledSeries[];
+  op_errors: LabelledSeries[];
+  lane_fill: LabelledSeries[];
+  send_stalls: LabelledSeries[];
+  serve_queue: LabelledSeries[];
+  serve_failures: LabelledSeries[];
 }
 
 export interface DurationsHeatmap {
@@ -471,6 +503,10 @@ export class BoardService {
 
   getHealth(): Observable<BoardHealth> {
     return this.api.get<BoardHealth>('board/health');
+  }
+
+  getStorage(windowHours = 6): Observable<BoardStorage> {
+    return this.api.get<BoardStorage>(`board/storage?window_hours=${windowHours}`);
   }
 
   getDurationsHeatmap(windowHours = 24): Observable<DurationsHeatmap> {

@@ -29,6 +29,7 @@ import { AuthService } from '@core/services/auth.service';
         <a routerLink="expensive-evals" routerLinkActive="active">Evals</a>
         @if (superuser()) {
           <a routerLink="health" routerLinkActive="active">System Health</a>
+          <a routerLink="storage" routerLinkActive="active">Storage</a>
         }
       </nav>
       <router-outlet></router-outlet>
