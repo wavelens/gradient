@@ -7,10 +7,25 @@ RUN = ("docker run -dt --name gradient --privileged --cgroupns=host "
        "-p 127.0.0.1:8080:80 -v gradient:/var/lib gradient-standalone:latest")
 
 
+def dump_container():
+    for cmd in [
+        "docker ps -a",
+        "docker logs gradient 2>&1 | tail -n 200",
+        "docker exec gradient systemctl is-system-running",
+        "docker exec gradient systemctl --failed --no-pager",
+        "docker exec gradient journalctl -b --no-pager -n 300",
+    ]:
+        print(f"=== {cmd} ===\n{machine.execute(cmd)[1]}")
+
+
 def start_container():
     machine.succeed(RUN)
-    machine.wait_until_succeeds("docker logs gradient 2>&1 | grep -q 'log in with admin / '", timeout=600)
-    assert_serving(machine, BASE)
+    try:
+        machine.wait_until_succeeds("docker logs gradient 2>&1 | grep -q 'log in with admin / '", timeout=600)
+        assert_serving(machine, BASE)
+    except Exception:
+        dump_container()
+        raise
 
 
 start_all()
