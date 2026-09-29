@@ -65,7 +65,7 @@ impl DispatchContext<'_> {
                 )
                 .await;
         };
-        if !self.active.contains_key(&job_id) {
+        if !self.active.contains(&job_id) {
             return self
                 .settle(
                     request_id,

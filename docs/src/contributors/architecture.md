@@ -59,12 +59,12 @@ root
 |---|---|---|
 | `graph` | Every request-path write to `derivation*`, `build_job`, `build_attempt`, `cached_path`, and the retires of maintenance | [Build Anchors](scheduler/build-anchors.md) |
 | `scheduler-core` | `WorkerPool` and the candidate cache (`JobTracker`); `Scheduler` is a facade, one message per method | [Capabilities and Dispatch](proto/capabilities-and-dispatch.md) |
-| `SessionActor` | One worker connection; the reader delivers one frame per call and TCP backpressure holds | [Connection](proto/connection.md) |
+| `SessionActor` | One worker connection; the reader hands it frames in order, up to 64 unanswered, then TCP backpressure holds | [Connection](proto/connection.md) |
 | `effects` | Outbox delivery: 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
 
 - **Pull-based dispatch:** a claim is a `dispatched_job` insert in Postgres (`gradient_db::claim_dispatch`); the scheduler actor only caches candidates.
 - **Session signals:** the scheduler reaches a session only through `SessionPort` (`Offers`, `Reauth`, `Abort`, `Drain`, `Close`); a burst of enqueues collapses into one offer per generation.
-- **Off-session RPCs:** `CacheQuery`, `QueryKnownDerivations` and `WorkerMetrics` run as tracked tasks. A respawned core actor gets every live session and its jobs back from the sessions supervisor.
+- **Off-session RPCs:** the reader starts `CacheQuery` and `QueryKnownDerivations` as tracked tasks the moment they arrive, and the session starts `WorkerMetrics` the same way, so a slow frame never holds back a lookup the worker waits on. Log chunks go through a per-session lane, flushed before a job's completion. A respawned core actor gets every live session and its jobs back from the sessions supervisor.
 - **State:** `AppState` (alias `ServerState`) holds three pools (`worker_db`, `web_db`, `cache_db`), `RuntimeConfig`, the NAR store, `UploadAdmission`, the graph handle, the event bus, `ready_set` and `probe_requests` channels for build-dispatch and the probe.
 - **Events** are typed (`gradient_types::events::Event`) and flow two ways: the in-process `EventBus` for live sockets and `/api/v1/metrics/events` (a slow subscriber skips), and durable `outbox` rows written by `gradient_db::events::record` in the caller's transaction, fanned out by `effects` into action and webhook deliveries.
 - **Uploads** are admitted before a byte moves: one server-wide count and byte budget, round-robin across sessions, FIFO within one. See [Transfer](proto/transfer.md#upload) and [NAR Storage](internals/nar-storage.md).

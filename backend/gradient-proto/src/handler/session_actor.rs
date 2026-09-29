@@ -12,7 +12,7 @@
 //! unread in the socket, so a handler waiting on a slow graph would otherwise
 //! read as a silent worker and get a healthy connection unregistered.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
@@ -21,14 +21,14 @@ use gradient_core::ServerState;
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use gradient_scheduler::Scheduler;
 use gradient_types::ids::ProjectId;
-use ractor::rpc::CallResult;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
-use super::dispatch::{ActiveJob, DispatchContext};
+use super::dispatch::{ActiveJobs, DispatchContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
+use super::log_lane::LogLane;
 use super::session::on_reauth_notify;
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
@@ -82,8 +82,9 @@ pub struct SessionState {
     uploads: UploadSession,
     nar_serve_semaphore: Arc<Semaphore>,
     offers_seen: u64,
-    active: HashMap<String, ActiveJob>,
+    active: ActiveJobs,
     job_events: JobEvents,
+    logs: LogLane,
     draining: bool,
     reader: JoinHandle<()>,
 }
@@ -139,11 +140,20 @@ impl Actor for SessionActor {
             bus: state.events.clone(),
             worker_id: peer_id.clone(),
         }));
+        let active = ActiveJobs::default();
+        let rpc = RpcContext::new(
+            Arc::clone(&state),
+            Arc::clone(&scheduler),
+            writer.clone(),
+            peer_id.clone(),
+            active.clone(),
+        );
         let reader = state.shutdown.spawn(read_loop(
             reader,
             myself,
             registered.last_seen,
             IN_FLIGHT_STAMP,
+            move |msg| rpc.serve(msg),
         ));
         let job_events = JobEvents::spawn(
             &state.shutdown,
@@ -155,6 +165,8 @@ impl Actor for SessionActor {
             },
         );
 
+        let logs = LogLane::to_storage(&state.shutdown, Arc::clone(&state));
+
         Ok(SessionState {
             peer_id,
             state,
@@ -165,7 +177,8 @@ impl Actor for SessionActor {
             uploads,
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
             offers_seen: 0,
-            active: HashMap::new(),
+            active,
+            logs,
             job_events,
             draining: false,
             reader,
@@ -187,8 +200,9 @@ impl Actor for SessionActor {
                         scheduler: &st.scheduler,
                         peer_id: &st.peer_id,
                         nar_serve_semaphore: &st.nar_serve_semaphore,
-                        active: &mut st.active,
+                        active: &st.active,
                         job_events: &st.job_events,
+                        logs: &st.logs,
                     };
 
                     ctx.dispatch(inbound, &mut st.uploads).await
@@ -258,11 +272,7 @@ impl Actor for SessionActor {
             }
             SessionMsg::Reattach => {
                 let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
-                let active = st
-                    .active
-                    .iter()
-                    .map(|(id, job)| (id.clone(), job.pending.clone()))
-                    .collect();
+                let active = st.active.pending();
                 if let Err(e) = st
                     .scheduler
                     .reattach_worker(
@@ -328,15 +338,21 @@ async fn offer_jobs(st: &mut SessionState) -> bool {
     true
 }
 
-/// Deliver frames one at a time, stamping the worker's liveness on receipt and
-/// every `stamp_every` until the handler answers. A worker that is talking is
-/// alive whether or not the server has finished answering it, so the stamp
-/// belongs here rather than in the handler.
+/// Frames the reader hands the session before the first of them is answered.
+/// Reading ahead keeps a lookup the worker waits on from sitting unread behind
+/// a frame whose handler is slow.
+const READ_AHEAD: usize = 64;
+
+/// Read frames as they arrive, stamping the worker's liveness on receipt and
+/// every `stamp_every` while any is unanswered. `serve` takes the frames
+/// answered off the session and returns the rest, which the session handles in
+/// the order they were read.
 async fn read_loop(
     mut reader: ProtoReader,
     session: ActorRef<SessionMsg>,
     last_seen: Arc<AtomicI64>,
     stamp_every: Duration,
+    serve: impl Fn(ClientMessage) -> Option<ClientMessage> + Send + 'static,
 ) {
     let stamp = || {
         last_seen.store(
@@ -344,20 +360,35 @@ async fn read_loop(
             Ordering::Relaxed,
         )
     };
-    while let Some(inbound) = recv_client_msg(&mut reader).await {
-        stamp();
-        let handled = session.call(|reply| SessionMsg::Frame(inbound, reply), None);
-        tokio::pin!(handled);
-        let mut in_flight =
-            tokio::time::interval_at(tokio::time::Instant::now() + stamp_every, stamp_every);
-        let result = loop {
-            tokio::select! {
-                result = &mut handled => break result,
-                _ = in_flight.tick() => stamp(),
+    let mut unanswered: VecDeque<oneshot::Receiver<bool>> = VecDeque::new();
+    let mut in_flight =
+        tokio::time::interval_at(tokio::time::Instant::now() + stamp_every, stamp_every);
+    loop {
+        tokio::select! {
+            biased;
+            answered = async { unanswered.front_mut().expect("guarded").await }, if !unanswered.is_empty() => {
+                unanswered.pop_front();
+                if !matches!(answered, Ok(true)) {
+                    return;
+                }
             }
-        };
-        if !matches!(result, Ok(CallResult::Success(true))) {
-            return;
+            inbound = recv_client_msg(&mut reader), if unanswered.len() < READ_AHEAD => {
+                let Some(inbound) = inbound else { break };
+                stamp();
+                let inbound = match inbound {
+                    Inbound::Control(msg) => match serve(msg) {
+                        Some(msg) => Inbound::Control(msg),
+                        None => continue,
+                    },
+                    bulk => bulk,
+                };
+                let (reply, answered) = oneshot::channel();
+                if session.send_message(SessionMsg::Frame(inbound, reply.into())).is_err() {
+                    return;
+                }
+                unanswered.push_back(answered);
+            }
+            _ = in_flight.tick(), if !unanswered.is_empty() => stamp(),
         }
     }
 
@@ -410,8 +441,9 @@ fn split_uploads(st: &mut SessionState) -> (DispatchContext<'_>, &mut UploadSess
             scheduler: &st.scheduler,
             peer_id: &st.peer_id,
             nar_serve_semaphore: &st.nar_serve_semaphore,
-            active: &mut st.active,
+            active: &st.active,
             job_events: &st.job_events,
+            logs: &st.logs,
         },
         &mut st.uploads,
     )
@@ -592,6 +624,7 @@ mod tests {
             session.clone(),
             Arc::clone(&last_seen),
             IN_FLIGHT_STAMP,
+            Some,
         )
         .await;
         session.stop(None);
@@ -627,6 +660,7 @@ mod tests {
             session.clone(),
             Arc::clone(&last_seen),
             Duration::from_millis(20),
+            Some,
         ));
         received.notified().await;
         last_seen.store(0, Ordering::Relaxed);
@@ -642,5 +676,61 @@ mod tests {
             stamped > 0,
             "a worker whose frame is still being handled is not silent"
         );
+    }
+
+    /// A lookup the worker waits on is read and answered while an earlier frame
+    /// still holds the session: queued behind it, the worker's deadline passed
+    /// before the lookup was even read.
+    #[tokio::test]
+    async fn a_cache_query_is_served_while_an_earlier_frame_is_held() {
+        let (socket, mut client) = connected_pair().await;
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (reader, _writer) = socket.split(Duration::from_secs(5), &state.shutdown);
+        let received = Arc::new(Notify::new());
+        let (session, join) = Actor::spawn(None, HoldingSession, Arc::clone(&received))
+            .await
+            .unwrap();
+        let (served_tx, mut served) = tokio::sync::mpsc::unbounded_channel();
+
+        for msg in [
+            ClientMessage::ReauthRequest,
+            ClientMessage::CacheQuery {
+                job_id: "j1".into(),
+                query_id: "q1".into(),
+                paths: Vec::new(),
+                nar_sizes: Vec::new(),
+                mode: gradient_wire::types::QueryMode::Pull,
+                external: false,
+            },
+        ] {
+            client
+                .send(Message::Binary(msg.encode().unwrap()))
+                .await
+                .unwrap();
+        }
+        let reading = state.shutdown.spawn(read_loop(
+            reader,
+            session.clone(),
+            Arc::new(AtomicI64::new(0)),
+            IN_FLIGHT_STAMP,
+            move |msg| match msg {
+                ClientMessage::CacheQuery { query_id, .. } => {
+                    let _ = served_tx.send(query_id);
+                    None
+                }
+                other => Some(other),
+            },
+        ));
+        received.notified().await;
+        let query = tokio::time::timeout(Duration::from_secs(5), served.recv())
+            .await
+            .expect("the lookup is not queued behind the held frame");
+
+        session.send_message(SessionMsg::DrainDeadline).unwrap();
+        reading.await.unwrap();
+        session.stop(None);
+        join.await.unwrap();
+
+        assert_eq!(query.as_deref(), Some("q1"));
     }
 }

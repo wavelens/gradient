@@ -11,6 +11,7 @@ mod cache_session;
 mod dispatch;
 mod eval_cache;
 mod job_events;
+mod log_lane;
 mod nar;
 mod nar_serve;
 mod session;

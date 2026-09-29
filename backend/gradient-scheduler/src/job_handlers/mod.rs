@@ -21,7 +21,6 @@ mod abort;
 mod assignment;
 mod build_status;
 mod eval_status;
-mod logs;
 mod priority;
 mod queue;
 pub(crate) mod timeline;

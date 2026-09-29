@@ -23,7 +23,7 @@ use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
 use gradient_scheduler::jobs::PendingJob;
 use gradient_wire::messages::{
-    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, QueryMode,
+    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind,
     ServerMessage,
 };
 use gradient_wire::session::frame::{Frame, Inbound};
@@ -32,6 +32,7 @@ use super::auth::{expand_base_authorized, lookup_base_worker_challenge, lookup_r
 use super::cache::handle_cache_query;
 use super::eval_cache::handle_eval_cache_pull;
 use super::job_events::{JobEvent, JobEvents};
+use super::log_lane::LogLane;
 use super::nar_serve::serve_nar_request;
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
@@ -47,6 +48,61 @@ use gradient_wire::auth::validate_tokens;
 pub(crate) struct ActiveJob {
     pub dispatch: DispatchedJobId,
     pub pending: PendingJob,
+}
+
+/// The jobs a session runs, shared with the RPCs it answers off its loop.
+#[derive(Clone, Default)]
+pub(crate) struct ActiveJobs(Arc<gradient_util::sync::Mutex<HashMap<String, ActiveJob>>>);
+
+impl ActiveJobs {
+    pub(crate) fn insert(&self, job_id: String, job: ActiveJob) {
+        self.0.lock().insert(job_id, job);
+    }
+
+    pub(crate) fn remove(&self, job_id: &str) -> Option<ActiveJob> {
+        self.0.lock().remove(job_id)
+    }
+
+    pub(crate) fn contains(&self, job_id: &str) -> bool {
+        self.0.lock().contains_key(job_id)
+    }
+
+    pub(crate) fn dispatch(&self, job_id: &str) -> Option<DispatchedJobId> {
+        self.0.lock().get(job_id).map(|a| a.dispatch)
+    }
+
+    pub(crate) fn project(&self, job_id: &str) -> Option<ProjectId> {
+        self.0.lock().get(job_id).map(|a| a.pending.project_id())
+    }
+
+    pub(crate) fn build(&self, job_id: &str, task_index: u32) -> Option<DerivationBuildId> {
+        match &self.0.lock().get(job_id)?.pending {
+            PendingJob::Build(j) => j.job.builds.get(task_index as usize)?.build_id.parse().ok(),
+            PendingJob::Eval(_) => None,
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.lock().len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.lock().is_empty()
+    }
+
+    pub(crate) fn pending(&self) -> Vec<(String, PendingJob)> {
+        self.0
+            .lock()
+            .iter()
+            .map(|(id, job)| (id.clone(), job.pending.clone()))
+            .collect()
+    }
+}
+
+impl From<HashMap<String, ActiveJob>> for ActiveJobs {
+    fn from(jobs: HashMap<String, ActiveJob>) -> Self {
+        Self(Arc::new(gradient_util::sync::Mutex::new(jobs)))
+    }
 }
 
 /// A report is accepted only when it names the dispatch this session handed
@@ -80,8 +136,9 @@ pub(super) struct DispatchContext<'a> {
     pub nar_serve_semaphore: &'a Arc<Semaphore>,
     /// Jobs this session currently runs, kept so a core restart can re-register
     /// them without a DB round-trip.
-    pub active: &'a mut HashMap<String, ActiveJob>,
+    pub active: &'a ActiveJobs,
     pub job_events: &'a JobEvents,
+    pub logs: &'a LogLane,
 }
 
 impl<'a> DispatchContext<'a> {
@@ -229,6 +286,7 @@ impl<'a> DispatchContext<'a> {
                 spans,
             } => {
                 self.forget_uploads(&job_id, uploads).await;
+                self.logs.flush().await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     self.active.remove(&job_id);
                     self.job_events
@@ -250,6 +308,7 @@ impl<'a> DispatchContext<'a> {
                 spans,
             } => {
                 self.forget_uploads(&job_id, uploads).await;
+                self.logs.flush().await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
                     self.active.remove(&job_id);
@@ -294,23 +353,9 @@ impl<'a> DispatchContext<'a> {
                 self.on_eval_cache_pull(job_id, fingerprint).await;
                 true
             }
-            ClientMessage::CacheQuery {
-                job_id,
-                query_id,
-                paths,
-                mode,
-                nar_sizes,
-                external,
-            } => {
-                self.spawn_cache_query(job_id, query_id, paths, nar_sizes, mode, external);
-                true
-            }
-            ClientMessage::QueryKnownDerivations {
-                job_id,
-                query_id,
-                drv_paths,
-            } => {
-                self.spawn_query_known_derivations(job_id, query_id, drv_paths);
+            msg @ (ClientMessage::CacheQuery { .. }
+            | ClientMessage::QueryKnownDerivations { .. }) => {
+                self.rpc().serve(msg);
                 true
             }
             ClientMessage::EvalMessage {
@@ -355,7 +400,7 @@ impl<'a> DispatchContext<'a> {
     /// Session-local by construction: [`dispatch_matches`] states what that
     /// guarantees and what it leaves to the scheduler.
     fn owned(&self, job_id: &str, reported: &str) -> Option<DispatchedJobId> {
-        let current = self.active.get(job_id).map(|a| a.dispatch);
+        let current = self.active.dispatch(job_id);
         if dispatch_matches(current, reported) {
             return current;
         }
@@ -376,6 +421,7 @@ impl<'a> DispatchContext<'a> {
             scheduler: Arc::clone(self.scheduler),
             writer: self.writer.clone(),
             peer_id: self.peer_id.to_owned(),
+            active: self.active.clone(),
         }
     }
 
@@ -397,36 +443,6 @@ impl<'a> DispatchContext<'a> {
                 network_speed_mbps,
             )
             .await;
-        });
-    }
-
-    fn spawn_cache_query(
-        &self,
-        job_id: String,
-        query_id: String,
-        paths: Vec<String>,
-        nar_sizes: Vec<Option<u64>>,
-        mode: QueryMode,
-        external: bool,
-    ) {
-        let rpc = self.rpc();
-        let project = self.active.get(&job_id).map(|a| a.pending.project_id());
-        self.state.shutdown.spawn(async move {
-            rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode, external, project)
-                .await
-        });
-    }
-
-    fn spawn_query_known_derivations(
-        &self,
-        job_id: String,
-        query_id: String,
-        drv_paths: Vec<String>,
-    ) {
-        let rpc = self.rpc();
-        self.state.shutdown.spawn(async move {
-            rpc.on_query_known_derivations(job_id, query_id, drv_paths)
-                .await
         });
     }
 
@@ -679,8 +695,11 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_log_chunk(&mut self, job_id: &str, task_index: u32, data: &[u8]) {
         debug!(peer_id = %self.peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
-        if let Err(e) = self.scheduler.append_log(job_id, task_index, data).await {
-            debug!(peer_id = %self.peer_id, %job_id, error = %e, "log append failed");
+        match self.active.build(job_id, task_index) {
+            Some(build) => self.logs.append(build, data.to_vec()).await,
+            None => {
+                debug!(peer_id = %self.peer_id, %job_id, task_index, "log chunk dropped: not a build this session runs")
+            }
         }
     }
 
@@ -768,14 +787,66 @@ impl<'a> DispatchContext<'a> {
 /// can't head-of-line-block a worker's `CacheQuery` (its 75 s `CacheStatus`
 /// deadline). Replies travel the cloneable writer, so out-of-order completion
 /// is safe.
+#[derive(Clone)]
 pub(super) struct RpcContext {
     state: Arc<ServerState>,
     scheduler: Arc<Scheduler>,
     writer: ProtoWriter,
     peer_id: String,
+    active: ActiveJobs,
 }
 
 impl RpcContext {
+    pub(super) fn new(
+        state: Arc<ServerState>,
+        scheduler: Arc<Scheduler>,
+        writer: ProtoWriter,
+        peer_id: String,
+        active: ActiveJobs,
+    ) -> Self {
+        Self {
+            state,
+            scheduler,
+            writer,
+            peer_id,
+            active,
+        }
+    }
+
+    /// Answer a frame correlated by its own id on a task of its own; any other
+    /// frame comes back for the session, which handles frames in order.
+    pub(super) fn serve(&self, msg: ClientMessage) -> Option<ClientMessage> {
+        let rpc = self.clone();
+        match msg {
+            ClientMessage::CacheQuery {
+                job_id,
+                query_id,
+                paths,
+                nar_sizes,
+                mode,
+                external,
+            } => {
+                self.state.shutdown.spawn(async move {
+                    rpc.on_cache_query(job_id, query_id, paths, nar_sizes, mode, external)
+                        .await
+                });
+                None
+            }
+            ClientMessage::QueryKnownDerivations {
+                job_id,
+                query_id,
+                drv_paths,
+            } => {
+                self.state.shutdown.spawn(async move {
+                    rpc.on_query_known_derivations(job_id, query_id, drv_paths)
+                        .await
+                });
+                None
+            }
+            other => Some(other),
+        }
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "mirrors the wire-protocol message fields; refactor tracked in #503"
@@ -788,11 +859,10 @@ impl RpcContext {
         nar_sizes: Vec<Option<u64>>,
         mode: gradient_wire::types::QueryMode,
         external: bool,
-        project: Option<ProjectId>,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, external, "CacheQuery");
         let answer = async {
-            let project_id = match project {
+            let project_id = match self.active.project(&job_id) {
                 Some(project_id) => Some(project_id),
                 None => self.scheduler.project_for_job(&job_id).await,
             };
@@ -947,7 +1017,8 @@ pub(in crate::handler) mod fixture {
         pub scheduler: Arc<Scheduler>,
         pub semaphore: Arc<Semaphore>,
         pub job_events: JobEvents,
-        pub active: HashMap<String, ActiveJob>,
+        pub logs: LogLane,
+        pub active: ActiveJobs,
         pub uploads: UploadSession,
     }
 
@@ -971,13 +1042,13 @@ pub(in crate::handler) mod fixture {
                     peer_id: "w1".into(),
                 },
             );
-            let active = HashMap::from([(
+            let active = ActiveJobs::from(HashMap::from([(
                 JOB.to_owned(),
                 ActiveJob {
                     dispatch: DispatchedJobId::now_v7(),
                     pending: pending_eval(),
                 },
-            )]);
+            )]));
             let (admission, admitted) = state.upload_admission.open_session("test");
             let uploads = UploadSession {
                 admission,
@@ -996,6 +1067,7 @@ pub(in crate::handler) mod fixture {
                 scheduler,
                 semaphore: Arc::new(Semaphore::new(1)),
                 job_events,
+                logs: LogLane::spawn(&state.shutdown, |_, _| async {}),
                 active,
                 uploads,
             };
@@ -1010,8 +1082,9 @@ pub(in crate::handler) mod fixture {
                     scheduler: &self.scheduler,
                     peer_id: "w1",
                     nar_serve_semaphore: &self.semaphore,
-                    active: &mut self.active,
+                    active: &self.active,
                     job_events: &self.job_events,
+                    logs: &self.logs,
                 },
                 &mut self.uploads,
             )
@@ -1086,13 +1159,13 @@ mod assignment_response_tests {
             },
         );
         let dispatch = DispatchedJobId::now_v7();
-        let mut active = HashMap::from([(
+        let active = ActiveJobs::from(HashMap::from([(
             "j1".to_owned(),
             ActiveJob {
                 dispatch,
                 pending: pending_eval(),
             },
-        )]);
+        )]));
 
         let mut ctx = DispatchContext {
             writer: &writer,
@@ -1100,8 +1173,9 @@ mod assignment_response_tests {
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
-            active: &mut active,
+            active: &active,
             job_events: &job_events,
+            logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
         };
         ctx.on_assign_job_response("j1".into(), false, Some("at capacity".into()))
             .await;
@@ -1144,13 +1218,13 @@ mod assignment_response_tests {
                 peer_id: "w1".into(),
             },
         );
-        let mut active = HashMap::from([(
+        let active = ActiveJobs::from(HashMap::from([(
             "j1".to_owned(),
             ActiveJob {
                 dispatch: DispatchedJobId::now_v7(),
                 pending: pending_eval(),
             },
-        )]);
+        )]));
 
         let mut ctx = DispatchContext {
             writer: &writer,
@@ -1158,12 +1232,13 @@ mod assignment_response_tests {
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
-            active: &mut active,
+            active: &active,
             job_events: &job_events,
+            logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
         };
         ctx.on_assign_job_response("j1".into(), true, None).await;
 
-        assert!(active.contains_key("j1"));
+        assert!(active.contains("j1"));
         assert!(log_db.into_transaction_log().is_empty());
     }
 
@@ -1185,7 +1260,7 @@ mod assignment_response_tests {
                 peer_id: "w1".into(),
             },
         );
-        let mut active = HashMap::new();
+        let active = ActiveJobs::from(HashMap::new());
         let mut events = state.events.subscribe();
         let anchor = DerivationBuildId::now_v7();
         let progress = DownloadProgress {
@@ -1199,8 +1274,9 @@ mod assignment_response_tests {
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
-            active: &mut active,
+            active: &active,
             job_events: &job_events,
+            logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
         };
         ctx.on_build_progress(&anchor.to_string(), progress);
         ctx.on_build_progress("not-a-uuid", progress);
@@ -1237,13 +1313,13 @@ mod assignment_response_tests {
                 peer_id: "w1".into(),
             },
         );
-        let mut active = HashMap::from([(
+        let active = ActiveJobs::from(HashMap::from([(
             "j1".to_owned(),
             ActiveJob {
                 dispatch: DispatchedJobId::now_v7(),
                 pending: pending_eval(),
             },
-        )]);
+        )]));
 
         let ctx = DispatchContext {
             writer: &writer,
@@ -1251,16 +1327,21 @@ mod assignment_response_tests {
             scheduler: &scheduler,
             peer_id: "w1",
             nar_serve_semaphore: &semaphore,
-            active: &mut active,
+            active: &active,
             job_events: &job_events,
+            logs: &LogLane::spawn(&state.shutdown, |_, _| async {}),
         };
-        ctx.spawn_cache_query(
-            "j1".into(),
-            "q1".into(),
-            vec!["/nix/store/00000000000000000000000000000000-a".into()],
-            vec![None],
-            QueryMode::Pull,
-            false,
+        assert!(
+            ctx.rpc()
+                .serve(ClientMessage::CacheQuery {
+                    job_id: "j1".into(),
+                    query_id: "q1".into(),
+                    paths: vec!["/nix/store/00000000000000000000000000000000-a".into()],
+                    nar_sizes: vec![None],
+                    mode: gradient_wire::types::QueryMode::Pull,
+                    external: false,
+                })
+                .is_none()
         );
 
         let reply = tokio::time::timeout(Duration::from_secs(5), sent.recv())
