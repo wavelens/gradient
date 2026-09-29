@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use tracing::{info, warn};
+use tracing::{Instrument as _, info, warn};
 
 use gradient_core::ServerState;
 use gradient_db::ClaimGate;
@@ -35,6 +35,7 @@ impl Scheduler {
     /// claim it in Postgres. The tracker only proposes: a claim another instance
     /// won, or one whose subject moved since the job was assembled, is dropped and
     /// the next best is tried. Nothing here reads the ready set.
+    #[tracing::instrument(level = "debug", skip_all, fields(?kind))]
     pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
         let instance = self.instance.load_full();
         for attempt in 0..CLAIM_ATTEMPTS {
@@ -43,7 +44,10 @@ impl Scheduler {
                 AssignOutcome::AtCapacity | AssignOutcome::Nothing => return None,
             };
 
-            match claim(&self.state, worker_id, &a.dispatch_record).await {
+            match claim(&self.state, worker_id, &a.dispatch_record)
+                .instrument(tracing::debug_span!("claim_dispatch"))
+                .await
+            {
                 Ok(true) => {
                     self.announce_dispatch(worker_id, &a.dispatch_record);
                     info!(%worker_id, job_id = %a.job_id(), ?kind, attempt, "job assigned via RequestJob");
@@ -84,6 +88,7 @@ impl Scheduler {
             .await;
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len()))]
     pub async fn record_scores(&self, worker_id: &str, scores: Vec<CandidateScore>) {
         let worker = worker_id.to_owned();
         let _ = self

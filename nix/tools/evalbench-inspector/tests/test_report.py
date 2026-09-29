@@ -118,6 +118,31 @@ def test_a_tarball_renders_to_an_escaped_page_with_standalone_charts(tmp_path):
         assert (tmp_path / "out" / "cold-clean" / f"{chart}.svg").exists()
 
 
+def test_the_dispatch_path_measures_each_step_from_the_evaluate_request():
+    from gradient_evalbench.bundle import Run, Span
+    from gradient_evalbench.report import dispatch_path
+
+    def span(process, name, ts, dur, **args):
+        return Span(process=process, lane=0, name=name, ts_us=ts, dur_us=dur, args=args)
+
+    run = Run(
+        name="r", path=None, meta={}, metrics={}, jobs=[], statements=[], explain_log=None,
+        spans=[
+            span("server (1)", "dispatch_queued_evals", 0, 10),
+            span("server (1)", "http_request", 1_000, 500, route="/api/v1/tasks/{project}/{task}/evaluate"),
+            span("server (1)", "dispatch_queued_evals", 4_000, 100),
+            span("server (1)", "offer_jobs", 4_200, 50),
+            span("worker (2)", "job", 9_000, 1_000),
+        ],
+    )
+    assert dispatch_path(run) == [
+        ("server http_request", 0.0, 0.5, 0.0),
+        ("server dispatch_queued_evals", 3.0, 0.1, 2.5),
+        ("server offer_jobs", 3.2, 0.05, 0.1),
+        ("worker job", 8.0, 1.0, 4.75),
+    ]
+
+
 def test_a_directory_without_runs_is_refused(tmp_path, capsys):
     assert main([str(tmp_path), "-o", str(tmp_path / "out")]) == 2
     assert "run.json" in capsys.readouterr().err

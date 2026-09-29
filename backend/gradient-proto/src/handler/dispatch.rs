@@ -609,9 +609,11 @@ impl<'a> DispatchContext<'a> {
 
     // ── Job request ───────────────────────────────────────────────────────────
 
+    #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
         if let Some(assignment) = self.scheduler.request_job(self.peer_id, kind).await {
+            tracing::Span::current().record("job_id", assignment.job_id());
             self.active.insert(
                 assignment.job_id().to_owned(),
                 ActiveJob {
@@ -627,6 +629,7 @@ impl<'a> DispatchContext<'a> {
                 &assignment.job,
                 assignment.project_id,
             )
+            .instrument(debug_span!("send_credentials"))
             .await;
             let job_id = assignment.job_id().to_owned();
             let assigned = debug_span!("assign_job", %job_id);
@@ -650,6 +653,7 @@ impl<'a> DispatchContext<'a> {
 
     // ── Scoring ───────────────────────────────────────────────────────────────
 
+    #[tracing::instrument(level = "debug", skip_all, fields(scores = scores.len(), is_final))]
     async fn on_request_job_chunk(&mut self, scores: Vec<CandidateScore>, is_final: bool) {
         debug!(peer_id = %self.peer_id, count = scores.len(), is_final, "RequestJobChunk");
         self.scheduler.record_scores(self.peer_id, scores).await;
