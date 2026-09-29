@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Which derivations an evaluation walk may prune, answered after every queued write.
+//! Which derivations an evaluation walk may prune, read from the pool beside the
+//! graph actor.
 
 use gradient_db::WorkerDb;
 use gradient_types::*;

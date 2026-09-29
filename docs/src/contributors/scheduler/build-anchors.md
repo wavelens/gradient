@@ -44,7 +44,6 @@ flowchart LR
 | `GraphMsg` | Writes |
 |---|---|
 | `Ingest` | One worker batch: derivations, stubs, edges, outputs, input sources, anchors, `build_job` rows, features, messages, entry points, readiness and demand |
-| `KnownDerivations` | Nothing; flushes queued batches, then answers which `drv_hashes` have a recorded subtree (`walked` and `unwalked_inputs = 0`) |
 | `UpstreamHits` | Probe results: narinfo on `derivation_output`, the runtime edges the narinfo names, `substitutable`, the demand moved |
 | `UpstreamProbed` | `probed = true` on answered anchors, and the demand a miss opens below them |
 | `CommitNar` | The `cached_path` row, its references, `cached_path_signature` placeholders, the backed outputs |
@@ -53,7 +52,9 @@ flowchart LR
 | `Demote` | `MissingNar`, operator `Path` invalidation, one cache dropping its `CacheClaim` |
 | `Gc` | Bounded deletes of derivations, stale paths and evaluations, re-checked against rows that became live since the scan |
 
-Every other message flushes the queue first: a read after a batch or a commit sees it.
+Every other message flushes the queue first: a write after a batch or a commit sees it.
+
+`Graph::known_derivations` is not a message: it reads which `drv_hashes` have a recorded subtree (`walked` and `unwalked_inputs = 0`) from the pool, so a walk's next wave does not wait out its previous batch's ingest. A recorded subtree only gains its record, so a read that misses a queued write prunes less, never wrongly.
 
 ## Batching
 
