@@ -172,19 +172,20 @@ pub async fn handle_cache_socket(
                         debug!(%cache_id, %store_path, "skipping path not in this cache");
                         continue;
                     }
-                    let permit = match Arc::clone(&nar_serve_semaphore).acquire_owned().await {
-                        Ok(p) => p,
-                        Err(_) => {
-                            warn!("nar serve semaphore closed");
-                            return;
-                        }
+                    let Some(slot) =
+                        super::nar_serve::ServeSlot::acquire(Arc::clone(&nar_serve_semaphore))
+                            .await
+                    else {
+                        warn!("nar serve semaphore closed");
+                        return;
                     };
+
                     let state = Arc::clone(&state);
                     let writer = writer.clone();
                     let job_id = job_id.clone();
                     let shutdown = state.shutdown.clone();
                     shutdown.spawn(async move {
-                        let _permit = permit;
+                        let _slot = slot;
                         if let Err(e) = super::nar_serve::serve_nar_request(
                             &state,
                             &writer,
