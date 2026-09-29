@@ -63,6 +63,8 @@
         cargoFeatures = [ "nix" "eval" ];
       };
 
+      gradient-evalbench = import ./nix/tests/bench/evalbench { inherit self pkgs; };
+
       default = gradient;
     };
 
