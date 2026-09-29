@@ -208,6 +208,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(projects::get_project_name_available),
         )
         .route("/board/health", get(board_metrics::get_board_health))
+        .route("/board/storage", get(board_storage::get_board_storage))
         .route(
             "/board/expensive/top-projects",
             get(board::get_top_projects_by_buildtime),
