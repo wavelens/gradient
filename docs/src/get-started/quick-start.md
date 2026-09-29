@@ -1,6 +1,6 @@
 # Quick Start
 
-A running Gradient instance with its own worker, on one NixOS host.
+A running Gradient instance with its own worker, on one NixOS host. For a first try without a NixOS host, see [Standalone](standalone.md).
 
 **Requirements:**
 
