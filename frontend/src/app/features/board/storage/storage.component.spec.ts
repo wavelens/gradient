@@ -43,6 +43,20 @@ describe('BoardStorageComponent', () => {
     expect(getStorage).toHaveBeenLastCalledWith(24);
   });
 
+  it('labels buckets by granularity', () => {
+    const c = fixture.componentInstance;
+    const at = ['2026-09-29T15:04:00+00:00'];
+    const labelAs = (granularity: BoardStorage['granularity']) => {
+      c.stats.set({ ...EMPTY, granularity });
+
+      return c.labels(at);
+    };
+
+    expect(labelAs('minute')).toEqual(['15:04']);
+    expect(labelAs('hour')).toEqual(['09-29 15:04']);
+    expect(labelAs('day')).toEqual(['09-29']);
+  });
+
   it('keeps polling after a failed fetch', () => {
     getStorage.mockReturnValueOnce(throwError(() => new Error('down')));
     fixture.componentInstance.select(1);
