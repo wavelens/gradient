@@ -32,7 +32,12 @@
     gradient-evalbench-inspector = pkgs.callPackage ./nix/tools/evalbench-inspector { };
   in
   {
-    apps = import ./nix/vms { inherit inputs system pkgs; };
+    apps = import ./nix/vms { inherit inputs system pkgs; } // {
+      standalone = {
+        type = "app";
+        program = "${(pkgs.nixos [ ./nix/standalone/vm.nix ]).config.system.build.vm}/bin/run-gradient-vm";
+      };
+    };
     checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
       clippy = self.packages.${system}.gradient.clippy;
       unittest = self.packages.${system}.gradient.tests;
