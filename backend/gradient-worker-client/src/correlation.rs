@@ -285,10 +285,10 @@ pub async fn cache_query_chunk(
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
         // Server could determine cache state: authoritative cached/uncached list.
         Ok(Ok(Ok(cached))) => Ok(cached),
-        // Server-side `CacheError`: indeterminate, not "absent". Propagate as a
-        // plain error so prefetch classifies it transient (retry) rather than a
-        // terminal `InputsUnavailable`.
-        Ok(Ok(Err(message))) => Err(anyhow::anyhow!("CacheQuery failed server-side: {message}")),
+        // Server-side `CacheError`: indeterminate, not "absent", so it is an
+        // outage: prefetch retries it rather than a terminal `InputsUnavailable`.
+        Ok(Ok(Err(message))) => Err(anyhow::Error::new(crate::connection::Unresponsive)
+            .context(format!("CacheQuery failed server-side: {message}"))),
         Ok(Err(_)) => Err(anyhow::anyhow!(
             "cache waiter dropped - connection closed or superseded?"
         )),
