@@ -10,7 +10,13 @@ export type MetricChartType = 'area' | 'bar' | 'line' | 'radar' | 'heatmap';
 
 export type MetricPointXY = { x: string; y: number };
 export type MetricAxis = 'left' | 'right';
-export type MetricSeries = { name: string; data: (number | null)[] | MetricPointXY[]; axis?: MetricAxis };
+export type MetricSeriesType = 'bar' | 'line';
+export type MetricSeries = {
+  name: string;
+  data: (number | null)[] | MetricPointXY[];
+  axis?: MetricAxis;
+  type?: MetricSeriesType;
+};
 
 export interface MetricChartConfig {
   type: MetricChartType;
@@ -86,7 +92,9 @@ export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme
 }
 
 function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, theme: ChartTheme): EChartsOption {
-  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: cfg.type === 'bar', axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
+  const kindOf = (s: MetricSeries): MetricSeriesType => s.type ?? (cfg.type === 'bar' ? 'bar' : 'line');
+  const hasBars = cfg.series.some((s) => kindOf(s) === 'bar') || cfg.type === 'bar';
+  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: hasBars, axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false) => ({
@@ -111,16 +119,19 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
     xAxis: cfg.horizontal ? primary : categoryAxis,
     yAxis: cfg.horizontal ? categoryAxis : values,
     ...(secondary ? { tooltip: dualAxisTooltip(cfg, format, secondaryFormat, theme) } : {}),
-    series: cfg.series.map((s) => ({
-      name: s.name,
-      type: cfg.type === 'bar' ? ('bar' as const) : ('line' as const),
-      data: (isXY(s.data) ? s.data.map((p) => p.y) : s.data) as (number | null)[],
-      ...(secondary ? { yAxisIndex: axisOf(s) } : {}),
-      ...(cfg.type === 'bar'
-        ? { barMaxWidth: 28 }
-        : { smooth: true, showSymbol: false, lineStyle: { width: 2 } }),
-      ...(cfg.type === 'area' ? { areaStyle: { opacity: 0.25 } } : {}),
-    })),
+    series: cfg.series.map((s) => {
+      const data = (isXY(s.data) ? s.data.map((p) => p.y) : s.data) as (number | null)[];
+      const kind = kindOf(s);
+      const showSymbol = s.type === 'line' && data.includes(null);
+      return {
+        name: s.name,
+        type: kind,
+        data,
+        ...(secondary ? { yAxisIndex: axisOf(s) } : {}),
+        ...(kind === 'bar' ? { barMaxWidth: 28 } : { smooth: true, showSymbol, lineStyle: { width: 2 } }),
+        ...(cfg.type === 'area' && kind === 'line' ? { areaStyle: { opacity: 0.25 } } : {}),
+      };
+    }),
   };
 }
 

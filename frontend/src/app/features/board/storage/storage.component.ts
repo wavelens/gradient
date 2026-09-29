@@ -8,14 +8,12 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, injec
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, Subject, catchError, interval, startWith, switchMap } from 'rxjs';
 import { BoardService, BoardStorage } from '@core/services/board.service';
-import { MetricChartComponent, MetricSeries } from '@shared/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { formatCount, formatDuration } from '@shared/text';
 import { alignSeries } from './storage-chart';
 
 const WINDOWS = [1, 6, 24, 168];
 const REFRESH_MS = 60_000;
-
-type Aligned = { categories: string[]; series: MetricSeries[] };
 
 @Component({
   selector: 'app-board-storage',
@@ -82,33 +80,40 @@ export class BoardStorageComponent implements OnInit {
 
   latency = computed(() => {
     const ops = this.stats()?.op_latency ?? [];
-    const avg = alignSeries(ops, (p) => p.avg);
-    const max = alignSeries(
-      ops.map((s) => ({ ...s, label: `${s.label} max` })),
-      (p) => p.max
+
+    return alignSeries(
+      { series: ops, pick: (p) => p.avg, type: 'line' },
+      { series: ops, pick: (p) => p.max, type: 'line', name: (l) => `${l} max` }
     );
-    return { categories: avg.categories, series: [...avg.series, ...max.series] };
   });
 
-  errors = computed(() => alignSeries(this.stats()?.op_errors ?? [], (p) => p.count));
+  errors = computed(() => alignSeries({ series: this.stats()?.op_errors ?? [], pick: (p) => p.count, counts: true }));
 
   lanes = computed(() =>
-    this.merge(
-      alignSeries(this.stats()?.lane_fill ?? [], (p) => p.max * 100),
-      alignSeries(
-        (this.stats()?.send_stalls ?? []).map((s) => ({ ...s, label: `${s.label} stalls` })),
-        (p) => p.count
-      )
+    alignSeries(
+      { series: this.stats()?.lane_fill ?? [], pick: (p) => p.max * 100, type: 'line' },
+      {
+        series: this.stats()?.send_stalls ?? [],
+        pick: (p) => p.count,
+        name: (l) => `${l} stalls`,
+        axis: 'right',
+        type: 'bar',
+        counts: true,
+      }
     )
   );
 
   serves = computed(() =>
-    this.merge(
-      alignSeries(this.stats()?.serve_queue ?? [], (p) => p.max),
-      alignSeries(
-        (this.stats()?.serve_failures ?? []).map((s) => ({ ...s, label: `failed ${s.label}` })),
-        (p) => p.count
-      )
+    alignSeries(
+      { series: this.stats()?.serve_queue ?? [], pick: (p) => p.max, type: 'line' },
+      {
+        series: this.stats()?.serve_failures ?? [],
+        pick: (p) => p.count,
+        name: (l) => `failed ${l}`,
+        axis: 'right',
+        type: 'bar',
+        counts: true,
+      }
     )
   );
 
@@ -129,18 +134,13 @@ export class BoardStorageComponent implements OnInit {
   }
 
   labels(categories: string[]): string[] {
-    const day = this.stats()?.granularity === 'day';
-    return categories.map((c) => (day ? c.slice(5, 10) : c.slice(11, 16)));
-  }
+    const granularity = this.stats()?.granularity;
+    const format = (c: string) => {
+      if (granularity === 'day') return c.slice(5, 10);
+      if (granularity === 'hour') return `${c.slice(5, 10)} ${c.slice(11, 16)}`;
+      return c.slice(11, 16);
+    };
 
-  private merge(left: Aligned, right: Aligned): Aligned {
-    const categories = [...new Set([...left.categories, ...right.categories])].sort();
-    const realign = (part: Aligned, axis: 'left' | 'right') =>
-      part.series.map((s) => {
-        const byCategory = new Map(part.categories.map((c, i) => [c, (s.data as (number | null)[])[i]]));
-        return { name: s.name, axis, data: categories.map((c) => byCategory.get(c) ?? null) };
-      });
-
-    return { categories, series: [...realign(left, 'left'), ...realign(right, 'right')] };
+    return categories.map(format);
   }
 }
