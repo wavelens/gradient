@@ -12,14 +12,14 @@ A complete Gradient on one machine, for trying it on a personal repository: serv
 === "Docker"
 
     ```sh
-    docker run -d --name gradient \
+    docker run -dt --name gradient \
       --privileged --cgroupns=host \
-      -p 8080:80 \
+      -p 127.0.0.1:8080:80 \
       -v gradient:/var/lib \
       ghcr.io/wavelens/gradient-standalone
     ```
 
-    The container runs systemd and the Nix build sandbox, which need `--privileged`. The `gradient` volume keeps projects, builds and the cache across restarts.
+    The container runs systemd and the Nix build sandbox, which need `--privileged`; `-t` gives systemd a console for `docker logs`. The port is bound to `127.0.0.1` only. The `gradient` volume keeps projects, builds and the cache across restarts.
 
 === "Nix"
 
@@ -42,7 +42,7 @@ Gradient is running at http://localhost:8080 - log in with admin / <password>
 === "Docker"
 
     ```sh
-    docker logs gradient 2>&1 | grep 'log in with'
+    docker exec gradient cat /var/lib/gradient-standalone/admin-password
     ```
 
 === "Nix"

@@ -78,7 +78,7 @@ A NixOS module sets up the server, a local worker, PostgreSQL and the reverse pr
 For a first try on a personal repository, the [Standalone](https://wavelens.github.io/gradient/get-started/standalone/) instance runs everything in one container or VM:
 
 ```sh
-docker run -d --name gradient --privileged --cgroupns=host -p 8080:80 -v gradient:/var/lib ghcr.io/wavelens/gradient-standalone
+docker run -dt --name gradient --privileged --cgroupns=host -p 127.0.0.1:8080:80 -v gradient:/var/lib ghcr.io/wavelens/gradient-standalone
 # or
 nix run github:wavelens/gradient#standalone
 ```
