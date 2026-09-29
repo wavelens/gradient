@@ -149,6 +149,7 @@ pub async fn fetch_repository(
     let binpath_ssh = binpath_ssh.to_owned();
     match archive_flake(
         &flake_ref,
+        &flake_root,
         &binpath_nix,
         &binpath_ssh,
         ssh_key.as_deref(),
@@ -221,6 +222,7 @@ pub async fn fetch_repository(
 /// Run the native flake.lock generator over the checkout, write the candidate
 /// lock back, and report it (with the bumped set) to the server. An empty patch
 /// returns without reporting so no PR is opened.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn run_input_update(
     spec: &gradient_wire::messages::InputUpdateSpec,
     checkout: &str,
@@ -315,16 +317,33 @@ fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<St
 /// Run `nix flake archive --json` and collect all store paths (source + all
 /// transitive flake inputs). Returns the source store path and every archived
 /// path, verified present via `nix path-info`.
+///
+/// When every locked input is already in the local store, only the flake's own
+/// source is fetched: `nix flake archive` re-hashes each `path:` and `git+file:`
+/// input to verify it, which on a nixpkgs checkout is a walk of every file.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn archive_flake(
     flake_ref: &str,
+    flake_root: &str,
     binpath_nix: &str,
     binpath_ssh: &str,
     ssh_key: Option<&str>,
     overrides: &[(String, String)],
     abort: &mut watch::Receiver<bool>,
 ) -> Result<(String, Vec<String>)> {
-    trace!(binpath_nix, flake_ref, "executing nix flake archive");
     let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
+    if overrides.is_empty()
+        && let Some(inputs) = present_locked_inputs(flake_root, binpath_nix, abort).await
+    {
+        let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
+        let source_path = prefetch_one(flake_ref, binpath_nix, ssh_command, abort).await?;
+        debug!(%source_path, inputs = inputs.len(), "every locked input present; archived the source alone");
+        let mut all_paths = inputs;
+        all_paths.push(source_path.clone());
+        return Ok((source_path, all_paths));
+    }
+
+    trace!(binpath_nix, flake_ref, "executing nix flake archive");
     let mut cmd = tokio::process::Command::new(binpath_nix);
     cmd.args(build_archive_argv(flake_ref, overrides));
     if let Some((_guard, ssh_command)) = &key_env {
@@ -432,6 +451,7 @@ fn build_prefetch_argv(flake_ref: &str) -> Vec<String> {
 
 /// Prefetch a single flake ref via `nix flake prefetch --json` and return its
 /// `storePath`.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn prefetch_one(
     flake_ref: &str,
     binpath_nix: &str,
@@ -456,6 +476,7 @@ async fn prefetch_one(
 /// source itself (a hard error if that fails) then every locked input from
 /// `flake.lock` independently, collecting the successes and turning per-input
 /// failures into warnings. Returns `(source_path, collected_paths, warnings)`.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn prefetch_flake_best_effort(
     flake_ref: &str,
     flake_root: &str,
@@ -529,6 +550,7 @@ fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
 /// Metadata is no longer surfaced here (the server records it from each
 /// `UploadFinished`); this only confirms the archive/prefetch step actually
 /// populated the store before the caller pushes.
+#[tracing::instrument(level = "debug", skip_all, fields(paths = paths.len()))]
 async fn query_path_info(
     paths: &[String],
     binpath_nix: &str,
@@ -551,6 +573,57 @@ async fn query_path_info(
     Ok(Vec::new())
 }
 
+/// The store path of every locked input in `flake_root`'s lock, when all of them
+/// are valid in the local store. `None` sends the caller through the archive: a
+/// missing lock, an input the lock pins without a `narHash`, or any path absent.
+async fn present_locked_inputs(
+    flake_root: &str,
+    binpath_nix: &str,
+    abort: &mut watch::Receiver<bool>,
+) -> Option<Vec<String>> {
+    let bytes = tokio::fs::read(std::path::Path::new(flake_root).join("flake.lock"))
+        .await
+        .ok()?;
+    let lock: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let paths = locked_input_paths(&lock)?;
+    match query_path_info(&paths, binpath_nix, abort).await {
+        Ok(_) => Some(paths),
+        Err(e) => {
+            debug!(error = %e, "a locked input is not in the store; archiving");
+            None
+        }
+    }
+}
+
+/// Every fetcher stores a locked input as `<hash>-source`, content-addressed by
+/// the NAR hash the lock pins, so the path follows from the lock alone.
+fn locked_input_paths(lock: &serde_json::Value) -> Option<Vec<String>> {
+    use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
+    use harmonia_store_path::{StoreDir, StorePathName};
+    use harmonia_utils_hash::{Hash, fmt::SRI};
+
+    let root = lock.get("root")?.as_str()?;
+    let store_dir = StoreDir::default();
+    let name: StorePathName = "source".parse().ok()?;
+    let mut paths: Vec<String> = lock
+        .get("nodes")?
+        .as_object()?
+        .iter()
+        .filter(|(key, _)| key.as_str() != root)
+        .map(|(_, node)| -> Option<String> {
+            let nar_hash = node.get("locked")?.get("narHash")?.as_str()?;
+            let hash = nar_hash.parse::<SRI<Hash>>().ok()?.into_hash();
+            let path =
+                make_store_path_from_ca(&store_dir, name.clone(), ContentAddress::NixArchive(hash));
+            Some(store_dir.display(&path).to_string())
+        })
+        .collect::<Option<_>>()?;
+    paths.sort_unstable();
+    paths.dedup();
+    Some(paths)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
 fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
     let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::now_v7()));
 
@@ -999,6 +1072,37 @@ mod tests {
         assert!(result.is_err(), "expected error when nix is unavailable");
         // The Fetching event was still emitted before the failure.
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
+    }
+
+    /// crane as this repository locks it; `nix eval` of its `fetchTree` outPath.
+    #[test]
+    fn a_locked_input_path_follows_from_its_nar_hash() {
+        let lock = serde_json::json!({
+            "nodes": {
+                "crane": {"locked": {"narHash": "sha256-jtT4yxZpR8seYnlCMMWSSPlFN92zO6ICuZ8pJrmi86k=", "type": "github"}},
+                "root": {"inputs": {"crane": "crane"}}
+            },
+            "root": "root",
+            "version": 7
+        });
+        assert_eq!(
+            locked_input_paths(&lock),
+            Some(vec![
+                "/nix/store/7rradzysxg41b2yx7qnh2f2bw73py192-source".to_owned()
+            ])
+        );
+    }
+
+    #[test]
+    fn an_input_without_a_nar_hash_sends_the_fetch_through_the_archive() {
+        let lock = serde_json::json!({
+            "nodes": {
+                "sub": {"locked": {"path": "./sub", "type": "path"}},
+                "root": {"inputs": {"sub": "sub"}}
+            },
+            "root": "root"
+        });
+        assert_eq!(locked_input_paths(&lock), None);
     }
 
     #[test]
