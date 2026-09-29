@@ -440,13 +440,24 @@ async fn ssh_key_env(
     Ok(Some((kf, ssh_command)))
 }
 
+/// `nix flake prefetch` resolves every ref through the registries, and loading
+/// the global one downloads it, which fails on a worker without a route out even
+/// though a direct ref never consults it. Only an indirect ref keeps it.
 fn build_prefetch_argv(flake_ref: &str) -> Vec<String> {
-    vec![
-        "flake".to_owned(),
-        "prefetch".to_owned(),
-        "--json".to_owned(),
-        flake_ref.to_owned(),
-    ]
+    let mut argv = vec!["flake".to_owned(), "prefetch".to_owned()];
+    if !is_indirect(flake_ref) {
+        argv.extend([
+            "--option".to_owned(),
+            "flake-registry".to_owned(),
+            String::new(),
+        ]);
+    }
+    argv.extend(["--json".to_owned(), flake_ref.to_owned()]);
+    argv
+}
+
+fn is_indirect(flake_ref: &str) -> bool {
+    flake_ref.starts_with("flake:") || !flake_ref.contains(':')
 }
 
 /// Prefetch a single flake ref via `nix flake prefetch --json` and return its
@@ -1091,6 +1102,29 @@ mod tests {
                 "/nix/store/7rradzysxg41b2yx7qnh2f2bw73py192-source".to_owned()
             ])
         );
+    }
+
+    #[test]
+    fn a_direct_prefetch_never_loads_the_global_registry() {
+        assert_eq!(
+            build_prefetch_argv("git+file:///tmp/checkout?rev=abc"),
+            [
+                "flake",
+                "prefetch",
+                "--option",
+                "flake-registry",
+                "",
+                "--json",
+                "git+file:///tmp/checkout?rev=abc"
+            ]
+        );
+        for indirect in ["nixpkgs", "nixpkgs/nixos-24.05", "flake:nixpkgs"] {
+            assert_eq!(
+                build_prefetch_argv(indirect),
+                ["flake", "prefetch", "--json", indirect],
+                "{indirect}"
+            );
+        }
     }
 
     #[test]
