@@ -920,6 +920,16 @@ in {
             boundaries: a long line may exceed the target.
           '';
         };
+
+        traceDir = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "/var/lib/gradient/trace";
+          description = ''
+            Directory that receives every closed stage span of the server as JSON lines, one file
+            per process. `null` disables span tracing.
+          '';
+        };
       };
 
       oidc = {
@@ -1182,6 +1192,14 @@ in {
       after = [ "gradient-local-worker-token.service" ];
     };
 
+    systemd.tmpfiles.settings."10-gradient-trace" = lib.mkIf (cfg.log.traceDir != null) {
+      ${cfg.log.traceDir}.d = {
+        user = "gradient";
+        group = "gradient";
+        mode = "0750";
+      };
+    };
+
     systemd.services.gradient-server = {
       wantedBy = [ "multi-user.target" ];
       after = [
@@ -1207,7 +1225,7 @@ in {
         ProtectKernelTunables = true;
         ProtectProc = "invisible";
         ProtectSystem = "strict";
-        ReadWritePaths = [ cfg.baseDir ];
+        ReadWritePaths = [ cfg.baseDir ] ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
         Restart = "on-failure";
         RestartSec = 10;
         LimitNOFILE = 65535;
@@ -1335,6 +1353,8 @@ in {
         GRADIENT_PULL_REQUESTS_COMMIT_EMAIL = cfg.pullRequests.commitEmail;
       } // lib.optionalAttrs (cfg.sentry.dsn != null) {
         GRADIENT_SENTRY_DSN = cfg.sentry.dsn;
+      } // lib.optionalAttrs (cfg.log.traceDir != null) {
+        GRADIENT_LOG_TRACE_DIR = cfg.log.traceDir;
       } // lib.optionalAttrs (cfg.log.level.cache != null) {
         GRADIENT_LOG_LEVEL_CACHE = cfg.log.level.cache;
       } // lib.optionalAttrs (cfg.log.level.web != null) {

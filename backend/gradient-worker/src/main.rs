@@ -24,7 +24,7 @@ use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use config::WorkerConfig;
-use gradient_util::logging::{LogSetup, LogWriter};
+use gradient_util::logging::{LogSetup, LogWriter, TraceSetup};
 use gradient_worker_client::reconnect::{
     RunOutcome, SessionEnd, backoff_after_session, retry_reconnect,
 };
@@ -49,7 +49,14 @@ fn main() -> Result<()> {
         quiet: &[],
         honor_rust_log: false,
         writer: LogWriter::Stderr,
-        trace: None,
+        trace: config.log.trace_dir.as_deref().map(|dir| TraceSetup {
+            dir,
+            process: if config.eval_subprocess {
+                "eval"
+            } else {
+                "worker"
+            },
+        }),
     });
 
     // Re-exec as eval subprocess when launched with the internal flag.
