@@ -77,16 +77,20 @@ def reset_to_cold():
 
 
 def wait_for_status(token, eval_id, wanted, timeout):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        status = api("GET", f"evals/{eval_id}", token)["status"]
-        if status in FAILED:
-            raise Exception(f"evaluation {eval_id} {status}:\n"
-                            + server.succeed("journalctl -u gradient-server --no-pager -n 100"))
-        if status in wanted:
-            return status
-        time.sleep(1)
-    raise Exception(f"evaluation {eval_id} did not reach {wanted} within {timeout} s")
+    # Polled inside the VM: a driver round trip per poll caps the timing at a second.
+    stop = "|".join(sorted(wanted | FAILED))
+    rc, status = server.execute(
+        f"timeout {timeout} sh -c 'while :; do"
+        f" s=$(curl -sf {API}/evals/{eval_id} -H \"Authorization: Bearer {token}\" | jq -r .message.status);"
+        f" echo \"$s\" | grep -qxE \"{stop}\" && {{ echo \"$s\"; exit 0; }}; sleep 0.05; done'"
+    )
+    status = status.strip()
+    if rc != 0:
+        raise Exception(f"evaluation {eval_id} did not reach {wanted} within {timeout} s")
+    if status in FAILED:
+        raise Exception(f"evaluation {eval_id} {status}:\n"
+                        + server.succeed("journalctl -u gradient-server --no-pager -n 100"))
+    return status
 
 
 def dump_postgres(run, eval_id):
