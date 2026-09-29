@@ -13,7 +13,7 @@ sequenceDiagram
     H->>C: fan_out_triggers -> apply_trigger
     C->>C: dedup, concurrency
     C->>C: trigger_evaluation: Commit + Queued evaluation
-    S->>S: next 5 s tick hands the evaluation to a worker
+    S->>S: woken by the new evaluation, hands it to a worker
 ```
 
 ## Routes
@@ -47,7 +47,7 @@ sequenceDiagram
 | 2 | `normalize_repo_url`, `event_repo_matches_task` | Strips `.git` and a trailing `/`, rewrites `git@` URLs; compares lowercased `owner/repo`, ignoring the host |
 | 3 | `gradient_ci::apply_trigger` | Dedup and concurrency: aborts the running evaluation or parks the new one in `Waiting`; a violation of `uq_evaluation_one_active_per_task` maps to `SkippedConcurrency` |
 | 4 | `gradient_ci::trigger::trigger_evaluation` | Inserts the `Commit` row and a `Queued` evaluation, sets `task.force_evaluation`, resets `last_check_at` |
-| 5 | `eval-dispatch` | The 5 s tick offers the evaluation to workers |
+| 5 | `eval-dispatch` | Woken by the created evaluation (`record_evaluation_created`), offers it to workers; the 5 s tick is the fallback |
 
 ## Related
 

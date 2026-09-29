@@ -21,6 +21,7 @@ use ractor::{
     Actor, ActorCell, ActorId, ActorProcessingErr, ActorRef, RpcReplyPort, SpawnErr,
     SupervisionEvent,
 };
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
@@ -36,13 +37,16 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const HEALTHY_RESET: Duration = Duration::from_secs(300);
 const STOP_TIMEOUT: Duration = Duration::from_secs(25);
 
-/// A pass that runs every `period`, cancelled in place past `budget`.
+/// A pass that runs every `period`, cancelled in place past `budget`. A `wake`
+/// runs the next pass at once instead of at the end of the period; one arriving
+/// during a pass runs another right after it.
 #[derive(Clone)]
 pub struct PeriodicSpec {
     pub name: &'static str,
     pub period: Duration,
     pub budget: Duration,
     pub run: PassFn,
+    pub wake: Option<Arc<Notify>>,
 }
 
 /// What the root supervises: a periodic pass, any actor spawned by a factory,
@@ -74,6 +78,28 @@ impl ChildSpec {
             period,
             budget,
             run: Arc::new(move || Box::pin(run())),
+            wake: None,
+        })
+    }
+
+    /// [`Self::periodic`], also run as soon as `wake` is notified.
+    pub fn periodic_woken<F, Fut>(
+        name: &'static str,
+        period: Duration,
+        budget: Duration,
+        wake: Arc<Notify>,
+        run: F,
+    ) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), PassError>> + Send + 'static,
+    {
+        Self::Periodic(PeriodicSpec {
+            name,
+            period,
+            budget,
+            run: Arc::new(move || Box::pin(run())),
+            wake: Some(wake),
         })
     }
 
@@ -174,9 +200,25 @@ pub async fn run_pass(
     true
 }
 
+/// The period, or a wake before it; `false` once shutdown began.
+async fn wait_for_turn(spec: &PeriodicSpec, cancel: &CancellationToken) -> bool {
+    let woken = async {
+        match &spec.wake {
+            Some(wake) => wake.notified().await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        _ = cancel.cancelled() => false,
+        _ = tokio::time::sleep(spec.period) => true,
+        _ = woken => true,
+    }
+}
+
 pub struct Periodic;
 
 pub enum PeriodicMsg {
+    Wait,
     Tick,
 }
 
@@ -195,29 +237,36 @@ impl Actor for Periodic {
         myself: ActorRef<Self::Msg>,
         args: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
-        myself.send_after(args.spec.period, || PeriodicMsg::Tick);
+        let _ = myself.send_message(PeriodicMsg::Wait);
         Ok(args)
     }
 
     async fn handle(
         &self,
         myself: ActorRef<Self::Msg>,
-        PeriodicMsg::Tick: Self::Msg,
+        msg: Self::Msg,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         let spec = &state.spec;
-        let alive = run_pass(
-            spec.name,
-            spec.budget,
-            &state.ctx.cancel,
-            &state.ctx.health,
-            (spec.run)(),
-        )
-        .await;
-        if alive {
-            myself.send_after(spec.period, || PeriodicMsg::Tick);
-        } else {
+        let alive = match msg {
+            PeriodicMsg::Wait => wait_for_turn(spec, &state.ctx.cancel).await,
+            PeriodicMsg::Tick => {
+                run_pass(
+                    spec.name,
+                    spec.budget,
+                    &state.ctx.cancel,
+                    &state.ctx.health,
+                    (spec.run)(),
+                )
+                .await
+            }
+        };
+        if !alive {
             myself.stop(Some("shutdown".into()));
+        } else if matches!(msg, PeriodicMsg::Wait) {
+            let _ = myself.send_message(PeriodicMsg::Tick);
+        } else {
+            let _ = myself.send_message(PeriodicMsg::Wait);
         }
         Ok(())
     }
@@ -515,6 +564,39 @@ mod tests {
             "ticking resumed after the restart"
         );
         assert!(h.last_ok_at.is_some());
+        shutdown.cancel_and_drain(Duration::from_secs(2)).await;
+    }
+
+    /// A queued evaluation sat out the rest of a 5 s dispatch tick before
+    /// anything looked at it; a wake runs the pass now.
+    #[tokio::test]
+    async fn a_wake_runs_the_pass_before_its_period() {
+        let shutdown = Shutdown::new();
+        let calls = Arc::new(AtomicU32::new(0));
+        let wake = Arc::new(Notify::new());
+        let counted = Arc::clone(&calls);
+        shutdown
+            .supervise_now(ChildSpec::periodic_woken(
+                "woken",
+                Duration::from_secs(3600),
+                Duration::from_secs(60),
+                Arc::clone(&wake),
+                move || {
+                    let calls = Arc::clone(&counted);
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    }
+                },
+            ))
+            .await
+            .expect("supervise");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "the period has not passed");
+
+        wake.notify_one();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the wake ran one pass");
         shutdown.cancel_and_drain(Duration::from_secs(2)).await;
     }
 

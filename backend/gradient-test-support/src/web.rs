@@ -163,6 +163,7 @@ fn server_with_pools(
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
         outbox_wake: Default::default(),
+        eval_dispatch_wake: Default::default(),
         probe_requests: Default::default(),
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),

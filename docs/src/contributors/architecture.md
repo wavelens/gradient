@@ -37,7 +37,8 @@ root
 ├── graph                                actor: sole writer of the graph and the cache index; stopped last
 ├── scheduler                            supervisor
 │   ├── scheduler-core                   actor: WorkerPool and JobTracker behind messages
-│   ├── trigger-dispatch, eval-dispatch  every 5 s
+│   ├── trigger-dispatch                 every 5 s
+│   ├── eval-dispatch                    5 s tick, woken by every created evaluation
 │   ├── build-dispatch                   actor: 5 s tick, kicks, ready-set resync every 60 s
 │   └── upstream-probe                   every 1 s: asks upstreams about newly demanded anchors
 ├── sessions                             supervisor: one actor per worker connection

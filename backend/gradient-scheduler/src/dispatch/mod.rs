@@ -87,13 +87,7 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
                     DISPATCH_BUDGET,
                     |s| async move { crate::trigger_dispatch::dispatch_once(&s).await },
                 ),
-                periodic(
-                    scheduler,
-                    "eval-dispatch",
-                    DISPATCH_TICK,
-                    DISPATCH_BUDGET,
-                    |s| async move { eval::dispatch_queued_evals(&s).await },
-                ),
+                eval_dispatch_spec(scheduler),
                 build::child_spec(scheduler),
                 crate::probe::child_spec(&scheduler.state),
             ],
@@ -167,6 +161,26 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
     }
 
     children
+}
+
+/// Woken by every created evaluation; the tick covers requeues and restarts.
+fn eval_dispatch_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
+    let wake = Arc::clone(&scheduler.state.eval_dispatch_wake);
+    let scheduler = Arc::clone(scheduler);
+    ChildSpec::periodic_woken(
+        "eval-dispatch",
+        DISPATCH_TICK,
+        DISPATCH_BUDGET,
+        wake,
+        move || {
+            let scheduler = Arc::clone(&scheduler);
+            async move {
+                eval::dispatch_queued_evals(&scheduler)
+                    .await
+                    .map_err(Into::into)
+            }
+        },
+    )
 }
 
 fn periodic<F, Fut>(
