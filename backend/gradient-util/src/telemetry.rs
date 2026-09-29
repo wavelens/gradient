@@ -146,7 +146,9 @@ impl Peak {
     }
 
     pub fn observe(&self, permille: u32) {
-        self.0.fetch_max(permille, Ordering::Relaxed);
+        if self.0.load(Ordering::Relaxed) < permille {
+            self.0.fetch_max(permille, Ordering::Relaxed);
+        }
     }
 
     pub fn get(&self) -> u32 {
@@ -318,6 +320,7 @@ mod tests {
                 .map(|(_, a)| a.sum)
                 .expect(m)
         };
+
         assert_eq!(value(metric::PROTO_BULK_LANE_FILL), 0.5);
         assert_eq!(value(metric::PROTO_CONTROL_LANE_FILL), 0.0);
         assert_eq!(value(metric::NAR_SERVES_WAITING), 2.0);
