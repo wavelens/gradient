@@ -39,7 +39,7 @@ flowchart LR
 
 ## Graph Actor
 
-`GraphActor` (`gradient-graph/src/actor.rs`) is a root child of the supervision tree, stopped after every sibling. Callers use the `Graph` handle (`lib.rs`); one message is one transaction.
+`GraphActor` (`gradient-graph/src/actor.rs`) is a root child of the supervision tree, stopped after every sibling. Callers use the `Graph` handle (`lib.rs`); one message is one transaction, except that queued `Ingest` and `CommitNar` messages share one.
 
 | `GraphMsg` | Writes |
 |---|---|
@@ -53,12 +53,12 @@ flowchart LR
 | `Demote` | `MissingNar`, operator `Path` invalidation, one cache dropping its `CacheClaim` |
 | `Gc` | Bounded deletes of derivations, stale paths and evaluations, re-checked against rows that became live since the scan |
 
-Every non-ingest message flushes the ingest queue first: a read after a batch sees that batch.
+Every other message flushes the queue first: a read after a batch or a commit sees it.
 
-## Ingest Batching
+## Batching
 
-- Queued batches share one transaction with a savepoint per batch (`ingest_one`); a batch that fails for its content fails only its caller.
-- A flush runs on the next mailbox turn, or at once when the queue reaches `INGEST_ROW_BUDGET` (5000 derivations).
+- Queued ingest batches and NAR commits share one transaction with a savepoint each (`ingest_one`, `commit_one`); one that fails for its content fails only its caller. An upload burst commits in one round trip and one WAL flush instead of one per NAR.
+- A flush runs on the next mailbox turn, or at once when the queue reaches `INGEST_ROW_BUDGET` (5000 derivations) or `NAR_COMMIT_BUDGET` (256 commits).
 - The worker's wire has no acknowledgement to retry on. A failed batch fails its evaluation (`fail_evaluation`) instead of leaving a hole.
 - `IngestBatch.truly_substituted` is the one fact from outside the graph: derivations already whole in our cache, established by the scheduler and keyed by drv path. Their new anchors start `Substituted`. Ids are assigned inside the transaction.
 - Upstream availability is not part of a batch; the probe answers through `UpstreamHits` for demanded anchors. A batch writes `substitutable = false` on new anchors only.
