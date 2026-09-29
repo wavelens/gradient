@@ -1737,7 +1737,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
             "SELECT count(*) FROM derivation_build db WHERE db.unready_deps <> ("
             "  SELECT count(*) FROM derivation_dependency e "
             "  LEFT JOIN derivation_build dep ON dep.derivation = e.dependency "
-            "  WHERE e.derivation = db.derivation "
+            "  WHERE e.derivation = db.derivation AND e.kind IN (0, 2) "
             "    AND (dep.derivation IS NULL OR NOT dep.fetchable)) "
             "OR db.fetchable <> (db.status IN (3, 7) AND db.missing_runtime_deps = 0 "
             "AND EXISTS ("
@@ -2156,7 +2156,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
                 f"JOIN derivation_build dep ON dep.derivation = e.dependency "
                 f"JOIN derivation d ON d.id = e.dependency "
                 f"WHERE e.derivation = (SELECT id FROM derivation WHERE hash = '{drv_hash}') "
-                f"  AND NOT dep.fetchable;"
+                f"  AND e.kind IN (0, 2) AND NOT dep.fetchable;"
             )
         )
     unsettled = int(sql(
