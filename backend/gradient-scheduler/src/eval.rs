@@ -24,6 +24,7 @@ const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 /// cache, so the anchor can be resigned instead of rebuilt. A pure read: the
 /// upstream question is [`probe_outputs`]'s and runs only once something wants
 /// the anchor.
+#[tracing::instrument(level = "debug", skip_all, fields(derivations = derivations.len()))]
 pub async fn assess_cached(
     state: &Arc<ServerState>,
     derivations: &[DiscoveredDerivation],

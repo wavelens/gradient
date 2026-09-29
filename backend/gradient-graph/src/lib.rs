@@ -133,6 +133,7 @@ impl Graph {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(eval_id = %batch.evaluation, derivations = batch.derivations.len()))]
     pub async fn ingest(&self, batch: IngestBatch) -> anyhow::Result<IngestReport> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -151,6 +152,7 @@ impl Graph {
 
     /// Store paths of `drv_hashes` the worker may prune, answered after every
     /// write queued before this call.
+    #[tracing::instrument(level = "debug", skip_all, fields(paths = drv_hashes.len()))]
     pub async fn known_derivations(&self, drv_hashes: Vec<String>) -> anyhow::Result<Vec<String>> {
         #[cfg(feature = "stub")]
         if self.stub {

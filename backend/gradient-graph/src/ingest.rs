@@ -147,6 +147,7 @@ impl BatchWriter<'_> {
     }
 
     /// The derivations this batch flipped to walked, by hash.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn upsert_walked(&self, derivations: &[DiscoveredDerivation]) -> Result<HashSet<String>> {
         let mut seen = HashSet::new();
         let mut ids: Vec<uuid::Uuid> = Vec::new();
@@ -211,6 +212,7 @@ impl BatchWriter<'_> {
     /// An unparseable dependency path fails the batch: the source would
     /// otherwise commit `walked = true` with an edge missing, and only a lost
     /// record clears `walked`, so no later walk would repair it.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn insert_stubs(&self, derivations: &[DiscoveredDerivation]) -> Result<()> {
         let walked: HashSet<&str> = derivations.iter().map(|d| d.drv_path.as_str()).collect();
         let mut seen = HashSet::new();
@@ -258,6 +260,7 @@ impl BatchWriter<'_> {
 
     /// Every drv path the batch names, walked or stub, to the row's id. Read
     /// back from the table after the inserts, never from a local guess.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn resolve_ids(&self, derivations: &[DiscoveredDerivation]) -> Result<Resolved> {
         let paths: HashSet<&str> = derivations
             .iter()
@@ -304,6 +307,7 @@ impl BatchWriter<'_> {
     /// ones it flipped to walked. Both inserts are conflict-guarded no-ops on a
     /// record already written, and re-asserting the full declared set on every
     /// walk is the only repair a graph that lost an edge ever gets.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn insert_records(
         &self,
         derivations: &[DiscoveredDerivation],
@@ -398,6 +402,7 @@ impl BatchWriter<'_> {
     /// before it whatever they read now, since the upsert above wrote `walked` one
     /// statement ago, and a freshly walked leaf that reads complete on both sides of
     /// the seed still owes its dependents a count-down.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn record_walk_completeness(
         &self,
         resolved: &Resolved,
@@ -457,6 +462,7 @@ impl BatchWriter<'_> {
     /// evaluation's `build_job` rows. A derivation whole in our cache is
     /// `Substituted`; `substitutable` is the upstream probe's to set, never a
     /// batch's.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn resolve_anchors(
         &self,
         ids: &HashMap<String, DerivationId>,
@@ -650,6 +656,7 @@ impl BatchWriter<'_> {
     /// every new builder), and both statements re-check the gate, so it is a
     /// re-gate rather than a counter move and does not belong inside the counters'
     /// transaction.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn advance_readiness(
         &self,
         batch: &IngestBatch,
@@ -719,6 +726,7 @@ impl BatchWriter<'_> {
     /// with it, so nothing downstream dispatches against an input nobody produced.
     /// The referrers are returned for the readiness pass to recount `unready_deps`,
     /// after it marks the producers fetchable.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn adopt_references(
         &self,
         resolved: &Resolved,
@@ -804,6 +812,7 @@ impl BatchWriter<'_> {
     /// without duplicating. The GC keeps every source of a reachable derivation
     /// live; the dispatch gate reads only the `.drv` NAR, whose references the
     /// sources are.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn persist_input_sources(
         &self,
         derivations: &[DiscoveredDerivation],
@@ -860,6 +869,7 @@ impl BatchWriter<'_> {
     }
 
     /// Record per-derivation system-feature requirements in the DB.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn add_system_features(
         &self,
         derivations: &[DiscoveredDerivation],
@@ -888,6 +898,7 @@ impl BatchWriter<'_> {
     }
 
     /// Persist Nix evaluation warnings and errors as evaluation messages.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
         for warning in warnings {
             record_evaluation_message(
@@ -914,6 +925,7 @@ impl BatchWriter<'_> {
 
     /// Insert this batch's task entry points, returning their derivation ids so
     /// the caller can announce their current anchor status to the forge.
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn process_entry_points(
         &self,
         task_id: TaskId,
@@ -983,6 +995,7 @@ fn accepts_batches(status: EvaluationStatus) -> bool {
     )
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(eval_id = %batch.evaluation, derivations = batch.derivations.len()))]
 pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<IngestReport> {
     let evaluation_id = batch.evaluation;
     match EEvaluation::find_by_id(evaluation_id)
@@ -1294,6 +1307,7 @@ async fn persist_narinfo(
 
 /// What a landed batch triggers outside its transaction: forge checks for the
 /// entry points, the per-task evaluation GC, and the live-channel ping.
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn after_commit(
     ctx: &DbContext,
     actor: &ractor::ActorRef<crate::actor::GraphMsg>,

@@ -19,7 +19,7 @@ use gradient_util::shutdown::Shutdown;
 use gradient_wire::types::BuildFailureKind;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument as _, debug, debug_span, error, info, warn};
 
 use gradient_wire::messages::{JobPhaseSpan, JobUpdateKind};
 
@@ -54,6 +54,18 @@ impl JobEvent {
             | JobEvent::Failed { job_id, .. } => job_id,
         }
     }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            JobEvent::Update {
+                update: JobUpdateKind::EvalResult { .. },
+                ..
+            } => "eval_result",
+            JobEvent::Update { .. } => "update",
+            JobEvent::Completed { .. } => "completed",
+            JobEvent::Failed { .. } => "failed",
+        }
+    }
 }
 
 pub(super) trait ApplyJobEvent: Send + Sync + 'static {
@@ -61,7 +73,7 @@ pub(super) trait ApplyJobEvent: Send + Sync + 'static {
 }
 
 pub(super) struct JobEvents {
-    tx: Option<mpsc::Sender<JobEvent>>,
+    tx: Option<mpsc::Sender<(Instant, JobEvent)>>,
     drained: Option<JoinHandle<()>>,
 }
 
@@ -83,9 +95,9 @@ impl JobEvents {
             );
             return;
         };
-        if let Err(lost) = tx.send(event).await {
+        if let Err(lost) = tx.send((Instant::now(), event)).await {
             error!(
-                job_id = lost.0.job_id(),
+                job_id = (lost.0).1.job_id(),
                 "job event lane closed; report dropped"
             );
         }
@@ -101,11 +113,21 @@ impl JobEvents {
     }
 }
 
-async fn drain(mut rx: mpsc::Receiver<JobEvent>, peer_id: String, handler: impl ApplyJobEvent) {
-    while let Some(event) = rx.recv().await {
+async fn drain(
+    mut rx: mpsc::Receiver<(Instant, JobEvent)>,
+    peer_id: String,
+    handler: impl ApplyJobEvent,
+) {
+    while let Some((received, event)) = rx.recv().await {
         let job_id = event.job_id().to_owned();
+        let span = debug_span!(
+            "job_event",
+            %job_id,
+            kind = event.kind(),
+            queue_wait_us = received.elapsed().as_micros() as u64,
+        );
         let started = Instant::now();
-        handler.apply(event).await;
+        handler.apply(event).instrument(span).await;
         let took = started.elapsed();
         if took > SLOW_JOB_EVENT {
             warn!(%peer_id, %job_id, took_ms = took.as_millis() as u64, queued = rx.len(), "job event applied slowly; the graph is behind");
@@ -285,6 +307,20 @@ mod tests {
             },
         );
         (events, rx, gate)
+    }
+
+    #[test]
+    fn an_eval_result_is_told_apart_from_other_updates() {
+        let eval_result = JobEvent::Update {
+            job_id: "j".into(),
+            update: JobUpdateKind::EvalResult {
+                derivations: vec![],
+                warnings: vec![],
+                errors: vec![],
+            },
+        };
+        assert_eq!(eval_result.kind(), "eval_result");
+        assert_eq!(update("j").kind(), "update");
     }
 
     #[tokio::test]
