@@ -25,7 +25,7 @@ sequenceDiagram
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
 
 - **Admission** is server-wide and fair across sessions: `upload.concurrency` (16) uploads and `upload.bytesBudget` (8 GiB) at once. A permit returns once the object is in storage, before the graph records it. Requests for the same object coalesce; followers get `Skip` once the first is stored.
-- **Worker side:** `worker.nar.maxConcurrentUploads` (8) slots, at most half of them for one job. `Retry` is retried up to 3 times, `Rejected` fails the upload, also when either answers the request before a grant. A failed transfer or an abandoned request sends `UploadCancel`.
+- **Worker side:** `worker.nar.maxConcurrentUploads` (8) slots, at most half of them for one job. A slot is held from the request until `UploadFinished` is sent, not through the commit, so the graph actor receives commits in bursts it batches. `Retry` is retried up to 3 times, `Rejected` fails the upload, also when either answers the request before a grant. A failed transfer or an abandoned request sends `UploadCancel`.
 - **Commit:** a relay is checked by length and SHA-256, then moved into the NAR store. A presigned upload completes the multipart and checks the object size; the full digest only with `nar.verifyDigest`.
 - **Leases:** a relay expires after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session releases its uploads.
 - **Evaluation cache blobs** use the same handshake with `UploadObject::EvalCache`.
