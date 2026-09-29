@@ -181,4 +181,5 @@ for run, _, instrumented in RUNS:
     if instrumented:
         summarize_run(out / run)
 summarize(out, [run for run, _, instrumented in RUNS if not instrumented])
+publish(out)
 print((out / "summary.txt").read_text())
