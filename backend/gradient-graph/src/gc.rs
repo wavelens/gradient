@@ -109,11 +109,12 @@ gradient_db::sql! {
     /// Every anchor whose queue membership deleting these evaluations can close:
     /// the derivations they name, and the direct inputs of those, which lose a
     /// demander with them.
-    GC_ANCHORS_LOSING_AN_EVALUATION = "SELECT derivation FROM build_job WHERE evaluation = ANY($1::uuid[]) \
+    GC_ANCHORS_LOSING_AN_EVALUATION = "WITH named AS MATERIALIZED ( \
+                 SELECT DISTINCT derivation FROM build_job WHERE evaluation = ANY($1::uuid[])) \
+             SELECT derivation FROM named \
              UNION SELECT derivation FROM entry_point WHERE evaluation = ANY($1::uuid[]) \
              UNION SELECT e.dependency AS derivation FROM derivation_dependency e \
-             JOIN build_job bj ON bj.derivation = e.derivation \
-             WHERE bj.evaluation = ANY($1::uuid[])",
+             JOIN named n ON n.derivation = e.derivation",
         params = [EvaluationIds(64)],
         tier = Sweep;
 }
