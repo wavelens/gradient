@@ -15,6 +15,7 @@ How testing is structured and which patterns a new test follows. Individual test
 | NixOS VM | `nix/tests/gradient/<name>/`, `nix/tests/harness/` | A booted machine running the packaged server, or a module against a scripted API |
 | SQL plan gate | `backend/src/sql_gate/`, run by the e2e VM test | Every registered statement's plan at production scale |
 | Mock daemon | `backend/gradient-daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/` | Scheduler and workers against a scripted Nix store |
+| Eval benchmark | `nix/tests/bench/evalbench/`, on demand | Evaluation speed per stage, with a capture bundle per run ([Eval Benchmark](eval-benchmark.md)) |
 
 - A crate's `tests/` directory is for public entry points (an HTTP route, a CLI call); everything else goes into a `#[cfg(test)]` module next to the code.
 - The inspector fixture is built in the test, never committed as a `.db`: a checked-in binary drifts from its schema.
@@ -27,6 +28,7 @@ How testing is structured and which patterns a new test follows. Individual test
 | `nix build .#checks.x86_64-linux.unittest` | Backend tests (nextest, then doc tests) |
 | `nix build .#checks.x86_64-linux.cli-unittest` | CLI tests |
 | `nix build .#checks.x86_64-linux.gradient-<name>` | One VM test |
+| `nix build .#gradient-evalbench` | The eval benchmark, outside `nix flake check` |
 | `pnpm -C frontend exec ng test --watch=false` | Frontend tests |
 
 !!! warning
