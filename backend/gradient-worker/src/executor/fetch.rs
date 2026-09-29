@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use gradient_wire::messages::{FlakeJob, FlakeSource};
-use gradient_wire::traits::JobReporter;
+use gradient_wire::traits::{JobReporter, WorkerStore};
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
 use tracing::{debug, info, trace, warn};
@@ -41,6 +41,14 @@ pub struct FetchOutcome {
     pub archived_paths: Vec<String>,
 }
 
+/// The `nix` and `ssh` binaries a fetch runs, and the store it checks.
+#[derive(Clone, Copy)]
+struct NixTools<'a> {
+    nix: &'a str,
+    ssh: &'a str,
+    store: &'a dyn WorkerStore,
+}
+
 /// Clone the repository referenced by `job`, archive it and all flake inputs
 /// into the Nix store, and return metadata about the archive.
 ///
@@ -54,6 +62,7 @@ pub async fn fetch_repository(
     job: &FlakeJob,
     updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
+    store: &dyn WorkerStore,
     binpath_nix: &str,
     binpath_ssh: &str,
     mut abort: watch::Receiver<bool>,
@@ -145,13 +154,15 @@ pub async fn fetch_repository(
     // and store-write access).  Returns the nix store source path so the
     // evaluator can use `path:/nix/store/xxx` - a pure, content-addressed
     // reference - instead of the git checkout in /tmp.
-    let binpath_nix = binpath_nix.to_owned();
-    let binpath_ssh = binpath_ssh.to_owned();
+    let tools = NixTools {
+        nix: binpath_nix,
+        ssh: binpath_ssh,
+        store,
+    };
     match archive_flake(
         &flake_ref,
         &flake_root,
-        &binpath_nix,
-        &binpath_ssh,
+        &tools,
         ssh_key.as_deref(),
         &applied_overrides,
         &mut abort,
@@ -177,8 +188,7 @@ pub async fn fetch_repository(
             match prefetch_flake_best_effort(
                 &flake_ref,
                 &flake_root,
-                &binpath_nix,
-                &binpath_ssh,
+                &tools,
                 ssh_key.as_deref(),
                 &applied_overrides,
                 &mut abort,
@@ -325,15 +335,19 @@ fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<St
 async fn archive_flake(
     flake_ref: &str,
     flake_root: &str,
-    binpath_nix: &str,
-    binpath_ssh: &str,
+    tools: &NixTools<'_>,
     ssh_key: Option<&str>,
     overrides: &[(String, String)],
     abort: &mut watch::Receiver<bool>,
 ) -> Result<(String, Vec<String>)> {
+    let NixTools {
+        nix: binpath_nix,
+        ssh: binpath_ssh,
+        store,
+    } = *tools;
     let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
     if overrides.is_empty()
-        && let Some(inputs) = present_locked_inputs(flake_root, binpath_nix, abort).await
+        && let Some(inputs) = present_locked_inputs(flake_root, store).await
     {
         let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
         let source_path = prefetch_one(flake_ref, binpath_nix, ssh_command, abort).await?;
@@ -362,7 +376,7 @@ async fn archive_flake(
     collect_input_paths(&json, &mut all_paths);
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    require_present(&all_paths, binpath_nix, abort).await?;
+    require_present(store, &all_paths).await?;
 
     Ok((source_path, all_paths))
 }
@@ -491,12 +505,16 @@ async fn prefetch_one(
 async fn prefetch_flake_best_effort(
     flake_ref: &str,
     flake_root: &str,
-    binpath_nix: &str,
-    binpath_ssh: &str,
+    tools: &NixTools<'_>,
     ssh_key: Option<&str>,
     overrides: &[(String, String)],
     abort: &mut watch::Receiver<bool>,
 ) -> Result<(String, Vec<String>, Vec<String>)> {
+    let NixTools {
+        nix: binpath_nix,
+        ssh: binpath_ssh,
+        store,
+    } = *tools;
     // The key-file guard must outlive every prefetch invocation below.
     let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
     let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
@@ -538,7 +556,7 @@ async fn prefetch_flake_best_effort(
     }
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    require_present(&all_paths, binpath_nix, abort).await?;
+    require_present(store, &all_paths).await?;
 
     Ok((source_path, all_paths, warnings))
 }
@@ -561,66 +579,39 @@ fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
 /// Metadata is no longer surfaced here (the server records it from each
 /// `UploadFinished`); this only confirms the archive/prefetch step actually
 /// populated the store before the caller pushes.
-async fn require_present(
-    paths: &[String],
-    binpath_nix: &str,
-    abort: &mut watch::Receiver<bool>,
-) -> Result<()> {
-    let missing = missing_paths(paths, binpath_nix, abort).await?;
+async fn require_present(store: &dyn WorkerStore, paths: &[String]) -> Result<()> {
+    let missing = missing_paths(store, paths).await?;
     if !missing.is_empty() {
         anyhow::bail!("not in the local store: {}", missing.join(", "));
     }
     Ok(())
 }
 
-/// The paths `nix path-info` does not know. It exits 0 on an invalid path and
-/// answers `null` for it, so presence is read from the JSON, not the status.
+/// The paths the daemon does not hold. Asked of the daemon, not `nix path-info`:
+/// that one checks every substituter for an invalid path, which without a route
+/// out costs seconds of DNS retries.
 #[tracing::instrument(level = "debug", skip_all, fields(paths = paths.len()))]
-async fn missing_paths(
-    paths: &[String],
-    binpath_nix: &str,
-    abort: &mut watch::Receiver<bool>,
-) -> Result<Vec<String>> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    trace!(binpath_nix, count = paths.len(), "executing nix path-info");
-    let mut cmd = tokio::process::Command::new(binpath_nix);
-    cmd.arg("path-info").arg("--json");
-    for path in paths {
-        cmd.arg(path);
-    }
-    let output = run_nix_subprocess(cmd, "nix path-info", abort).await?;
-    let json = parse_nix_json(&output.stdout, "nix path-info")?;
-    unknown_paths(paths, &json)
-}
-
-fn unknown_paths(paths: &[String], json: &serde_json::Value) -> Result<Vec<String>> {
-    let infos = json
-        .as_object()
-        .context("nix path-info JSON is not an object keyed by path")?;
+async fn missing_paths(store: &dyn WorkerStore, paths: &[String]) -> Result<Vec<String>> {
+    let valid =
+        futures::future::try_join_all(paths.iter().map(|path| store.has_path(path))).await?;
     Ok(paths
         .iter()
-        .filter(|p| infos.get(p.as_str()).is_none_or(serde_json::Value::is_null))
-        .cloned()
+        .zip(valid)
+        .filter(|(_, valid)| !valid)
+        .map(|(path, _)| path.clone())
         .collect())
 }
 
 /// The store path of every locked input in `flake_root`'s lock, when all of them
 /// are valid in the local store. `None` sends the caller through the archive: a
 /// missing lock, an input the lock pins without a `narHash`, or any path absent.
-async fn present_locked_inputs(
-    flake_root: &str,
-    binpath_nix: &str,
-    abort: &mut watch::Receiver<bool>,
-) -> Option<Vec<String>> {
+async fn present_locked_inputs(flake_root: &str, store: &dyn WorkerStore) -> Option<Vec<String>> {
     let bytes = tokio::fs::read(std::path::Path::new(flake_root).join("flake.lock"))
         .await
         .ok()?;
     let lock: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let paths = locked_input_paths(&lock)?;
-    match missing_paths(&paths, binpath_nix, abort).await {
+    match missing_paths(store, &paths).await {
         Ok(missing) if missing.is_empty() => Some(paths),
         Ok(missing) => {
             debug!(?missing, "a locked input is not in the store; archiving");
@@ -972,6 +963,7 @@ fn declared_inputs_from_lock(
 mod tests {
     use super::*;
     use gradient_test_support::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
+    use gradient_test_support::fakes::worker_store::FakeWorkerStore;
     use gradient_wire::messages::FlakeStep;
 
     fn make_flake_job() -> FlakeJob {
@@ -999,8 +991,16 @@ mod tests {
         let mut reporter = RecordingJobReporter::new();
 
         // This will fail with a git error (fake URL), but it should report Fetching first.
-        let result =
-            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        let result = fetch_repository(
+            &job,
+            &mut reporter,
+            &credentials,
+            &FakeWorkerStore::new(),
+            "nix",
+            "ssh",
+            no_abort(),
+        )
+        .await;
 
         assert_eq!(reporter.len(), 1);
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
@@ -1024,8 +1024,16 @@ mod tests {
         };
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
-        let result =
-            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        let result = fetch_repository(
+            &job,
+            &mut reporter,
+            &credentials,
+            &FakeWorkerStore::new(),
+            "nix",
+            "ssh",
+            no_abort(),
+        )
+        .await;
         let msg = format!("{:?}", result.err());
         assert!(
             !msg.contains("requires FlakeSource::Repository"),
@@ -1105,8 +1113,16 @@ mod tests {
 
         // Clone succeeds; nix flake archive fails (nix not available in test context).
         // Without the fallback, the error propagates.
-        let result =
-            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        let result = fetch_repository(
+            &job,
+            &mut reporter,
+            &credentials,
+            &FakeWorkerStore::new(),
+            "nix",
+            "ssh",
+            no_abort(),
+        )
+        .await;
         assert!(result.is_err(), "expected error when nix is unavailable");
         // The Fetching event was still emitted before the failure.
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
@@ -1131,21 +1147,15 @@ mod tests {
         );
     }
 
-    /// `nix path-info --json` exits 0 on an invalid path and answers `null`:
-    /// the fast path read that exit status as presence and pushed nixpkgs
-    /// from a builder that had never registered it.
-    #[test]
-    fn an_invalid_path_is_missing_although_path_info_succeeded() {
+    #[tokio::test]
+    async fn missing_paths_are_the_ones_the_store_does_not_hold() {
+        let store = FakeWorkerStore::new().with_present_path("/nix/store/a-source");
         let paths = vec![
             "/nix/store/a-source".to_owned(),
             "/nix/store/b-source".to_owned(),
         ];
-        let json = serde_json::json!({
-            "/nix/store/a-source": {"narHash": "sha256-x"},
-            "/nix/store/b-source": null
-        });
         assert_eq!(
-            unknown_paths(&paths, &json).unwrap(),
+            missing_paths(&store, &paths).await.unwrap(),
             vec!["/nix/store/b-source".to_owned()]
         );
     }
