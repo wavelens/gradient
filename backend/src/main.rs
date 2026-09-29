@@ -34,6 +34,7 @@ fn init_logging(log: &LogArgs) {
         quiet: NOISY_DEPS,
         honor_rust_log: true,
         writer: LogWriter::Stdout,
+        trace: None,
     });
 }
 
@@ -145,6 +146,7 @@ mod tests {
             quiet: NOISY_DEPS,
             honor_rust_log: true,
             writer: LogWriter::Stdout,
+            trace: None,
         })
     }
 

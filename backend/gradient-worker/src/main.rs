@@ -49,6 +49,7 @@ fn main() -> Result<()> {
         quiet: &[],
         honor_rust_log: false,
         writer: LogWriter::Stderr,
+        trace: None,
     });
 
     // Re-exec as eval subprocess when launched with the internal flag.
