@@ -18,3 +18,4 @@ pub mod shutdown;
 pub mod store_path;
 pub mod supervision;
 pub mod sync;
+pub mod telemetry;
