@@ -108,6 +108,7 @@ nav:
           - Transfer: contributors/proto/transfer.md
           - Federation: contributors/proto/federation.md
       - Evaluation Metrics: contributors/eval-metrics.md
+      - Eval Benchmark: contributors/eval-benchmark.md
       - Diagnostic Reports: contributors/diagnostic-reports.md
       - Tests: contributors/tests.md
       - Frontend Style Guide: contributors/frontend-style-guide.md
