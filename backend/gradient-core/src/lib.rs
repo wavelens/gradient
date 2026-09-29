@@ -228,6 +228,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         scim_group_roles,
         events: gradient_types::EventBus::default(),
         outbox_wake: Arc::new(tokio::sync::Notify::new()),
+        eval_dispatch_wake: Arc::new(tokio::sync::Notify::new()),
         graph: Graph::new(),
         probe_requests: gradient_db::ProbeRequests::channel(),
         ready_set: Default::default(),

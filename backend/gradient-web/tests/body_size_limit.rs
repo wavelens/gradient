@@ -69,6 +69,7 @@ fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
             },
         ),
         outbox_wake: Default::default(),
+        eval_dispatch_wake: Default::default(),
         probe_requests: Default::default(),
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),

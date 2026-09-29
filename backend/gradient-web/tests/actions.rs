@@ -187,6 +187,7 @@ fn server_with_email(
             },
         ),
         outbox_wake: Default::default(),
+        eval_dispatch_wake: Default::default(),
         probe_requests: Default::default(),
         ready_set: Default::default(),
         graph: gradient_core::Graph::stub(),

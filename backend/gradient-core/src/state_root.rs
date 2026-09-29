@@ -89,6 +89,9 @@ pub struct AppState {
     /// Nudged after every committed write that owes an effect; the effects
     /// actor waits on it so a delivery does not sit out the 30 s tick.
     pub outbox_wake: Arc<Notify>,
+    /// Nudged when an evaluation is created, so eval dispatch runs now instead
+    /// of on its next tick.
+    pub eval_dispatch_wake: Arc<Notify>,
     /// The graph actor's handle: every write to the dependency graph and the
     /// cache index goes through it.
     pub graph: Arc<Graph>,
@@ -163,6 +166,7 @@ impl AppState {
     }
 
     pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
+        self.eval_dispatch_wake.notify_one();
         if let Some(event) = gradient_db::events::evaluation_created(eval) {
             self.record(event).await;
         }
