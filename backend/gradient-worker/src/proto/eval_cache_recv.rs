@@ -31,9 +31,12 @@ use tracing::{debug, warn};
 /// Per-job in-flight pull state. The executor is sequential so at most one pull
 /// is live for a given `job_id` at a time.
 enum Pending {
-    /// Awaiting `EvalCachePullResult`; on `Inline` it transitions to `PullStream`.
+    /// Awaiting `EvalCachePullResult`. The dispatch loop moves it to
+    /// `PullStream` on `Inline` before the waiter wakes, since the chunks
+    /// follow the result immediately.
     Pull {
         result_tx: oneshot::Sender<EvalCachePullOutcome>,
+        bytes_tx: oneshot::Sender<Result<Vec<u8>, String>>,
     },
     /// Accumulating inline `EvalCacheChunk` frames after an `Inline` outcome.
     PullStream {
@@ -58,6 +61,7 @@ pub struct EvalCacheReceiver {
 pub struct PendingPull {
     job_id: String,
     result_rx: oneshot::Receiver<EvalCachePullOutcome>,
+    bytes_rx: oneshot::Receiver<Result<Vec<u8>, String>>,
     recv: EvalCacheReceiver,
 }
 
@@ -84,16 +88,7 @@ impl PendingPull {
     /// After an `Inline` outcome, switch this handle into chunk-accumulation
     /// mode and await the assembled blob delivered on `is_final`.
     pub async fn await_inline(self, total_bytes: u64) -> Result<Vec<u8>> {
-        let (bytes_tx, bytes_rx) = oneshot::channel();
-        self.recv.inner.lock().pending.insert(
-            self.job_id.clone(),
-            Pending::PullStream {
-                buf: Vec::with_capacity(total_bytes as usize),
-                bytes_tx,
-            },
-        );
-
-        match tokio::time::timeout(TRANSFER_TIMEOUT, bytes_rx).await {
+        match tokio::time::timeout(TRANSFER_TIMEOUT, self.bytes_rx).await {
             Ok(Ok(Ok(bytes))) => {
                 if bytes.len() as u64 != total_bytes {
                     return Err(anyhow::anyhow!(
@@ -130,22 +125,40 @@ impl EvalCacheReceiver {
     /// Install a pull waiter for `job_id` before sending `EvalCachePull`.
     pub fn register_pull(&self, job_id: &str) -> PendingPull {
         let (result_tx, result_rx) = oneshot::channel();
-        self.inner
-            .lock()
-            .pending
-            .insert(job_id.to_owned(), Pending::Pull { result_tx });
+        let (bytes_tx, bytes_rx) = oneshot::channel();
+        self.inner.lock().pending.insert(
+            job_id.to_owned(),
+            Pending::Pull {
+                result_tx,
+                bytes_tx,
+            },
+        );
         PendingPull {
             job_id: job_id.to_owned(),
             result_rx,
+            bytes_rx,
             recv: self.clone(),
         }
     }
 
     /// Route an `EvalCachePullResult` to its waiter.
     pub fn deliver_pull_result(&self, job_id: &str, outcome: EvalCachePullOutcome) {
-        let pending = self.inner.lock().pending.remove(job_id);
-        match pending {
-            Some(Pending::Pull { result_tx }) => {
+        let mut g = self.inner.lock();
+        match g.pending.remove(job_id) {
+            Some(Pending::Pull {
+                result_tx,
+                bytes_tx,
+            }) => {
+                if let EvalCachePullOutcome::Inline { total_bytes, .. } = &outcome {
+                    g.pending.insert(
+                        job_id.to_owned(),
+                        Pending::PullStream {
+                            buf: Vec::with_capacity(*total_bytes as usize),
+                            bytes_tx,
+                        },
+                    );
+                }
+                drop(g);
                 if result_tx.send(outcome).is_err() {
                     debug!(%job_id, "eval-cache pull waiter went away before delivery");
                 }
@@ -228,6 +241,24 @@ mod tests {
         r2.deliver_pull_chunk("j", b"def", 3, false);
         r2.deliver_pull_chunk("j", b"ghi", 6, true);
         assert_eq!(task.await.unwrap().unwrap(), b"abcdefghi");
+    }
+
+    #[tokio::test]
+    async fn chunks_delivered_before_the_waiter_wakes_are_kept() {
+        let r = EvalCacheReceiver::new();
+        let mut pull = r.register_pull("j");
+        r.deliver_pull_result(
+            "j",
+            EvalCachePullOutcome::Inline {
+                total_bytes: 6,
+                stream_token: "t".into(),
+            },
+        );
+        r.deliver_pull_chunk("j", b"abc", 0, false);
+        r.deliver_pull_chunk("j", b"def", 3, true);
+
+        pull.await_outcome().await.unwrap();
+        assert_eq!(pull.await_inline(6).await.unwrap(), b"abcdef");
     }
 
     #[tokio::test]
