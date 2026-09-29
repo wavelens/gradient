@@ -13725,19 +13725,19 @@ components:
         granularity: { type: string, enum: [minute, hour, day], description: Rollup bucket width the series were read at. }
         op_latency:
           type: array
-          description: NAR storage call latency in milliseconds, one series per `<op>/<kind>` label.
+          description: NAR storage call latency in milliseconds, one series per operation label (`get`, `put`, `multipart_complete`, ...).
           items: { $ref: '#/components/schemas/LabelledSeries' }
         op_errors:
           type: array
-          description: Failed NAR storage calls, one series per `<op>/<kind>` label.
+          description: Failed or cancelled NAR storage calls, one series per `<op>/<kind>` label (`get/error`, `put/cancelled`, ...).
           items: { $ref: '#/components/schemas/LabelledSeries' }
         lane_fill:
           type: array
-          description: Worker protocol writer lane fill, labelled `bulk` and `control`.
+          description: Peak writer lane fill (0 to 1) across every proto session, worker and cache, labelled `bulk` and `control`.
           items: { $ref: '#/components/schemas/LabelledSeries' }
         send_stalls:
           type: array
-          description: Worker protocol sends that waited for lane capacity, one series per lane label.
+          description: Sends on any proto session, worker or cache, that timed out after `send_chunk_timeout` waiting for lane capacity, one series per lane label.
           items: { $ref: '#/components/schemas/LabelledSeries' }
         serve_queue:
           type: array
