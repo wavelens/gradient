@@ -90,6 +90,7 @@ mod m20260928_000002_task_wait_for_workers;
 mod m20260928_000003_drop_twin_runtime_edges;
 mod m20260929_000000_gin_references_without_pending_list;
 mod m20260929_000001_completed_anchor_window_index;
+mod m20260929_000002_build_job_evaluation_anchor_index;
 
 pub struct Migrator;
 
@@ -176,6 +177,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260928_000003_drop_twin_runtime_edges::Migration),
             Box::new(m20260929_000000_gin_references_without_pending_list::Migration),
             Box::new(m20260929_000001_completed_anchor_window_index::Migration),
+            Box::new(m20260929_000002_build_job_evaluation_anchor_index::Migration),
         ]
     }
 }
