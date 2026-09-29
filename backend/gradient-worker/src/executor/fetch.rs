@@ -362,7 +362,7 @@ async fn archive_flake(
     collect_input_paths(&json, &mut all_paths);
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    let _ = query_path_info(&all_paths, binpath_nix, abort).await?;
+    require_present(&all_paths, binpath_nix, abort).await?;
 
     Ok((source_path, all_paths))
 }
@@ -538,7 +538,7 @@ async fn prefetch_flake_best_effort(
     }
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    let _ = query_path_info(&all_paths, binpath_nix, abort).await?;
+    require_present(&all_paths, binpath_nix, abort).await?;
 
     Ok((source_path, all_paths, warnings))
 }
@@ -556,19 +556,33 @@ fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
     }
 }
 
-/// Verify every store path is present locally via `nix path-info --json`.
+/// Fail unless every store path is valid in the local store.
 ///
 /// Metadata is no longer surfaced here (the server records it from each
 /// `UploadFinished`); this only confirms the archive/prefetch step actually
 /// populated the store before the caller pushes.
-#[tracing::instrument(level = "debug", skip_all, fields(paths = paths.len()))]
-async fn query_path_info(
+async fn require_present(
     paths: &[String],
     binpath_nix: &str,
     abort: &mut watch::Receiver<bool>,
-) -> Result<Vec<()>> {
+) -> Result<()> {
+    let missing = missing_paths(paths, binpath_nix, abort).await?;
+    if !missing.is_empty() {
+        anyhow::bail!("not in the local store: {}", missing.join(", "));
+    }
+    Ok(())
+}
+
+/// The paths `nix path-info` does not know. It exits 0 on an invalid path and
+/// answers `null` for it, so presence is read from the JSON, not the status.
+#[tracing::instrument(level = "debug", skip_all, fields(paths = paths.len()))]
+async fn missing_paths(
+    paths: &[String],
+    binpath_nix: &str,
+    abort: &mut watch::Receiver<bool>,
+) -> Result<Vec<String>> {
     if paths.is_empty() {
-        return Ok(vec![]);
+        return Ok(Vec::new());
     }
 
     trace!(binpath_nix, count = paths.len(), "executing nix path-info");
@@ -578,10 +592,19 @@ async fn query_path_info(
         cmd.arg(path);
     }
     let output = run_nix_subprocess(cmd, "nix path-info", abort).await?;
+    let json = parse_nix_json(&output.stdout, "nix path-info")?;
+    unknown_paths(paths, &json)
+}
 
-    let _json: serde_json::Value = parse_nix_json(&output.stdout, "nix path-info")?;
-
-    Ok(Vec::new())
+fn unknown_paths(paths: &[String], json: &serde_json::Value) -> Result<Vec<String>> {
+    let infos = json
+        .as_object()
+        .context("nix path-info JSON is not an object keyed by path")?;
+    Ok(paths
+        .iter()
+        .filter(|p| infos.get(p.as_str()).is_none_or(serde_json::Value::is_null))
+        .cloned()
+        .collect())
 }
 
 /// The store path of every locked input in `flake_root`'s lock, when all of them
@@ -597,10 +620,14 @@ async fn present_locked_inputs(
         .ok()?;
     let lock: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let paths = locked_input_paths(&lock)?;
-    match query_path_info(&paths, binpath_nix, abort).await {
-        Ok(_) => Some(paths),
+    match missing_paths(&paths, binpath_nix, abort).await {
+        Ok(missing) if missing.is_empty() => Some(paths),
+        Ok(missing) => {
+            debug!(?missing, "a locked input is not in the store; archiving");
+            None
+        }
         Err(e) => {
-            debug!(error = %e, "a locked input is not in the store; archiving");
+            debug!(error = %e, "store presence unknown; archiving");
             None
         }
     }
@@ -1101,6 +1128,25 @@ mod tests {
             Some(vec![
                 "/nix/store/7rradzysxg41b2yx7qnh2f2bw73py192-source".to_owned()
             ])
+        );
+    }
+
+    /// `nix path-info --json` exits 0 on an invalid path and answers `null`:
+    /// the fast path read that exit status as presence and pushed nixpkgs
+    /// from a builder that had never registered it.
+    #[test]
+    fn an_invalid_path_is_missing_although_path_info_succeeded() {
+        let paths = vec![
+            "/nix/store/a-source".to_owned(),
+            "/nix/store/b-source".to_owned(),
+        ];
+        let json = serde_json::json!({
+            "/nix/store/a-source": {"narHash": "sha256-x"},
+            "/nix/store/b-source": null
+        });
+        assert_eq!(
+            unknown_paths(&paths, &json).unwrap(),
+            vec!["/nix/store/b-source".to_owned()]
         );
     }
 
