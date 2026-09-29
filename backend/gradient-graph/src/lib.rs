@@ -39,6 +39,7 @@ pub use policy::retry_backoff_elapsed;
 pub struct Graph {
     actor: watch::Sender<Option<ActorRef<GraphMsg>>>,
     events: OnceLock<EventBus>,
+    reads: OnceLock<gradient_db::WorkerDb>,
     #[cfg(feature = "stub")]
     stub: bool,
 }
@@ -54,6 +55,7 @@ impl Graph {
         Arc::new(Self {
             actor: watch::channel(None).0,
             events: OnceLock::new(),
+            reads: OnceLock::new(),
             #[cfg(feature = "stub")]
             stub: false,
         })
@@ -66,6 +68,7 @@ impl Graph {
         Arc::new(Self {
             actor: watch::channel(None).0,
             events: OnceLock::new(),
+            reads: OnceLock::new(),
             stub: true,
         })
     }
@@ -96,6 +99,7 @@ impl Graph {
         parent: Option<ActorCell>,
     ) -> Result<ActorRef<GraphMsg>, SpawnErr> {
         let _ = self.events.set(ctx.events.clone());
+        let _ = self.reads.set(ctx.worker_db.clone());
         let args = GraphArgs { ctx, health };
         let (actor, _) = match parent {
             Some(parent) => Actor::spawn_linked(None, GraphActor, args, parent).await?,
@@ -150,16 +154,21 @@ impl Graph {
         Ok(report)
     }
 
-    /// Store paths of `drv_hashes` the worker may prune, answered after every
-    /// write queued before this call.
+    /// Store paths of `drv_hashes` the worker may prune, read from the pool, not
+    /// behind the actor: a walk waited out its own previous batch's ingest on
+    /// every wave. A committed subtree only ever gains its record, so a read that
+    /// misses a queued write prunes less, never wrongly.
     #[tracing::instrument(level = "debug", skip_all, fields(paths = drv_hashes.len()))]
     pub async fn known_derivations(&self, drv_hashes: Vec<String>) -> anyhow::Result<Vec<String>> {
         #[cfg(feature = "stub")]
         if self.stub {
             return Ok(Vec::new());
         }
-        self.call(|reply| GraphMsg::KnownDerivations { drv_hashes, reply })
-            .await
+        let db = self
+            .reads
+            .get()
+            .ok_or_else(|| anyhow::anyhow!("graph actor never started"))?;
+        Ok(known::prunable(db, drv_hashes).await?)
     }
 
     /// Apply what the upstream probe found for a batch of outputs: the narinfo,
@@ -315,9 +324,9 @@ mod tests {
             msg: GraphMsg,
             _state: &mut (),
         ) -> Result<(), ractor::ActorProcessingErr> {
-            if let GraphMsg::KnownDerivations { reply, .. } = msg {
+            if let GraphMsg::UpstreamProbed(_, reply) = msg {
                 tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-                let _ = reply.send(Ok(vec!["answered".into()]));
+                let _ = reply.send(Ok(()));
             }
             Ok(())
         }
@@ -329,9 +338,11 @@ mod tests {
         let (actor, _) = Actor::spawn(None, Backlogged, ()).await.unwrap();
         graph.actor.send_replace(Some(actor.clone()));
 
-        let answer = graph.known_derivations(Vec::new()).await.unwrap();
+        graph
+            .upstream_probed(vec![gradient_types::DerivationId::now_v7()])
+            .await
+            .unwrap();
 
-        assert_eq!(answer, vec!["answered".to_owned()]);
         actor.stop(None);
     }
 }

@@ -7,8 +7,7 @@
 //! The one writer of the dependency graph and the cache index. Every message is
 //! one transaction; ingest batches and NAR commits queued together are one
 //! transaction with a savepoint each, and any other message flushes that queue
-//! first, which is what makes a known-derivations query read its callers' earlier
-//! writes.
+//! first, so it acts on its callers' earlier writes.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,7 +26,7 @@ use crate::messages::{
     DemoteReport, Demotion, GcReport, GcRequest, IngestBatch, IngestReport, NarCommit,
     NarCommitted, RequeueScope, Transition, TransitionReport, UpstreamHit,
 };
-use crate::{demote, gc, known, nar, requeue, transition};
+use crate::{demote, gc, nar, requeue, transition};
 
 /// How long a caller waits for the actor to exist after a restart.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -52,10 +51,6 @@ type Reply<T> = RpcReplyPort<anyhow::Result<T>>;
 
 pub enum GraphMsg {
     Ingest(IngestBatch, Reply<IngestReport>),
-    KnownDerivations {
-        drv_hashes: Vec<String>,
-        reply: Reply<Vec<String>>,
-    },
     UpstreamHits(HashMap<String, UpstreamHit>, Reply<()>),
     UpstreamProbed(Vec<DerivationId>, Reply<()>),
     CommitNar(NarCommit, Reply<NarCommitted>),
@@ -132,14 +127,6 @@ impl Actor for GraphActor {
             GraphMsg::Flush => {
                 st.flush_pending = false;
                 flush(&myself, st).await;
-            }
-            GraphMsg::KnownDerivations { drv_hashes, reply } => {
-                flush(&myself, st).await;
-                let result = known::prunable(&st.ctx.worker_db, drv_hashes)
-                    .await
-                    .map_err(Into::into);
-                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
-                let _ = reply.send(result);
             }
             GraphMsg::UpstreamHits(hits, reply) => {
                 flush(&myself, st).await;
@@ -461,43 +448,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn queued_batches_share_one_transaction_and_a_query_after_them_sees_them() {
+    async fn queued_batches_share_one_transaction() {
         let e1 = EvaluationId::now_v7();
         let e2 = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_exec_results(timeouts(1))
             .append_query_results([vec![evaluation(e1)], vec![evaluation(e2)]])
-            .append_query_results([Vec::<MDerivation>::new()])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
         let graph = crate::Graph::new();
         let actor = graph.spawn(ctx, None, None).await.unwrap();
 
-        // Three messages land in the mailbox before the actor runs any of them,
-        // so the query is processed while both batches are still queued.
+        // Both land in the mailbox before the actor runs either, so the flush the
+        // first one queues comes after the second.
         let (tx1, rx1) = ractor::concurrency::oneshot();
         let (tx2, rx2) = ractor::concurrency::oneshot();
-        let (tx3, rx3) = ractor::concurrency::oneshot();
         actor
             .send_message(GraphMsg::Ingest(batch(e1), tx1.into()))
             .unwrap();
         actor
             .send_message(GraphMsg::Ingest(batch(e2), tx2.into()))
             .unwrap();
-        actor
-            .send_message(GraphMsg::KnownDerivations {
-                drv_hashes: vec!["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into()],
-                reply: tx3.into(),
-            })
-            .unwrap();
         assert_eq!(rx1.await.unwrap().unwrap().evaluation, e1);
         assert_eq!(rx2.await.unwrap().unwrap().evaluation, e2);
-        assert!(rx3.await.unwrap().unwrap().is_empty());
 
         actor.stop_and_wait(None, None).await.unwrap();
         drop(actor);
-        let log = pool.into_transaction_log();
-        let rendered: Vec<String> = log.iter().map(|t| format!("{t:?}")).collect();
+        let rendered: Vec<String> = pool
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
         let ingest_tx = rendered
             .iter()
             .position(|t| t.contains(r#"FROM \"evaluation\""#))
@@ -508,14 +489,6 @@ mod tests {
                 .count(),
             2,
             "both batches in one transaction: {rendered:?}"
-        );
-        let known = rendered
-            .iter()
-            .position(|t| t.contains(r#"FROM \"derivation\""#))
-            .unwrap_or_else(|| panic!("the known-derivations read is logged: {rendered:?}"));
-        assert!(
-            known > ingest_tx,
-            "the read runs after the writes: {rendered:?}"
         );
     }
 
@@ -792,7 +765,7 @@ mod tests {
     #[tokio::test]
     async fn a_respawned_actor_answers_the_call_that_waited_for_it() {
         let (ctx, _) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<MDerivation>::new()])
+            .append_exec_results(timeouts(1))
             .into_connection())
         .await;
         let graph = crate::Graph::new();
@@ -803,11 +776,11 @@ mod tests {
         let waiting = {
             let graph = Arc::clone(&graph);
             ctx.shutdown
-                .spawn(async move { graph.known_derivations(vec!["a".into()]).await })
+                .spawn(async move { graph.upstream_hits(Default::default()).await })
         };
         tokio::time::sleep(Duration::from_millis(50)).await;
         let second = graph.spawn(ctx, None, None).await.unwrap();
-        assert!(waiting.await.unwrap().unwrap().is_empty());
+        waiting.await.unwrap().unwrap();
         second.stop_and_wait(None, None).await.unwrap();
     }
 }
