@@ -34,6 +34,7 @@ pub struct FlakeWalker<'a> {
 }
 
 impl<'a> FlakeWalker<'a> {
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn open(
         ctx: &Arc<Context>,
         fetch: &FetchersSettings,
@@ -59,6 +60,7 @@ impl<'a> FlakeWalker<'a> {
         })
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn discover(
         &self,
         wildcards: &[String],
@@ -72,6 +74,7 @@ impl<'a> FlakeWalker<'a> {
     /// Split the include patterns into disjoint shards for memory-bounded
     /// parallel discovery. Exclusions are dropped here; the caller re-attaches
     /// them to every shard so each worker's `discover` applies them.
+    #[tracing::instrument(level = "debug", skip_all)]
     pub fn plan_shards(&self, wildcards: &[String]) -> Result<(Vec<DiscoveryShard>, Vec<String>)> {
         let root = self.root()?;
         let includes: Vec<Vec<String>> = wildcards
@@ -94,6 +97,7 @@ impl<'a> FlakeWalker<'a> {
         ))
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(attr = attr_path))]
     pub fn resolve(&self, attr_path: &str) -> Result<(String, Vec<String>)> {
         let (_, segs) = wildcard_walk::parse_pattern(attr_path);
         let mut cursor = self.cache.root()?;
@@ -129,6 +133,7 @@ impl<'a> FlakeWalker<'a> {
 /// Parse and lock `flake_ref`, applying each `(input, flake_ref)` override at
 /// lock time so eval-resolved drvPaths reflect it, without opening its eval
 /// cache. Shared by [`FlakeWalker::open`] and [`fingerprint`].
+#[tracing::instrument(level = "debug", skip_all)]
 fn lock_flake(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,

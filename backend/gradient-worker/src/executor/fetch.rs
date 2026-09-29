@@ -49,6 +49,7 @@ pub struct FetchOutcome {
 ///
 /// `abort` is a watch channel receiver; when its value becomes `true` the
 /// function returns an error immediately (or kills any running subprocess).
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn fetch_repository(
     job: &FlakeJob,
     updater: &mut dyn JobReporter,

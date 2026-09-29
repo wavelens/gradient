@@ -367,7 +367,7 @@ impl JobExecutor {
     /// When `FetchFlake` and eval steps are in the same job, the local clone
     /// path from the fetch is reused for evaluation - the repo is cloned
     /// exactly once.
-    #[instrument(skip_all, fields(steps = ?job.steps))]
+    #[instrument(name = "job", skip_all, fields(job_id = %updater.job_id, steps = ?job.steps))]
     pub async fn execute_flake_job(
         &self,
         job: FlakeJob,
