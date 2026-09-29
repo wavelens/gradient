@@ -72,6 +72,8 @@
       gradient-evalbench = import ./nix/tests/bench/evalbench { inherit self pkgs; };
 
       default = gradient;
+    } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+      standalone-image = import ./nix/standalone/image.nix { inherit pkgs; };
     };
 
     devShells.default = with pkgs; mkShell {
