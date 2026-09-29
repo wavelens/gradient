@@ -39,8 +39,9 @@ ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dep
     /// rows could not resolve, from both places a reference is kept. Returns each
     /// referrer whose edge landed or was upgraded, once per edge.
     ///
-    /// The producer lookup is fenced: a generic plan guesses thousands of referrers
-    /// per GIN probe and hash-joins them against a sequential scan of every output.
+    /// The producer lookup, twin check included, is fenced: a generic plan guesses
+    /// thousands of referrers per GIN probe and hash-joins them against a
+    /// sequential scan of every output.
     ADOPT_REFERENCED_OUTPUTS = r#"
 INSERT INTO derivation_dependency (derivation, dependency, kind)
 SELECT DISTINCT r.derivation, o.derivation, 1
@@ -51,11 +52,14 @@ JOIN LATERAL (
     UNION
     SELECT ro.hash FROM derivation_output ro WHERE string_to_array(ro.references_list, ' ') && t.tokens
 ) h ON true
-JOIN LATERAL (SELECT p.derivation FROM derivation_output p WHERE p.hash = h.hash OFFSET 0) r
+JOIN LATERAL (
+    SELECT p.derivation FROM derivation_output p
+    WHERE p.hash = h.hash
+      AND NOT EXISTS (SELECT 1 FROM derivation_output own
+                      WHERE own.derivation = p.derivation AND own.hash = o.hash)
+    OFFSET 0) r
   ON r.derivation <> o.derivation
 WHERE o.derivation = ANY($1::uuid[])
-  AND NOT EXISTS (SELECT 1 FROM derivation_output own
-                  WHERE own.derivation = r.derivation AND own.hash = o.hash)
 ON CONFLICT (derivation, dependency) DO UPDATE SET kind = 2 WHERE derivation_dependency.kind = 0
 RETURNING derivation
 "#,
@@ -150,7 +154,7 @@ mod tests {
         );
         let adopt = ADOPT_REFERENCED_OUTPUTS.text();
         assert!(
-            adopt.contains("WHERE own.derivation = r.derivation AND own.hash = o.hash"),
+            adopt.contains("WHERE own.derivation = p.derivation AND own.hash = o.hash"),
             "{adopt}"
         );
     }
@@ -173,8 +177,10 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.contains("WHERE p.hash = h.hash OFFSET 0"),
-            "unfenced, the producer lookup seq-scans every output: {sql}"
+            sql.contains(
+                "WHERE own.derivation = p.derivation AND own.hash = o.hash)\n    OFFSET 0) r"
+            ),
+            "unfenced, the producer lookup and its twin check seq-scan every output: {sql}"
         );
         assert!(
             sql.contains("SELECT DISTINCT r.derivation, o.derivation, 1"),
