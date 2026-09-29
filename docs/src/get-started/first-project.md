@@ -4,7 +4,7 @@ A flake built by Gradient, with the outputs in a binary cache.
 
 **Requirements:**
 
-- A running instance, see [Quick Start](quick-start.md)
+- A running instance, see [Quick Start](quick-start.md) or [Standalone](standalone.md)
 - A flake in a Git repository the server can reach
 
 ## 1. Register
