@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use gradient_wire::messages::{CandidateScore, JobCandidate, JobKind};
 use gradient_wire::traits::WorkerStore;
-use tracing::warn;
+use tracing::{Instrument as _, warn};
 
 use crate::proto::scorer::JobScorer;
 use gradient_worker_client::connection::ProtoWriter;
@@ -46,7 +46,11 @@ pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
     tokio::spawn(async move {
         let started = std::time::Instant::now();
         let count = candidates.len();
-        let to_send = match scorer.score_candidates(&*store, &candidates).await {
+        let to_send = match scorer
+            .score_candidates(&*store, &candidates)
+            .instrument(tracing::debug_span!("score_candidates", count))
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 warn!(error = %e, count, "score_candidates failed in spawned task");
@@ -63,7 +67,10 @@ pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
 
         use gradient_wire::messages::ClientMessage;
         if is_final {
-            if let Err(e) = send_score_chunks(&writer, to_send).await {
+            if let Err(e) = send_score_chunks(&writer, to_send)
+                .instrument(tracing::debug_span!("send_scores"))
+                .await
+            {
                 warn!(error = %e, "send_score_chunks (final) failed");
             }
         } else {
@@ -86,6 +93,7 @@ pub(super) fn spawn_scoring_task<S: WorkerStore + ?Sized + 'static>(
         for kind in request_after {
             if let Err(e) = writer
                 .send(ClientMessage::RequestJob { kind: kind.clone() })
+                .instrument(tracing::debug_span!("request_job", ?kind))
                 .await
             {
                 warn!(error = %e, ?kind, "RequestJob after scoring failed");

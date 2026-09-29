@@ -532,6 +532,7 @@ impl DispatchState {
         );
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(candidates = cands.len()))]
     fn on_job_offer(&mut self, cands: Vec<JobCandidate>) {
         debug!(count = cands.len(), "received job offer");
         if self.draining || cands.is_empty() {

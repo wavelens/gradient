@@ -313,8 +313,10 @@ impl Actor for SessionActor {
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(candidates = tracing::field::Empty))]
 async fn offer_jobs(st: &mut SessionState) -> bool {
     let offer = st.scheduler.get_new_job_candidates(&st.peer_id).await;
+    tracing::Span::current().record("candidates", offer.candidates.len());
     st.offers_seen = offer.generation;
     if offer.candidates.is_empty() {
         return true;

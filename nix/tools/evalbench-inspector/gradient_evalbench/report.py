@@ -16,6 +16,24 @@ from .flame import fold
 
 METRICS = ("fetch_ms", "eval_drv_ms", "total_eval_ms", "total_thunks", "peak_rss_mb")
 
+# From the evaluate request to the worker starting the job, in the order a job
+# passes them; each is the first such span after the request.
+DISPATCH_PATH = (
+    ("server", "http_request"),
+    ("server", "dispatch_queued_evals"),
+    ("server", "offer_jobs"),
+    ("worker", "on_job_offer"),
+    ("worker", "score_candidates"),
+    ("worker", "send_scores"),
+    ("server", "on_request_job_chunk"),
+    ("worker", "request_job"),
+    ("server", "on_request_job"),
+    ("server", "claim_dispatch"),
+    ("server", "send_credentials"),
+    ("server", "assign_job"),
+    ("worker", "job"),
+)
+
 CSS = """
 :root { --bg: #fbfbfa; --fg: #1d1d1f; --muted: #6b6b70; --line: #e2e2e4; --card: #ffffff; --ink: #111; }
 @media (prefers-color-scheme: dark) {
@@ -98,6 +116,43 @@ def comparison(runs: list[Run], top: int = 25) -> str:
     return _table(["span (total ms)", *[r.name for r in runs]], rows)
 
 
+def dispatch_path(run: Run) -> list[tuple[str, float, float, float]]:
+    """`(step, at_ms, dur_ms, gap_ms)` per step found, from the evaluate request."""
+    requests = [
+        s for s in run.spans
+        if s.name == "http_request" and str(s.args.get("route", "")).endswith("/evaluate")
+    ]
+    if not requests:
+        return []
+    cursor = origin = min(s.ts_us for s in requests)
+    previous_end = origin
+    rows = []
+    for process, name in DISPATCH_PATH:
+        later = [
+            s for s in run.spans
+            if s.name == name and s.process.startswith(process) and s.ts_us >= cursor
+            and (name != "http_request" or s.ts_us == origin)
+        ]
+        if not later:
+            continue
+        step = min(later, key=lambda s: s.ts_us)
+        rows.append((f"{process} {name}", (step.ts_us - origin) / 1000, step.dur_us / 1000,
+                     (step.ts_us - previous_end) / 1000))
+        cursor = step.ts_us
+        previous_end = max(previous_end, step.end_us)
+    return rows
+
+
+def dispatch_table(run: Run) -> str:
+    rows = dispatch_path(run)
+    if not rows:
+        return '<p class="muted">no evaluate request in the trace</p>'
+    return _table(
+        ["step", "at ms", "took ms", "waited ms"],
+        [[_td(step), _td(f"{at:.1f}"), _td(f"{dur:.1f}"), _td(f"{max(gap, 0):.1f}")] for step, at, dur, gap in rows],
+    )
+
+
 def _chart(out: pathlib.Path, name: str, chart: str) -> str:
     if not chart:
         return '<p class="muted">no data</p>'
@@ -175,6 +230,7 @@ def section(run: Run, out_dir: pathlib.Path) -> str:
 <h2 id="{run.name}">{escape(run.name)}</h2>
 <p class="muted">{escape(" ".join(f"{k}={v}" for k, v in run.meta.items()))} -
 open <a href="{run.name}/trace.json">trace.json</a> in <a href="https://ui.perfetto.dev">ui.perfetto.dev</a> to zoom.</p>
+<h3>Dispatch path</h3><div class="card">{dispatch_table(run)}</div>
 <h3>Job phases</h3>{_chart(out, "phase-totals", svg.bars(_phase_totals(run)))}
 <div>{svg.legend(phase_names)}</div>{_chart(out, "phases", svg.phases(run.jobs))}
 <h3>Span timeline</h3>{_chart(out, "timeline", svg.timeline(run.spans))}

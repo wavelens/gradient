@@ -44,7 +44,7 @@ xdg-open report/index.html
 ```
 
 - Runs: mode, evaluated seconds, traced wall time, `evaluation_metric`, and span totals side by side.
-- Per run: job phase totals and a phase Gantt per dispatched job, a span timeline per process lane, a span flame graph (spans folded by nesting), span totals, `pg_stat_statements`, the `auto_explain` statements by total plan time and the slowest plans, and the perf flame graphs.
+- Per run: the dispatch path (each step from the evaluate request to the worker's `job`, with the wait before it), job phase totals and a phase Gantt per dispatched job, a span timeline per process lane, a span flame graph (spans folded by nesting), span totals, `pg_stat_statements`, the `auto_explain` statements by total plan time and the slowest plans, and the perf flame graphs.
 - Every bar carries its details as a hover title; `<run>/trace.json` is copied beside the page for Perfetto.
 
 ## Bundle
@@ -74,8 +74,8 @@ The benchmark sets `services.gradient.log.traceDir` and `services.gradient.worke
 
 | Process | Spans |
 |---|---|
-| `server` | `dispatch_queued_evals`, `assign_job`, `job_event` (`kind`, `queue_wait_us`), `handle_eval_result`, `assess_cached`, `ingest`, `flush`, `ingest_one`, `commit_one`, `transact_once`, `apply_batch` and one span per batch step, `after_commit`, `known_derivations`, `eval_stream_completed` |
-| `worker` | `job`, `fetch_repository` (`clone_and_checkout`, `run_input_update`, `archive_flake`, `prefetch_one`, `prefetch_flake_best_effort`, `missing_paths`), `evaluate_flake`, `evaluate_derivations`, `wave`, `parse_drv_wave`, `query_known_derivations`, `report_eval_result` |
+| `server` | `dispatch_queued_evals`, `offer_jobs`, `on_request_job_chunk`, `record_scores`, `on_request_job`, `request_job`, `claim_dispatch`, `send_credentials`, `assign_job`, `job_event` (`kind`, `queue_wait_us`), `handle_eval_result`, `assess_cached`, `ingest`, `flush`, `ingest_one`, `commit_one`, `transact_once`, `apply_batch` and one span per batch step, `after_commit`, `known_derivations`, `eval_stream_completed` |
+| `worker` | `on_job_offer`, `score_candidates`, `send_scores`, `request_job`, `job`, `fetch_repository` (`clone_and_checkout`, `run_input_update`, `archive_flake`, `prefetch_one`, `prefetch_flake_best_effort`, `missing_paths`), `evaluate_flake`, `evaluate_derivations`, `wave`, `parse_drv_wave`, `query_known_derivations`, `report_eval_result` |
 | `eval` | `open`, `lock_flake`, `discover`, `plan_shards`, `resolve` (`attr`) |
 
 - `ingest` minus its `flush` is the time a batch waited in the graph actor's mailbox.
