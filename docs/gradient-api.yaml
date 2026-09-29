@@ -9263,6 +9263,33 @@ paths:
         '403':
           description: Superuser required
 
+  /board/storage:
+    get:
+      tags: [board]
+      summary: Storage and transport health series (superuser)
+      description: >-
+        Per-label rollup series for NAR storage call latency and errors, worker
+        protocol lane fill and send stalls, NAR serve queue depth and serve
+        failures. Windows up to 6 h read minute buckets, up to 168 h hour
+        buckets, longer windows day buckets. Superuser only.
+      operationId: getBoardStorage
+      parameters:
+        - { name: window_hours, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 2160, default: 6 } }
+      responses:
+        '200':
+          description: Storage and transport health series
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/BoardStorage'
+        '403':
+          description: Superuser required
+
   /projects/{project}/workers/{worker_id}/metrics:
     get:
       tags: [board]
@@ -13690,6 +13717,54 @@ components:
         subject: { type: string, nullable: true, description: The derivation's name for a build job, the repository for an eval job. }
         score: { type: number }
         won: { type: boolean, description: Whether this candidate won the decision and was dispatched. }
+
+    BoardStorage:
+      type: object
+      required: [granularity, op_latency, op_errors, lane_fill, send_stalls, serve_queue, serve_failures]
+      properties:
+        granularity: { type: string, enum: [minute, hour, day], description: Rollup bucket width the series were read at. }
+        op_latency:
+          type: array
+          description: NAR storage call latency in milliseconds, one series per `<op>/<kind>` label.
+          items: { $ref: '#/components/schemas/LabelledSeries' }
+        op_errors:
+          type: array
+          description: Failed NAR storage calls, one series per `<op>/<kind>` label.
+          items: { $ref: '#/components/schemas/LabelledSeries' }
+        lane_fill:
+          type: array
+          description: Worker protocol writer lane fill, labelled `bulk` and `control`.
+          items: { $ref: '#/components/schemas/LabelledSeries' }
+        send_stalls:
+          type: array
+          description: Worker protocol sends that waited for lane capacity, one series per lane label.
+          items: { $ref: '#/components/schemas/LabelledSeries' }
+        serve_queue:
+          type: array
+          description: NAR serves waiting for and holding a serve slot, labelled `waiting` and `active`.
+          items: { $ref: '#/components/schemas/LabelledSeries' }
+        serve_failures:
+          type: array
+          description: Failed NAR serves, one series per failure reason.
+          items: { $ref: '#/components/schemas/LabelledSeries' }
+
+    LabelledSeries:
+      type: object
+      required: [label, points]
+      properties:
+        label: { type: string, description: The row's scope label, or empty for unlabelled rows. }
+        points:
+          type: array
+          items: { $ref: '#/components/schemas/LabelledPoint' }
+
+    LabelledPoint:
+      type: object
+      required: [bucket_start, count, avg, max]
+      properties:
+        bucket_start: { type: string, format: date-time }
+        count: { type: integer, description: Samples recorded in the bucket. }
+        avg: { type: number, description: Mean sample value, 0 for an empty bucket. }
+        max: { type: number, description: Largest sample value in the bucket. }
 
     SupervisedLoop:
       type: object
