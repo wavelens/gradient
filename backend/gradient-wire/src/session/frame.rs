@@ -1270,10 +1270,6 @@ mod writer_tests {
         )
     }
 
-    /// A backed-up writer queue must surface as `SendError::Stalled` from `send_msg`
-    /// after the configured timeout - never hang. This is what makes a
-    /// stalled peer detectable on the server side instead of waiting for
-    /// the worker's 600 s receive ceiling.
     fn stalls(label: &str) -> i64 {
         STATS
             .snapshot()
@@ -1303,6 +1299,10 @@ mod writer_tests {
         assert!(GAUGES.bulk_lane_peak.get() >= 500);
     }
 
+    /// A backed-up writer queue must surface as `SendError::Stalled` from `send_msg`
+    /// after the configured timeout - never hang. This is what makes a
+    /// stalled peer detectable on the server side instead of waiting for
+    /// the worker's 600 s receive ceiling.
     #[tokio::test(start_paused = true)]
     async fn send_msg_times_out_when_queue_is_full() {
         let (writer, _control_rx, _bulk_rx) = unwired_writer(1, Duration::from_secs(5));
