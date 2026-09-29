@@ -13,11 +13,12 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `baseDir` | path | `"/var/lib/gradient"` | `GRADIENT_BASE_DIR` | Directory holding Gradient's state, NAR files and caches. |
-| `domain` | string | - | `GRADIENT_SERVE_URL` (part) | Domain under which Gradient is served. |
+| `domain` | string | - | - | Domain under which Gradient is served. |
 | `enable` | bool | `false` | - | Whether to enable Gradient. |
 | `listenAddr` | string | `"127.0.0.1"` | `GRADIENT_LISTEN_ADDR` | IP address the Gradient server listens on. |
 | `localWorker` | bool | `worker.enable` | - | Whether to provision credentials for a `worker` running on this host: a worker identity derived from the hostname, a token generated on first start, the matching peers file, and a registration as an `auto_enable` base worker. |
 | `port` | port | `3000` | `GRADIENT_PORT` | Port the Gradient server listens on. |
+| `serveUrl` | string | derived | `GRADIENT_SERVE_URL` | Public URL under which clients reach Gradient. Set it when the URL differs from `domain`, for example behind a port mapping. |
 | `useQuic` | bool | `false` | `GRADIENT_USE_QUIC` | Whether to enable advertising HTTP/3 (QUIC) to clients. |
 | `useTls` | bool | `true` | `GRADIENT_USE_TLS` | Whether to enable TLS. |
 
