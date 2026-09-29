@@ -29,6 +29,7 @@
     ];
 
     gradient-report = pkgs.callPackage ./nix/tools/report-inspector { };
+    gradient-evalbench-inspector = pkgs.callPackage ./nix/tools/evalbench-inspector { };
   in
   {
     apps = import ./nix/vms { inherit inputs system pkgs; };
@@ -45,7 +46,7 @@
 
     packages = rec {
       inherit (pkgs) gradient-nix;
-      inherit gradient-report;
+      inherit gradient-report gradient-evalbench-inspector;
       store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
@@ -93,6 +94,7 @@
         pnpm
 
         gradient-report
+        gradient-evalbench-inspector
         openssl
         sqlite
         postgresql_18

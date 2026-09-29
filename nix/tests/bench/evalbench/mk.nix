@@ -213,6 +213,7 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
 
     GIT          = "${lib.getExe pkgs.git}"
     API          = "http://gradient.local/api/v1"
+    INSPECTOR    = "${lib.getExe (pkgs.callPackage ../../../tools/evalbench-inspector { })}"
     NIXPKGS      = "${self.inputs.nixpkgs}"
     NIXPKGS_HASH = "${self.inputs.nixpkgs.narHash}"
     ${import ../../harness/prelude.nix { inherit lib; topology = topo; }}

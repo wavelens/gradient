@@ -87,22 +87,25 @@ class Summarize(unittest.TestCase):
             self.assertIn("cold-clean", text)
             self.assertIn("query_known_derivations", text)
 
-    def test_publish_declares_the_bundle_and_both_summaries_as_build_products(self):
+    def test_publish_declares_the_bundle_the_summaries_and_the_report_as_build_products(self):
         with tempfile.TemporaryDirectory() as out:
             out = pathlib.Path(out)
             shutil.copytree(FIXTURES / "skewed", out / "cold-clean")
             summarize.summarize(out, ["cold-clean"])
-            summarize.publish(out)
+            (out / "report").mkdir()
+            (out / "report" / "index.html").write_text("<!doctype html>")
+            summarize.publish(out, out / "report" / "index.html")
 
             lines = (out / "nix-support" / "hydra-build-products").read_text().splitlines()
             paths = [pathlib.Path(line.split()[2]) for line in lines]
             self.assertEqual([p.name for p in paths],
-                             ["evalbench.tar.gz", "summary.txt", "summary.json"])
+                             ["evalbench.tar.gz", "summary.txt", "summary.json", "index.html"])
             self.assertTrue(all(p.is_absolute() and p.is_file() for p in paths))
             with tarfile.open(out / "evalbench.tar.gz") as bundle:
                 names = bundle.getnames()
             self.assertIn("evalbench/cold-clean/trace.json", names)
             self.assertNotIn("evalbench/nix-support", names)
+            self.assertNotIn("evalbench/report", names)
 
 
 if __name__ == "__main__":

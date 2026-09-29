@@ -6,6 +6,8 @@
 # (spans, pcaps, Postgres statistics) whose timings the summary reports, then again
 # under perf and strace, whose overhead would distort those timings.
 
+import subprocess
+
 RUNS = [
     ("cold-clean", True, False),
     ("warm-clean", False, False),
@@ -181,5 +183,6 @@ for run, _, instrumented in RUNS:
     if instrumented:
         summarize_run(out / run)
 summarize(out, [run for run, _, instrumented in RUNS if not instrumented])
-publish(out)
+subprocess.run([INSPECTOR, str(out), "-o", str(out / "report")], check=True)
+publish(out, out / "report" / "index.html")
 print((out / "summary.txt").read_text())

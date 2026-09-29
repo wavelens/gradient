@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gradient-evalbench-inspector"
+version = "1.4.1"
+description = "Render a Gradient eval benchmark bundle as an inspectable HTML report"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+gradient-evalbench = "gradient_evalbench.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["gradient_evalbench*"]
