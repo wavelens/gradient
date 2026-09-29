@@ -17,7 +17,7 @@ cat result/summary.txt
 ```
 
 - Not part of `nix flake check`: perf and strace make it slow and noisy.
-- Built by Gradient, the evaluation page offers three downloads through `nix-support/hydra-build-products`: `evalbench.tar.gz` (the whole bundle), `summary.txt` and `summary.json`. The builder needs the `kvm` and `nixos-test` system features.
+- Built by Gradient, the evaluation page offers four downloads through `nix-support/hydra-build-products`: `evalbench.tar.gz` (the whole bundle), `summary.txt`, `summary.json` and `index.html` (the [report](#report)). The builder needs the `kvm` and `nixos-test` system features.
 - The summarizer has a cheap check of its own: `nix build .#checks.x86_64-linux.evalbench-summarize`.
 
 ## Runs
@@ -33,6 +33,19 @@ cat result/summary.txt
 - Captures run from the manual evaluation until the evaluation leaves `EvaluatingDerivation`; the run then waits for `Completed` before the next one starts.
 - `summary.txt` reports the clean runs only: perf, strace and `auto_explain` distort timings.
 - The test fails only when an evaluation fails or a capture file is missing. There are no timing thresholds.
+
+## Report
+
+`gradient-evalbench-inspector` renders a bundle as one self-contained HTML page, and each chart as its own SVG next to it. The benchmark runs it into `result/report/`; a downloaded bundle renders the same way:
+
+```sh
+nix run .#gradient-evalbench-inspector -- evalbench.tar.gz -o report
+xdg-open report/index.html
+```
+
+- Runs: mode, evaluated seconds, traced wall time, `evaluation_metric`, and span totals side by side.
+- Per run: job phase totals and a phase Gantt per dispatched job, a span timeline per process lane, a span flame graph (spans folded by nesting), span totals, `pg_stat_statements`, the `auto_explain` statements by total plan time and the slowest plans, and the perf flame graphs.
+- Every bar carries its details as a hover title; `<run>/trace.json` is copied beside the page for Perfetto.
 
 ## Bundle
 

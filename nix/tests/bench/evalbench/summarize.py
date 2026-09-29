@@ -180,12 +180,13 @@ def summarize(out_dir, runs):
     return summaries
 
 
-def publish(out_dir):
+def publish(out_dir, report):
     out_dir = pathlib.Path(out_dir).resolve()
+    report = pathlib.Path(report).resolve()
     bundle = out_dir / "evalbench.tar.gz"
     with tarfile.open(bundle, "w:gz") as tar:
         for entry in sorted(out_dir.iterdir()):
-            if entry.name not in ("nix-support", bundle.name):
+            if entry.name not in ("nix-support", bundle.name, report.parent.name):
                 tar.add(entry, arcname=f"evalbench/{entry.name}")
 
     products = out_dir / "nix-support"
@@ -194,4 +195,5 @@ def publish(out_dir):
         f"file tarball {bundle}\n"
         f"file text {out_dir / 'summary.txt'}\n"
         f"file json {out_dir / 'summary.json'}\n"
+        f"file html {report}\n"
     )
