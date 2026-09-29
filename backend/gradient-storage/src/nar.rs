@@ -6,7 +6,7 @@
 
 use crate::HotNarCache;
 use crate::admission::ObjectKey;
-use crate::timed::TimedStore;
+use crate::timed::{OpGuard, TimedStore, watch_stream};
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
@@ -309,11 +309,15 @@ impl NarStore {
         use object_store::{GetOptions, GetRange};
 
         if let Some(base) = &self.local_base {
-            return local_stream(
+            let guard = OpGuard::start(&STATS, "get");
+            let opened = local_stream(
                 std::path::Path::new(base).join(path.as_ref()),
                 offset.unwrap_or(0),
             )
             .await;
+
+            guard.finish_with(opened.is_ok());
+            return opened.map(|found| found.map(|(size, s)| (size, watch_stream(s, &STATS))));
         }
 
         let Some(offset) = offset else {
@@ -1148,6 +1152,31 @@ mod tests {
         assert!(!store.exists("ab12cd").await.expect("head"));
         store.put("ab12cd", b"data".to_vec()).await.expect("put");
         assert!(store.exists("ab12cd").await.expect("head"));
+    }
+
+    #[tokio::test]
+    async fn a_local_read_records_get_latency() {
+        use gradient_util::telemetry::metric;
+
+        let gets = || -> i64 {
+            STATS
+                .snapshot()
+                .iter()
+                .filter(|(k, _)| k.metric == metric::STORAGE_OP_MS && k.label == "get")
+                .map(|(_, a)| a.count)
+                .sum()
+        };
+
+        let (_d, store) = local_store();
+        store.put("ab12cd", b"data".to_vec()).await.expect("put");
+        let before = gets();
+        let _found = store
+            .get_stream("ab12cd")
+            .await
+            .expect("read")
+            .expect("found");
+
+        assert!(gets() > before);
     }
 
     #[tokio::test]
