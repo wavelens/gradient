@@ -1128,15 +1128,20 @@ pub struct TopProjectBuildTime {
     pub build_count: i64,
 }
 
-/// A build shared by several projects counts once toward each of them.
+/// A build shared by several projects counts once toward each of them. The
+/// projects are looked up per completed anchor, so the window's anchors drive
+/// the plan rather than a scan of every anchor joined to every job naming it.
 fn top_projects_by_buildtime_sql(window_days: i64) -> String {
     format!(
         "WITH {metric}, anchor AS ( \
-           SELECT DISTINCT b.id AS derivation_build, b.derivation, pr.project \
-           FROM build_job bj \
-           JOIN derivation_build b ON b.id = bj.derivation_build \
-           JOIN evaluation ev ON ev.id = bj.evaluation \
-           JOIN task pr ON pr.id = ev.task \
+           SELECT b.id AS derivation_build, b.derivation, named.project \
+           FROM derivation_build b \
+           CROSS JOIN LATERAL ( \
+             SELECT DISTINCT pr.project FROM build_job bj \
+             JOIN evaluation ev ON ev.id = bj.evaluation \
+             JOIN task pr ON pr.id = ev.task \
+             WHERE bj.derivation_build = b.id \
+           ) named \
            WHERE {clauses} \
          ) \
          SELECT a.project, p.name AS project_name, \
@@ -1857,7 +1862,8 @@ mod tests {
     fn top_projects_count_each_build_once_per_project() {
         let sql = top_projects_by_buildtime_sql(30);
         assert!(
-            sql.contains("SELECT DISTINCT b.id AS derivation_build, b.derivation, pr.project"),
+            sql.contains("SELECT DISTINCT pr.project FROM build_job bj")
+                && sql.contains("WHERE bj.derivation_build = b.id"),
             "sql = {sql}"
         );
         assert!(sql.contains("FROM anchor a"), "sql = {sql}");
