@@ -8,12 +8,16 @@
 //! worker PUTs every part straight to object storage.
 
 use anyhow::{Context, Result};
+use gradient_util::telemetry::MinuteStats;
 use gradient_wire::types::{CompletedMultipart, PresignedMultipart};
 use object_store::aws::AmazonS3;
 use object_store::multipart::{MultipartStore as _, PartId};
 use object_store::path::Path;
 use object_store::signer::{SignedUrlOptions, Signer};
+use std::future::Future;
 use std::time::Duration;
+
+use crate::timed::OpGuard;
 
 const MIB: u64 = 1024 * 1024;
 const MIN_PART_BYTES: u64 = 64 * MIB;
@@ -49,13 +53,24 @@ pub(crate) fn part_ttl(nar_size: u64) -> Duration {
     (gradient_wire::constants::PRESIGN_TTL + transfer).min(MAX_SIGV4_TTL)
 }
 
+async fn timed<T>(
+    stats: &'static MinuteStats,
+    op: &'static str,
+    call: impl Future<Output = object_store::Result<T>>,
+) -> object_store::Result<T> {
+    let guard = OpGuard::start(stats, op);
+    let result = call.await;
+    guard.finish_with(result.is_ok());
+    result
+}
+
 pub(crate) async fn presign(
     s3: &AmazonS3,
+    stats: &'static MinuteStats,
     path: &Path,
     nar_size: u64,
 ) -> Result<PresignedMultipart> {
-    let upload_id = s3
-        .create_multipart(path)
+    let upload_id = timed(stats, "multipart_create", s3.create_multipart(path))
         .await
         .context("failed to create multipart upload")?;
     let layout = layout(nar_size);
@@ -96,6 +111,7 @@ pub(crate) async fn sign_parts(
 
 pub(crate) async fn complete(
     s3: &AmazonS3,
+    stats: &'static MinuteStats,
     path: &Path,
     receipt: &CompletedMultipart,
 ) -> Result<()> {
@@ -111,7 +127,11 @@ pub(crate) async fn complete(
         })
         .collect();
     crate::nar::bounded(
-        s3.complete_multipart(path, &receipt.upload_id, parts),
+        timed(
+            stats,
+            "multipart_complete",
+            s3.complete_multipart(path, &receipt.upload_id, parts),
+        ),
         COMPLETE_BUDGET,
         "failed to complete multipart upload",
     )
@@ -164,6 +184,21 @@ mod tests {
         assert_eq!(part_ttl(1024 * 1024 * GIB), MAX_SIGV4_TTL);
     }
 
+    fn leaked_stats() -> &'static MinuteStats {
+        Box::leak(Box::default())
+    }
+
+    fn latencies(stats: &MinuteStats, op: &str) -> i64 {
+        stats
+            .snapshot()
+            .iter()
+            .filter(|(k, _)| {
+                k.metric == gradient_util::telemetry::metric::STORAGE_OP_MS && k.label == op
+            })
+            .map(|(_, a)| a.count)
+            .sum()
+    }
+
     fn s3(endpoint: Option<&str>) -> AmazonS3 {
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name("bucket")
@@ -197,8 +232,10 @@ mod tests {
             .mount(&server)
             .await;
 
+        let stats = leaked_stats();
         let grant = presign(
             &s3(Some(&server.uri())),
+            stats,
             &Path::from("nars/ab/cd.nar.zst"),
             2 * GIB,
         )
@@ -208,6 +245,7 @@ mod tests {
         assert_eq!(grant.part_size, layout(2 * GIB).part_size);
         assert_eq!(grant.part_urls.len() as u64, layout(2 * GIB).part_count);
         assert!(grant.part_urls[0].contains("partNumber=1"));
+        assert_eq!(latencies(stats, "multipart_create"), 1);
     }
 
     #[tokio::test]
@@ -229,13 +267,17 @@ mod tests {
             upload_id: "up-1".into(),
             etags: vec!["\"e1\"".into(), "\"e2\"".into()],
         };
+        let stats = leaked_stats();
         complete(
             &s3(Some(&server.uri())),
+            stats,
             &Path::from("nars/ab/cd.nar.zst"),
             &receipt,
         )
         .await
         .expect("complete");
+
+        assert_eq!(latencies(stats, "multipart_complete"), 1);
         let body =
             String::from_utf8(server.received_requests().await.unwrap()[0].body.clone()).unwrap();
         let first = body.find("e1").expect("first etag");
@@ -251,7 +293,7 @@ mod tests {
             etags: vec![],
         };
         assert!(
-            complete(&s3(None), &Path::from("x"), &receipt)
+            complete(&s3(None), leaked_stats(), &Path::from("x"), &receipt)
                 .await
                 .is_err()
         );
