@@ -30,6 +30,7 @@ use tokio_tungstenite::{
 use tracing::{debug, trace, warn};
 
 use gradient_util::shutdown::Shutdown;
+use gradient_util::telemetry::{GAUGES, STATS, fill_permille, metric};
 
 use crate::messages::{ArchivedClientMessage, ArchivedServerMessage, ClientMessage, ServerMessage};
 
@@ -645,10 +646,22 @@ impl<M: WireMessage> MsgWriter<M> {
         }
         let bulk = msg.is_bulk();
         let lane = if bulk { &self.tx } else { &self.control_tx };
+        let lane_name = if bulk { "bulk" } else { "control" };
+
         match tokio::time::timeout(self.send_chunk_timeout, lane.send(bytes)).await {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => {
+                let peak = if bulk {
+                    &GAUGES.bulk_lane_peak
+                } else {
+                    &GAUGES.control_lane_peak
+                };
+                peak.observe(fill_permille(lane.capacity(), lane.max_capacity()));
+
+                Ok(())
+            }
             Ok(Err(_)) => Err(SendError::Closed),
             Err(_) => {
+                STATS.record(metric::PROTO_SEND_STALLS, lane_name, 1.0);
                 warn!(
                     timeout_secs = self.send_chunk_timeout.as_secs(),
                     bulk,
@@ -1261,6 +1274,35 @@ mod writer_tests {
     /// after the configured timeout - never hang. This is what makes a
     /// stalled peer detectable on the server side instead of waiting for
     /// the worker's 600 s receive ceiling.
+    fn stalls(label: &str) -> i64 {
+        STATS
+            .snapshot()
+            .iter()
+            .filter(|(k, _)| k.metric == metric::PROTO_SEND_STALLS && k.label == label)
+            .map(|(_, a)| a.count)
+            .sum()
+    }
+
+    fn bulk_message() -> ServerMessage {
+        ServerMessage::NarPush {
+            job_id: "j".into(),
+            store_path: "/nix/store/x".into(),
+            data: vec![0],
+            offset: 0,
+            is_final: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_queued_bulk_message_raises_the_lane_peak() {
+        let (writer, _rx) = MsgWriter::<ServerMessage>::spy(Duration::from_secs(1));
+        for _ in 0..32 {
+            writer.send_msg(&bulk_message()).await.expect("send");
+        }
+
+        assert!(GAUGES.bulk_lane_peak.get() >= 500);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn send_msg_times_out_when_queue_is_full() {
         let (writer, _control_rx, _bulk_rx) = unwired_writer(1, Duration::from_secs(5));
@@ -1274,11 +1316,13 @@ mod writer_tests {
             code: 400,
             reason: "stalled".into(),
         };
+        let before = stalls("control");
         assert_eq!(
             writer.send_msg(&msg).await,
             Err(SendError::Stalled),
             "send_msg must report a stall when the writer queue stays full past send_chunk_timeout",
         );
+        assert!(stalls("control") > before);
     }
 
     /// Fast-path: when the queue has room, send_msg returns Ok immediately
