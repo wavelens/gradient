@@ -116,7 +116,8 @@ def evaluate(run, cold, instrumented):
     prepare(run)
     psql("SELECT pg_stat_statements_reset();")
     set_auto_explain(instrumented)
-    epoch = server.succeed("date +%s").strip()
+    log = postgres_log()
+    log_from = log_size(log)
     if instrumented:
         start_profilers(run)
     else:
@@ -136,7 +137,7 @@ def evaluate(run, cold, instrumented):
     dump_postgres(run, eval_id)
     collect_traces(run)
     if instrumented:
-        server.succeed(f"journalctl -u postgresql --since=@{epoch} --no-pager > {BENCH}/{run}/pg/auto_explain.log")
+        server.succeed(f"tail -c +{log_from + 1} {log} > {BENCH}/{run}/pg/auto_explain.log")
 
     wait_for_status(token, eval_id, {"Completed"}, timeout=1200)
     dump_json(f"SELECT * FROM evaluation_metric WHERE evaluation = '{eval_id}'",
