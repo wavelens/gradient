@@ -223,6 +223,43 @@ describe('buildMetricChartOption dual axis', () => {
     expect(y[0].splitNumber).toBeGreaterThan(0);
   });
 
+  it('renders a series typed bar as bars inside a line chart', () => {
+    const opt = buildMetricChartOption(
+      {
+        type: 'line',
+        categories: cats,
+        series: [
+          { name: 'fill', data: [1, 2, 3] },
+          { name: 'stalls', data: [0, 1, 0], axis: 'right' as const, type: 'bar' as const },
+        ],
+        secondary: { title: 'stalls' },
+      },
+      THEME
+    );
+    const s = opt.series as any[];
+    expect(s.map((x) => x.type)).toEqual(['line', 'bar']);
+    expect(s[1].yAxisIndex).toBe(1);
+    expect((opt.xAxis as any).boundaryGap).toBe(true);
+  });
+
+  it('marks the points of a gapped line typed explicitly', () => {
+    const opt = buildMetricChartOption(
+      {
+        type: 'line',
+        categories: cats,
+        series: [
+          { name: 'sparse', data: [null, 4, null], type: 'line' as const },
+          { name: 'untyped', data: [null, 4, null] },
+        ],
+      },
+      THEME
+    );
+    const s = opt.series as any[];
+    expect(s[0].showSymbol).toBe(true);
+    expect(s[1].showSymbol).toBe(false);
+    expect((opt.xAxis as any).boundaryGap).toBe(false);
+  });
+
   it('keeps a single axis when no secondary is configured', () => {
     const opt = buildMetricChartOption({ type: 'area', series: one, categories: cats }, THEME);
     expect(Array.isArray(opt.yAxis)).toBe(false);
