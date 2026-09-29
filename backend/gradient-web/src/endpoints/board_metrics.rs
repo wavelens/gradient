@@ -483,38 +483,28 @@ pub struct DurationsHeatmap {
 }
 
 fn board_durations_heatmap_sql(window_hours: i64, project_filter: Option<&str>) -> String {
-    let mut clauses = vec![
-        format!(
-            "b.status = {}",
-            gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed)
-        ),
-        "ba.build_started_at IS NOT NULL".to_string(),
-        "ba.build_finished_at IS NOT NULL".to_string(),
-        format!(
-            "ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours'"
-        ),
-    ];
-
-    if let Some(list) = project_filter {
-        clauses.push(format!("pr.project IN ({list})"));
-    }
+    let scope = project_filter
+        .map(|list| format!(" AND pr.project IN ({list})"))
+        .unwrap_or_default();
 
     format!(
         "SELECT date_trunc('hour', ba.build_finished_at) AS t, \
                 width_bucket((extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000)::bigint, \
                              ARRAY[10000,30000,60000,180000,600000,1800000]::bigint[]) AS band, \
                 count(*)::bigint AS c \
-         FROM build_job bj \
-         JOIN derivation_build b ON b.id = bj.derivation_build \
-         JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN task pr ON pr.id = ev.task \
-         JOIN LATERAL ( \
-           SELECT ba2.build_started_at, ba2.build_finished_at \
-           FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
-           ORDER BY ba2.created_at DESC LIMIT 1 \
-         ) ba ON true \
-         WHERE {} GROUP BY t, band ORDER BY t",
-        clauses.join(" AND ")
+         FROM build_attempt ba JOIN derivation_build b ON b.id = ba.derivation_build \
+         WHERE ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
+           AND ba.build_started_at IS NOT NULL \
+           AND b.status = {completed} \
+           AND NOT EXISTS (SELECT 1 FROM build_attempt later \
+                           WHERE later.derivation_build = ba.derivation_build \
+                             AND (later.created_at, later.id) > (ba.created_at, ba.id)) \
+           AND EXISTS (SELECT 1 FROM build_job bj \
+                       JOIN evaluation ev ON ev.id = bj.evaluation \
+                       JOIN task pr ON pr.id = ev.task \
+                       WHERE bj.derivation_build = b.id{scope}) \
+         GROUP BY t, band ORDER BY t",
+        completed = gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed),
     )
 }
 
@@ -523,7 +513,8 @@ gradient_db::sql_fn! {
         24,
         Some("'11111111-1111-1111-1111-111111111111'"),
     ),
-        params = [];
+        params = [],
+        tier = Bulk;
 }
 
 /// 2D build-duration distribution (duration band × hour) for the Durations page.
@@ -748,6 +739,31 @@ mod tests {
             );
             assert!(sql.contains("project_base_worker"), "{sql}");
         }
+    }
+
+    /// A build named by many evaluations is one build: the heatmap reads each
+    /// anchor's latest attempt once and scopes it through an `EXISTS`, never a
+    /// join that repeats it per naming job.
+    #[test]
+    fn the_durations_heatmap_counts_each_build_once() {
+        let sql = super::board_durations_heatmap_sql(24, Some("'p'"));
+        assert!(
+            sql.contains("FROM build_attempt ba JOIN derivation_build b"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("NOT EXISTS (SELECT 1 FROM build_attempt later"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("EXISTS (SELECT 1 FROM build_job bj")
+                && sql.contains("pr.project IN ('p')"),
+            "{sql}"
+        );
+        assert!(
+            !sql.contains("FROM build_job bj JOIN derivation_build"),
+            "{sql}"
+        );
     }
 
     #[test]
