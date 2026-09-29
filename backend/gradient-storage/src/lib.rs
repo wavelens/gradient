@@ -19,6 +19,7 @@ pub mod partial;
 pub mod relay;
 pub mod sgr;
 pub mod source_nar;
+mod timed;
 
 pub use self::context::StorageCtx;
 pub use self::debug_info::{BuildIdEntry, scan_build_ids};

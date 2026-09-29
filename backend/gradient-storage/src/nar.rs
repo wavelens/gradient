@@ -6,10 +6,12 @@
 
 use crate::HotNarCache;
 use crate::admission::ObjectKey;
+use crate::timed::TimedStore;
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
+use gradient_util::telemetry::STATS;
 use gradient_wire::constants::{BULK_CHUNK_SIZE, MULTIPART_NAR_BYTES, PRESIGN_TTL};
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
@@ -167,7 +169,7 @@ impl NarStore {
         let store = object_store::local::LocalFileSystem::new_with_prefix(base_path)
             .context("Failed to create local NAR storage")?;
         Ok(Self {
-            inner: Arc::new(store),
+            inner: Arc::new(TimedStore::new(Arc::new(store), &STATS)),
             prefix: String::new(),
             local_base: Some(base_path.to_string()),
             s3_signer: None,
@@ -231,7 +233,10 @@ impl NarStore {
         let store = Arc::new(store);
 
         Ok(Self {
-            inner: Arc::clone(&store) as Arc<dyn ObjectStore>,
+            inner: Arc::new(TimedStore::new(
+                Arc::clone(&store) as Arc<dyn ObjectStore>,
+                &STATS,
+            )),
             prefix: crate::layout::normalize_prefix(prefix),
             local_base: None,
             s3_signer: Some(store),
