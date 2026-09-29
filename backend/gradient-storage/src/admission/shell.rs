@@ -169,7 +169,7 @@ pub struct AdmissionSession {
 }
 
 impl AdmissionSession {
-    pub fn request(&self, id: u64, object: ObjectKey, size: u64) {
+    pub fn request(&self, id: u64, object: ObjectKey, size: u64, priority: bool) {
         let session = self.id;
         self.admission
             .enqueued_at
@@ -181,6 +181,7 @@ impl AdmissionSession {
                 id,
                 object,
                 size,
+                priority,
             })
         });
     }
@@ -265,8 +266,8 @@ mod tests {
     async fn a_dropped_permit_grants_the_next_request() {
         let admission = admission(1);
         let (session, mut rx) = admission.open_session("test");
-        session.request(1, nar("a"), 1);
-        session.request(2, nar("b"), 1);
+        session.request(1, nar("a"), 1, false);
+        session.request(2, nar("b"), 1, false);
         let Admitted::Granted { id: 1, permit, .. } = next(&mut rx).await else {
             panic!("request 1 is granted first");
         };
@@ -283,8 +284,8 @@ mod tests {
         let admission = admission(4);
         let (first, mut first_rx) = admission.open_session("test");
         let (second, mut second_rx) = admission.open_session("test");
-        first.request(1, nar("a"), 1);
-        second.request(9, nar("a"), 1);
+        first.request(1, nar("a"), 1, false);
+        second.request(9, nar("a"), 1, false);
         let Admitted::Granted { permit, .. } = next(&mut first_rx).await else {
             panic!("the first request leads");
         };
@@ -301,8 +302,8 @@ mod tests {
         let admission = admission(1);
         let (first, mut first_rx) = admission.open_session("test");
         let (second, mut second_rx) = admission.open_session("test");
-        first.request(1, nar("a"), 1);
-        second.request(1, nar("b"), 1);
+        first.request(1, nar("a"), 1, false);
+        second.request(1, nar("b"), 1, false);
         let Admitted::Granted { permit, .. } = next(&mut first_rx).await else {
             panic!("the first worker is granted");
         };
@@ -328,8 +329,8 @@ mod tests {
     async fn cancelling_a_queued_request_never_grants_it() {
         let admission = admission(1);
         let (session, mut rx) = admission.open_session("test");
-        session.request(1, nar("a"), 1);
-        session.request(2, nar("b"), 1);
+        session.request(1, nar("a"), 1, false);
+        session.request(2, nar("b"), 1, false);
         let Admitted::Granted { permit, .. } = next(&mut rx).await else {
             panic!("request 1 is granted");
         };
@@ -344,9 +345,9 @@ mod tests {
         let admission = admission(1);
         let (a, _a_rx) = admission.open_session("worker-a");
         let (b, _b_rx) = admission.open_session("worker-b");
-        a.request(1, nar("x"), 1);
-        b.request(1, nar("y"), 1);
-        b.request(2, nar("z"), 1);
+        a.request(1, nar("x"), 1, false);
+        b.request(1, nar("y"), 1, false);
+        b.request(2, nar("z"), 1, false);
         let stats = admission.stats();
         assert_eq!(stats.in_flight, 1);
         assert_eq!(stats.granted_total, 1);

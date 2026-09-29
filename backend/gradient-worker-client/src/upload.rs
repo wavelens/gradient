@@ -9,11 +9,12 @@ use std::sync::{Arc, Weak};
 
 use anyhow::{Context, Result, bail};
 use gradient_util::sync::Mutex;
-use gradient_wire::messages::{ClientMessage, ServerMessage};
+use gradient_wire::messages::{ClientMessage, ServerMessage, is_small_upload};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, SemaphorePermit, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
 use crate::connection::ProtoWriter;
+use crate::upload_slots::{Slot, SlotPool};
 
 pub const MAX_UPLOAD_ATTEMPTS: u32 = 3;
 
@@ -32,14 +33,14 @@ struct Inner {
 
 /// Every upload this worker sends: requested, granted, transferred, then
 /// acknowledged by the server. A slot bounds the transfer, not the commit after
-/// it, so the server's graph sees a burst of commits it can batch. One job holds
-/// at most half of the slots, so an evaluation pushing its whole closure never
-/// queues build outputs behind it.
+/// it, so the server's graph sees a burst of commits it can batch. A waiting
+/// small upload takes the next free slot before any large one, and small ones
+/// may take all of them; a job's large uploads hold at most half.
 #[derive(Clone)]
 pub struct UploadClient {
     inner: Arc<Mutex<Inner>>,
     writer: ProtoWriter,
-    slots: Arc<Semaphore>,
+    slots: Arc<SlotPool>,
     per_job: usize,
 }
 
@@ -48,7 +49,7 @@ impl UploadClient {
         Self {
             inner: Arc::default(),
             writer,
-            slots: Arc::new(Semaphore::new(max_outstanding.max(1))),
+            slots: SlotPool::new(max_outstanding.max(1)),
             per_job: (max_outstanding / 2).max(1),
         }
     }
@@ -90,7 +91,7 @@ impl UploadClient {
     pub async fn start(&self, job_id: &str, object: UploadObject, size: u64) -> Result<Upload<'_>> {
         Ok(Upload {
             client: self,
-            slots: Some(self.acquire_slots(job_id).await?),
+            slots: Some(self.acquire_slots(job_id, size).await?),
             job_id: job_id.to_owned(),
             object,
             size,
@@ -148,13 +149,19 @@ impl UploadClient {
         (id, grant_rx, outcome_rx)
     }
 
-    async fn acquire_slots(&self, job_id: &str) -> Result<Slots<'_>> {
-        let job = self
-            .job_slots(job_id)
-            .acquire_owned()
-            .await
-            .context("upload slots closed")?;
-        let worker = self.slots.acquire().await.context("upload slots closed")?;
+    async fn acquire_slots(&self, job_id: &str, size: u64) -> Result<Slots> {
+        let small = is_small_upload(size);
+        let job = if small {
+            None
+        } else {
+            Some(
+                self.job_slots(job_id)
+                    .acquire_owned()
+                    .await
+                    .context("upload slots closed")?,
+            )
+        };
+        let worker = self.slots.acquire(small).await?;
         Ok(Slots {
             _job: job,
             _worker: worker,
@@ -177,16 +184,16 @@ impl UploadClient {
     }
 }
 
-struct Slots<'a> {
-    _job: OwnedSemaphorePermit,
-    _worker: SemaphorePermit<'a>,
+struct Slots {
+    _job: Option<OwnedSemaphorePermit>,
+    _worker: Slot,
 }
 
 /// One object's way through the handshake, holding a worker upload slot from
 /// its request until its transfer is finished.
 pub struct Upload<'a> {
     client: &'a UploadClient,
-    slots: Option<Slots<'a>>,
+    slots: Option<Slots>,
     job_id: String,
     object: UploadObject,
     size: u64,
@@ -201,7 +208,7 @@ impl Upload<'_> {
     /// before granting (a rejection, or a retry when it cannot open a target).
     pub async fn next_grant(&mut self) -> Result<Option<(u64, GrantTarget)>> {
         if self.slots.is_none() {
-            self.slots = Some(self.client.acquire_slots(&self.job_id).await?);
+            self.slots = Some(self.client.acquire_slots(&self.job_id, self.size).await?);
         }
         loop {
             if self.attempts == MAX_UPLOAD_ATTEMPTS {
@@ -373,8 +380,10 @@ mod tests {
         UploadMetadata::EvalCache { size_bytes: 1 }
     }
 
+    const LARGE: u64 = gradient_wire::messages::SMALL_UPLOAD_BYTES + 1;
+
     async fn run(client: &UploadClient) -> Result<()> {
-        let mut upload = client.start("build:1", nar(), 1).await?;
+        let mut upload = client.start("build:1", nar(), LARGE).await?;
         while upload.next_grant().await?.is_some() {
             if upload.settle(Ok(meta())).await? {
                 break;
@@ -649,8 +658,38 @@ mod tests {
         assert!(upload.await.unwrap().is_err());
     }
 
+    async fn requests(server: &mut gradient_wire::testing::MockServerConn) -> Vec<String> {
+        let mut jobs = Vec::new();
+        while let Ok(Ok(ClientMessage::UploadRequest { job_id, .. })) =
+            tokio::time::timeout(Duration::from_millis(200), server.recv()).await
+        {
+            jobs.push(job_id);
+        }
+        jobs
+    }
+
     #[tokio::test]
     async fn one_job_leaves_slots_for_the_others() {
+        let (client, mut server, _pump) = connected(2).await;
+        for job in ["build:1", "build:1", "build:2"] {
+            let client = client.clone();
+            tokio::spawn(async move {
+                let _ = client.start(job, nar(), LARGE).await?.next_grant().await;
+                anyhow::Ok(())
+            });
+            tokio::task::yield_now().await;
+        }
+        let mut jobs = requests(&mut server).await;
+        jobs.sort();
+        assert_eq!(
+            jobs,
+            ["build:1", "build:2"],
+            "build:1 waits on its own share"
+        );
+    }
+
+    #[tokio::test]
+    async fn small_uploads_may_take_every_slot() {
         let (client, mut server, _pump) = connected(2).await;
         for _ in 0..2 {
             let client = client.clone();
@@ -659,29 +698,7 @@ mod tests {
                 anyhow::Ok(())
             });
         }
-        let ClientMessage::UploadRequest { job_id, .. } = server.recv().await.unwrap() else {
-            panic!()
-        };
-        assert_eq!(job_id, "eval:1");
-        assert!(
-            tokio::time::timeout(Duration::from_millis(200), server.recv())
-                .await
-                .is_err(),
-            "the eval waits on its own share"
-        );
-        tokio::spawn({
-            let client = client.clone();
-            async move { run(&client).await }
-        });
-        let ClientMessage::UploadRequest { job_id, .. } =
-            tokio::time::timeout(Duration::from_secs(5), server.recv())
-                .await
-                .expect("a build output is not queued behind the eval")
-                .unwrap()
-        else {
-            panic!()
-        };
-        assert_eq!(job_id, "build:1");
+        assert_eq!(requests(&mut server).await, ["eval:1", "eval:1"]);
     }
 
     #[tokio::test]

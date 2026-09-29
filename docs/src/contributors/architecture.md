@@ -67,7 +67,7 @@ root
 - **Off-session RPCs:** the reader starts `CacheQuery` and `QueryKnownDerivations` as tracked tasks the moment they arrive, and the session starts `WorkerMetrics` the same way, so a slow frame never holds back a lookup the worker waits on. Log chunks go through a per-session lane, flushed before a job's completion. A respawned core actor gets every live session and its jobs back from the sessions supervisor.
 - **State:** `AppState` (alias `ServerState`) holds three pools (`worker_db`, `web_db`, `cache_db`), `RuntimeConfig`, the NAR store, `UploadAdmission`, the graph handle, the event bus, `ready_set` and `probe_requests` channels for build-dispatch and the probe.
 - **Events** are typed (`gradient_types::events::Event`) and flow two ways: the in-process `EventBus` for live sockets and `/api/v1/metrics/events` (a slow subscriber skips), and durable `outbox` rows written by `gradient_db::events::record` in the caller's transaction, fanned out by `effects` into action and webhook deliveries.
-- **Uploads** are admitted before a byte moves: one server-wide count and byte budget, round-robin across sessions, FIFO within one. See [Transfer](proto/transfer.md#upload) and [NAR Storage](internals/nar-storage.md).
+- **Uploads** are admitted before a byte moves: one server-wide count and byte budget, round-robin across sessions, FIFO within one, small uploads first. See [Transfer](proto/transfer.md#upload) and [NAR Storage](internals/nar-storage.md).
 
 **Supervision rules:**
 

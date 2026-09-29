@@ -312,12 +312,12 @@ in {
     nar = {
       maxConcurrentUploads = lib.mkOption {
         type = lib.types.ints.positive;
-        default = 8;
+        default = 16;
         description = ''
           Upload requests the worker keeps open at once, waiting for a server grant or
-          transferring. One job holds at most half of them, so build outputs never wait
-          behind an evaluation's closure push. The server's upload budget decides how many
-          run; this bounds worker memory.
+          transferring. Uploads of at most 1 MiB are served first and may take all of
+          them; one job's larger uploads hold at most half. The server's upload budget
+          decides how many run; this bounds worker memory.
         '';
       };
 
