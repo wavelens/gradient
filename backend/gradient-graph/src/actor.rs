@@ -5,9 +5,10 @@
  */
 
 //! The one writer of the dependency graph and the cache index. Every message is
-//! one transaction; ingest batches queued together are one transaction with a
-//! savepoint per batch, and any other message flushes that queue first, which is
-//! what makes a known-derivations query read its callers' earlier writes.
+//! one transaction; ingest batches and NAR commits queued together are one
+//! transaction with a savepoint each, and any other message flushes that queue
+//! first, which is what makes a known-derivations query read its callers' earlier
+//! writes.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -41,6 +42,10 @@ pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
 pub const GRAPH_TX_ATTEMPTS: u32 = 3;
 /// Queued ingest batches are flushed early once they carry this many derivations.
 pub const INGEST_ROW_BUDGET: usize = 5000;
+/// Queued NAR commits are flushed early once this many wait. A commit costs a
+/// dozen statements, so this keeps a flush, and the retry of one, well inside
+/// [`GRAPH_TX_BUDGET`] while sharing the commit round trip among many.
+pub const NAR_COMMIT_BUDGET: usize = 256;
 pub const HEALTH_NAME: &str = "graph";
 
 type Reply<T> = RpcReplyPort<anyhow::Result<T>>;
@@ -71,6 +76,7 @@ pub struct GraphState {
     health: Option<Arc<SupervisorHealth>>,
     queued: Vec<(IngestBatch, Reply<IngestReport>)>,
     queued_rows: usize,
+    nars: Vec<(NarCommit, Reply<NarCommitted>)>,
     flush_pending: bool,
 }
 
@@ -106,6 +112,7 @@ impl Actor for GraphActor {
             health: args.health,
             queued: Vec::new(),
             queued_rows: 0,
+            nars: Vec::new(),
             flush_pending: false,
         })
     }
@@ -120,12 +127,7 @@ impl Actor for GraphActor {
             GraphMsg::Ingest(batch, reply) => {
                 st.queued_rows += batch.derivations.len();
                 st.queued.push((batch, reply));
-                if st.queued_rows >= INGEST_ROW_BUDGET {
-                    flush(&myself, st).await;
-                } else if !st.flush_pending {
-                    st.flush_pending = true;
-                    let _ = myself.send_message(GraphMsg::Flush);
-                }
+                queue_flush(&myself, st).await;
             }
             GraphMsg::Flush => {
                 st.flush_pending = false;
@@ -160,18 +162,8 @@ impl Actor for GraphActor {
                 let _ = reply.send(ask_probe(st, result));
             }
             GraphMsg::CommitNar(commit, reply) => {
-                flush(&myself, st).await;
-                let commit = &commit;
-                let result = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
-                    nar::commit(&scoped, commit).await
-                })
-                .await;
-                if let Ok(committed) = &result {
-                    nar::after_commit(&st.ctx, committed, &commit.store_path);
-                }
-
-                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
-                let _ = reply.send(result);
+                st.nars.push((commit, reply));
+                queue_flush(&myself, st).await;
             }
             GraphMsg::Transition(t, reply) => {
                 flush(&myself, st).await;
@@ -227,33 +219,58 @@ fn ask_probe(st: &GraphState, result: anyhow::Result<Vec<DerivationId>>) -> anyh
     result.map(|gained| st.ctx.probe_requests.send(gained))
 }
 
-/// Write every queued batch in one transaction, a savepoint each, then reply
-/// to all of them and run the post-commit effects of the ones that landed. A
-/// batch that fails is lost (the wire has no ack the worker could retry on),
-/// so its evaluation is failed rather than left with a hole in its graph.
-#[tracing::instrument(level = "debug", skip_all, fields(batches = st.queued.len(), rows = st.queued_rows))]
+/// Flush now once the queue is past a budget, otherwise after the messages
+/// already in the mailbox, so a burst of them shares one transaction.
+async fn queue_flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
+    if st.queued_rows >= INGEST_ROW_BUDGET || st.nars.len() >= NAR_COMMIT_BUDGET {
+        flush(myself, st).await;
+    } else if !st.flush_pending {
+        st.flush_pending = true;
+        let _ = myself.send_message(GraphMsg::Flush);
+    }
+}
+
+/// Write every queued batch and NAR commit in one transaction, a savepoint
+/// each, then reply to all of them and run the post-commit effects of the ones
+/// that landed. A batch that fails is lost (the wire has no ack the worker could
+/// retry on), so its evaluation is failed rather than left with a hole in its
+/// graph; a failed commit is its uploader's error to report.
+#[tracing::instrument(level = "debug", skip_all, fields(batches = st.queued.len(), rows = st.queued_rows, nars = st.nars.len()))]
 async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
-    if st.queued.is_empty() {
+    if st.queued.is_empty() && st.nars.is_empty() {
         return;
     }
 
     let (batches, replies): (Vec<IngestBatch>, Vec<Reply<IngestReport>>) =
         std::mem::take(&mut st.queued).into_iter().unzip();
+    let (commits, commit_replies): (Vec<NarCommit>, Vec<Reply<NarCommitted>>) =
+        std::mem::take(&mut st.nars).into_iter().unzip();
     st.queued_rows = 0;
-    let batches_ref = &batches;
+    let (batches_ref, commits_ref) = (&batches, &commits);
     let written = transact(&st.ctx, GRAPH_TX_BUDGET, move |scoped| async move {
-        let mut outcomes = Vec::with_capacity(batches_ref.len());
+        let mut ingested = Vec::with_capacity(batches_ref.len());
         for batch in batches_ref {
-            outcomes.push(escalate_retryable(ingest_one(&scoped, batch).await)?);
+            ingested.push(escalate_retryable(ingest_one(&scoped, batch).await)?);
         }
 
-        Ok(outcomes)
+        let mut committed = Vec::with_capacity(commits_ref.len());
+        for commit in commits_ref {
+            committed.push(escalate_retryable(commit_one(&scoped, commit).await)?);
+        }
+
+        Ok((ingested, committed))
     })
     .await;
 
     match written {
-        Ok(outcomes) => {
+        Ok((outcomes, committed)) => {
             st.record(&Ok(()));
+            for ((commit, reply), outcome) in commits.iter().zip(commit_replies).zip(committed) {
+                if let Ok(done) = &outcome {
+                    nar::after_commit(&st.ctx, done, &commit.store_path);
+                }
+                let _ = reply.send(outcome);
+            }
             for ((batch, reply), outcome) in batches.into_iter().zip(replies).zip(outcomes) {
                 match outcome {
                     Ok(report) => {
@@ -268,8 +285,11 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
             }
         }
         Err(e) => {
-            warn!(error = %e, batches = replies.len(), "ingest transaction failed; its evaluations are failed");
+            warn!(error = %e, batches = replies.len(), nars = commit_replies.len(), "ingest transaction failed; its evaluations are failed");
             st.record(&Err(anyhow!("{e}")));
+            for reply in commit_replies {
+                let _ = reply.send(Err(anyhow!("{e}")));
+            }
             for (batch, reply) in batches.into_iter().zip(replies) {
                 ingest::fail_evaluation(&st.ctx, batch.evaluation, &e.to_string()).await;
                 let _ = reply.send(Err(anyhow!("{e}")));
@@ -281,9 +301,7 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
 /// A batch that failed for its timing fails the whole flush, which `transact` then
 /// retries; one that failed for its content stays that batch's own outcome. Its
 /// savepoint already rolled back, but a deadlock victim is no verdict on the batch.
-fn escalate_retryable(
-    outcome: anyhow::Result<IngestReport>,
-) -> anyhow::Result<anyhow::Result<IngestReport>> {
+fn escalate_retryable<T>(outcome: anyhow::Result<T>) -> anyhow::Result<anyhow::Result<T>> {
     match outcome {
         Err(e) if is_retryable(&e) => Err(e),
         outcome => Ok(outcome),
@@ -293,10 +311,29 @@ fn escalate_retryable(
 /// One batch under its own savepoint, so a bad batch fails only its caller.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn ingest_one(scoped: &DbContext, batch: &IngestBatch) -> anyhow::Result<IngestReport> {
+    in_savepoint(scoped, |inner| async move {
+        ingest::apply_batch(&inner, batch).await
+    })
+    .await
+}
+
+/// One NAR commit under its own savepoint, so a bad commit fails only its uploader.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn commit_one(scoped: &DbContext, commit: &NarCommit) -> anyhow::Result<NarCommitted> {
+    in_savepoint(
+        scoped,
+        |inner| async move { nar::commit(&inner, commit).await },
+    )
+    .await
+}
+
+async fn in_savepoint<T, F, Fut>(scoped: &DbContext, work: F) -> anyhow::Result<T>
+where
+    F: FnOnce(DbContext) -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
+{
     let savepoint = Arc::new(scoped.worker_db.begin().await.context("savepoint")?);
-    let inner = scoped.in_transaction(Arc::clone(&savepoint));
-    let outcome = ingest::apply_batch(&inner, batch).await;
-    drop(inner);
+    let outcome = work(scoped.in_transaction(Arc::clone(&savepoint))).await;
     let savepoint =
         Arc::try_unwrap(savepoint).map_err(|_| anyhow!("a savepoint handle escaped its batch"))?;
     match outcome {
@@ -482,6 +519,84 @@ mod tests {
         );
     }
 
+    fn nar(hash: &str) -> NarCommit {
+        NarCommit {
+            store_path: format!("/nix/store/{hash}-hello-2.12"),
+            file_hash: "sha256:abc".into(),
+            file_size: 5,
+            nar_size: 5,
+            nar_hash: "sha256:def".into(),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            targets: crate::messages::SignTargets::None,
+            confirmed: true,
+        }
+    }
+
+    fn cached_path(hash: &str) -> MCachedPath {
+        MCachedPath {
+            id: gradient_types::ids::CachedPathId::now_v7(),
+            hash: hash.into(),
+            package: "hello-2.12".into(),
+            created_at: now(),
+            ..Default::default()
+        }
+    }
+
+    /// An upload burst is a mailbox of commits; each one committing alone paid a
+    /// round trip and a WAL flush per NAR, and serialised the burst behind them.
+    #[tokio::test]
+    async fn queued_nar_commits_share_one_transaction() {
+        let (h1, h2) = (
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        );
+        let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(1))
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![cached_path(h1)]])
+            .append_query_results([none(), none()])
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![cached_path(h2)]])
+            .append_query_results([none(), none()])
+            .append_exec_results([MockExecResult::default(), MockExecResult::default()])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+        let graph = crate::Graph::new();
+        let actor = graph.spawn(ctx, None, None).await.unwrap();
+
+        let (tx1, rx1) = ractor::concurrency::oneshot();
+        let (tx2, rx2) = ractor::concurrency::oneshot();
+        actor
+            .send_message(GraphMsg::CommitNar(nar(h1), tx1.into()))
+            .unwrap();
+        actor
+            .send_message(GraphMsg::CommitNar(nar(h2), tx2.into()))
+            .unwrap();
+        assert!(rx1.await.unwrap().unwrap().created);
+        assert!(rx2.await.unwrap().unwrap().created);
+
+        actor.stop_and_wait(None, None).await.unwrap();
+        drop(actor);
+        let rendered: Vec<String> = pool
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        let inserts: Vec<usize> = rendered
+            .iter()
+            .map(|t| t.matches(r#"INSERT INTO \"cached_path\""#).count())
+            .filter(|n| *n > 0)
+            .collect();
+        assert_eq!(
+            inserts,
+            vec![2],
+            "both commits in one transaction: {rendered:?}"
+        );
+    }
+
     #[tokio::test]
     async fn a_batch_without_its_evaluation_fails_only_its_caller() {
         let e1 = EvaluationId::now_v7();
@@ -644,12 +759,12 @@ mod tests {
 
     #[test]
     fn a_batch_that_deadlocked_fails_the_flush_so_it_is_retried() {
-        assert!(escalate_retryable(Err(coded("40P01").context("seed"))).is_err());
+        assert!(escalate_retryable::<()>(Err(coded("40P01").context("seed"))).is_err());
     }
 
     #[test]
     fn a_batch_that_failed_for_its_content_fails_only_itself() {
-        let outcome = escalate_retryable(Err(coded("23505"))).expect("stays the batch's own");
+        let outcome = escalate_retryable::<()>(Err(coded("23505"))).expect("stays the batch's own");
         assert!(outcome.is_err());
         assert!(
             escalate_retryable(Ok(IngestReport::default()))
