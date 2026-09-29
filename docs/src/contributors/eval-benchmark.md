@@ -17,6 +17,7 @@ cat result/summary.txt
 ```
 
 - Not part of `nix flake check`: perf and strace make it slow and noisy.
+- Built by Gradient, the evaluation page offers three downloads through `nix-support/hydra-build-products`: `evalbench.tar.gz` (the whole bundle), `summary.txt` and `summary.json`. The builder needs the `kvm` and `nixos-test` system features.
 - The summarizer has a cheap check of its own: `nix build .#checks.x86_64-linux.evalbench-summarize`.
 
 ## Runs

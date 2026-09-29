@@ -9,6 +9,7 @@
 import json
 import pathlib
 import statistics
+import tarfile
 
 SERVER_CLOCK = ("server",)
 
@@ -177,3 +178,20 @@ def summarize(out_dir, runs):
     (out_dir / "summary.json").write_text(json.dumps(summaries, indent=2))
     (out_dir / "summary.txt").write_text(render(summaries))
     return summaries
+
+
+def publish(out_dir):
+    out_dir = pathlib.Path(out_dir).resolve()
+    bundle = out_dir / "evalbench.tar.gz"
+    with tarfile.open(bundle, "w:gz") as tar:
+        for entry in sorted(out_dir.iterdir()):
+            if entry.name not in ("nix-support", bundle.name):
+                tar.add(entry, arcname=f"evalbench/{entry.name}")
+
+    products = out_dir / "nix-support"
+    products.mkdir(exist_ok=True)
+    (products / "hydra-build-products").write_text(
+        f"file tarball {bundle}\n"
+        f"file text {out_dir / 'summary.txt'}\n"
+        f"file json {out_dir / 'summary.json'}\n"
+    )
