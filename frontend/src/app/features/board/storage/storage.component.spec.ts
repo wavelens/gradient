@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { BoardStorageComponent } from './storage.component';
 import { BoardService, BoardStorage } from '@core/services/board.service';
@@ -16,7 +16,7 @@ const EMPTY: BoardStorage = {
 
 describe('BoardStorageComponent', () => {
   let fixture: ComponentFixture<BoardStorageComponent>;
-  const getStorage = vi.fn(() => of(EMPTY));
+  const getStorage = vi.fn((_hours: number) => of(EMPTY));
 
   beforeEach(async () => {
     getStorage.mockClear();
@@ -39,6 +39,14 @@ describe('BoardStorageComponent', () => {
     ) as HTMLButtonElement;
     button.click();
     fixture.detectChanges();
+
+    expect(getStorage).toHaveBeenLastCalledWith(24);
+  });
+
+  it('keeps polling after a failed fetch', () => {
+    getStorage.mockReturnValueOnce(throwError(() => new Error('down')));
+    fixture.componentInstance.select(1);
+    fixture.componentInstance.select(24);
 
     expect(getStorage).toHaveBeenLastCalledWith(24);
   });
