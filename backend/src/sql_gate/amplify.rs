@@ -29,12 +29,13 @@ pub enum Rewrite {
     Remap,
     /// A 32-char store hash, derived the same way.
     Rehash,
+    /// A space-separated list of store paths: each path's hash is rehashed, so
+    /// a copy references the copies of what its original referenced and a path
+    /// keeps the VM's fan-in instead of gaining one referrer per copy.
+    References,
     /// A column a unique index covers: the copy index keeps it unique and the
     /// `amp` prefix says the row is synthetic.
     Mark,
-    /// A column spelled out rather than copied, for a value derived from one of
-    /// the rewritten ones.
-    Expr(&'static str),
 }
 
 enum Scale {
@@ -107,10 +108,7 @@ const TARGETS: &[Target] = &[
             ("id", Rewrite::Remap),
             ("hash", Rewrite::Rehash),
             ("package", Rewrite::Mark),
-            (
-                "references",
-                Rewrite::Expr("substr(md5(t.hash || g.i::text), 1, 32) || '-amp'"),
-            ),
+            ("references", Rewrite::References),
         ],
     },
     Target {
@@ -126,6 +124,7 @@ const TARGETS: &[Target] = &[
             ("derivation", Rewrite::Remap),
             ("hash", Rewrite::Rehash),
             ("cached_path", Rewrite::Remap),
+            ("references_list", Rewrite::References),
         ],
     },
     Target {
@@ -242,8 +241,13 @@ pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -
             {
                 Some(Rewrite::Remap) => format!("md5(t.{q}::text || g.i::text)::uuid"),
                 Some(Rewrite::Rehash) => format!("substr(md5(t.{q} || g.i::text), 1, 32)"),
+                Some(Rewrite::References) => format!(
+                    "(SELECT string_agg(regexp_replace(r.tok, '[0-9a-z]{{32}}', \
+                     substr(md5(substring(r.tok FROM '[0-9a-z]{{32}}') || g.i::text), 1, 32)), \
+                     ' ' ORDER BY r.n) \
+                     FROM unnest(string_to_array(t.{q}, ' ')) WITH ORDINALITY AS r(tok, n))"
+                ),
                 Some(Rewrite::Mark) => format!("'amp' || g.i::text || '-' || t.{q}"),
-                Some(Rewrite::Expr(sql)) => (*sql).to_string(),
                 None => format!("t.{q}"),
             }
         })
@@ -392,6 +396,33 @@ mod tests {
         assert!(
             fk.contains("md5(t.\"derivation\"::text || g.i::text)::uuid"),
             "{fk}"
+        );
+    }
+
+    /// A reference and the hash it names are rewritten by the same function, so
+    /// a copied path references the copies of its original's references.
+    #[test]
+    fn a_reference_lands_on_the_copy_of_the_path_it_named() {
+        let hash = clone_sql(
+            "cached_path",
+            &["hash".to_string()],
+            &[("hash", Rewrite::Rehash)],
+        );
+        let references = clone_sql(
+            "cached_path",
+            &["references".to_string()],
+            &[("references", Rewrite::References)],
+        );
+
+        assert!(
+            hash.contains("substr(md5(t.\"hash\" || g.i::text), 1, 32)"),
+            "{hash}"
+        );
+        assert!(
+            references
+                .contains("substr(md5(substring(r.tok FROM '[0-9a-z]{32}') || g.i::text), 1, 32)")
+                && references.contains("unnest(string_to_array(t.\"references\", ' '))"),
+            "{references}"
         );
     }
 
