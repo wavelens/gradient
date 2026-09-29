@@ -6,7 +6,7 @@
 
 import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject, interval, startWith, switchMap } from 'rxjs';
+import { EMPTY, Subject, catchError, interval, startWith, switchMap } from 'rxjs';
 import { BoardService, BoardStorage } from '@core/services/board.service';
 import { MetricChartComponent, MetricSeries } from '@shared/ui';
 import { formatCount, formatDuration } from '@shared/text';
@@ -116,7 +116,7 @@ export class BoardStorageComponent implements OnInit {
     this.reload
       .pipe(
         switchMap(() => interval(REFRESH_MS).pipe(startWith(0))),
-        switchMap(() => this.board.getStorage(this.hours())),
+        switchMap(() => this.board.getStorage(this.hours()).pipe(catchError(() => EMPTY))),
         takeUntilDestroyed(this.destroyRef)
       )
       .subscribe((s) => this.stats.set(s));
