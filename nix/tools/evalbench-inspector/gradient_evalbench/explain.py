@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Plans from an `auto_explain` journal: the slowest single plans and the
-statements that spent the most time in total."""
+"""Plans from an `auto_explain` log: the slowest single plans and the statements
+that spent the most time in total. Reads the collector's file, where a message's
+lines are contiguous, and a journal export, where backends interleave."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 
 JOURNAL = re.compile(r"^\S+ +\d+ [\d:]+ \S+ postgres\[(\d+)\]: (.*)$")
-START = re.compile(r"^\[\d+\] LOG:  duration: ([\d.]+) ms  plan:$")
+START = re.compile(r"^\[(\d+)\] LOG:  duration: ([\d.]+) ms  plan:$")
 QUERY = "Query Text: "
 
 
@@ -41,24 +42,31 @@ class Explained:
     by_query: list[QueryTotal]
 
 
+def _message(line: str) -> tuple[str | None, str]:
+    journal = JOURNAL.match(line)
+    return (journal.group(1), journal.group(2)) if journal else (None, line)
+
+
 def _plans(lines):
     open_plans: dict[str, Plan] = {}
+    last_started: str | None = None
     for line in lines:
-        match = JOURNAL.match(line.rstrip("\n"))
-        if not match:
-            continue
-        pid, message = match.groups()
+        pid, message = _message(line.rstrip("\n"))
         start = START.match(message)
         if start:
+            pid = pid or start.group(1)
             if pid in open_plans:
                 yield open_plans.pop(pid)
-            open_plans[pid] = Plan(duration_ms=float(start.group(1)))
-        elif pid in open_plans and message.startswith(" "):
+            open_plans[pid] = Plan(duration_ms=float(start.group(2)))
+            last_started = pid
+            continue
+        pid = pid or last_started
+        if pid in open_plans and message[:1] in (" ", "\t"):
             plan = open_plans[pid]
             body = message.strip()
             if body.startswith(QUERY) and not plan.query:
                 plan.query = body.removeprefix(QUERY)
-            plan.lines.append(message[8:] if message.startswith(" " * 8) else message)
+            plan.lines.append(message.removeprefix("\t").removeprefix(" " * 8))
         elif pid in open_plans:
             yield open_plans.pop(pid)
     yield from open_plans.values()

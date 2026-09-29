@@ -85,6 +85,24 @@ def test_explain_ranks_plans_across_interleaved_backends(tmp_path):
     assert [(t.query, t.count, t.total_ms) for t in result.by_query] == [("SELECT slow", 1, 90.5), ("SELECT 1", 2, 12.0)]
 
 
+COLLECTOR = """\
+[10] LOG:  duration: 5.000 ms  plan:
+\tQuery Text: SELECT 1
+\tResult  (actual rows=1.00 loops=1)
+[11] LOG:  statement: SELECT 2
+[12] LOG:  duration: 40.000 ms  plan:
+\tQuery Text: SELECT slow
+"""
+
+
+def test_explain_reads_the_collector_file_where_a_message_is_contiguous(tmp_path):
+    log = tmp_path / "postgresql.log"
+    log.write_text(COLLECTOR)
+    result = explain.parse(log)
+    assert [(p.duration_ms, p.query) for p in result.slowest] == [(40.0, "SELECT slow"), (5.0, "SELECT 1")]
+    assert result.slowest[1].text == "Query Text: SELECT 1\nResult  (actual rows=1.00 loops=1)"
+
+
 def test_a_tarball_renders_to_an_escaped_page_with_standalone_charts(tmp_path):
     build_bundle(tmp_path / "src", instrumented=True)
     bundle = tmp_path / "evalbench.tar.gz"

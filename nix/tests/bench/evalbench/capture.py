@@ -72,6 +72,14 @@ def stop_profilers(run):
         )
 
 
+def postgres_log():
+    return psql("SELECT current_setting('data_directory') || '/' || pg_current_logfile();", database="postgres")
+
+
+def log_size(path):
+    return int(server.succeed(f"stat -c %s {path}").strip())
+
+
 def set_auto_explain(on):
     duration, analyze = ("0", "on") if on else ("-1", "off")
     psql(f"ALTER SYSTEM SET auto_explain.log_min_duration = {duration};"

@@ -190,6 +190,12 @@ pkgs.testers.runNixOSTest ({ lib, ... }: {
             "auto_explain.log_nested_statements" = true;
             # acpi_pm makes every per-node clock read trap; rows and loops are enough.
             "auto_explain.log_timing" = false;
+            # A plan on the serial console costs a millisecond a line, inside the
+            # transaction that logged it; a file costs nothing.
+            logging_collector = true;
+            log_filename = "postgresql.log";
+            log_rotation_age = 0;
+            log_rotation_size = 0;
           };
         };
 
