@@ -394,6 +394,7 @@ impl JobExecutor {
                         &job,
                         updater as &mut dyn gradient_wire::traits::JobReporter,
                         credentials,
+                        &*self.store,
                         &self.binpath_nix,
                         &self.binpath_ssh,
                         abort.clone(),

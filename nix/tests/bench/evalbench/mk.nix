@@ -31,6 +31,8 @@
     nix.settings = {
       trusted-users = [ "root" "@wheel" ];
       max-jobs = lib.mkForce 4;
+      # No route out: every substituter lookup would cost seconds of DNS retries.
+      substituters = lib.mkForce [ ];
     };
 
     services.gradient.worker = {
