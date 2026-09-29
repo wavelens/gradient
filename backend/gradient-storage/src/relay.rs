@@ -180,16 +180,13 @@ pub async fn serve_nar(
                 source = s;
                 start = 0;
             }
-            _ => {
+            reopened => {
+                let failure = match reopened {
+                    Err(_) => Failure::StorageTimeout,
+                    _ => Failure::StorageError,
+                };
                 let reason = format!("failed to reopen {store_path} for fresh transfer");
-                return Err(fail_transfer(
-                    writer,
-                    job_id,
-                    store_path,
-                    Failure::StorageError,
-                    reason,
-                )
-                .await);
+                return Err(fail_transfer(writer, job_id, store_path, failure, reason).await);
             }
         }
     }
