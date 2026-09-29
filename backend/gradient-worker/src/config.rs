@@ -451,6 +451,11 @@ pub struct LogArgs {
         default_value = "true"
     )]
     pub fetch_from_store: bool,
+
+    /// Directory that receives every closed stage span as JSON lines, one file
+    /// per process; eval subprocesses write their own. Unset disables span tracing.
+    #[arg(long = "log-trace-dir", env = "GRADIENT_WORKER_LOG_TRACE_DIR")]
+    pub trace_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for LogArgs {
@@ -463,6 +468,7 @@ impl Default for LogArgs {
             burst_bytes_per_min: 8 * 1024 * 1024,
             sustained_bytes_per_hour: 64 * 1024 * 1024,
             fetch_from_store: true,
+            trace_dir: None,
         }
     }
 }

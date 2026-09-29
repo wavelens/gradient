@@ -397,6 +397,16 @@ in {
           therefore produces no new log.
         '';
       };
+
+      traceDir = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/var/lib/gradient-worker/trace";
+        description = ''
+          Directory that receives every closed stage span of the worker and its eval subprocesses
+          as JSON lines, one file per process. `null` disables span tracing.
+        '';
+      };
     };
   };
 
@@ -413,11 +423,17 @@ in {
     ];
 
     systemd = {
-      tmpfiles.settings = lib.mkIf (cfg.gcrootsDir != "") {
-        "10-gradient".${cfg.gcrootsDir}.d = {
+      tmpfiles.settings."10-gradient" = lib.optionalAttrs (cfg.gcrootsDir != "") {
+        ${cfg.gcrootsDir}.d = {
           user = "gradient-worker";
           group = "gradient-worker";
           mode = "0755";
+        };
+      } // lib.optionalAttrs (cfg.log.traceDir != null) {
+        ${cfg.log.traceDir}.d = {
+          user = "gradient-worker";
+          group = "gradient-worker";
+          mode = "0750";
         };
       };
 
@@ -449,7 +465,8 @@ in {
           ProtectKernelTunables = true;
           ProtectProc = "invisible";
           ProtectSystem = "strict";
-          ReadWritePaths = lib.optionals (cfg.gcrootsDir != "") [ cfg.gcrootsDir ];
+          ReadWritePaths = lib.optionals (cfg.gcrootsDir != "") [ cfg.gcrootsDir ]
+            ++ lib.optional (cfg.log.traceDir != null) cfg.log.traceDir;
           Restart = "on-failure";
           RestartSec = 10;
           # SIGTERM drains: the worker finishes its in-flight jobs before it
@@ -524,6 +541,8 @@ in {
           GRADIENT_WORKER_EVAL_CACHE_DIR = cfg.eval.cache.dir;
         } // lib.optionalAttrs (cfg.eval.forkWorkers != null) {
           GRADIENT_WORKER_EVAL_FORK_WORKERS = toString cfg.eval.forkWorkers;
+        } // lib.optionalAttrs (cfg.log.traceDir != null) {
+          GRADIENT_WORKER_LOG_TRACE_DIR = cfg.log.traceDir;
         } // lib.optionalAttrs (cfg.log.level.eval != null) {
           GRADIENT_WORKER_LOG_LEVEL_EVAL = cfg.log.level.eval;
         } // lib.optionalAttrs (cfg.log.level.build != null) {

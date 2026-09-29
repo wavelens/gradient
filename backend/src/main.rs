@@ -8,7 +8,7 @@ use clap::Parser;
 use gradient_core::init_state;
 use gradient_types::Cli;
 use gradient_types::cli::LogArgs;
-use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS};
+use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS, TraceSetup};
 use std::sync::Arc;
 use tracing::info;
 
@@ -34,7 +34,10 @@ fn init_logging(log: &LogArgs) {
         quiet: NOISY_DEPS,
         honor_rust_log: true,
         writer: LogWriter::Stdout,
-        trace: None,
+        trace: log.trace_dir.as_deref().map(|dir| TraceSetup {
+            dir,
+            process: "server",
+        }),
     });
 }
 

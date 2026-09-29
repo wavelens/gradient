@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::path::PathBuf;
+
 use clap::Args;
 
 #[derive(Args, Debug, Clone)]
@@ -38,6 +40,10 @@ pub struct LogArgs {
         default_value_t = 262144
     )]
     pub chunk_bytes: usize,
+    /// Directory that receives every closed stage span as JSON lines, one file
+    /// per process. Unset disables span tracing.
+    #[arg(long = "log-trace-dir", env = "GRADIENT_LOG_TRACE_DIR")]
+    pub trace_dir: Option<PathBuf>,
 }
 
 impl Default for LogArgs {
@@ -49,6 +55,7 @@ impl Default for LogArgs {
             level_proto: None,
             level_scheduler: None,
             chunk_bytes: 262144,
+            trace_dir: None,
         }
     }
 }
