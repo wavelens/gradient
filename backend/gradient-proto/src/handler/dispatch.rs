@@ -33,7 +33,7 @@ use super::cache::handle_cache_query;
 use super::eval_cache::handle_eval_cache_pull;
 use super::job_events::{JobEvent, JobEvents};
 use super::log_lane::LogLane;
-use super::nar_serve::serve_nar_request;
+use super::nar_serve::{ServeSlot, serve_nar_request};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoWriter, send_credentials_for_job, send_error, send_server_msg,
 };
@@ -736,10 +736,10 @@ impl<'a> DispatchContext<'a> {
             let peer_id = self.peer_id.to_owned();
             let job_id = job_id.clone();
             shutdown.spawn(async move {
-                let _guard = match permit.acquire_owned().await {
-                    Ok(g) => g,
-                    Err(_) => return, // semaphore closed (shutdown)
+                let Some(_slot) = ServeSlot::acquire(permit).await else {
+                    return;
                 };
+
                 if let Err(e) =
                     serve_nar_request(&state, &writer, &job_id, &store_path, 0, None).await
                 {
@@ -765,10 +765,10 @@ impl<'a> DispatchContext<'a> {
         let peer_id = self.peer_id.to_owned();
         let shutdown = self.state.shutdown.clone();
         shutdown.spawn(async move {
-            let _guard = match permit.acquire_owned().await {
-                Ok(g) => g,
-                Err(_) => return,
+            let Some(_slot) = ServeSlot::acquire(permit).await else {
+                return;
             };
+
             if let Err(e) = serve_nar_request(
                 &state,
                 &writer,

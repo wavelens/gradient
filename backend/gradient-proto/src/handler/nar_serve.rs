@@ -13,9 +13,52 @@ use std::time::Duration;
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_storage::relay::{RelayRequest, RelayTimeouts, ServeError, serve_nar};
+use gradient_util::telemetry::{GAUGES, Gauges};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::warn;
 
 use super::socket::ProtoWriter;
+
+pub(super) struct ServeSlot {
+    _permit: OwnedSemaphorePermit,
+    gauges: &'static Gauges,
+}
+
+struct Waiting(&'static Gauges);
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.0.serves_waiting.dec();
+    }
+}
+
+impl ServeSlot {
+    pub(super) async fn acquire(semaphore: Arc<Semaphore>) -> Option<Self> {
+        Self::acquire_with(semaphore, &GAUGES).await
+    }
+
+    pub(super) async fn acquire_with(
+        semaphore: Arc<Semaphore>,
+        gauges: &'static Gauges,
+    ) -> Option<Self> {
+        gauges.serves_waiting.inc();
+        let waiting = Waiting(gauges);
+        let permit = semaphore.acquire_owned().await.ok()?;
+        drop(waiting);
+        gauges.serves_active.inc();
+
+        Some(Self {
+            _permit: permit,
+            gauges,
+        })
+    }
+}
+
+impl Drop for ServeSlot {
+    fn drop(&mut self) {
+        self.gauges.serves_active.dec();
+    }
+}
 
 /// Stream a single requested NAR from `nar_storage` to the worker, purging
 /// the `cached_path` row when the object has vanished from storage.
@@ -288,5 +331,72 @@ mod serve_nar_tests {
         assert!(awaiting_upload(&state, hash).await, "young and unconfirmed");
         assert!(!awaiting_upload(&state, hash).await, "confirmed");
         assert!(!awaiting_upload(&state, hash).await, "older than the grace");
+    }
+}
+
+#[cfg(test)]
+mod serve_slot_tests {
+    use super::*;
+    use gradient_util::telemetry::Gauges;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Semaphore;
+
+    fn gauges() -> &'static Gauges {
+        Box::leak(Box::new(Gauges::new()))
+    }
+
+    #[tokio::test]
+    async fn a_slot_is_active_until_dropped() {
+        let g = gauges();
+        let slot = ServeSlot::acquire_with(Arc::new(Semaphore::new(1)), g)
+            .await
+            .expect("slot");
+
+        assert_eq!(g.serves_active.get(), 1);
+        assert_eq!(g.serves_waiting.get(), 0);
+        drop(slot);
+        assert_eq!(g.serves_active.get(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_queued_serve_counts_as_waiting() {
+        let g = gauges();
+        let sem = Arc::new(Semaphore::new(1));
+        let held = ServeSlot::acquire_with(Arc::clone(&sem), g)
+            .await
+            .expect("slot");
+        let mut queued = Box::pin(ServeSlot::acquire_with(Arc::clone(&sem), g));
+        let still_queued = tokio::time::timeout(Duration::from_millis(20), &mut queued).await;
+
+        assert!(still_queued.is_err());
+        assert_eq!(g.serves_waiting.get(), 1);
+        drop(held);
+        let slot = queued.await.expect("slot");
+        assert_eq!(g.serves_waiting.get(), 0);
+        assert_eq!(g.serves_active.get(), 1);
+        drop(slot);
+    }
+
+    #[tokio::test]
+    async fn cancelled_wait_releases_waiting() {
+        let g = gauges();
+        let sem = Arc::new(Semaphore::new(0));
+        let waiting = ServeSlot::acquire_with(Arc::clone(&sem), g);
+        let cancelled = tokio::time::timeout(Duration::from_millis(20), waiting).await;
+
+        assert!(cancelled.is_err());
+        assert_eq!(g.serves_waiting.get(), 0);
+        assert_eq!(g.serves_active.get(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_closed_semaphore_yields_no_slot() {
+        let g = gauges();
+        let sem = Arc::new(Semaphore::new(0));
+        sem.close();
+
+        assert!(ServeSlot::acquire_with(sem, g).await.is_none());
+        assert_eq!(g.serves_waiting.get(), 0);
     }
 }
