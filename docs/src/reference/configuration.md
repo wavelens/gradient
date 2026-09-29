@@ -342,7 +342,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.nar.maxConcurrentUploads` | int | `8` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests the worker keeps open at once, waiting for a server grant or transferring. One job holds at most half of them. |
+| `worker.nar.maxConcurrentUploads` | int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests the worker keeps open at once, waiting for a server grant or transferring. Uploads of at most 1 MiB are served first and may take all of them; one job's larger uploads hold at most half. |
 | `worker.nar.partialTtlSecs` | int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after its last write that an unfinished NAR download under `<worker.baseDir>/nar-partial` is deleted. |
 
 ## `worker.nixDaemon`

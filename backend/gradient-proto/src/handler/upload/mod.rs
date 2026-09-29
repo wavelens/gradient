@@ -80,6 +80,7 @@ impl DispatchContext<'_> {
         {
             return self.grant(request_id, GrantTarget::Skip).await;
         }
+        let priority = gradient_wire::messages::is_small_upload(size);
         if !uploads.table.queue(request_id, job_id, object, size) {
             return self
                 .settle(
@@ -90,7 +91,7 @@ impl DispatchContext<'_> {
                 )
                 .await;
         }
-        uploads.admission.request(request_id, key, size);
+        uploads.admission.request(request_id, key, size, priority);
     }
 
     pub(super) async fn on_upload_admitted(

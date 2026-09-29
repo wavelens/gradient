@@ -233,7 +233,7 @@ mod tests {
         gradient_storage::admission::UploadPermit,
     ) {
         let (session, mut rx) = state.upload_admission.open_session("test");
-        session.request(1, ObjectKey::Nar("c".repeat(32)), 3);
+        session.request(1, ObjectKey::Nar("c".repeat(32)), 3, false);
         let Some(Admitted::Granted { permit, .. }) = rx.recv().await else {
             panic!("granted")
         };

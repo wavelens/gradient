@@ -382,7 +382,7 @@ impl Default for BuildArgs {
 pub struct NarArgs {
     /// Upload requests this worker keeps open at once (queued at the server or
     /// transferring). Bounds memory: a presigned PUT holds its compressed NAR.
-    #[arg(long = "nar-max-concurrent-uploads", env = "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS", default_value_t = 8, value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long = "nar-max-concurrent-uploads", env = "GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS", default_value_t = 16, value_parser = clap::value_parser!(u32).range(1..))]
     pub max_concurrent_uploads: u32,
 
     /// TTL in seconds for partially-received NAR downloads (`*.partial`) staged
@@ -400,7 +400,7 @@ pub struct NarArgs {
 impl Default for NarArgs {
     fn default() -> Self {
         Self {
-            max_concurrent_uploads: 8,
+            max_concurrent_uploads: 16,
             partial_ttl_secs: 86400,
         }
     }

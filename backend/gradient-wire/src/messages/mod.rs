@@ -69,6 +69,15 @@ pub use crate::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 /// eval-cache blob) - all three ride the same channel and share one budget.
 pub const TRANSFER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
+/// An upload of at most this many NAR bytes goes ahead of larger ones, at the
+/// worker's slots and at the server's admission. An evaluation's closure push is
+/// thousands of `.drv` files, and every wave of its walk waits on them.
+pub const SMALL_UPLOAD_BYTES: u64 = 1024 * 1024;
+
+pub fn is_small_upload(size: u64) -> bool {
+    size <= SMALL_UPLOAD_BYTES
+}
+
 /// Server-side budget for answering one `CacheQuery`; on expiry the server
 /// replies `CacheError` so the worker retries instead of reading "uncached".
 pub const CACHE_QUERY_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);

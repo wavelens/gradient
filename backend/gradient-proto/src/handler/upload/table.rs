@@ -205,7 +205,7 @@ mod tests {
         id: u64,
     ) -> (gradient_storage::admission::AdmissionSession, UploadPermit) {
         let (session, mut rx) = admission.open_session("test");
-        session.request(id, ObjectKey::Nar(id.to_string()), 1);
+        session.request(id, ObjectKey::Nar(id.to_string()), 1, false);
         let Some(Admitted::Granted { permit, .. }) = rx.recv().await else {
             panic!("granted")
         };

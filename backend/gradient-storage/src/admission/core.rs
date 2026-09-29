@@ -21,6 +21,9 @@ pub struct Request {
     pub id: u64,
     pub object: ObjectKey,
     pub size: u64,
+    /// A small upload: its session serves it before larger queued ones, and a
+    /// session with one waiting is served before the others.
+    pub priority: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,7 +45,8 @@ pub enum Outcome {
 }
 
 /// Server-wide upload budget: round-robin across sessions, FIFO within one,
-/// and no request ever bypasses a blocked head.
+/// priority requests ahead of the rest, and no request ever bypasses a blocked
+/// head.
 pub struct AdmissionCore {
     limits: Limits,
     ring: VecDeque<SessionId>,
@@ -169,7 +173,15 @@ impl AdmissionCore {
         decisions
     }
 
-    fn head(&self) -> Option<Request> {
+    fn head(&mut self) -> Option<Request> {
+        if let Some(at) = self.ring.iter().position(|s| {
+            self.queues
+                .get(s)
+                .and_then(VecDeque::front)
+                .is_some_and(|r| r.priority)
+        }) {
+            self.ring.rotate_left(at);
+        }
         let session = self.ring.front()?;
         self.queues.get(session)?.front().cloned()
     }
@@ -196,7 +208,15 @@ impl AdmissionCore {
         if queue.is_empty() {
             self.ring.push_back(session);
         }
-        queue.push_back(request);
+        let at = if request.priority {
+            queue
+                .iter()
+                .position(|r| !r.priority)
+                .unwrap_or(queue.len())
+        } else {
+            queue.len()
+        };
+        queue.insert(at, request);
     }
 
     fn requeue_in_order(&mut self, followers: Vec<Request>) {
@@ -233,7 +253,35 @@ mod tests {
             id,
             object: ObjectKey::Nar(hash.into()),
             size,
+            priority: false,
         }
+    }
+
+    fn small_req(session: SessionId, id: u64, hash: &str) -> Request {
+        Request {
+            priority: true,
+            ..req(session, id, hash, 1)
+        }
+    }
+
+    #[test]
+    fn a_small_upload_is_granted_before_the_larger_ones_queued_ahead_of_it() {
+        let mut core = core(1, GIB);
+        assert_eq!(granted(&core.enqueue(req(1, 1, "a", 1))), vec![(1, 1)]);
+        core.enqueue(req(1, 2, "b", 1));
+        core.enqueue(req(2, 3, "c", 1));
+        core.enqueue(small_req(2, 4, "d"));
+        core.enqueue(small_req(2, 5, "e"));
+
+        let mut served = Vec::new();
+        let mut last = (1, 1);
+        for _ in 0..4 {
+            let next = granted(&core.release(last.0, last.1, Outcome::Committed));
+            assert_eq!(next.len(), 1, "one slot: {next:?}");
+            last = next[0];
+            served.push(last);
+        }
+        assert_eq!(served, vec![(2, 4), (2, 5), (1, 2), (2, 3)]);
     }
 
     fn granted(decisions: &[Decision]) -> Vec<(SessionId, u64)> {
