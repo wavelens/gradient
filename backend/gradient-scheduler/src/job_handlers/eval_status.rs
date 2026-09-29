@@ -176,6 +176,7 @@ impl Scheduler {
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(%job_id, derivations = derivations.len()))]
     pub async fn handle_eval_result(
         &self,
         job_id: &str,

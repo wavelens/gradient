@@ -22,6 +22,7 @@ use crate::Scheduler;
 use crate::jobs::PendingEvalJob;
 use gradient_wire::types::{FlakeJob, FlakeStep, RequiredPath};
 
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler.draining.load(Ordering::Relaxed) {
         return Ok(());

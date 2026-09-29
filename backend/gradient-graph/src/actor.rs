@@ -231,6 +231,7 @@ fn ask_probe(st: &GraphState, result: anyhow::Result<Vec<DerivationId>>) -> anyh
 /// to all of them and run the post-commit effects of the ones that landed. A
 /// batch that fails is lost (the wire has no ack the worker could retry on),
 /// so its evaluation is failed rather than left with a hole in its graph.
+#[tracing::instrument(level = "debug", skip_all, fields(batches = st.queued.len(), rows = st.queued_rows))]
 async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     if st.queued.is_empty() {
         return;
@@ -290,6 +291,7 @@ fn escalate_retryable(
 }
 
 /// One batch under its own savepoint, so a bad batch fails only its caller.
+#[tracing::instrument(level = "debug", skip_all)]
 async fn ingest_one(scoped: &DbContext, batch: &IngestBatch) -> anyhow::Result<IngestReport> {
     let savepoint = Arc::new(scoped.worker_db.begin().await.context("savepoint")?);
     let inner = scoped.in_transaction(Arc::clone(&savepoint));
@@ -355,6 +357,7 @@ fn is_retryable(err: &anyhow::Error) -> bool {
     })
 }
 
+#[tracing::instrument(level = "debug", skip_all)]
 async fn transact_once<T, F, Fut>(ctx: &DbContext, budget: Duration, work: &F) -> anyhow::Result<T>
 where
     F: Fn(DbContext) -> Fut,

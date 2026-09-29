@@ -182,6 +182,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
     }
 }
 
+#[tracing::instrument(level = "debug", skip_all, fields(eval_id = %evaluation_id))]
 async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<()> {
     // Every edge landed with its batch, so the graph is complete here: run the
     // healing pipeline scoped to this eval, which thaws its closure, settles the

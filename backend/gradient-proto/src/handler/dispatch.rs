@@ -17,7 +17,7 @@ use gradient_types::events::build;
 use gradient_types::ids::{DerivationBuildId, DispatchedJobId, ProjectId};
 use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
-use tracing::{debug, info, trace, warn};
+use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
@@ -628,14 +628,17 @@ impl<'a> DispatchContext<'a> {
                 assignment.project_id,
             )
             .await;
+            let job_id = assignment.job_id().to_owned();
+            let assigned = debug_span!("assign_job", %job_id);
             if send_server_msg(
                 self.writer,
                 &ServerMessage::AssignJob {
-                    job_id: assignment.job_id().to_owned(),
+                    job_id,
                     dispatch: assignment.dispatch().to_string(),
                     job: assignment.job,
                 },
             )
+            .instrument(assigned)
             .await
             .is_err()
             {
