@@ -47,7 +47,7 @@ pub use eval::WorkerEvaluator;
 /// push: every upload needs the server's grant anyway, so there is nothing to
 /// fall back to.
 async fn query_fetched_paths(
-    updater: &mut JobUpdater,
+    updater: &JobUpdater,
     all_paths: Vec<String>,
     sizes: Vec<Option<u64>>,
 ) -> Result<Vec<CachedPath>> {
@@ -81,7 +81,7 @@ async fn query_fetched_paths(
 pub(crate) async fn push_drv_closure(
     drv_paths: &[String],
     pushed: &mut std::collections::HashSet<String>,
-    updater: &mut JobUpdater,
+    updater: &JobUpdater,
     store: &LocalNixStore,
 ) -> Result<()> {
     if drv_paths.is_empty() {

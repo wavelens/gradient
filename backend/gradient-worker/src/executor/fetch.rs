@@ -1003,7 +1003,7 @@ mod tests {
         .await;
 
         assert_eq!(reporter.len(), 1);
-        assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
+        assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
         // The actual clone fails because the URL is fake - that's expected.
         assert!(result.is_err());
     }
@@ -1125,7 +1125,7 @@ mod tests {
         .await;
         assert!(result.is_err(), "expected error when nix is unavailable");
         // The Fetching event was still emitted before the failure.
-        assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
+        assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
     }
 
     /// crane as this repository locks it; `nix eval` of its `fetchTree` outPath.

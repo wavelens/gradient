@@ -8,6 +8,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_util::sync::Mutex;
 use gradient_wire::messages::{
     BuildMetrics, BuildOutput, CachedPath, DiscoveredDerivation, EvalMessageLevel, QueryMode,
 };
@@ -54,7 +55,7 @@ pub enum ReportedEvent {
 /// [`JobReporter`] that records every call as a [`ReportedEvent`].
 #[derive(Debug, Default)]
 pub struct RecordingJobReporter {
-    pub events: Vec<ReportedEvent>,
+    events: Mutex<Vec<ReportedEvent>>,
     /// Paths to return from `query_cache`. Tests set this to simulate
     /// paths already present in the server's cache.
     pub cached_paths: Vec<String>,
@@ -90,29 +91,38 @@ impl RecordingJobReporter {
         self
     }
 
+    /// Every event recorded so far, in call order.
+    pub fn events(&self) -> Vec<ReportedEvent> {
+        self.events.lock().clone()
+    }
+
+    fn record(&self, event: ReportedEvent) {
+        self.events.lock().push(event);
+    }
+
     /// Number of events recorded.
     pub fn len(&self) -> usize {
-        self.events.len()
+        self.events.lock().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.events.lock().is_empty()
     }
 
     /// Get the last `EvalResult` event, if any.
-    pub fn last_eval_result(&self) -> Option<&ReportedEvent> {
-        self.events
-            .iter()
+    pub fn last_eval_result(&self) -> Option<ReportedEvent> {
+        self.events()
+            .into_iter()
             .rev()
             .find(|e| matches!(e, ReportedEvent::EvalResult { .. }))
     }
 
     /// Collect every drv path pushed via `push_drv_closure`, across all batches.
-    pub fn all_pushed_drv_paths(&self) -> Vec<&String> {
-        self.events
-            .iter()
+    pub fn all_pushed_drv_paths(&self) -> Vec<String> {
+        self.events()
+            .into_iter()
             .filter_map(|e| match e {
-                ReportedEvent::DrvClosurePush { drv_paths } => Some(drv_paths.iter()),
+                ReportedEvent::DrvClosurePush { drv_paths } => Some(drv_paths),
                 _ => None,
             })
             .flatten()
@@ -120,15 +130,12 @@ impl RecordingJobReporter {
     }
 
     /// Collect all derivations across every `EvalResult` event (incremental batches).
-    pub fn all_eval_derivations(&self) -> Vec<&DiscoveredDerivation> {
-        self.events
-            .iter()
-            .filter_map(|e| {
-                if let ReportedEvent::EvalResult { derivations, .. } = e {
-                    Some(derivations.iter())
-                } else {
-                    None
-                }
+    pub fn all_eval_derivations(&self) -> Vec<DiscoveredDerivation> {
+        self.events()
+            .into_iter()
+            .filter_map(|e| match e {
+                ReportedEvent::EvalResult { derivations, .. } => Some(derivations),
+                _ => None,
             })
             .flatten()
             .collect()
@@ -153,7 +160,7 @@ impl JobReporter for RecordingJobReporter {
         }))
     }
 
-    async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
+    async fn query_known_derivations(&self, drv_paths: Vec<String>) -> Result<Vec<String>> {
         let known_set: std::collections::HashSet<&str> =
             self.known_drv_paths.iter().map(|s| s.as_str()).collect();
         Ok(drv_paths
@@ -197,33 +204,32 @@ impl JobReporter for RecordingJobReporter {
     }
 
     async fn report_fetching(&mut self) -> Result<()> {
-        self.events.push(ReportedEvent::Fetching);
+        self.record(ReportedEvent::Fetching);
         Ok(())
     }
 
     async fn report_fetch_result(&mut self, flake_source: Option<String>) -> Result<()> {
-        self.events
-            .push(ReportedEvent::FetchResult { flake_source });
+        self.record(ReportedEvent::FetchResult { flake_source });
         Ok(())
     }
 
     async fn report_evaluating_flake(&mut self) -> Result<()> {
-        self.events.push(ReportedEvent::EvaluatingFlake);
+        self.record(ReportedEvent::EvaluatingFlake);
         Ok(())
     }
 
     async fn report_evaluating_derivations(&mut self) -> Result<()> {
-        self.events.push(ReportedEvent::EvaluatingDerivations);
+        self.record(ReportedEvent::EvaluatingDerivations);
         Ok(())
     }
 
     async fn report_eval_result(
-        &mut self,
+        &self,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
         errors: Vec<String>,
     ) -> Result<()> {
-        self.events.push(ReportedEvent::EvalResult {
+        self.record(ReportedEvent::EvalResult {
             derivations,
             warnings,
             errors,
@@ -232,18 +238,18 @@ impl JobReporter for RecordingJobReporter {
     }
 
     async fn push_drv_closure(
-        &mut self,
+        &self,
         drv_paths: &[String],
         _pushed: &mut std::collections::HashSet<String>,
     ) -> Result<()> {
-        self.events.push(ReportedEvent::DrvClosurePush {
+        self.record(ReportedEvent::DrvClosurePush {
             drv_paths: drv_paths.to_vec(),
         });
         Ok(())
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {
-        self.events.push(ReportedEvent::Building { build_id });
+        self.record(ReportedEvent::Building { build_id });
         Ok(())
     }
 
@@ -254,7 +260,7 @@ impl JobReporter for RecordingJobReporter {
         metrics: Option<BuildMetrics>,
         substituted: bool,
     ) -> Result<()> {
-        self.events.push(ReportedEvent::BuildOutput {
+        self.record(ReportedEvent::BuildOutput {
             build_id,
             outputs,
             metrics,
@@ -264,13 +270,12 @@ impl JobReporter for RecordingJobReporter {
     }
 
     async fn report_compressing(&mut self) -> Result<()> {
-        self.events.push(ReportedEvent::Compressing);
+        self.record(ReportedEvent::Compressing);
         Ok(())
     }
 
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {
-        self.events
-            .push(ReportedEvent::LogChunk { task_index, data });
+        self.record(ReportedEvent::LogChunk { task_index, data });
         Ok(())
     }
 
@@ -280,7 +285,7 @@ impl JobReporter for RecordingJobReporter {
         source: &str,
         message: &str,
     ) -> Result<()> {
-        self.events.push(ReportedEvent::EvalMessage {
+        self.record(ReportedEvent::EvalMessage {
             level,
             source: source.to_owned(),
             message: message.to_owned(),
