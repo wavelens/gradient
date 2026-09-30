@@ -73,9 +73,12 @@ crate::sql! {
              WHERE e.id = locked.id",
         params = [EvaluationIds(64)];
 
+    // Driven from `build_job`'s derivation index, which carries the evaluation:
+    // as a semi-join the planner walked every evaluation and probed its jobs.
     BUMP_GRAPH_VERSION_FOR_DERIVATIONS = "UPDATE evaluation e SET graph_version = e.graph_version + 1 \
              FROM (SELECT id FROM evaluation \
-                   WHERE id IN (SELECT evaluation FROM build_job WHERE derivation = ANY($1::uuid[])) \
+                   WHERE id = ANY(ARRAY(SELECT DISTINCT evaluation FROM build_job \
+                                        WHERE derivation = ANY($1::uuid[]))) \
                    ORDER BY id FOR UPDATE) locked \
              WHERE e.id = locked.id",
         params = [DerivationIds(64)];
