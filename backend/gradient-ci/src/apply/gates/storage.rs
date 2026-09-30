@@ -17,6 +17,7 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait};
 /// instance-wide limit). Returns the evaluation unchanged when at least one
 /// writable cache still has headroom, or when the project has no writable cache at
 /// all (that case is owned by [`park_if_no_cache`](super::park_if_no_cache)).
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn park_if_storage_full<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,
