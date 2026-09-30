@@ -64,6 +64,12 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
         Box::pin(async { Ok(()) })
     }
 
+    /// Clear out the pre-shard flat layout (`logs/<uuid>.log`, `logs/<uuid>/`),
+    /// run by the deep GC. Default is a no-op for backends without one.
+    fn clean_legacy_layout<'a>(&'a self) -> BoxFuture<'a, Result<LegacyCleanup>> {
+        Box::pin(async { Ok(LegacyCleanup::default()) })
+    }
+
     /// Concatenate the decompressed chunk objects in order. Used as a fallback
     /// by `read` once the inline log has been dropped. Stops at the first
     /// missing chunk index.
@@ -82,6 +88,14 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
             Ok(out)
         })
     }
+}
+
+/// What [`LogStorage::clean_legacy_layout`] did: flat local entries move into
+/// their shard, flat S3 objects are deleted along with their attempts' logs.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct LegacyCleanup {
+    pub relocated: u64,
+    pub deleted: Vec<BuildAttemptId>,
 }
 
 /// Whether `err` says a log file or object does not exist, as opposed to a
@@ -149,6 +163,26 @@ impl FileLogStorage {
 
     fn chunk_path(&self, attempt_id: BuildAttemptId, index: u32) -> PathBuf {
         self.logs_dir.join(layout::chunk_key(attempt_id, index))
+    }
+
+    /// Move one flat entry into its shard. A live log already written to the
+    /// shard keeps its order: the flat file holds the earlier lines. A chunk dir
+    /// already in the shard was written later and wins over the flat one.
+    async fn relocate_flat_entry(&self, attempt_id: BuildAttemptId, name: &str) -> Result<()> {
+        let from = self.logs_dir.join(name);
+        let to = self.logs_dir.join(layout::shard(attempt_id)).join(name);
+        fs::create_dir_all(self.logs_dir.join(layout::shard(attempt_id))).await?;
+        if !fs::try_exists(&to).await? {
+            fs::rename(&from, &to).await?;
+        } else if name.ends_with(".log") {
+            let mut merged = fs::read(&from).await?;
+            merged.extend(fs::read(&to).await?);
+            fs::write(&to, merged).await?;
+            fs::remove_file(&from).await?;
+        } else {
+            fs::remove_dir_all(&from).await?;
+        }
+        Ok(())
     }
 }
 
@@ -268,6 +302,29 @@ impl LogStorage for FileLogStorage {
 
     fn delete_inline_log<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { remove_file_if_present(&self.log_path(attempt_id)).await })
+    }
+
+    fn clean_legacy_layout<'a>(&'a self) -> BoxFuture<'a, Result<LegacyCleanup>> {
+        Box::pin(async move {
+            let mut flat = Vec::new();
+            let mut entries = fs::read_dir(&self.logs_dir).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let name = entry.file_name();
+                if let Some((id, name)) = name
+                    .to_str()
+                    .and_then(|n| Some((layout::attempt_of(n)?, n.to_owned())))
+                {
+                    flat.push((id, name));
+                }
+            }
+
+            let mut cleanup = LegacyCleanup::default();
+            for (attempt_id, name) in flat {
+                self.relocate_flat_entry(attempt_id, &name).await?;
+                cleanup.relocated += 1;
+            }
+            Ok(cleanup)
+        })
     }
 }
 
@@ -416,6 +473,46 @@ impl LogStorage for S3LogStorage {
     fn delete_inline_log<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         self.local.delete_inline_log(attempt_id)
     }
+
+    fn clean_legacy_layout<'a>(&'a self) -> BoxFuture<'a, Result<LegacyCleanup>> {
+        Box::pin(async move {
+            use futures::{StreamExt as _, TryStreamExt as _};
+            let mut cleanup = self.local.clean_legacy_layout().await?;
+            let root = self.logs_root();
+            let top = self.object_store.list_with_delimiter(Some(&root)).await?;
+
+            let flat_objects = top.objects.into_iter().map(|meta| meta.location);
+            let flat_dirs = top.common_prefixes.into_iter();
+            let mut deleted = BTreeSet::new();
+            let mut doomed = Vec::new();
+            for location in flat_objects.chain(flat_dirs) {
+                let Some(id) = location.filename().and_then(layout::attempt_of) else {
+                    continue;
+                };
+                deleted.insert(id);
+                doomed.push(location);
+            }
+
+            for location in doomed {
+                let objects = self
+                    .object_store
+                    .list(Some(&location))
+                    .map_ok(|meta| meta.location)
+                    .chain(futures::stream::once(async move { Ok(location) }))
+                    .boxed();
+                let mut results = self.object_store.delete_stream(objects);
+                while let Some(result) = results.next().await {
+                    match result {
+                        Ok(_) | Err(object_store::Error::NotFound { .. }) => {}
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+            }
+
+            cleanup.deleted = deleted.into_iter().collect();
+            Ok(cleanup)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -511,6 +608,65 @@ mod tests {
         assert!(is_not_found(&file.read_chunk(id, 0).await.unwrap_err()));
         assert!(is_not_found(&s3.read_chunk(id, 0).await.unwrap_err()));
         assert!(!is_not_found(&anyhow::anyhow!("connection reset")));
+    }
+
+    #[tokio::test]
+    async fn file_legacy_cleanup_moves_flat_entries_into_their_shard() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = FileLogStorage::new(dir.path()).await.unwrap();
+        let logs = dir.path().join("logs");
+        let id = sample_id();
+        fs::write(logs.join(format!("{SAMPLE}.log")), "early\n")
+            .await
+            .unwrap();
+        fs::create_dir_all(logs.join(SAMPLE)).await.unwrap();
+        fs::write(logs.join(SAMPLE).join("chunk_00000000.zst"), b"z")
+            .await
+            .unwrap();
+        storage.append(id, "late\n").await.unwrap();
+
+        let cleanup = storage.clean_legacy_layout().await.unwrap();
+
+        assert_eq!(cleanup.relocated, 2);
+        assert!(cleanup.deleted.is_empty());
+        assert_eq!(storage.read_inline(id).await.unwrap(), "early\nlate\n");
+        assert_eq!(storage.read_chunk(id, 0).await.unwrap(), b"z");
+        assert!(!logs.join(SAMPLE).exists());
+        assert!(!logs.join(format!("{SAMPLE}.log")).exists());
+    }
+
+    #[tokio::test]
+    async fn s3_legacy_cleanup_deletes_flat_objects_and_keeps_shards() {
+        let dir = tempfile::tempdir().unwrap();
+        let (s3, store) = s3_storage(dir.path()).await;
+        let legacy = BuildAttemptId::new(uuid::Uuid::now_v7());
+        for key in [
+            format!("pre/logs/{legacy}/chunk_00000000.zst"),
+            format!("pre/logs/{legacy}/chunk_00000001.zst"),
+            format!("pre/logs/{legacy}.log"),
+        ] {
+            store
+                .put(&ObjectPath::from(key), PutPayload::from_static(b"old"))
+                .await
+                .unwrap();
+        }
+        let kept = sample_id();
+        s3.write_chunk(kept, 0, b"new").await.unwrap();
+
+        let cleanup = s3.clean_legacy_layout().await.unwrap();
+
+        assert_eq!(cleanup.deleted, vec![legacy]);
+        use futures::TryStreamExt as _;
+        let left: Vec<String> = store
+            .list(Some(&ObjectPath::from("pre/logs")))
+            .map_ok(|meta| meta.location.to_string())
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(
+            left,
+            vec![format!("pre/logs/fe/{SAMPLE}/chunk_00000000.zst")]
+        );
     }
 
     #[tokio::test]
