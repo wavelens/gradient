@@ -24,7 +24,7 @@ use gradient_types::*;
 use gradient_wire::types::DiscoveredDerivation;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
-    QueryFilter, TransactionTrait, Value,
+    QueryFilter, Value,
 };
 use tracing::{debug, error, warn};
 
@@ -144,6 +144,15 @@ struct BatchWriter<'a> {
 impl BatchWriter<'_> {
     fn db(&self) -> &WorkerDb {
         &self.ctx.worker_db
+    }
+
+    /// The actor's transaction, which every step of a batch writes inside. A
+    /// savepoint per step was two round trips for a rollback nothing used: a
+    /// failed step fails the batch, and the batch's own savepoint takes it back.
+    fn txn(&self) -> Result<&sea_orm::DatabaseTransaction> {
+        self.db()
+            .as_transaction()
+            .context("a batch is written inside the graph actor's transaction")
     }
 
     /// The derivations this batch flipped to walked, by hash.
@@ -417,17 +426,11 @@ impl BatchWriter<'_> {
             return Ok(());
         }
 
-        let txn = self
-            .db()
-            .begin()
-            .await
-            .context("begin the walk completeness transaction")?;
-        gradient_db::seed_walk_completeness(&txn, &walked, grew)
+        gradient_db::seed_walk_completeness(self.txn()?, &walked, grew)
             .await
             .context("seed unwalked_inputs")?;
-        txn.commit()
-            .await
-            .context("commit the walk completeness transaction")
+
+        Ok(())
     }
 
     async fn set_anchor_limits(
@@ -688,12 +691,8 @@ impl BatchWriter<'_> {
             return Ok(Vec::new());
         }
 
-        let txn = self
-            .db()
-            .begin()
-            .await
-            .context("begin the readiness transaction")?;
-        let lock = gradient_db::lock_seed_anchors(&txn, &locked).await?;
+        let txn = self.txn()?;
+        let lock = gradient_db::lock_seed_anchors(txn, &locked).await?;
         let mut changes = gradient_db::became_fetchable(&lock)
             .await
             .context("advance fetchable anchors")?;
@@ -701,18 +700,15 @@ impl BatchWriter<'_> {
             .await
             .context("seed unready_deps")?;
         changes.extend(
-            gradient_db::promote(&txn, &locked)
+            gradient_db::promote(txn, &locked)
                 .await
                 .context("promote the batch's anchors")?,
         );
         changes.extend(
-            gradient_db::unpromote_ungated(&txn, &locked)
+            gradient_db::unpromote_ungated(txn, &locked)
                 .await
                 .context("settle the queue against the seeded counts")?,
         );
-        txn.commit()
-            .await
-            .context("commit the readiness transaction")?;
         let net = gradient_db::collapse_transitions(changes);
         gradient_db::emit_transition_effects(self.ctx, &net).await;
         self.move_batch_demand(&to_seed, entry_points).await
@@ -740,18 +736,11 @@ impl BatchWriter<'_> {
             return Ok(Vec::new());
         }
 
-        let txn = self
-            .db()
-            .begin()
-            .await
-            .context("begin the reference adoption transaction")?;
-        let referrers = gradient_db::adopt_referenced_outputs(&txn, &walked)
+        let txn = self.txn()?;
+        let referrers = gradient_db::adopt_referenced_outputs(txn, &walked)
             .await
             .context("adopt the references naming newly walked outputs")?;
         if referrers.is_empty() {
-            txn.commit()
-                .await
-                .context("commit the reference adoption transaction")?;
             return Ok(referrers);
         }
 
@@ -759,18 +748,14 @@ impl BatchWriter<'_> {
             referrers = referrers.len(),
             "adopted runtime edges recorded before their producers were walked"
         );
-        let mut changes = gradient_db::recompute_and_settle_demand(&txn, &referrers)
+        let mut changes = gradient_db::recompute_and_settle_demand(txn, &referrers)
             .await?
             .changes;
-        let seeded = gradient_db::seed_runtime_deps(&txn, &[], &referrers).await?;
+        let seeded = gradient_db::seed_runtime_deps(txn, &[], &referrers).await?;
         if !seeded.unwhole.is_empty() {
-            let lock = gradient_db::lock_anchors(&txn, &seeded.unwhole).await?;
+            let lock = gradient_db::lock_anchors(txn, &seeded.unwhole).await?;
             changes.extend(gradient_db::lost_fetchability(&lock).await?);
         }
-
-        txn.commit()
-            .await
-            .context("commit the reference adoption transaction")?;
         gradient_db::emit_transition_effects(self.ctx, &changes).await;
 
         Ok(referrers)
@@ -1382,7 +1367,8 @@ mod tests {
     use crate::test_ctx::ctx;
     use gradient_entity::evaluation::EvaluationStatus;
     use sea_orm::{
-        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement, Value,
+        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Statement,
+        TransactionTrait, Value,
     };
     use std::collections::BTreeMap;
 
