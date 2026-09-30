@@ -84,6 +84,20 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
     }
 }
 
+/// Whether `err` says a log file or object does not exist, as opposed to a
+/// storage failure worth retrying.
+pub fn is_not_found(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            || matches!(
+                cause.downcast_ref::<object_store::Error>(),
+                Some(object_store::Error::NotFound { .. })
+            )
+    })
+}
+
 /// Keys below `logs/`, shared by every backend. The shard is the last UUID
 /// byte (the random tail of a v7 id), fanning logs across 256 subfolders:
 /// `<xx>/<uuid>.log` inline, `<xx>/<uuid>/chunk_<n>.zst` chunked.
@@ -485,6 +499,18 @@ mod tests {
             s3.local.read_chunk(id, 0).await.is_err(),
             "S3 backend must not write chunks to local disk"
         );
+    }
+
+    #[tokio::test]
+    async fn a_missing_chunk_is_not_found_in_both_backends() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = FileLogStorage::new(dir.path()).await.unwrap();
+        let (s3, _store) = s3_storage(dir.path()).await;
+        let id = sample_id();
+
+        assert!(is_not_found(&file.read_chunk(id, 0).await.unwrap_err()));
+        assert!(is_not_found(&s3.read_chunk(id, 0).await.unwrap_err()));
+        assert!(!is_not_found(&anyhow::anyhow!("connection reset")));
     }
 
     #[tokio::test]

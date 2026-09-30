@@ -38,6 +38,23 @@ fn decode_chunk(raw: &[u8]) -> WebResult<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// A chunk's text for a line range. A chunk whose object is gone renders as
+/// placeholder lines, keeping the line numbers of every later chunk in place.
+async fn chunk_lines_text(
+    logs: &dyn gradient_storage::LogStorage,
+    log_key: BuildAttemptId,
+    row: &ChunkRow,
+) -> WebResult<String> {
+    match logs.read_chunk(log_key, row.chunk_index as u32).await {
+        Ok(raw) => decode_chunk(&raw),
+        Err(e) if gradient_storage::is_not_found(&e) => {
+            Ok(gradient_storage::log_chunk::MISSING_CHUNK_LINE
+                .repeat(row.line_count.max(0) as usize))
+        }
+        Err(e) => Err(WebError::Internal(e)),
+    }
+}
+
 pub async fn get_build_log_chunks(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -171,12 +188,7 @@ pub async fn get_build_log_lines(
         if chunk_last < want_first || chunk_first > want_last {
             continue;
         }
-        let raw = state
-            .log_storage
-            .read_chunk(log_key, row.chunk_index as u32)
-            .await
-            .map_err(|_| WebError::not_found("LogChunk"))?;
-        let text = decode_chunk(&raw)?;
+        let text = chunk_lines_text(state.log_storage.as_ref(), log_key, row).await?;
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
 
         let lo = want_first.saturating_sub(chunk_first) as usize;
@@ -272,7 +284,9 @@ pub async fn get_build_log_search(
 
 #[cfg(test)]
 mod tests {
-    use super::{LineRangeQuery, parse_line_range};
+    use super::{ChunkRow, LineRangeQuery, chunk_lines_text, parse_line_range};
+    use gradient_storage::{FileLogStorage, LogStorage};
+    use gradient_types::BuildAttemptId;
 
     fn q(start: Option<u64>, end: Option<u64>, range: Option<&str>) -> LineRangeQuery {
         LineRangeQuery {
@@ -314,5 +328,31 @@ mod tests {
     #[test]
     fn rejects_malformed_range() {
         assert!(parse_line_range(&q(None, None, Some("nonsense"))).is_err());
+    }
+
+    fn row(chunk_index: i32, line_count: i32) -> ChunkRow {
+        ChunkRow {
+            chunk_index,
+            line_count,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_missing_chunk_renders_one_placeholder_per_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = FileLogStorage::new(dir.path()).await.unwrap();
+        let key = BuildAttemptId::now_v7();
+        let raw = zstd::stream::encode_all(&b"kept\n"[..], 1).unwrap();
+        logs.write_chunk(key, 0, &raw).await.unwrap();
+
+        assert_eq!(
+            chunk_lines_text(&logs, key, &row(0, 1)).await.unwrap(),
+            "kept\n"
+        );
+        assert_eq!(
+            chunk_lines_text(&logs, key, &row(1, 3)).await.unwrap(),
+            gradient_storage::log_chunk::MISSING_CHUNK_LINE.repeat(3)
+        );
     }
 }

@@ -80,8 +80,12 @@ pub struct StoredChunkDesc {
     pub color_prefix: String,
 }
 
-/// Decompress and concatenate chunks `0..count`, failing on any unreadable
-/// chunk: a caller rewriting the log must never drop a chunk it could not read.
+/// Stands in for each line of a chunk whose object is gone.
+pub const MISSING_CHUNK_LINE: &str = "[log chunk unavailable]\n";
+
+/// Decompress and concatenate chunks `0..count`. A chunk that no longer exists
+/// reads as one [`MISSING_CHUNK_LINE`]; any other failure is returned, because a
+/// caller rewriting the log must never drop a chunk it merely failed to read.
 pub async fn read_chunks(
     storage: &dyn LogStorage,
     log_key: BuildAttemptId,
@@ -89,10 +93,13 @@ pub async fn read_chunks(
 ) -> Result<String> {
     let mut out = String::new();
     for index in 0..count {
-        let raw = storage.read_chunk(log_key, index).await?;
-        out.push_str(&String::from_utf8_lossy(&zstd::stream::decode_all(
-            &raw[..],
-        )?));
+        match storage.read_chunk(log_key, index).await {
+            Ok(raw) => out.push_str(&String::from_utf8_lossy(&zstd::stream::decode_all(
+                &raw[..],
+            )?)),
+            Err(e) if crate::log::is_not_found(&e) => out.push_str(MISSING_CHUNK_LINE),
+            Err(e) => return Err(e),
+        }
     }
     Ok(out)
 }
@@ -163,6 +170,23 @@ mod tests {
     #[test]
     fn empty_log_yields_no_chunks() {
         assert!(chunk_log("", 256).is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_chunks_marks_a_missing_chunk_and_keeps_the_rest() {
+        use crate::log::{FileLogStorage, LogStorage};
+        use gradient_types::ids::BuildAttemptId;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = FileLogStorage::new(dir.path()).await.unwrap();
+        let id = BuildAttemptId::now_v7();
+        for (index, text) in [(0, "first\n"), (2, "third\n")] {
+            let raw = zstd::stream::encode_all(text.as_bytes(), 1).unwrap();
+            storage.write_chunk(id, index, &raw).await.unwrap();
+        }
+
+        let text = super::read_chunks(&storage, id, 3).await.unwrap();
+
+        assert_eq!(text, format!("first\n{}third\n", super::MISSING_CHUNK_LINE));
     }
 
     #[tokio::test]
