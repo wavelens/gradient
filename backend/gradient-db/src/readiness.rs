@@ -255,11 +255,10 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
              status = CASE WHEN {unqueue} THEN {created} ELSE d.status END, \
              updated_at = CASE WHEN {unqueue} \
                                THEN (now() AT TIME ZONE 'UTC') ELSE d.updated_at END \
-         FROM derivation_build old, \
-              (SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
+         FROM (SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
                WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) \
                GROUP BY e.derivation) c \
-         WHERE d.derivation = c.derivation AND old.id = d.id \
+         WHERE d.derivation = c.derivation \
          RETURNING d.derivation, old.status AS from_status, d.status AS to_status",
         unqueue = format!(
             "d.status = {queued} AND {not_in_flight}",
@@ -339,8 +338,7 @@ fn unpromote_sql(reason: &str) -> String {
     format!(
         "UPDATE derivation_build db \
          SET status = {created}, updated_at = (now() AT TIME ZONE 'UTC') \
-         FROM derivation_build old \
-         WHERE old.id = db.id AND db.status = {queued} AND {not_in_flight} AND {reason} \
+         WHERE db.status = {queued} AND {not_in_flight} AND {reason} \
          RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
         created = status_sql::build(BuildStatus::Created),
         queued = status_sql::build(BuildStatus::Queued),
@@ -709,8 +707,7 @@ crate::sql! {
     /// anchor is pending work again. It goes to `Created` and not to `Queued`, the
     /// promote that follows reads the gates, and an abort's attempts are no verdict.
     THAW_DEMANDED = "UPDATE derivation_build db SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
-         FROM derivation_build old \
-         WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) AND db.status IN (5, 10) AND db.demanded \
+         WHERE db.derivation = ANY($1::uuid[]) AND db.status IN (5, 10) AND db.demanded \
          RETURNING db.derivation, old.status AS from_status, 0 AS to_status",
         params = [DerivationIds(64)];
 
@@ -725,8 +722,7 @@ crate::sql! {
         tier = Sweep;
 
     THAW_DEMANDED_ALL = "UPDATE derivation_build db SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC') \
-         FROM derivation_build old \
-         WHERE old.id = db.id AND db.status IN (5, 10) AND db.demanded \
+         WHERE db.status IN (5, 10) AND db.demanded \
          RETURNING db.derivation, old.status AS from_status, 0 AS to_status",
         params = [],
         tier = Sweep;

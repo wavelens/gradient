@@ -44,9 +44,9 @@ pub(crate) fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> 
 }
 
 /// Collect `RETURNING db.derivation, old.status AS from_status, db.status AS
-/// to_status` rows into the typed changes the effects emitter consumes. Bulk
-/// statements capture the pre-update status via a `FROM derivation_build old`
-/// self-join on the primary key (Postgres evaluates `old` against the snapshot).
+/// to_status` rows into the typed changes the effects emitter consumes. `old` is
+/// Postgres 18's pre-update row, which a self-join used to fetch at the price of
+/// a sequential scan once a statement moved many anchors.
 pub(crate) fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
     rows.into_iter()
         .filter_map(|r| {
@@ -101,8 +101,7 @@ fn substitute_created_anchors_sql() -> String {
         UPDATE derivation_build AS db
         SET status = {substituted}, substituted = true,
             updated_at = (now() AT TIME ZONE 'UTC')
-        FROM derivation_build old
-        WHERE old.id = db.id AND db.status = {created} AND db.derivation = ANY($1::uuid[])
+        WHERE db.status = {created} AND db.derivation = ANY($1::uuid[])
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
         substituted = status_sql::build(BuildStatus::Substituted),
@@ -131,9 +130,7 @@ fn cascade_dependency_failed_sql() -> String {
     {cte}
     UPDATE derivation_build AS db
     SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
-    FROM derivation_build old
-    WHERE old.id = db.id
-      AND db.status IN ({cascade_target})
+    WHERE db.status IN ({cascade_target})
       AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#,
@@ -239,9 +236,7 @@ fn dependency_failed_reconcile_sql() -> String {
     {prelude}
     UPDATE derivation_build AS db
     SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
-    FROM derivation_build old
-    WHERE old.id = db.id
-      AND db.status IN ({cascade_target})
+    WHERE db.status IN ({cascade_target})
       AND db.derivation IN (SELECT derivation FROM dependents)
       AND db.derivation IN (SELECT derivation FROM closure)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
@@ -422,9 +417,7 @@ fn requeue_failed_anchors_sql() -> String {
         UPDATE derivation_build db
         SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
-        FROM derivation_build old
-        WHERE old.id = db.id
-          AND db.derivation = ANY($1) AND db.status IN ({requeueable})
+        WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
           AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
@@ -483,9 +476,7 @@ fn requeue_closure_update(blocked: &str) -> String {
         UPDATE derivation_build db
         SET status = {created}, attempt = 0,
             updated_at = (now() AT TIME ZONE 'UTC')
-        FROM derivation_build old
-        WHERE old.id = db.id
-          AND db.derivation IN (SELECT derivation FROM closure)
+        WHERE db.derivation IN (SELECT derivation FROM closure)
           AND db.status IN ({requeueable}){blocked}
         RETURNING db.derivation, old.status AS from_status, db.status AS to_status
         "#,
@@ -562,9 +553,7 @@ fn reconcile_cached_anchors_for_eval_sql() -> String {
     UPDATE derivation_build db
     SET status = CASE WHEN db.status IN ({terminal_success}) THEN db.status ELSE {completed} END,
         updated_at = (now() AT TIME ZONE 'UTC')
-    FROM derivation_build old
-    WHERE old.id = db.id
-      AND db.derivation IN (SELECT derivation FROM closure)
+    WHERE db.derivation IN (SELECT derivation FROM closure)
       AND db.status NOT IN ({terminal_success})
       AND {not_in_flight}
       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
@@ -583,7 +572,7 @@ crate::sql_fn! {
     RECONCILE_CACHED_ANCHORS_FOR_EVAL = reconcile_cached_anchors_for_eval_sql,
         params = [EvaluationId],
         tier = Walk,
-        budget = crate::sql::Budget::walk().buffers(1_000_000)
+        budget = crate::sql::Budget::walk().buffers(500_000)
             .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, plus \
                       one output-and-path anti-join per anchor the closure names"),
         flags = [Walk];
@@ -742,7 +731,7 @@ mod tests {
             "must only touch non-terminal anchors (never terminal-success): {sql}"
         );
         assert!(
-            sql.contains("FROM derivation_build old") && sql.contains("old.status AS from_status"),
+            sql.contains("old.status AS from_status"),
             "must capture the pre-update status for the effects emitter: {sql}"
         );
         assert!(
