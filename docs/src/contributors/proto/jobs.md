@@ -37,7 +37,7 @@ sequenceDiagram
         S->>W: KnownDerivations { known }
     end
     loop every 50 derivations
-        W->>S: CacheQuery { Push } + uploads (.drv closure)
+        W->>S: CacheQuery { Push } + uploads (.drv files, sources)
         W->>S: JobUpdate { EvalResult { derivations } }
     end
     W->>S: JobUpdate { EvalResult { warnings, errors } }
@@ -45,10 +45,9 @@ sequenceDiagram
 ```
 
 - `known` lists the derivations already walked completely; the worker skips their subtrees. A **Full rewalk** gets an empty list.
-- Each batch uploads the `.drv` closure before its `EvalResult`: builds start while the walk goes on.
+- Each batch uploads its `.drv` files and their input sources before its `EvalResult`: builds start while the walk goes on. An input's `.drv` goes with the batch that walks it.
 - The walk goes on while a batch uploads, up to 64 batches ahead.
-- Batches queued behind an upload go out together as one closure; each `EvalResult` still follows its upload.
-- A batch queries and uploads only the part of its closure no earlier batch of the same evaluation covered.
+- A path an earlier batch of the same evaluation pushed is neither queried nor uploaded again.
 - The server ingests each batch and promotes ready builds to `Queued` right away.
 - The evaluation turns `Building` on `JobCompleted`; evaluation errors become error messages that fail the evaluation at the end.
 

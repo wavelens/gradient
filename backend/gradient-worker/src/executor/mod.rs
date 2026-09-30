@@ -57,74 +57,26 @@ async fn query_fetched_paths(
     updater.query_push(all_paths, sizes).await
 }
 
-/// Push the runtime closure of every `.drv` produced during eval to the
-/// gradient cache.
-///
-/// Walking the closure (rather than just the `.drv` files themselves) is what
-/// keeps downstream build workers from racing the cache: a `.drv` references
-/// every `input_source` (e.g. `builtins.path`, `lib.cleanSource` outputs that
-/// landed in the eval worker's local store) and every transitive `.drv`. If
-/// we only pushed the `.drv` files, a downstream worker's `prefetch_inputs`
-/// could query the cache, find the `.drv` cached, then fail on import because
-/// a referenced source is still local-only. Walking the closure here ensures
-/// every store path needed to interpret a produced `.drv` is in the cache
-/// before this eval job's `JobCompleted` reaches the server.
-///
-/// The daemon's reference walk is unreliable for a `.drv`'s `inputSrcs`, so the
-/// sources are additionally discovered by parsing each `.drv`
-/// ([`drv_input_sources`]), mirroring the build-side prefetch. They have no
-/// producing derivation, so a missed source cannot self-heal - the build just
-/// fails `InputsUnavailable` forever.
-///
-/// A failed closure upload fails the evaluation (propagated to the caller),
-/// so a downstream build never starts against a source the cache is missing.
-#[tracing::instrument(level = "debug", skip_all, fields(seeds = drv_paths.len()))]
-pub(crate) async fn push_drv_closure(
-    drv_paths: &[String],
-    pushed: &mut std::collections::HashSet<String>,
+/// Push a batch's `.drv` files and their input sources to the gradient cache:
+/// what a build of the batch pulls before it starts, cacheable before the batch
+/// is reported. An input's own `.drv` is pushed by the batch that walks it, or was
+/// pushed by the evaluation that recorded it. A failed upload fails the evaluation,
+/// so no build starts against a path the cache is missing.
+#[instrument(level = "debug", skip_all, fields(paths = paths.len()))]
+pub(crate) async fn push_paths(
+    paths: &[(String, Option<u64>)],
     updater: &JobUpdater,
     store: &LocalNixStore,
 ) -> Result<()> {
-    if drv_paths.is_empty() {
+    if paths.is_empty() {
         return Ok(());
     }
 
     let mut guard = updater.phase(JobPhase::DrvClosurePush);
-    let mut closure = store.collect_runtime_closure(drv_paths, pushed).await;
-
-    // The daemon's reference walk drops a `.drv`'s `inputSrcs`, so discover them
-    // authoritatively by parsing each `.drv` - mirroring the build-side prefetch
-    // (`InputPrefetcher::enumerate_inputs`). Parse EVERY `.drv` in the closure, not
-    // just the seeds: a pruned/transitive node's input source (a producerless
-    // config file like `etc-machine-id`, or a vendored `cargo-src-*`) is otherwise
-    // never pushed, and a later rebuild of that node fails `InputsUnavailable`
-    // forever on a source that has no producer and only the eval worker holds.
-    let drv_members: Vec<String> = closure
-        .keys()
-        .filter(|p| p.ends_with(".drv"))
-        .cloned()
-        .collect();
-    for source in drv_input_sources(&drv_members).await {
-        if !pushed.contains(&source) {
-            closure.entry(source).or_insert(None);
-        }
-    }
-
-    if closure.is_empty() {
-        return Ok(());
-    }
-    tracing::debug!(
-        seeds = drv_paths.len(),
-        closure = closure.len(),
-        "pushing eval closure to cache"
-    );
-
-    let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = closure.into_iter().unzip();
     guard.record(paths.len() as u32, 0);
-    let cache_entries = query_fetched_paths(updater, paths.clone(), sizes).await?;
-    upload_all(updater, pair_with_store(cache_entries, store), None).await?;
-    pushed.extend(paths);
-    Ok(())
+    let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = paths.iter().cloned().unzip();
+    let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
+    upload_all(updater, pair_with_store(cache_entries, store), None).await
 }
 
 /// Every entry paired with the local store it is packed from: the shape
@@ -136,42 +88,6 @@ fn pair_with_store<'a>(
     entries
         .into_iter()
         .map(|cp| (cp, nar::NarSource::Path { meta: Some(store) }))
-        .collect()
-}
-
-/// The `inputSrcs` declared by each `.drv`, read by parsing the file directly
-/// rather than via the daemon's reference walk (which is unreliable for a
-/// `.drv`'s sources). Mirrors the build-side prefetch so every source a build
-/// worker will demand is pushed by the eval that produced it. A `.drv` that
-/// cannot be read or parsed is skipped (logged), not fatal - the daemon closure
-/// still covers it.
-async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<String> {
-    use futures::stream::{self, StreamExt as _};
-    use gradient_util::store_path::nix_store_path;
-
-    const DRV_READ_CONCURRENCY: usize = 64;
-
-    stream::iter(drv_paths.iter().cloned())
-        .map(|drv_path| async move {
-            let full = nix_store_path(&drv_path);
-            match tokio::fs::read(&full).await {
-                Ok(bytes) => match gradient_derivation::parse_drv(&bytes) {
-                    Ok(drv) => drv.input_sources,
-                    Err(e) => {
-                        tracing::warn!(drv = %drv_path, error = %e, "push: cannot parse .drv for input sources");
-                        Vec::new()
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(drv = %drv_path, error = %e, "push: cannot read .drv for input sources");
-                    Vec::new()
-                }
-            }
-        })
-        .buffer_unordered(DRV_READ_CONCURRENCY)
-        .concat()
-        .await
-        .into_iter()
         .collect()
 }
 
@@ -724,38 +640,6 @@ pub(crate) fn check_abort(abort: &watch::Receiver<bool>) -> Result<()> {
 mod tests {
     use super::*;
     use gradient_test_support::fakes::worker_store::FakeWorkerStore;
-
-    /// Regression: a `.drv`'s `inputSrcs` (e.g. `builtins.toFile` configs like
-    /// `grub-config.xml`) must be discovered by parsing the `.drv`, not via the
-    /// daemon reference walk - the latter drops them, so the eval never pushed
-    /// them and the build failed `InputsUnavailable` with no self-heal.
-    #[tokio::test]
-    async fn drv_input_sources_parses_inputsrcs_not_via_daemon() {
-        let dir = tempfile::tempdir().unwrap();
-        let drv = dir.path().join("nixos-system.drv");
-        tokio::fs::write(
-            &drv,
-            br#"Derive([("out","/nix/store/abc-out","","")],[("/nix/store/dep.drv",["out"])],["/nix/store/s1-grub-config.xml","/nix/store/s2-grub-config.xml"],"x86_64-linux","/nix/store/bash",["-e"],[("name","nixos-system")])"#,
-        )
-        .await
-        .unwrap();
-
-        let srcs = drv_input_sources(&[drv.to_string_lossy().into_owned()]).await;
-
-        assert!(srcs.contains("/nix/store/s1-grub-config.xml"));
-        assert!(srcs.contains("/nix/store/s2-grub-config.xml"));
-        assert!(
-            !srcs.contains("/nix/store/dep.drv"),
-            "an input derivation is not an input source"
-        );
-    }
-
-    /// An unreadable `.drv` is skipped, not fatal - the daemon closure covers it.
-    #[tokio::test]
-    async fn drv_input_sources_skips_unreadable_drv() {
-        let srcs = drv_input_sources(&["/nix/store/does-not-exist.drv".to_string()]).await;
-        assert!(srcs.is_empty());
-    }
 
     fn spec(kind: BuildSpecKind, outputs: &[(&str, &str)]) -> BuildSpec {
         BuildSpec {

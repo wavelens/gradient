@@ -19,13 +19,12 @@
 //! surface downstream as `"serialised integer N is too large for type 'j'"`
 //! or `query_path_info` returning `Ok(None)` for a path that exists).
 
-use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt as _};
-use gradient_util::store_path::{nix_store_path, strip_store_prefix};
+use gradient_util::store_path::strip_store_prefix;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
@@ -135,20 +134,18 @@ impl LocalNixStore {
     pub async fn nar_sizes(&self, store_paths: &[String]) -> Vec<Option<u64>> {
         stream::iter(store_paths.iter().cloned())
             .map(|path| async move {
-                self.path_info(&path)
+                self.nar_size(&path)
                     .await
                     .inspect_err(|e| debug!(path = %path, error = %e, "nar size unknown"))
                     .ok()
-                    .map(|info| info.nar_size)
             })
             .buffered(DAEMON_LOOKUPS)
             .collect()
             .await
     }
 
-    /// `store_path`'s direct runtime references, as canonical
-    /// `/nix/store/<hash>-<name>` strings, and its uncompressed NAR size.
-    async fn path_info(&self, store_path: &str) -> Result<ClosurePath> {
+    /// `store_path`'s uncompressed NAR size.
+    async fn nar_size(&self, store_path: &str) -> Result<u64> {
         let base = strip_store_prefix(store_path);
         let sp = StorePath::from_base_path(base)
             .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
@@ -162,14 +159,7 @@ impl LocalNixStore {
                 anyhow::anyhow!("query_path_info: path not in local store: {store_path}")
             })?;
 
-        Ok(ClosurePath {
-            references: info
-                .references
-                .iter()
-                .map(|r| nix_store_path(&r.to_string()))
-                .collect(),
-            nar_size: info.nar_size,
-        })
+        Ok(info.nar_size)
     }
 
     /// Register `gcroot_symlink` as an indirect GC root with the daemon.
@@ -191,82 +181,10 @@ impl LocalNixStore {
                 )
             })
     }
-
-    /// BFS the runtime reference closure of `seeds` via `query_path_info`,
-    /// stopping at `known`. See [`reference_closure`].
-    #[tracing::instrument(level = "debug", skip_all, fields(seeds = seeds.len()))]
-    pub async fn collect_runtime_closure(
-        &self,
-        seeds: &[String],
-        known: &HashSet<String>,
-    ) -> HashMap<String, Option<u64>> {
-        reference_closure(
-            seeds,
-            known,
-            |path| async move { self.path_info(&path).await },
-        )
-        .await
-    }
 }
 
 /// Daemon lookups in flight at once; the connection pool bounds them as well.
 const DAEMON_LOOKUPS: usize = 32;
-
-/// What a closure walk learns of one path from the daemon.
-pub(crate) struct ClosurePath {
-    pub(crate) references: Vec<String>,
-    pub(crate) nar_size: u64,
-}
-
-/// Every store path reachable from `seeds` over `references`, including the
-/// seeds, each canonicalised to `/nix/store/<hash>-<name>` form so consumers
-/// (e.g. NAR push) see a single, well-defined string per path, with its NAR size.
-///
-/// A path in `known` is neither returned nor descended into: its whole closure
-/// was covered by an earlier call. Each level of the walk is looked up
-/// concurrently. Paths whose lookup fails (e.g. removed between calls) are
-/// logged and kept without a size, so the caller still gets a best-effort
-/// closure for the rest.
-pub(crate) async fn reference_closure<F, Fut>(
-    seeds: &[String],
-    known: &HashSet<String>,
-    lookup: F,
-) -> HashMap<String, Option<u64>>
-where
-    F: Fn(String) -> Fut,
-    Fut: std::future::Future<Output = Result<ClosurePath>>,
-{
-    let mut found: HashMap<String, Option<u64>> = HashMap::new();
-    let mut frontier: Vec<String> = seeds.iter().map(|s| nix_store_path(s)).collect();
-    while !frontier.is_empty() {
-        frontier.retain(|path| !known.contains(path) && !found.contains_key(path));
-        frontier.sort_unstable();
-        frontier.dedup();
-        found.extend(frontier.iter().map(|path| (path.clone(), None)));
-
-        let answers: Vec<(String, Result<ClosurePath>)> = stream::iter(frontier)
-            .map(|path| {
-                let answer = lookup(path.clone());
-                async move { (path, answer.await) }
-            })
-            .buffer_unordered(DAEMON_LOOKUPS)
-            .collect()
-            .await;
-
-        frontier = Vec::new();
-        for (path, answer) in answers {
-            match answer {
-                Ok(info) => {
-                    found.insert(path, Some(info.nar_size));
-                    frontier.extend(info.references);
-                }
-                Err(e) => warn!(path = %path, error = %e, "closure walk: skipping unreadable path"),
-            }
-        }
-    }
-
-    found
-}
 
 #[async_trait]
 impl WorkerStore for LocalNixStore {
@@ -337,77 +255,5 @@ impl PathMetaSource for LocalNixStore {
             deriver,
             ca,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::cell::RefCell;
-
-    use super::*;
-
-    fn p(name: &str) -> String {
-        format!("/nix/store/00000000000000000000000000000000-{name}")
-    }
-
-    #[tokio::test]
-    async fn a_known_path_bounds_the_next_closure_walk() {
-        let graph: HashMap<String, Vec<String>> = HashMap::from([
-            (p("a"), vec![p("stdenv")]),
-            (p("b"), vec![p("stdenv"), p("src")]),
-            (p("stdenv"), vec![p("glibc")]),
-            (p("glibc"), vec![]),
-            (p("src"), vec![]),
-        ]);
-        let queried = RefCell::new(Vec::new());
-        let lookup = |path: String| {
-            queried.borrow_mut().push(path.clone());
-            let references = graph.get(&path).cloned().unwrap_or_default();
-            async move {
-                Ok(ClosurePath {
-                    references,
-                    nar_size: 1,
-                })
-            }
-        };
-
-        let mut known = HashSet::new();
-        let first = reference_closure(&[p("a")], &known, lookup).await;
-        assert_eq!(
-            first,
-            HashMap::from([
-                (p("a"), Some(1)),
-                (p("stdenv"), Some(1)),
-                (p("glibc"), Some(1))
-            ])
-        );
-        known.extend(first.into_keys());
-        queried.borrow_mut().clear();
-
-        let second = reference_closure(&[p("b")], &known, lookup).await;
-        assert_eq!(
-            second,
-            HashMap::from([(p("b"), Some(1)), (p("src"), Some(1))])
-        );
-        assert_eq!(*queried.borrow(), vec![p("b"), p("src")]);
-    }
-
-    #[tokio::test]
-    async fn an_unreadable_path_stays_in_the_closure_without_a_size() {
-        let lookup = |path: String| async move {
-            if path == p("gone") {
-                anyhow::bail!("path not in local store");
-            }
-            Ok(ClosurePath {
-                references: vec![p("gone")],
-                nar_size: 7,
-            })
-        };
-
-        let closure = reference_closure(&[p("a")], &HashSet::new(), lookup).await;
-        assert_eq!(
-            closure,
-            HashMap::from([(p("a"), Some(7)), (p("gone"), None)])
-        );
     }
 }

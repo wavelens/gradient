@@ -538,10 +538,11 @@ fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(
 /// drops its entire dep subtree, causing the dispatcher to release the parent
 /// prematurely and the nix-daemon to die with "1 dependency failed".
 #[tracing::instrument(level = "debug", skip_all, fields(size = wave.len()))]
+/// Each `.drv` of the wave parsed, with its NAR size, in wave order.
 async fn parse_drv_wave(
     drv_reader: &dyn DrvReader,
     wave: &[(Option<String>, String)],
-) -> Result<Vec<gradient_derivation::Derivation>> {
+) -> Result<Vec<(gradient_derivation::Derivation, u64)>> {
     // Index-tagged futures so results can be sorted back into BFS order.
     let mut futs: FuturesUnordered<_> = wave
         .iter()
@@ -561,12 +562,12 @@ async fn parse_drv_wave(
                          to avoid silently dropping dependencies"
                     )
                 })?;
-                Ok::<_, anyhow::Error>((i, parsed))
+                Ok::<_, anyhow::Error>((i, (parsed, drv_nar_size(bytes.len()))))
             }
         })
         .collect();
 
-    let mut slots: Vec<Option<gradient_derivation::Derivation>> =
+    let mut slots: Vec<Option<(gradient_derivation::Derivation, u64)>> =
         (0..wave.len()).map(|_| None).collect();
     while let Some(result) = futs.next().await {
         let (i, drv) = result?;
@@ -632,35 +633,38 @@ fn build_discovered_derivation(
 const PUBLISH_BACKLOG: usize = 64;
 
 /// One batch the walk hands to [`publish`]: the derivations it reports and the
-/// `.drv` paths whose runtime closure must be cached before that report.
+/// paths that must be cached before that report, its `.drv` files with their NAR
+/// sizes and their input sources.
 struct Flush {
-    drvs: Vec<String>,
+    paths: Vec<(String, Option<u64>)>,
     derivations: Vec<DiscoveredDerivation>,
     warnings: Vec<String>,
     errors: Vec<String>,
 }
 
-/// Pushes each batch's `.drv` closure, then reports it, in walk order, beside the
-/// walk so a slow link never stalls it. Batches that queued up during a push go
-/// out as one closure: one cache query and one upload set, however many batches.
+/// Pushes each batch's paths, then reports it, in walk order, beside the walk so a
+/// slow link never stalls it. A path an earlier batch pushed is not pushed again.
 async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>) -> Result<()> {
     let mut pushed = HashSet::new();
-    while let Some(first) = flushes.recv().await {
-        let mut ready = vec![first];
-        while let Ok(next) = flushes.try_recv() {
-            ready.push(next);
-        }
-
-        let drvs: Vec<String> = ready.iter().flat_map(|f| f.drvs.iter().cloned()).collect();
-        reporter.push_drv_closure(&drvs, &mut pushed).await?;
-        for flush in ready {
-            reporter
-                .report_eval_result(flush.derivations, flush.warnings, flush.errors)
-                .await?;
-        }
+    while let Some(flush) = flushes.recv().await {
+        let fresh: Vec<(String, Option<u64>)> = flush
+            .paths
+            .into_iter()
+            .filter(|(path, _)| pushed.insert(path.clone()))
+            .collect();
+        reporter.push_paths(&fresh).await?;
+        reporter
+            .report_eval_result(flush.derivations, flush.warnings, flush.errors)
+            .await?;
     }
 
     Ok(())
+}
+
+/// The NAR size of a `.drv`: a regular, non-executable file's archive is its
+/// contents padded to 8 bytes inside a fixed 112-byte frame.
+fn drv_nar_size(len: usize) -> u64 {
+    (112 + len.div_ceil(8) * 8) as u64
 }
 
 /// BFS closure walker.
@@ -678,8 +682,8 @@ struct ClosureWalker<'a> {
     queue: VecDeque<(Option<String>, String)>,
     walked: usize,
     start: Instant,
-    /// `.drv` paths parsed since the last flush, not pruned via `known_set`.
-    produced_drvs: Vec<String>,
+    /// The `.drv` files walked since the last flush and their input sources.
+    paths: Vec<(String, Option<u64>)>,
     flushes: mpsc::Sender<Flush>,
 }
 
@@ -705,7 +709,7 @@ impl<'a> ClosureWalker<'a> {
             queue,
             walked: 0,
             start: Instant::now(),
-            produced_drvs: Vec::new(),
+            paths: Vec::new(),
             flushes,
         }
     }
@@ -743,7 +747,7 @@ impl<'a> ClosureWalker<'a> {
             "flushing eval batch"
         );
         let flush = Flush {
-            drvs: std::mem::take(&mut self.produced_drvs),
+            paths: std::mem::take(&mut self.paths),
             derivations: std::mem::take(&mut self.batch),
             warnings,
             errors,
@@ -767,7 +771,7 @@ impl<'a> ClosureWalker<'a> {
         // Collect all new input-derivation paths from this wave so we can
         // batch-query the server once rather than once per derivation.
         let mut new_deps: Vec<String> = Vec::new();
-        for drv in &parsed_drvs {
+        for (drv, _) in &parsed_drvs {
             for (input_drv, _) in &drv.input_derivations {
                 if !self.visited.contains(input_drv.as_str()) {
                     new_deps.push(input_drv.clone());
@@ -808,8 +812,10 @@ impl<'a> ClosureWalker<'a> {
             }
         }
 
-        for ((attr, drv_path), drv) in wave.into_iter().zip(parsed_drvs) {
-            self.produced_drvs.push(drv_path.clone());
+        for ((attr, drv_path), (drv, nar_size)) in wave.into_iter().zip(parsed_drvs) {
+            self.paths.push((drv_path.clone(), Some(nar_size)));
+            self.paths
+                .extend(drv.input_sources.iter().map(|src| (src.clone(), None)));
             self.batch
                 .push(build_discovered_derivation(attr, drv_path, &drv));
             self.walked += 1;
@@ -1398,35 +1404,42 @@ mod tests {
         let mut pushed: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for event in &events {
             match event {
-                ReportedEvent::DrvClosurePush { drv_paths } => {
-                    pushed.extend(drv_paths.iter().map(|s| s.as_str()));
+                ReportedEvent::PathsPushed { paths } => {
+                    pushed.extend(paths.iter().map(|(path, _)| path.as_str()));
                 }
                 ReportedEvent::EvalResult { derivations, .. } => {
                     for d in derivations {
                         assert!(
                             pushed.contains(d.drv_path.as_str()),
-                            "reported {} before pushing its source closure",
+                            "reported {} before pushing it",
                             d.drv_path
                         );
+                        for src in &d.input_sources {
+                            assert!(
+                                pushed.contains(src.as_str()),
+                                "reported {} before pushing its source {src}",
+                                d.drv_path
+                            );
+                        }
                     }
                 }
                 _ => {}
             }
         }
 
-        assert!(!pushed.is_empty(), "expected at least one closure push");
+        assert!(!pushed.is_empty(), "expected at least one push");
     }
 
-    /// Batches that queued up behind a push go out as one closure, and every one
-    /// is still reported after it, in walk order.
+    /// Every batch is pushed, then reported, in walk order; a source two batches
+    /// share is pushed with the first.
     #[tokio::test]
-    async fn queued_batches_share_one_closure_push() {
+    async fn each_batch_is_pushed_before_its_report_and_a_shared_source_once() {
         let reporter = RecordingJobReporter::new();
         let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
-        for (drv, warning) in [("a.drv", "first"), ("b.drv", "second"), ("c.drv", "third")] {
+        for (drv, warning) in [("a.drv", "first"), ("b.drv", "second")] {
             flushes
                 .send(Flush {
-                    drvs: vec![drv.into()],
+                    paths: vec![(drv.into(), Some(120)), ("builder.sh".into(), None)],
                     derivations: vec![],
                     warnings: vec![warning.into()],
                     errors: vec![],
@@ -1440,19 +1453,42 @@ mod tests {
 
         let events = reporter.events();
         let [
-            ReportedEvent::DrvClosurePush { drv_paths },
+            ReportedEvent::PathsPushed { paths: p1 },
             ReportedEvent::EvalResult { warnings: w1, .. },
+            ReportedEvent::PathsPushed { paths: p2 },
             ReportedEvent::EvalResult { warnings: w2, .. },
-            ReportedEvent::EvalResult { warnings: w3, .. },
         ] = events.as_slice()
         else {
-            panic!("one push, then three reports: {events:?}");
+            panic!("a push before each report: {events:?}");
         };
-        assert_eq!(drv_paths, &["a.drv", "b.drv", "c.drv"]);
         assert_eq!(
-            [w1, w2, w3].map(|w| w[0].as_str()),
-            ["first", "second", "third"]
+            p1,
+            &[
+                ("a.drv".to_owned(), Some(120)),
+                ("builder.sh".to_owned(), None)
+            ]
         );
+        assert_eq!(p2, &[("b.drv".to_owned(), Some(120))]);
+        assert_eq!([w1, w2].map(|w| w[0].as_str()), ["first", "second"]);
+    }
+
+    /// The closed form against the NAR framing: every string is its 8-byte length
+    /// and its bytes padded to 8, and a regular file is seven of them around its
+    /// contents.
+    #[test]
+    fn a_drv_nar_size_is_its_framed_contents() {
+        fn framed(len: usize) -> usize {
+            8 + len.div_ceil(8) * 8
+        }
+        for len in [0, 1, 7, 8, 9, 3612] {
+            let frame: usize = ["nix-archive-1", "(", "type", "regular", "contents"]
+                .iter()
+                .map(|s| framed(s.len()))
+                .sum::<usize>()
+                + framed(len)
+                + framed(")".len());
+            assert_eq!(drv_nar_size(len), frame as u64, "len {len}");
+        }
     }
 
     /// A dependency the server already knows is neither walked nor reported:
@@ -1491,12 +1527,16 @@ mod tests {
             !all[0].dependencies.is_empty(),
             "the pruned deps stay named"
         );
-        let pushed = reporter.all_pushed_drv_paths();
+        let pushed = reporter.all_pushed_paths();
+        let drvs: Vec<&String> = pushed.iter().filter(|p| p.ends_with(".drv")).collect();
         assert_eq!(
-            pushed,
-            vec![fixture.entry_point.clone()],
+            drvs,
+            vec![&fixture.entry_point],
             "only the walked drv is pushed"
         );
+        for src in &all[0].input_sources {
+            assert!(pushed.contains(src), "its source {src} goes with it");
+        }
     }
 
     #[tokio::test]

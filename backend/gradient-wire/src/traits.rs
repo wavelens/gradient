@@ -101,22 +101,14 @@ pub trait JobReporter: Send + Sync {
         errors: Vec<String>,
     ) -> Result<()>;
 
-    /// Push the runtime closure of `drv_paths` (their `input_sources` and
-    /// transitive `.drv` files) into the gradient cache. A failed upload fails
-    /// the evaluation (the error is recorded on the eval) rather than leaving a
-    /// downstream build to discover the missing source. Called per batch
-    /// *before* [`report_eval_result`](Self::report_eval_result) so every source
-    /// a downstream build worker prefetches is already cacheable by the time the
-    /// server can dispatch that build mid-evaluation.
-    ///
-    /// `pushed` carries the paths earlier calls of this evaluation already
-    /// covered: the closure walk stops at them, and every path this call pushes
-    /// or finds cached is added.
-    async fn push_drv_closure(
-        &self,
-        drv_paths: &[String],
-        pushed: &mut std::collections::HashSet<String>,
-    ) -> Result<()>;
+    /// Push `paths` into the gradient cache: a batch's `.drv` files and their
+    /// `input_sources`, each with its uncompressed NAR size where the caller
+    /// knows it. Called per batch *before*
+    /// [`report_eval_result`](Self::report_eval_result), so everything a build of
+    /// the batch pulls is cacheable by the time the server can dispatch it. A
+    /// failed upload fails the evaluation rather than leaving a build to discover
+    /// the missing path.
+    async fn push_paths(&self, paths: &[(String, Option<u64>)]) -> Result<()>;
 
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(
