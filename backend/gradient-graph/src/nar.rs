@@ -9,6 +9,7 @@
 use anyhow::Context as _;
 use gradient_db::{DbContext, WorkerDb};
 use gradient_entity::StorePath;
+use gradient_sources::CacheSigner;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId};
 use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
@@ -85,7 +86,10 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         retract_anchors(ctx, txn, &seeded.unwhole).await?;
     }
 
-    queue_signature_placeholders(db, cached_path, c.targets).await?;
+    let signed = sign_into_caches(ctx, &[(c, &sp, cached_path)])
+        .await?
+        .pop()
+        .unwrap_or_default();
     let outputs_marked = EDerivationOutput::update_many()
         .col_expr(CDerivationOutput::IsCached, Expr::value(true))
         .col_expr(CDerivationOutput::CachedPath, Expr::value(cached_path))
@@ -100,6 +104,7 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         cached_path,
         created,
         outputs_marked,
+        signed,
     })
 }
 
@@ -159,28 +164,24 @@ pub(crate) async fn commit_batch(
         retract_anchors(ctx, txn, &seeded.unwhole).await?;
     }
 
-    let mut caches: std::collections::HashMap<SignTargets, Vec<CacheId>> = Default::default();
-    let mut placeholders = Vec::new();
-    for (c, u) in commits.iter().zip(&upserted) {
-        if let std::collections::hash_map::Entry::Vacant(slot) = caches.entry(c.targets) {
-            slot.insert(target_caches(db, c.targets).await?);
-        }
-        placeholders.extend(
-            caches[&c.targets]
-                .iter()
-                .map(|cache| (u.cached_path, *cache)),
-        );
-    }
-    insert_placeholders(db, placeholders).await;
+    let signing: Vec<(&NarCommit, &StorePath, CachedPathId)> = commits
+        .iter()
+        .zip(&paths)
+        .zip(&upserted)
+        .map(|((c, sp), u)| (c, sp, u.cached_path))
+        .collect();
+    let signed = sign_into_caches(ctx, &signing).await?;
 
     let marked = mark_outputs_cached(db, &hashes).await?;
     Ok(hashes
         .iter()
         .zip(upserted)
-        .map(|(hash, u)| NarCommitted {
+        .zip(signed)
+        .map(|((hash, u), signed)| NarCommitted {
             cached_path: u.cached_path,
             created: u.created,
             outputs_marked: marked.get(hash).copied().unwrap_or(0),
+            signed,
         })
         .collect())
 }
@@ -467,56 +468,118 @@ fn new_row(hash: &str, package: &str, c: &NarCommit) -> MCachedPath {
     }
 }
 
-async fn queue_signature_placeholders(
-    db: &WorkerDb,
-    cached_path: CachedPathId,
-    targets: SignTargets,
-) -> anyhow::Result<()> {
-    let caches = target_caches(db, targets).await?;
-    insert_placeholders(
-        db,
-        caches
-            .into_iter()
-            .map(|cache| (cached_path, cache))
-            .collect(),
-    )
-    .await;
-    Ok(())
-}
-
-async fn target_caches(db: &WorkerDb, targets: SignTargets) -> anyhow::Result<Vec<CacheId>> {
-    Ok(match targets {
-        SignTargets::None => vec![],
-        SignTargets::Cache(id) => vec![id],
-        SignTargets::ProjectCaches(project) => EProjectCache::find()
-            .filter(CProjectCache::Project.eq(project))
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|oc| oc.cache)
-            .collect(),
-    })
-}
-
-async fn insert_placeholders(db: &WorkerDb, pairs: Vec<(CachedPathId, CacheId)>) {
-    if pairs.is_empty() {
-        return;
+/// The `cached_path_signature` row of every target cache for each committed path,
+/// signed where this server holds the cache's key, in one statement. A path every
+/// producing task keeps private, or a cache whose key is missing, gets an unsigned
+/// row for the sweep to fill. Returns the caches signed into, per commit.
+async fn sign_into_caches(
+    ctx: &DbContext,
+    committed: &[(&NarCommit, &StorePath, CachedPathId)],
+) -> anyhow::Result<Vec<Vec<CacheId>>> {
+    let db = &ctx.worker_db;
+    let mut signed = vec![Vec::new(); committed.len()];
+    let claimed: Vec<usize> = (0..committed.len())
+        .filter(|&i| !matches!(committed[i].0.targets, SignTargets::None))
+        .collect();
+    if claimed.is_empty() {
+        return Ok(signed);
     }
 
-    let ts = now();
-    let rows: Vec<ACachedPathSignature> = pairs
-        .into_iter()
-        .map(|(cached_path, cache)| {
-            MCachedPathSignature {
-                id: CachedPathSignatureId::now_v7(),
-                cached_path,
-                cache,
-                created_at: ts,
-                ..Default::default()
-            }
-            .into_active_model()
-        })
+    let hashes: Vec<String> = claimed
+        .iter()
+        .map(|&i| committed[i].1.hash().to_owned())
         .collect();
+    let private = gradient_db::private_output_hashes(db, &hashes).await?;
+    let mut signers: std::collections::HashMap<SignTargets, Vec<(CacheId, Option<CacheSigner>)>> =
+        Default::default();
+    let mut rows = Vec::new();
+    let ts = now();
+    for i in claimed {
+        let (c, sp, cached_path) = committed[i];
+        if let std::collections::hash_map::Entry::Vacant(slot) = signers.entry(c.targets) {
+            slot.insert(target_signers(ctx, c.targets).await?);
+        }
+        let fingerprint =
+            (!private.contains(sp.hash())).then(|| (sp.full(), normalize_nar_hash(&c.nar_hash)));
+        for (cache, signer) in &signers[&c.targets] {
+            let signature = match (&fingerprint, signer) {
+                (Some((store_path, nar_hash)), Some(signer)) => Some(signer.sign_narinfo_raw(
+                    store_path,
+                    nar_hash,
+                    c.nar_size as u64,
+                    &c.references,
+                )),
+                _ => None,
+            };
+            if signature.is_some() {
+                signed[i].push(*cache);
+            }
+            rows.push(
+                MCachedPathSignature {
+                    id: CachedPathSignatureId::now_v7(),
+                    cached_path,
+                    cache: *cache,
+                    signature,
+                    created_at: ts,
+                    ..Default::default()
+                }
+                .into_active_model(),
+            );
+        }
+    }
+    insert_signatures(db, rows).await;
+
+    Ok(signed)
+}
+
+/// The caches `targets` names, each with a signer when its key decrypts.
+async fn target_signers(
+    ctx: &DbContext,
+    targets: SignTargets,
+) -> anyhow::Result<Vec<(CacheId, Option<CacheSigner>)>> {
+    let db = &ctx.worker_db;
+    let caches: Vec<MCache> = match targets {
+        SignTargets::None => Vec::new(),
+        SignTargets::Cache(id) => ECache::find_by_id(id).one(db).await?.into_iter().collect(),
+        SignTargets::ProjectCaches(project) => {
+            let ids: Vec<CacheId> = EProjectCache::find()
+                .filter(CProjectCache::Project.eq(project))
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|pc| pc.cache)
+                .collect();
+            ECache::find().filter(CCache::Id.is_in(ids)).all(db).await?
+        }
+    };
+
+    Ok(caches
+        .iter()
+        .map(|cache| (cache.id, signer_for(ctx, cache)))
+        .collect())
+}
+
+fn signer_for(ctx: &DbContext, cache: &MCache) -> Option<CacheSigner> {
+    if cache.private_key.is_empty() {
+        return None;
+    }
+    CacheSigner::from_cache(
+        &ctx.config.secrets.crypt_file,
+        cache,
+        &ctx.config.server.serve_url,
+    )
+    .inspect_err(
+        |e| warn!(cache = %cache.name, error = %e, "signer unavailable; the row stays unsigned"),
+    )
+    .ok()
+}
+
+/// A row already there keeps its signature and takes the new one only where it
+/// had none, so a re-push never unsigns a path and a placeholder is filled.
+async fn insert_signatures(db: &WorkerDb, rows: Vec<ACachedPathSignature>) {
+    if rows.is_empty() {
+        return;
+    }
 
     let result = ECachedPathSignature::insert_many(rows)
         .on_conflict(
@@ -524,10 +587,12 @@ async fn insert_placeholders(db: &WorkerDb, pairs: Vec<(CachedPathId, CacheId)>)
                 CCachedPathSignature::CachedPath,
                 CCachedPathSignature::Cache,
             ])
-            .do_nothing()
+            .value(
+                CCachedPathSignature::Signature,
+                Expr::cust("coalesce(cached_path_signature.signature, excluded.signature)"),
+            )
             .to_owned(),
         )
-        .try_insert()
         .exec(db)
         .await;
     if let Err(e) = result {
@@ -723,35 +788,112 @@ mod tests {
         .await
     }
 
-    /// A resolved project enqueues a `cached_path_signature` placeholder for every
-    /// subscribed cache. Regression guard: the detached NAR commit must resolve
-    /// the project on the read loop before the job is evicted from the tracker,
-    /// otherwise `SignTargets` collapses to `None`, no placeholder is written,
-    /// the sign sweep has nothing to sign, and the narinfo 404s forever.
-    #[tokio::test]
-    async fn project_target_enqueues_signature_placeholder() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+    fn secret_file() -> (tempfile::NamedTempFile, String) {
+        use std::io::Write as _;
+
+        let mut file = tempfile::NamedTempFile::new().expect("temp secret");
+        file.write_all(b"test-secret-key-32-bytes-padding!")
+            .expect("write secret");
+        let path = file.path().to_string_lossy().to_string();
+        (file, path)
+    }
+
+    fn cache_row(private_key: String) -> MCache {
+        MCache {
+            id: cache_id(),
+            name: "main".into(),
+            display_name: "Main".into(),
+            description: String::new(),
+            active: true,
+            priority: 0,
+            local_priority: None,
+            public_key: String::new(),
+            private_key,
+            public: true,
+            created_by: gradient_types::ids::UserId::now_v7(),
+            created_at: now(),
+            managed: false,
+            max_storage_gb: 0,
+        }
+    }
+
+    /// The scripted answers of a commit that resolves its project to one cache.
+    fn project_commit_db(cache: MCache) -> DatabaseConnection {
+        MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![project_cache_row()]])
+            .append_query_results([vec![cache]])
             .append_exec_results([exec(1), exec(1)])
-            .into_connection();
+            .into_connection()
+    }
 
-        let log = commit_and_log(
-            db,
+    /// A resolved project writes a `cached_path_signature` row for every
+    /// subscribed cache, signed with the cache's key. Regression guard: the
+    /// detached NAR commit must resolve the project on the read loop before the
+    /// job is evicted from the tracker, otherwise `SignTargets` collapses to
+    /// `None`, no row is written, and the narinfo 404s forever.
+    #[tokio::test]
+    async fn a_project_target_signs_with_the_caches_key() {
+        let (_file, secret) = secret_file();
+        let (private_key, _) =
+            gradient_sources::generate_signing_key(&secret).expect("signing key");
+        let (ctx, pool) = crate::test_ctx::ctx_with_crypt_file(
+            project_commit_db(cache_row(private_key)),
+            &secret,
+        )
+        .await;
+
+        let committed = commit_in_transaction(
+            &ctx,
             &NarCommit {
                 targets: SignTargets::ProjectCaches(project()),
                 ..commit_for(SP)
             },
         )
-        .await;
+        .await
+        .expect("commit");
+        drop(ctx);
 
+        assert_eq!(committed.signed, vec![cache_id()]);
+        let log = raw_statements(pool);
+        let insert = log
+            .iter()
+            .find(|s| s.sql.contains("INSERT INTO \"cached_path_signature\""))
+            .expect("the signature row");
         assert!(
-            log.iter().any(|s| s.contains("cached_path_signature")),
-            "ProjectCaches target must insert a cached_path_signature placeholder"
+            matches!(bound(insert, "signature"), Value::Bytes(Some(sig)) if sig.len() == 64),
+            "{insert:?}"
         );
+    }
+
+    /// A cache whose key this server does not hold still gets its row, unsigned,
+    /// for the sweep: "not yet signed" stays distinct from "never signed".
+    #[tokio::test]
+    async fn a_cache_without_a_key_gets_an_unsigned_row() {
+        let (ctx, pool) = ctx(project_commit_db(cache_row(String::new()))).await;
+
+        let committed = commit_in_transaction(
+            &ctx,
+            &NarCommit {
+                targets: SignTargets::ProjectCaches(project()),
+                ..commit_for(SP)
+            },
+        )
+        .await
+        .expect("commit");
+        drop(ctx);
+
+        assert!(committed.signed.is_empty());
+        let log = raw_statements(pool);
+        let insert = log
+            .iter()
+            .find(|s| s.sql.contains("INSERT INTO \"cached_path_signature\""))
+            .expect("the signature row");
+        assert_eq!(bound(insert, "signature"), Value::Bytes(None), "{insert:?}");
     }
 
     #[tokio::test]

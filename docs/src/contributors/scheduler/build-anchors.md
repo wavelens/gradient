@@ -46,7 +46,7 @@ flowchart LR
 | `Ingest` | One worker batch: derivations, stubs, edges, outputs, input sources, anchors, `build_job` rows, features, messages, entry points, readiness and demand |
 | `UpstreamHits` | Probe results: narinfo on `derivation_output`, the runtime edges the narinfo names, `substitutable`, the demand moved |
 | `UpstreamProbed` | `probed = true` on answered anchors, and the demand a miss opens below them |
-| `CommitNar` | The `cached_path` row, its references, `cached_path_signature` placeholders, the backed outputs |
+| `CommitNar` | The `cached_path` row, its references, signed `cached_path_signature` rows, the backed outputs |
 | `Transition` | Evaluation and anchor state: stream completed, eval failed, build started/output/completed/failed, dispatched, orphaned, ready, reconcile, abort, prioritize |
 | `Requeue` | `FailedTransient` anchors whose backoff elapsed, back to `Queued` |
 | `Demote` | `MissingNar`, operator `Path` invalidation, one cache dropping its `CacheClaim` |

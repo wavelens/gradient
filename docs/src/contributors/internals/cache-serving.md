@@ -26,7 +26,7 @@ sequenceDiagram
 
 - **Keys:** one Ed25519 key per cache, encrypted with the crypt secret. `format_cache_key` returns the decrypted private key; `format_cache_public_key` the `<host>-<name>:<base64>` public key.
 - **The server signs**, never the worker: `gradient_proto::signing::sign_cached_path`, on a NAR commit and on a REST upload.
-- **Placeholders:** a commit queues `cached_path_signature` rows for every subscribed cache; the sign sweep (`sign_missing_signatures` in `gradient-cache/src/cacher/sign_sweep.rs`) fills them. Subscribing a cache later inserts placeholders too.
+- **Signatures:** a commit writes the `cached_path_signature` row of every subscribed cache, signed with the cache's key in the same statement. The sign sweep (`sign_missing_signatures` in `gradient-cache/src/cacher/sign_sweep.rs`) fills the rows a later subscription inserts and any a commit left unsigned.
 
 ## Narinfo
 

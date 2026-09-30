@@ -2473,6 +2473,7 @@ dependencies = [
  "clap",
  "gradient-db",
  "gradient-entity",
+ "gradient-sources",
  "gradient-storage",
  "gradient-types",
  "gradient-util",

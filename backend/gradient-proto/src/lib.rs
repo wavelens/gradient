@@ -12,7 +12,6 @@
 pub mod handler;
 pub mod ingest;
 pub mod outbound;
-pub mod signing;
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so
 /// the statements it declares with `gradient_db::sql!` reach the plan gate's

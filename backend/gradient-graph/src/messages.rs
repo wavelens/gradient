@@ -87,13 +87,15 @@ pub struct NarCommit {
     pub confirmed: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NarCommitted {
     pub cached_path: CachedPathId,
     /// The `cached_path` row was created by this commit.
     pub created: bool,
     /// `derivation_output` rows now backed by the path.
     pub outputs_marked: u64,
+    /// The caches whose `cached_path_signature` row this commit signed.
+    pub signed: Vec<CacheId>,
 }
 
 /// A state change on the graph. One transaction each.
