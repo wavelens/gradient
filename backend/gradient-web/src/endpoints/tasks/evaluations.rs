@@ -24,7 +24,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_sources::{check_task_updates, get_commit_info, get_path_from_derivation_output};
+use gradient_sources::{get_commit_info, get_path_from_derivation_output, head_commit};
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
@@ -295,21 +295,13 @@ pub async fn post_task_evaluate(
             (commit_hash, message, author)
         }
         None => {
-            let mut task_for_check = task.clone();
-            task_for_check.force_evaluation = true;
-            let (_has_updates, commit_hash) =
-                check_task_updates(&state.db(), &task_for_check, None)
-                    .await
-                    .map_err(|e| {
-                        WebError::bad_request_with(
-                            ErrorCode::REPOSITORY_UNREACHABLE,
-                            format!("Failed to fetch repository state: {}", e),
-                        )
-                    })?;
-
-            let (message, _email, author) = get_commit_info(&state.db(), &task, &commit_hash)
-                .await
-                .unwrap_or_else(|_| (String::new(), None, String::new()));
+            let head = head_commit(&state.db(), &task, None).await.map_err(|e| {
+                WebError::bad_request_with(
+                    ErrorCode::REPOSITORY_UNREACHABLE,
+                    format!("Failed to fetch repository state: {}", e),
+                )
+            })?;
+            let commit_hash = head.hash;
 
             // A manual evaluation also bumps tracked flake inputs (OpenPr
             // action). Self-gated: no-ops unless the task qualifies. A pinned
@@ -326,7 +318,7 @@ pub async fn post_task_evaluate(
                 tracing::warn!(error = %e, task = %task.name, "manual input_update trigger failed");
             }
 
-            (commit_hash, message, author)
+            (commit_hash, head.message, head.author_name)
         }
     };
 
