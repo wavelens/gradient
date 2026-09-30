@@ -262,7 +262,10 @@ pub async fn abandon_open_dispatches<C: ConnectionTrait>(
     .await
 }
 
-async fn abandon_open<C: ConnectionTrait>(db: &C, scope: Option<Expr>) -> Result<u64, DbErr> {
+pub(crate) async fn abandon_open<C: ConnectionTrait>(
+    db: &C,
+    scope: Option<Expr>,
+) -> Result<u64, DbErr> {
     let mut update = EDispatchedJob::update_many()
         .col_expr(
             CDispatchedJob::FinishedAt,
