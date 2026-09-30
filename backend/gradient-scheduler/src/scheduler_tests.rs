@@ -2015,3 +2015,89 @@ async fn a_signal_reaches_the_other_members_of_a_started_attempt() {
             .any(|s| matches!(s, SessionSignal::ClusterSignal { payload, .. } if payload == b"hi"))
     );
 }
+
+fn open_attempt(scheduler: &Scheduler, attempt: ClusterAttemptId, keys: &[&str]) {
+    let cluster = ClusterJobId::now_v7();
+    let members = keys
+        .iter()
+        .map(|key| crate::cluster::AttemptMember {
+            job_id: (*key).into(),
+            worker: "w1".into(),
+            role: "node".into(),
+            index: 0,
+            primary: false,
+            accepted: true,
+            report: None,
+            settled: false,
+        })
+        .collect();
+    scheduler.attempts.lock().open(
+        attempt,
+        crate::cluster::AttemptState {
+            cluster,
+            parked: crate::cluster::PendingCluster {
+                id: cluster,
+                same_zone: false,
+                queued_at: gradient_types::now(),
+                expected: 0,
+                members: Vec::new(),
+                not_before: None,
+            },
+            members,
+            roster: Vec::new(),
+            deadline: std::time::Instant::now(),
+            started: true,
+            verdict: None,
+            resolution: None,
+        },
+    );
+}
+
+/// An attempt member whose report is deferred is not in the tracker, yet the
+/// eval watchdog and the abandoned sweep must not see it as lost.
+#[tokio::test]
+async fn an_attempt_member_counts_as_tracked() {
+    let scheduler = test_scheduler().await;
+    open_attempt(&scheduler, ClusterAttemptId::now_v7(), &["eval:a"]);
+
+    let untracked = scheduler
+        .untracked(vec!["eval:a".into(), "eval:b".into()])
+        .await;
+
+    assert_eq!(untracked, vec!["eval:b".to_owned()]);
+}
+
+/// A scheduler-core restart rebuilds the tracker from the sessions; a member
+/// must come back cluster-marked, or the next disconnect requeues it alone.
+#[tokio::test]
+async fn a_reattached_member_is_not_requeued_as_a_single_job() {
+    let scheduler = test_scheduler().await;
+    let attempt = ClusterAttemptId::now_v7();
+    let (session, _rx) = port();
+    scheduler
+        .reattach_worker(
+            "w1",
+            eval_worker_caps(),
+            HashSet::new(),
+            session,
+            vec![crate::jobs::Reattached {
+                job_id: "j1".into(),
+                job: crate::jobs::PendingJob::Eval(eval_job(ProjectId::now_v7())),
+                cluster: Some(attempt),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let disconnected = scheduler
+        .call(|reply| crate::actor::SchedulerMsg::Unregister {
+            worker: "w1".into(),
+            reply,
+        })
+        .await
+        .unwrap();
+
+    assert!(disconnected.requeued.is_empty());
+    assert_eq!(disconnected.cluster_members.len(), 1);
+    assert_eq!(scheduler.pending_job_count().await, 0);
+}

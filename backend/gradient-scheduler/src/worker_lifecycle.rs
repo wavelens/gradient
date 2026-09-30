@@ -279,8 +279,11 @@ impl Scheduler {
             .await
             .unwrap_or_default();
         build::requeue_orphaned_jobs(&self.state, &gone.requeued).await;
-        if !gone.cluster_members.is_empty() {
-            info!(%worker_id, members = gone.cluster_members.len(), "cluster members lost with their worker");
+        for lost in gone.cluster_members {
+            let report = crate::cluster::MemberReport::Lost { job: lost.job };
+            if let Err(e) = self.on_cluster_member_closed(&lost.key, report).await {
+                warn!(error = %e, %worker_id, key = %lost.key, "settling a lost cluster member failed");
+            }
         }
         self.state.events.publish(worker::Disconnected {
             worker_id: worker_id.to_owned(),

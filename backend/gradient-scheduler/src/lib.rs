@@ -280,10 +280,18 @@ impl Scheduler {
     /// The subset of `job_ids` the tracker knows nothing about (neither pending
     /// nor active). On a core outage every id counts as tracked, so a dispatch
     /// pass enqueues nothing rather than duplicating work.
+    /// Keys neither the tracker nor an open cluster attempt holds; a member whose
+    /// report waits for its attempt's verdict is in neither map but still owned.
     pub async fn untracked(&self, job_ids: Vec<String>) -> Vec<String> {
-        self.call(|reply| SchedulerMsg::Untracked { job_ids, reply })
+        let untracked = self
+            .call(|reply| SchedulerMsg::Untracked { job_ids, reply })
             .await
-            .unwrap_or_default()
+            .unwrap_or_default();
+
+        untracked
+            .into_iter()
+            .filter(|key| self.attempt_of(key).is_none())
+            .collect()
     }
 
     /// Drop the pending builds `stale` names; a core outage prunes nothing.
