@@ -5,7 +5,8 @@
  */
 
 //! Cluster jobs. The unique open-attempt index is the cross-instance arbiter for
-//! a cluster claim, as `idx-dispatched_job-open-job` is for a single job.
+//! a cluster claim, as `idx-dispatched_job-open-job` is for a single job. The
+//! `dispatched_job` foreign key is validated separately, off the exclusive lock.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -40,10 +41,13 @@ const UP: &[&str] = &[
         started_at timestamp,
         finished_at timestamp,
         outcome smallint)"#,
+    r#"CREATE INDEX IF NOT EXISTS "idx-cluster_attempt-cluster_job" ON cluster_attempt (cluster_job)"#,
     r#"CREATE UNIQUE INDEX IF NOT EXISTS "idx-cluster_attempt-open"
        ON cluster_attempt (cluster_job) WHERE finished_at IS NULL"#,
-    "ALTER TABLE dispatched_job ADD COLUMN IF NOT EXISTS cluster_attempt uuid \
-     REFERENCES cluster_attempt(id) ON DELETE SET NULL",
+    "ALTER TABLE dispatched_job ADD COLUMN IF NOT EXISTS cluster_attempt uuid",
+    r#"ALTER TABLE dispatched_job ADD CONSTRAINT "fk-dispatched_job-cluster_attempt"
+       FOREIGN KEY (cluster_attempt) REFERENCES cluster_attempt(id) ON DELETE SET NULL NOT VALID"#,
+    r#"ALTER TABLE dispatched_job VALIDATE CONSTRAINT "fk-dispatched_job-cluster_attempt""#,
     r#"CREATE INDEX IF NOT EXISTS "idx-dispatched_job-cluster_attempt"
        ON dispatched_job (cluster_attempt) WHERE cluster_attempt IS NOT NULL"#,
 ];
