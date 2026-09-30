@@ -11,4 +11,5 @@
 mod lifecycle;
 
 pub(crate) use crate::waiting_state::reconcile_waiting_state;
+pub(crate) use lifecycle::requeue_cluster_members;
 pub use lifecycle::requeue_orphaned_jobs;

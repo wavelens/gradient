@@ -162,6 +162,13 @@ pub enum SchedulerMsg {
         seats: Vec<(String, String)>,
         reply: RpcReplyPort<()>,
     },
+    ReturnMember {
+        worker: String,
+        key: String,
+        job: PendingJob,
+        attempt: ClusterAttemptId,
+        reply: RpcReplyPort<()>,
+    },
     Candidates {
         worker: String,
         only_new: bool,
@@ -639,6 +646,17 @@ impl Actor for CoreActor {
             } => {
                 core.restore_placement(cluster, &seats);
                 core.bump_offers();
+                let _ = reply.send(());
+            }
+            SchedulerMsg::ReturnMember {
+                worker,
+                key,
+                job,
+                attempt,
+                reply,
+            } => {
+                core.tracker
+                    .activate_members(attempt, vec![(worker, key, job)]);
                 let _ = reply.send(());
             }
             SchedulerMsg::DropCluster { seats, reply } => {

@@ -18,6 +18,7 @@ use gradient_wire::types::{BuildFailureKind, BuildMetrics, BuildOutput};
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
+use crate::cluster::{Failure, MemberReport};
 use crate::jobs::PendingJob;
 
 impl Scheduler {
@@ -98,9 +99,22 @@ impl Scheduler {
                 reply,
             })
             .await?;
-        let worker_idle = released.worker_idle;
-        match released.job {
-            Some(PendingJob::Eval(j)) => {
+        let Some(job) = released.job else {
+            warn!(%job_id, "job_completed for unknown job");
+            return Ok(());
+        };
+        if self.attempt_of(job_id).is_some() && !crate::jobs::is_fetch_only_job(&job) {
+            return self
+                .on_cluster_member_closed(job_id, MemberReport::Completed { job })
+                .await;
+        }
+
+        self.settle_completed(job, released.worker_idle).await
+    }
+
+    pub(crate) async fn settle_completed(&self, job: PendingJob, worker_idle: bool) -> Result<()> {
+        match job {
+            PendingJob::Eval(j) => {
                 // Split mode: a fetch-only job just archived the source. Enqueue
                 // the cached eval follow-up under the same `eval:{id}` key, which
                 // the Release above freed, instead of finalizing.
@@ -155,7 +169,7 @@ impl Scheduler {
 
                 r
             }
-            Some(PendingJob::Build(j)) => {
+            PendingJob::Build(j) => {
                 let report = self
                     .state
                     .graph
@@ -184,10 +198,6 @@ impl Scheduler {
 
                 Ok(())
             }
-            None => {
-                warn!(%job_id, "job_completed for unknown job");
-                Ok(())
-            }
         }
     }
 
@@ -207,16 +217,35 @@ impl Scheduler {
                 reply,
             })
             .await?;
-        match released.job {
-            Some(PendingJob::Eval(j)) => {
+        let Some(job) = released.job else {
+            warn!(%job_id, "job_failed for unknown job");
+            return Ok(());
+        };
+        let failure = Failure {
+            error: error.to_owned(),
+            kind,
+            missing_paths: missing_paths.to_vec(),
+        };
+        if self.attempt_of(job_id).is_some() {
+            return self
+                .on_cluster_member_closed(job_id, MemberReport::Failed { job, failure })
+                .await;
+        }
+
+        self.settle_failed(job, &failure).await
+    }
+
+    pub(crate) async fn settle_failed(&self, job: PendingJob, failure: &Failure) -> Result<()> {
+        match job {
+            PendingJob::Eval(j) => {
                 let r = self
                     .state
                     .graph
                     .transition(Transition::EvalFailed {
                         evaluation: j.evaluation_id,
-                        error: error.to_owned(),
-                        kind,
-                        missing_paths: missing_paths.to_vec(),
+                        error: failure.error.clone(),
+                        kind: failure.kind,
+                        missing_paths: failure.missing_paths.clone(),
                     })
                     .await
                     .map(|_| ());
@@ -225,22 +254,18 @@ impl Scheduler {
                 self.kick_dispatch();
                 r
             }
-            Some(PendingJob::Build(j)) => self
+            PendingJob::Build(j) => self
                 .state
                 .graph
                 .transition(Transition::BuildFailed {
                     anchor: j.derivation_build,
-                    error: error.to_owned(),
-                    log_banner: gradient_sources::strip_nix_log_tail(error),
-                    kind,
-                    missing_paths: missing_paths.to_vec(),
+                    error: failure.error.clone(),
+                    log_banner: gradient_sources::strip_nix_log_tail(&failure.error),
+                    kind: failure.kind,
+                    missing_paths: failure.missing_paths.clone(),
                 })
                 .await
                 .map(|_| ()),
-            None => {
-                warn!(%job_id, "job_failed for unknown job");
-                Ok(())
-            }
         }
     }
 }

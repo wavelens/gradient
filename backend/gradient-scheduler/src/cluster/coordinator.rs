@@ -86,6 +86,10 @@ impl AttemptBook {
         self.attempts.insert(attempt, state);
     }
 
+    pub fn cluster_of(&self, attempt: ClusterAttemptId) -> Option<ClusterJobId> {
+        self.attempts.get(&attempt).map(|s| s.cluster)
+    }
+
     pub fn attempt_of(&self, job_id: &str) -> Option<ClusterAttemptId> {
         self.by_job.get(job_id).copied()
     }

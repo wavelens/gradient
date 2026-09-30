@@ -429,6 +429,10 @@ pub fn is_fetch_only(job: &FlakeJob) -> bool {
     job.steps.as_slice() == [FlakeStep::FetchFlake]
 }
 
+pub(crate) fn is_fetch_only_job(job: &PendingJob) -> bool {
+    matches!(job, PendingJob::Eval(j) if is_fetch_only(&j.job))
+}
+
 /// Per-job score submitted by a worker after checking its local store.
 #[derive(Debug, Clone, Default)]
 pub struct WorkerJobScore {
