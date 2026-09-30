@@ -90,6 +90,22 @@ The `cluster-dispatch` pass runs every 5 s and whenever a `RequestJob` goes unan
 - `ClusterSignal` is relayed only within a started attempt and only from one of its members; anything else is dropped.
 - `to` names one member by role and index; without it, every other member receives the signal.
 
+## Recovery
+
+A member's `JobCompleted` or `JobFailed` releases its job but holds the build or evaluation transition until the attempt has a verdict. The first report that decides one resolves the attempt; every member is then settled by that verdict.
+
+| Verdict | When | Attempt | Cluster | Members |
+|---|---|---|---|---|
+| Complete | Every member succeeded, or the primary succeeded | `Succeeded` | `Completed` | Reported members settle; still-running ones end `Aborted` |
+| Retry | A member failed or was lost, budget left, every member can still run | `Failed` | `Queued` | Every member job goes back to the dispatch passes |
+| Fail | Same as Retry without budget, or a member can no longer run | `Failed` | `Failed` | Members settle with their own outcome; requeueing failure kinds become `Permanent`; survivors end `Aborted` |
+| Abort | An evaluation abort reached a member | `Aborted` | `Aborted` | Survivors end `Aborted` |
+
+- Reports that arrive while the attempt is being resolved settle by the decided verdict.
+- Members count as tracked while their attempt is open, so the abandoned-dispatch sweep and the evaluation watchdog skip them.
+- Retries are bounded by `cluster_job.retry_budget`, not by the per-evaluation dispatch budget.
+- A member lost with its worker, or reaped after an unconfirmed abort, reports into the same verdict.
+
 ## Related
 
 - [Build Anchors](build-anchors.md)
