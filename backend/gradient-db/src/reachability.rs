@@ -63,13 +63,20 @@ crate::sql_lazy! {
 /// `Aborted` therefore finalized `Completed` milliseconds after reaching
 /// `Building` - a green check for a commit on which nothing was built. It is
 /// deliberately NOT [`BuildStatus::TERMINAL_FAILURE`], which excludes `Aborted`
-/// so an abort never cascades `DependencyFailed` downward.
+/// so an abort never cascades `DependencyFailed` downward. The one `Aborted`
+/// anchor that is no failure: a companion stopped because its cluster job
+/// completed through the primary member.
 static EVAL_ANY_ANCHOR_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT EXISTS (SELECT 1 FROM build_job bj \
          JOIN derivation_build db ON db.id = bj.derivation_build \
-         WHERE bj.evaluation = $1 AND db.status IN ({failed})) AS failed",
+         WHERE bj.evaluation = $1 AND db.status IN ({failed}) \
+         AND NOT (db.status = {aborted} AND EXISTS (SELECT 1 FROM cluster_member cm \
+              JOIN cluster_job cj ON cj.id = cm.cluster_job \
+              WHERE cm.derivation_build = db.id AND cj.status = {completed}))) AS failed",
         failed = crate::status_sql::build_in(&BuildStatus::REQUEUEABLE),
+        aborted = crate::status_sql::build(BuildStatus::Aborted),
+        completed = i16::from(gradient_entity::cluster_job::ClusterJobStatus::Completed),
     )
 });
 
@@ -700,5 +707,13 @@ mod tests {
             ),
             "{frontier}"
         );
+    }
+
+    #[test]
+    fn a_companion_of_a_completed_cluster_does_not_fail_its_evaluation() {
+        let sql = EVAL_ANY_ANCHOR_FAILED_SQL.as_str();
+
+        assert!(sql.contains("FROM cluster_member cm"), "{sql}");
+        assert!(sql.contains("AND NOT (db.status ="), "{sql}");
     }
 }

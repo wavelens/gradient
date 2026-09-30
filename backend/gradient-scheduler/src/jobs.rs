@@ -1059,6 +1059,21 @@ impl JobTracker {
         self.clusters.ready()
     }
 
+    pub fn drop_cluster(&mut self, id: ClusterJobId) -> Option<PendingCluster> {
+        let cluster = self.clusters.drop_cluster(id)?;
+        for member in &cluster.members {
+            self.forget_job_scores(&member.key);
+        }
+        Some(cluster)
+    }
+
+    /// Whether the scheduler told the worker running `job_id` to stop it.
+    pub fn is_aborting(&self, job_id: &str) -> bool {
+        self.active
+            .get(job_id)
+            .is_some_and(|a| a.aborted_at.is_some())
+    }
+
     pub fn waiting_cluster(&self, id: ClusterJobId) -> Option<&PendingCluster> {
         self.clusters.get(id)
     }

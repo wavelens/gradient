@@ -115,6 +115,15 @@ impl ClusterBook {
         self.waiting.remove(&id)
     }
 
+    /// Drop a waiting cluster and untrack its members.
+    pub fn drop_cluster(&mut self, id: ClusterJobId) -> Option<PendingCluster> {
+        let cluster = self.waiting.remove(&id)?;
+        for member in &cluster.members {
+            self.by_key.remove(&member.key);
+        }
+        Some(cluster)
+    }
+
     pub fn release(&mut self, key: &str) {
         self.by_key.remove(key);
     }

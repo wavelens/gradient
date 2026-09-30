@@ -164,6 +164,7 @@ fn terminal(failure: Failure) -> Failure {
     match failure.kind {
         BuildFailureKind::Transient
         | BuildFailureKind::SubstituteUnavailable
+        | BuildFailureKind::InputsUnavailable
         | BuildFailureKind::CorruptEvalCache => Failure {
             error: format!("cluster retry budget spent: {}", failure.error),
             kind: BuildFailureKind::Permanent,
@@ -219,8 +220,11 @@ mod tests {
                 roster: Vec::new(),
                 deadline: Instant::now(),
                 started: true,
+                all_accepted: false,
                 verdict: None,
+                resolving: false,
                 resolution: None,
+                resolved_at: None,
             },
         );
         book
@@ -319,6 +323,7 @@ mod tests {
         for kind in [
             BuildFailureKind::Transient,
             BuildFailureKind::SubstituteUnavailable,
+            BuildFailureKind::InputsUnavailable,
             BuildFailureKind::CorruptEvalCache,
         ] {
             let Disposition::Fail(_, failure) = dispose(resolution, failed(kind)) else {

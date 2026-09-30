@@ -53,19 +53,36 @@ impl Scheduler {
         }
     }
 
-    async fn resolve_attempt(&self, attempt: ClusterAttemptId, fate: Fate) -> Result<()> {
-        let Some(cluster) = self.attempts.lock().cluster_of(attempt) else {
+    /// Settle a decided attempt. A failed database write leaves the verdict in
+    /// the book for the cluster-dispatch pass to retry.
+    pub(crate) async fn resolve_attempt(
+        &self,
+        attempt: ClusterAttemptId,
+        fate: Fate,
+    ) -> Result<()> {
+        let Some(cluster) = self.attempts.lock().begin_resolving(attempt) else {
             return Ok(());
         };
-        let db = &self.state.worker_db;
-        if !gradient_db::close_cluster_attempt(db, attempt, attempt_outcome(fate)).await? {
-            warn!(%attempt, "cluster attempt already closed elsewhere; leaving its members to that closer");
-            return Ok(());
-        }
-        let requeued = fate == Fate::Retry && gradient_db::requeue_cluster_job(db, cluster).await?;
-        if !requeued {
-            gradient_db::finish_cluster_job(db, cluster, final_status(fate)).await?;
-        }
+        let resolved = gradient_db::resolve_cluster_attempt(
+            &self.state.worker_db,
+            cluster,
+            attempt,
+            attempt_outcome(fate),
+            fate == Fate::Retry,
+            final_status(fate),
+        )
+        .await;
+        let requeued = match resolved {
+            Ok(Some(requeued)) => requeued,
+            Ok(None) => {
+                warn!(%attempt, "cluster attempt already closed; settling its members without a retry");
+                false
+            }
+            Err(e) => {
+                self.attempts.lock().abort_resolving(attempt);
+                return Err(e.into());
+            }
+        };
 
         let resolution = Resolution { fate, requeued };
         let (reports, survivors) = self.attempts.lock().drain(attempt, resolution);
