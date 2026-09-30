@@ -1822,9 +1822,14 @@ async fn a_restored_placement_waits_again() {
 }
 
 /// Two leading results for the two workers' registrations (each closes its
-/// unclaimed dispatches), then `results` for the cluster's own writes.
+/// unclaimed dispatches), then `results` for the cluster's own writes. Every
+/// query (a registration's connection insert, each pass's dead-cluster sweep)
+/// reads an empty row set.
 fn cluster_claims(results: &[u64]) -> sea_orm::DatabaseConnection {
     sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        .append_query_results(
+            (0..16).map(|_| Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()),
+        )
         .append_exec_results(
             [0, 0]
                 .iter()
@@ -1908,8 +1913,8 @@ async fn a_lost_cluster_claim_hands_the_members_back_to_the_feed() {
 
 #[tokio::test]
 async fn a_rejecting_member_aborts_the_attempt_and_returns_the_cluster() {
-    // claims, then close_cluster_attempt's two updates
-    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 2])).await;
+    // claims, then the failed prepare's close, abandon and status reset
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 2, 0])).await;
     let mut w1 = idle(&scheduler, "w1").await;
     let mut w2 = idle(&scheduler, "w2").await;
     ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
@@ -1931,7 +1936,7 @@ async fn a_rejecting_member_aborts_the_attempt_and_returns_the_cluster() {
 
 #[tokio::test]
 async fn an_undelivered_member_times_the_attempt_out() {
-    let mut state = gradient_test_support::prelude::test_state(cluster_claims(&[1, 1, 1, 1, 2]));
+    let mut state = gradient_test_support::prelude::test_state(cluster_claims(&[1, 1, 1, 1, 2, 0]));
     Arc::make_mut(&mut Arc::get_mut(&mut state).expect("unshared").config)
         .scheduler
         .cluster_prepare_timeout_secs = 0;
@@ -1956,7 +1961,7 @@ async fn an_undelivered_member_times_the_attempt_out() {
 
 #[tokio::test]
 async fn a_member_ending_before_its_attempt_started_fails_the_prepare() {
-    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 2])).await;
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 2, 0])).await;
     let mut w1 = idle(&scheduler, "w1").await;
     let mut w2 = idle(&scheduler, "w2").await;
     ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
