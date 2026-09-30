@@ -17,7 +17,6 @@
 use crate::DbContext;
 use crate::graph_sql::BUILDER_STATUSES;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::outbox::OutboxKind;
 use gradient_types::*;
 use std::collections::{HashMap, HashSet};
 use tracing::error;
@@ -321,11 +320,8 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
     if !finished.is_empty() {
         match crate::build_attempt::latest_attempts_by_derivation(db, &finished).await {
             Ok(attempts) => {
-                let rows = attempts
-                    .values()
-                    .map(|a| (a.to_string(), serde_json::json!({ "attempt": a })))
-                    .collect();
-                if let Err(e) = crate::outbox::enqueue_many(db, OutboxKind::LogFinalize, rows).await
+                if let Err(e) =
+                    super::logging::enqueue_log_finalize(db, attempts.into_values()).await
                 {
                     error!(error = %e, "failed to enqueue the log finalizations");
                 }

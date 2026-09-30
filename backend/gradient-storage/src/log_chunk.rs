@@ -80,6 +80,23 @@ pub struct StoredChunkDesc {
     pub color_prefix: String,
 }
 
+/// Decompress and concatenate chunks `0..count`, failing on any unreadable
+/// chunk: a caller rewriting the log must never drop a chunk it could not read.
+pub async fn read_chunks(
+    storage: &dyn LogStorage,
+    log_key: BuildAttemptId,
+    count: u32,
+) -> Result<String> {
+    let mut out = String::new();
+    for index in 0..count {
+        let raw = storage.read_chunk(log_key, index).await?;
+        out.push_str(&String::from_utf8_lossy(&zstd::stream::decode_all(
+            &raw[..],
+        )?));
+    }
+    Ok(out)
+}
+
 /// Split, zstd-compress, and write each chunk; return descriptors for the DB index.
 /// Existing chunks for `log_key` are removed first so re-finalize is idempotent.
 pub async fn compress_and_store_chunks(

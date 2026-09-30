@@ -14,7 +14,9 @@ use gradient_db::admin_tasks;
 use gradient_entity::ids::AdminTaskId;
 use gradient_types::events::gc::DeepFinished;
 use gradient_types::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect,
+};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -180,14 +182,18 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
 
     // A log key is the owning attempt's own id; it is orphan when no
     // `build_attempt` row carries that id.
-    let referenced: HashSet<BuildAttemptId> = EBuildAttempt::find()
-        .filter(CBuildAttempt::Id.is_in(on_disk.clone()))
-        .all(&state.worker_db)
-        .await
-        .context("query build_attempts by id")?
-        .into_iter()
-        .map(|a| a.id)
-        .collect();
+    let referenced: HashSet<BuildAttemptId> = gradient_db::fetch_in_chunks(&on_disk, |chunk| {
+        EBuildAttempt::find()
+            .select_only()
+            .column(CBuildAttempt::Id)
+            .filter(CBuildAttempt::Id.is_in(chunk))
+            .into_tuple::<BuildAttemptId>()
+            .all(&state.worker_db)
+    })
+    .await
+    .context("query build_attempts by id")?
+    .into_iter()
+    .collect();
 
     for attempt_id in on_disk {
         if !referenced.contains(&attempt_id) {
@@ -300,5 +306,30 @@ mod tests {
         let mut report = DeepGcReport::default();
         pass_logs(Arc::clone(&state), &mut report).await.unwrap();
         assert_eq!(report.orphan_logs_removed, 1);
+    }
+
+    #[tokio::test]
+    async fn pass_logs_removes_a_chunk_only_orphan_and_keeps_a_referenced_log() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log: Arc<dyn LogStorage> = Arc::new(FileLogStorage::new(tmp.path()).await.unwrap());
+        let orphan = BuildAttemptId::now_v7();
+        let kept = BuildAttemptId::now_v7();
+        log.write_chunk(orphan, 0, b"z").await.unwrap();
+        log.write_chunk(kept, 0, b"z").await.unwrap();
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![std::collections::BTreeMap::from([(
+                "id",
+                sea_orm::Value::from(kept.into_inner()),
+            )])]])
+            .into_connection();
+        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let state = make_state(nar, Arc::clone(&log), db);
+
+        let mut report = DeepGcReport::default();
+        pass_logs(Arc::clone(&state), &mut report).await.unwrap();
+        assert_eq!(report.logs_scanned, 2);
+        assert_eq!(report.orphan_logs_removed, 1);
+        assert_eq!(log.list_logs().await.unwrap(), vec![kept]);
     }
 }

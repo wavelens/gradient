@@ -89,6 +89,10 @@ pub async fn substitute_log(
         Some(body) => {
             if let Err(e) = state.log_storage.append(attempt_id, &body).await {
                 warn!(error = %e, "substitute_log: log_storage.append failed");
+            } else if let Err(e) =
+                gradient_db::enqueue_log_finalize(&state.worker_db, [attempt_id]).await
+            {
+                warn!(error = %e, "substitute_log: failed to finalize the substituted log");
             }
         }
         None => debug!(drv = drv_basename, "substitute_log: no upstream has a log"),
