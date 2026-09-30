@@ -1991,7 +1991,7 @@ mod tests {
             .iter()
             .find(|s| {
                 s.sql
-                    .contains("SELECT evaluation FROM build_job WHERE derivation = ANY")
+                    .contains("SELECT DISTINCT evaluation FROM build_job WHERE derivation = ANY")
             })
             .expect("a batch that grew an edge bumps the evaluations sharing it");
         let Some(Value::Array(_, Some(bound))) =
