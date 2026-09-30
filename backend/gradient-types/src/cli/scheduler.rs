@@ -33,6 +33,23 @@ pub struct SchedulerArgs {
         default_value_t = 30
     )]
     pub cluster_prepare_timeout_secs: u64,
+
+    /// Seconds a ready cluster waits for simultaneously idle slots before it
+    /// reserves a target placement.
+    #[arg(
+        long = "scheduler-cluster-reserve-after-secs",
+        env = "GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS",
+        default_value_t = 600
+    )]
+    pub cluster_reserve_after_secs: u64,
+
+    /// Seconds a cluster reservation is held before it is released and planned again.
+    #[arg(
+        long = "scheduler-cluster-reserve-timeout-secs",
+        env = "GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS",
+        default_value_t = 1800
+    )]
+    pub cluster_reserve_timeout_secs: u64,
 }
 
 impl Default for SchedulerArgs {
@@ -41,6 +58,8 @@ impl Default for SchedulerArgs {
             scoring_policy: "resource-aware".into(),
             dispatch_retention_days: 30,
             cluster_prepare_timeout_secs: 30,
+            cluster_reserve_after_secs: 600,
+            cluster_reserve_timeout_secs: 1800,
         }
     }
 }

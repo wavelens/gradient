@@ -779,6 +779,24 @@ in {
           '';
         };
 
+        clusterReserveAfterSecs = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 600;
+          description = ''
+            Seconds a ready cluster job waits for enough simultaneously idle workers before
+            it reserves a placement. Reserved workers receive no new single jobs until the
+            cluster starts or the reservation expires.
+          '';
+        };
+
+        clusterReserveTimeoutSecs = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 1800;
+          description = ''
+            Seconds a cluster job reservation is held before it is released and planned again.
+          '';
+        };
+
         scoringPolicy = lib.mkOption {
           type = lib.types.enum [ "simple" "resource-aware" ];
           default = "resource-aware";
@@ -1353,6 +1371,8 @@ in {
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.build.defaultTimeoutSecs;
         GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.build.defaultMaxSilentSecs;
         GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS = toString cfg.scheduler.clusterPrepareTimeoutSecs;
+        GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS = toString cfg.scheduler.clusterReserveAfterSecs;
+        GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS = toString cfg.scheduler.clusterReserveTimeoutSecs;
         GRADIENT_SCHEDULER_SCORING_POLICY = cfg.scheduler.scoringPolicy;
         GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS = toString cfg.scheduler.dispatchRetentionDays;
         GRADIENT_METRICS_ROLLUP_INTERVAL_SECS = toString cfg.metrics.rollupIntervalSecs;
