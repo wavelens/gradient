@@ -82,6 +82,7 @@ Offers are deltas: the server sends a worker only candidates missing from its `s
 4. **Evaluations:** every status in `EvaluationStatus::ACTIVE` except `Queued` and `Waiting` turns `Aborted` with `finished_at`. `Building` is included: nothing else drives its remaining builds.
 5. **Their anchors:** `Created`, `Queued` and `Building` anchors of those evaluations turn `Aborted`, unless a non-terminal evaluation also names them.
 6. **Tasks:** each affected task gets `force_evaluation`. The fresh evaluation thaws the aborted anchors through `ReconcileScope::Eval` once its stream completes.
+7. **Clusters:** every open [cluster attempt](clusters.md) closes (`PrepareFailed` when unstarted, `Aborted` otherwise). A `Running` cluster goes back to `Queued`, or to `Aborted` when a member evaluation or anchor can no longer run.
 
 - `Queued` evaluations return through the eval dispatcher; `Waiting` ones through the reconciler.
 - The live effects of `update_evaluation_status` do not run; the rows are consistent on their own.
