@@ -40,3 +40,9 @@ pub struct Committing {
     pub cluster: PendingCluster,
     pub seats: Vec<CommittedSeat>,
 }
+
+/// A member's assignment waiting for its session to hand it out.
+pub struct PreparedMember {
+    pub assignment: crate::jobs::Assignment,
+    pub membership: gradient_wire::types::ClusterMembership,
+}

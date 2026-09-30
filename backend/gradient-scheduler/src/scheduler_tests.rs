@@ -1820,3 +1820,176 @@ async fn a_restored_placement_waits_again() {
     assert_eq!(scheduler.cluster_snapshot().await.clusters.len(), 1);
     assert!(scheduler.active_job("eval:a").await.is_none());
 }
+
+/// Two leading results for the two workers' registrations (each closes its
+/// unclaimed dispatches), then `results` for the cluster's own writes.
+fn cluster_claims(results: &[u64]) -> sea_orm::DatabaseConnection {
+    sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        .append_exec_results(
+            [0, 0]
+                .iter()
+                .chain(results)
+                .map(|&n| sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: n,
+                }),
+        )
+        .into_connection()
+}
+
+fn drain(rx: &mut mpsc::UnboundedReceiver<SessionSignal>) -> Vec<SessionSignal> {
+    let mut signals = Vec::new();
+    while let Ok(s) = rx.try_recv() {
+        signals.push(s);
+    }
+    signals
+}
+
+fn assigned(signals: &[SessionSignal]) -> Option<String> {
+    signals.iter().find_map(|s| match s {
+        SessionSignal::ClusterAssign { job_id } => Some(job_id.clone()),
+        _ => None,
+    })
+}
+
+#[tokio::test]
+async fn a_ready_cluster_on_idle_workers_is_assigned_then_started() {
+    // attempt insert, two member claims, then the start's two updates
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 1])).await;
+    let mut w1 = idle(&scheduler, "w1").await;
+    let mut w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+
+    scheduler.plan_clusters().await.unwrap();
+
+    let j1 = assigned(&drain(&mut w1)).expect("w1 assigned");
+    let j2 = assigned(&drain(&mut w2)).expect("w2 assigned");
+    let first = scheduler.take_prepared(&j1).expect("prepared");
+    assert_eq!(
+        first.membership.hold_secs,
+        30 + crate::cluster::CLUSTER_HOLD_MARGIN_SECS
+    );
+    assert!(scheduler.take_prepared(&j2).is_some());
+
+    scheduler.cluster_member_accepted(&j1).await;
+    assert!(
+        !drain(&mut w1)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::StartCluster { .. }))
+    );
+    scheduler.cluster_member_accepted(&j2).await;
+
+    let roster = drain(&mut w1).into_iter().find_map(|s| match s {
+        SessionSignal::StartCluster { roster, .. } => Some(roster),
+        _ => None,
+    });
+    assert_eq!(roster.map(|r| r.len()), Some(2));
+}
+
+#[tokio::test]
+async fn a_lost_cluster_claim_leaves_the_cluster_waiting() {
+    // attempt insert wins, the first member claim loses
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 0])).await;
+    let mut w1 = idle(&scheduler, "w1").await;
+    let _w2 = idle(&scheduler, "w2").await;
+    let cluster = ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+
+    scheduler.plan_clusters().await.unwrap();
+
+    assert!(assigned(&drain(&mut w1)).is_none());
+    assert!(scheduler.active_job("eval:a").await.is_none());
+    assert!(
+        scheduler.cluster_snapshot().await.clusters.is_empty(),
+        "backing off"
+    );
+    assert!(scheduler.untracked(vec!["eval:a".into()]).await.is_empty());
+    let _ = cluster;
+}
+
+#[tokio::test]
+async fn a_rejecting_member_aborts_the_attempt_and_returns_the_cluster() {
+    // claims, then close_cluster_attempt's two updates
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 2])).await;
+    let mut w1 = idle(&scheduler, "w1").await;
+    let mut w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    scheduler.plan_clusters().await.unwrap();
+    let j1 = assigned(&drain(&mut w1)).expect("w1 assigned");
+    drain(&mut w2);
+
+    assert!(scheduler.cluster_member_rejected(&j1).await);
+    assert!(!scheduler.cluster_member_rejected(&j1).await);
+
+    assert!(
+        drain(&mut w2)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::AbortCluster { .. }))
+    );
+    assert!(scheduler.active_job("eval:a").await.is_none());
+    assert!(scheduler.untracked(vec!["eval:a".into()]).await.is_empty());
+}
+
+#[tokio::test]
+async fn an_undelivered_member_times_the_attempt_out() {
+    let mut state = gradient_test_support::prelude::test_state(cluster_claims(&[1, 1, 1, 1, 2]));
+    Arc::make_mut(&mut Arc::get_mut(&mut state).expect("unshared").config)
+        .scheduler
+        .cluster_prepare_timeout_secs = 0;
+    let scheduler = Arc::new(Scheduler::new(state));
+    scheduler.spawn_core(None).await.unwrap();
+    let mut w1 = idle(&scheduler, "w1").await;
+    let _w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    scheduler.plan_clusters().await.unwrap();
+    drain(&mut w1);
+
+    scheduler.plan_clusters().await.unwrap();
+
+    assert!(
+        drain(&mut w1)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::AbortCluster { .. }))
+    );
+}
+
+#[tokio::test]
+async fn one_pass_never_seats_two_clusters_on_one_worker() {
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1])).await;
+    let _w1 = idle(&scheduler, "w1").await;
+    let _w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    ready_cluster(&scheduler, &[("eval:c", "server"), ("eval:d", "client")]).await;
+
+    scheduler.plan_clusters().await.unwrap();
+
+    assert_eq!(scheduler.cluster_snapshot().await.clusters.len(), 1);
+}
+
+#[tokio::test]
+async fn a_signal_reaches_the_other_members_of_a_started_attempt() {
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 1])).await;
+    let mut w1 = idle(&scheduler, "w1").await;
+    let mut w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    scheduler.plan_clusters().await.unwrap();
+    let j1 = assigned(&drain(&mut w1)).expect("w1");
+    let j2 = assigned(&drain(&mut w2)).expect("w2");
+    let attempt = scheduler
+        .take_prepared(&j1)
+        .expect("prepared")
+        .membership
+        .attempt;
+    scheduler.cluster_member_accepted(&j1).await;
+    scheduler.cluster_member_accepted(&j2).await;
+    drain(&mut w2);
+
+    scheduler
+        .relay_cluster_signal("w1", &attempt, None, b"hi".to_vec())
+        .await;
+
+    assert!(
+        drain(&mut w2)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::ClusterSignal { payload, .. } if payload == b"hi"))
+    );
+}

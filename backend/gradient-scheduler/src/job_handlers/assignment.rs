@@ -41,7 +41,11 @@ impl Scheduler {
         for attempt in 0..CLAIM_ATTEMPTS {
             let a = match self.try_assign(worker_id, &kind, &instance).await {
                 AssignOutcome::Assigned(a) => a,
-                AssignOutcome::AtCapacity | AssignOutcome::Nothing => return None,
+                AssignOutcome::AtCapacity => return None,
+                AssignOutcome::Nothing => {
+                    self.cluster_wake.notify_one();
+                    return None;
+                }
             };
 
             match claim(&self.state, worker_id, &a.dispatch_record)
@@ -148,7 +152,7 @@ impl Scheduler {
 
     /// Announce the hand-out to the job board. Fired only once the record is
     /// durable, so the board never shows a job that was withdrawn.
-    fn announce_dispatch(&self, worker_id: &str, record: &DispatchRecord) {
+    pub(crate) fn announce_dispatch(&self, worker_id: &str, record: &DispatchRecord) {
         self.state.events.publish(worker::JobDispatched {
             project: record.project,
             worker_id: worker_id.to_owned(),
