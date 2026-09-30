@@ -27,7 +27,7 @@ Among the matching workers, the scheduler scores each queued job and steers heav
 
 ## Zones
 
-Workers in one datacenter share a zone label, `services.gradient.worker.zone` (default: none). A [cluster job](../contributors/scheduler/clusters.md) that needs a fast interconnect starts all members in one zone; workers without a zone count as one zone of their own.
+Workers in one datacenter share a zone label, `services.gradient.worker.zone` (default: none). A [cluster job](../contributors/scheduler/clusters.md) that needs a fast interconnect starts all members in one zone; all workers without a zone share one unnamed zone.
 
 `services.gradient.worker.endpoint` is the address the other members of a cluster reach the worker at. The server hands every member the endpoints of the others when the cluster starts.
 

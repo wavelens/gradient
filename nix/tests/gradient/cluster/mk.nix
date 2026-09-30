@@ -29,6 +29,7 @@ let
     worker3 = "7f3c9e21-4b8a-4d5e-9c1f-2a6b8d0e4f13";
   };
   zones = { worker1 = "a"; worker2 = "a"; worker3 = "b"; };
+  features = { worker1 = [ "big-parallel" ]; worker2 = [ "big-parallel" ]; worker3 = [ "big-parallel" "zone-b" ]; };
 
   workerNode = name: { ... }: {
     imports = [
@@ -42,9 +43,12 @@ let
       config = storeSpec.toDaemonConfig specs name;
     };
 
+    nix.settings.system-features = features.${name};
+
     services.gradient.worker = {
       enable = true;
       zone = zones.${name};
+      system.features = features.${name};
       capabilities = {
         eval = true;
         build = true;
