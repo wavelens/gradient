@@ -936,10 +936,12 @@ mod tests {
         let statements = logged(db);
         assert_eq!(statements.first().map(|s| s.sql.as_str()), Some("BEGIN"));
         assert_eq!(statements.last().map(|s| s.sql.as_str()), Some("COMMIT"));
-        assert!(
-            !statements
-                .iter()
-                .any(|s| s.sql.contains("\"status\" IN ($")),
+        let cluster_updates = statements
+            .iter()
+            .filter(|s| s.sql.starts_with("UPDATE \"cluster_job\""))
+            .count();
+        assert_eq!(
+            cluster_updates, 1,
             "a requeued cluster is not also finished"
         );
     }
