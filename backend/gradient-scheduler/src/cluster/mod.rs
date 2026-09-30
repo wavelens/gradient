@@ -12,6 +12,7 @@ mod coordinator;
 mod divert;
 mod matching;
 mod planner;
+mod recovery;
 mod settlement;
 mod slots;
 

@@ -118,17 +118,7 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
             {
                 let dispatches = eval_dispatch_count(state, eval.id).await;
                 match orphaned_eval_outcome(dispatches, MAX_EVAL_DISPATCH_ATTEMPTS) {
-                    OrphanedEval::Requeue => {
-                        persist_waiting_reason(
-                            state,
-                            eval.id,
-                            &eval.waiting_reason,
-                            Some(&WaitingReason::eval_workers(EvalCapability::Eval, 0)),
-                        )
-                        .await;
-                        update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting)
-                            .await;
-                    }
+                    OrphanedEval::Requeue => park_orphaned_eval(state, eval).await,
                     OrphanedEval::Exhausted => {
                         warn!(
                             evaluation_id = %eval.id,
@@ -151,6 +141,62 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
             }
             Ok(_) => {}
             Err(e) => warn!(error = %e, %evaluation_id, "requeue orphaned eval: load failed"),
+        }
+    }
+}
+
+pub(crate) async fn park_orphaned_eval(state: &Arc<ServerState>, eval: MEvaluation) {
+    persist_waiting_reason(
+        state,
+        eval.id,
+        &eval.waiting_reason,
+        Some(&WaitingReason::eval_workers(EvalCapability::Eval, 0)),
+    )
+    .await;
+    update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await;
+}
+
+/// Put a retried cluster's members back where the ready feed finds them. The
+/// cluster is `Queued` again before this runs, so each member is folded back into
+/// it rather than dispatched alone; its retry budget bounds the loop, not the
+/// per-evaluation dispatch budget.
+pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[PendingJob]) {
+    let anchors: Vec<DerivationBuildId> = jobs
+        .iter()
+        .filter_map(PendingJob::derivation_build)
+        .collect();
+    if !anchors.is_empty()
+        && let Err(e) = state
+            .graph
+            .transition(Transition::OrphanedBuilds { anchors })
+            .await
+    {
+        warn!(error = %e, "requeue of cluster member builds did not reach the graph actor");
+    }
+    state.ready_set.enter(jobs.iter().filter_map(|j| match j {
+        PendingJob::Build(b) => Some(b.derivation),
+        PendingJob::Eval(_) => None,
+    }));
+
+    for job in jobs.iter().filter(|j| j.derivation_build().is_none()) {
+        match EEvaluation::find_by_id(job.evaluation_id())
+            .one(&state.worker_db)
+            .await
+        {
+            Ok(Some(eval))
+                if matches!(
+                    eval.status,
+                    EvaluationStatus::Fetching
+                        | EvaluationStatus::EvaluatingFlake
+                        | EvaluationStatus::EvaluatingDerivation
+                ) =>
+            {
+                park_orphaned_eval(state, eval).await
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!(error = %e, evaluation_id = %job.evaluation_id(), "requeue cluster member eval: load failed")
+            }
         }
     }
 }
