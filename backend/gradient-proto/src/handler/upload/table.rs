@@ -219,7 +219,7 @@ mod tests {
             bytes: u64::MAX,
         });
         let dir = tempfile::TempDir::new().unwrap();
-        let partials = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let partials = PartialStore::new(dir.path()).unwrap();
         let writer = partials.open_writer("peer/a", "a", 0, 0).await.unwrap();
         let (_session, permit) = permit(&admission, 1).await;
         let mut table = UploadTable::default();

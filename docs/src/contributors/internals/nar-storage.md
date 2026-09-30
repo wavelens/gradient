@@ -53,13 +53,14 @@ logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 
 ## Deep GC
 
-`POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) reconciles every storage backend against the database in three passes (`gradient-cache/src/cacher/deep_gc.rs`).
+`POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) reconciles every storage backend against the database in four passes (`gradient-cache/src/cacher/deep_gc.rs`).
 
 | Pass | Removes |
 |---|---|
 | NAR | `cleanup_orphaned_cache_files`: objects without `cached_path` rows and rows without objects. Evicting stale live paths is maintenance's job |
 | Blob | `build-request-blobs/...` objects and `build_request_blob` rows without a partner |
 | Log | Flat pre-shard logs first (see [Build Logs](#build-logs)), then logs keyed by `BuildAttemptId` without a `build_attempt` row; an attempt without a log is legitimate |
+| Partial | Unfinished uploads under `nar-partial`, `nar-upload-partial` and `source-upload-partial` older than `nar.partialTtlSecs`, and directories left empty by the older nested layout. No other sweep walks these roots: a walk on a session or request path stalls it behind the filesystem |
 
 - **Tracking:** an `admin_task` row, `kind = deep_gc`, `pending` -> `running` -> `completed` / `failed`. The partial unique index `admin_task_one_active_per_kind` allows one active task; a second `POST` answers `409`.
 - **Progress** is flushed between passes to `admin_task.progress`, read at `GET /api/v1/admin/tasks[/{task_id}]`.

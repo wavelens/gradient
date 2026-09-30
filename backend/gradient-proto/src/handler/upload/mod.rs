@@ -313,9 +313,6 @@ impl DispatchContext<'_> {
     }
 
     pub(super) async fn sweep_uploads(&mut self, uploads: &mut UploadSession) {
-        if let Err(e) = uploads.partials.gc().await {
-            warn!(peer_id = %self.peer_id, error = %e, "sweeping stale upload partials failed");
-        }
         for (id, granted) in uploads.table.expired(Instant::now()) {
             self.abandon(granted).await;
             self.settle(

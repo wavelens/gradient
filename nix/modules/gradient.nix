@@ -593,8 +593,9 @@ in {
           type = lib.types.ints.unsigned;
           default = 86400;
           description = ''
-            Seconds after its last write that an unfinished NAR upload under
-            {file}`<services.gradient.baseDir>/nar-partial` is deleted. `0` disables the cleanup.
+            Seconds after its last write that an unfinished upload staged under
+            {file}`<services.gradient.baseDir>` is removed by the next deep GC. `0` keeps every
+            unfinished upload.
           '';
         };
       };

@@ -1113,7 +1113,6 @@ pub(in crate::handler) mod fixture {
                 table: UploadTable::default(),
                 partials: gradient_storage::PartialStore::new(
                     tempfile::TempDir::new().unwrap().keep(),
-                    Duration::from_secs(3600),
                 )
                 .unwrap(),
                 retain_up_to: 0,

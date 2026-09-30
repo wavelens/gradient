@@ -12,16 +12,18 @@
 //! the sender seeks to it. A `stream_token` mismatch (e.g. a worker upgrade
 //! changed zstd output) truncates the partial so the transfer restarts from 0.
 //!
-//! Keys must be filesystem-safe. Callers use `{job_id}/{hash}` (worker pull) or
-//! `{peer_id}/{job_id}/{hash}` (server push), namespaced by job so two concurrent
-//! transfers of the same content-addressed path never share a file. Appends
-//! enforce contiguous offsets.
+//! Callers namespace keys with `/`, `{job_id}/{hash}` (worker pull) or
+//! `{peer_id}/{object}` (server push), so two concurrent transfers of the same
+//! content-addressed path never share a file. Every key maps to one file name
+//! directly under the root: a per-namespace directory would outlive its files
+//! and every sweep would have to walk all of them. Appends enforce contiguous
+//! offsets.
 //!
 //! All filesystem access is async (`tokio::fs`) so staging never parks a tokio
 //! worker thread on the hot NAR receive path.
 
 use std::io::SeekFrom;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
@@ -36,7 +38,6 @@ static CLAIM_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 #[derive(Clone, Debug)]
 pub struct PartialStore {
     root: PathBuf,
-    ttl: Duration,
 }
 
 /// A completed `.partial` file: where it lies, how many bytes it holds and the
@@ -163,19 +164,19 @@ impl PartialStore {
     /// Create the store rooted at `root`, creating the directory if needed. The
     /// one-time sync `create_dir_all` keeps `new` non-async so constructors need
     /// not cascade into an async context.
-    pub fn new(root: impl Into<PathBuf>, ttl: Duration) -> Result<Self> {
+    pub fn new(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
         std::fs::create_dir_all(&root)
             .with_context(|| format!("create partial dir {}", root.display()))?;
-        Ok(Self { root, ttl })
+        Ok(Self { root })
     }
 
     fn partial_path(&self, key: &str) -> PathBuf {
-        self.root.join(format!("{key}.partial"))
+        self.root.join(format!("{}.partial", file_stem(key)))
     }
 
     fn token_path(&self, key: &str) -> PathBuf {
-        self.root.join(format!("{key}.token"))
+        self.root.join(format!("{}.token", file_stem(key)))
     }
 
     /// Path to the `.partial` file so callers can stream/read it directly.
@@ -190,19 +191,6 @@ impl PartialStore {
         tokio::fs::File::open(&path)
             .await
             .with_context(|| format!("open staged partial {}", path.display()))
-    }
-
-    /// Ensure any parent directory implied by a `{peer}/{hash}` key exists.
-    async fn ensure_parent(&self, key: &str) -> Result<()> {
-        if let Some(parent) = self.partial_path(key).parent()
-            && parent != self.root.as_path()
-        {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("create partial parent {}", parent.display()))?;
-        }
-
-        Ok(())
     }
 
     /// Bytes already received for `key` under `token`. Returns 0 (and discards
@@ -237,7 +225,6 @@ impl PartialStore {
         resume_from: u64,
         retain_up_to: u64,
     ) -> Result<PartialWriter> {
-        self.ensure_parent(key).await?;
         let path = self.partial_path(key);
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
@@ -286,7 +273,6 @@ impl PartialStore {
     /// so it restarts by re-opening the writer, which keeps whatever prefix the
     /// stored token still validates and truncates only when that token changed.
     pub async fn append(&self, key: &str, token: &str, offset: u64, data: &[u8]) -> Result<()> {
-        self.ensure_parent(key).await?;
         let path = self.partial_path(key);
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
@@ -361,7 +347,7 @@ impl PartialStore {
     /// loop; only the byte copy/upload stays detached.
     ///
     /// The token sidecar is dropped rather than moved: a claim is terminal, so
-    /// nothing can resume it, and only a `.partial` is reachable by [`Self::gc`].
+    /// nothing can resume it.
     pub async fn detach(&self, key: &str) -> Result<Option<String>> {
         let src = self.partial_path(key);
         match tokio::fs::metadata(&src).await {
@@ -372,86 +358,78 @@ impl PartialStore {
 
         let seq = CLAIM_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let claim = format!("{key}.{seq}.claim");
-        self.ensure_parent(&claim).await?;
         tokio::fs::rename(&src, self.partial_path(&claim))
             .await
             .context("claim partial")?;
-        match tokio::fs::remove_file(self.token_path(key)).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).context("drop claimed partial token"),
-        }
+        remove_if_present(&self.token_path(key)).await?;
         Ok(Some(claim))
     }
 
     /// Remove the token sidecar, leaving the partial in place (idempotent).
-    /// Used when a partial is committed under its own name: the sweep in
-    /// [`Self::gc`] enumerates `*.partial` only, so a token left beside a file
-    /// that is about to be renamed away would never be reclaimed.
+    /// Used when a partial is committed under its own name, so the token does
+    /// not outlive the file being renamed away.
     pub async fn discard_token(&self, key: &str) -> Result<()> {
-        let path = self.token_path(key);
-        match tokio::fs::remove_file(&path).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e).with_context(|| format!("remove {}", path.display())),
-        }
+        remove_if_present(&self.token_path(key)).await
     }
 
     /// Remove the partial and its token sidecar (idempotent).
     pub async fn discard(&self, key: &str) -> Result<()> {
-        for p in [self.partial_path(key), self.token_path(key)] {
-            match tokio::fs::remove_file(&p).await {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e).with_context(|| format!("remove {}", p.display())),
-            }
-        }
-
-        Ok(())
+        remove_if_present(&self.partial_path(key)).await?;
+        remove_if_present(&self.token_path(key)).await
     }
 
-    /// Total bytes across all `.partial` files (disk-budget accounting).
-    pub async fn total_bytes(&self) -> Result<u64> {
-        Ok(self.walk().await?.iter().map(|(_, len, _)| *len).sum())
-    }
-
-    /// Delete partials whose mtime is older than the TTL. Returns the count
-    /// removed. A zero TTL disables the sweep.
-    pub async fn gc(&self) -> Result<usize> {
-        if self.ttl.is_zero() {
+    /// Delete every partial whose last write is older than `ttl` with its
+    /// token, and every token left without a partial for as long. Directories
+    /// the nested key layout left behind go once they are empty. Returns the
+    /// partials removed; a zero `ttl` disables the sweep.
+    pub async fn gc(&self, ttl: Duration) -> Result<usize> {
+        if ttl.is_zero() {
             return Ok(0);
         }
 
         let cutoff = SystemTime::now()
-            .checked_sub(self.ttl)
+            .checked_sub(ttl)
             .unwrap_or(SystemTime::UNIX_EPOCH);
+        let (files, dirs) = self.walk().await?;
         let mut removed = 0;
-        for (path, _len, mtime) in self.walk().await? {
+        for (path, mtime) in files {
             if mtime >= cutoff {
                 continue;
             }
 
-            let key = path
-                .strip_prefix(&self.root)
-                .ok()
-                .and_then(|p| p.to_str())
-                .and_then(|s| s.strip_suffix(".partial"))
-                .map(str::to_owned);
-            if let Some(key) = key {
-                self.discard(&key).await?;
-                removed += 1;
+            match path.extension().and_then(|e| e.to_str()) {
+                Some("partial") => {
+                    remove_if_present(&path).await?;
+                    remove_if_present(&path.with_extension("token")).await?;
+                    removed += 1;
+                }
+                Some("token") if !tokio::fs::try_exists(path.with_extension("partial")).await? => {
+                    remove_if_present(&path).await?;
+                }
+                _ => {}
+            }
+        }
+
+        for dir in dirs.iter().rev() {
+            match tokio::fs::remove_dir(dir).await {
+                Ok(()) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                Err(e) => return Err(e).with_context(|| format!("remove {}", dir.display())),
             }
         }
 
         Ok(removed)
     }
 
-    /// Walk returning `(partial_path, len, mtime)` for every `*.partial` file
-    /// under the root. Uses an explicit dir stack (subdirs pushed, popped and
-    /// read in turn) instead of async recursion, so one level of `{peer}/`
-    /// nesting is handled without boxed futures.
-    async fn walk(&self) -> Result<Vec<(PathBuf, u64, SystemTime)>> {
-        let mut out = Vec::new();
+    /// Every file under the root with its mtime, and every directory below the
+    /// root, parents before their children.
+    async fn walk(&self) -> Result<(Vec<(PathBuf, SystemTime)>, Vec<PathBuf>)> {
+        let mut files = Vec::new();
+        let mut dirs = Vec::new();
         let mut stack = vec![self.root.clone()];
         while let Some(dir) = stack.pop() {
             let mut rd = match tokio::fs::read_dir(&dir).await {
@@ -464,15 +442,29 @@ impl PartialStore {
                 let path = entry.path();
                 let meta = entry.metadata().await.context("partial entry metadata")?;
                 if meta.is_dir() {
+                    dirs.push(path.clone());
                     stack.push(path);
-                } else if path.extension().and_then(|e| e.to_str()) == Some("partial") {
-                    let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                    out.push((path, meta.len(), mtime));
+                } else {
+                    files.push((path, meta.modified().unwrap_or(SystemTime::UNIX_EPOCH)));
                 }
             }
         }
 
-        Ok(out)
+        Ok((files, dirs))
+    }
+}
+
+/// `key` as a single file name: `%` and the `/` namespace separator are
+/// escaped, so distinct keys never share a file.
+fn file_stem(key: &str) -> String {
+    key.replace('%', "%25").replace('/', "%2F")
+}
+
+async fn remove_if_present(path: &Path) -> Result<()> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("remove {}", path.display())),
     }
 }
 
@@ -481,15 +473,15 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn store(ttl_secs: u64) -> (TempDir, PartialStore) {
+    fn store() -> (TempDir, PartialStore) {
         let dir = TempDir::new().unwrap();
-        let s = PartialStore::new(dir.path(), Duration::from_secs(ttl_secs)).unwrap();
+        let s = PartialStore::new(dir.path()).unwrap();
         (dir, s)
     }
 
     #[tokio::test]
     async fn append_then_resume_reports_len() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         s.append("abc", "tok", 0, b"hello").await.unwrap();
         s.append("abc", "tok", 5, b" world").await.unwrap();
         assert_eq!(s.received_len("abc", "tok").await.unwrap(), 11);
@@ -498,14 +490,14 @@ mod tests {
 
     #[tokio::test]
     async fn non_contiguous_append_errors() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         s.append("abc", "tok", 0, b"hello").await.unwrap();
         assert!(s.append("abc", "tok", 7, b"world").await.is_err());
     }
 
     #[tokio::test]
     async fn token_mismatch_truncates_to_zero() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         s.append("abc", "old", 0, b"hello").await.unwrap();
         assert_eq!(s.received_len("abc", "new").await.unwrap(), 0);
         s.append("abc", "new", 0, b"x").await.unwrap();
@@ -514,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn discard_is_idempotent() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         s.append("abc", "tok", 0, b"hello").await.unwrap();
         s.discard("abc").await.unwrap();
         s.discard("abc").await.unwrap();
@@ -522,26 +514,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn namespaced_key_creates_subdir() {
-        let (_d, s) = store(3600);
-        s.append("peer-1/abc", "tok", 0, b"hi").await.unwrap();
-        assert_eq!(s.received_len("peer-1/abc", "tok").await.unwrap(), 2);
-    }
-
-    #[tokio::test]
-    async fn total_bytes_sums_partials() {
-        let (_d, s) = store(3600);
-        s.append("a", "t", 0, b"12345").await.unwrap();
-        s.append("peer/b", "t", 0, b"678").await.unwrap();
-        assert_eq!(s.total_bytes().await.unwrap(), 8);
+    async fn namespaced_keys_stay_flat_under_the_root() {
+        let (d, s) = store();
+        s.append("peer-1/job/abc", "tok", 0, b"hi").await.unwrap();
+        s.append("peer-1%2Fjob/abc", "tok", 0, b"other")
+            .await
+            .unwrap();
+        assert_eq!(s.received_len("peer-1/job/abc", "tok").await.unwrap(), 2);
+        assert_eq!(s.received_len("peer-1%2Fjob/abc", "tok").await.unwrap(), 5);
+        for entry in std::fs::read_dir(d.path()).unwrap() {
+            assert!(entry.unwrap().file_type().unwrap().is_file());
+        }
     }
 
     #[tokio::test]
     async fn gc_zero_ttl_disabled() {
-        let (_d, s) = store(0);
+        let (_d, s) = store();
         s.append("a", "t", 0, b"123").await.unwrap();
-        assert_eq!(s.gc().await.unwrap(), 0);
+        assert_eq!(s.gc(Duration::ZERO).await.unwrap(), 0);
         assert_eq!(s.received_len("a", "t").await.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn gc_removes_stale_partials_and_the_directories_they_emptied() {
+        let (d, s) = store();
+        let legacy = d.path().join("peer/build:job");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(d.path().join("peer/eval:job")).unwrap();
+        let old = SystemTime::now() - Duration::from_secs(7200);
+        for name in ["abc.partial", "abc.token", "orphan.token"] {
+            let file = std::fs::File::create(legacy.join(name)).unwrap();
+            file.set_modified(old).unwrap();
+        }
+        s.append("peer/fresh", "t", 0, b"123").await.unwrap();
+
+        assert_eq!(s.gc(Duration::from_secs(3600)).await.unwrap(), 1);
+
+        assert!(!d.path().join("peer").exists());
+        assert_eq!(s.received_len("peer/fresh", "t").await.unwrap(), 3);
     }
 
     /// A claimed partial survives a later push that resets the shared key: the
@@ -550,7 +560,7 @@ mod tests {
     /// same-hash re-push discarded/truncated the shared `{peer}/{hash}` partial.
     #[tokio::test]
     async fn detach_isolates_claim_from_reset() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         s.append("peer/abc", "tok1", 0, b"hello").await.unwrap();
 
         let claim = s
@@ -572,7 +582,7 @@ mod tests {
 
     #[tokio::test]
     async fn writer_hashes_what_it_writes_and_finish_reports_it() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         let mut w = s.open_writer("peer/job/hash", "tok", 0, 0).await.unwrap();
         w.append(0, b"hello ").await.unwrap();
         w.append(6, b"world").await.unwrap();
@@ -587,7 +597,7 @@ mod tests {
 
     #[tokio::test]
     async fn resuming_rehashes_the_existing_prefix() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         let mut w = s.open_writer("k", "tok", 0, 0).await.unwrap();
         w.append(0, b"hello ").await.unwrap();
         drop(w);
@@ -607,7 +617,7 @@ mod tests {
     /// when no chunk is ever appended.
     #[tokio::test]
     async fn a_resume_with_no_new_bytes_still_reports_the_prefix_hash() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         let mut w = s.open_writer("k", "tok", 0, 0).await.unwrap();
         w.append(0, b"hello world").await.unwrap();
         w.finish().await.unwrap();
@@ -629,7 +639,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_gap_is_rejected() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         let mut w = s.open_writer("k", "tok", 0, 0).await.unwrap();
         w.append(0, b"abc").await.unwrap();
         assert!(w.append(5, b"x").await.is_err());
@@ -637,7 +647,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stream_under_the_bound_is_retained_and_one_over_it_is_dropped() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
 
         let mut w = s.open_writer("small", "tok", 0, 8).await.unwrap();
         w.append(0, b"abcd").await.unwrap();
@@ -658,7 +668,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_resumed_stream_never_retains() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         let mut w = s.open_writer("k", "tok", 0, 64).await.unwrap();
         w.append(0, b"abcd").await.unwrap();
         drop(w);
@@ -676,7 +686,7 @@ mod tests {
 
     #[tokio::test]
     async fn detach_absent_is_none() {
-        let (_d, s) = store(3600);
+        let (_d, s) = store();
         assert!(s.detach("peer/missing").await.unwrap().is_none());
     }
 }

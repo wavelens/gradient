@@ -56,6 +56,23 @@ pub struct ServerArgs {
     pub public_stats: bool,
 }
 
+impl ServerArgs {
+    /// Where relayed `/proto` uploads stage their `*.partial` files.
+    pub fn nar_partial_dir(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.base_dir).join("nar-partial")
+    }
+
+    /// Where chunked HTTP cache uploads stage their `*.partial` files.
+    pub fn nar_upload_partial_dir(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.base_dir).join("nar-upload-partial")
+    }
+
+    /// Where chunked source uploads stage their `*.partial` files.
+    pub fn source_upload_partial_dir(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.base_dir).join("source-upload-partial")
+    }
+}
+
 impl Default for ServerArgs {
     fn default() -> Self {
         Self {

@@ -849,7 +849,7 @@ mod tests {
     #[tokio::test]
     async fn disk_mode_delivers_the_staged_file() {
         let dir = TempDir::new().unwrap();
-        let store = PartialStore::new(dir.path(), Duration::from_secs(60)).unwrap();
+        let store = PartialStore::new(dir.path()).unwrap();
         let store_for_key = store.clone();
         let r = NarReceiver::with_partial_store(store);
         let path = format!("/nix/store/{}-x", "a".repeat(32));
@@ -977,7 +977,7 @@ mod tests {
     #[tokio::test]
     async fn partial_store_resumes_across_reconnect() {
         let dir = TempDir::new().unwrap();
-        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store = PartialStore::new(dir.path()).unwrap();
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let path = format!("/nix/store/{hash}-pkg");
 
@@ -1014,7 +1014,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_jobs_same_path_do_not_collide() {
         let dir = TempDir::new().unwrap();
-        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store = PartialStore::new(dir.path()).unwrap();
         let hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let path = format!("/nix/store/{hash}-pkg");
 
@@ -1052,7 +1052,7 @@ mod tests {
     #[tokio::test]
     async fn a_restart_from_zero_drops_the_resumed_prefix() {
         let dir = TempDir::new().unwrap();
-        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store = PartialStore::new(dir.path()).unwrap();
         let hash = "cccccccccccccccccccccccccccccccc";
         let path = format!("/nix/store/{hash}-pkg");
         store
@@ -1081,7 +1081,7 @@ mod tests {
     #[tokio::test]
     async fn dropping_the_receiver_ends_every_stager() {
         let dir = TempDir::new().unwrap();
-        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store = PartialStore::new(dir.path()).unwrap();
         let hash = "dddddddddddddddddddddddddddddddd";
         let path = format!("/nix/store/{hash}-pkg");
 
@@ -1107,7 +1107,7 @@ mod tests {
     #[tokio::test]
     async fn a_chunk_nothing_requested_is_not_staged() {
         let dir = TempDir::new().unwrap();
-        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store = PartialStore::new(dir.path()).unwrap();
         let hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
         let path = format!("/nix/store/{hash}-pkg");
 

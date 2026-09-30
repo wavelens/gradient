@@ -249,9 +249,7 @@ mod tests {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let (_session, permit) = granted_permit(&state).await;
         let dir = tempfile::TempDir::new().unwrap();
-        let partials =
-            gradient_storage::PartialStore::new(dir.path(), std::time::Duration::from_secs(60))
-                .unwrap();
+        let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
         let mut writer = partials.open_writer("peer/c", "c", 0, 0).await.unwrap();
         writer.append(0, b"abc").await.unwrap();
         let (writer_out, mut sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
@@ -348,9 +346,7 @@ mod tests {
         let state = Arc::new(unwired);
         let (_session, permit) = granted_permit(&state).await;
         let dir = tempfile::TempDir::new().unwrap();
-        let partials =
-            gradient_storage::PartialStore::new(dir.path(), std::time::Duration::from_secs(60))
-                .unwrap();
+        let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
         let mut writer = partials.open_writer("peer/c", "c", 0, 0).await.unwrap();
         writer.append(0, b"abc").await.unwrap();
         let (writer_out, _sent) = ProtoWriter::spy(std::time::Duration::from_secs(5));
@@ -401,18 +397,8 @@ mod tests {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let (_session, permit) = granted_permit(&state).await;
         let dir = tempfile::TempDir::new().unwrap();
-        tokio::fs::create_dir_all(dir.path().join("peer"))
-            .await
-            .unwrap();
-        tokio::fs::write(dir.path().join("peer/c.partial"), b"ab")
-            .await
-            .unwrap();
-        tokio::fs::write(dir.path().join("peer/c.token"), b"c")
-            .await
-            .unwrap();
-        let partials =
-            gradient_storage::PartialStore::new(dir.path(), std::time::Duration::from_secs(60))
-                .unwrap();
+        let partials = gradient_storage::PartialStore::new(dir.path()).unwrap();
+        partials.append("peer/c", "c", 0, b"ab").await.unwrap();
         let mut writer = partials.open_writer("peer/c", "c", 2, 0).await.unwrap();
         assert!(writer.resumed());
         writer.append(2, b"c").await.unwrap();
@@ -454,7 +440,7 @@ mod tests {
             }
         ));
         assert!(
-            !dir.path().join("peer/c.partial").exists(),
+            !partials.path("peer/c").exists(),
             "the foreign prefix is gone"
         );
     }

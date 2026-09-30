@@ -35,6 +35,7 @@ pub struct DeepGcReport {
     pub orphan_logs_removed: u64,
     pub legacy_logs_relocated: u64,
     pub legacy_logs_deleted: u64,
+    pub stale_partials_removed: u64,
 }
 
 impl DeepGcReport {
@@ -66,6 +67,11 @@ pub async fn run_deep_gc(state: Arc<ServerState>, task_id: AdminTaskId) {
     flush_progress(&state, task_id, &report).await;
 
     if let Err(e) = pass_logs(Arc::clone(&state), &mut report).await {
+        return finish_failed(state, task_id, e, report).await;
+    }
+    flush_progress(&state, task_id, &report).await;
+
+    if let Err(e) = pass_partials(&state, &mut report).await {
         return finish_failed(state, task_id, e, report).await;
     }
 
@@ -207,6 +213,25 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
                 report.orphan_logs_removed += 1;
             }
         }
+    }
+    Ok(())
+}
+
+/// The only sweep of upload partials: a walk per session, request or
+/// maintenance tick stalls whoever waits on it behind the filesystem.
+async fn pass_partials(state: &ServerState, report: &mut DeepGcReport) -> Result<()> {
+    let ttl = std::time::Duration::from_secs(state.config.nar.partial_ttl_secs);
+    let server = &state.config.server;
+    for root in [
+        server.nar_partial_dir(),
+        server.nar_upload_partial_dir(),
+        server.source_upload_partial_dir(),
+    ] {
+        let removed = gradient_storage::PartialStore::new(&root)?
+            .gc(ttl)
+            .await
+            .with_context(|| format!("sweep partials under {}", root.display()))?;
+        report.stale_partials_removed += removed as u64;
     }
     Ok(())
 }

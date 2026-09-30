@@ -105,8 +105,7 @@ fn main() -> Result<()> {
             #[expect(clippy::disallowed_methods, reason = "returns on drain_requested")]
             tokio::spawn(async move {
                 let ttl = std::time::Duration::from_secs(gc_config.nar.partial_ttl_secs);
-                let store = match gradient_storage::PartialStore::new(gc_config.nar_partial_dir(), ttl)
-                {
+                let store = match gradient_storage::PartialStore::new(gc_config.nar_partial_dir()) {
                     Ok(s) => s,
                     Err(e) => {
                         warn!(error = %e, "NAR partial GC: open failed");
@@ -121,7 +120,7 @@ fn main() -> Result<()> {
                         _ = gc_shutdown.drain_requested() => return,
                         _ = tick.tick() => {}
                     }
-                    match store.gc().await {
+                    match store.gc(ttl).await {
                         Ok(n) if n > 0 => info!(removed = n, "swept stale NAR partials"),
                         Ok(_) => {}
                         Err(e) => warn!(error = %e, "NAR partial GC failed"),

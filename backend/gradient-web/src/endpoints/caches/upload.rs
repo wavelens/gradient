@@ -25,7 +25,6 @@ use gradient_types::*;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Deserialize)]
 pub struct NarinfoPart {
@@ -221,9 +220,9 @@ pub struct ChunkQuery {
 /// under a dedicated root so per-NAR keys never collide with the proto path's
 /// per-session budget accounting.
 fn upload_partial_store(state: &ServerState) -> WebResult<PartialStore> {
-    let root = format!("{}/nar-upload-partial", state.config.server.base_dir);
-    let ttl = Duration::from_secs(state.config.nar.partial_ttl_secs);
-    Ok(PartialStore::new(root, ttl)?)
+    Ok(PartialStore::new(
+        state.config.server.nar_upload_partial_dir(),
+    )?)
 }
 
 /// Stream one multipart `nar` field to a staged `.partial` so a single-shot
@@ -307,11 +306,8 @@ pub async fn nar_chunk(
 
     let store = upload_partial_store(&state)?;
     let key = format!("{}/{store_hash}", cache.id);
-    // A fresh upload sweeps abandoned partials (best-effort); the `offset == 0`
-    // append then truncates any stale prefix so a re-run restarts cleanly.
-    if offset == 0 {
-        let _ = store.gc().await;
-    }
+    // An `offset == 0` append truncates any stale prefix so a re-run restarts
+    // cleanly; abandoned partials are left to the deep GC.
 
     // `received` is authoritative: when the caller's `offset` is contiguous we
     // append and advance it; otherwise we append nothing and report the current

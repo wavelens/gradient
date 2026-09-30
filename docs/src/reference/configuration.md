@@ -148,7 +148,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `nar.hotCacheBytes` | int | `536870912` | `GRADIENT_NAR_HOT_CACHE_BYTES` | Capacity in bytes of the in-memory NAR cache. |
 | `nar.maxConcurrentServes` | int | `8` | `GRADIENT_NAR_MAX_CONCURRENT_SERVES` | NAR serving tasks that may run at once per worker connection, bounding memory and storage fan-out for large batches. |
 | `nar.maxUploadSize` | int | `536870912` | `GRADIENT_NAR_MAX_UPLOAD_SIZE` | Maximum size in bytes of a NAR uploaded to the cache upload endpoint. |
-| `nar.partialTtlSecs` | int | `86400` | `GRADIENT_NAR_PARTIAL_TTL_SECS` | Seconds after its last write that an unfinished NAR upload under `<baseDir>/nar-partial` is deleted. |
+| `nar.partialTtlSecs` | int | `86400` | `GRADIENT_NAR_PARTIAL_TTL_SECS` | Seconds after its last write that an unfinished upload staged under `<baseDir>` is removed by the next [deep GC](../contributors/internals/nar-storage.md#deep-gc). `0` keeps every unfinished upload. |
 | `nar.sendChunkTimeoutSecs` | int | `30` | `GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS` | Seconds an outbound `NarPush` chunk may wait for the WebSocket to drain before the transfer is aborted with `NarAbort`. |
 | `nar.smallBytes` | int | `1048576` | `GRADIENT_NAR_SMALL_BYTES` | Size in bytes up to which a NAR is served through the server on download instead of a presigned S3 URL, and kept in the in-memory cache. Uploads do not depend on it. |
 | `nar.storageOpenTimeoutSecs` | int | `60` | `GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS` | Seconds to wait for a NAR object stream from storage (for example an S3 GET) before answering the worker with `NarAbort`, which the worker retries. |

@@ -109,8 +109,7 @@ impl Actor for SessionActor {
             capabilities,
             authorized_peers,
         } = args;
-        let partial_ttl = Duration::from_secs(state.config.nar.partial_ttl_secs);
-        let uploads = open_uploads(&state, &peer_id, &myself, partial_ttl)
+        let uploads = open_uploads(&state, &peer_id, &myself)
             .map_err(|e| ActorProcessingErr::from(format!("{e:#}")))?;
         let port: Arc<dyn SessionPort> = Arc::new(SessionRef(myself.clone()));
         let registered = match scheduler
@@ -447,16 +446,12 @@ fn open_uploads(
     state: &Arc<ServerState>,
     peer_id: &str,
     myself: &ActorRef<SessionMsg>,
-    partial_ttl: Duration,
 ) -> anyhow::Result<UploadSession> {
     let (admission, mut admitted) = state.upload_admission.open_session(peer_id);
     let uploads = UploadSession {
         admission,
         table: UploadTable::default(),
-        partials: gradient_storage::PartialStore::new(
-            format!("{}/nar-partial", state.config.server.base_dir),
-            partial_ttl,
-        )?,
+        partials: gradient_storage::PartialStore::new(state.config.server.nar_partial_dir())?,
         retain_up_to: state.config.nar.small_bytes,
         idle_lease: Duration::from_secs(state.config.upload.lease_idle_secs),
     };

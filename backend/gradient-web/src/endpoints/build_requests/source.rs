@@ -26,7 +26,6 @@ use gradient_types::{BaseResponse, MUser};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Deserialize)]
 pub struct SourceQuery {
@@ -108,9 +107,9 @@ pub struct SourceFinalize {
 /// Disk-staging store for chunked source uploads. Its own root keeps the
 /// per-user upload keys away from the cache NAR partials.
 fn source_partial_store(state: &ServerState) -> WebResult<PartialStore> {
-    let root = format!("{}/source-upload-partial", state.config.server.base_dir);
-    let ttl = Duration::from_secs(state.config.nar.partial_ttl_secs);
-    Ok(PartialStore::new(root, ttl)?)
+    Ok(PartialStore::new(
+        state.config.server.source_upload_partial_dir(),
+    )?)
 }
 
 /// Client-chosen upload id used as the staging key; rejected when it could
@@ -145,10 +144,6 @@ pub async fn source_chunk(
 
     let store = source_partial_store(&state)?;
     let key = format!("{}/{upload}", user.id);
-    if offset == 0 {
-        let _ = store.gc().await;
-    }
-
     let staged = store.received_len(&key, &upload).await?;
     let received = if offset == 0 || offset == staged {
         store.append(&key, &upload, offset, &body).await?;

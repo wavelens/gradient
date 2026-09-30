@@ -76,10 +76,9 @@ pub struct NarArgs {
     )]
     pub max_concurrent_serves: usize,
 
-    /// TTL in seconds for partially-received relayed uploads (`*.partial`)
-    /// under `<base_dir>/nar-partial`. A periodic sweep deletes partials whose
-    /// last write is older than this so an abandoned resume can't pin disk
-    /// forever. Default 86400 (24 h). Set to 0 to disable the sweep.
+    /// TTL in seconds for unfinished uploads (`*.partial`) staged under
+    /// `<base_dir>`. The deep GC deletes partials whose last write is older
+    /// than this. Default 86400 (24 h). Set to 0 to keep every partial.
     #[arg(
         long = "nar-partial-ttl-secs",
         env = "GRADIENT_NAR_PARTIAL_TTL_SECS",

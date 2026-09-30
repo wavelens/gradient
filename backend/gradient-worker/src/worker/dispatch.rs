@@ -260,10 +260,7 @@ impl DispatchState {
         scorer: JobScorer,
         credentials: CredentialStore,
     ) -> Self {
-        let nar_recv = match gradient_storage::PartialStore::new(
-            config.nar_partial_dir(),
-            std::time::Duration::from_secs(config.nar.partial_ttl_secs),
-        ) {
+        let nar_recv = match gradient_storage::PartialStore::new(config.nar_partial_dir()) {
             Ok(store) => gradient_worker_client::nar_recv::NarReceiver::with_partial_store(store),
             Err(e) => {
                 warn!(error = %e, "failed to init NAR partial dir; downloads will not resume");
