@@ -2101,3 +2101,68 @@ async fn a_reattached_member_is_not_requeued_as_a_single_job() {
     assert_eq!(disconnected.cluster_members.len(), 1);
     assert_eq!(scheduler.pending_job_count().await, 0);
 }
+
+fn eval_reservation(worker: &str) -> crate::cluster::Reservation {
+    crate::cluster::Reservation {
+        placement: crate::cluster::Placement {
+            cluster: gradient_entity::ids::ClusterJobId::now_v7(),
+            seats: vec![crate::cluster::Seat {
+                member: 0,
+                worker: worker.into(),
+            }],
+        },
+        kinds: vec![crate::cluster::SlotKind::Eval],
+        since: std::time::Instant::now(),
+    }
+}
+
+#[tokio::test]
+async fn a_reserved_seat_gets_no_single_job() {
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(ProjectId::now_v7()))
+        .await
+        .unwrap();
+    assert!(scheduler.reserve(eval_reservation("w1")).await);
+
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_none());
+    assert_eq!(scheduler.pending_job_count().await, 1);
+}
+
+#[tokio::test]
+async fn a_released_seat_takes_single_jobs_again() {
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(ProjectId::now_v7()))
+        .await
+        .unwrap();
+    let reservation = eval_reservation("w1");
+    let cluster = reservation.cluster();
+    assert!(scheduler.reserve(reservation).await);
+    scheduler.release_reservation(cluster).await;
+
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_some());
+}
+
+#[tokio::test]
+async fn a_second_reservation_is_refused() {
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    register(&scheduler, "w2", eval_worker_caps(), HashSet::new()).await;
+
+    assert!(scheduler.reserve(eval_reservation("w1")).await);
+    assert!(!scheduler.reserve(eval_reservation("w2")).await);
+}
+
+#[tokio::test]
+async fn a_disconnected_seat_drops_the_reservation() {
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    assert!(scheduler.reserve(eval_reservation("w1")).await);
+
+    scheduler.unregister_worker("w1").await;
+
+    assert!(scheduler.reservation().await.is_none());
+}
