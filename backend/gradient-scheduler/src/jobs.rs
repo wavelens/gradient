@@ -180,7 +180,7 @@ impl PendingJob {
         }
     }
 
-    fn into_job(self) -> Job {
+    pub(crate) fn into_job(self) -> Job {
         match self {
             PendingJob::Eval(j) => Job::Flake(j.job),
             PendingJob::Build(j) => Job::Build(j.job),

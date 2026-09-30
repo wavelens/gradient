@@ -89,6 +89,7 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
                 ),
                 eval_dispatch_spec(scheduler),
                 build::child_spec(scheduler),
+                cluster_dispatch_spec(scheduler),
                 crate::probe::child_spec(&scheduler.state),
             ],
         ),
@@ -164,6 +165,21 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
 }
 
 /// Woken by every created evaluation; the tick covers requeues and restarts.
+fn cluster_dispatch_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
+    let wake = Arc::clone(&scheduler.cluster_wake);
+    let scheduler = Arc::clone(scheduler);
+    ChildSpec::periodic_woken(
+        "cluster-dispatch",
+        DISPATCH_TICK,
+        DISPATCH_BUDGET,
+        wake,
+        move || {
+            let scheduler = Arc::clone(&scheduler);
+            async move { scheduler.plan_clusters().await.map_err(Into::into) }
+        },
+    )
+}
+
 fn eval_dispatch_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
     let wake = Arc::clone(&scheduler.state.eval_dispatch_wake);
     let scheduler = Arc::clone(scheduler);

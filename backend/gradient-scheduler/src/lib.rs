@@ -96,6 +96,10 @@ pub struct Scheduler {
     /// Each in-flight evaluation's last build-phase assessment, reused while
     /// its counters and the pool are unchanged.
     pub(crate) assessments: Arc<std::sync::Mutex<assessment_memo::AssessmentMemo>>,
+    pub(crate) cluster_wake: Arc<tokio::sync::Notify>,
+    pub(crate) prepared:
+        Arc<gradient_util::sync::Mutex<std::collections::HashMap<String, cluster::PreparedMember>>>,
+    pub(crate) attempts: Arc<gradient_util::sync::Mutex<cluster::AttemptBook>>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -121,6 +125,9 @@ impl Scheduler {
             )),
             draining: Arc::new(AtomicBool::new(false)),
             assessments: Arc::default(),
+            cluster_wake: Arc::new(tokio::sync::Notify::new()),
+            prepared: Arc::default(),
+            attempts: Arc::default(),
         }
     }
 
