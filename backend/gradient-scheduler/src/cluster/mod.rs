@@ -8,12 +8,14 @@
 //! cluster is whole, and idle slots are the planner's only capacity view.
 
 pub(crate) mod book;
+mod coordinator;
 mod divert;
 mod matching;
 mod planner;
 mod slots;
 
 pub use book::{ClusterBook, ClusterMember, PendingCluster};
+pub use coordinator::*;
 pub(crate) use divert::{Membership, Route};
 pub use matching::kuhn;
 pub use planner::{Placement, ScoreLookup, Seat, plan};
