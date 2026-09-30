@@ -197,8 +197,7 @@ fn reset_uncached_producers_sql() -> String {
         "UPDATE derivation_build db \
          SET status = {created}, substituted = false, attempt = 0, \
              updated_at = (now() AT TIME ZONE 'UTC') \
-         FROM derivation_build old \
-         WHERE old.id = db.id AND db.derivation = ANY($1::uuid[]) \
+         WHERE db.derivation = ANY($1::uuid[]) \
            AND db.status IN ({terminal_success}) AND NOT db.fetchable \
          RETURNING db.derivation, old.status AS from_status, db.status AS to_status",
         created = crate::status_sql::build(gradient_entity::build::BuildStatus::Created),
