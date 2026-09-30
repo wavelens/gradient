@@ -24,6 +24,7 @@ use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use tracing::instrument;
 
+pub use commit_info::HeadCommit;
 pub use remote::{accept_cert, fetch_options_with_ssh};
 
 #[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
@@ -47,6 +48,20 @@ pub async fn get_commit_info(
     TaskGitContext::new(ctx, task)
         .await?
         .commit_info(commit_hash)
+        .await
+}
+
+/// The tip of `branch` (the remote HEAD when `None`) with its commit metadata, in
+/// one shallow fetch. Reads nothing from the database beyond the deploy key.
+#[instrument(skip(ctx), fields(task_id = %task.id, task_name = %task.name))]
+pub async fn head_commit(
+    ctx: &DbContext,
+    task: &MTask,
+    branch: Option<&str>,
+) -> Result<HeadCommit, SourceError> {
+    TaskGitContext::new(ctx, task)
+        .await?
+        .head_commit(branch)
         .await
 }
 

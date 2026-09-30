@@ -172,3 +172,46 @@ fn read_head_from_pktlines_server_keeps_connection_open() {
     drop(stream);
     server.join().unwrap();
 }
+
+// ── fetch_head_commit ────────────────────────────────────────────────────
+
+fn commit_on(repo: &git2::Repository, branch: &str, message: &str) -> git2::Oid {
+    let sig = git2::Signature::now("Ada", "ada@example.com").unwrap();
+    let tree = repo
+        .find_tree(repo.index().unwrap().write_tree().unwrap())
+        .unwrap();
+    let parent = repo
+        .find_reference(&format!("refs/heads/{branch}"))
+        .ok()
+        .and_then(|r| r.peel_to_commit().ok());
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    repo.commit(
+        Some(&format!("refs/heads/{branch}")),
+        &sig,
+        &sig,
+        message,
+        &tree,
+        &parents,
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_head_commit_is_the_tip_of_the_ref_asked_for() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    commit_on(&repo, "main", "first");
+    let main = commit_on(&repo, "main", "second\n\nbody");
+    let feature = commit_on(&repo, "feature", "on feature");
+    let url = format!("file://{}", dir.path().display());
+
+    let head = super::commit_info::fetch_head_commit(&url, None, None).unwrap();
+    assert_eq!(head.hash, main.as_bytes());
+    assert_eq!(head.message, "second");
+    assert_eq!(head.author_name, "Ada");
+    assert_eq!(head.author_email.as_deref(), Some("ada@example.com"));
+
+    let branch = super::commit_info::fetch_head_commit(&url, None, Some("feature")).unwrap();
+    assert_eq!(branch.hash, feature.as_bytes());
+}
