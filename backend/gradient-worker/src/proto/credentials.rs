@@ -56,8 +56,34 @@ impl CredentialStore {
     }
 
     /// Clear all stored credentials (called after a job completes).
+    /// A detached copy: later `store` / `clear` calls on `self` leave it as is.
+    pub fn snapshot(&self) -> Self {
+        let store = Self::new();
+        if let Some(key) = self.ssh_key() {
+            store.store(CredentialKind::SshKey, key.expose().to_vec());
+        }
+        store
+    }
+
     pub fn clear(&self) {
         let mut inner = self.inner.lock();
         inner.ssh_key = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_snapshot_keeps_its_key_after_the_store_moves_on() {
+        let store = CredentialStore::new();
+        store.store(CredentialKind::SshKey, b"p1".to_vec());
+
+        let held = store.snapshot();
+        store.clear();
+        store.store(CredentialKind::SshKey, b"p2".to_vec());
+
+        assert_eq!(held.ssh_key().expect("kept").expose(), b"p1");
     }
 }

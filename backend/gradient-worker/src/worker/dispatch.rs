@@ -358,7 +358,7 @@ impl DispatchState {
                 self.on_abort_cluster(attempt, reason).await?;
             }
             ServerMessage::AbortJob { job_id, reason } => {
-                self.on_abort_job(job_id, reason).await;
+                self.on_abort_job(job_id, reason).await?;
             }
             ServerMessage::Credential { kind, data } => {
                 self.on_credential(kind, data);
@@ -662,6 +662,7 @@ impl DispatchState {
                 dispatch,
                 job,
                 kind: kind.clone(),
+                credentials: self.credentials.snapshot(),
             };
             let accepted = self.holds.hold(membership, held, std::time::Instant::now());
             info!(%job_id, %attempt, accepted, "cluster member assigned - holding its slot");
@@ -688,7 +689,15 @@ impl DispatchState {
             })
             .await?;
 
-        self.spawn_job(job_id.clone(), kind.clone(), dispatch, job, None);
+        let credentials = self.credentials.clone();
+        self.spawn_job(
+            job_id.clone(),
+            kind.clone(),
+            dispatch,
+            job,
+            None,
+            credentials,
+        );
 
         if active_count + 1 < max {
             self.writer.send(ClientMessage::RequestJob { kind }).await?;
@@ -704,13 +713,13 @@ impl DispatchState {
         dispatch: String,
         job: Job,
         cluster: Option<String>,
+        credentials: CredentialStore,
     ) {
         let (dispatch, abort_rx, timeline) =
             self.jobs.register(job_id.clone(), kind, dispatch, cluster);
 
         let executor = self.executor.clone();
         let job_store = Arc::clone(&executor.store);
-        let credentials = self.credentials.clone();
         let job_writer = self.writer.clone();
         let job_cache_waiters = Arc::clone(&self.cache_waiters);
         let job_known_derivation_waiters = Arc::clone(&self.known_derivation_waiters);
@@ -759,6 +768,7 @@ impl DispatchState {
             held.dispatch,
             held.job,
             Some(attempt),
+            held.credentials,
         );
 
         Ok(())
@@ -798,12 +808,23 @@ impl DispatchState {
         Ok(())
     }
 
-    async fn on_abort_job(&mut self, job_id: String, reason: String) {
+    async fn on_abort_job(&mut self, job_id: String, reason: String) -> Result<()> {
         warn!(%job_id, %reason, "job aborted by server");
+        if let Some(held) = self.holds.drop_job(&job_id) {
+            let kind = held.kind.clone();
+            self.report_released(vec![held], "aborted by server")
+                .await?;
+            if !self.draining {
+                self.writer.send(ClientMessage::RequestJob { kind }).await?;
+            }
+            return Ok(());
+        }
         if !self.jobs.abort(&job_id) {
             debug!(%job_id, "abort for a job this session does not run");
         }
         self.uploads.cancel_job(&job_id).await;
+
+        Ok(())
     }
 
     // ── Credentials ───────────────────────────────────────────────────────────
