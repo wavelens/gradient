@@ -64,7 +64,7 @@ pub fn aging_step(
     policy: &AgingPolicy,
 ) -> AgingStep {
     match &snapshot.reservation {
-        Some(held) => held_step(snapshot, held, at, policy),
+        Some(held) => held_step(snapshot, held, now, at, policy),
         None => reserve_step(snapshot, now, at, policy),
     }
 }
@@ -79,19 +79,36 @@ pub fn hide_reserved(snapshot: &mut ClusterSnapshot) {
 fn held_step(
     snapshot: &ClusterSnapshot,
     held: &Reservation,
+    now: NaiveDateTime,
     at: Instant,
     policy: &AgingPolicy,
 ) -> AgingStep {
-    let cluster_waiting = snapshot.clusters.iter().any(|c| c.id == held.cluster());
-    let seats_connected = held.seats().all(|seat| has_slot(&snapshot.connected, seat));
-    if !cluster_waiting || !seats_connected || at.duration_since(held.since) >= policy.timeout {
+    let Some(cluster) = snapshot.clusters.iter().find(|c| c.id == held.cluster()) else {
+        return AgingStep::Expire;
+    };
+    if !held.seats().all(|seat| has_slot(&snapshot.connected, seat)) {
         return AgingStep::Expire;
     }
-    if held.seats().all(|seat| has_slot(&snapshot.slots, seat)) {
-        return AgingStep::Commit(held.placement.clone());
+    if at.duration_since(held.since) >= policy.timeout {
+        return match reserve_step(snapshot, now, at, policy) {
+            AgingStep::Reserve(renewed) => AgingStep::Reserve(renewed),
+            _ => AgingStep::Expire,
+        };
+    }
+    if !held.seats().all(|seat| has_slot(&snapshot.slots, seat)) {
+        return AgingStep::Keep;
     }
 
-    AgingStep::Keep
+    let seats: Vec<Slot> = snapshot
+        .slots
+        .iter()
+        .filter(|s| held.seats_worker(&s.worker))
+        .cloned()
+        .collect();
+    match plan(cluster, &seats, &snapshot.scores) {
+        Some(placement) => AgingStep::Commit(placement),
+        None => AgingStep::Expire,
+    }
 }
 
 fn reserve_step(
@@ -306,12 +323,27 @@ mod tests {
     }
 
     #[test]
-    fn an_old_reservation_expires() {
+    fn an_old_reservation_is_planned_again() {
         let c = cluster(2, 700, false);
         let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
         let mut r = reserved(step(&s));
         r.since = Instant::now() - Duration::from_secs(1801);
         s.reservation = Some(r);
+
+        let AgingStep::Reserve(renewed) = step(&s) else {
+            panic!("a timed-out reservation is planned again");
+        };
+        assert!(Instant::now().duration_since(renewed.since) < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_seat_that_can_no_longer_run_its_member_expires_the_reservation() {
+        let c = cluster(2, 700, false);
+        let mut s = snapshot(vec![c], &[], &["w1", "w2"]);
+        s.reservation = Some(reserved(step(&s)));
+        let mut unfit = slot("w1");
+        unfit.caps.capabilities.eval = false;
+        s.slots = vec![unfit, slot("w2")];
 
         assert!(matches!(step(&s), AgingStep::Expire));
     }
