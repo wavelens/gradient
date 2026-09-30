@@ -106,6 +106,16 @@ A member's `JobCompleted` or `JobFailed` releases its job but holds the build or
 - Retries are bounded by `cluster_job.retry_budget`, not by the per-evaluation dispatch budget.
 - A member lost with its worker, or reaped after an unconfirmed abort, reports into the same verdict.
 
+## Aging Reservations
+
+A ready cluster that finds no simultaneously idle workers for `scheduler.clusterReserveAfterSecs` (600 s) reserves a placement instead of waiting for them to line up by chance.
+
+- Target: the planner's match over every connected eligible worker, idle workers seated first.
+- Seats: a reserved worker keeps its running jobs but gets no new single job of the reserved kind.
+- Commit: once every seat is idle, the reservation commits like an ordinary placement.
+- One at a time: only one cluster holds a reservation; other clusters plan over the unreserved idle workers.
+- Release: after `scheduler.clusterReserveTimeoutSecs` (1800 s), when a seat's worker disconnects, or when the cluster leaves the queue. The next planning pass reserves again.
+
 ## Related
 
 - [Build Anchors](build-anchors.md)
