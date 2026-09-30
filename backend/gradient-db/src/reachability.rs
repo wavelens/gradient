@@ -24,6 +24,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, QueryFilter,
     QuerySelect, TransactionTrait, Value,
 };
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 /// Whether an evaluation still names an anchor it is waiting for.
@@ -245,6 +246,40 @@ pub async fn producers_of_hashes<C: ConnectionTrait>(
         .iter()
         .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
         .map(DerivationId::new)
+        .collect())
+}
+
+crate::sql! {
+    /// The reserved `build-request` task is always signable, whatever its
+    /// `sign_cache` flag: the client that submitted it must substitute its outputs.
+    PRIVATE_OUTPUT_HASHES = "SELECT do_.hash FROM derivation_output do_ \
+             JOIN derivation d ON d.id = do_.derivation \
+             JOIN build_job b ON b.derivation = d.id \
+             JOIN evaluation e ON e.id = b.evaluation \
+             JOIN task p ON p.id = e.task \
+             WHERE do_.hash = ANY($1) \
+             GROUP BY do_.hash HAVING NOT bool_or(p.sign_cache OR p.name = 'build-request')",
+        params = [CachedPathHashes(64)];
+}
+
+/// The hashes among `hashes` that some task produces and every producing task
+/// keeps out of its caches (`sign_cache = false`): a `.drv`, a source or a direct
+/// upload has no producing task and is signed.
+pub async fn private_output_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<HashSet<String>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let rows = db
+        .query_all_raw(PRIVATE_OUTPUT_HASHES.bind([hashes.to_vec().into()]))
+        .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "hash").ok())
         .collect())
 }
 

@@ -198,7 +198,7 @@ impl Graph {
     }
 
     /// Record a NAR already in storage: the `cached_path` row, its references,
-    /// signature placeholders and the outputs it backs, in one transaction.
+    /// its signatures and the outputs it backs, in one transaction.
     pub async fn commit_nar(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -206,6 +206,7 @@ impl Graph {
                 cached_path: gradient_types::ids::CachedPathId::now_v7(),
                 created: true,
                 outputs_marked: 0,
+                signed: Vec::new(),
             });
         }
         let committed = self
@@ -384,11 +385,19 @@ pub(crate) mod test_ctx {
 
     /// A context over `db`, plus the pool handle its transaction log is read from.
     pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
+        ctx_with_crypt_file(db, "test-secret").await
+    }
+
+    /// [`ctx`] reading its crypt secret from `crypt_file`, for a test that signs.
+    pub(crate) async fn ctx_with_crypt_file(
+        db: DatabaseConnection,
+        crypt_file: &str,
+    ) -> (DbContext, WorkerDb) {
         let dir = std::env::temp_dir().join(format!("gradient-graph-{}", uuid::Uuid::now_v7()));
         let cli = Cli::try_parse_from([
             "gradient-server",
             "--secrets-crypt-file",
-            "test-secret",
+            crypt_file,
             "--secrets-jwt-file",
             "test-jwt",
             "--serve-url",

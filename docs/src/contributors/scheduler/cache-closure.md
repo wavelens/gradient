@@ -37,7 +37,7 @@ Runtime edges live in `derivation_dependency` next to build edges (`EdgeKind::Ru
 4. `seed_runtime_deps` (`gradient-db/src/runtime_readiness.rs`): an absolute recount of the producers. A path without a NAR before is `freshly_present`; a re-push of a backed path is only recounted.
 5. Anchors that became whole: `ripple_anchors_whole` counts down their runtime dependents, one statement per level, then `became_fetchable` flips `fetchable` and moves `unready_deps`.
 6. Anchors that a new edge into a missing path un-wholed: `ripple_anchors_unwhole`, then `lost_fetchability`.
-7. Queue a `cached_path_signature` placeholder per target cache and mark matching `derivation_output` rows cached.
+7. Write a `cached_path_signature` row per target cache, signed with the cache's key (unsigned when the key is missing or every producing task keeps the path private), and mark matching `derivation_output` rows cached.
 
 - **Transitions only:** a ripple starts from rows the seed reports as flipped. Rippling from a state drives a counter below zero, and a negative counter never reads `= 0` again.
 - **Deadlocks:** the actor retries a transaction that fails with `40P01` or `40001` up to `GRAPH_TX_ATTEMPTS` (3) times (`gradient-graph/src/actor.rs`).

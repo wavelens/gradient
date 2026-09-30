@@ -7,15 +7,11 @@
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
 use gradient_graph::{NarCommit, SignTargets};
+use gradient_types::events::cache::NarSigned;
 use gradient_types::ids::ProjectId;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Select};
 use tracing::warn;
-
-/// Paths signed at once. The graph commits NARs in batches and every uploader of a
-/// batch resumes together, so without a bound a batch lands on the pool as one
-/// burst and starves the sessions' dispatch claims behind it.
-static SIGNING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
@@ -92,25 +88,11 @@ pub(super) async fn mark_nar_stored(
         })
         .await?;
 
-    // Sign this specific path in place so its narinfo is servable immediately,
-    // rather than waking a whole-table sweep. Placeholder rows only exist when a
-    // cache took it (ProjectCaches); the periodic sweep stays the backfill.
-    if project_id.is_some() {
-        let _slot = SIGNING.acquire().await;
-        crate::signing::sign_cached_path(
-            &state.worker_db,
-            &state.events,
-            &state.config.secrets.crypt_file,
-            &state.config.server.serve_url,
-            crate::signing::SignRequest {
-                cached_path: committed.cached_path,
-                store_path,
-                nar_hash: record.nar_hash,
-                nar_size: record.nar_size,
-                references: record.references,
-            },
-        )
-        .await;
+    for cache in committed.signed {
+        state.events.publish(NarSigned {
+            cache,
+            hash: hash.to_owned(),
+        });
     }
 
     Ok(())

@@ -6,13 +6,10 @@
 
 //! Periodic backfill that signs `cached_path_signature` placeholder rows.
 //!
-//! NAR uploads and new cache subscriptions insert `cached_path_signature`
-//! rows with `signature = NULL` - "this (path, cache) pair needs a
-//! signature". A freshly uploaded NAR is signed in place by the proto upload
-//! handler (`sign_cached_path`); this periodic pass is the backfill that
-//! catches subscription placeholders and any row a commit left NULL. It walks
-//! the pending rows, computes narinfo signatures with the cache's private key,
-//! and fills them in.
+//! A NAR commit signs its rows as it writes them; a new cache subscription
+//! inserts rows with `signature = NULL`, and so does a commit whose cache key was
+//! missing. This periodic pass walks the pending rows, computes narinfo
+//! signatures with the cache's private key, and fills them in.
 
 use gradient_core::ServerState;
 use gradient_sources::CacheSigner;
@@ -82,20 +79,6 @@ async fn reconcile_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()>
     Ok(())
 }
 
-/// Skip a `cached_path` iff every producing task has `sign_cache=false`
-/// and at least one such task exists. Paths absent from `producers`
-/// (i.e. not produced by any task - `.drv` files, direct builds) are
-/// signed normally.
-pub(crate) fn compute_skipped_cached_paths(
-    producers: &HashMap<CachedPathId, Vec<bool>>,
-) -> HashSet<CachedPathId> {
-    producers
-        .iter()
-        .filter(|(_, flags)| !flags.is_empty() && flags.iter().all(|f| !f))
-        .map(|(id, _)| *id)
-        .collect()
-}
-
 /// One pass: sign every pending `cached_path_signature` row. Errors on
 /// individual rows are logged and skipped.
 pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<()> {
@@ -144,8 +127,13 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         .map(|c| (c.id, c))
         .collect();
 
-    let producers = load_producing_task_flags(&state, &cached_paths).await?;
-    let skipped: HashSet<CachedPathId> = compute_skipped_cached_paths(&producers);
+    let hashes: Vec<String> = cached_paths.values().map(|cp| cp.hash.clone()).collect();
+    let private = gradient_db::private_output_hashes(&state.worker_db, &hashes).await?;
+    let skipped: HashSet<CachedPathId> = cached_paths
+        .values()
+        .filter(|cp| private.contains(&cp.hash))
+        .map(|cp| cp.id)
+        .collect();
 
     // Build a per-cache signer once (one crypt-secret read + one private-key
     // decryption per cache, not per row). `None` marks caches whose key
@@ -225,65 +213,6 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     Ok(())
 }
 
-gradient_db::sql! {
-    /// The reserved per-project `build-request` task backing `gradient build`
-    /// is always signable regardless of its `sign_cache` flag - its outputs
-    /// must be substitutable by the submitting client. Keyed on the reserved
-    /// name (BUILD_REQUEST_TASK_NAME), not `managed`, which also marks
-    /// nix-state-declared tasks that may legitimately set sign_cache=false.
-    PRODUCING_TASK_FLAGS = r#"
-            SELECT do_.hash AS hash,
-                   (p.sign_cache OR p.name = 'build-request') AS sign_cache
-            FROM derivation_output do_
-            JOIN derivation d   ON d.id = do_.derivation
-            JOIN build_job b    ON b.derivation = d.id
-            JOIN evaluation e   ON e.id = b.evaluation
-            JOIN task p      ON p.id = e.task
-            WHERE do_.hash = ANY($1)
-        "#,
-        params = [CachedPathHashes(64)];
-}
-
-/// Loads, for every cached_path in `cached_paths`, the `sign_cache` flag of
-/// every task that produced a matching `derivation_output`. Cached_paths
-/// whose hash matches no `derivation_output` (e.g. `.drv` files) are absent
-/// from the returned map - that means "no producing task, sign normally".
-async fn load_producing_task_flags(
-    state: &Arc<ServerState>,
-    cached_paths: &HashMap<CachedPathId, MCachedPath>,
-) -> anyhow::Result<HashMap<CachedPathId, Vec<bool>>> {
-    use sea_orm::FromQueryResult;
-
-    let mut out: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
-    if cached_paths.is_empty() {
-        return Ok(out);
-    }
-
-    let cp_by_hash: HashMap<&str, CachedPathId> = cached_paths
-        .values()
-        .map(|cp| (cp.hash.as_str(), cp.id))
-        .collect();
-    let hashes: Vec<String> = cp_by_hash.keys().map(|s| s.to_string()).collect();
-
-    #[derive(FromQueryResult)]
-    struct Row {
-        hash: String,
-        sign_cache: bool,
-    }
-
-    let rows = Row::find_by_statement(PRODUCING_TASK_FLAGS.bind([hashes.into()]))
-        .all(&state.worker_db)
-        .await?;
-
-    for r in rows {
-        if let Some(&id) = cp_by_hash.get(r.hash.as_str()) {
-            out.entry(id).or_default().push(r.sign_cache);
-        }
-    }
-
-    Ok(out)
-}
-
 #[cfg(test)]
 mod orphan_claim_tests {
     use super::RECONCILE_ORPHAN_CLAIMS;
@@ -297,36 +226,6 @@ mod orphan_claim_tests {
         assert!(
             sql.contains("t.sign_cache"),
             "a task that opted out of signing must not be handed a claim"
-        );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cp(id: u128) -> CachedPathId {
-        CachedPathId::new(uuid::Uuid::from_u128(id))
-    }
-
-    #[test]
-    fn skip_when_all_producing_tasks_private() {
-        let mut producers: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
-        producers.insert(cp(1), vec![false, false]);
-        producers.insert(cp(2), vec![false, true]);
-        producers.insert(cp(3), vec![true]);
-
-        let skipped = compute_skipped_cached_paths(&producers);
-
-        assert!(
-            skipped.contains(&cp(1)),
-            "private-only path must be skipped"
-        );
-        assert!(!skipped.contains(&cp(2)), "mixed path must be signed");
-        assert!(!skipped.contains(&cp(3)), "public-only path must be signed");
-        assert!(
-            !skipped.contains(&cp(4)),
-            "orphan (absent from map) must be signed"
         );
     }
 }

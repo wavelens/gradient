@@ -114,7 +114,7 @@ pub use self::reachability::{
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
     derivations_with_hashes, eval_any_anchor_failed, eval_blocked, evals_referencing_derivation,
     evals_referencing_derivations, inherit_names, pending_orphan_frontier, pending_orphans_among,
-    producers_of_hashes,
+    private_output_hashes, producers_of_hashes,
 };
 pub use self::readiness::{
     AnchorLock, DemandMoved, Repaired, SeedLock, SettledDemand, advance_fetchable,

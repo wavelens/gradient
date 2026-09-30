@@ -20,6 +20,7 @@ use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar_reader};
 use gradient_storage::PartialStore;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
+use gradient_types::events::cache::NarSigned;
 use gradient_types::*;
 use serde::Deserialize;
 use serde_json::json;
@@ -167,7 +168,12 @@ pub async fn nars_upload(
     permit.committed();
     let _ = upload_store.discard(&stage_key).await;
 
-    sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
+    for cache in outcome.signed {
+        state.events.publish(NarSigned {
+            cache,
+            hash: narinfo_hash(&narinfo.store_path),
+        });
+    }
 
     audit_record(
         &state,
@@ -196,27 +202,14 @@ pub async fn nars_upload(
     ))
 }
 
-/// Sign the freshly ingested path in place so its narinfo is servable
-/// immediately, rather than lagging until the periodic sweep runs.
-async fn sign_uploaded_path(
-    state: &ServerState,
-    narinfo: &NarinfoPart,
-    cached_path: gradient_types::ids::CachedPathId,
-) {
-    gradient_proto::signing::sign_cached_path(
-        &state.web_db,
-        &state.events,
-        &state.config.secrets.crypt_file,
-        &state.config.server.serve_url,
-        gradient_proto::signing::SignRequest {
-            cached_path,
-            store_path: &narinfo.store_path,
-            nar_hash: &narinfo.nar_hash,
-            nar_size: narinfo.nar_size,
-            references: &narinfo.references,
-        },
-    )
-    .await;
+fn narinfo_hash(store_path: &str) -> String {
+    store_path
+        .strip_prefix("/nix/store/")
+        .unwrap_or(store_path)
+        .split('-')
+        .next()
+        .unwrap_or("")
+        .to_owned()
 }
 
 #[derive(Deserialize)]
@@ -415,7 +408,12 @@ pub async fn nar_finalize(
     permit.committed();
     let _ = store.discard(&key).await;
 
-    sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
+    for cache in outcome.signed {
+        state.events.publish(NarSigned {
+            cache,
+            hash: narinfo_hash(&narinfo.store_path),
+        });
+    }
 
     audit_record(
         &state,
