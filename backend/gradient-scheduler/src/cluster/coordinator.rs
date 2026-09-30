@@ -105,6 +105,7 @@ impl AttemptBook {
             return Acceptance::Waiting;
         }
 
+        state.started = true;
         Acceptance::AllAccepted {
             cluster: state.cluster,
             attempt,
@@ -117,6 +118,15 @@ impl AttemptBook {
         if let Some(state) = self.attempts.get_mut(&attempt) {
             state.started = true;
         }
+    }
+
+    /// The attempt `job_id` is a member of, while it has not started yet.
+    pub fn preparing(&self, job_id: &str) -> Option<ClusterAttemptId> {
+        let attempt = self.attempt_of(job_id)?;
+        self.attempts
+            .get(&attempt)
+            .filter(|s| !s.started)
+            .map(|_| attempt)
     }
 
     pub fn take(&mut self, attempt: ClusterAttemptId) -> Option<AttemptState> {
@@ -235,6 +245,16 @@ mod tests {
 
         assert_eq!(book.overdue(now + Duration::from_secs(1)), vec![attempt]);
         book.mark_started(attempt);
+        assert!(book.overdue(now + Duration::from_secs(1)).is_empty());
+    }
+
+    #[test]
+    fn an_attempt_every_member_accepted_is_never_overdue() {
+        let now = Instant::now();
+        let (mut book, _) = book(now);
+        book.accept("build:a");
+        book.accept("build:b");
+
         assert!(book.overdue(now + Duration::from_secs(1)).is_empty());
     }
 

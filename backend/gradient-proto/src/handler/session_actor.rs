@@ -268,6 +268,13 @@ impl Actor for SessionActor {
             }
             SessionMsg::Signal(SessionSignal::AbortCluster { attempt, reason }) => {
                 info!(peer_id = %st.peer_id, %attempt, %reason, "sending AbortCluster to worker");
+                if let Ok(id) = attempt.parse() {
+                    let members = st.active.remove_attempt(id);
+                    let (mut ctx, uploads) = split_uploads(st);
+                    for job_id in &members {
+                        ctx.forget_uploads(job_id, uploads).await;
+                    }
+                }
                 let msg = ServerMessage::AbortCluster { attempt, reason };
                 if send_server_msg(&st.writer, &msg).await.is_err() {
                     myself.stop(Some("write failed".into()));

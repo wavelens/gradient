@@ -83,6 +83,23 @@ impl ActiveJobs {
         }
     }
 
+    /// Drop every member of `attempt`; their rows closed with the attempt.
+    pub(crate) fn remove_attempt(
+        &self,
+        attempt: gradient_types::ids::ClusterAttemptId,
+    ) -> Vec<String> {
+        let mut jobs = self.0.lock();
+        let members: Vec<String> = jobs
+            .iter()
+            .filter(|(_, job)| job.cluster == Some(attempt))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &members {
+            jobs.remove(id);
+        }
+        members
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.0.lock().len()
     }
@@ -328,7 +345,12 @@ impl<'a> DispatchContext<'a> {
             } => {
                 self.forget_uploads(&job_id, uploads).await;
                 self.logs.flush().await;
-                if let Some(dispatch) = self.owned(&job_id, &dispatch) {
+                if self.owned(&job_id, &dispatch).is_some()
+                    && self.scheduler.cluster_member_released(&job_id).await
+                {
+                    info!(peer_id = %self.peer_id, %job_id, %error, "held cluster member released before its start");
+                    self.active.remove(&job_id);
+                } else if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
                     self.active.remove(&job_id);
                     self.scheduler.record_job_timeline(
@@ -998,6 +1020,25 @@ pub(in crate::handler) mod fixture {
     use tokio::sync::mpsc;
 
     pub(in crate::handler) const JOB: &str = "j1";
+
+    #[test]
+    fn an_aborted_attempt_leaves_only_its_members_session() {
+        let attempt = gradient_types::ids::ClusterAttemptId::now_v7();
+        let job = |cluster| ActiveJob {
+            dispatch: DispatchedJobId::now_v7(),
+            pending: pending_eval(),
+            cluster,
+        };
+        let active = ActiveJobs::from(HashMap::from([
+            ("member".to_owned(), job(Some(attempt))),
+            ("single".to_owned(), job(None)),
+        ]));
+
+        assert_eq!(active.remove_attempt(attempt), vec!["member".to_owned()]);
+
+        assert!(!active.contains("member"));
+        assert!(active.contains("single"));
+    }
 
     pub(in crate::handler) fn pending_eval() -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
