@@ -25,10 +25,16 @@ describe('BoardLayoutComponent', () => {
     expect(tabs(true)).toContain('System Health');
   });
 
+  it('places Storage right after Cache', () => {
+    const shown = tabs(true);
+    expect(shown[shown.indexOf('Cache') + 1]).toBe('Storage');
+  });
+
   /// The health endpoint answers superusers only; a tab that can only fail is gone.
   it('hides System Health from everyone else', () => {
     const shown = tabs(false);
     expect(shown).not.toContain('System Health');
+    expect(shown).not.toContain('Storage');
     expect(shown).toContain('Workers');
   });
 });

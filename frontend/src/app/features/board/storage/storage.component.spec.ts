@@ -43,13 +43,28 @@ describe('BoardStorageComponent', () => {
     expect(getStorage).toHaveBeenLastCalledWith(24);
   });
 
+  it('puts every chart on one axis spanning the whole window', () => {
+    const errors = {
+      label: 'get/error',
+      points: [{ bucket_start: new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString(), count: 3, avg: 1, max: 1 }],
+    };
+    getStorage.mockReturnValueOnce(of({ ...EMPTY, op_errors: [errors] }));
+    fixture.componentInstance.select(1);
+    const c = fixture.componentInstance;
+
+    expect(c.categories()).toHaveLength(60);
+    expect(c.errors()[0].data).toHaveLength(60);
+    expect(c.errors()[0].data.at(-1)).toBe(3);
+    expect(c.errors()[0].data.slice(0, -1).every((v) => v === 0)).toBe(true);
+  });
+
   it('labels buckets by granularity', () => {
     const c = fixture.componentInstance;
-    const at = ['2026-09-29T15:04:00+00:00'];
+    const at = Date.parse('2026-09-29T15:04:00Z');
     const labelAs = (granularity: BoardStorage['granularity']) => {
-      c.stats.set({ ...EMPTY, granularity });
+      c.view.set({ stats: { ...EMPTY, granularity }, buckets: [at] });
 
-      return c.labels(at);
+      return c.categories();
     };
 
     expect(labelAs('minute')).toEqual(['15:04']);

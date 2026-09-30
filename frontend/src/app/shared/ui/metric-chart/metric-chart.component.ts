@@ -85,6 +85,7 @@ export class MetricChartComponent implements OnDestroy {
   yAxisTitle = input('');
   valueFormatter = input<((value: number) => string) | undefined>(undefined);
   secondary = input<MetricChartConfig['secondary']>(undefined);
+  inset = input<MetricChartConfig['inset']>(undefined);
 
   private host = viewChild.required<ElementRef<HTMLElement>>('host');
   private chart?: echarts.ECharts;
@@ -124,6 +125,7 @@ export class MetricChartComponent implements OnDestroy {
       yAxisTitle: this.yAxisTitle(),
       valueFormatter: this.valueFormatter(),
       secondary: this.secondary(),
+      inset: this.inset(),
     }, resolveChartTheme());
   }
 }

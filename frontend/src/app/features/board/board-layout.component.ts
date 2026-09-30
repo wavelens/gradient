@@ -24,12 +24,14 @@ import { AuthService } from '@core/services/auth.service';
         <a routerLink="durations" routerLinkActive="active">Durations</a>
         <a routerLink="workers" routerLinkActive="active">Workers</a>
         <a routerLink="cache" routerLinkActive="active">Cache</a>
+        @if (superuser()) {
+          <a routerLink="storage" routerLinkActive="active">Storage</a>
+        }
         <a routerLink="network" routerLinkActive="active">Network</a>
         <a routerLink="expensive" routerLinkActive="active">Jobs</a>
         <a routerLink="expensive-evals" routerLinkActive="active">Evals</a>
         @if (superuser()) {
           <a routerLink="health" routerLinkActive="active">System Health</a>
-          <a routerLink="storage" routerLinkActive="active">Storage</a>
         }
       </nav>
       <router-outlet></router-outlet>
