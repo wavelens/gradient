@@ -81,7 +81,6 @@ fn callbacks(ssh_creds: Option<(String, String)>) -> RemoteCallbacks<'static> {
 }
 
 impl TaskGitContext<'_> {
-    #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name))]
     pub(super) async fn head_commit(
         &self,
         branch: Option<&str>,
