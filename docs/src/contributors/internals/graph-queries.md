@@ -59,15 +59,15 @@ All edge indexes are covering: walks are index-only. The GC freshness seed's cut
 
 ## Counter Ripples
 
-A ripple level moves `missing_runtime_deps` one level up in three statements:
+A ripple moves `missing_runtime_deps` (or `derivation.unwalked_inputs`) up the graph in one call of a SQL function (`ripple_missing_runtime_deps`, `ripple_unwalked_inputs`), each level in three steps inside it:
 
 ```mermaid
 flowchart LR
-    a["RUNTIME_DEPENDENT_COUNTS<br/>read dependents + edge counts"] --> b["lock_anchors<br/>in derivation order"]
-    b --> c["COUNT_DOWN_RUNTIME / COUNT_UP_RUNTIME<br/>unnest of the bound set"]
+    a["read dependents + edge counts<br/>of the level"] --> b["advisory keys, then rows<br/>in derivation order"]
+    b --> c["update by the bound set<br/>next level = the rows that flipped"]
 ```
 
-Deriving the set inside the update left the planner without a small driver: a sequential scan of `cached_path` that took row locks in physical order and deadlocked NAR commits against maintenance about every six minutes. Locking the bound set in `derivation` order first removes both.
+Deriving the set inside the update left the planner without a small driver: a sequential scan of `cached_path` that took row locks in physical order and deadlocked NAR commits against maintenance about every six minutes. Locking the bound set in `derivation` order first removes both. A level per statement then cost the batch that walked the bootstrap leaves 163 round trips, which the function folds into one.
 
 ## Instance Metrics
 
