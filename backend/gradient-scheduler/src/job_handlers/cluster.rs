@@ -88,18 +88,20 @@ impl Scheduler {
         hide_reserved(&mut snapshot);
         let reserved = snapshot.reservation.as_ref().map(Reservation::cluster);
         let mut slots = snapshot.slots;
-        let mut committed = false;
+        let mut seated: Vec<String> = Vec::new();
         for cluster in snapshot.clusters.iter().filter(|c| Some(c.id) != reserved) {
             let Some(placement) = crate::cluster::plan(cluster, &slots, &snapshot.scores) else {
                 continue;
             };
             slots.retain(|s| !placement.seats.iter().any(|seat| seat.worker == s.worker));
-            self.commit(placement).await;
-            committed = true;
+            let workers: Vec<String> = placement.seats.iter().map(|s| s.worker.clone()).collect();
+            if self.commit(placement).await {
+                seated.extend(workers);
+            }
         }
-        if !committed {
-            self.age(&aging).await;
-        }
+        let mut aging = aging;
+        aging.slots.retain(|s| !seated.contains(&s.worker));
+        self.age(&aging).await;
 
         Ok(())
     }
@@ -123,17 +125,25 @@ impl Scheduler {
                 }
             }
             AgingStep::Reserve(reservation) => {
+                if let Some(held) = &snapshot.reservation
+                    && held.cluster() != reservation.cluster()
+                {
+                    self.release_reservation(held.cluster()).await;
+                }
                 self.reserve(reservation).await;
             }
-            AgingStep::Commit(placement) => self.commit(placement).await,
+            AgingStep::Commit(placement) => {
+                self.commit(placement).await;
+            }
         }
     }
 
-    pub(crate) async fn commit(&self, placement: Placement) {
+    /// `true` when the placement's workers were taken for the attempt.
+    pub(crate) async fn commit(&self, placement: Placement) -> bool {
         let attempt = ClusterAttemptId::now_v7();
         let Some(Committing { cluster, seats }) = self.take_placement(placement, attempt).await
         else {
-            return;
+            return false;
         };
         let cluster_id = cluster.id;
         // Owned by the book from here on: a pass dropped mid-commit still
@@ -164,6 +174,8 @@ impl Scheduler {
                 self.back_off(attempt).await;
             }
         }
+
+        true
     }
 
     fn open_attempt(
