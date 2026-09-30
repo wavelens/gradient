@@ -329,7 +329,7 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     }
 }
 
-fn visible_to(
+pub(crate) fn visible_to(
     job: &PendingJob,
     authorized: Option<&HashSet<ProjectId>>,
     caps: Option<&WorkerCaps>,
