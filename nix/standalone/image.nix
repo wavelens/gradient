@@ -22,7 +22,7 @@ in pkgs.dockerTools.buildLayeredImage {
 
   config = {
     Cmd = [ "${toplevel}/init" ];
-    Env = [ "container=docker" ];
+    Env = [ "container=docker" "PATH=/run/wrappers/bin:${toplevel}/sw/bin" ];
     ExposedPorts."80/tcp" = { };
     Volumes."/var/lib" = { };
     StopSignal = "SIGRTMIN+3";
