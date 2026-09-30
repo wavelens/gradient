@@ -489,7 +489,7 @@ mod tests {
         assert_eq!(rx2.await.unwrap().unwrap().evaluation, e2);
 
         actor.stop_and_wait(None, None).await.unwrap();
-        drop(actor);
+        drop((actor, graph));
         let rendered: Vec<String> = pool
             .into_transaction_log()
             .iter()
@@ -568,7 +568,7 @@ mod tests {
         assert!(rx2.await.unwrap().unwrap().created);
 
         actor.stop_and_wait(None, None).await.unwrap();
-        drop(actor);
+        drop((actor, graph));
         let rendered: Vec<String> = pool
             .into_transaction_log()
             .iter()
