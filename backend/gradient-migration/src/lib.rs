@@ -93,6 +93,7 @@ mod m20260929_000001_completed_anchor_window_index;
 mod m20260929_000002_build_job_evaluation_anchor_index;
 mod m20260929_000003_build_job_derivation_covering_index;
 mod m20260930_000000_evaluation_hot_updates;
+mod m20260930_000001_unsettled_anchor_index;
 
 pub struct Migrator;
 
@@ -182,6 +183,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260929_000002_build_job_evaluation_anchor_index::Migration),
             Box::new(m20260929_000003_build_job_derivation_covering_index::Migration),
             Box::new(m20260930_000000_evaluation_hot_updates::Migration),
+            Box::new(m20260930_000001_unsettled_anchor_index::Migration),
         ]
     }
 }
