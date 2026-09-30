@@ -28,8 +28,8 @@ pub enum ReportedEvent {
         warnings: Vec<String>,
         errors: Vec<String>,
     },
-    DrvClosurePush {
-        drv_paths: Vec<String>,
+    PathsPushed {
+        paths: Vec<(String, Option<u64>)>,
     },
     Building {
         build_id: String,
@@ -117,15 +117,16 @@ impl RecordingJobReporter {
             .find(|e| matches!(e, ReportedEvent::EvalResult { .. }))
     }
 
-    /// Collect every drv path pushed via `push_drv_closure`, across all batches.
-    pub fn all_pushed_drv_paths(&self) -> Vec<String> {
+    /// Every path pushed via `push_paths`, across all batches.
+    pub fn all_pushed_paths(&self) -> Vec<String> {
         self.events()
             .into_iter()
             .filter_map(|e| match e {
-                ReportedEvent::DrvClosurePush { drv_paths } => Some(drv_paths),
+                ReportedEvent::PathsPushed { paths } => Some(paths),
                 _ => None,
             })
             .flatten()
+            .map(|(path, _)| path)
             .collect()
     }
 
@@ -237,13 +238,9 @@ impl JobReporter for RecordingJobReporter {
         Ok(())
     }
 
-    async fn push_drv_closure(
-        &self,
-        drv_paths: &[String],
-        _pushed: &mut std::collections::HashSet<String>,
-    ) -> Result<()> {
-        self.record(ReportedEvent::DrvClosurePush {
-            drv_paths: drv_paths.to_vec(),
+    async fn push_paths(&self, paths: &[(String, Option<u64>)]) -> Result<()> {
+        self.record(ReportedEvent::PathsPushed {
+            paths: paths.to_vec(),
         });
         Ok(())
     }
