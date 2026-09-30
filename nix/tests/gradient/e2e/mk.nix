@@ -324,6 +324,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
         "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
         "L+ /var/lib/git/flake-busywrap.nix 0755 git git - ${./flake_repository_busywrap.nix}"
+        "L+ /var/lib/git/flake-spin.nix 0755 git git - ${./flake_repository_spin.nix}"
       ];
     };
 
@@ -2848,6 +2849,69 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         assert f"lockguard {arm}: recount wrote 0" in out, f"arm {arm} drifted:\n{out}"
     assert "lockguard unguarded: recount wrote 1" in out, (
         f"the unguarded arm did not drift, so the keys are not what the others prove:\n{out}"
+    )
+
+    # ── Phase 10l: an aborted evaluation stops evaluating on the worker ───
+    # The spin flake keeps nix busy for hours, so only the abort ends its
+    # evaluations. The poller compares commits, not statuses: nothing after this
+    # phase evaluates the aborted commit again.
+    banner("Phase 10l: an aborted evaluation stops evaluating on the worker")
+
+    def eval_cpu_ticks(node):
+        out = node.succeed(
+            "for p in $(pgrep -f -- --eval-subprocess); do "
+            "cut -d' ' -f14,15 /proc/$p/stat 2>/dev/null; done; true"
+        )
+        return sum(int(t) for t in out.split())
+
+    def evaluating_nodes():
+        before = {node.name: eval_cpu_ticks(node) for node, _ in fleet_units()}
+        server.sleep(2)
+        return [node.name for node, _ in fleet_units()
+                if eval_cpu_ticks(node) - before[node.name] > 100]
+
+    known = sql("SELECT string_agg(id::text, ',') FROM evaluation;")
+    spin_evals = f"FROM evaluation WHERE NOT (id = ANY(string_to_array('{known}', ',')::uuid[]))"
+    abort_since = server.succeed("date '+%F %T'").strip()
+    server.succeed("cp /var/lib/git/flake-spin.nix /var/lib/git/test/flake.nix")
+    server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
+    server.succeed(f"{GIT} -C /var/lib/git/test commit -am 'spin'")
+    server.succeed("chown git:git -R /var/lib/git/test")
+
+    # Both tasks poll the repository; an evaluation created after the abort
+    # would spin through every later phase.
+    poll(f"SELECT count(*) {spin_evals};", "2", "both tasks did not pick up the spin commit")
+    poll(f"SELECT (count(*) > 0)::text {spin_evals} AND status = 2;",
+         "true", "no spin evaluation reached its derivation phase", timeout=300)
+    for _ in range(60):
+        if evaluating_nodes():
+            break
+    else:
+        raise Exception("no worker is evaluating the spin flake")
+
+    for evaluation in sql(f"SELECT id {spin_evals};").splitlines():
+        server.succeed(
+            f'{CURL} -sf -X POST -H "Authorization: Bearer {token}" '
+            f'-H "Content-Type: application/json" -d \'{{"method": "abort"}}\' '
+            f'{API}/evals/{evaluation}'
+        )
+
+    deadline = time.time() + 60
+    while (busy := evaluating_nodes()) and time.time() < deadline:
+        pass
+    if busy:
+        logs = "\n".join(
+            node.succeed(f"journalctl -u {unit} --no-pager --since='{abort_since}' | grep -i abort || true")
+            for node, unit in fleet_units()
+        )
+        raise Exception(f"{busy} still evaluating 60 s after the abort:\n{logs}")
+
+    assert sql(f"SELECT string_agg(DISTINCT status::text, ',') {spin_evals};") == "7", (
+        "a spin evaluation left Aborted after its worker stopped"
+    )
+    server.fail(
+        f"journalctl -u gradient-server --no-pager --since='{abort_since}' "
+        "| grep -q 'worker never confirmed the abort'"
     )
 
     # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
