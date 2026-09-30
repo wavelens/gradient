@@ -938,6 +938,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
                 cluster_attempts_closed = r.cluster_attempts_closed,
                 clusters_requeued = r.clusters_requeued,
                 clusters_aborted = r.clusters_aborted,
+                clusters_failed = r.clusters_failed,
                 "recovered interrupted work from previous process"
             )
         }

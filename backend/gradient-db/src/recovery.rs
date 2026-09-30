@@ -47,6 +47,7 @@ pub struct RecoveryReport {
     pub cluster_attempts_closed: u64,
     pub clusters_requeued: u64,
     pub clusters_aborted: u64,
+    pub clusters_failed: u64,
 }
 
 fn requeue_mid_flight_sql() -> String {
@@ -184,6 +185,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     report.cluster_attempts_closed = clusters.attempts_closed;
     report.clusters_requeued = clusters.clusters_requeued;
     report.clusters_aborted = clusters.clusters_aborted;
+    report.clusters_failed = clusters.clusters_failed;
 
     Ok(report)
 }
@@ -375,10 +377,11 @@ mod tests {
                 rows_affected: 1,
             }])
             // 5. one unstarted attempt closed, one cluster requeued
-            .append_exec_results([1, 0, 0, 1].map(|n| MockExecResult {
+            .append_exec_results([1, 0, 0, 0, 1].map(|n| MockExecResult {
                 last_insert_id: 0,
                 rows_affected: n,
             }))
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
@@ -410,10 +413,11 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MEval>::new()])
             // 5. cluster attempts and clusters (none)
-            .append_exec_results([0, 0, 0, 0].map(|n| MockExecResult {
+            .append_exec_results([0, 0, 0, 0, 0].map(|n| MockExecResult {
                 last_insert_id: 0,
                 rows_affected: n,
             }))
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         recover_interrupted_work(&db).await.unwrap();
@@ -447,7 +451,8 @@ mod tests {
             .append_exec_results([none.clone(), none.clone()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MEval>::new()])
-            .append_exec_results([none.clone(), none.clone(), none.clone(), none])
+            .append_exec_results([none.clone(), none.clone(), none.clone(), none.clone(), none])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         recover_interrupted_work(&db).await.unwrap();
@@ -487,10 +492,11 @@ mod tests {
             // 4a. SELECT pre-build evals: empty, so steps 4b/4c/4d are skipped
             .append_query_results([Vec::<MEval>::new()])
             // 5. cluster attempts and clusters (none)
-            .append_exec_results([0, 0, 0, 0].map(|n| MockExecResult {
+            .append_exec_results([0, 0, 0, 0, 0].map(|n| MockExecResult {
                 last_insert_id: 0,
                 rows_affected: n,
             }))
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
