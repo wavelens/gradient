@@ -99,7 +99,10 @@ pub async fn claim_dispatch<C: ConnectionTrait>(
     Ok(claimed.rows_affected() == 1)
 }
 
-fn claim_statement(row: MDispatchedJob, gate: ClaimGate) -> Result<InsertStatement, DbErr> {
+pub(crate) fn claim_statement(
+    row: MDispatchedJob,
+    gate: ClaimGate,
+) -> Result<InsertStatement, DbErr> {
     let row = row.into_active_model();
     let (columns, values): (Vec<CDispatchedJob>, Vec<Expr>) = CDispatchedJob::iter()
         .filter_map(|c| row.get(c).into_value().map(|v| (c, Expr::val(v))))
