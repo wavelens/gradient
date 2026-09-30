@@ -26,7 +26,7 @@ A flake job fetches and evaluates a flake. The server fixes the steps when the j
 2. `nix flake prefetch` of the source alone when every locked input's `<narHash>-source` path is already in the store; otherwise `nix flake archive`, falling back to `nix flake prefetch` per input. A failed source is fatal.
 3. Upload every fetched path with a `Push` cache query, then report `FetchResult { flake_source }`.
 
-**Evaluate:** the worker walks the derivations breadth-first in waves of up to 64.
+**Evaluate:** the worker walks the derivations breadth-first in waves of up to 256.
 
 ```mermaid
 sequenceDiagram
