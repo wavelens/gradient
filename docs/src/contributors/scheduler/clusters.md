@@ -56,6 +56,39 @@ flowchart LR
 - A member evaluation always evaluates in one job, never as a split fetch-only job whose follow-up would run outside the cluster.
 - An empty answer to `RequestJob` records an idle slot `(worker, kind)`. An assignment, a full worker or a disconnect clears it; entries older than 25 s (two worker heartbeats) are ignored. Idle slots are the planner's only view of free capacity.
 
+## Placement
+
+The `cluster-dispatch` pass runs every 5 s and whenever a `RequestJob` goes unanswered. It first expires overdue prepares, then places every ready cluster, prioritized clusters first, then the oldest.
+
+- A worker is a seat for a member when it has an idle slot of the member's kind, can run the job (capabilities, project access) and matches the member's `pin`.
+- Every member sits on its own worker (bipartite matching).
+- With `same_zone`, all members sit in one zone; workers without a zone form one zone of their own.
+- Among zones that seat every member, the lowest summed missing NAR size wins.
+- A worker seated for one cluster is not offered to the next cluster of the same pass.
+- A cluster without a full placement keeps waiting; single dispatch is unaffected.
+
+## Prepare and Start
+
+1. The scheduler takes the cluster and its seats in one step, refusing if a seat's worker went busy since the snapshot.
+2. `claim_cluster` writes the attempt and every member's `dispatched_job` row; build members get their `Dispatched` transition.
+3. Each seat's session sends `AssignJob` with `cluster` (`attempt`, `role`, `index`, `hold_secs`). The worker holds the job without running it.
+4. Once every member accepted, `start_cluster_attempt` marks the attempt started and the cluster `Running`, and every member receives `StartCluster` with the roster.
+
+| Event | Result |
+|---|---|
+| Every member accepts | `StartCluster` to every member |
+| A member rejects | Attempt closed `PrepareFailed`, `AbortCluster` to every member, cluster waits again after 30 s |
+| `scheduler.clusterPrepareTimeoutSecs` passes without every acceptance | Same as a reject |
+| The claim is lost | Nothing written, cluster waits again after 30 s |
+
+- A failed prepare does not consume the cluster's retry budget.
+- `hold_secs` is `clusterPrepareTimeoutSecs` plus 10 s: a worker that never hears `StartCluster` releases the slot on its own.
+
+## Signals
+
+- `ClusterSignal` is relayed only within a started attempt and only from one of its members; anything else is dropped.
+- `to` names one member by role and index; without it, every other member receives the signal.
+
 ## Related
 
 - [Build Anchors](build-anchors.md)
