@@ -69,6 +69,13 @@ pub fn aging_step(
     }
 }
 
+/// Seats reserved for one cluster are no idle capacity for any other.
+pub fn hide_reserved(snapshot: &mut ClusterSnapshot) {
+    if let Some(held) = snapshot.reservation.clone() {
+        snapshot.slots.retain(|s| !held.holds(&s.worker, s.kind));
+    }
+}
+
 fn held_step(
     snapshot: &ClusterSnapshot,
     held: &Reservation,
@@ -327,5 +334,22 @@ mod tests {
         s.clusters.clear();
 
         assert!(matches!(step(&s), AgingStep::Expire));
+    }
+
+    #[test]
+    fn seats_reserved_for_another_cluster_are_hidden_from_planning() {
+        let old = cluster(2, 700, false);
+        let young = cluster(2, 10, false);
+        let young_id = young.id;
+        let mut s = snapshot(vec![old, young], &[], &["w1", "w2"]);
+        s.reservation = Some(reserved(step(&s)));
+        s.slots = vec![slot("w1"), slot("w2"), slot("w3")];
+
+        hide_reserved(&mut s);
+
+        let open: Vec<&str> = s.slots.iter().map(|x| x.worker.as_str()).collect();
+        assert_eq!(open, ["w3"]);
+        let young = s.clusters.iter().find(|c| c.id == young_id).expect("young");
+        assert!(plan(young, &s.slots, &s.scores).is_none());
     }
 }

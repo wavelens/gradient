@@ -14,14 +14,15 @@ use gradient_entity::cluster_attempt::ClusterAttemptOutcome;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::ClusterAttemptId;
 use gradient_wire::types::{ClusterAddress, ClusterMembership, ClusterPeer};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::assignment::{claim_gate, dispatch_row, dispatched_transition};
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{
-    Acceptance, AttemptMember, AttemptState, CLUSTER_HOLD_MARGIN_SECS, CLUSTER_RETRY_BACKOFF,
-    CommittedSeat, Committing, PendingCluster, Placement, PreparedMember,
+    Acceptance, AgingPolicy, AgingStep, AttemptMember, AttemptState, CLUSTER_HOLD_MARGIN_SECS,
+    CLUSTER_RETRY_BACKOFF, ClusterSnapshot, CommittedSeat, Committing, PendingCluster, Placement,
+    PreparedMember, Reservation, aging_step, hide_reserved,
 };
 use crate::jobs::Assignment;
 
@@ -70,17 +71,50 @@ impl Scheduler {
             self.fail_prepare(attempt).await;
         }
 
-        let snapshot = self.cluster_snapshot().await;
+        let mut snapshot = self.cluster_snapshot().await;
+        let aging = snapshot.clone();
+        hide_reserved(&mut snapshot);
+        let reserved = snapshot.reservation.as_ref().map(Reservation::cluster);
         let mut slots = snapshot.slots;
-        for cluster in &snapshot.clusters {
+        let mut committed = false;
+        for cluster in snapshot.clusters.iter().filter(|c| Some(c.id) != reserved) {
             let Some(placement) = crate::cluster::plan(cluster, &slots, &snapshot.scores) else {
                 continue;
             };
             slots.retain(|s| !placement.seats.iter().any(|seat| seat.worker == s.worker));
             self.commit(placement).await;
+            committed = true;
+        }
+        if !committed {
+            self.age(&aging).await;
         }
 
         Ok(())
+    }
+
+    /// A cluster that waited too long for simultaneously idle slots reserves
+    /// seats and commits once all of them are idle.
+    async fn age(&self, snapshot: &ClusterSnapshot) {
+        let config = &self.state.config.scheduler;
+        let policy = AgingPolicy {
+            reserve_after: chrono::Duration::seconds(
+                i64::try_from(config.cluster_reserve_after_secs).unwrap_or(i64::MAX),
+            ),
+            timeout: Duration::from_secs(config.cluster_reserve_timeout_secs),
+        };
+        match aging_step(snapshot, gradient_types::now(), Instant::now(), &policy) {
+            AgingStep::Keep => {}
+            AgingStep::Expire => {
+                if let Some(held) = &snapshot.reservation {
+                    info!(cluster = %held.cluster(), "cluster reservation released");
+                    self.release_reservation(held.cluster()).await;
+                }
+            }
+            AgingStep::Reserve(reservation) => {
+                self.reserve(reservation).await;
+            }
+            AgingStep::Commit(placement) => self.commit(placement).await,
+        }
     }
 
     pub(crate) async fn commit(&self, placement: Placement) {
