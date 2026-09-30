@@ -288,6 +288,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.domain` | string | `""` | - | Domain of the worker's reverse proxy virtual host. |
 | `worker.drainTimeoutSecs` | int | `60` | `GRADIENT_WORKER_DRAIN_TIMEOUT_SECS` | Seconds a stop waits for running jobs. |
 | `worker.enable` | bool | `false` | - | Whether to enable the Gradient worker. |
+| `worker.endpoint` | null or string | `null` | `GRADIENT_WORKER_ENDPOINT` | Address other members of a cluster job reach this worker at, passed through verbatim in the cluster roster. |
 | `worker.gcrootsDir` | string | `"/nix/var/nix/gcroots/gradient"` | `GRADIENT_WORKER_GCROOTS_DIR` | Directory for the indirect GC roots that pin each running build's inputs and outputs against a concurrent `nix-collect-garbage`. |
 | `worker.id` | null or string | `null` | `GRADIENT_WORKER_ID` | Worker UUID. |
 | `worker.listenAddr` | string | `"127.0.0.1"` | `GRADIENT_WORKER_LISTEN_ADDR` | IP address the worker listens on for incoming server connections. |
@@ -295,6 +296,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `worker.port` | port | `3100` | `GRADIENT_WORKER_PORT` | Port the worker listens on for incoming server connections. |
 | `worker.serverUrl` | null or string | `null` | `GRADIENT_WORKER_SERVER_URL` | WebSocket URL of the Gradient server's `/proto` endpoint. |
 | `worker.useTls` | bool | `true` | - | Whether to enable TLS. |
+| `worker.zone` | null or string | `null` | `GRADIENT_WORKER_ZONE` | Locality label advertised to the scheduler; a cluster job asking for one zone places every member on workers with the same label. |
 
 ## `worker.build`
 

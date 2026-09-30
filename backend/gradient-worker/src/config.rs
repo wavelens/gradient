@@ -53,6 +53,17 @@ pub struct WorkerConfig {
     #[arg(long = "id", env = "GRADIENT_WORKER_ID")]
     pub id: Option<String>,
 
+    /// Locality label advertised to the scheduler. Cluster jobs that ask for
+    /// one zone place all their members on workers sharing a label; workers
+    /// without one form a zone of their own.
+    #[arg(long = "zone", env = "GRADIENT_WORKER_ZONE")]
+    pub zone: Option<String>,
+
+    /// Address other members of a cluster job reach this worker at, passed
+    /// through verbatim in the cluster roster.
+    #[arg(long = "endpoint", env = "GRADIENT_WORKER_ENDPOINT")]
+    pub endpoint: Option<String>,
+
     /// Path to the `nix` binary. Defaults to `nix` (resolved via `PATH`).
     #[arg(
         long = "nix-bin",
@@ -152,6 +163,8 @@ impl Default for WorkerConfig {
             peers_file: None,
             base_dir: "/var/lib/gradient-worker".to_owned(),
             id: None,
+            zone: None,
+            endpoint: None,
             nix_bin: "nix".to_owned(),
             ssh_bin: "ssh".to_owned(),
             gcroots_dir: "/nix/var/nix/gcroots/gradient".to_owned(),
