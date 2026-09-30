@@ -25,6 +25,12 @@ A build only goes to a worker that supports the derivation's system (e.g. `aarch
 
 Among the matching workers, the scheduler scores each queued job and steers heavy builds and evaluations away from workers without enough free memory for the predicted peak, learned from earlier runs. `services.gradient.worker.build.metrics` records the per-build measurements this prediction needs.
 
+## Zones
+
+Workers in one datacenter share a zone label, `services.gradient.worker.zone` (default: none). A [cluster job](../contributors/scheduler/clusters.md) that needs a fast interconnect starts all members in one zone; workers without a zone count as one zone of their own.
+
+`services.gradient.worker.endpoint` is the address the other members of a cluster reach the worker at. The server hands every member the endpoints of the others when the cluster starts.
+
 ## Access
 
 | Kind | Registered | Serves |

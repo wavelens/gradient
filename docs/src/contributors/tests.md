@@ -14,7 +14,7 @@ How testing is structured and which patterns a new test follows. Individual test
 | Report inspector | `nix/tools/report-inspector/tests/` | Inspector commands over a report fixture built in the test |
 | NixOS VM | `nix/tests/gradient/<name>/`, `nix/tests/harness/` | A booted machine running the packaged server, or a module against a scripted API |
 | SQL plan gate | `backend/src/sql_gate/`, run by the e2e VM test | Every registered statement's plan at production scale |
-| Mock daemon | `backend/gradient-daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/` | Scheduler and workers against a scripted Nix store |
+| Mock daemon | `backend/gradient-daemon/`, `nix/tests/store-spec/`, `nix/tests/gradient/scheduler/`, `nix/tests/gradient/cluster/` | Scheduler and workers against a scripted Nix store |
 | Eval benchmark | `nix/tests/bench/evalbench/`, on demand | Evaluation speed per stage, with a capture bundle per run ([Eval Benchmark](eval-benchmark.md)) |
 
 - A crate's `tests/` directory is for public entry points (an HTTP route, a CLI call); everything else goes into a `#[cfg(test)]` module next to the code.
@@ -119,7 +119,7 @@ The prelude also re-exports the protocol doubles: `MockProtoServer` (`gradient-w
 
 ## Mock Daemon
 
-`gradient-scheduler` runs the real server and workers; each worker's `nix-daemon` is replaced by `gradient-daemon serve --backend mock` on the stock socket. The `mock` feature of `backend/gradient-daemon` builds the binary into the `daemon` output of the `gradient` package.
+`gradient-scheduler` and `gradient-cluster` run the real server and workers; each worker's `nix-daemon` is replaced by `gradient-daemon serve --backend mock` on the stock socket. Both suites share the server node (`scheduler/server.nix`) and the script helpers (`scheduler/helpers.py`). The `mock` feature of `backend/gradient-daemon` builds the binary into the `daemon` output of the `gradient` package.
 
 | Aspect | Behavior |
 |---|---|

@@ -13,9 +13,9 @@ flowchart LR
 
 ## Tables
 
-| Table | Key | Role |
+| Table | Links to | Role |
 |---|---|---|
-| `cluster_job` | `id` | The group: `status` (`Queued`, `Running`, `Completed`, `Failed`, `Aborted`), `same_zone`, `attempts`, `retry_budget` |
+| `cluster_job` | - | The group: `status` (`Queued`, `Running`, `Completed`, `Failed`, `Aborted`), `same_zone`, `attempts`, `retry_budget` |
 | `cluster_member` | `cluster_job` | One member job: exactly one of `evaluation` or `derivation_build` (the anchor), plus `role`, `primary`, `pin` |
 | `cluster_attempt` | `cluster_job` | One try: `created_at`, `started_at` (unset until every member accepted), `finished_at`, `outcome` (`Succeeded`, `Failed`, `PrepareFailed`, `Aborted`) |
 | `dispatched_job` | `cluster_attempt` | A member's dispatch row; `NULL` for a single dispatch |
@@ -120,3 +120,6 @@ A ready cluster that finds no simultaneously idle workers for `scheduler.cluster
 
 - [Build Anchors](build-anchors.md)
 - [Waiting and Recovery](waiting-and-recovery.md)
+- [Workers: Zones](../../concepts/workers.md#zones)
+- [Jobs: Cluster Members](../proto/jobs.md#cluster-members)
+- `nix/tests/gradient/cluster/`: the `gradient-cluster` VM test
