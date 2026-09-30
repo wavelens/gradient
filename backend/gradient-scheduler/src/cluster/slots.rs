@@ -85,6 +85,8 @@ pub struct ClusterSnapshot {
     pub clusters: Vec<PendingCluster>,
     pub slots: Vec<Slot>,
     pub scores: HashMap<(String, String), WorkerJobScore>,
+    pub connected: Vec<Slot>,
+    pub reservation: Option<super::Reservation>,
 }
 
 #[cfg(test)]
