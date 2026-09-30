@@ -573,6 +573,24 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_zone_is_no_zone() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.update_capabilities(
+            "w1",
+            WorkerProfile {
+                zone: Some(String::new()),
+                endpoint: Some(String::new()),
+                ..Default::default()
+            },
+        );
+
+        let shared = pool.workers["w1"].shared();
+        assert_eq!(shared.zone, None);
+        assert_eq!(shared.endpoint, None);
+    }
+
+    #[test]
     fn worker_caps_carry_the_zone() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
