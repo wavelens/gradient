@@ -9,12 +9,13 @@ use std::sync::{Arc, Weak};
 
 use anyhow::{Context, Result, bail};
 use gradient_util::sync::Mutex;
-use gradient_wire::messages::{ClientMessage, ServerMessage, is_small_upload};
+use gradient_wire::messages::{
+    ClientMessage, SMALL_UPLOADS_IN_FLIGHT, ServerMessage, is_small_upload,
+};
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 
 use crate::connection::ProtoWriter;
-use crate::upload_slots::{Slot, SlotPool};
 
 pub const MAX_UPLOAD_ATTEMPTS: u32 = 3;
 
@@ -33,14 +34,15 @@ struct Inner {
 
 /// Every upload this worker sends: requested, granted, transferred, then
 /// acknowledged by the server. A slot bounds the transfer, not the commit after
-/// it, so the server's graph sees a burst of commits it can batch. A waiting
-/// small upload takes the next free slot before any large one, and small ones
-/// may take all of them; a job's large uploads hold at most half.
+/// it, so the server's graph sees a burst of commits it can batch. Small uploads
+/// have [`SMALL_UPLOADS_IN_FLIGHT`] slots of their own; the large ones share
+/// `max_outstanding`, of which one job holds at most half.
 #[derive(Clone)]
 pub struct UploadClient {
     inner: Arc<Mutex<Inner>>,
     writer: ProtoWriter,
-    slots: Arc<SlotPool>,
+    small: Arc<Semaphore>,
+    large: Arc<Semaphore>,
     per_job: usize,
 }
 
@@ -49,7 +51,8 @@ impl UploadClient {
         Self {
             inner: Arc::default(),
             writer,
-            slots: SlotPool::new(max_outstanding.max(1)),
+            small: Arc::new(Semaphore::new(SMALL_UPLOADS_IN_FLIGHT)),
+            large: Arc::new(Semaphore::new(max_outstanding.max(1))),
             per_job: (max_outstanding / 2).max(1),
         }
     }
@@ -150,20 +153,27 @@ impl UploadClient {
     }
 
     async fn acquire_slots(&self, job_id: &str, size: u64) -> Result<Slots> {
-        let small = is_small_upload(size);
-        let job = if small {
-            None
-        } else {
-            Some(
-                self.job_slots(job_id)
-                    .acquire_owned()
-                    .await
-                    .context("upload slots closed")?,
-            )
-        };
-        let worker = self.slots.acquire(small).await?;
+        if is_small_upload(size) {
+            let worker = Arc::clone(&self.small)
+                .acquire_owned()
+                .await
+                .context("upload slots closed")?;
+            return Ok(Slots {
+                _job: None,
+                _worker: worker,
+            });
+        }
+        let job = self
+            .job_slots(job_id)
+            .acquire_owned()
+            .await
+            .context("upload slots closed")?;
+        let worker = Arc::clone(&self.large)
+            .acquire_owned()
+            .await
+            .context("upload slots closed")?;
         Ok(Slots {
-            _job: job,
+            _job: Some(job),
             _worker: worker,
         })
     }
@@ -186,7 +196,7 @@ impl UploadClient {
 
 struct Slots {
     _job: Option<OwnedSemaphorePermit>,
-    _worker: Slot,
+    _worker: OwnedSemaphorePermit,
 }
 
 /// One object's way through the handshake, holding a worker upload slot from

@@ -314,10 +314,10 @@ in {
         type = lib.types.ints.positive;
         default = 16;
         description = ''
-          Upload requests the worker keeps open at once, waiting for a server grant or
-          transferring. Uploads of at most 1 MiB are served first and may take all of
-          them; one job's larger uploads hold at most half. The server's upload budget
-          decides how many run; this bounds worker memory.
+          Upload requests over 1 MiB the worker keeps open at once, waiting for a server
+          grant or transferring; one job holds at most half. Smaller uploads have a window
+          of 128 of their own. The server's upload budget decides how many run; this bounds
+          worker memory.
         '';
       };
 

@@ -496,9 +496,9 @@ in {
           type = lib.types.ints.positive;
           default = 16;
           description = ''
-            Uploads (NARs and eval cache blobs) admitted at once across all workers and REST
-            clients. A permit is held until the object is in storage. Further uploads wait for
-            a permit.
+            Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers
+            and REST clients; smaller ones have a window of 128 of their own. A permit is held
+            until the object is in storage. Further uploads wait for a permit.
           '';
         };
 

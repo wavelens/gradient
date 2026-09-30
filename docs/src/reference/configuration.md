@@ -275,7 +275,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
 | `upload.bytesBudget` | int | `8589934592` | `GRADIENT_UPLOAD_BYTES_BUDGET` | Total size in bytes of admitted uploads. |
-| `upload.concurrency` | int | `16` | `GRADIENT_UPLOAD_CONCURRENCY` | Uploads (NARs and eval cache blobs) admitted at once across all workers and REST clients. A permit is held until the object is in storage. |
+| `upload.concurrency` | int | `16` | `GRADIENT_UPLOAD_CONCURRENCY` | Uploads over 1 MiB (NARs and eval cache blobs) admitted at once across all workers and REST clients; smaller ones have a window of 128 of their own. A permit is held until the object is in storage. |
 | `upload.leaseIdleSecs` | int | `300` | `GRADIENT_UPLOAD_LEASE_IDLE_SECS` | Seconds a granted relay upload may go without data before its permit is reclaimed and the worker is told to retry. |
 | `upload.restWaitSecs` | int | `30` | `GRADIENT_UPLOAD_REST_WAIT_SECS` | Seconds a NAR upload to the cache upload endpoint waits for a permit before it is answered with 503 and `Retry-After`. |
 
@@ -342,7 +342,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `worker.nar.maxConcurrentUploads` | int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests the worker keeps open at once, waiting for a server grant or transferring. Uploads of at most 1 MiB are served first and may take all of them; one job's larger uploads hold at most half. |
+| `worker.nar.maxConcurrentUploads` | int | `16` | `GRADIENT_WORKER_NAR_MAX_CONCURRENT_UPLOADS` | Upload requests over 1 MiB the worker keeps open at once, waiting for a server grant or transferring; one job holds at most half. Smaller uploads have a window of 128 of their own. |
 | `worker.nar.partialTtlSecs` | int | `86400` | `GRADIENT_WORKER_NAR_PARTIAL_TTL_SECS` | Seconds after its last write that an unfinished NAR download under `<worker.baseDir>/nar-partial` is deleted. |
 
 ## `worker.nixDaemon`
