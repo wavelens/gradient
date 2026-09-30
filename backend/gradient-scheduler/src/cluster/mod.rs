@@ -12,6 +12,7 @@ mod coordinator;
 mod divert;
 mod matching;
 mod planner;
+mod settlement;
 mod slots;
 
 pub use book::{ClusterBook, ClusterMember, PendingCluster};
@@ -19,6 +20,7 @@ pub use coordinator::*;
 pub(crate) use divert::{Membership, Route};
 pub use matching::kuhn;
 pub use planner::{Placement, ScoreLookup, Seat, plan};
+pub use settlement::*;
 pub use slots::{ClusterSnapshot, IDLE_SLOT_TTL, IdleSlots, Slot, SlotKind};
 
 #[derive(Debug, Clone)]

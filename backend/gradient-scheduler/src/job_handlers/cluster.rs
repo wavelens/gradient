@@ -146,7 +146,8 @@ impl Scheduler {
                 index: s.index,
                 primary: s.primary,
                 accepted: false,
-                outcome: None,
+                report: None,
+                settled: false,
             })
             .collect();
         self.attempts.lock().open(
@@ -158,6 +159,8 @@ impl Scheduler {
                 roster,
                 deadline: Instant::now() + Duration::from_secs(timeout),
                 started: false,
+                verdict: None,
+                resolution: None,
             },
         );
     }
