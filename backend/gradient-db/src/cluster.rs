@@ -109,6 +109,47 @@ fn open_attempt_statement(claim: &ClusterClaim) -> Result<InsertStatement, DbErr
     Ok(insert)
 }
 
+/// Stamp `started_at` on `attempt` while it is open and unstarted, and only then
+/// set its cluster `Running` and count the attempt; `false` when nothing moved.
+pub async fn start_cluster_attempt<C>(
+    db: &C,
+    cluster: ClusterJobId,
+    attempt: ClusterAttemptId,
+) -> Result<bool, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let now = gradient_types::now();
+    let txn = db.begin().await?;
+    let started = EClusterAttempt::update_many()
+        .col_expr(CClusterAttempt::StartedAt, Expr::value(now))
+        .filter(CClusterAttempt::Id.eq(attempt))
+        .filter(CClusterAttempt::StartedAt.is_null())
+        .filter(CClusterAttempt::FinishedAt.is_null())
+        .exec(&txn)
+        .await?
+        .rows_affected
+        == 1;
+    if started {
+        EClusterJob::update_many()
+            .col_expr(
+                CClusterJob::Status,
+                Expr::value(i16::from(ClusterJobStatus::Running)),
+            )
+            .col_expr(
+                CClusterJob::Attempts,
+                Expr::col(CClusterJob::Attempts).add(1),
+            )
+            .col_expr(CClusterJob::UpdatedAt, Expr::value(now))
+            .filter(CClusterJob::Id.eq(cluster))
+            .exec(&txn)
+            .await?;
+    }
+    txn.commit().await?;
+
+    Ok(started)
+}
+
 /// Close `attempt` if still open, abandoning its open member rows with it;
 /// `false` when another closer got there first and nothing was touched.
 pub async fn close_cluster_attempt<C>(
@@ -472,5 +513,54 @@ mod tests {
 
         assert!(found.is_empty());
         assert!(logged(db).is_empty());
+    }
+
+    async fn started(first: u64) -> (bool, Vec<Statement>) {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(first), exec(1)])
+            .into_connection();
+        let started =
+            start_cluster_attempt(&db, ClusterJobId::now_v7(), ClusterAttemptId::now_v7())
+                .await
+                .expect("start");
+
+        (started, logged(db))
+    }
+
+    #[tokio::test]
+    async fn starting_an_open_attempt_runs_its_cluster() {
+        let (started, statements) = started(1).await;
+
+        assert!(started);
+        let attempt = &statements
+            .iter()
+            .find(|s| s.sql.starts_with("UPDATE \"cluster_attempt\""))
+            .expect("attempt")
+            .sql;
+        assert!(attempt.contains("\"started_at\" IS NULL"), "{attempt}");
+        assert!(attempt.contains("\"finished_at\" IS NULL"), "{attempt}");
+        let job = statements
+            .iter()
+            .find(|s| s.sql.starts_with("UPDATE \"cluster_job\""))
+            .expect("cluster");
+        assert!(
+            job.sql.contains("\"attempts\" = \"attempts\" + $"),
+            "{}",
+            job.sql
+        );
+        let running = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Running));
+        assert!(format!("{:?}", job.values).contains(&running));
+    }
+
+    #[tokio::test]
+    async fn a_started_or_closed_attempt_starts_nothing() {
+        let (started, statements) = started(0).await;
+
+        assert!(!started);
+        assert!(
+            !statements
+                .iter()
+                .any(|s| s.sql.starts_with("UPDATE \"cluster_job\""))
+        );
     }
 }
