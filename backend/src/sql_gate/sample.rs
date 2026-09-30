@@ -21,48 +21,57 @@ use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, V
 use uuid::Uuid;
 
 /// The SQL that draws one value of `param`, or `None` for the kinds the gate can
-/// spell out on its own. Array kinds take the declared width as `$1`.
+/// spell out on its own. Array kinds take the declared width as `$1`. Every draw
+/// is ordered: heap order moves with each update, and an unordered draw measured a
+/// different evaluation, 100x apart in size, from one run to the next. A single
+/// evaluation is the one naming the most anchors, the worst case a statement
+/// scoped to one must fit.
 pub fn draw_sql(param: &Param) -> Option<&'static str> {
     Some(match param {
-        Param::DerivationId => "SELECT id AS v FROM derivation LIMIT 1",
+        Param::DerivationId => "SELECT id AS v FROM derivation ORDER BY id LIMIT 1",
         Param::DerivationIds(_) => {
-            "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation LIMIT $1) s"
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation ORDER BY id LIMIT $1) s"
         }
         Param::OrphanDerivationIds(_) => {
             "SELECT array_agg(id) AS v FROM (\
                  SELECT d.id FROM derivation d \
                  WHERE NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = d.id) \
                    AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = d.id) \
-                 LIMIT $1) s"
+                 ORDER BY d.id LIMIT $1) s"
         }
-        Param::DerivationHash => "SELECT hash AS v FROM derivation LIMIT 1",
+        Param::DerivationHash => "SELECT hash AS v FROM derivation ORDER BY id LIMIT 1",
         Param::DerivationHashes(_) => {
-            "SELECT array_agg(hash) AS v FROM (SELECT hash FROM derivation LIMIT $1) s"
+            "SELECT array_agg(hash) AS v FROM (SELECT hash FROM derivation ORDER BY id LIMIT $1) s"
         }
-        Param::CachedPathId => "SELECT id AS v FROM cached_path LIMIT 1",
-        Param::CachedPathHash => "SELECT hash AS v FROM cached_path LIMIT 1",
+        Param::CachedPathId => "SELECT id AS v FROM cached_path ORDER BY id LIMIT 1",
+        Param::CachedPathHash => "SELECT hash AS v FROM cached_path ORDER BY id LIMIT 1",
         Param::CachedPathHashes(_) => {
-            "SELECT array_agg(hash) AS v FROM (SELECT hash FROM cached_path LIMIT $1) s"
+            "SELECT array_agg(hash) AS v FROM (SELECT hash FROM cached_path ORDER BY id LIMIT $1) s"
         }
-        Param::AnchorId => "SELECT id AS v FROM derivation_build LIMIT 1",
+        Param::AnchorId => "SELECT id AS v FROM derivation_build ORDER BY id LIMIT 1",
         Param::AnchorIds(_) => {
-            "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation_build LIMIT $1) s"
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation_build ORDER BY id LIMIT $1) s"
         }
-        Param::EvaluationId => "SELECT id AS v FROM evaluation LIMIT 1",
+        Param::EvaluationId => {
+            "SELECT evaluation AS v FROM build_job \
+             GROUP BY evaluation ORDER BY count(*) DESC, evaluation LIMIT 1"
+        }
         Param::EvaluationIds(_) => {
-            "SELECT array_agg(id) AS v FROM (SELECT id FROM evaluation LIMIT $1) s"
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM evaluation ORDER BY id LIMIT $1) s"
         }
-        Param::EntryPointId => "SELECT id AS v FROM entry_point LIMIT 1",
+        Param::EntryPointId => "SELECT id AS v FROM entry_point ORDER BY id LIMIT 1",
         Param::EntryPointIds(_) => {
-            "SELECT array_agg(id) AS v FROM (SELECT id FROM entry_point LIMIT $1) s"
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM entry_point ORDER BY id LIMIT $1) s"
         }
-        Param::ProjectId => "SELECT id AS v FROM project LIMIT 1",
-        Param::UserId => r#"SELECT id AS v FROM "user" LIMIT 1"#,
-        Param::CacheId => "SELECT id AS v FROM cache LIMIT 1",
-        Param::CacheIds(_) => "SELECT array_agg(id) AS v FROM (SELECT id FROM cache LIMIT $1) s",
-        Param::TaskId => "SELECT id AS v FROM task LIMIT 1",
-        Param::TaskActionId => "SELECT id AS v FROM task_action LIMIT 1",
-        Param::IntegrationId => "SELECT id AS v FROM integration LIMIT 1",
+        Param::ProjectId => "SELECT id AS v FROM project ORDER BY id LIMIT 1",
+        Param::UserId => r#"SELECT id AS v FROM "user" ORDER BY id LIMIT 1"#,
+        Param::CacheId => "SELECT id AS v FROM cache ORDER BY id LIMIT 1",
+        Param::CacheIds(_) => {
+            "SELECT array_agg(id) AS v FROM (SELECT id FROM cache ORDER BY id LIMIT $1) s"
+        }
+        Param::TaskId => "SELECT id AS v FROM task ORDER BY id LIMIT 1",
+        Param::TaskActionId => "SELECT id AS v FROM task_action ORDER BY id LIMIT 1",
+        Param::IntegrationId => "SELECT id AS v FROM integration ORDER BY id LIMIT 1",
         Param::CommitPrefixLow => {
             "SELECT rpad(left(encode(c.hash, 'hex'), 7), 40, '0') AS v FROM commit c \
              WHERE EXISTS (SELECT 1 FROM evaluation e WHERE e.commit = c.id) ORDER BY c.id LIMIT 1"
@@ -234,7 +243,11 @@ mod tests {
             Param::CommitPrefixLow,
             Param::CommitPrefixHigh,
         ] {
-            assert!(draw_sql(&param).is_some(), "{param:?} has no sampler");
+            let sql = draw_sql(&param).unwrap_or_else(|| panic!("{param:?} has no sampler"));
+            assert!(
+                sql.contains("ORDER BY"),
+                "{param:?} draws in heap order: {sql}"
+            );
         }
     }
 
