@@ -114,3 +114,44 @@ for name in ["worker1", "worker2"]:
     )
 NODES["worker3"].fail(f"journalctl -u gradient-worker --no-pager | grep 'cluster started' | grep -q {attempt}")
 assert_clean()
+
+banner("member lost mid attempt")
+e = phase("kill-pair")
+gate = hold_members("kill-pair", ["k1", "k2"])
+cluster = seed_cluster("kill-pair", [("k1", "left", None), ("k2", "right", None)], same_zone=False, retry_budget=2)
+daemon(gate, "release", {"node": "kill-pair/gate"})
+victim = wait_running("kill-pair", "k1")
+holder = wait_running("kill-pair", "k2")
+assert victim is not holder, "both members ran on one worker"
+# A build reads its outcome when it starts: the hanging first attempt stays hung, every retry succeeds.
+for w in WORKER_NODES:
+    if w is not victim:
+        for n in ["k1", "k2"]:
+            daemon(w, "outcome", {"node": f"kill-pair/{n}", "outcome": "success"})
+[[first, _, _]] = attempts_of(cluster)
+victim.succeed("systemctl kill --signal=KILL gradient-worker && systemctl stop gradient-worker")
+for _ in range(180):
+    if sql(f"SELECT finished_at IS NOT NULL FROM cluster_attempt WHERE id = '{first}'") == "t":
+        break
+    server.sleep(1)
+else:
+    raise Exception(f"attempt {first} stayed open after its member was lost")
+assert sql(f"SELECT count(*) FROM dispatched_job WHERE cluster_attempt = '{first}' AND finished_at IS NULL") == "0"
+wait_evaluation(e, "Completed", timeout=600)
+assert cluster_status(cluster) == "2", cluster_status(cluster)
+assert sql(f"SELECT attempts FROM cluster_job WHERE id = '{cluster}'") == "2"
+attempts = attempts_of(cluster)
+assert len(attempts) == 2, attempts
+assert attempts[0][0] == first and attempts[0][1] in ("1", "3"), attempts[0]
+assert attempts[1][1:] == ["0", "true"], attempts[1]
+assert sql(f"SELECT count(*) FROM cluster_attempt WHERE cluster_job = '{cluster}' AND finished_at IS NULL") == "0"
+seats = seats_of(attempts[1][0])
+assert len(set(seats.values())) == 2, seats
+assert WORKER_IDS[victim.name] not in seats.values(), seats
+assert_no_single_member_rows("kill-pair", ["k1", "k2"])
+daemon(victim, "release", {"node": "kill-pair/k1"})
+victim.succeed("systemctl start gradient-worker")
+victim.wait_until_succeeds(
+    "journalctl -u gradient-worker --no-pager --since=-180s | grep -q 'handshake successful'", timeout=180
+)
+assert_clean()
