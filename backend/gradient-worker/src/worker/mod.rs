@@ -20,6 +20,7 @@
 //! - [`Worker<Disconnected>`] - no active connection.  Call
 //!   [`reconnect`](Worker::reconnect) to obtain a fresh `Worker<Connected>`.
 
+mod cluster;
 mod dispatch;
 mod id;
 mod scoring;

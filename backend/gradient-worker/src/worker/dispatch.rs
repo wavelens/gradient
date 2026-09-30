@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use gradient_wire::messages::{
-    ArchivedServerMessage, CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
+    ArchivedServerMessage, BuildFailureKind, CachedPath, ClientMessage, ClusterAddress,
+    ClusterMembership, ClusterPeer, Job, JobCandidate, JobKind, ServerMessage,
 };
 use gradient_wire::session::frame::{Frame, Inbound};
 use tokio::sync::{mpsc, watch};
@@ -34,6 +35,7 @@ use crate::shutdown::Shutdown;
 use gradient_worker_client::connection::{ProtoReader, ProtoWriter};
 use gradient_worker_client::correlation::{CacheWaiters, DispatchHandle, KnownDerivationWaiters};
 
+use super::cluster::{ClusterChannels, ClusterHolds, HeldJob};
 use super::scoring::spawn_scoring_task;
 
 // ── Dispatch loop ─────────────────────────────────────────────────────────────
@@ -146,6 +148,7 @@ struct ActiveJob {
     dispatch: DispatchHandle,
     abort: watch::Sender<bool>,
     timeline: Arc<JobTimeline>,
+    cluster: Option<String>,
 }
 
 /// Registry of in-flight jobs and the completion channel each task reports on.
@@ -172,6 +175,7 @@ impl JobRegistry {
         job_id: String,
         kind: JobKind,
         dispatch: String,
+        cluster: Option<String>,
     ) -> (DispatchHandle, watch::Receiver<bool>, Arc<JobTimeline>) {
         let dispatch = DispatchHandle::new(dispatch);
         let (abort, abort_rx) = watch::channel(false);
@@ -183,6 +187,7 @@ impl JobRegistry {
                 dispatch: dispatch.clone(),
                 abort,
                 timeline: Arc::clone(&timeline),
+                cluster,
             },
         );
         (dispatch, abort_rx, timeline)
@@ -208,6 +213,14 @@ impl JobRegistry {
         }
     }
 
+    fn abort_attempt(&self, attempt: &str) -> usize {
+        self.running
+            .values()
+            .filter(|j| j.cluster.as_deref() == Some(attempt))
+            .filter(|j| j.abort.send(true).is_ok())
+            .count()
+    }
+
     fn finish(&mut self, job_id: &str) -> Option<ActiveJob> {
         self.running.remove(job_id)
     }
@@ -226,6 +239,8 @@ pub(super) struct DispatchState {
     eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
     uploads: gradient_worker_client::upload::UploadClient,
     jobs: JobRegistry,
+    holds: ClusterHolds,
+    channels: ClusterChannels,
     done_rx: Option<mpsc::UnboundedReceiver<(String, Result<()>)>>,
     max_eval: u32,
     max_build: u32,
@@ -256,6 +271,7 @@ impl DispatchState {
             }
         };
         let (done_tx, done_rx) = mpsc::unbounded_channel();
+        let channels = ClusterChannels::new(writer.clone());
         let uploads = gradient_worker_client::upload::UploadClient::new(
             writer.clone(),
             config.nar.max_concurrent_uploads as usize,
@@ -271,6 +287,8 @@ impl DispatchState {
                 running: HashMap::new(),
                 done_tx,
             },
+            holds: ClusterHolds::default(),
+            channels,
             done_rx: Some(done_rx),
             max_eval: config.eval.max_concurrent,
             max_build: config.build.max_concurrent,
@@ -287,7 +305,13 @@ impl DispatchState {
     /// assigned while the in-flight jobs finish.
     async fn begin_drain(&mut self) -> Result<()> {
         self.draining = true;
+        let held = self.holds.release_all();
+        self.report_released(held, "worker draining").await?;
         self.writer.send(ClientMessage::Draining).await
+    }
+
+    fn occupied(&self, kind: JobKind) -> u32 {
+        self.jobs.active(kind.clone()) + self.holds.held(&kind)
     }
 
     fn max_for(&self, kind: JobKind) -> u32 {
@@ -313,28 +337,25 @@ impl DispatchState {
                 job_id,
                 dispatch,
                 job,
-                cluster: None,
+                cluster,
             } => {
-                self.on_assign_job(job_id, dispatch, job).await?;
-            }
-            ServerMessage::AssignJob {
-                job_id,
-                cluster: Some(membership),
-                ..
-            } => {
-                warn!(%job_id, attempt = %membership.attempt, "declining a cluster member; holding is not wired yet");
-                self.writer
-                    .send(ClientMessage::AssignJobResponse {
-                        job_id,
-                        accepted: false,
-                        reason: Some("cluster jobs unsupported".into()),
-                    })
+                self.on_assign_job(job_id, dispatch, job, cluster.map(|m| *m))
                     .await?;
             }
-            ServerMessage::StartCluster { attempt, .. }
-            | ServerMessage::ClusterSignal { attempt, .. }
-            | ServerMessage::AbortCluster { attempt, .. } => {
-                warn!(%attempt, "cluster message not wired yet");
+            ServerMessage::StartCluster { attempt, roster } => {
+                self.on_start_cluster(attempt, roster).await?;
+            }
+            ServerMessage::ClusterSignal {
+                attempt,
+                from,
+                payload,
+            } => {
+                if !self.channels.deliver(&attempt, from, payload) {
+                    debug!(%attempt, "ClusterSignal for an attempt with no running member - dropped");
+                }
+            }
+            ServerMessage::AbortCluster { attempt, reason } => {
+                self.on_abort_cluster(attempt, reason).await?;
             }
             ServerMessage::AbortJob { job_id, reason } => {
                 self.on_abort_job(job_id, reason).await;
@@ -429,6 +450,9 @@ impl DispatchState {
             .jobs
             .finish(&job_id)
             .expect("a job task is registered before it is spawned");
+        if let Some(attempt) = &job.cluster {
+            self.channels.close(attempt);
+        }
         gradient_worker_client::correlation::forget_cache_waiters_for_job(
             &self.cache_waiters,
             &job_id,
@@ -480,7 +504,7 @@ impl DispatchState {
 
         if !self.draining {
             let kind = completed_kind;
-            if self.jobs.active(kind.clone()) < self.max_for(kind.clone()) {
+            if self.occupied(kind.clone()) < self.max_for(kind.clone()) {
                 self.writer.send(ClientMessage::RequestJob { kind }).await?;
             }
         }
@@ -499,11 +523,14 @@ impl DispatchState {
     /// already treats a send failure as a dead connection.
     async fn on_heartbeat(&mut self) -> Result<()> {
         send_live_metrics(&self.writer);
+        let expired = self.holds.expired(std::time::Instant::now());
+        self.report_released(expired, "cluster start timed out")
+            .await?;
         if self.draining {
             return Ok(());
         }
-        let active_eval = self.jobs.active(JobKind::Flake);
-        let active_build = self.jobs.active(JobKind::Build);
+        let active_eval = self.occupied(JobKind::Flake);
+        let active_build = self.occupied(JobKind::Build);
         let want_eval = active_eval < self.max_eval;
         let want_build = active_build < self.max_build;
         debug!(
@@ -563,7 +590,7 @@ impl DispatchState {
             (JobKind::Flake, self.max_eval),
         ]
         .into_iter()
-        .filter(|(kind, max)| self.jobs.active(kind.clone()) < *max)
+        .filter(|(kind, max)| self.occupied(kind.clone()) < *max)
         .map(|(kind, _)| kind)
         .collect();
         spawn_scoring_task(
@@ -578,7 +605,13 @@ impl DispatchState {
 
     // ── Job lifecycle ─────────────────────────────────────────────────────────
 
-    async fn on_assign_job(&mut self, job_id: String, dispatch: String, job: Job) -> Result<()> {
+    async fn on_assign_job(
+        &mut self,
+        job_id: String,
+        dispatch: String,
+        job: Job,
+        cluster: Option<ClusterMembership>,
+    ) -> Result<()> {
         if self.jobs.readopt(&job_id, &dispatch) {
             warn!(%job_id, %dispatch, "job assigned again while still running; reporting under the new dispatch id");
             self.writer
@@ -607,7 +640,7 @@ impl DispatchState {
             Job::Flake(_) => JobKind::Flake,
             Job::Build(_) => JobKind::Build,
         };
-        let active_count = self.jobs.active(kind.clone());
+        let active_count = self.occupied(kind.clone());
         let max = self.max_for(kind.clone());
 
         if active_count >= max {
@@ -622,6 +655,30 @@ impl DispatchState {
             return Ok(());
         }
 
+        if let Some(membership) = cluster {
+            let attempt = membership.attempt.clone();
+            let held = HeldJob {
+                job_id: job_id.clone(),
+                dispatch,
+                job,
+                kind: kind.clone(),
+            };
+            let accepted = self.holds.hold(membership, held, std::time::Instant::now());
+            info!(%job_id, %attempt, accepted, "cluster member assigned - holding its slot");
+            self.writer
+                .send(ClientMessage::AssignJobResponse {
+                    job_id,
+                    accepted,
+                    reason: (!accepted)
+                        .then(|| "already holds a member of this cluster attempt".to_owned()),
+                })
+                .await?;
+            if accepted && active_count + 1 < max {
+                self.writer.send(ClientMessage::RequestJob { kind }).await?;
+            }
+            return Ok(());
+        }
+
         info!(%job_id, ?kind, "job assigned - accepting");
         self.writer
             .send(ClientMessage::AssignJobResponse {
@@ -631,8 +688,25 @@ impl DispatchState {
             })
             .await?;
 
+        self.spawn_job(job_id.clone(), kind.clone(), dispatch, job, None);
+
+        if active_count + 1 < max {
+            self.writer.send(ClientMessage::RequestJob { kind }).await?;
+        }
+
+        Ok(())
+    }
+
+    fn spawn_job(
+        &mut self,
+        job_id: String,
+        kind: JobKind,
+        dispatch: String,
+        job: Job,
+        cluster: Option<String>,
+    ) {
         let (dispatch, abort_rx, timeline) =
-            self.jobs.register(job_id.clone(), kind.clone(), dispatch);
+            self.jobs.register(job_id.clone(), kind, dispatch, cluster);
 
         let executor = self.executor.clone();
         let job_store = Arc::clone(&executor.store);
@@ -666,9 +740,59 @@ impl DispatchState {
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
             let _ = job_done_tx.send((jid, result));
         });
+    }
 
-        if active_count + 1 < max {
-            self.writer.send(ClientMessage::RequestJob { kind }).await?;
+    async fn on_start_cluster(&mut self, attempt: String, roster: Vec<ClusterPeer>) -> Result<()> {
+        let Some((membership, held)) = self.holds.start(&attempt) else {
+            warn!(%attempt, "StartCluster for an attempt this worker does not hold - ignoring");
+            return Ok(());
+        };
+        info!(%attempt, job_id = %held.job_id, peers = roster.len(), ?roster, "cluster started - running the held member");
+        let me = ClusterAddress {
+            role: membership.role,
+            index: membership.index,
+        };
+        self.channels.open(&attempt, me, roster);
+        self.spawn_job(
+            held.job_id,
+            held.kind,
+            held.dispatch,
+            held.job,
+            Some(attempt),
+        );
+
+        Ok(())
+    }
+
+    async fn on_abort_cluster(&mut self, attempt: String, reason: String) -> Result<()> {
+        let held = self.holds.drop_attempt(&attempt);
+        let running = self.jobs.abort_attempt(&attempt);
+        self.channels.close(&attempt);
+        warn!(%attempt, %reason, held = held.is_some(), running, "cluster attempt aborted by server");
+        if let Some(job) = held
+            && !self.draining
+        {
+            self.writer
+                .send(ClientMessage::RequestJob { kind: job.kind })
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn report_released(&mut self, released: Vec<HeldJob>, error: &str) -> Result<()> {
+        for job in released {
+            warn!(job_id = %job.job_id, %error, "releasing a held cluster member");
+            self.writer
+                .send(ClientMessage::JobFailed {
+                    job_id: job.job_id,
+                    dispatch: job.dispatch,
+                    error: error.to_owned(),
+                    kind: BuildFailureKind::Aborted,
+                    missing_paths: Vec::new(),
+                    spans: Vec::new(),
+                })
+                .await?;
         }
 
         Ok(())
@@ -855,8 +979,12 @@ mod tests {
     #[test]
     fn a_reassigned_running_job_keeps_its_task_and_takes_the_new_dispatch_id() {
         let (mut jobs, _done_rx) = registry();
-        let (dispatch, abort_rx, _timeline) =
-            jobs.register("job-1".to_owned(), JobKind::Build, "dispatch-1".to_owned());
+        let (dispatch, abort_rx, _timeline) = jobs.register(
+            "job-1".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            None,
+        );
 
         assert!(jobs.readopt("job-1", "dispatch-2"));
 
@@ -878,11 +1006,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn aborting_an_attempt_stops_only_its_members() {
+        let (mut jobs, _done_rx) = registry();
+        let (_, member, _) = jobs.register(
+            "build:x".to_owned(),
+            JobKind::Build,
+            "dispatch-1".to_owned(),
+            Some("a1".to_owned()),
+        );
+        let (_, single, _) = jobs.register(
+            "build:y".to_owned(),
+            JobKind::Build,
+            "dispatch-2".to_owned(),
+            None,
+        );
+
+        assert_eq!(jobs.abort_attempt("a1"), 1);
+
+        assert!(*member.borrow(), "the member hears the abort");
+        assert!(!*single.borrow(), "a single job keeps running");
+    }
+
     /// The terminal report carries whatever id the job runs under at the end.
     #[test]
     fn finishing_a_job_hands_back_its_current_dispatch_id() {
         let (mut jobs, _done_rx) = registry();
-        jobs.register("job-1".to_owned(), JobKind::Flake, "dispatch-1".to_owned());
+        jobs.register(
+            "job-1".to_owned(),
+            JobKind::Flake,
+            "dispatch-1".to_owned(),
+            None,
+        );
         jobs.readopt("job-1", "dispatch-2");
 
         let job = jobs.finish("job-1").expect("the job was running");
