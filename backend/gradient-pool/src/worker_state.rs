@@ -126,8 +126,8 @@ impl WorkerShared {
         self.cpu_count = profile.cpu_count;
         self.ram_total_mb = profile.ram_total_mb;
         self.cpu_core_score = profile.cpu_core_score;
-        self.zone = profile.zone;
-        self.endpoint = profile.endpoint;
+        self.zone = profile.zone.filter(|z| !z.is_empty());
+        self.endpoint = profile.endpoint.filter(|e| !e.is_empty());
     }
 }
 
