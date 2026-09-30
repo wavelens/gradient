@@ -20,6 +20,7 @@ pub mod actor;
 mod assessment_memo;
 pub mod build;
 pub mod buildability;
+pub mod cluster;
 pub mod dispatch;
 pub mod eval;
 pub mod history;
