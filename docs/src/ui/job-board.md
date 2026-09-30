@@ -13,11 +13,11 @@ What the scheduler and the workers do right now and over time: live jobs, why a 
 | Durations | Average and maximum build time, the wait split over time | |
 | Workers | Fleet size, load by capability, system and feature, slot use per worker | Spot the missing kind of worker |
 | Cache | Stored size, traffic, growth, latency per upstream | |
+| Storage | NAR storage latency and errors per operation (file or S3), writer lane fill and send stalls, NAR serve queue and failures; every chart on one time axis over the whole window, minute resolution up to 6 h; superusers only | Pick the time window |
 | Network | NAR egress, worker network and disk speed, HTTP latency per route | |
 | Jobs | The costliest builds by wall time, peak RAM, CPU time, disk I/O and network | Pick the time window |
 | Evals | The costliest evaluations by time, peak memory, thunks, function calls and allocations | Pick the time window |
 | System Health | Server runtime, metric pipeline lag, route stats; superusers only | **Run Deep GC**; **Enable Draining** before stopping the server |
-| Storage | NAR storage latency and errors per operation (file or S3), writer lane fill and send stalls, NAR serve queue and failures; minute resolution up to 6 h; superusers only | |
 
 === "Live Jobs"
 
