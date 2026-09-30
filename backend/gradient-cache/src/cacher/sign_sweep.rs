@@ -147,10 +147,9 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     let producers = load_producing_task_flags(&state, &cached_paths).await?;
     let skipped: HashSet<CachedPathId> = compute_skipped_cached_paths(&producers);
 
-    // Build a per-cache signer once (one crypt-secret read + one private-key
-    // decryption per cache, not per row). `None` marks caches whose key
-    // failed to decode - we skip their rows for this pass.
-    let mut signers: HashMap<CacheId, Option<CacheSigner>> = HashMap::new();
+    // `None` marks caches whose key failed to decode - we skip their rows for
+    // this pass.
+    let mut signers: HashMap<CacheId, Option<Arc<CacheSigner>>> = HashMap::new();
     for (cache_id, cache) in &caches {
         if cache.private_key.is_empty() {
             signers.insert(*cache_id, None);

@@ -112,6 +112,24 @@ fn cache_signer_matches_one_shot_signer() {
 }
 
 #[test]
+fn a_signer_is_decrypted_once_until_its_key_rotates() {
+    let (_f, path) = temp_secret_file();
+    let (encrypted_priv, pub_b64) = generate_signing_key(&path).expect("generate failed");
+    let mut cache = make_cache("memocache", &pub_b64, &encrypted_priv);
+    cache.id = gradient_types::ids::CacheId::now_v7();
+    let serve_url = "https://cache.example.com";
+
+    let first = CacheSigner::from_cache(&path, &cache, serve_url).expect("signer build");
+    let again = CacheSigner::from_cache(&path, &cache, serve_url).expect("signer build");
+    assert!(std::sync::Arc::ptr_eq(&first, &again));
+
+    let (rotated, _) = generate_signing_key(&path).expect("generate failed");
+    cache.private_key = rotated;
+    let after = CacheSigner::from_cache(&path, &cache, serve_url).expect("signer build");
+    assert!(!std::sync::Arc::ptr_eq(&first, &after));
+}
+
+#[test]
 fn cache_signer_rejects_bad_key_at_build_time() {
     // Construction surfaces decryption errors up front so the sweep can
     // skip the cache for the rest of the pass instead of failing each row.
