@@ -154,7 +154,7 @@ mod tests {
         use gradient_types::ids::BuildAttemptId;
         let dir = tempfile::tempdir().unwrap();
         let storage = FileLogStorage::new(dir.path()).await.unwrap();
-        let id = BuildAttemptId::new(uuid::Uuid::new_v4());
+        let id = BuildAttemptId::new(uuid::Uuid::now_v7());
         let log = "line one\nline two\nline three\n";
         let descs = super::compress_and_store_chunks(&storage, id, log, 12)
             .await

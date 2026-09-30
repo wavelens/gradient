@@ -35,6 +35,19 @@ ${baseDir}/nars/<2 chars>/<rest>.nar.zst
     - No object versioning (nor object lock or replication, which force versioning): Gradient assumes overwrite on PUT, and a versioned bucket keeps one copy per re-upload that no S3 GC reclaims.
     - An `AbortIncompleteMultipartUpload` lifecycle rule (e.g. 7 days): NARs over 1 GiB go up as multipart, and a worker that dies mid-upload leaves the parts behind.
 
+## Build Logs
+
+Build logs share the NAR backend (`gradient-storage/src/log.rs`), sharded by the last byte of the `BuildAttemptId`, the random tail of a UUIDv7:
+
+```text
+logs/<last 2 chars>/<attempt>.log                  # live log
+logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
+```
+
+- **Live:** appended to `${baseDir}/logs/...` while the attempt runs, also with S3 (S3 has no append).
+- **Finalized:** `finalize_build_log` writes zstd chunks, indexes them in `build_log_chunk` and drops the live file. With S3 the chunks go to `<prefix>logs/...` only.
+- **Reclaimed:** with their derivation by the orphan-derivation GC; logs without a `build_attempt` row by the [deep GC](#deep-gc) log pass.
+
 ## Deep GC
 
 `POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) reconciles every storage backend against the database in three passes (`gradient-cache/src/cacher/deep_gc.rs`).
