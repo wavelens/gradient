@@ -44,6 +44,9 @@ pub struct RecoveryReport {
     pub builds_aborted: u64,
     pub evals_aborted: u64,
     pub tasks_forced: u64,
+    pub cluster_attempts_closed: u64,
+    pub clusters_requeued: u64,
+    pub clusters_aborted: u64,
 }
 
 fn requeue_mid_flight_sql() -> String {
@@ -173,6 +176,14 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
             .await?;
         report.tasks_forced = res.rows_affected;
     }
+
+    // 5. Cluster attempts: every open one is lost with the process, and a
+    // `Running` cluster goes back to `Queued` unless 3-4 left a member that can
+    // no longer run.
+    let clusters = crate::cluster::recover_cluster_attempts(conn).await?;
+    report.cluster_attempts_closed = clusters.attempts_closed;
+    report.clusters_requeued = clusters.clusters_requeued;
+    report.clusters_aborted = clusters.clusters_aborted;
 
     Ok(report)
 }
@@ -363,6 +374,11 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
+            // 5. one unstarted attempt closed, one cluster requeued
+            .append_exec_results([1, 0, 0, 1].map(|n| MockExecResult {
+                last_insert_id: 0,
+                rows_affected: n,
+            }))
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
@@ -374,6 +390,9 @@ mod tests {
         assert_eq!(report.builds_aborted, 4);
         assert_eq!(report.evals_aborted, 1);
         assert_eq!(report.tasks_forced, 1);
+        assert_eq!(report.cluster_attempts_closed, 1);
+        assert_eq!(report.clusters_requeued, 1);
+        assert_eq!(report.clusters_aborted, 0);
     }
 
     /// Recovery asserts that nothing the previous process handed out is still
@@ -390,6 +409,11 @@ mod tests {
             .append_exec_results([none.clone(), none])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<MEval>::new()])
+            // 5. cluster attempts and clusters (none)
+            .append_exec_results([0, 0, 0, 0].map(|n| MockExecResult {
+                last_insert_id: 0,
+                rows_affected: n,
+            }))
             .into_connection();
 
         recover_interrupted_work(&db).await.unwrap();
@@ -411,6 +435,40 @@ mod tests {
         assert!(close < requeue, "{sql:?}");
     }
 
+    /// The member-liveness check reads what the sweep above already moved: an
+    /// evaluation member aborted in 4b must abort its cluster, not requeue it.
+    #[tokio::test]
+    async fn clusters_recover_after_the_evaluations_they_hold() {
+        let none = MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([none.clone(), none.clone()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<MEval>::new()])
+            .append_exec_results([none.clone(), none.clone(), none.clone(), none])
+            .into_connection();
+
+        recover_interrupted_work(&db).await.unwrap();
+
+        let log = db.into_transaction_log();
+        let sql: Vec<&str> = log
+            .iter()
+            .flat_map(|t| t.statements())
+            .map(|s| s.sql.as_str())
+            .collect();
+        let evals = sql
+            .iter()
+            .position(|s| s.contains("FROM \"evaluation\""))
+            .expect("4a");
+        let clusters = sql
+            .iter()
+            .position(|s| s.starts_with("UPDATE \"cluster_job\""))
+            .expect("step 5");
+        assert!(evals < clusters, "{sql:?}");
+    }
+
     #[tokio::test]
     async fn task_force_step_skipped_when_no_pre_build_evals() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -428,6 +486,11 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             // 4a. SELECT pre-build evals: empty, so steps 4b/4c/4d are skipped
             .append_query_results([Vec::<MEval>::new()])
+            // 5. cluster attempts and clusters (none)
+            .append_exec_results([0, 0, 0, 0].map(|n| MockExecResult {
+                last_insert_id: 0,
+                rows_affected: n,
+            }))
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
