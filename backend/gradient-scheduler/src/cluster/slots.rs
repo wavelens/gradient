@@ -23,6 +23,15 @@ pub enum SlotKind {
     Build,
 }
 
+impl SlotKind {
+    pub fn job_kind(self) -> JobKind {
+        match self {
+            SlotKind::Eval => JobKind::Flake,
+            SlotKind::Build => JobKind::Build,
+        }
+    }
+}
+
 impl From<&JobKind> for SlotKind {
     fn from(kind: &JobKind) -> Self {
         match kind {
@@ -48,6 +57,10 @@ impl IdleSlots {
 
     pub fn forget_worker(&mut self, worker: &str) {
         self.seen.retain(|(w, _), _| w != worker);
+    }
+
+    pub fn is_idle(&self, worker: &str, kind: SlotKind, now: Instant) -> bool {
+        self.live(now).any(|(w, k)| w == worker && k == kind)
     }
 
     pub fn live(&self, now: Instant) -> impl Iterator<Item = (&str, SlotKind)> {

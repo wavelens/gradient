@@ -97,6 +97,10 @@ impl ClusterBook {
         self.by_key.insert(key, of.cluster.id);
     }
 
+    pub fn get(&self, id: ClusterJobId) -> Option<&PendingCluster> {
+        self.waiting.get(&id)
+    }
+
     pub fn contains(&self, key: &str) -> bool {
         self.by_key.contains_key(key)
     }

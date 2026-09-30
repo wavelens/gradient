@@ -23,6 +23,8 @@ pub struct WorkerCaps {
     pub metrics: Option<crate::score::WorkerMetricsView>,
     /// Locality label for cluster placement; `None` is the zone of all unlabelled workers.
     pub zone: Option<String>,
+    /// Address a cluster peer reaches this worker at, as the worker advertised it.
+    pub endpoint: Option<String>,
 }
 
 impl WorkerCaps {

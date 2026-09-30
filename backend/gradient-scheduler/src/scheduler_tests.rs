@@ -1713,3 +1713,110 @@ async fn the_snapshot_lists_the_oldest_cluster_first() {
 
     assert_eq!(ids, vec![older, newer]);
 }
+
+async fn ready_cluster(scheduler: &Scheduler, members: &[(&str, &str)]) -> ClusterJobId {
+    let cluster = gradient_entity::cluster_job::Model {
+        id: ClusterJobId::now_v7(),
+        ..Default::default()
+    };
+    for (key, role) in members {
+        let member = gradient_entity::cluster_member::Model {
+            id: ClusterMemberId::now_v7(),
+            cluster_job: cluster.id,
+            evaluation: Some(EvaluationId::now_v7()),
+            role: (*role).into(),
+            ..Default::default()
+        };
+        let of = gradient_db::MemberOf {
+            cluster: cluster.clone(),
+            member,
+            member_count: members.len() as u32,
+        };
+        scheduler
+            .enqueue_cluster_member(
+                of,
+                (*key).into(),
+                crate::jobs::PendingJob::Eval(eval_job(ProjectId::now_v7())),
+            )
+            .await
+            .unwrap();
+    }
+
+    cluster.id
+}
+
+async fn idle(scheduler: &Scheduler, worker: &str) -> mpsc::UnboundedReceiver<SessionSignal> {
+    let rx = register(scheduler, worker, eval_worker_caps(), HashSet::new()).await;
+    assert!(
+        scheduler
+            .request_job(worker, JobKind::Flake)
+            .await
+            .is_none()
+    );
+
+    rx
+}
+
+async fn placed(scheduler: &Scheduler) -> crate::cluster::Placement {
+    let snapshot = scheduler.cluster_snapshot().await;
+    crate::cluster::plan(&snapshot.clusters[0], &snapshot.slots, &snapshot.scores).expect("placed")
+}
+
+#[tokio::test]
+async fn a_placement_takes_the_cluster_and_its_seats() {
+    let scheduler = test_scheduler().await;
+    let _w1 = idle(&scheduler, "w1").await;
+    let _w2 = idle(&scheduler, "w2").await;
+    let cluster = ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    let placement = placed(&scheduler).await;
+
+    let committing = scheduler
+        .take_placement(placement, ClusterAttemptId::now_v7())
+        .await
+        .expect("taken");
+
+    assert_eq!(committing.cluster.id, cluster);
+    assert_eq!(committing.seats.len(), 2);
+    assert!(scheduler.cluster_snapshot().await.clusters.is_empty());
+    assert!(scheduler.active_job("eval:a").await.is_some());
+}
+
+#[tokio::test]
+async fn a_placement_whose_worker_went_busy_is_refused() {
+    let scheduler = test_scheduler().await;
+    let _w1 = idle(&scheduler, "w1").await;
+    let _w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    let placement = placed(&scheduler).await;
+    scheduler
+        .enqueue_eval_job("eval:single".into(), eval_job(ProjectId::now_v7()))
+        .await
+        .unwrap();
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_some());
+
+    assert!(
+        scheduler
+            .take_placement(placement, ClusterAttemptId::now_v7())
+            .await
+            .is_none()
+    );
+    assert_eq!(scheduler.cluster_snapshot().await.clusters.len(), 1);
+}
+
+#[tokio::test]
+async fn a_restored_placement_waits_again() {
+    let scheduler = test_scheduler().await;
+    let _w1 = idle(&scheduler, "w1").await;
+    let _w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    let placement = placed(&scheduler).await;
+    let committing = scheduler
+        .take_placement(placement, ClusterAttemptId::now_v7())
+        .await
+        .expect("taken");
+
+    scheduler.restore_cluster(committing).await;
+
+    assert_eq!(scheduler.cluster_snapshot().await.clusters.len(), 1);
+    assert!(scheduler.active_job("eval:a").await.is_none());
+}

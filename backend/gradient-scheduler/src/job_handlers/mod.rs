@@ -20,6 +20,7 @@
 mod abort;
 mod assignment;
 mod build_status;
+mod cluster;
 mod eval_status;
 mod priority;
 mod queue;

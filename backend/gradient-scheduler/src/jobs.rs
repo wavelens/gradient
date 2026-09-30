@@ -284,7 +284,7 @@ impl Assignment {
 }
 
 /// Owned snapshot of a dispatch decision for the `dispatched_job` table.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct DispatchRecord {
     /// The tracker's key for this job, persisted on `dispatched_job.job_id`.
     pub job_id: String,
@@ -1045,6 +1045,10 @@ impl JobTracker {
 
     pub fn ready_clusters(&self) -> impl Iterator<Item = &PendingCluster> {
         self.clusters.ready()
+    }
+
+    pub fn waiting_cluster(&self, id: ClusterJobId) -> Option<&PendingCluster> {
+        self.clusters.get(id)
     }
 
     pub fn take_cluster(&mut self, id: ClusterJobId) -> Option<PendingCluster> {

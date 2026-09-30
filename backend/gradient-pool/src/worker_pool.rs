@@ -179,6 +179,7 @@ impl WorkerPool {
                 capabilities: s.capabilities.clone(),
                 metrics: self.metrics_for(id),
                 zone: s.zone.clone(),
+                endpoint: s.endpoint.clone(),
             }
         })
     }
