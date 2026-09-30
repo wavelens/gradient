@@ -59,7 +59,7 @@ Every other message flushes the queue first: a write after a batch or a commit s
 ## Batching
 
 - Queued ingest batches and NAR commits share one transaction with a savepoint each (`ingest_one`, `commit_one`); one that fails for its content fails only its caller. An upload burst commits in one round trip and one WAL flush instead of one per NAR.
-- A flush runs on the next mailbox turn, or at once when the queue reaches `INGEST_ROW_BUDGET` (5000 derivations) or `NAR_COMMIT_BUDGET` (32 commits, since a flush holds its anchor locks to the end).
+- A flush runs on the next mailbox turn, or at once when the queue reaches `INGEST_ROW_BUDGET` (5000 derivations) or `NAR_COMMIT_BUDGET` (32 commits). A flush stops taking NAR commits after `NAR_FLUSH_TIME` (100 ms) and leaves the rest to the next mailbox turn, since it holds every commit's anchor locks to its end.
 - The worker's wire has no acknowledgement to retry on. A failed batch fails its evaluation (`fail_evaluation`) instead of leaving a hole.
 - `IngestBatch.truly_substituted` is the one fact from outside the graph: derivations already whole in our cache, established by the scheduler and keyed by drv path. Their new anchors start `Substituted`. Ids are assigned inside the transaction.
 - Upstream availability is not part of a batch; the probe answers through `UpstreamHits` for demanded anchors. A batch writes `substitutable = false` on new anchors only.
