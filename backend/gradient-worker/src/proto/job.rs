@@ -257,15 +257,20 @@ impl JobUpdater {
         paths: Vec<String>,
         sizes: Vec<Option<u64>>,
     ) -> Result<Vec<CachedPath>> {
-        let from_store = match &self.store {
-            Some(store) => store.nar_sizes(&paths).await,
-            None => vec![None; paths.len()],
-        };
-        let nar_sizes: Vec<Option<u64>> = from_store
-            .into_iter()
-            .enumerate()
-            .map(|(i, stored)| sizes.get(i).copied().flatten().or(stored))
-            .collect();
+        let mut nar_sizes = sizes;
+        nar_sizes.resize(paths.len(), None);
+        if let Some(store) = &self.store {
+            let unknown: Vec<usize> = (0..paths.len())
+                .filter(|&i| nar_sizes[i].is_none())
+                .collect();
+            let unknown_paths: Vec<String> = unknown.iter().map(|&i| paths[i].clone()).collect();
+            for (i, size) in unknown
+                .into_iter()
+                .zip(store.nar_sizes(&unknown_paths).await)
+            {
+                nar_sizes[i] = size;
+            }
+        }
 
         let mut guard = self.phase(JobPhase::CacheQueryWait);
         guard.record(paths.len() as u32, 0);

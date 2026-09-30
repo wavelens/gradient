@@ -78,6 +78,7 @@ async fn query_fetched_paths(
 ///
 /// A failed closure upload fails the evaluation (propagated to the caller),
 /// so a downstream build never starts against a source the cache is missing.
+#[tracing::instrument(level = "debug", skip_all, fields(seeds = drv_paths.len()))]
 pub(crate) async fn push_drv_closure(
     drv_paths: &[String],
     pushed: &mut std::collections::HashSet<String>,
@@ -99,16 +100,15 @@ pub(crate) async fn push_drv_closure(
     // never pushed, and a later rebuild of that node fails `InputsUnavailable`
     // forever on a source that has no producer and only the eval worker holds.
     let drv_members: Vec<String> = closure
-        .iter()
+        .keys()
         .filter(|p| p.ends_with(".drv"))
         .cloned()
         .collect();
-    closure.extend(
-        drv_input_sources(&drv_members)
-            .await
-            .into_iter()
-            .filter(|p| !pushed.contains(p)),
-    );
+    for source in drv_input_sources(&drv_members).await {
+        if !pushed.contains(&source) {
+            closure.entry(source).or_insert(None);
+        }
+    }
 
     if closure.is_empty() {
         return Ok(());
@@ -119,12 +119,11 @@ pub(crate) async fn push_drv_closure(
         "pushing eval closure to cache"
     );
 
-    let paths: Vec<String> = closure.iter().cloned().collect();
+    let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = closure.into_iter().unzip();
     guard.record(paths.len() as u32, 0);
-    let sizes = vec![None; paths.len()];
-    let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
+    let cache_entries = query_fetched_paths(updater, paths.clone(), sizes).await?;
     upload_all(updater, pair_with_store(cache_entries, store), None).await?;
-    pushed.extend(closure);
+    pushed.extend(paths);
     Ok(())
 }
 
