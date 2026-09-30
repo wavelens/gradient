@@ -78,6 +78,11 @@ pub fn is_small_upload(size: u64) -> bool {
     size <= SMALL_UPLOAD_BYTES
 }
 
+/// Small uploads in flight at once beside the large ones, at the worker's slots and
+/// at the server's admission. A small upload costs its two round trips, not its
+/// bytes, so this window over the link's latency is what bounds a closure push.
+pub const SMALL_UPLOADS_IN_FLIGHT: usize = 128;
+
 /// Server-side budget for answering one `CacheQuery`; on expiry the server
 /// replies `CacheError` so the worker retries instead of reading "uncached".
 pub const CACHE_QUERY_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);

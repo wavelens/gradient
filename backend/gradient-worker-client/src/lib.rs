@@ -20,4 +20,3 @@ pub mod reconnect;
 pub mod testing;
 pub mod throughput;
 pub mod upload;
-mod upload_slots;

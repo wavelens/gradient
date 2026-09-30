@@ -42,7 +42,7 @@ pub const GRAPH_TX_ATTEMPTS: u32 = 3;
 /// Queued ingest batches are flushed early once they carry this many derivations.
 pub const INGEST_ROW_BUDGET: usize = 5000;
 /// Queued NAR commits are flushed early once this many wait.
-pub const NAR_COMMIT_BUDGET: usize = 32;
+pub const NAR_COMMIT_BUDGET: usize = 128;
 /// A flush stops taking NAR commits once it has run this long and leaves the rest
 /// for the next one. It holds the anchor locks of every commit in it until it ends,
 /// so this bounds how long a dispatch claim waits behind it, whatever the commits

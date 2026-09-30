@@ -6,6 +6,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use gradient_wire::messages::SMALL_UPLOADS_IN_FLIGHT;
+
 pub type SessionId = u64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -45,8 +47,8 @@ pub enum Outcome {
 }
 
 /// Server-wide upload budget: round-robin across sessions, FIFO within one,
-/// priority requests ahead of the rest, and no request ever bypasses a blocked
-/// head.
+/// priority requests ahead of the rest and in a window of their own
+/// ([`SMALL_UPLOADS_IN_FLIGHT`]), and no request ever bypasses a blocked head.
 pub struct AdmissionCore {
     limits: Limits,
     ring: VecDeque<SessionId>,
@@ -55,6 +57,7 @@ pub struct AdmissionCore {
     leaders: HashSet<ObjectKey>,
     followers: HashMap<ObjectKey, Vec<Request>>,
     bytes_in_flight: u64,
+    small_in_flight: usize,
 }
 
 impl AdmissionCore {
@@ -67,6 +70,7 @@ impl AdmissionCore {
             leaders: HashSet::new(),
             followers: HashMap::new(),
             bytes_in_flight: 0,
+            small_in_flight: 0,
         }
     }
 
@@ -136,6 +140,9 @@ impl AdmissionCore {
             return Vec::new();
         };
         self.bytes_in_flight -= request.size;
+        if request.priority {
+            self.small_in_flight -= 1;
+        }
         self.leaders.remove(&request.object);
         let followers = self.followers.remove(&request.object).unwrap_or_default();
         match outcome {
@@ -158,7 +165,7 @@ impl AdmissionCore {
                     .push(head);
                 continue;
             }
-            if !self.fits(head.size) {
+            if !self.fits(&head) {
                 break;
             }
             self.pop_head();
@@ -166,6 +173,9 @@ impl AdmissionCore {
                 self.ring.rotate_left(1);
             }
             self.bytes_in_flight += head.size;
+            if head.priority {
+                self.small_in_flight += 1;
+            }
             self.leaders.insert(head.object.clone());
             self.granted.insert((head.session, head.id), head.clone());
             decisions.push(Decision::Grant(head));
@@ -196,10 +206,17 @@ impl AdmissionCore {
         self.drop_empty(session);
     }
 
-    fn fits(&self, size: u64) -> bool {
-        self.granted.is_empty()
-            || (self.granted.len() < self.limits.concurrency
-                && self.bytes_in_flight + size <= self.limits.bytes)
+    fn fits(&self, request: &Request) -> bool {
+        let (in_flight, window) = if request.priority {
+            (self.small_in_flight, SMALL_UPLOADS_IN_FLIGHT)
+        } else {
+            (
+                self.granted.len() - self.small_in_flight,
+                self.limits.concurrency,
+            )
+        };
+        in_flight == 0
+            || (in_flight < window && self.bytes_in_flight + request.size <= self.limits.bytes)
     }
 
     fn push_back(&mut self, request: Request) {
@@ -265,23 +282,33 @@ mod tests {
     }
 
     #[test]
-    fn a_small_upload_is_granted_before_the_larger_ones_queued_ahead_of_it() {
+    fn small_uploads_are_granted_beside_the_large_ones() {
         let mut core = core(1, GIB);
         assert_eq!(granted(&core.enqueue(req(1, 1, "a", 1))), vec![(1, 1)]);
-        core.enqueue(req(1, 2, "b", 1));
-        core.enqueue(req(2, 3, "c", 1));
-        core.enqueue(small_req(2, 4, "d"));
-        core.enqueue(small_req(2, 5, "e"));
+        assert_eq!(granted(&core.enqueue(req(1, 2, "b", 1))), vec![]);
+        assert_eq!(granted(&core.enqueue(small_req(2, 3, "c"))), vec![(2, 3)]);
+        assert_eq!(granted(&core.enqueue(small_req(1, 4, "d"))), vec![(1, 4)]);
+        assert_eq!(
+            granted(&core.release(1, 1, Outcome::Committed)),
+            vec![(1, 2)]
+        );
+    }
 
-        let mut served = Vec::new();
-        let mut last = (1, 1);
-        for _ in 0..4 {
-            let next = granted(&core.release(last.0, last.1, Outcome::Committed));
-            assert_eq!(next.len(), 1, "one slot: {next:?}");
-            last = next[0];
-            served.push(last);
+    #[test]
+    fn the_small_window_is_a_bound_of_its_own() {
+        let mut core = core(1, GIB);
+        for id in 0..SMALL_UPLOADS_IN_FLIGHT as u64 {
+            assert_eq!(
+                granted(&core.enqueue(small_req(1, id, &id.to_string()))),
+                vec![(1, id)]
+            );
         }
-        assert_eq!(served, vec![(2, 4), (2, 5), (1, 2), (2, 3)]);
+        let over = SMALL_UPLOADS_IN_FLIGHT as u64;
+        assert_eq!(granted(&core.enqueue(small_req(1, over, "over"))), vec![]);
+        assert_eq!(
+            granted(&core.release(1, 0, Outcome::Committed)),
+            vec![(1, over)]
+        );
     }
 
     fn granted(decisions: &[Decision]) -> Vec<(SessionId, u64)> {
