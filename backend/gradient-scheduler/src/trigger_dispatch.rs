@@ -102,6 +102,7 @@ use std::sync::Arc;
 
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
 use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_entity::task_trigger as ept;
 use gradient_sources::{check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -197,12 +198,6 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             }
         };
 
-        let info = get_commit_info(&sources, task, &commit_hash);
-        let (msg, _email, author) = tokio::time::timeout(HEAD_RESOLVE_BUDGET, info)
-            .await
-            .unwrap_or_else(|_| Ok((String::new(), None, String::new())))
-            .unwrap_or_else(|_| (String::new(), None, String::new()));
-
         // Bump tracked flake inputs (OpenPr action) on every due trigger fire,
         // independent of whether HEAD advanced - upstream input updates never
         // move the repo, so gating this on a new commit would never run it.
@@ -217,6 +212,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         // A normal CI evaluation only when there is something new to evaluate;
         // time triggers always re-run against current HEAD.
         if has_update || is_time {
+            let (msg, author) = commit_metadata(&sources, task, &commit_hash).await;
             let trigger_type = cfg.trigger_type();
             match apply_trigger(
                 &state.worker_db,
@@ -267,6 +263,24 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         update_last_fired(state, &trig, now).await;
     }
     Ok(())
+}
+
+/// The message and author an evaluation of `commit_hash` records, empty when
+/// the fetch fails or overruns [`HEAD_RESOLVE_BUDGET`].
+async fn commit_metadata(
+    sources: &DbContext,
+    task: &MTask,
+    commit_hash: &[u8],
+) -> (String, String) {
+    match tokio::time::timeout(
+        HEAD_RESOLVE_BUDGET,
+        get_commit_info(sources, task, commit_hash),
+    )
+    .await
+    {
+        Ok(Ok(commit)) => (commit.message, commit.author_name),
+        _ => (String::new(), String::new()),
+    }
 }
 
 /// Await one trigger's HEAD resolution under [`HEAD_RESOLVE_BUDGET`]. `None` on

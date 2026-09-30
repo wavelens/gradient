@@ -44,7 +44,7 @@ pub async fn get_commit_info(
     ctx: &DbContext,
     task: &MTask,
     commit_hash: &[u8],
-) -> Result<(String, Option<String>, String), SourceError> {
+) -> Result<HeadCommit, SourceError> {
     TaskGitContext::new(ctx, task)
         .await?
         .commit_info(commit_hash)
@@ -75,8 +75,8 @@ pub async fn resolve_head(
     branch: Option<&str>,
 ) -> Result<(Vec<u8>, String, String), SourceError> {
     let (_has_update, commit_hash) = check_task_updates(ctx, task, branch).await?;
-    let (msg, _email, author) = get_commit_info(ctx, task, &commit_hash).await?;
-    Ok((commit_hash, msg, author))
+    let commit = get_commit_info(ctx, task, &commit_hash).await?;
+    Ok((commit_hash, commit.message, commit.author_name))
 }
 
 /// Resolve a ref on an arbitrary remote repository to its commit hash, without

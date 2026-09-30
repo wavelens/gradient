@@ -278,13 +278,13 @@ pub async fn post_task_evaluate(
 
     let pinned_run = pinned.is_some();
 
-    // A pinned commit skips the branch-head lookup entirely; the clone inside
+    // A pinned commit skips the branch-head lookup entirely; the fetch inside
     // `get_commit_info` is what proves the commit is actually reachable, so an
     // unknown one is refused here instead of queueing an evaluation that dies
     // fetching.
     let (commit_hash, commit_message, author_name) = match pinned {
         Some(commit_hash) => {
-            let (message, _email, author) = get_commit_info(&state.db(), &task, &commit_hash)
+            let commit = get_commit_info(&state.db(), &task, &commit_hash)
                 .await
                 .map_err(|e| {
                     WebError::bad_request_with(
@@ -292,7 +292,7 @@ pub async fn post_task_evaluate(
                         format!("Commit not found in repository: {}", e),
                     )
                 })?;
-            (commit_hash, message, author)
+            (commit_hash, commit.message, commit.author_name)
         }
         None => {
             let head = head_commit(&state.db(), &task, None).await.map_err(|e| {

@@ -6,6 +6,7 @@
 
 mod fixtures;
 
+use super::commit_info::{fetch_commit, head_refspec};
 use super::pktline::read_ref_from_pktlines;
 use super::url::{git_transport_url, parse_git_protocol_url};
 use crate::SourceError;
@@ -206,12 +207,26 @@ fn the_head_commit_is_the_tip_of_the_ref_asked_for() {
     let feature = commit_on(&repo, "feature", "on feature");
     let url = format!("file://{}", dir.path().display());
 
-    let head = super::commit_info::fetch_head_commit(&url, None, None).unwrap();
+    let head = fetch_commit(&url, None, &head_refspec(None)).unwrap();
     assert_eq!(head.hash, main.as_bytes());
     assert_eq!(head.message, "second");
     assert_eq!(head.author_name, "Ada");
     assert_eq!(head.author_email.as_deref(), Some("ada@example.com"));
 
-    let branch = super::commit_info::fetch_head_commit(&url, None, Some("feature")).unwrap();
+    let branch = fetch_commit(&url, None, &head_refspec(Some("feature"))).unwrap();
     assert_eq!(branch.hash, feature.as_bytes());
+}
+
+#[test]
+fn a_pinned_commit_below_the_tip_is_fetched_by_its_hash() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    let pinned = commit_on(&repo, "main", "pinned\n\nbody");
+    commit_on(&repo, "main", "tip");
+    let url = format!("file://{}", dir.path().display());
+
+    let commit = fetch_commit(&url, None, &pinned.to_string()).unwrap();
+    assert_eq!(commit.hash, pinned.as_bytes());
+    assert_eq!(commit.message, "pinned");
 }

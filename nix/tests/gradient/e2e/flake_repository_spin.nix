@@ -8,11 +8,11 @@
   inputs.nixpkgs.url = "path:[nixpkgs]";
   outputs = { self, nixpkgs, ... }: let
     pkgs = import nixpkgs { system = "x86_64-linux"; };
-    # Hours of pure evaluation, so only an abort can end it.
-    spin = builtins.foldl'
-      (acc: _: builtins.foldl' builtins.add acc (builtins.genList (i: i) 10000))
-      0
-      (builtins.genList (i: i) 10000000);
+    # Hours of evaluation in flat memory, so only an abort ends it and the
+    # worker's memory guard never reaps it.
+    range = builtins.genList (i: i) 1000;
+    loop = f: acc: builtins.foldl' (a: _: f a) acc range;
+    spin = loop (loop (loop (acc: builtins.foldl' builtins.add acc range))) 0;
   in {
     packages.x86_64-linux.default = builtins.seq spin pkgs.hello;
   };
