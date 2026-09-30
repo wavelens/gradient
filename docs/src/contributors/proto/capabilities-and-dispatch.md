@@ -52,7 +52,7 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 
 ## Assignment
 
-- The worker sends `RequestJob { kind }` for each free slot, again after every `AssignJob` while slots remain, and every 10 s while idle. The server keeps no memory of an unanswered request.
+- The worker sends `RequestJob { kind }` for each free slot, again after every `AssignJob` while slots remain, and every 10 s while idle. An unanswered request is remembered as an idle slot for [cluster placement](../scheduler/clusters.md#tracking), not as a queued request.
 - On `RequestJob`, the server scores every pending job of that kind for this worker with the [scheduling policy](../../reference/scheduler-policies.md) and picks the highest; ties go to the smaller job ID. Nothing below the dispatch floor of 0 is handed out.
 - The winner is claimed by inserting a `dispatched_job` row; a lost race tries the next job, up to 3 times. `AssignJob` goes out only after the claim.
 - `AssignJob.dispatch` is the claim's ID. Every report (`JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress`) echoes the ID, and reports with a stale ID are dropped.

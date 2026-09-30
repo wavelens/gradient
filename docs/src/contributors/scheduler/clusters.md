@@ -44,6 +44,18 @@ flowchart LR
 
 - A second close (a prepare timeout racing a member failure) returns `false` and touches nothing.
 
+## Tracking
+
+| Stage | Where a member is | Rule |
+|---|---|---|
+| Ready | Cluster book, under its own key | The eval and build dispatch passes look up each batch's memberships in one query (`cluster_membership`). Members of a `Queued` cluster join the book; members of any other cluster wait for it; non-members queue as before. |
+| Waiting | Cluster book | A cluster is ready once every member arrived. A member key in the book counts as tracked. A member leaving readiness (resync prune, evaluation cancel) unreadies its cluster until the feed brings it back. |
+| Offered | Job offers | Workers score members under their own key; single dispatch (`take_best_of_kind`) never sees them. |
+| Running | Active jobs, marked with its attempt | A reject, a revoked peer or a disconnect never requeues a member as a single job. |
+
+- A member evaluation always evaluates in one job, never as a split fetch-only job whose follow-up would run outside the cluster.
+- An empty answer to `RequestJob` records an idle slot `(worker, kind)`. An assignment, a full worker or a disconnect clears it; entries older than 25 s (two worker heartbeats) are ignored. Idle slots are the planner's only view of free capacity.
+
 ## Related
 
 - [Build Anchors](build-anchors.md)
