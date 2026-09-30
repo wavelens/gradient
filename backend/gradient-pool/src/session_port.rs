@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use gradient_wire::types::{ClusterAddress, ClusterPeer};
+
 /// What the scheduler pushes to a session. Every variant is idempotent;
 /// `Offers` carries the generation that lets a session coalesce a burst.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +22,22 @@ pub enum SessionSignal {
     /// worker must drop the connection and reconnect rather than keep reporting
     /// into a session the pool no longer knows about.
     Close {
+        reason: String,
+    },
+    ClusterAssign {
+        job_id: String,
+    },
+    StartCluster {
+        attempt: String,
+        roster: Vec<ClusterPeer>,
+    },
+    ClusterSignal {
+        attempt: String,
+        from: ClusterAddress,
+        payload: Vec<u8>,
+    },
+    AbortCluster {
+        attempt: String,
         reason: String,
     },
 }

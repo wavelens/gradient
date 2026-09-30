@@ -246,6 +246,36 @@ impl Actor for SessionActor {
                     myself.stop(Some("write failed".into()));
                 }
             }
+            SessionMsg::Signal(SessionSignal::StartCluster { attempt, roster }) => {
+                let msg = ServerMessage::StartCluster { attempt, roster };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
+            SessionMsg::Signal(SessionSignal::ClusterSignal {
+                attempt,
+                from,
+                payload,
+            }) => {
+                let msg = ServerMessage::ClusterSignal {
+                    attempt,
+                    from,
+                    payload,
+                };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
+            SessionMsg::Signal(SessionSignal::AbortCluster { attempt, reason }) => {
+                info!(peer_id = %st.peer_id, %attempt, %reason, "sending AbortCluster to worker");
+                let msg = ServerMessage::AbortCluster { attempt, reason };
+                if send_server_msg(&st.writer, &msg).await.is_err() {
+                    myself.stop(Some("write failed".into()));
+                }
+            }
+            SessionMsg::Signal(SessionSignal::ClusterAssign { job_id }) => {
+                warn!(peer_id = %st.peer_id, %job_id, "cluster assignment not wired yet");
+            }
             SessionMsg::Signal(SessionSignal::Close { reason }) => {
                 warn!(peer_id = %st.peer_id, %reason, "closing session at the scheduler's request");
                 myself.stop(Some(reason));
@@ -550,6 +580,54 @@ mod tests {
             ProtoSocket::Tungstenite(Box::new(server)),
             client.unwrap().0,
         )
+    }
+
+    #[tokio::test]
+    async fn an_abort_cluster_signal_reaches_the_worker() {
+        let (socket, mut client) = connected_pair().await;
+        let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+        scheduler.spawn_core(None).await.unwrap();
+        let (actor, _join) = Actor::spawn(
+            None,
+            SessionActor,
+            SessionArgs {
+                peer_id: "w1".into(),
+                state: Arc::clone(&state),
+                scheduler: Arc::clone(&scheduler),
+                socket,
+                capabilities: GradientCapabilities::default(),
+                authorized_peers: HashSet::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        actor
+            .send_message(SessionMsg::Signal(SessionSignal::AbortCluster {
+                attempt: "a1".into(),
+                reason: "member lost".into(),
+            }))
+            .unwrap();
+
+        let frame = client
+            .next()
+            .await
+            .expect("a frame")
+            .expect("no transport error");
+        let Message::Binary(bytes) = frame else {
+            panic!("expected a binary frame, got {frame:?}");
+        };
+        assert_eq!(
+            ServerMessage::decode(bytes)
+                .unwrap()
+                .into_message()
+                .unwrap(),
+            ServerMessage::AbortCluster {
+                attempt: "a1".into(),
+                reason: "member lost".into(),
+            }
+        );
     }
 
     #[tokio::test]
