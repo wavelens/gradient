@@ -101,6 +101,7 @@ The prelude also re-exports the protocol doubles: `MockProtoServer` (`gradient-w
 - **No wall-clock budgets:** the runner is shared and slow.
 - **Unmeasured statements** (empty relations) are reported, not passed; more than 40 fail the phase.
 - **Tables only a user fills** (stars) are filled through the real API before the gate; values that differ per run (commit hash prefixes) are drawn parameter kinds.
+- **Draws are ordered**, never heap order: a single evaluation is the one naming the most anchors, the worst case its statements must fit; every other kind takes the oldest rows by id.
 
 ### CLI and Lints
 
