@@ -27,6 +27,10 @@ use crate::messages::{
 pub trait WorkerStore: Send + Sync {
     /// Check whether a store path is present in the local store.
     async fn has_path(&self, store_path: &str) -> Result<bool>;
+
+    /// Add `nar` as the content-addressed path `<hash>-<name>`, the path nix's own
+    /// fetchers produce for the same tree, and return it. A present path is done.
+    async fn add_nar(&self, name: &str, nar: Vec<u8>) -> Result<String>;
 }
 
 // ── Derivation file reader ───────────────────────────────────────────────────

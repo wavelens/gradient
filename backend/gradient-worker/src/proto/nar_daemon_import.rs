@@ -9,20 +9,15 @@
 //! Receives the (still zstd-compressed) NAR - staged on disk by the pull, or
 //! in memory when it came from a presigned download - plus the cache metadata
 //! that came back in `CacheStatus`, decompresses it, constructs a
-//! [`ValidPathInfo`], and calls harmonia's `add_to_store_nar` over the daemon
-//! socket. No `nix copy` subprocess, no signature/key configuration on the
-//! worker - the WS transport itself is authenticated, so we pass
-//! `dont_check_sigs: true`.
+//! [`ValidPathInfo`], and streams it into the daemon through
+//! [`LocalNixStore::import_nar`]. No `nix copy` subprocess.
 
 use std::io::{Read as _, Seek as _};
-use std::pin::pin;
 
 use anyhow::{Context, Result};
-use futures::stream::StreamExt as _;
 use gradient_wire::messages::CachedPath;
 use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path::StorePath;
-use harmonia_store_remote::DaemonStore as _;
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, warn};
 
@@ -65,31 +60,6 @@ impl<'a> NarImporter<'a> {
 
         let info = build_unkeyed_path_info(self.store_path, self.meta, nar_size)?;
         Ok(ValidPathInfo { path, info })
-    }
-
-    async fn stream_to_daemon(
-        &self,
-        decompressed: &[u8],
-        valid_info: &ValidPathInfo,
-    ) -> Result<()> {
-        let mut guard = self.store.acquire().await?;
-
-        guard
-            .execute(|client| async move {
-                let logs = client.add_to_store_nar(
-                    valid_info,
-                    decompressed,
-                    false, // repair
-                    true,  // dont_check_sigs - we trust the authenticated WS transport
-                );
-                let mut logs = pin!(logs);
-                while let Some(_msg) = logs.next().await {}
-                logs.await
-            })
-            .await
-            .map_err(|e| {
-                anyhow::anyhow!("daemon add_to_store_nar({}) failed: {}", self.store_path, e)
-            })
     }
 
     async fn import(&self, payload: NarPayload) -> Result<()> {
@@ -137,7 +107,7 @@ impl<'a> NarImporter<'a> {
         .await
         .context("decompress task panicked")??;
         let valid_info = self.build_path_info(decompressed.len() as u64)?;
-        self.stream_to_daemon(&decompressed, &valid_info).await?;
+        self.store.import_nar(&valid_info, &decompressed).await?;
         debug!(%self.store_path, bytes = compressed_len, "imported NAR into local store");
         Ok(())
     }
