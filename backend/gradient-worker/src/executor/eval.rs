@@ -168,13 +168,11 @@ fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
     errors
 }
 
-/// How many `.drv` files to read+parse concurrently inside a single BFS wave.
-/// Reading a `.drv` is async filesystem IO, so the sequential walk would only
-/// keep one in-flight read at a time and bottleneck on round-trip latency.
-/// Pulling a wave of paths and resolving them in parallel cuts wall-clock
-/// closure-walk time by roughly the concurrency factor for IO-bound stores
-/// (network FS, slow disks). Cap kept low to avoid open-fd / kernel pressure.
-const DRV_READ_CONCURRENCY: usize = 64;
+/// How many `.drv` files one BFS wave reads and parses at once. Every wave asks
+/// the server which of its inputs are known, one round trip on the walk's
+/// critical path, so a wide wave is what keeps a high-latency link from pacing
+/// the walk; the reads are small files, so the cap only bounds open fds.
+const DRV_READ_CONCURRENCY: usize = 256;
 
 /// Fraction of host RAM the eval pool may occupy (`pool_size * max_eval_rss`),
 /// leaving headroom for the OS, the parent worker, and a concurrent build.
