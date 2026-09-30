@@ -40,15 +40,7 @@ pub struct Registered {
     pub last_seen: Arc<AtomicI64>,
 }
 
-#[derive(Debug, Clone)]
-pub struct WorkerCapabilities {
-    pub architectures: Vec<String>,
-    pub system_features: Vec<String>,
-    pub max_concurrent_builds: u32,
-    pub cpu_count: u32,
-    pub ram_total_mb: u64,
-    pub cpu_core_score: u32,
-}
+pub type WorkerCapabilities = gradient_pool::WorkerProfile;
 
 #[derive(Debug, Clone, Copy)]
 pub struct WorkerMetrics {
@@ -416,15 +408,7 @@ impl Actor for CoreActor {
                 caps,
                 reply,
             } => {
-                core.pool.update_capabilities(
-                    &worker,
-                    caps.architectures,
-                    caps.system_features,
-                    caps.max_concurrent_builds,
-                    caps.cpu_count,
-                    caps.ram_total_mb,
-                    caps.cpu_core_score,
-                );
+                core.pool.update_capabilities(&worker, caps);
                 let _ = reply.send(());
             }
             SchedulerMsg::UpdateMetrics {

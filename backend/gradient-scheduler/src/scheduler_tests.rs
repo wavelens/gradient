@@ -285,6 +285,7 @@ async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
                 cpu_count: 8,
                 ram_total_mb: 16_000,
                 cpu_core_score: 100,
+                ..Default::default()
             },
         )
         .await;
@@ -1135,6 +1136,7 @@ async fn a_lost_build_claim_hands_its_anchor_back_to_the_ready_set() {
                 cpu_count: 8,
                 ram_total_mb: 16_000,
                 cpu_core_score: 100,
+                ..Default::default()
             },
         )
         .await;

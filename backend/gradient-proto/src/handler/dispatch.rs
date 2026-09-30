@@ -215,17 +215,19 @@ impl<'a> DispatchContext<'a> {
                 cpu_count,
                 ram_total_mb,
                 cpu_core_score,
-                zone: _,
-                endpoint: _,
+                zone,
+                endpoint,
             } => {
-                self.on_worker_capabilities(
+                self.on_worker_capabilities(WorkerCapabilities {
                     architectures,
                     system_features,
                     max_concurrent_builds,
                     cpu_count,
                     ram_total_mb,
                     cpu_core_score,
-                )
+                    zone,
+                    endpoint,
+                })
                 .await;
                 true
             }
@@ -541,32 +543,10 @@ impl<'a> DispatchContext<'a> {
 
     // ── Capability advertisement ──────────────────────────────────────────────
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "mirrors the WorkerCapabilities wire fields; refactor tracked in #503"
-    )]
-    async fn on_worker_capabilities(
-        &mut self,
-        architectures: Vec<String>,
-        system_features: Vec<String>,
-        max_concurrent_builds: u32,
-        cpu_count: u32,
-        ram_total_mb: u64,
-        cpu_core_score: u32,
-    ) {
-        debug!(peer_id = %self.peer_id, ?architectures, ?system_features, max_concurrent_builds, cpu_count, ram_total_mb, cpu_core_score, "WorkerCapabilities");
+    async fn on_worker_capabilities(&mut self, caps: WorkerCapabilities) {
+        debug!(peer_id = %self.peer_id, ?caps, "WorkerCapabilities");
         self.scheduler
-            .update_worker_capabilities(
-                self.peer_id,
-                WorkerCapabilities {
-                    architectures,
-                    system_features,
-                    max_concurrent_builds,
-                    cpu_count,
-                    ram_total_mb,
-                    cpu_core_score,
-                },
-            )
+            .update_worker_capabilities(self.peer_id, caps)
             .await;
     }
 
