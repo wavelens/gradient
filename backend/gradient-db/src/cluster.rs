@@ -6,16 +6,21 @@
 
 //! Cluster attempts: all members of an attempt are claimed, or none is.
 
-use crate::dispatch_record::{ClaimGate, claim_statement};
+use crate::dispatch_record::{ClaimGate, abandon_open, claim_statement};
 use chrono::NaiveDateTime;
-use gradient_entity::cluster_attempt::{Column as CClusterAttempt, Entity as EClusterAttempt};
+use gradient_entity::cluster_attempt::{
+    ClusterAttemptOutcome, Column as CClusterAttempt, Entity as EClusterAttempt,
+};
 use gradient_entity::cluster_job::{
     ClusterJobStatus, Column as CClusterJob, Entity as EClusterJob,
 };
-use gradient_entity::dispatched_job::Model as MDispatchedJob;
+use gradient_entity::dispatched_job::{Column as CDispatchedJob, Model as MDispatchedJob};
 use gradient_entity::ids::{ClusterAttemptId, ClusterJobId};
 use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query};
-use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, ExprTrait, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, ExprTrait, QueryFilter,
+    TransactionTrait,
+};
 
 pub struct ClusterClaim {
     pub cluster: ClusterJobId,
@@ -96,9 +101,45 @@ fn open_attempt_statement(claim: &ClusterClaim) -> Result<InsertStatement, DbErr
     Ok(insert)
 }
 
+/// Close `attempt` if still open, abandoning its open member rows with it;
+/// `false` when another closer got there first and nothing was touched.
+pub async fn close_cluster_attempt<C>(
+    db: &C,
+    attempt: ClusterAttemptId,
+    outcome: ClusterAttemptOutcome,
+) -> Result<bool, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let txn = db.begin().await?;
+    let closed = EClusterAttempt::update_many()
+        .col_expr(
+            CClusterAttempt::FinishedAt,
+            Expr::value(gradient_types::now()),
+        )
+        .col_expr(CClusterAttempt::Outcome, Expr::value(i16::from(outcome)))
+        .filter(CClusterAttempt::Id.eq(attempt))
+        .filter(CClusterAttempt::FinishedAt.is_null())
+        .exec(&txn)
+        .await?
+        .rows_affected
+        == 1;
+    if closed {
+        abandon_open(
+            &txn,
+            Some(Expr::col(CDispatchedJob::ClusterAttempt).eq(attempt)),
+        )
+        .await?;
+    }
+    txn.commit().await?;
+
+    Ok(closed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use gradient_entity::ids::{DerivationBuildId, DispatchedJobId, EvaluationId};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Statement};
 
@@ -217,5 +258,51 @@ mod tests {
             !statements.iter().any(|s| s.sql == "COMMIT"),
             "{statements:?}"
         );
+    }
+
+    async fn closed(result: u64, outcome: ClusterAttemptOutcome) -> (bool, Vec<Statement>) {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(result), exec(2)])
+            .into_connection();
+        let closed = close_cluster_attempt(&db, ClusterAttemptId::now_v7(), outcome)
+            .await
+            .expect("close");
+
+        (closed, logged(db))
+    }
+
+    fn updates<'a>(statements: &'a [Statement], table: &str) -> Vec<&'a Statement> {
+        let prefix = format!("UPDATE \"{table}\"");
+        statements
+            .iter()
+            .filter(|s| s.sql.starts_with(&prefix))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn closing_an_attempt_abandons_its_open_members() {
+        let (closed, statements) = closed(1, ClusterAttemptOutcome::PrepareFailed).await;
+
+        assert!(closed);
+        let members = updates(&statements, "dispatched_job");
+        let sql = &members.first().expect("member close").sql;
+        assert!(sql.contains("\"cluster_attempt\" ="), "{sql}");
+        assert!(sql.contains("\"finished_at\" IS NULL"), "{sql}");
+        let abandoned = format!(
+            "SmallInt(Some({}))",
+            i16::from(DispatchedJobOutcome::Abandoned)
+        );
+        assert!(format!("{:?}", members[0].values).contains(&abandoned));
+    }
+
+    #[tokio::test]
+    async fn closing_touches_only_open_rows() {
+        let (closed, statements) = closed(0, ClusterAttemptOutcome::Failed).await;
+
+        assert!(!closed);
+        let attempt = updates(&statements, "cluster_attempt");
+        let sql = &attempt.first().expect("attempt close").sql;
+        assert!(sql.contains("\"finished_at\" IS NULL"), "{sql}");
+        assert!(updates(&statements, "dispatched_job").is_empty());
     }
 }
