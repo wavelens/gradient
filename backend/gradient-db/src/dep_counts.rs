@@ -69,7 +69,7 @@ fn needs_recompute(ep: &MEntryPoint, version: i64, now: NaiveDateTime) -> bool {
 crate::sql! {
     BUMP_GRAPH_VERSION = "UPDATE evaluation e SET graph_version = e.graph_version + 1 \
              FROM (SELECT id FROM evaluation WHERE id = ANY($1::uuid[]) \
-                   ORDER BY id FOR UPDATE) locked \
+                   ORDER BY id FOR NO KEY UPDATE) locked \
              WHERE e.id = locked.id",
         params = [EvaluationIds(64)];
 
@@ -79,7 +79,7 @@ crate::sql! {
              FROM (SELECT id FROM evaluation \
                    WHERE id = ANY(ARRAY(SELECT DISTINCT evaluation FROM build_job \
                                         WHERE derivation = ANY($1::uuid[]))) \
-                   ORDER BY id FOR UPDATE) locked \
+                   ORDER BY id FOR NO KEY UPDATE) locked \
              WHERE e.id = locked.id",
         params = [DerivationIds(64)];
 }
@@ -533,6 +533,10 @@ mod tests {
             "{}",
             log[0]
         );
-        assert!(log[0].contains("ORDER BY id FOR UPDATE"), "{}", log[0]);
+        assert!(
+            log[0].contains("ORDER BY id FOR NO KEY UPDATE"),
+            "{}",
+            log[0]
+        );
     }
 }

@@ -81,7 +81,7 @@ WHERE d.id = w.id AND w.walked AND w.unwalked_inputs <> coalesce(c.n, 0)
 "#;
 
 crate::sql! {
-    LOCK_WALK_ROWS = "SELECT id FROM derivation WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+    LOCK_WALK_ROWS = "SELECT id FROM derivation WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE",
         params = [DerivationIds(64)];
 
     /// Recount freshly recorded derivations against their inputs as they stand.
@@ -136,7 +136,7 @@ RETURNING d.id, (d.walked AND d.unwalked_inputs = c.n) AS was_complete
 "#,
         params = [DerivationIds(64), Ints(1, 64)];
 
-    COMPLETE_AMONG = "SELECT id FROM derivation WHERE id = ANY($1::uuid[]) AND walked AND unwalked_inputs = 0 ORDER BY id FOR UPDATE",
+    COMPLETE_AMONG = "SELECT id FROM derivation WHERE id = ANY($1::uuid[]) AND walked AND unwalked_inputs = 0 ORDER BY id FOR NO KEY UPDATE",
         params = [DerivationIds(64)];
 
     UNWALK = "UPDATE derivation SET walked = false WHERE id = ANY($1)",
@@ -450,9 +450,9 @@ mod tests {
 
         let log = crate::pool::raw_statements(db.into_transaction_log());
         assert!(
-            log[0]
-                .sql
-                .contains("FROM derivation WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE"),
+            log[0].sql.contains(
+                "FROM derivation WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE"
+            ),
             "the lock comes first: {log:?}"
         );
         assert!(

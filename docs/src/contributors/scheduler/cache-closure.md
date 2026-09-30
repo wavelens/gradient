@@ -31,7 +31,7 @@ Runtime edges live in `derivation_dependency` next to build edges (`EdgeKind::Ru
 
 `commit` (`gradient-graph/src/nar.rs`) runs inside the graph actor's transaction for every `CommitNar`; a pooled handle is rejected.
 
-1. Upsert the `cached_path` row under `FOR UPDATE`. `was_backed` is read under that lock: the one endpoint no later statement can recover.
+1. Upsert the `cached_path` row under `FOR NO KEY UPDATE`. `was_backed` is read under that lock: the one endpoint no later statement can recover.
 2. Overwrite `references` with the line the worker reported, in order. The narinfo `References:` line and the signature fingerprint are rebuilt from that line verbatim (`references_for_hash`).
 3. Insert the runtime edges the references name (add-only), then recompute `demanded` for the producers.
 4. `seed_runtime_deps` (`gradient-db/src/runtime_readiness.rs`): an absolute recount of the producers. A path without a NAR before is `freshly_present`; a re-push of a backed path is only recounted.
@@ -46,7 +46,7 @@ Runtime edges live in `derivation_dependency` next to build edges (`EdgeKind::Ru
 
 `retire_outputs` (`gradient-db/src/runtime_readiness.rs`) is the one path that deletes `cached_path` rows.
 
-1. Lock the hashes `FOR UPDATE` in one hash-ordered statement, with the producers' advisory keys exclusive.
+1. Lock the hashes `FOR NO KEY UPDATE` in one hash-ordered statement, with the producers' advisory keys exclusive.
 2. Read which producers are whole (`whole_among`) before the delete destroys that endpoint.
 3. Delete the rows (`cached_path_signature` cascades), clear `is_cached` on the outputs.
 4. `ripple_anchors_unwhole` from the anchors that were whole.

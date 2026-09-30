@@ -651,7 +651,7 @@ mod tests {
             .expect("the upstream trust is dropped");
         let whole = log
             .iter()
-            .position(|s| s.contains("ORDER BY db.derivation FOR UPDATE"))
+            .position(|s| s.contains("ORDER BY db.derivation FOR NO KEY UPDATE"))
             .expect("the wholeness the producers had is read");
         let retire = log
             .iter()
