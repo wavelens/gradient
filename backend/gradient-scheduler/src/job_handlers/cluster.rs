@@ -383,4 +383,23 @@ impl Scheduler {
             warn!(error = %e, "cluster signals did not reach the scheduler");
         }
     }
+
+    pub async fn reserve(&self, reservation: crate::cluster::Reservation) -> bool {
+        self.call(|reply| SchedulerMsg::Reserve { reservation, reply })
+            .await
+            .unwrap_or(false)
+    }
+
+    pub async fn release_reservation(&self, cluster: gradient_types::ids::ClusterJobId) {
+        let _ = self
+            .cast(SchedulerMsg::ReleaseReservation { cluster })
+            .await;
+    }
+
+    pub async fn reservation(&self) -> Option<crate::cluster::Reservation> {
+        self.call(|reply| SchedulerMsg::Reservation { reply })
+            .await
+            .ok()
+            .flatten()
+    }
 }

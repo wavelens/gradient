@@ -162,6 +162,16 @@ pub enum SchedulerMsg {
         seats: Vec<(String, String)>,
         reply: RpcReplyPort<()>,
     },
+    Reserve {
+        reservation: crate::cluster::Reservation,
+        reply: RpcReplyPort<bool>,
+    },
+    ReleaseReservation {
+        cluster: gradient_types::ids::ClusterJobId,
+    },
+    Reservation {
+        reply: RpcReplyPort<Option<crate::cluster::Reservation>>,
+    },
     ReturnMember {
         worker: String,
         key: String,
@@ -294,6 +304,7 @@ pub struct SchedulerCore {
     offers: u64,
     policy: Arc<dyn ScoringPolicy>,
     idle: crate::cluster::IdleSlots,
+    reservation: Option<crate::cluster::Reservation>,
 }
 
 impl SchedulerCore {
@@ -340,6 +351,13 @@ impl SchedulerCore {
             return AssignOutcome::AtCapacity;
         }
         let (authorized, caps) = self.auth_and_caps(worker);
+        if self
+            .reservation
+            .as_ref()
+            .is_some_and(|r| r.holds(worker, slot))
+        {
+            return self.idle(worker, slot, caps.as_ref());
+        }
         let policy = Arc::clone(&self.policy);
         match self.tracker.take_best_of_kind(
             worker,
@@ -354,13 +372,21 @@ impl SchedulerCore {
                 self.pool.assign_job(worker, assignment.job_id());
                 AssignOutcome::Assigned(assignment)
             }
-            None => {
-                if caps.as_ref().is_some_and(|c| runs(c, slot)) {
-                    self.idle.record(worker, slot, Instant::now());
-                }
-                AssignOutcome::Nothing
-            }
+            None => self.idle(worker, slot, caps.as_ref()),
         }
+    }
+
+    /// Nothing handed out: the slot is idle capacity for cluster placement.
+    fn idle(
+        &mut self,
+        worker: &str,
+        slot: crate::cluster::SlotKind,
+        caps: Option<&WorkerCaps>,
+    ) -> AssignOutcome {
+        if caps.is_some_and(|c| runs(c, slot)) {
+            self.idle.record(worker, slot, Instant::now());
+        }
+        AssignOutcome::Nothing
     }
 
     fn take_placement(
@@ -487,7 +513,7 @@ impl SchedulerCore {
             slots,
             scores,
             connected: self.connected_slots(),
-            reservation: None,
+            reservation: self.reservation.clone(),
         }
     }
 
@@ -536,6 +562,7 @@ impl Actor for CoreActor {
             offers: 0,
             policy: args.policy,
             idle: Default::default(),
+            reservation: None,
         })
     }
 
@@ -563,6 +590,13 @@ impl Actor for CoreActor {
             SchedulerMsg::Unregister { worker, reply } => {
                 let orphaned = core.pool.unregister(&worker);
                 core.idle.forget_worker(&worker);
+                if core
+                    .reservation
+                    .as_ref()
+                    .is_some_and(|r| r.seats_worker(&worker))
+                {
+                    core.reservation = None;
+                }
                 let gone = core.tracker.worker_disconnected(&worker);
                 let total = orphaned.len() + gone.requeued.len() + gone.cluster_members.len();
                 if total > 0 {
@@ -665,7 +699,16 @@ impl Actor for CoreActor {
                 instance,
                 reply,
             } => {
-                let _ = reply.send(core.take_placement(&placement, attempt, &instance));
+                let taken = core.take_placement(&placement, attempt, &instance);
+                if taken.is_some()
+                    && core
+                        .reservation
+                        .as_ref()
+                        .is_some_and(|r| r.cluster() == placement.cluster)
+                {
+                    core.reservation = None;
+                }
+                let _ = reply.send(taken);
             }
             SchedulerMsg::RestoreCluster {
                 cluster,
@@ -686,6 +729,30 @@ impl Actor for CoreActor {
                 core.tracker
                     .activate_members(attempt, vec![(worker, key, job)]);
                 let _ = reply.send(());
+            }
+            SchedulerMsg::Reserve { reservation, reply } => {
+                let free = core
+                    .reservation
+                    .as_ref()
+                    .is_none_or(|held| held.cluster() == reservation.cluster());
+                if free {
+                    info!(cluster = %reservation.cluster(), "cluster reserved its seats");
+                    core.reservation = Some(reservation);
+                }
+                let _ = reply.send(free);
+            }
+            SchedulerMsg::ReleaseReservation { cluster } => {
+                if core
+                    .reservation
+                    .as_ref()
+                    .is_some_and(|r| r.cluster() == cluster)
+                {
+                    core.reservation = None;
+                    core.bump_offers();
+                }
+            }
+            SchedulerMsg::Reservation { reply } => {
+                let _ = reply.send(core.reservation.clone());
             }
             SchedulerMsg::DropCluster { seats, reply } => {
                 for (worker, key) in &seats {
@@ -891,6 +958,7 @@ mod tests {
             offers: 0,
             policy: gradient_pool::score::policy_by_name("simple"),
             idle: Default::default(),
+            reservation: None,
         };
         core.pool
             .register("w1".into(), eval_worker_caps(), HashSet::new(), port().0);
