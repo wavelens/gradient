@@ -10,27 +10,8 @@ use crate::{SourceError, cache_key_host};
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::SecretKey;
 use gradient_types::*;
-use gradient_util::sync::Mutex;
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
 
-/// What a decrypted signer was derived from: a rotated key, a renamed cache or
-/// another secret file is a different signer.
-#[derive(PartialEq, Eq)]
-struct Derivation {
-    secret_file: String,
-    private_key: String,
-    cache_name: String,
-    serve_url: String,
-}
-
-/// The key is Argon2-encrypted, so each decryption costs tens of milliseconds;
-/// a signer is derived once per cache and reused until its row changes.
-static SIGNERS: LazyLock<Mutex<HashMap<CacheId, Derived>>> = LazyLock::new(Default::default);
-
-type Derived = (Derivation, Arc<CacheSigner>);
-
-/// A pre-decrypted signer for a single cache, shared across many
+/// A pre-decrypted signer for a single cache, reusable across many
 /// signatures without re-reading the crypt-secret file or re-decrypting
 /// the cache's private key.
 pub struct CacheSigner {
@@ -40,33 +21,14 @@ pub struct CacheSigner {
 }
 
 impl CacheSigner {
-    /// The signer of `cache`, decrypted on first use and shared until the row's
-    /// key, name or the secret file changes.
+    /// Build a signer from the encrypted cache row by reading the crypt
+    /// secret from `secret_file` once. Subsequent `sign_*` calls reuse the
+    /// in-memory `SecretKey`.
     pub fn from_cache(
         secret_file: &str,
         cache: &MCache,
         serve_url: &str,
-    ) -> Result<Arc<Self>, SourceError> {
-        let derivation = Derivation {
-            secret_file: secret_file.to_owned(),
-            private_key: cache.private_key.clone(),
-            cache_name: cache.name.clone(),
-            serve_url: serve_url.to_owned(),
-        };
-        if let Some((from, signer)) = SIGNERS.lock().get(&cache.id)
-            && *from == derivation
-        {
-            return Ok(Arc::clone(signer));
-        }
-
-        let signer = Arc::new(Self::decrypt(secret_file, cache, serve_url)?);
-        SIGNERS
-            .lock()
-            .insert(cache.id, (derivation, Arc::clone(&signer)));
-        Ok(signer)
-    }
-
-    fn decrypt(secret_file: &str, cache: &MCache, serve_url: &str) -> Result<Self, SourceError> {
+    ) -> Result<Self, SourceError> {
         let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
         let key_bytes = general_purpose::STANDARD
             .decode(key_b64.trim())

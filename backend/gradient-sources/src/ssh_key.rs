@@ -74,12 +74,6 @@ pub fn decrypt_ssh_private_key(
     project: MProject,
     serve_url: &str,
 ) -> Result<(String, String), SourceError> {
-    let secret = gradient_types::input::load_secret_bytes(secret_file).map_err(|e| {
-        SourceError::FileRead {
-            reason: e.to_string(),
-        }
-    })?;
-
     let encrypted_private_key = general_purpose::STANDARD
         .decode(project.clone().private_key)
         .map_err(|e| SourceError::ProjectKeyDecoding {
@@ -88,7 +82,7 @@ pub fn decrypt_ssh_private_key(
         })?;
 
     let decrypted_private_key =
-        match crypter::decrypt_with_password(secret.expose(), encrypted_private_key) {
+        match crate::secret::decrypt_bytes(secret_file, encrypted_private_key)? {
             Some(p) => String::from_utf8(p).map_err(|_| SourceError::KeyUtf8Conversion)?,
             None => {
                 return Err(SourceError::KeyDecryption {
