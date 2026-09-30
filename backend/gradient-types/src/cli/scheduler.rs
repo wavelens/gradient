@@ -24,6 +24,15 @@ pub struct SchedulerArgs {
         default_value_t = 30
     )]
     pub dispatch_retention_days: i64,
+
+    /// Seconds every member of a cluster attempt has to accept its assignment
+    /// before the attempt is aborted and the cluster queued again.
+    #[arg(
+        long = "scheduler-cluster-prepare-timeout-secs",
+        env = "GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS",
+        default_value_t = 30
+    )]
+    pub cluster_prepare_timeout_secs: u64,
 }
 
 impl Default for SchedulerArgs {
@@ -31,6 +40,7 @@ impl Default for SchedulerArgs {
         Self {
             scoring_policy: "resource-aware".into(),
             dispatch_retention_days: 30,
+            cluster_prepare_timeout_secs: 30,
         }
     }
 }

@@ -770,6 +770,15 @@ in {
       };
 
       scheduler = {
+        clusterPrepareTimeoutSecs = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 30;
+          description = ''
+            Seconds every member of a cluster job attempt has to accept its assignment. An attempt
+            not accepted by all members in time is aborted and the cluster job is queued again.
+          '';
+        };
+
         scoringPolicy = lib.mkOption {
           type = lib.types.enum [ "simple" "resource-aware" ];
           default = "resource-aware";
@@ -1343,6 +1352,7 @@ in {
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.build.retryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.build.defaultTimeoutSecs;
         GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.build.defaultMaxSilentSecs;
+        GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS = toString cfg.scheduler.clusterPrepareTimeoutSecs;
         GRADIENT_SCHEDULER_SCORING_POLICY = cfg.scheduler.scoringPolicy;
         GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS = toString cfg.scheduler.dispatchRetentionDays;
         GRADIENT_METRICS_ROLLUP_INTERVAL_SECS = toString cfg.metrics.rollupIntervalSecs;
