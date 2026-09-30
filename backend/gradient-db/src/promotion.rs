@@ -553,6 +553,9 @@ where
 
 fn reconcile_cached_anchors_for_eval_sql() -> String {
     let cte = eval_closure_cte();
+    let not_in_flight = crate::dispatch_record::no_open_dispatch_predicate(
+        &crate::dispatch_record::build_job_key_sql("db.id"),
+    );
     format!(
         r#"
     {cte}
@@ -563,6 +566,7 @@ fn reconcile_cached_anchors_for_eval_sql() -> String {
     WHERE old.id = db.id
       AND db.derivation IN (SELECT derivation FROM closure)
       AND db.status NOT IN ({terminal_success})
+      AND {not_in_flight}
       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
       AND NOT EXISTS (
         SELECT 1 FROM derivation_output o
@@ -840,6 +844,18 @@ mod tests {
         ));
 
         assert!(norm(find_ready_anchors_sql()).contains(&gate));
+    }
+
+    /// A relay out on a worker settles its own anchor `Substituted`; the reconcile
+    /// finding its outputs first called it built.
+    #[test]
+    fn the_cached_reconcile_leaves_an_anchor_whose_dispatch_row_is_open() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let gate = norm(crate::dispatch_record::no_open_dispatch_predicate(
+            &crate::dispatch_record::build_job_key_sql("db.id"),
+        ));
+
+        assert!(norm(reconcile_cached_anchors_for_eval_sql()).contains(&gate));
     }
 
     /// The delta is the resync's gate narrowed to what moved: a copy that
