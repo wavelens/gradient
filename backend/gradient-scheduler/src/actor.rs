@@ -157,6 +157,7 @@ pub enum SchedulerMsg {
     },
     SignalWorkers {
         signals: Vec<(String, SessionSignal)>,
+        reply: RpcReplyPort<()>,
     },
     DropCluster {
         seats: Vec<(String, String)>,
@@ -775,10 +776,11 @@ impl Actor for CoreActor {
                 }
                 let _ = reply.send(());
             }
-            SchedulerMsg::SignalWorkers { signals } => {
+            SchedulerMsg::SignalWorkers { signals, reply } => {
                 for (worker, signal) in signals {
                     core.pool.signal(&worker, signal);
                 }
+                let _ = reply.send(());
             }
             SchedulerMsg::Candidates {
                 worker,

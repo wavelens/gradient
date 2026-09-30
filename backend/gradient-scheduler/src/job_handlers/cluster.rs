@@ -450,7 +450,10 @@ impl Scheduler {
     }
 
     pub(crate) async fn signal_workers(&self, signals: Vec<(String, SessionSignal)>) {
-        if let Err(e) = self.cast(SchedulerMsg::SignalWorkers { signals }).await {
+        if let Err(e) = self
+            .call(|reply| SchedulerMsg::SignalWorkers { signals, reply })
+            .await
+        {
             warn!(error = %e, "cluster signals did not reach the scheduler");
         }
     }
