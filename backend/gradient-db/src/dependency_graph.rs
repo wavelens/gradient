@@ -21,12 +21,15 @@ struct EdgeRow {
 }
 
 crate::sql! {
-    EVAL_DEPENDENCY_EDGES = "WITH d AS MATERIALIZED (SELECT derivation FROM build_job WHERE evaluation = $1) \
-         SELECT d.derivation, s.dependency FROM d, LATERAL (\
+    EVAL_DEPENDENCY_EDGES = "SELECT bj.derivation, s.dependency FROM build_job bj, LATERAL (\
            SELECT e.dependency FROM derivation_dependency e \
-           WHERE e.derivation = d.derivation OFFSET 0) s",
+           WHERE e.derivation = bj.derivation OFFSET 0) s \
+         WHERE bj.evaluation = $1",
         params = [EvaluationId],
-        tier = Walk;
+        tier = Walk,
+        budget = crate::sql::Budget::walk().buffers(450_000)
+            .because("returns every edge of the evaluation: ~3.4 buffers per job, and the \
+                      fixture's largest evaluation names ~98k");
 }
 
 /// Every `derivation_dependency` edge whose parent derivation is one an

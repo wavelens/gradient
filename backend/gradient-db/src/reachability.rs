@@ -44,7 +44,10 @@ static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
 crate::sql_lazy! {
     EVAL_BLOCKED = || EVAL_BLOCKED_SQL.as_str(),
         params = [EvaluationId],
-        tier = Bulk;
+        tier = Bulk,
+        budget = crate::sql::Budget::bulk().buffers(500_000)
+            .because("an evaluation nothing blocks is read to its last anchor, and the \
+                      fixture's largest names ~98k");
 }
 
 /// Whether any anchor the evaluation names ended without being built: what
@@ -203,7 +206,10 @@ crate::sql! {
          FROM build_job bj WHERE bj.evaluation = $1 \
          ON CONFLICT (evaluation, derivation) DO NOTHING",
         params = [EvaluationId, EvaluationId],
-        tier = Bulk;
+        tier = Bulk,
+        budget = crate::sql::Budget::bulk().buffers(650_000)
+            .because("copies every name of the evaluation, ~5 buffers per row across the \
+                      heap and its indexes, and the fixture's largest names ~98k");
 }
 
 /// Name for `to` everything `from` names. Returns how many names it took over.
