@@ -20,3 +20,23 @@ pub(crate) use divert::{Membership, Route};
 pub use matching::kuhn;
 pub use planner::{Placement, ScoreLookup, Seat, plan};
 pub use slots::{ClusterSnapshot, IDLE_SLOT_TTL, IdleSlots, Slot, SlotKind};
+
+#[derive(Debug, Clone)]
+pub struct CommittedSeat {
+    pub worker: String,
+    pub key: String,
+    pub job: crate::jobs::PendingJob,
+    pub record: crate::jobs::DispatchRecord,
+    pub role: String,
+    pub index: u32,
+    pub primary: bool,
+    pub zone: Option<String>,
+    pub endpoint: Option<String>,
+}
+
+/// A cluster taken from the book with its seats' members already active.
+#[derive(Debug)]
+pub struct Committing {
+    pub cluster: PendingCluster,
+    pub seats: Vec<CommittedSeat>,
+}

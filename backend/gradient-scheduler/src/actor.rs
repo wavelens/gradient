@@ -14,7 +14,9 @@ use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
 
 use gradient_pool::score::{InstanceContext, ScoringPolicy};
-use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId};
+use gradient_types::ids::{
+    ClusterAttemptId, DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId,
+};
 use gradient_wire::types::{CandidateScore, GradientCapabilities, JobCandidate, JobKind};
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info};
@@ -141,6 +143,20 @@ pub enum SchedulerMsg {
     },
     ClusterSnapshot {
         reply: RpcReplyPort<crate::cluster::ClusterSnapshot>,
+    },
+    TakePlacement {
+        placement: crate::cluster::Placement,
+        attempt: ClusterAttemptId,
+        instance: Arc<InstanceContext>,
+        reply: RpcReplyPort<Option<crate::cluster::Committing>>,
+    },
+    RestoreCluster {
+        cluster: crate::cluster::PendingCluster,
+        seats: Vec<(String, String)>,
+        reply: RpcReplyPort<()>,
+    },
+    SignalWorkers {
+        signals: Vec<(String, SessionSignal)>,
     },
     Candidates {
         worker: String,
@@ -336,6 +352,96 @@ impl SchedulerCore {
         }
     }
 
+    fn take_placement(
+        &mut self,
+        placement: &crate::cluster::Placement,
+        attempt: ClusterAttemptId,
+        instance: &InstanceContext,
+    ) -> Option<crate::cluster::Committing> {
+        use crate::cluster::{CommittedSeat, PendingCluster};
+
+        let now = Instant::now();
+        let seats_free = {
+            let cluster = self
+                .tracker
+                .waiting_cluster(placement.cluster)
+                .filter(|c| c.ready())?;
+            placement.seats.iter().all(|s| {
+                let kind = PendingCluster::slot_kind(&cluster.members[s.member]);
+                self.idle.is_idle(&s.worker, kind, now)
+                    && self.pool.has_capacity(&s.worker, &kind.job_kind())
+            })
+        };
+        if !seats_free {
+            return None;
+        }
+
+        let cluster = self.tracker.take_cluster(placement.cluster)?;
+        let mut roles: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+        let index_of: Vec<u32> = cluster
+            .members
+            .iter()
+            .map(|m| {
+                let next = roles.entry(m.role.as_str()).or_default();
+                *next += 1;
+                *next - 1
+            })
+            .collect();
+
+        let policy = Arc::clone(&self.policy);
+        let seats: Vec<CommittedSeat> = placement
+            .seats
+            .iter()
+            .filter_map(|s| {
+                let m = &cluster.members[s.member];
+                let job = m.job.clone()?;
+                let caps = self.pool.worker_caps(&s.worker);
+                self.idle.clear(&s.worker, PendingCluster::slot_kind(m));
+                Some(CommittedSeat {
+                    worker: s.worker.clone(),
+                    key: m.key.clone(),
+                    record: self.tracker.member_record(
+                        &s.worker,
+                        caps.as_ref(),
+                        &m.key,
+                        &job,
+                        &*policy,
+                        instance,
+                    ),
+                    job,
+                    role: m.role.clone(),
+                    index: index_of[s.member],
+                    primary: m.primary,
+                    zone: caps.as_ref().and_then(|c| c.zone.clone()),
+                    endpoint: caps.as_ref().and_then(|c| c.endpoint.clone()),
+                })
+            })
+            .collect();
+
+        let active = seats
+            .iter()
+            .map(|s| (s.worker.clone(), s.key.clone(), s.job.clone()))
+            .collect();
+        self.tracker.activate_members(attempt, active);
+        for s in &seats {
+            self.pool.assign_job(&s.worker, &s.key);
+        }
+
+        Some(crate::cluster::Committing { cluster, seats })
+    }
+
+    fn restore_placement(
+        &mut self,
+        cluster: crate::cluster::PendingCluster,
+        seats: &[(String, String)],
+    ) {
+        for (worker, key) in seats {
+            self.tracker.remove_active(key);
+            self.pool.release_job(worker, key);
+        }
+        self.tracker.restore_cluster(cluster);
+    }
+
     fn cluster_snapshot(&self, now: Instant) -> crate::cluster::ClusterSnapshot {
         let mut clusters: Vec<_> = self
             .tracker
@@ -513,6 +619,28 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::ClusterSnapshot { reply } => {
                 let _ = reply.send(core.cluster_snapshot(Instant::now()));
+            }
+            SchedulerMsg::TakePlacement {
+                placement,
+                attempt,
+                instance,
+                reply,
+            } => {
+                let _ = reply.send(core.take_placement(&placement, attempt, &instance));
+            }
+            SchedulerMsg::RestoreCluster {
+                cluster,
+                seats,
+                reply,
+            } => {
+                core.restore_placement(cluster, &seats);
+                core.bump_offers();
+                let _ = reply.send(());
+            }
+            SchedulerMsg::SignalWorkers { signals } => {
+                for (worker, signal) in signals {
+                    core.pool.signal(&worker, signal);
+                }
             }
             SchedulerMsg::Candidates {
                 worker,
