@@ -317,8 +317,8 @@ async fn perform_setup(
             cpu_count: host.cpu_count,
             ram_total_mb: host.ram_total_mb,
             cpu_core_score,
-            zone: None,
-            endpoint: None,
+            zone: config.zone.clone().filter(|z| !z.is_empty()),
+            endpoint: config.endpoint.clone().filter(|e| !e.is_empty()),
         })
         .await?;
     }

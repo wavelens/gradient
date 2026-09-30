@@ -118,6 +118,27 @@ in {
       '';
     };
 
+    zone = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "fra1";
+      description = ''
+        Locality label advertised to the scheduler. A cluster job that asks for one zone places
+        every member on workers with the same label. `null` puts the worker in the zone of all
+        unlabelled workers.
+      '';
+    };
+
+    endpoint = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "10.0.0.7:7000";
+      description = ''
+        Address other members of a cluster job reach this worker at, passed through verbatim in the
+        cluster roster. `null` advertises none.
+      '';
+    };
+
     peersFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
@@ -529,6 +550,10 @@ in {
           GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
         } // lib.optionalAttrs (cfg.id != null) {
           GRADIENT_WORKER_ID = cfg.id;
+        } // lib.optionalAttrs (cfg.zone != null) {
+          GRADIENT_WORKER_ZONE = cfg.zone;
+        } // lib.optionalAttrs (cfg.endpoint != null) {
+          GRADIENT_WORKER_ENDPOINT = cfg.endpoint;
         } // lib.optionalAttrs (cfg.system.architectures != [ ]) {
           GRADIENT_WORKER_SYSTEM_ARCHITECTURES = lib.concatStringsSep "," cfg.system.architectures;
         } // lib.optionalAttrs (cfg.system.features != [ ]) {
