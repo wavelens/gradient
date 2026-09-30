@@ -592,10 +592,11 @@ mod tests {
 
         actor.stop_and_wait(None, None).await.unwrap();
         drop((actor, graph));
-        let statements = gradient_db::pool::statements(pool.into_transaction_log());
-        let inserts: Vec<&String> = statements
+        let statements = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let inserts: Vec<String> = statements
             .iter()
-            .filter(|s| s.contains("INSERT INTO \"cached_path\""))
+            .filter(|s| s.sql.contains(r#"INSERT INTO "cached_path""#))
+            .map(|s| format!("{:?}", s.values))
             .collect();
         assert_eq!(inserts.len(), 1, "one insert for the batch: {statements:?}");
         assert!(
