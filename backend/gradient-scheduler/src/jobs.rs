@@ -1206,6 +1206,11 @@ impl JobTracker {
 }
 
 #[cfg(test)]
+pub(crate) fn test_eval_job(peer: ProjectId) -> PendingJob {
+    tests::eval_job(peer)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use gradient_wire::types::{
@@ -1270,7 +1275,7 @@ mod tests {
         assert!(!build_job(peer, vec![]).prunes_walk());
     }
 
-    fn eval_job(peer: ProjectId) -> PendingJob {
+    pub(super) fn eval_job(peer: ProjectId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
             evaluation_id: EvaluationId::now_v7(),
             task_id: None,
