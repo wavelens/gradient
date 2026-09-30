@@ -87,7 +87,7 @@ fn whole_among_sql() -> String {
     format!(
         "SELECT db.derivation FROM derivation_build db \
          WHERE db.derivation = ANY($1::uuid[]) AND {whole} \
-         ORDER BY db.derivation FOR UPDATE",
+         ORDER BY db.derivation FOR NO KEY UPDATE",
         whole = anchor_whole_predicate("db"),
     )
 }
@@ -177,7 +177,7 @@ pub async fn whole_output_hashes<C: ConnectionTrait>(
         .collect())
 }
 
-/// The hash-ordered `FOR UPDATE` pass every retire opens with. It conflicts with
+/// The hash-ordered `FOR NO KEY UPDATE` pass every retire opens with. It conflicts with
 /// the RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds on the
 /// parent row, so that wait is absorbed in its own statement and the DELETE opens
 /// a snapshot that sees the signature it would otherwise cascade away. It also holds
@@ -188,7 +188,7 @@ fn lock_cached_paths_sql() -> String {
     let (with, filter) = crate::anchor_guard::producer_filter("$1");
     format!(
         "WITH {with} SELECT 1 FROM cached_path \
-         WHERE hash = ANY($1) AND {filter} ORDER BY hash FOR UPDATE"
+         WHERE hash = ANY($1) AND {filter} ORDER BY hash FOR NO KEY UPDATE"
     )
 }
 
@@ -361,7 +361,7 @@ async fn ripple(
     Ok(reached)
 }
 
-/// Take `hashes` `FOR UPDATE` in one hash-ordered statement, before the caller
+/// Take `hashes` `FOR NO KEY UPDATE` in one hash-ordered statement, before the caller
 /// decides or writes anything. A transaction that will write `derivation_build`
 /// and only then reach a retire has to take its `cached_path` locks FIRST, or it
 /// inverts the class order every other writer follows; re-acquiring a row this
@@ -378,7 +378,7 @@ pub async fn lock_cached_paths(txn: &DatabaseTransaction, hashes: &[String]) -> 
     Ok(())
 }
 
-/// The anchors among `derivations` that are whole right now, held `FOR UPDATE`.
+/// The anchors among `derivations` that are whole right now, held `FOR NO KEY UPDATE`.
 /// Read BEFORE the event that takes their presence away, because nothing after it
 /// can recover the endpoint, and only after their advisory keys are held by an
 /// earlier statement: [`retire_outputs`] opens with [`LOCK_CACHED_PATHS`], which
@@ -556,12 +556,12 @@ mod tests {
             "{lock}"
         );
         assert!(!lock.contains("derivation_dependency"), "{lock}");
-        assert!(lock.contains("ORDER BY hash FOR UPDATE"), "{lock}");
+        assert!(lock.contains("ORDER BY hash FOR NO KEY UPDATE"), "{lock}");
 
         let whole = WHOLE_AMONG.text();
         assert!(!whole.contains("pg_advisory"), "{whole}");
         assert!(
-            whole.contains("ORDER BY db.derivation FOR UPDATE"),
+            whole.contains("ORDER BY db.derivation FOR NO KEY UPDATE"),
             "{whole}"
         );
     }
@@ -706,7 +706,7 @@ mod tests {
                 assert!(
                     log[..i]
                         .iter()
-                        .any(|s| s.sql.contains("ORDER BY derivation FOR UPDATE")),
+                        .any(|s| s.sql.contains("ORDER BY derivation FOR NO KEY UPDATE")),
                     "an unlocked counter write: {log:?}"
                 );
             }

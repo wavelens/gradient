@@ -551,7 +551,7 @@ mod tests {
         );
         assert!(
             log[3].contains("SET LOCAL work_mem")
-                && log[4].contains("ORDER BY derivation FOR UPDATE")
+                && log[4].contains("ORDER BY derivation FOR NO KEY UPDATE")
                 && log[5].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
             "what lost a name and what gained one are recomputed together, locked and raised: {log:?}"
         );

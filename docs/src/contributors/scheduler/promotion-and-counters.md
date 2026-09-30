@@ -26,7 +26,7 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 - **Whole** (`graph_sql::anchor_whole_predicate`): every output has a NAR in the cache and `missing_runtime_deps = 0`. The `EXISTS` over `derivation_output` stops an anchor with no output rows from reading whole.
 - An upstream copy never counts as `fetchable`. A dependent of an unrelayed substitutable anchor waits for the relay; builds pull every input from the Gradient cache.
 - A flip writes the flag with a `RETURNING` of exactly the changed rows, and only those ripple. A ripple from a state instead of a transition drives a counter below zero, where `= 0` never holds again.
-- Flip and ripple share one transaction under `readiness::lock_anchors` (`derivation`-ordered `FOR UPDATE`), which returns the `AnchorLock` proof both functions require.
+- Flip and ripple share one transaction under `readiness::lock_anchors` (`derivation`-ordered `FOR NO KEY UPDATE`), which returns the `AnchorLock` proof both functions require.
 - Wholeness is transitive and ripples level by level; `unready_deps` moves one hop and stops, since reaching zero queues a dependent and never makes the dependent `fetchable`.
 
 ## Promotion Gates

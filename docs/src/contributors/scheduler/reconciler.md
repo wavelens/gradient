@@ -93,7 +93,7 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 | 10 | Count `Building` evaluations with `active_anchors = 0` (read-only) | `wedged_building_evals` |
 
 - **Repair scope:** pending anchors, their direct dependencies, `fetchable` rows with `missing_runtime_deps > 0`, and terminal-success rows without `fetchable`. Its size is logged as `scope` on every pass.
-- Each chunk of 3 and 6 is its own transaction: `lock_anchors` (ordered `FOR UPDATE`) first, then the recount. A cancelled sweep loses one chunk.
+- Each chunk of 3 and 6 is its own transaction: `lock_anchors` (ordered `FOR NO KEY UPDATE`) first, then the recount. A cancelled sweep loses one chunk.
 - A recount reads one snapshot and ripples nothing: a chain of drifted rows converges one level per interval.
 - Drift counts are rows already repaired; a warning naming only those is a successful self-repair.
 - Interval `0` disables the sweep and the `graph-stuck-reheal` pass.

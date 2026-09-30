@@ -48,10 +48,13 @@
 //! dispatch against an input nothing can provide.
 //!
 //! [`AnchorLock`] is how that is required rather than requested. [`lock_anchors`]
-//! takes the anchors `FOR UPDATE` in one `derivation`-ordered statement and returns
+//! takes the anchors `FOR NO KEY UPDATE` in one `derivation`-ordered statement and returns
 //! the only proof [`became_fetchable`] and [`lost_fetchability`] accept, so neither can
 //! run on a pooled handle, in another transaction, or over a row the lock did not
-//! name. A retry is then a retry of the whole flip. [`seed_unready_deps`] takes the
+//! name. A retry is then a retry of the whole flip. The lock is `NO KEY` because a
+//! `FOR UPDATE` would also hold every other transaction's foreign-key check on these
+//! rows, a dispatch claim or a build report, until the flush commits.
+//! [`seed_unready_deps`] takes the
 //! stronger [`SeedLock`], which also holds the dependencies it counts under shared
 //! advisory keys while every flip holds its anchors' keys exclusively
 //! ([`crate::anchor_guard`]): an absolute count and a concurrent flip of what it
@@ -80,7 +83,7 @@
 //! of the only output, ends stored `true` with a true value of `false`, and
 //! `fetchable = true` is exactly what stops it counting toward its dependents'
 //! `unready_deps`. Chunking is the other half: one transaction over the whole scope
-//! holds `FOR UPDATE` on every pending anchor while it works, and a statement timeout
+//! holds `FOR NO KEY UPDATE` on every pending anchor while it works, and a statement timeout
 //! or the sweep's budget then cancels it in place and rolls back every repair,
 //! silently.
 //!
@@ -458,7 +461,7 @@ fn lock_anchors_sql(with_dependencies: bool) -> String {
     format!(
         "WITH {with} SELECT 1 FROM derivation_build \
          WHERE derivation = ANY($1::uuid[]) AND {filter} \
-         ORDER BY derivation FOR UPDATE"
+         ORDER BY derivation FOR NO KEY UPDATE"
     )
 }
 
@@ -478,7 +481,7 @@ crate::sql_fn! {
         params = [DerivationIds(64)];
 }
 
-/// Proof that a batch of anchors is held `FOR UPDATE`, `derivation`-ordered, on `txn`.
+/// Proof that a batch of anchors is held `FOR NO KEY UPDATE`, `derivation`-ordered, on `txn`.
 /// Only [`lock_anchors`] constructs one, and [`seed_unready_deps`],
 /// [`became_fetchable`], [`lost_fetchability`] and the two recounts accept nothing
 /// else, so none of them can run unlocked, on a pooled handle where the lock is
@@ -498,7 +501,7 @@ pub struct AnchorLock<'txn> {
     derivations: Vec<DerivationId>,
 }
 
-/// Take `derivations` `FOR UPDATE` in one `derivation`-ordered statement, before the
+/// Take `derivations` `FOR NO KEY UPDATE` in one `derivation`-ordered statement, before the
 /// caller decides anything, with each anchor's advisory key held exclusively ahead of
 /// its row (see [`crate::anchor_guard`]). With acquisition monotone in `derivation` a
 /// wait-for cycle would need some transaction to wait on a lower id than one it
@@ -1164,7 +1167,7 @@ pub struct Repaired {
 /// Materialise [`repair_scope`] once, so every chunk the two repairs lock and
 /// recount comes from one snapshot instead of a subquery each statement re-evaluates
 /// against its own. Its length is the sweep's `repair_scope`: a measurement, not a
-/// violation, since the select is unbounded and each chunk takes `FOR UPDATE` on rows
+/// violation, since the select is unbounded and each chunk takes `FOR NO KEY UPDATE` on rows
 /// every live graph writer also locks.
 pub async fn readiness_scope<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationId>, DbErr> {
     db.query_all_raw(REPAIR_SCOPE_QUERY.stmt())
@@ -1383,7 +1386,7 @@ mod tests {
             "{sql}"
         );
         assert!(
-            sql.contains("(SELECT n FROM anchor_locks) >= 0 ORDER BY derivation FOR UPDATE"),
+            sql.contains("(SELECT n FROM anchor_locks) >= 0 ORDER BY derivation FOR NO KEY UPDATE"),
             "{sql}"
         );
         assert!(!sql.contains("derivation_dependency"), "{sql}");
@@ -1393,7 +1396,10 @@ mod tests {
             seed.contains("pg_advisory_xact_lock_shared(643, k)"),
             "{seed}"
         );
-        assert!(seed.contains("ORDER BY derivation FOR UPDATE"), "{seed}");
+        assert!(
+            seed.contains("ORDER BY derivation FOR NO KEY UPDATE"),
+            "{seed}"
+        );
     }
 
     /// An empty batch is not a statement, the lock included: every entry point
@@ -1444,7 +1450,7 @@ mod tests {
             "BEGIN, lock, mark, ripple, COMMIT: {inside:?}"
         );
         assert!(
-            inside[1].contains("ORDER BY derivation FOR UPDATE"),
+            inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
             "an unordered locker deadlocks against every ordered one: {inside:?}"
         );
         assert!(inside[2].contains("SET fetchable = true"), "{inside:?}");
@@ -1794,7 +1800,7 @@ mod tests {
                 .collect();
             assert_eq!(inside.len(), 4, "BEGIN, lock, recount, COMMIT: {inside:?}");
             assert!(
-                inside[1].contains("ORDER BY derivation FOR UPDATE"),
+                inside[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
                 "{inside:?}"
             );
             assert!(inside[2].contains(recount), "{inside:?}");
@@ -2001,7 +2007,7 @@ mod tests {
         let log = statements(db.into_transaction_log());
         assert!(
             log[0].contains("SET LOCAL work_mem")
-                && log[1].contains("ORDER BY derivation FOR UPDATE"),
+                && log[1].contains("ORDER BY derivation FOR NO KEY UPDATE"),
             "the walk its plan gate measures is raised and its roots locked: {log:?}"
         );
         let walk = norm(&log[2]);
@@ -2107,7 +2113,7 @@ mod tests {
                 .position(|s| s.sql.contains(needle))
                 .unwrap_or_else(|| panic!("{needle} must run: {log:?}"))
         };
-        let complete = at("AND walked AND unwalked_inputs = 0 ORDER BY id FOR UPDATE");
+        let complete = at("AND walked AND unwalked_inputs = 0 ORDER BY id FOR NO KEY UPDATE");
         let unwalk = at("UPDATE derivation SET walked = false");
         let anchors = at("FROM derivation_build");
         assert!(complete < unwalk && unwalk < anchors, "{log:?}");

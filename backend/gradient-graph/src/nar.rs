@@ -12,7 +12,7 @@ use gradient_entity::StorePath;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId};
 use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
-use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::sea_query::{Expr, LockType, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -185,7 +185,7 @@ pub(crate) async fn commit_batch(
         .collect())
 }
 
-/// Every row of the batch under its `FOR UPDATE` lock, taken in hash order, then
+/// Every row of the batch under its `FOR NO KEY UPDATE` lock, taken in hash order, then
 /// the existing ones refreshed and the new ones inserted together.
 async fn upsert_cached_paths(
     db: &WorkerDb,
@@ -196,7 +196,7 @@ async fn upsert_cached_paths(
     let mut existing: std::collections::HashMap<String, MCachedPath> = ECachedPath::find()
         .filter(CCachedPath::Hash.is_in(hashes))
         .order_by_asc(CCachedPath::Hash)
-        .lock_exclusive()
+        .lock(LockType::NoKeyUpdate)
         .all(db)
         .await?
         .into_iter()
@@ -378,7 +378,7 @@ struct Upserted {
     was_backed: bool,
 }
 
-/// Insert or refresh the row under its `FOR UPDATE` lock. A duplicate-key error
+/// Insert or refresh the row under its `FOR NO KEY UPDATE` lock. A duplicate-key error
 /// on the insert propagates: the actor serialises commits, so there is no race to
 /// recover from, and inside a transaction a re-select after a failed INSERT would
 /// only replace the real error with 25P02.
@@ -390,7 +390,7 @@ async fn upsert_cached_path(
 ) -> anyhow::Result<Upserted> {
     match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
-        .lock_exclusive()
+        .lock(LockType::NoKeyUpdate)
         .one(db)
         .await?
     {
@@ -904,7 +904,7 @@ mod tests {
     async fn the_pre_commit_endpoint_is_read_under_the_row_lock() {
         let log = recommit_log(Vec::new()).await;
         assert!(
-            log[0].contains("FOR UPDATE"),
+            log[0].contains("FOR NO KEY UPDATE"),
             "the row read that holds the endpoint must lock it: {log:?}"
         );
     }

@@ -1649,7 +1649,7 @@ mod tests {
             .expect("the edge insert runs");
         let lock = log
             .iter()
-            .position(|s| s.contains("ORDER BY derivation FOR UPDATE"))
+            .position(|s| s.contains("ORDER BY derivation FOR NO KEY UPDATE"))
             .expect("the readiness pass locks its anchors");
         let mark = log
             .iter()
@@ -1930,7 +1930,9 @@ mod tests {
             .expect("the edge insert runs");
         let anchor_lock = log
             .iter()
-            .position(|s| s.sql.contains("FROM derivation_build") && s.sql.contains("FOR UPDATE"))
+            .position(|s| {
+                s.sql.contains("FROM derivation_build") && s.sql.contains("FOR NO KEY UPDATE")
+            })
             .expect("the readiness pass locks its anchors");
         assert!(
             edges < seed && seed < anchor_lock,

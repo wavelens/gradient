@@ -58,7 +58,7 @@ pub struct ConsistencyReport {
     /// `build_job` rows. A repair, like the other drift counts.
     pub eval_counter_drift: i64,
     /// How many anchors the readiness repair locked and recounted. A measurement,
-    /// not a violation: each is taken `FOR UPDATE`, twice, against rows every live
+    /// not a violation: each is taken `FOR NO KEY UPDATE`, twice, against rows every live
     /// graph writer also locks, so the cost is worth seeing on a clean pass too.
     pub repair_scope: i64,
 }
@@ -319,7 +319,7 @@ mod tests {
             "the repair scope is read once, contradicting flags included: {log:?}"
         );
         assert!(
-            log[5].contains("FOR UPDATE") && log[6].contains("SET fetchable"),
+            log[5].contains("FOR NO KEY UPDATE") && log[6].contains("SET fetchable"),
             "the flag is repaired under its own ordered lock, before the demand walk \
              that stops at a fetchable anchor: {log:?}"
         );
@@ -333,7 +333,7 @@ mod tests {
             "both Skipped directions read the demand this pass corrected: {log:?}"
         );
         assert!(
-            log[11].contains("FOR UPDATE") && log[12].contains("SET unready_deps"),
+            log[11].contains("FOR NO KEY UPDATE") && log[12].contains("SET unready_deps"),
             "the counter recount follows the demand recount, in a second locked pass \
              over the same scope: {log:?}"
         );
@@ -384,7 +384,7 @@ mod tests {
         );
         assert!(
             log[18].contains("SET LOCAL work_mem")
-                && log[19].contains("ORDER BY derivation FOR UPDATE")
+                && log[19].contains("ORDER BY derivation FOR NO KEY UPDATE")
                 && log[20].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
             "a name gives the closure below it demand, in this pass and not the next: {log:?}"
         );
