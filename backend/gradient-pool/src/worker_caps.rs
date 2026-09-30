@@ -21,6 +21,8 @@ pub struct WorkerCaps {
     pub capabilities: gradient_wire::types::GradientCapabilities,
     /// Live resource view of the worker, fed into resource-aware scoring rules.
     pub metrics: Option<crate::score::WorkerMetricsView>,
+    /// Locality label for cluster placement; `None` is the zone of all unlabelled workers.
+    pub zone: Option<String>,
 }
 
 impl WorkerCaps {

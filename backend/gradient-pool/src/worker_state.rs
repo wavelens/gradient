@@ -57,6 +57,19 @@ impl WorkerMarker for Draining {}
 
 // ── Shared worker data ────────────────────────────────────────────────────────
 
+/// What a worker advertises about itself in `WorkerCapabilities`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorkerProfile {
+    pub architectures: Vec<String>,
+    pub system_features: Vec<String>,
+    pub max_concurrent_builds: u32,
+    pub cpu_count: u32,
+    pub ram_total_mb: u64,
+    pub cpu_core_score: u32,
+    pub zone: Option<String>,
+    pub endpoint: Option<String>,
+}
+
 /// All fields that are relevant regardless of the worker's lifecycle state.
 ///
 /// Accessed via [`TypedWorker<S>`]'s `Deref` / `DerefMut` impls.
@@ -69,6 +82,8 @@ pub struct WorkerShared {
     pub cpu_count: u32,
     pub ram_total_mb: u64,
     pub cpu_core_score: u32,
+    pub zone: Option<String>,
+    pub endpoint: Option<String>,
     /// Latest live-metrics heartbeat; `None` until the first report so scoring
     /// can tell "no sample yet" apart from a measured zero.
     pub cpu_usage_pct: Option<f32>,
@@ -88,6 +103,32 @@ pub struct WorkerShared {
     /// the liveness watchdog to detect a worker that died without a clean TCP
     /// close. Shared so the session loop holds a handle without the pool lock.
     pub last_seen: Arc<AtomicI64>,
+}
+
+impl WorkerShared {
+    pub fn profile(&self) -> WorkerProfile {
+        WorkerProfile {
+            architectures: self.architectures.clone(),
+            system_features: self.system_features.clone(),
+            max_concurrent_builds: self.max_concurrent_builds,
+            cpu_count: self.cpu_count,
+            ram_total_mb: self.ram_total_mb,
+            cpu_core_score: self.cpu_core_score,
+            zone: self.zone.clone(),
+            endpoint: self.endpoint.clone(),
+        }
+    }
+
+    pub fn apply_profile(&mut self, profile: WorkerProfile) {
+        self.architectures = profile.architectures;
+        self.system_features = profile.system_features;
+        self.max_concurrent_builds = profile.max_concurrent_builds;
+        self.cpu_count = profile.cpu_count;
+        self.ram_total_mb = profile.ram_total_mb;
+        self.cpu_core_score = profile.cpu_core_score;
+        self.zone = profile.zone;
+        self.endpoint = profile.endpoint;
+    }
 }
 
 impl std::fmt::Debug for WorkerShared {
@@ -142,6 +183,8 @@ impl TypedWorker<Active> {
                 cpu_count: 0,
                 ram_total_mb: 0,
                 cpu_core_score: 0,
+                zone: None,
+                endpoint: None,
                 cpu_usage_pct: None,
                 ram_free_mb: None,
                 disk_speed_mbps: None,

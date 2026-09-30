@@ -67,12 +67,15 @@ mod tests {
         pool.register(id.into(), caps, HashSet::new(), port());
         pool.update_capabilities(
             id,
-            arch.iter().map(|s| s.to_string()).collect(),
-            features.iter().map(|s| s.to_string()).collect(),
-            slots,
-            8,
-            16_000,
-            1_000,
+            crate::WorkerProfile {
+                architectures: arch.iter().map(|s| s.to_string()).collect(),
+                system_features: features.iter().map(|s| s.to_string()).collect(),
+                max_concurrent_builds: slots,
+                cpu_count: 8,
+                ram_total_mb: 16_000,
+                cpu_core_score: 1_000,
+                ..Default::default()
+            },
         );
     }
 

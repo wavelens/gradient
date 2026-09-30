@@ -97,34 +97,14 @@ impl WorkerPool {
         session: Arc<dyn SessionPort>,
     ) -> Arc<AtomicI64> {
         let prior = self.workers.get(&id).map(|slot| {
-            let s = slot.shared();
             (
-                s.architectures.clone(),
-                s.system_features.clone(),
-                s.max_concurrent_builds,
-                s.cpu_count,
-                s.ram_total_mb,
-                s.cpu_core_score,
-                Arc::clone(&s.last_seen),
+                slot.shared().profile(),
+                Arc::clone(&slot.shared().last_seen),
             )
         });
         let mut worker = TypedWorker::<Active>::new(capabilities, authorized_peers, session);
-        if let Some((
-            architectures,
-            system_features,
-            max_concurrent_builds,
-            cpu_count,
-            ram_total_mb,
-            cpu_core_score,
-            last_seen,
-        )) = prior
-        {
-            worker.architectures = architectures;
-            worker.system_features = system_features;
-            worker.max_concurrent_builds = max_concurrent_builds;
-            worker.cpu_count = cpu_count;
-            worker.ram_total_mb = ram_total_mb;
-            worker.cpu_core_score = cpu_core_score;
+        if let Some((profile, last_seen)) = prior {
+            worker.apply_profile(profile);
             last_seen.store(
                 gradient_types::now().and_utc().timestamp_millis(),
                 Ordering::Relaxed,
@@ -195,32 +175,14 @@ impl WorkerPool {
                 system_features: s.system_features.clone(),
                 capabilities: s.capabilities.clone(),
                 metrics: self.metrics_for(id),
+                zone: s.zone.clone(),
             }
         })
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "mirrors the WorkerCapabilities wire fields; refactor tracked in #503"
-    )]
-    pub fn update_capabilities(
-        &mut self,
-        id: &str,
-        architectures: Vec<String>,
-        system_features: Vec<String>,
-        max_concurrent_builds: u32,
-        cpu_count: u32,
-        ram_total_mb: u64,
-        cpu_core_score: u32,
-    ) {
+    pub fn update_capabilities(&mut self, id: &str, profile: crate::WorkerProfile) {
         if let Some(slot) = self.workers.get_mut(id) {
-            let s = slot.shared_mut();
-            s.architectures = architectures;
-            s.system_features = system_features;
-            s.max_concurrent_builds = max_concurrent_builds;
-            s.cpu_count = cpu_count;
-            s.ram_total_mb = ram_total_mb;
-            s.cpu_core_score = cpu_core_score;
+            slot.shared_mut().apply_profile(profile);
         }
     }
 
@@ -477,6 +439,7 @@ mod tests {
     use super::*;
     use crate::peer_auth::PeerAuth;
     use crate::session_port::{SessionPort, SessionSignal};
+    use crate::worker_state::WorkerProfile;
     use tokio::sync::mpsc;
 
     fn caps() -> GradientCapabilities {
@@ -558,7 +521,16 @@ mod tests {
         assert_eq!(pool.mean_cpu_core_score(), None);
         for (id, score) in [("w1", 1_000), ("w2", 3_000), ("w3", 0)] {
             pool.register(id.into(), caps(), HashSet::new(), port().0);
-            pool.update_capabilities(id, vec![], vec![], 1, 1, 1, score);
+            pool.update_capabilities(
+                id,
+                WorkerProfile {
+                    max_concurrent_builds: 1,
+                    cpu_count: 1,
+                    ram_total_mb: 1,
+                    cpu_core_score: score,
+                    ..Default::default()
+                },
+            );
         }
         assert_eq!(pool.mean_cpu_core_score(), Some(2_000.0));
     }
@@ -569,32 +541,66 @@ mod tests {
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities(
             "w1",
-            vec!["x86_64-linux".into()],
-            vec!["kvm".into()],
-            4,
-            8,
-            16384,
-            1200,
+            WorkerProfile {
+                architectures: vec!["x86_64-linux".into()],
+                system_features: vec!["kvm".into()],
+                max_concurrent_builds: 4,
+                cpu_count: 8,
+                ram_total_mb: 16384,
+                cpu_core_score: 1200,
+                zone: Some("fra1".into()),
+                endpoint: Some("10.0.0.7:7000".into()),
+            },
         );
 
         // A reconnect/re-auth re-registers without the worker re-sending caps;
-        // architectures and sizing must survive so the worker stays matchable.
+        // architectures, sizing and locality must survive so the worker stays matchable.
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
 
         let workers = pool.all_workers();
         assert_eq!(workers[0].architectures, vec!["x86_64-linux"]);
         assert_eq!(workers[0].system_features, vec!["kvm"]);
         assert_eq!(workers[0].max_concurrent_builds, 4);
+        let shared = pool.workers["w1"].shared();
+        assert_eq!(shared.zone.as_deref(), Some("fra1"));
+        assert_eq!(shared.endpoint.as_deref(), Some("10.0.0.7:7000"));
         let view = pool.metrics_for("w1").unwrap();
         assert_eq!(view.cpu_count, 8);
         assert_eq!(view.ram_total_mb, 16384);
     }
 
     #[test]
+    fn worker_caps_carry_the_zone() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.update_capabilities(
+            "w1",
+            WorkerProfile {
+                zone: Some("fra1".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            pool.worker_caps("w1").unwrap().zone.as_deref(),
+            Some("fra1")
+        );
+    }
+
+    #[test]
     fn test_update_metrics_updates_view() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.update_capabilities("w1", vec![], vec![], 1, 4, 8192, 1000);
+        pool.update_capabilities(
+            "w1",
+            WorkerProfile {
+                max_concurrent_builds: 1,
+                cpu_count: 4,
+                ram_total_mb: 8192,
+                cpu_core_score: 1000,
+                ..Default::default()
+            },
+        );
 
         // Before any heartbeat the dynamic fields are absent, not zero.
         let view = pool.metrics_for("w1").unwrap();
@@ -631,12 +637,15 @@ mod tests {
         );
         pool.update_capabilities(
             "w1",
-            vec!["x86_64-linux".into()],
-            vec!["kvm".into()],
-            4,
-            8,
-            16384,
-            1200,
+            WorkerProfile {
+                architectures: vec!["x86_64-linux".into()],
+                system_features: vec!["kvm".into()],
+                max_concurrent_builds: 4,
+                cpu_count: 8,
+                ram_total_mb: 16384,
+                cpu_core_score: 1200,
+                ..Default::default()
+            },
         );
         pool.update_metrics("w1", 12.5, 9000, None, None);
 
@@ -654,7 +663,13 @@ mod tests {
     fn test_draining_worker_has_no_capacity() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.update_capabilities("w1", vec![], vec![], 10, 0, 0, 0);
+        pool.update_capabilities(
+            "w1",
+            WorkerProfile {
+                max_concurrent_builds: 10,
+                ..Default::default()
+            },
+        );
 
         // Active worker has capacity.
         assert!(pool.has_capacity("w1", &JobKind::Build));
@@ -734,7 +749,14 @@ mod tests {
         // Guards against `<` → `<=` off-by-one in `has_build_capacity`.
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2, 0, 0, 0);
+        pool.update_capabilities(
+            "w1",
+            WorkerProfile {
+                architectures: vec!["x86_64-linux".into()],
+                max_concurrent_builds: 2,
+                ..Default::default()
+            },
+        );
 
         assert!(pool.has_capacity("w1", &JobKind::Build), "0/2 has capacity");
         pool.assign_job("w1", "j1");
@@ -773,7 +795,14 @@ mod tests {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.register("w2".into(), caps(), HashSet::new(), port().0);
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2, 0, 0, 0);
+        pool.update_capabilities(
+            "w1",
+            WorkerProfile {
+                architectures: vec!["x86_64-linux".into()],
+                max_concurrent_builds: 2,
+                ..Default::default()
+            },
+        );
         pool.assign_job("w1", "j1");
         pool.mark_draining("w2");
 
