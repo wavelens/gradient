@@ -91,7 +91,7 @@ pub struct HotNarCache {
     inner: Option<Mutex<Inner>>,
     capacity: u64,
     small_nar_bytes: u64,
-    loads: tokio::sync::Mutex<HashMap<String, LoadFuture>>,
+    loads: Mutex<HashMap<String, LoadFuture>>,
     hits: AtomicU64,
     misses: AtomicU64,
     evictions: AtomicU64,
@@ -112,7 +112,7 @@ impl HotNarCache {
             inner: (capacity_bytes > 0).then(|| Mutex::new(Inner::default())),
             capacity: capacity_bytes,
             small_nar_bytes,
-            loads: tokio::sync::Mutex::new(HashMap::new()),
+            loads: Mutex::new(HashMap::new()),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             evictions: AtomicU64::new(0),
@@ -207,8 +207,10 @@ impl HotNarCache {
     }
 
     /// A hit, or one run of `load` shared by every caller that misses on `hash`
-    /// meanwhile; the result is admitted on success and never on failure.
-    pub async fn get_or_load<F>(&self, hash: &str, load: F) -> anyhow::Result<Bytes>
+    /// meanwhile; the result is admitted on success and never on failure. The
+    /// load runs on its own task, so a caller that gives up never strands it
+    /// half-read in `loads`.
+    pub async fn get_or_load<F>(self: &Arc<Self>, hash: &str, load: F) -> anyhow::Result<Bytes>
     where
         F: Future<Output = anyhow::Result<Bytes>> + Send + 'static,
     {
@@ -216,27 +218,44 @@ impl HotNarCache {
             return Ok(bytes);
         }
 
-        let (shared, leader) = {
-            let mut loads = self.loads.lock().await;
-            match loads.get(hash) {
-                Some(running) => (running.clone(), false),
-                None => {
-                    let shared = load.map(|r| r.map_err(Arc::new)).boxed().shared();
-                    loads.insert(hash.to_owned(), shared.clone());
-                    (shared, true)
-                }
+        let shared = {
+            let mut loads = self.loads.lock();
+            if let Some(bytes) = self.peek(hash) {
+                return Ok(bytes);
             }
+
+            loads
+                .entry(hash.to_owned())
+                .or_insert_with(|| self.spawn_load(hash, load))
+                .clone()
         };
 
-        let result = shared.await;
-        if leader {
-            self.loads.lock().await.remove(hash);
-            if let Ok(bytes) = &result {
-                self.insert(hash, bytes.clone());
-            }
-        }
+        shared.await.map_err(|e| anyhow::anyhow!("{e:#}"))
+    }
 
-        result.map_err(|e| anyhow::anyhow!("{e:#}"))
+    fn spawn_load<F>(self: &Arc<Self>, hash: &str, load: F) -> LoadFuture
+    where
+        F: Future<Output = anyhow::Result<Bytes>> + Send + 'static,
+    {
+        let cache = Arc::clone(self);
+        let hash = hash.to_owned();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a read-only load bounded by the storage read timeout; shutdown may drop it"
+        )]
+        let task = tokio::spawn(async move {
+            let result = load.await.map_err(Arc::new);
+            if let Ok(bytes) = &result {
+                cache.insert(&hash, bytes.clone());
+            }
+
+            cache.loads.lock().remove(&hash);
+            result
+        });
+
+        task.map(|joined| joined.unwrap_or_else(|e| Err(Arc::new(e.into()))))
+            .boxed()
+            .shared()
     }
 
     pub fn stats(&self) -> HotNarStats {
@@ -408,7 +427,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_load_is_not_cached() {
-        let c = cache(MIB, MIB);
+        let c = Arc::new(cache(MIB, MIB));
         let err = c
             .get_or_load("h", async { Err(anyhow::anyhow!("storage down")) })
             .await;
@@ -420,6 +439,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ok.as_ref(), b"later");
+    }
+
+    #[tokio::test]
+    async fn a_load_whose_caller_timed_out_still_finishes_and_is_admitted() {
+        let c = Arc::new(cache(MIB, MIB));
+        let (release, gate) = tokio::sync::oneshot::channel::<()>();
+        let caller = c.get_or_load("h", async move {
+            gate.await.ok();
+            Ok(Bytes::from_static(b"payload"))
+        });
+        let timeout = std::time::Duration::from_millis(10);
+        assert!(tokio::time::timeout(timeout, caller).await.is_err());
+
+        release.send(()).unwrap();
+        let admitted = async {
+            while c.stats().entries == 0 {
+                tokio::task::yield_now().await;
+            }
+        };
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), admitted)
+            .await
+            .expect("the abandoned load ran to completion");
+        assert_eq!(c.get("h").unwrap().as_ref(), b"payload");
     }
 
     #[test]
