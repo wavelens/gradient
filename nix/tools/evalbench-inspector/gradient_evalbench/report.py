@@ -116,6 +116,11 @@ def comparison(runs: list[Run], top: int = 25) -> str:
     return _table(["span (total ms)", *[r.name for r in runs]], rows)
 
 
+# Worker and server clocks are aligned to within a few milliseconds, so a step on
+# the other process may start just before the one it follows.
+CLOCK_SKEW_US = 50_000
+
+
 def dispatch_path(run: Run) -> list[tuple[str, float, float, float]]:
     """`(step, at_ms, dur_ms, gap_ms)` per step found, from the evaluate request."""
     requests = [
@@ -124,21 +129,28 @@ def dispatch_path(run: Run) -> list[tuple[str, float, float, float]]:
     ]
     if not requests:
         return []
-    cursor = origin = min(s.ts_us for s in requests)
-    previous_end = origin
-    rows = []
+    origin = min(s.ts_us for s in requests)
+    jobs = sorted(
+        (s for s in run.spans if s.name == "job" and str(s.args.get("job_id", "")).startswith("eval:")
+         and s.ts_us >= origin),
+        key=lambda s: s.ts_us,
+    )
+    job_id = jobs[0].args["job_id"] if jobs else None
+    cursor, previous_end, rows = origin, origin, []
     for process, name in DISPATCH_PATH:
         later = [
             s for s in run.spans
-            if s.name == name and s.process.startswith(process) and s.ts_us >= cursor
-            and (name != "http_request" or s.ts_us == origin)
+            if s.name == name and s.process.startswith(process)
+            and s.ts_us >= (origin if name == "http_request" else cursor - CLOCK_SKEW_US)
+            and str(s.args.get("kind", "Flake")) == "Flake"
+            and s.args.get("job_id", job_id) == job_id
         ]
         if not later:
             continue
         step = min(later, key=lambda s: s.ts_us)
         rows.append((f"{process} {name}", (step.ts_us - origin) / 1000, step.dur_us / 1000,
                      (step.ts_us - previous_end) / 1000))
-        cursor = step.ts_us
+        cursor = max(cursor, step.ts_us)
         previous_end = max(previous_end, step.end_us)
     return rows
 
