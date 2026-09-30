@@ -554,6 +554,24 @@ impl ActiveJob {
     }
 }
 
+/// A job a session still runs when it registers again, with its cluster attempt.
+#[derive(Debug, Clone)]
+pub struct Reattached {
+    pub job_id: String,
+    pub job: PendingJob,
+    pub cluster: Option<ClusterAttemptId>,
+}
+
+impl Reattached {
+    pub fn single(job_id: String, job: PendingJob) -> Self {
+        Self {
+            job_id,
+            job,
+            cluster: None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Disconnected {
     pub requeued: Vec<PendingJob>,
@@ -990,12 +1008,24 @@ impl JobTracker {
     }
 
     /// Re-attach a job a session still runs after the tracker was rebuilt.
-    pub fn restore_active(&mut self, worker_id: &str, job_id: String, job: PendingJob) {
+    pub fn restore_active(&mut self, worker_id: &str, reattached: Reattached) {
+        let Reattached {
+            job_id,
+            job,
+            cluster,
+        } = reattached;
         if self.active.contains_key(&job_id) {
             return;
         }
         self.pending.remove(&job_id);
-        self.active.insert(job_id, ActiveJob::new(worker_id, job));
+        self.clusters.forget(&job_id);
+        self.active.insert(
+            job_id,
+            ActiveJob {
+                cluster,
+                ..ActiveJob::new(worker_id, job)
+            },
+        );
     }
 
     pub fn release_to_pending(&mut self, job_id: &str) {
@@ -1032,6 +1062,7 @@ impl JobTracker {
     ) {
         for (worker, key, job) in members {
             self.forget_job_scores(&key);
+            self.clusters.release(&key);
             self.active.insert(
                 key,
                 ActiveJob {
@@ -1264,7 +1295,8 @@ impl JobTracker {
         anchors: &HashSet<DerivationBuildId>,
     ) {
         let active = self.active.values_mut().map(|a| &mut a.job);
-        for job in self.pending.values_mut().chain(active) {
+        let members = self.clusters.jobs_mut();
+        for job in self.pending.values_mut().chain(active).chain(members) {
             match job {
                 PendingJob::Eval(e) if Some(e.evaluation_id) == evaluation => e.prioritized = true,
                 PendingJob::Build(b) if anchors.contains(&b.derivation_build) => {
@@ -2667,5 +2699,59 @@ mod tests {
         assert_eq!(rec.derivation_build, Some(anchor));
         assert!(rec.substitute);
         assert!(rec.score_breakdown.is_object(), "{}", rec.score_breakdown);
+    }
+
+    #[test]
+    fn prioritizing_an_evaluation_lifts_its_waiting_cluster() {
+        let job = eval_job(ProjectId::now_v7());
+        let evaluation = job.evaluation_id();
+        let mut tracker = JobTracker::new();
+        tracker.add_member(member(ClusterJobId::now_v7(), 1), "eval:x".into(), job);
+
+        tracker.prioritize(Some(evaluation), &HashSet::new());
+
+        assert!(
+            tracker
+                .ready_clusters()
+                .next()
+                .expect("ready")
+                .prioritized()
+        );
+    }
+
+    #[test]
+    fn a_member_activated_from_a_taken_cluster_leaves_the_book() {
+        let cluster = ClusterJobId::now_v7();
+        let job = eval_job(ProjectId::now_v7());
+        let mut tracker = JobTracker::new();
+        tracker.add_member(member(cluster, 1), "eval:x".into(), job.clone());
+        tracker.take_cluster(cluster).expect("taken");
+        assert!(tracker.contains_job("eval:x"), "tracked while claimed");
+
+        tracker.activate_members(
+            ClusterAttemptId::now_v7(),
+            vec![("w1".into(), "eval:x".into(), job)],
+        );
+        tracker.remove_active("eval:x");
+
+        assert!(!tracker.contains_job("eval:x"));
+    }
+
+    #[test]
+    fn a_reattached_member_keeps_its_attempt() {
+        let attempt = ClusterAttemptId::now_v7();
+        let mut tracker = JobTracker::new();
+
+        tracker.restore_active(
+            "w1",
+            Reattached {
+                job_id: "m1".into(),
+                job: eval_job(ProjectId::now_v7()),
+                cluster: Some(attempt),
+            },
+        );
+        tracker.release_to_pending("m1");
+
+        assert_eq!(tracker.pending_count(), 0);
     }
 }

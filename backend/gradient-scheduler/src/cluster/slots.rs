@@ -17,7 +17,7 @@ use crate::jobs::WorkerJobScore;
 /// Two 10 s worker heartbeats plus slack: an idle worker re-asks within it.
 pub const IDLE_SLOT_TTL: Duration = Duration::from_secs(25);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SlotKind {
     Eval,
     Build,

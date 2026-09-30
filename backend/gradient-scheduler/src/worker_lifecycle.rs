@@ -23,7 +23,6 @@ use gradient_wire::types::GradientCapabilities;
 use crate::Scheduler;
 use crate::actor::{Registered, Registration, SchedulerMsg, WorkerCapabilities, WorkerMetrics};
 use crate::build;
-use crate::jobs::PendingJob;
 use gradient_pool::session_port::SessionPort;
 
 /// Insert a `worker_sample` time-series row for a connected worker. Best-effort;
@@ -151,7 +150,7 @@ impl Scheduler {
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<ProjectId>,
         session: Arc<dyn SessionPort>,
-        active: Vec<(String, PendingJob)>,
+        active: Vec<crate::jobs::Reattached>,
     ) -> Result<Registered> {
         let registration = Registration {
             worker: worker_id.to_owned(),

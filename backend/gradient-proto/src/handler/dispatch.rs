@@ -48,6 +48,7 @@ use gradient_wire::auth::validate_tokens;
 pub(crate) struct ActiveJob {
     pub dispatch: DispatchedJobId,
     pub pending: PendingJob,
+    pub cluster: Option<gradient_types::ids::ClusterAttemptId>,
 }
 
 /// The jobs a session runs, shared with the RPCs it answers off its loop.
@@ -90,11 +91,15 @@ impl ActiveJobs {
         self.0.lock().is_empty()
     }
 
-    pub(crate) fn pending(&self) -> Vec<(String, PendingJob)> {
+    pub(crate) fn pending(&self) -> Vec<gradient_scheduler::jobs::Reattached> {
         self.0
             .lock()
             .iter()
-            .map(|(id, job)| (id.clone(), job.pending.clone()))
+            .map(|(id, job)| gradient_scheduler::jobs::Reattached {
+                job_id: id.clone(),
+                job: job.pending.clone(),
+                cluster: job.cluster,
+            })
             .collect()
     }
 }
@@ -605,6 +610,7 @@ impl<'a> DispatchContext<'a> {
                 ActiveJob {
                     dispatch: assignment.dispatch(),
                     pending: assignment.pending.clone(),
+                    cluster: None,
                 },
             );
             send_credentials_for_job(
@@ -1041,6 +1047,7 @@ pub(in crate::handler) mod fixture {
                 ActiveJob {
                     dispatch: DispatchedJobId::now_v7(),
                     pending: pending_eval(),
+                    cluster: None,
                 },
             )]));
             let (admission, admitted) = state.upload_admission.open_session("test");
@@ -1158,6 +1165,7 @@ mod assignment_response_tests {
             ActiveJob {
                 dispatch,
                 pending: pending_eval(),
+                cluster: None,
             },
         )]));
 
@@ -1217,6 +1225,7 @@ mod assignment_response_tests {
             ActiveJob {
                 dispatch: DispatchedJobId::now_v7(),
                 pending: pending_eval(),
+                cluster: None,
             },
         )]));
 
@@ -1312,6 +1321,7 @@ mod assignment_response_tests {
             ActiveJob {
                 dispatch: DispatchedJobId::now_v7(),
                 pending: pending_eval(),
+                cluster: None,
             },
         )]));
 
