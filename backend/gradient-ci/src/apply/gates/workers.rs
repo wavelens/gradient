@@ -22,6 +22,7 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait};
 /// workers are connected, not when connected workers all lack `eval`. The
 /// row is unparked by `unpark_no_workers_for_project` whenever a worker
 /// registration is created or its `enable_eval` / `active` flags flip on.
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn park_if_no_workers<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,

@@ -59,6 +59,7 @@ pub(super) async fn ensure_no_active_evaluation<C: ConnectionTrait>(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
 )]
+#[tracing::instrument(level = "debug", skip_all)]
 pub async fn trigger_evaluation<C: ConnectionTrait>(
     db: &C,
     task: &MTask,
