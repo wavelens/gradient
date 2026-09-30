@@ -92,6 +92,7 @@ mod m20260929_000000_gin_references_without_pending_list;
 mod m20260929_000001_completed_anchor_window_index;
 mod m20260929_000002_build_job_evaluation_anchor_index;
 mod m20260929_000003_build_job_derivation_covering_index;
+mod m20260930_000000_evaluation_hot_updates;
 
 pub struct Migrator;
 
@@ -180,6 +181,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260929_000001_completed_anchor_window_index::Migration),
             Box::new(m20260929_000002_build_job_evaluation_anchor_index::Migration),
             Box::new(m20260929_000003_build_job_derivation_covering_index::Migration),
+            Box::new(m20260930_000000_evaluation_hot_updates::Migration),
         ]
     }
 }
