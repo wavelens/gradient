@@ -822,8 +822,9 @@ async fn dispatched(
     substitute: bool,
     build_context: serde_json::Value,
 ) {
-    if let Some(build_job) = find_or_create_build_job(ctx, evaluation, derivation_build).await
-        && let Err(e) = gradient_db::open_attempt(
+    if let Some(build_job) = find_or_create_build_job(ctx, evaluation, derivation_build).await {
+        let superseded = gradient_db::latest_attempt_id(&ctx.worker_db, derivation_build).await;
+        match gradient_db::open_attempt(
             &ctx.worker_db,
             build_job,
             derivation_build,
@@ -832,8 +833,10 @@ async fn dispatched(
             build_context,
         )
         .await
-    {
-        warn!(error = %e, "failed to open build_attempt");
+        {
+            Ok(_) => finalize_superseded_log(ctx, superseded).await,
+            Err(e) => warn!(error = %e, "failed to open build_attempt"),
+        }
     }
 
     if let Err(e) = EDerivationBuild::update_many()
@@ -844,6 +847,21 @@ async fn dispatched(
         .await
     {
         warn!(error = %e, %derivation_build, "failed to stamp anchor dispatched_at");
+    }
+}
+
+/// Only a terminal anchor finalizes its latest attempt, so the attempt a new
+/// one replaces (aborted, lost with its worker, retried) is finalized here.
+async fn finalize_superseded_log(
+    ctx: &DbContext,
+    superseded: Result<Option<BuildAttemptId>, sea_orm::DbErr>,
+) {
+    let result = match superseded {
+        Ok(attempt) => gradient_db::enqueue_log_finalize(&ctx.worker_db, attempt).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = result {
+        warn!(error = %e, "failed to finalize the superseded attempt's log");
     }
 }
 

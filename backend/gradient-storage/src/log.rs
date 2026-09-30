@@ -26,6 +26,12 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
     /// Read the full log for `attempt_id`. Returns an empty string when no log exists yet.
     fn read<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>>;
 
+    /// Read only the inline (not yet chunked) log; empty when there is none.
+    /// Defaults to `read` for backends without a separate chunked copy.
+    fn read_inline<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
+        self.read(attempt_id)
+    }
+
     /// Permanently delete the log for `attempt_id` from all backing stores.
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>>;
 
@@ -165,13 +171,19 @@ impl LogStorage for FileLogStorage {
 
     fn read<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
-            let path = self.log_path(attempt_id);
-            match fs::read_to_string(&path).await {
-                Ok(content) if !content.is_empty() => Ok(content),
-                Ok(_) => self.reassemble_chunks(attempt_id).await,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    self.reassemble_chunks(attempt_id).await
-                }
+            let inline = self.read_inline(attempt_id).await?;
+            if !inline.is_empty() {
+                return Ok(inline);
+            }
+            self.reassemble_chunks(attempt_id).await
+        })
+    }
+
+    fn read_inline<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            match fs::read_to_string(self.log_path(attempt_id)).await {
+                Ok(content) => Ok(content),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
                 Err(e) => Err(e.into()),
             }
         })
@@ -179,8 +191,9 @@ impl LogStorage for FileLogStorage {
 
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            self.delete_chunks(attempt_id).await.ok();
-            remove_file_if_present(&self.log_path(attempt_id)).await
+            let chunks = self.delete_chunks(attempt_id).await;
+            let inline = remove_file_if_present(&self.log_path(attempt_id)).await;
+            chunks.and(inline)
         })
     }
 
@@ -291,18 +304,23 @@ impl LogStorage for S3LogStorage {
 
     fn read<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
-            let local = self.local.read(attempt_id).await?;
-            if !local.is_empty() {
-                return Ok(local);
+            let inline = self.read_inline(attempt_id).await?;
+            if !inline.is_empty() {
+                return Ok(inline);
             }
             self.reassemble_chunks(attempt_id).await
         })
     }
 
+    fn read_inline<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
+        self.local.read_inline(attempt_id)
+    }
+
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            self.local.delete(attempt_id).await?;
-            self.delete_chunks(attempt_id).await
+            let local = self.local.delete(attempt_id).await;
+            let remote = self.delete_chunks(attempt_id).await;
+            local.and(remote)
         })
     }
 
@@ -363,11 +381,16 @@ impl LogStorage for S3LogStorage {
 
     fn delete_chunks<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            use futures::StreamExt as _;
+            use futures::{StreamExt as _, TryStreamExt as _};
             let dir = self.object_path(&layout::chunk_dir_key(attempt_id));
-            let mut stream = self.object_store.list(Some(&dir));
-            while let Some(item) = stream.next().await {
-                match self.object_store.delete(&item?.location).await {
+            let locations = self
+                .object_store
+                .list(Some(&dir))
+                .map_ok(|meta| meta.location)
+                .boxed();
+            let mut deleted = self.object_store.delete_stream(locations);
+            while let Some(result) = deleted.next().await {
+                match result {
                     Ok(_) | Err(object_store::Error::NotFound { .. }) => {}
                     Err(e) => return Err(e.into()),
                 }

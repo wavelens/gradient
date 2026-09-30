@@ -7,11 +7,13 @@
 use crate::DbContext;
 use anyhow::{Context, Result};
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+};
 use tracing::{error, warn};
 
-/// Compress a finalized build log into zstd chunks, persist the chunk index,
-/// and drop the inline copy.
+/// Compress an attempt's inline log into zstd chunks, appended to the chunks an
+/// earlier pass wrote, persist the chunk index, and drop the inline copy.
 ///
 /// Fallible on purpose: this runs as an outbox delivery, so a storage or index
 /// failure is retried with the inline copy still in place rather than losing the
@@ -21,19 +23,24 @@ pub async fn finalize_build_log(
     ctx: &DbContext,
     log_id: gradient_entity::ids::BuildAttemptId,
 ) -> Result<()> {
-    let log_text = ctx
-        .storage
-        .log_storage
-        .read(log_id)
+    let logs = ctx.storage.log_storage.as_ref();
+    let inline = logs
+        .read_inline(log_id)
         .await
-        .unwrap_or_default();
-    if log_text.is_empty() {
+        .with_context(|| format!("reading the inline build log of attempt {log_id}"))?;
+    if inline.is_empty() {
         return Ok(());
     }
+
+    let indexed = indexed_chunk_count(&ctx.worker_db, log_id).await?;
+    let earlier = gradient_storage::log_chunk::read_chunks(logs, log_id, indexed)
+        .await
+        .with_context(|| format!("reading the earlier log chunks of attempt {log_id}"))?;
+
     let descs = gradient_storage::log_chunk::compress_and_store_chunks(
-        ctx.storage.log_storage.as_ref(),
+        logs,
         log_id,
-        &log_text,
+        &(earlier + &inline),
         ctx.config.log.chunk_bytes,
     )
     .await
@@ -43,11 +50,37 @@ pub async fn finalize_build_log(
         .await
         .with_context(|| format!("writing the log chunk index of attempt {log_id}"))?;
 
-    if let Err(e) = ctx.storage.log_storage.delete_inline_log(log_id).await {
+    if let Err(e) = logs.delete_inline_log(log_id).await {
         warn!(error = %e, build_id = %log_id, "Failed to drop inline log after chunking");
     }
 
     Ok(())
+}
+
+/// Queue [`finalize_build_log`] for each attempt. The outbox folds a duplicate
+/// of a row still waiting, and an attempt without an inline log is a no-op.
+pub async fn enqueue_log_finalize(
+    db: &impl ConnectionTrait,
+    attempts: impl IntoIterator<Item = gradient_entity::ids::BuildAttemptId>,
+) -> Result<(), sea_orm::DbErr> {
+    let rows = attempts
+        .into_iter()
+        .map(|a| (a.to_string(), serde_json::json!({ "attempt": a })))
+        .collect();
+    crate::outbox::enqueue_many(db, crate::outbox::OutboxKind::LogFinalize, rows).await
+}
+
+async fn indexed_chunk_count(
+    db: &impl ConnectionTrait,
+    log_id: gradient_entity::ids::BuildAttemptId,
+) -> Result<u32> {
+    use gradient_entity::build_log_chunk::{Column, Entity};
+    let count = Entity::find()
+        .filter(Column::BuildAttempt.eq(log_id))
+        .count(db)
+        .await
+        .with_context(|| format!("counting the log chunks of attempt {log_id}"))?;
+    Ok(count as u32)
 }
 
 /// Replace the `build_log_chunk` rows for `log_id` with `descs` (idempotent).
@@ -193,5 +226,67 @@ pub async fn record_evaluation_message(
         insert_evaluation_message(&ctx.worker_db, evaluation_id, level, message, source).await
     {
         error!(error = %e, %evaluation_id, "Failed to insert evaluation_message");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_entity::ids::BuildAttemptId;
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use std::collections::BTreeMap;
+
+    #[tokio::test]
+    async fn finalize_appends_a_late_inline_tail_to_the_earlier_chunks() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([
+                [BTreeMap::from([("num_items", Value::BigInt(Some(1)))])],
+                [BTreeMap::from([("id", Value::from(uuid::Uuid::now_v7()))])],
+            ])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let (ctx, _pool) = crate::test_ctx::ctx(db).await;
+        let logs = std::sync::Arc::clone(&ctx.storage.log_storage);
+        let id = BuildAttemptId::now_v7();
+        gradient_storage::log_chunk::compress_and_store_chunks(
+            logs.as_ref(),
+            id,
+            "early\n",
+            1 << 16,
+        )
+        .await
+        .unwrap();
+        logs.append(id, "late\n").await.unwrap();
+
+        finalize_build_log(&ctx, id).await.unwrap();
+
+        assert_eq!(logs.read(id).await.unwrap(), "early\nlate\n");
+        assert!(logs.read_inline(id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn finalize_without_an_inline_log_leaves_the_chunks_and_index_alone() {
+        let (ctx, pool) =
+            crate::test_ctx::ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection())
+                .await;
+        let logs = std::sync::Arc::clone(&ctx.storage.log_storage);
+        let id = BuildAttemptId::now_v7();
+        gradient_storage::log_chunk::compress_and_store_chunks(
+            logs.as_ref(),
+            id,
+            "done\n",
+            1 << 16,
+        )
+        .await
+        .unwrap();
+
+        finalize_build_log(&ctx, id).await.unwrap();
+
+        assert_eq!(logs.read(id).await.unwrap(), "done\n");
+        crate::test_ctx::settle(ctx).await;
+        assert!(crate::pool::statements(pool.into_transaction_log()).is_empty());
     }
 }
