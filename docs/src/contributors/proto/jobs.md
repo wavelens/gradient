@@ -1,6 +1,6 @@
 # Jobs
 
-The two job kinds, how their progress is reported, and what happens when a job fails, is aborted or loses its worker. Every job arrives as `AssignJob { job_id, dispatch, job }`; every report echoes `dispatch`.
+The two job kinds, how their progress is reported, and what happens when a job fails, is aborted or loses its worker. Every job arrives as `AssignJob { job_id, dispatch, job, cluster }`; every report echoes `dispatch`. `cluster` is set only for a [cluster member](../scheduler/clusters.md).
 
 ## Flake Jobs
 
@@ -101,6 +101,23 @@ A build job carries exactly one `BuildSpec`: one shared build (anchor).
 - **DependencyFailed** spreads upward over the dependency graph from `Permanent` and `Timeout` failures, across evaluations.
 - **Eval job outage:** an eval job that failed `Transient` (the server connection dropped, an object PUT or a `CacheQuery` stopped answering) re-queues its evaluation, up to `build.maxAttempts` (3) runs.
 - An evaluation ends `Completed`, or `Failed` when any build failed, was aborted or dependency-failed, or an error message exists.
+
+## Cluster Members
+
+A [cluster member](../scheduler/clusters.md) arrives as `AssignJob` with `cluster = { attempt, role, index, hold_secs }`.
+
+| Event | Worker |
+|---|---|
+| `AssignJob` with `cluster` | Holds the slot without running the job and accepts; a second member of the same attempt is rejected |
+| `StartCluster { attempt, roster }` | Runs the held member; its signal route opens with the roster |
+| `ClusterSignal` from the server | Delivered to the running member of that attempt; dropped once the member finished |
+| `ClusterSignal` to the server | Sent by the member; `to = None` reaches every other member |
+| `AbortCluster { attempt }` | Drops a held member unreported and aborts a running one (`JobFailed { Aborted }`) |
+| No `StartCluster` within `hold_secs` | Releases the slot and reports `JobFailed { Aborted }` with `cluster start timed out` |
+| Local drain | Releases every held member the same way, with `worker draining` |
+
+- A held member counts against `eval.maxConcurrent` / `build.maxConcurrent` like a running job.
+- The server sets `hold_secs` to its prepare timeout plus a 10 s margin.
 
 ## Abort and Lost Workers
 
