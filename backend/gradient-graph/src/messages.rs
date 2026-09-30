@@ -63,7 +63,7 @@ pub struct IngestReport {
 }
 
 /// Which caches get a `cached_path_signature` placeholder for a committed path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignTargets {
     ProjectCaches(ProjectId),
     Cache(CacheId),
