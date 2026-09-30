@@ -690,11 +690,11 @@ async fn abort_leaves_a_shared_anchor_running_for_the_other_evaluation() {
             HashSet::new(),
             session,
             vec![
-                (
+                crate::jobs::Reattached::single(
                     build_job_key(shared),
                     PendingJob::Build(build_job(aborted_eval, peer, shared)),
                 ),
-                (
+                crate::jobs::Reattached::single(
                     build_job_key(only_mine),
                     PendingJob::Build(build_job(aborted_eval, peer, only_mine)),
                 ),
@@ -835,7 +835,10 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
             },
             HashSet::new(),
             session,
-            vec![(job_id.clone(), crate::jobs::PendingJob::Eval(fetch_job))],
+            vec![crate::jobs::Reattached::single(
+                job_id.clone(),
+                crate::jobs::PendingJob::Eval(fetch_job),
+            )],
         )
         .await
         .expect("reattach");
@@ -978,7 +981,10 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
             eval_worker_caps(),
             HashSet::new(),
             session,
-            vec![(assigned.job_id().to_owned(), assigned.pending.clone())],
+            vec![crate::jobs::Reattached::single(
+                assigned.job_id().to_owned(),
+                assigned.pending.clone(),
+            )],
         )
         .await
         .unwrap();
@@ -1653,4 +1659,57 @@ async fn a_disconnect_drops_the_workers_idle_slots() {
     scheduler.unregister_worker("w1").await;
 
     assert!(scheduler.cluster_snapshot().await.slots.is_empty());
+}
+
+#[tokio::test]
+async fn a_worker_that_cannot_build_has_no_idle_build_slot() {
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+
+    assert!(scheduler.request_job("w1", JobKind::Build).await.is_none());
+
+    assert!(scheduler.cluster_snapshot().await.slots.is_empty());
+}
+
+#[tokio::test]
+async fn a_draining_worker_offers_no_idle_slot() {
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_none());
+
+    scheduler.mark_worker_draining("w1").await;
+
+    assert!(scheduler.cluster_snapshot().await.slots.is_empty());
+}
+
+#[tokio::test]
+async fn the_snapshot_lists_the_oldest_cluster_first() {
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let (older, newer) = (
+        gradient_types::ids::ClusterJobId::now_v7(),
+        gradient_types::ids::ClusterJobId::now_v7(),
+    );
+    for (cluster, age) in [(newer, 1), (older, 60)] {
+        let mut of = member_of(cluster, 1);
+        of.cluster.created_at = gradient_types::now() - chrono::Duration::seconds(age);
+        scheduler
+            .enqueue_cluster_member(
+                of,
+                format!("eval:{cluster}"),
+                crate::jobs::PendingJob::Eval(eval_job(peer)),
+            )
+            .await
+            .unwrap();
+    }
+
+    let ids: Vec<_> = scheduler
+        .cluster_snapshot()
+        .await
+        .clusters
+        .iter()
+        .map(|c| c.id)
+        .collect();
+
+    assert_eq!(ids, vec![older, newer]);
 }

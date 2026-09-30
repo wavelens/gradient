@@ -33,7 +33,7 @@ pub struct Registration {
     pub capabilities: GradientCapabilities,
     pub authorized_peers: HashSet<ProjectId>,
     pub session: Arc<dyn SessionPort>,
-    pub active: Vec<(String, PendingJob)>,
+    pub active: Vec<crate::jobs::Reattached>,
 }
 
 pub struct Registered {
@@ -252,6 +252,15 @@ pub struct CoreArgs {
     pub policy: Arc<dyn ScoringPolicy>,
 }
 
+/// Whether a worker with `caps` can run a job of `kind` at all; an idle slot of
+/// a kind it cannot run is no capacity.
+fn runs(caps: &WorkerCaps, kind: crate::cluster::SlotKind) -> bool {
+    match kind {
+        crate::cluster::SlotKind::Eval => caps.capabilities.eval || caps.fetch,
+        crate::cluster::SlotKind::Build => caps.capabilities.build,
+    }
+}
+
 pub struct SchedulerCore {
     pool: WorkerPool,
     tracker: JobTracker,
@@ -319,20 +328,22 @@ impl SchedulerCore {
                 AssignOutcome::Assigned(assignment)
             }
             None => {
-                self.idle.record(worker, slot, Instant::now());
+                if caps.as_ref().is_some_and(|c| runs(c, slot)) {
+                    self.idle.record(worker, slot, Instant::now());
+                }
                 AssignOutcome::Nothing
             }
         }
     }
 
     fn cluster_snapshot(&self, now: Instant) -> crate::cluster::ClusterSnapshot {
-        let clusters: Vec<_> = self
+        let mut clusters: Vec<_> = self
             .tracker
             .ready_clusters()
             .filter(|c| c.not_before.is_none_or(|t| t <= now))
             .cloned()
             .collect();
-        let slots = self
+        let mut slots: Vec<_> = self
             .idle
             .live(now)
             .filter_map(|(worker, kind)| {
@@ -347,6 +358,8 @@ impl SchedulerCore {
                 })
             })
             .collect();
+        clusters.sort_by_key(|c| (!c.prioritized(), c.queued_at, c.id));
+        slots.sort_by(|a: &crate::cluster::Slot, b| (&a.worker, a.kind).cmp(&(&b.worker, b.kind)));
         let keys: HashSet<&str> = clusters
             .iter()
             .flat_map(|c| c.members.iter().map(|m| m.key.as_str()))
@@ -395,10 +408,9 @@ impl Actor for CoreActor {
                     reg.authorized_peers,
                     reg.session,
                 );
-                for (job_id, job) in reg.active {
-                    core.tracker
-                        .restore_active(&reg.worker, job_id.clone(), job);
-                    core.pool.assign_job(&reg.worker, &job_id);
+                for reattached in reg.active {
+                    core.pool.assign_job(&reg.worker, &reattached.job_id);
+                    core.tracker.restore_active(&reg.worker, reattached);
                 }
                 info!(worker = %reg.worker, "worker registered");
                 let _ = reply.send(Registered { last_seen });
@@ -479,6 +491,7 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::MarkDraining { worker, reply } => {
                 core.pool.mark_draining(&worker);
+                core.idle.forget_worker(&worker);
                 let _ = reply.send(());
             }
             SchedulerMsg::Enqueue { job_id, job, reply } => {

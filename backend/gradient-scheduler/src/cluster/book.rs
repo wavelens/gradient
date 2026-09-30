@@ -75,6 +75,9 @@ pub struct ClusterBook {
 
 impl ClusterBook {
     pub fn add(&mut self, of: MemberOf, key: String, job: PendingJob) {
+        if self.claiming(&key) {
+            return;
+        }
         let cluster = self
             .waiting
             .entry(of.cluster.id)
@@ -102,12 +105,20 @@ impl ClusterBook {
         self.waiting.values().filter(|c| c.ready())
     }
 
+    /// A taken cluster's keys stay tracked until it is restored or its members
+    /// are released into active jobs, so no pass enqueues them meanwhile.
     pub fn take(&mut self, id: ClusterJobId) -> Option<PendingCluster> {
-        let cluster = self.waiting.remove(&id)?;
-        for member in &cluster.members {
-            self.by_key.remove(&member.key);
-        }
-        Some(cluster)
+        self.waiting.remove(&id)
+    }
+
+    pub fn release(&mut self, key: &str) {
+        self.by_key.remove(key);
+    }
+
+    fn claiming(&self, key: &str) -> bool {
+        self.by_key
+            .get(key)
+            .is_some_and(|id| !self.waiting.contains_key(id))
     }
 
     pub fn restore(&mut self, cluster: PendingCluster) {
@@ -129,6 +140,13 @@ impl ClusterBook {
             member.job = None;
         }
         true
+    }
+
+    pub fn jobs_mut(&mut self) -> impl Iterator<Item = &mut PendingJob> {
+        self.waiting
+            .values_mut()
+            .flat_map(|c| c.members.iter_mut())
+            .filter_map(|m| m.job.as_mut())
     }
 
     pub fn jobs(&self) -> impl Iterator<Item = (&String, &PendingJob)> {
@@ -197,14 +215,21 @@ pub(crate) mod book_tests {
     }
 
     #[test]
-    fn a_taken_cluster_is_invisible_until_restored() {
+    fn a_taken_cluster_stays_tracked_but_unready_until_restored() {
         let id = ClusterJobId::now_v7();
         let mut book = ClusterBook::default();
-        book.add(member_of(id, 1), "build:x".into(), eval());
+        let member = member_of(id, 1);
+        book.add(member.clone(), "build:x".into(), eval());
 
         let taken = book.take(id).expect("taken");
-        assert!(!book.contains("build:x"));
+        assert!(book.contains("build:x"));
         assert_eq!(book.ready().count(), 0);
+        book.add(member, "build:x".into(), eval());
+        assert_eq!(
+            book.ready().count(),
+            0,
+            "a claimed member is not added twice"
+        );
 
         book.restore(taken);
         assert!(book.contains("build:x"));
