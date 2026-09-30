@@ -16,6 +16,7 @@ pub mod cache_upstream;
 pub mod cache_usage;
 pub mod chunked;
 pub mod closure;
+pub mod cluster;
 pub mod connection;
 pub mod consistency;
 pub mod context;
@@ -74,6 +75,7 @@ pub use self::cache_upstream::{
 };
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;
+pub use self::cluster::*;
 pub use self::connection::*;
 pub use self::consistency::{ConsistencyReport, graph_consistency_report};
 pub use self::context::{DbContext, ProbeRequests};
