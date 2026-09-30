@@ -21,6 +21,8 @@ use gradient_wire::messages::{
     ClientMessage, ClusterAddress, ClusterMembership, ClusterPeer, Job, JobKind,
 };
 use gradient_worker_client::connection::ProtoWriter;
+
+use crate::proto::credentials::CredentialStore;
 use tokio::sync::mpsc;
 
 pub(super) struct HeldJob {
@@ -28,6 +30,7 @@ pub(super) struct HeldJob {
     pub dispatch: String,
     pub job: Job,
     pub kind: JobKind,
+    pub credentials: CredentialStore,
 }
 
 struct HeldAttempt {
@@ -74,6 +77,16 @@ impl ClusterHolds {
 
     pub(super) fn drop_attempt(&mut self, attempt: &str) -> Option<HeldJob> {
         self.held.remove(attempt).map(|h| h.job)
+    }
+
+    /// Drop the hold of `job_id`, whichever attempt it belongs to.
+    pub(super) fn drop_job(&mut self, job_id: &str) -> Option<HeldJob> {
+        let attempt = self
+            .held
+            .iter()
+            .find(|(_, h)| h.job.job_id == job_id)
+            .map(|(a, _)| a.clone())?;
+        self.drop_attempt(&attempt)
     }
 
     pub(super) fn expired(&mut self, now: Instant) -> Vec<HeldJob> {
@@ -215,6 +228,7 @@ mod tests {
             dispatch: format!("dispatch-{job_id}"),
             job: Job::Build(BuildJob { builds: Vec::new() }),
             kind: JobKind::Build,
+            credentials: CredentialStore::new(),
         }
     }
 
@@ -313,6 +327,16 @@ mod tests {
             holds.start("a1").is_none(),
             "a late StartCluster runs nothing"
         );
+    }
+
+    #[test]
+    fn an_aborted_job_drops_its_hold() {
+        let mut holds = ClusterHolds::default();
+        holds.hold(membership("a1", 40), held("build:x"), Instant::now());
+
+        assert_eq!(holds.drop_job("build:x").expect("held").job_id, "build:x");
+        assert!(holds.drop_job("build:x").is_none());
+        assert_eq!(holds.held(&JobKind::Build), 0);
     }
 
     #[test]

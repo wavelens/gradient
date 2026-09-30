@@ -79,7 +79,8 @@ The `cluster-dispatch` pass runs every 5 s and whenever a `RequestJob` goes unan
 | Every member accepts | `StartCluster` to every member |
 | A member rejects | Attempt closed `PrepareFailed`, `AbortCluster` to every member, cluster waits again after 30 s |
 | `scheduler.clusterPrepareTimeoutSecs` passes without every acceptance | Same as a reject |
-| The claim is lost | Nothing written, cluster waits again after 30 s |
+| A held member reports `JobFailed` before the start (hold expired, drain, `AbortJob`) | Same as a reject; the report never reaches the build or evaluation |
+| The claim is lost | Nothing written; the members go back to the dispatch passes, which re-read their cluster |
 
 - A failed prepare does not consume the cluster's retry budget.
 - `hold_secs` is `clusterPrepareTimeoutSecs` plus 10 s: a worker that never hears `StartCluster` releases the slot on its own.
