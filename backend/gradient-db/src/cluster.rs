@@ -166,6 +166,74 @@ where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
     let txn = db.begin().await?;
+    let closed = close_attempt(&txn, attempt, outcome).await?;
+    txn.commit().await?;
+
+    Ok(closed)
+}
+
+/// Settle a decided attempt in one transaction: close it, then requeue its
+/// cluster (`retry`, within budget, every member alive) or finish it with
+/// `finished`. `None` when the attempt was already closed; `Some(requeued)` otherwise.
+pub async fn resolve_cluster_attempt<C>(
+    db: &C,
+    cluster: ClusterJobId,
+    attempt: ClusterAttemptId,
+    outcome: ClusterAttemptOutcome,
+    retry: bool,
+    finished: ClusterJobStatus,
+) -> Result<Option<bool>, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let txn = db.begin().await?;
+    if !close_attempt(&txn, attempt, outcome).await? {
+        txn.rollback().await?;
+        return Ok(None);
+    }
+    let requeued = retry && requeue_cluster_job(&txn, cluster).await?;
+    if !requeued {
+        finish_cluster_job(&txn, cluster, finished).await?;
+    }
+    txn.commit().await?;
+
+    Ok(Some(requeued))
+}
+
+/// Close an attempt whose prepare failed. A start that committed first already
+/// set the cluster `Running`; it goes back to `Queued` with the attempt.
+pub async fn fail_prepare_attempt<C>(
+    db: &C,
+    cluster: ClusterJobId,
+    attempt: ClusterAttemptId,
+) -> Result<bool, DbErr>
+where
+    C: TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let txn = db.begin().await?;
+    let closed = close_attempt(&txn, attempt, ClusterAttemptOutcome::PrepareFailed).await?;
+    if closed {
+        EClusterJob::update_many()
+            .col_expr(
+                CClusterJob::Status,
+                Expr::value(i16::from(ClusterJobStatus::Queued)),
+            )
+            .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+            .filter(CClusterJob::Id.eq(cluster))
+            .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
+            .exec(&txn)
+            .await?;
+    }
+    txn.commit().await?;
+
+    Ok(closed)
+}
+
+async fn close_attempt<C: ConnectionTrait>(
+    db: &C,
+    attempt: ClusterAttemptId,
+    outcome: ClusterAttemptOutcome,
+) -> Result<bool, DbErr> {
     let closed = EClusterAttempt::update_many()
         .col_expr(
             CClusterAttempt::FinishedAt,
@@ -174,20 +242,38 @@ where
         .col_expr(CClusterAttempt::Outcome, Expr::value(i16::from(outcome)))
         .filter(CClusterAttempt::Id.eq(attempt))
         .filter(CClusterAttempt::FinishedAt.is_null())
-        .exec(&txn)
+        .exec(db)
         .await?
         .rows_affected
         == 1;
     if closed {
         abandon_open(
-            &txn,
+            db,
             Some(Expr::col(CDispatchedJob::ClusterAttempt).eq(attempt)),
         )
         .await?;
     }
-    txn.commit().await?;
 
     Ok(closed)
+}
+
+/// Abort every `Queued` cluster with a member that can no longer run; it would
+/// wait for that member forever. Returns the clusters it aborted.
+pub async fn abort_dead_queued_clusters<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<ClusterJobId>, DbErr> {
+    let aborted = EClusterJob::update_many()
+        .col_expr(
+            CClusterJob::Status,
+            Expr::value(i16::from(ClusterJobStatus::Aborted)),
+        )
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+        .filter(CClusterJob::Status.eq(ClusterJobStatus::Queued))
+        .filter(Expr::exists(dead_member_of_cluster()))
+        .exec_with_returning(db)
+        .await?;
+
+    Ok(aborted.into_iter().map(|c| c.id).collect())
 }
 
 crate::sql! {
@@ -362,6 +448,7 @@ pub struct ClusterRecovery {
     pub attempts_closed: u64,
     pub clusters_requeued: u64,
     pub clusters_aborted: u64,
+    pub clusters_failed: u64,
 }
 
 pub async fn recover_cluster_attempts<C: ConnectionTrait>(
@@ -380,6 +467,17 @@ pub async fn recover_cluster_attempts<C: ConnectionTrait>(
         .exec(conn)
         .await?
         .rows_affected;
+    let failed = EClusterJob::update_many()
+        .col_expr(
+            CClusterJob::Status,
+            Expr::value(i16::from(ClusterJobStatus::Failed)),
+        )
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+        .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
+        .filter(Expr::col(CClusterJob::Attempts).gte(Expr::col(CClusterJob::RetryBudget)))
+        .exec(conn)
+        .await?
+        .rows_affected;
     let requeued = EClusterJob::update_many()
         .col_expr(
             CClusterJob::Status,
@@ -390,11 +488,13 @@ pub async fn recover_cluster_attempts<C: ConnectionTrait>(
         .exec(conn)
         .await?
         .rows_affected;
+    let dead_queued = abort_dead_queued_clusters(conn).await?.len() as u64;
 
     Ok(ClusterRecovery {
         attempts_closed: unstarted + started,
         clusters_requeued: requeued,
-        clusters_aborted: aborted,
+        clusters_aborted: aborted + dead_queued,
+        clusters_failed: failed,
     })
 }
 
@@ -773,7 +873,8 @@ mod tests {
     #[tokio::test]
     async fn startup_closes_every_open_attempt_then_requeues_live_clusters() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(2), exec(1), exec(1), exec(3)])
+            .append_exec_results([exec(2), exec(1), exec(1), exec(1), exec(3)])
+            .append_query_results([Vec::<std::collections::BTreeMap<&str, sea_orm::Value>>::new()])
             .into_connection();
 
         let recovered = recover_cluster_attempts(&db).await.expect("recover");
@@ -783,7 +884,8 @@ mod tests {
             ClusterRecovery {
                 attempts_closed: 3,
                 clusters_requeued: 3,
-                clusters_aborted: 1
+                clusters_aborted: 1,
+                clusters_failed: 1,
             }
         );
         let statements = logged(db);
@@ -811,5 +913,81 @@ mod tests {
             i16::from(ClusterAttemptOutcome::PrepareFailed)
         );
         assert!(format!("{:?}", statements[0].values).contains(&prepare_failed));
+    }
+
+    #[tokio::test]
+    async fn a_resolution_closes_and_requeues_in_one_transaction() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(1), exec(0), exec(1)])
+            .into_connection();
+
+        let resolved = resolve_cluster_attempt(
+            &db,
+            ClusterJobId::now_v7(),
+            ClusterAttemptId::now_v7(),
+            ClusterAttemptOutcome::Failed,
+            true,
+            ClusterJobStatus::Failed,
+        )
+        .await
+        .expect("resolve");
+
+        assert_eq!(resolved, Some(true));
+        let statements = logged(db);
+        assert_eq!(statements.first().map(|s| s.sql.as_str()), Some("BEGIN"));
+        assert_eq!(statements.last().map(|s| s.sql.as_str()), Some("COMMIT"));
+        assert!(
+            !statements
+                .iter()
+                .any(|s| s.sql.contains("\"status\" IN ($")),
+            "a requeued cluster is not also finished"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolving_a_closed_attempt_writes_nothing() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0)])
+            .into_connection();
+
+        let resolved = resolve_cluster_attempt(
+            &db,
+            ClusterJobId::now_v7(),
+            ClusterAttemptId::now_v7(),
+            ClusterAttemptOutcome::Failed,
+            true,
+            ClusterJobStatus::Failed,
+        )
+        .await
+        .expect("resolve");
+
+        assert_eq!(resolved, None);
+        assert!(logged(db).iter().any(|s| s.sql == "ROLLBACK"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_prepare_returns_a_started_cluster_to_the_queue() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(1), exec(0), exec(1)])
+            .into_connection();
+
+        assert!(
+            fail_prepare_attempt(&db, ClusterJobId::now_v7(), ClusterAttemptId::now_v7())
+                .await
+                .expect("fail")
+        );
+
+        let statements = logged(db);
+        let reset = statements
+            .iter()
+            .find(|s| s.sql.starts_with("UPDATE \"cluster_job\""))
+            .expect("status reset");
+        let values = format!("{:?}", reset.values);
+        let queued = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Queued));
+        let running = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Running));
+        assert!(
+            values.contains(&queued) && values.contains(&running),
+            "{values}"
+        );
     }
 }
