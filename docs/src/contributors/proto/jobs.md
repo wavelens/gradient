@@ -46,7 +46,7 @@ sequenceDiagram
 
 - `known` lists the derivations already walked completely; the worker skips their subtrees. A **Full rewalk** gets an empty list.
 - Each batch uploads its `.drv` files and their input sources before its `EvalResult`: builds start while the walk goes on. An input's `.drv` goes with the batch that walks it.
-- The walk goes on while a batch uploads, up to 64 batches ahead.
+- The walk goes on while a batch uploads, up to 64 batches ahead, and the uploads of consecutive batches overlap: each `EvalResult` follows its own batch's uploads, in walk order.
 - A path an earlier batch of the same evaluation pushed is neither queried nor uploaded again.
 - The server ingests each batch and promotes ready builds to `Queued` right away.
 - The evaluation turns `Building` on `JobCompleted`; evaluation errors become error messages that fail the evaluation at the end.

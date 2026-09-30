@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
-use futures::stream::{FuturesUnordered, StreamExt as _};
+use futures::stream::{FuturesOrdered, FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_sources::{DerivationResolver, FlakeDiscovery};
 use gradient_wire::messages::{
@@ -627,23 +627,48 @@ struct Flush {
     errors: Vec<String>,
 }
 
-/// Pushes each batch's paths, then reports it, in walk order, beside the walk so a
-/// slow link never stalls it. A path an earlier batch pushed is not pushed again.
+/// Pushes each batch's paths and reports it once they are cached, in walk order,
+/// beside the walk so a slow link never stalls it. Every push starts as its batch
+/// arrives: a push waits for the server to commit its paths behind whatever the
+/// graph actor is flushing, so pushes that took turns each cost a flush of the
+/// batch before. A path an earlier batch pushed is not pushed again.
 async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>) -> Result<()> {
     let mut pushed = HashSet::new();
-    while let Some(flush) = flushes.recv().await {
-        let fresh: Vec<(String, Option<u64>)> = flush
-            .paths
-            .into_iter()
-            .filter(|(path, _)| pushed.insert(path.clone()))
-            .collect();
-        reporter.push_paths(&fresh).await?;
-        reporter
-            .report_eval_result(flush.derivations, flush.warnings, flush.errors)
-            .await?;
+    let mut pushes = FuturesOrdered::new();
+    loop {
+        tokio::select! {
+            biased;
+            Some(cached) = pushes.next(), if !pushes.is_empty() => report(reporter, cached?).await?,
+            flush = flushes.recv() => match flush {
+                Some(mut flush) => {
+                    let fresh = fresh_paths(&mut pushed, &mut flush);
+                    pushes.push_back(async move {
+                        reporter.push_paths(&fresh).await?;
+                        Ok::<_, anyhow::Error>(flush)
+                    });
+                }
+                None => break,
+            },
+        }
+    }
+    while let Some(cached) = pushes.next().await {
+        report(reporter, cached?).await?;
     }
 
     Ok(())
+}
+
+fn fresh_paths(pushed: &mut HashSet<String>, flush: &mut Flush) -> Vec<(String, Option<u64>)> {
+    std::mem::take(&mut flush.paths)
+        .into_iter()
+        .filter(|(path, _)| pushed.insert(path.clone()))
+        .collect()
+}
+
+async fn report(reporter: &dyn JobReporter, flush: Flush) -> Result<()> {
+    reporter
+        .report_eval_result(flush.derivations, flush.warnings, flush.errors)
+        .await
 }
 
 /// The NAR size of a `.drv`: a regular, non-executable file's archive is its
@@ -987,7 +1012,7 @@ pub async fn evaluate_derivations_with(
         return Err(abort_err());
     }
 
-    // ── Step 2: resolve attr paths → drv paths ───────────────────────────────
+    // ── Step 2: resolve attr paths -> drv paths ──────────────────────────────
     let (resolved, resolve_warnings) = match resolver
         .resolve_derivation_paths(repo.clone(), attrs, &eval_overrides)
         .await
