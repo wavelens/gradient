@@ -42,6 +42,10 @@ flowchart LR
 
     How the policy ranks pending jobs for the requesting worker.
 
+-   :material-server-network: **[Cluster Jobs](clusters.md)**
+
+    Jobs claimed together on distinct workers, all or nothing.
+
 </div>
 
 ## Related
