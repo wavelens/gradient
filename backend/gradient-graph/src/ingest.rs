@@ -1248,6 +1248,13 @@ pub(crate) async fn mark_probed(
             .context("settle what an answered anchor demands")?;
         changes.extend(settled.changes);
         gained_demand.extend_from_slice(&settled.moved.gained);
+        // `probed` is a gate of its own: an anchor demanded before its answer
+        // gained no demand here, and nothing else would queue it before a sweep.
+        changes.extend(
+            gradient_db::promote(db, chunk)
+                .await
+                .context("queue the anchors the answer made promotable")?,
+        );
     }
     gradient_db::emit_transition_effects(ctx, &changes).await;
 
@@ -1759,6 +1766,7 @@ mod tests {
             .append_query_results([vec![demand_row(input, true)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 4])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1767,7 +1775,14 @@ mod tests {
         assert_eq!(gained, vec![input], "the input the miss demands");
 
         drop(ctx);
-        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let raw = gradient_db::pool::raw_statements(pool.into_transaction_log());
+        let last = raw.last().expect("statements ran");
+        assert!(
+            last.sql.contains("SET status =")
+                && format!("{:?}", last.values).contains(&anchor.to_string()),
+            "the answered anchor itself is offered to promotion last: {last:?}"
+        );
+        let log: Vec<String> = raw.iter().map(|s| s.sql.clone()).collect();
         for fragment in [
             "SET probed = true",
             "region(evaluation, derivation, builder) AS",
