@@ -807,6 +807,7 @@ async fn enqueue_ready_anchors(
     }
 
     let ready_ids: Vec<_> = new_anchors.iter().map(|a| a.id).collect();
+    let membership = crate::cluster::Membership::load(&state.worker_db, &[], &ready_ids).await?;
 
     let maps =
         BuildDispatchMaps::load(state, &new_anchors, scheduler.policy.uses_history()).await?;
@@ -815,7 +816,11 @@ async fn enqueue_ready_anchors(
     for anchor in new_anchors {
         match maps.classify_dispatch(&anchor) {
             DispatchOutcome::Dispatch(job_id, pending) => {
-                if let Err(e) = scheduler.enqueue_build_job(job_id, *pending).await {
+                let route = membership.route(&job_id);
+                if let Err(e) = scheduler
+                    .enqueue_routed(route, job_id, crate::jobs::PendingJob::Build(*pending))
+                    .await
+                {
                     warn!(error = %e, "enqueue_build_job failed");
                     continue;
                 }
