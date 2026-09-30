@@ -10,9 +10,11 @@
 pub(crate) mod book;
 mod divert;
 mod matching;
+mod planner;
 mod slots;
 
 pub use book::{ClusterBook, ClusterMember, PendingCluster};
 pub(crate) use divert::{Membership, Route};
 pub use matching::kuhn;
+pub use planner::{Placement, ScoreLookup, Seat, plan};
 pub use slots::{ClusterSnapshot, IDLE_SLOT_TTL, IdleSlots, Slot, SlotKind};

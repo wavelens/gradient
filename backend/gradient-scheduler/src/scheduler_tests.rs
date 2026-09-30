@@ -99,7 +99,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
 
 /// One build job on the global anchor `derivation_build`, attributed to the
 /// evaluation that dispatched it.
-fn build_job(
+pub(crate) fn build_job(
     evaluation_id: EvaluationId,
     peer: ProjectId,
     derivation_build: DerivationBuildId,
