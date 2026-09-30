@@ -14,7 +14,8 @@ use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 use tracing::{debug, trace, warn};
 
@@ -100,6 +101,202 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         created,
         outputs_marked,
     })
+}
+
+/// [`commit`] for a batch, one statement per step instead of a dozen per NAR: the
+/// commit's cost is round trips, not the database's work. Any failure fails the
+/// batch; the caller then commits its NARs one by one, so a bad one still fails
+/// only its own uploader. Runs on the graph actor's transaction, like [`commit`].
+pub(crate) async fn commit_batch(
+    ctx: &DbContext,
+    commits: &[NarCommit],
+) -> anyhow::Result<Vec<NarCommitted>> {
+    let db = &ctx.worker_db;
+    let txn = db.as_transaction().context(
+        "a NAR batch must run inside a transaction: the anchor locks it takes are only held under one",
+    )?;
+    let paths = commits
+        .iter()
+        .map(|c| {
+            let sp = StorePath::parse(&c.store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            if !is_nix32_hash(sp.hash()) {
+                anyhow::bail!("malformed store path: {}", c.store_path);
+            }
+            Ok(sp)
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let hashes: Vec<String> = paths.iter().map(|sp| sp.hash().to_owned()).collect();
+    if hashes
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len()
+        != hashes.len()
+    {
+        anyhow::bail!("a NAR batch commits each path once");
+    }
+
+    let upserted = upsert_cached_paths(db, commits, &paths).await?;
+    let (backed, fresh): (Vec<_>, Vec<_>) = hashes
+        .iter()
+        .zip(&upserted)
+        .partition(|(_, u)| u.was_backed);
+    let backed: Vec<String> = backed.into_iter().map(|(h, _)| h.clone()).collect();
+    let fresh: Vec<String> = fresh.into_iter().map(|(h, _)| h.clone()).collect();
+
+    commit_runtime_edges(ctx, txn, commits, &hashes).await?;
+
+    let freshly_present = gradient_db::producers_of_hashes(txn, &fresh).await?;
+    let recounted = gradient_db::producers_of_hashes(txn, &backed).await?;
+    let seeded = gradient_db::seed_runtime_deps(txn, &freshly_present, &recounted).await?;
+    let owners = gradient_db::derivations_with_hashes(txn, &fresh).await?;
+    advance_anchors(ctx, txn, &seeded.whole, &owners).await?;
+    if !seeded.unwhole.is_empty() {
+        warn!(
+            nars = commits.len(),
+            unwhole = seeded.unwhole.len(),
+            "commit added unwhole references"
+        );
+        retract_anchors(ctx, txn, &seeded.unwhole).await?;
+    }
+
+    let mut caches: std::collections::HashMap<SignTargets, Vec<CacheId>> = Default::default();
+    let mut placeholders = Vec::new();
+    for (c, u) in commits.iter().zip(&upserted) {
+        if let std::collections::hash_map::Entry::Vacant(slot) = caches.entry(c.targets) {
+            slot.insert(target_caches(db, c.targets).await?);
+        }
+        placeholders.extend(
+            caches[&c.targets]
+                .iter()
+                .map(|cache| (u.cached_path, *cache)),
+        );
+    }
+    insert_placeholders(db, placeholders).await;
+
+    let marked = mark_outputs_cached(db, &hashes).await?;
+    Ok(hashes
+        .iter()
+        .zip(upserted)
+        .map(|(hash, u)| NarCommitted {
+            cached_path: u.cached_path,
+            created: u.created,
+            outputs_marked: marked.get(hash).copied().unwrap_or(0),
+        })
+        .collect())
+}
+
+/// Every row of the batch under its `FOR UPDATE` lock, taken in hash order, then
+/// the existing ones refreshed and the new ones inserted together.
+async fn upsert_cached_paths(
+    db: &WorkerDb,
+    commits: &[NarCommit],
+    paths: &[StorePath],
+) -> anyhow::Result<Vec<Upserted>> {
+    let hashes: Vec<&str> = paths.iter().map(|sp| sp.hash()).collect();
+    let mut existing: std::collections::HashMap<String, MCachedPath> = ECachedPath::find()
+        .filter(CCachedPath::Hash.is_in(hashes))
+        .order_by_asc(CCachedPath::Hash)
+        .lock_exclusive()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|row| (row.hash.clone(), row))
+        .collect();
+
+    let mut upserted = Vec::with_capacity(commits.len());
+    let mut inserts = Vec::new();
+    for (c, sp) in commits.iter().zip(paths) {
+        match existing.remove(sp.hash()) {
+            Some(row) => {
+                upserted.push(Upserted {
+                    cached_path: row.id,
+                    created: false,
+                    was_backed: row.is_fully_cached(),
+                });
+                refreshed(row, c).update(db).await?;
+            }
+            None => {
+                let row = new_row(sp.hash(), sp.name(), c);
+                upserted.push(Upserted {
+                    cached_path: row.id,
+                    created: true,
+                    was_backed: false,
+                });
+                inserts.push(row.into_active_model());
+            }
+        }
+    }
+    if !inserts.is_empty() {
+        ECachedPath::insert_many(inserts)
+            .exec_without_returning(db)
+            .await?;
+    }
+
+    Ok(upserted)
+}
+
+/// The runtime edges and demand of the NARs a producer backs. A `.drv` or a
+/// source has none, so one lookup settles the common batch; a batch that has any
+/// takes them NAR by NAR, exactly as [`commit`] does.
+async fn commit_runtime_edges(
+    ctx: &DbContext,
+    txn: &sea_orm::DatabaseTransaction,
+    commits: &[NarCommit],
+    hashes: &[String],
+) -> anyhow::Result<()> {
+    let referencing: Vec<(&NarCommit, &String)> = commits
+        .iter()
+        .zip(hashes)
+        .filter(|(c, _)| !c.references.is_empty())
+        .collect();
+    let candidates: Vec<String> = referencing.iter().map(|(_, h)| (*h).clone()).collect();
+    if candidates.is_empty()
+        || gradient_db::producers_of_hashes(txn, &candidates)
+            .await?
+            .is_empty()
+    {
+        return Ok(());
+    }
+
+    for (c, hash) in referencing {
+        let producers = gradient_db::producers_of_hashes(txn, std::slice::from_ref(hash)).await?;
+        if producers.is_empty() {
+            continue;
+        }
+        let referenced = gradient_db::producers_of_tokens(txn, &c.references).await?;
+        if referenced.is_empty() {
+            continue;
+        }
+        for producer in &producers {
+            gradient_db::insert_runtime_edges(txn, *producer, &referenced).await?;
+        }
+        let settled = gradient_db::recompute_and_settle_demand(txn, &producers).await?;
+        gradient_db::emit_transition_effects(ctx, &settled.changes).await;
+    }
+
+    Ok(())
+}
+
+/// Back every output with its hash's row in one statement, counted per hash.
+async fn mark_outputs_cached(
+    db: &WorkerDb,
+    hashes: &[String],
+) -> anyhow::Result<std::collections::HashMap<String, u64>> {
+    let rows = EDerivationOutput::update_many()
+        .col_expr(CDerivationOutput::IsCached, Expr::value(true))
+        .col_expr(
+            CDerivationOutput::CachedPath,
+            Expr::cust("(SELECT cp.id FROM cached_path cp WHERE cp.hash = derivation_output.hash)"),
+        )
+        .filter(CDerivationOutput::Hash.is_in(hashes.to_vec()))
+        .exec_with_returning(db)
+        .await
+        .context("mark derivation outputs cached")?;
+    let mut marked = std::collections::HashMap::new();
+    for row in rows {
+        *marked.entry(row.hash).or_insert(0) += 1;
+    }
+    Ok(marked)
 }
 
 /// The anchor side of a forward wholeness flip: the anchors in `whole` can serve
@@ -200,33 +397,7 @@ async fn upsert_cached_path(
         Some(row) => {
             let id = row.id;
             let was_backed = row.is_fully_cached();
-            let file_hash = normalize_nar_hash(&c.file_hash);
-            // Different bytes under the same store path: the recorded build-id
-            // members no longer describe the NAR, so re-open it to the indexer.
-            let rescan_debug_info = row.file_hash.as_deref() != Some(file_hash.as_str());
-            let was_confirmed = row.confirmed;
-            let mut active = row.into_active_model();
-            active.file_size = Set(Some(c.file_size));
-            active.file_hash = Set(Some(file_hash));
-            if rescan_debug_info {
-                active.debug_info_indexed = Set(false);
-                active.confirmed = Set(c.confirmed);
-            } else if c.confirmed && !was_confirmed {
-                active.confirmed = Set(true);
-            }
-
-            active.nar_size = Set(Some(c.nar_size));
-            active.nar_hash = Set(Some(normalize_nar_hash(&c.nar_hash)));
-            active.references = Set(Some(c.references.join(" ")));
-            if c.deriver.is_some() {
-                active.deriver = Set(c.deriver.clone());
-            }
-
-            if c.ca.is_some() {
-                active.ca = Set(c.ca.clone());
-            }
-
-            active.update(db).await?;
+            refreshed(row, c).update(db).await?;
             Ok(Upserted {
                 cached_path: id,
                 created: false,
@@ -234,24 +405,10 @@ async fn upsert_cached_path(
             })
         }
         None => {
-            let am = MCachedPath {
-                id: CachedPathId::now_v7(),
-                hash: hash.to_owned(),
-                package: package.to_owned(),
-                file_hash: Some(normalize_nar_hash(&c.file_hash)),
-                file_size: Some(c.file_size),
-                nar_size: Some(c.nar_size),
-                nar_hash: Some(normalize_nar_hash(&c.nar_hash)),
-                deriver: c.deriver.clone(),
-                ca: c.ca.clone(),
-                references: Some(c.references.join(" ")),
-                created_at: now(),
-                confirmed: c.confirmed,
-                ..Default::default()
-            }
-            .into_active_model();
-
-            let row = am.insert(db).await?;
+            let row = new_row(hash, package, c)
+                .into_active_model()
+                .insert(db)
+                .await?;
             Ok(Upserted {
                 cached_path: row.id,
                 created: true,
@@ -261,12 +418,74 @@ async fn upsert_cached_path(
     }
 }
 
+/// An existing row brought up to the commit's report.
+fn refreshed(row: MCachedPath, c: &NarCommit) -> ACachedPath {
+    let file_hash = normalize_nar_hash(&c.file_hash);
+    // Different bytes under the same store path: the recorded build-id
+    // members no longer describe the NAR, so re-open it to the indexer.
+    let rescan_debug_info = row.file_hash.as_deref() != Some(file_hash.as_str());
+    let was_confirmed = row.confirmed;
+    let mut active = row.into_active_model();
+    active.file_size = Set(Some(c.file_size));
+    active.file_hash = Set(Some(file_hash));
+    if rescan_debug_info {
+        active.debug_info_indexed = Set(false);
+        active.confirmed = Set(c.confirmed);
+    } else if c.confirmed && !was_confirmed {
+        active.confirmed = Set(true);
+    }
+
+    active.nar_size = Set(Some(c.nar_size));
+    active.nar_hash = Set(Some(normalize_nar_hash(&c.nar_hash)));
+    active.references = Set(Some(c.references.join(" ")));
+    if c.deriver.is_some() {
+        active.deriver = Set(c.deriver.clone());
+    }
+
+    if c.ca.is_some() {
+        active.ca = Set(c.ca.clone());
+    }
+
+    active
+}
+
+fn new_row(hash: &str, package: &str, c: &NarCommit) -> MCachedPath {
+    MCachedPath {
+        id: CachedPathId::now_v7(),
+        hash: hash.to_owned(),
+        package: package.to_owned(),
+        file_hash: Some(normalize_nar_hash(&c.file_hash)),
+        file_size: Some(c.file_size),
+        nar_size: Some(c.nar_size),
+        nar_hash: Some(normalize_nar_hash(&c.nar_hash)),
+        deriver: c.deriver.clone(),
+        ca: c.ca.clone(),
+        references: Some(c.references.join(" ")),
+        created_at: now(),
+        confirmed: c.confirmed,
+        ..Default::default()
+    }
+}
+
 async fn queue_signature_placeholders(
     db: &WorkerDb,
     cached_path: CachedPathId,
     targets: SignTargets,
 ) -> anyhow::Result<()> {
-    let cache_ids: Vec<CacheId> = match targets {
+    let caches = target_caches(db, targets).await?;
+    insert_placeholders(
+        db,
+        caches
+            .into_iter()
+            .map(|cache| (cached_path, cache))
+            .collect(),
+    )
+    .await;
+    Ok(())
+}
+
+async fn target_caches(db: &WorkerDb, targets: SignTargets) -> anyhow::Result<Vec<CacheId>> {
+    Ok(match targets {
         SignTargets::None => vec![],
         SignTargets::Cache(id) => vec![id],
         SignTargets::ProjectCaches(project) => EProjectCache::find()
@@ -276,20 +495,22 @@ async fn queue_signature_placeholders(
             .into_iter()
             .map(|oc| oc.cache)
             .collect(),
-    };
+    })
+}
 
-    if cache_ids.is_empty() {
-        return Ok(());
+async fn insert_placeholders(db: &WorkerDb, pairs: Vec<(CachedPathId, CacheId)>) {
+    if pairs.is_empty() {
+        return;
     }
 
     let ts = now();
-    let rows: Vec<ACachedPathSignature> = cache_ids
+    let rows: Vec<ACachedPathSignature> = pairs
         .into_iter()
-        .map(|cid| {
+        .map(|(cached_path, cache)| {
             MCachedPathSignature {
                 id: CachedPathSignatureId::now_v7(),
                 cached_path,
-                cache: cid,
+                cache,
                 created_at: ts,
                 ..Default::default()
             }
@@ -310,10 +531,8 @@ async fn queue_signature_placeholders(
         .exec(db)
         .await;
     if let Err(e) = result {
-        warn!(%cached_path, error = %e, "insert cached_path_signature failed");
+        warn!(error = %e, "insert cached_path_signature failed");
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

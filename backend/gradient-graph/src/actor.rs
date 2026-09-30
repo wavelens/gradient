@@ -243,15 +243,7 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
             ingested.push(escalate_retryable(ingest_one(&scoped, batch).await)?);
         }
 
-        let started = Instant::now();
-        let mut committed = Vec::with_capacity(commits_ref.len());
-        for commit in commits_ref {
-            if !committed.is_empty() && started.elapsed() >= NAR_FLUSH_TIME {
-                break;
-            }
-            committed.push(escalate_retryable(commit_one(&scoped, commit).await)?);
-        }
-
+        let committed = commit_nars(&scoped, commits_ref).await?;
         Ok((ingested, committed))
     })
     .await;
@@ -318,6 +310,40 @@ async fn ingest_one(scoped: &DbContext, batch: &IngestBatch) -> anyhow::Result<I
         ingest::apply_batch(&inner, batch).await
     })
     .await
+}
+
+/// The queued NARs in one set-based savepoint; if that fails, one by one, so a bad
+/// commit fails only its uploader, stopping at [`NAR_FLUSH_TIME`] and leaving the
+/// rest to the next flush. A deadlock fails the whole flush for `transact` to retry.
+#[tracing::instrument(level = "debug", skip_all, fields(nars = commits.len()))]
+async fn commit_nars(
+    scoped: &DbContext,
+    commits: &[NarCommit],
+) -> anyhow::Result<Vec<anyhow::Result<NarCommitted>>> {
+    if commits.is_empty() {
+        return Ok(Vec::new());
+    }
+    match in_savepoint(scoped, |inner| async move {
+        nar::commit_batch(&inner, commits).await
+    })
+    .await
+    {
+        Ok(done) => return Ok(done.into_iter().map(Ok).collect()),
+        Err(e) if is_retryable(&e) => return Err(e),
+        Err(e) => {
+            warn!(error = %e, nars = commits.len(), "NAR batch failed; committing one by one")
+        }
+    }
+
+    let started = Instant::now();
+    let mut committed = Vec::with_capacity(commits.len());
+    for commit in commits {
+        if !committed.is_empty() && started.elapsed() >= NAR_FLUSH_TIME {
+            break;
+        }
+        committed.push(escalate_retryable(commit_one(scoped, commit).await)?);
+    }
+    Ok(committed)
 }
 
 /// One NAR commit under its own savepoint, so a bad commit fails only its uploader.
@@ -545,12 +571,9 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_exec_results(timeouts(1))
             .append_query_results([Vec::<MCachedPath>::new()])
-            .append_query_results([vec![cached_path(h1)]])
             .append_query_results([none(), none()])
-            .append_query_results([Vec::<MCachedPath>::new()])
-            .append_query_results([vec![cached_path(h2)]])
-            .append_query_results([none(), none()])
-            .append_exec_results([MockExecResult::default(), MockExecResult::default()])
+            .append_query_results([Vec::<MDerivationOutput>::new()])
+            .append_exec_results([MockExecResult::default()])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
         let graph = crate::Graph::new();
@@ -569,21 +592,52 @@ mod tests {
 
         actor.stop_and_wait(None, None).await.unwrap();
         drop((actor, graph));
-        let rendered: Vec<String> = pool
-            .into_transaction_log()
+        let statements = gradient_db::pool::statements(pool.into_transaction_log());
+        let inserts: Vec<&String> = statements
             .iter()
-            .map(|t| format!("{t:?}"))
+            .filter(|s| s.contains("INSERT INTO \"cached_path\""))
             .collect();
-        let inserts: Vec<usize> = rendered
-            .iter()
-            .map(|t| t.matches(r#"INSERT INTO \"cached_path\""#).count())
-            .filter(|n| *n > 0)
-            .collect();
-        assert_eq!(
-            inserts,
-            vec![2],
-            "both commits in one transaction: {rendered:?}"
+        assert_eq!(inserts.len(), 1, "one insert for the batch: {statements:?}");
+        assert!(
+            inserts[0].contains(h1) && inserts[0].contains(h2),
+            "{inserts:?}"
         );
+    }
+
+    /// One bad NAR must not fail the uploads it was batched with.
+    #[tokio::test]
+    async fn a_failed_batch_commits_its_nars_one_by_one() {
+        let good = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(timeouts(1))
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![cached_path(good)]])
+            .append_query_results([none(), none()])
+            .append_exec_results([MockExecResult::default()])
+            .into_connection();
+        let (ctx, _pool) = ctx(db).await;
+        let graph = crate::Graph::new();
+        let actor = graph.spawn(ctx, None, None).await.unwrap();
+
+        let (tx1, rx1) = ractor::concurrency::oneshot();
+        let (tx2, rx2) = ractor::concurrency::oneshot();
+        actor
+            .send_message(GraphMsg::CommitNar(nar(good), tx1.into()))
+            .unwrap();
+        actor
+            .send_message(GraphMsg::CommitNar(
+                NarCommit {
+                    store_path: "/nix/store/EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE-hello".into(),
+                    ..nar(good)
+                },
+                tx2.into(),
+            ))
+            .unwrap();
+        assert!(rx1.await.unwrap().unwrap().created);
+        let err = rx2.await.unwrap().expect_err("malformed");
+        assert!(err.to_string().contains("malformed"), "{err}");
+        actor.stop_and_wait(None, None).await.unwrap();
     }
 
     #[tokio::test]
