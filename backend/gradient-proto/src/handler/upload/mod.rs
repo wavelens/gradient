@@ -234,7 +234,7 @@ impl DispatchContext<'_> {
         }
         if is_final && let Some(granted) = uploads.table.take_granted(request_id) {
             match granted.finished {
-                Some(_) => self.commit(request_id, granted).await,
+                Some(_) => self.commit(request_id, granted),
                 None => uploads.table.grant(request_id, granted),
             }
         }
@@ -260,30 +260,34 @@ impl DispatchContext<'_> {
         if matches!(granted.transfer, Transfer::Relay(_)) && !granted.final_seen {
             return uploads.table.grant(request_id, granted);
         }
-        self.commit(request_id, granted).await;
+        self.commit(request_id, granted);
     }
 
-    async fn commit(&self, request_id: u64, granted: Granted) {
+    fn commit(&self, request_id: u64, granted: Granted) {
         let Some(metadata) = granted.finished else {
             return;
         };
-        let project_id = match self.scheduler.project_for_job(&granted.job_id).await {
-            Some(id) => Some(id),
-            None => {
-                super::nar::project_for_dispatched_job(
-                    &self.state.worker_db,
-                    self.peer_id,
-                    &granted.job_id,
-                )
-                .await
-            }
+        let project = {
+            let scheduler = Arc::clone(self.scheduler);
+            let state = Arc::clone(self.state);
+            let peer_id = self.peer_id.to_owned();
+            let job_id = granted.job_id.clone();
+            Box::pin(async move {
+                match scheduler.project_for_job(&job_id).await {
+                    Some(id) => Some(id),
+                    None => {
+                        super::nar::project_for_dispatched_job(&state.worker_db, &peer_id, &job_id)
+                            .await
+                    }
+                }
+            })
         };
         let c = commit::Commit {
             writer: self.writer.clone(),
             state: Arc::clone(self.state),
             peer_id: self.peer_id.to_owned(),
             request_id,
-            project_id,
+            project,
             object: granted.object,
             transfer: granted.transfer,
             metadata,

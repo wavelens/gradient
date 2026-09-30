@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use gradient_core::ServerState;
 use gradient_storage::admission::{ObjectKey, UploadPermit};
 use gradient_types::ids::ProjectId;
@@ -22,7 +23,9 @@ pub(super) struct Commit {
     pub state: Arc<ServerState>,
     pub peer_id: String,
     pub request_id: u64,
-    pub project_id: Option<ProjectId>,
+    /// Resolved here, off the session's reader loop: the scheduler answers it
+    /// from its mailbox, which a claim in flight holds for the claim's lock waits.
+    pub project: BoxFuture<'static, Option<ProjectId>>,
     pub object: UploadObject,
     pub transfer: Transfer,
     pub metadata: UploadMetadata,
@@ -35,7 +38,8 @@ pub(super) async fn run(c: Commit) {
     let outcome = match place(&c.state, &c.object, c.transfer, &c.metadata).await {
         Ok(()) => {
             c.permit.committed();
-            record(&c.state, c.project_id, &c.object, &c.metadata).await
+            let project_id = c.project.await;
+            record(&c.state, project_id, &c.object, &c.metadata).await
         }
         Err(outcome) => {
             drop(c.permit);
@@ -257,7 +261,7 @@ mod tests {
             state: Arc::clone(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project_id: None,
+            project: Box::pin(std::future::ready(None)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -301,7 +305,7 @@ mod tests {
             state: Arc::clone(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project_id: None,
+            project: Box::pin(std::future::ready(None)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -356,7 +360,7 @@ mod tests {
             state: Arc::clone(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project_id: None,
+            project: Box::pin(std::future::ready(None)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
@@ -419,7 +423,7 @@ mod tests {
             state: Arc::clone(&state),
             peer_id: "w1".into(),
             request_id: 1,
-            project_id: None,
+            project: Box::pin(std::future::ready(None)),
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
