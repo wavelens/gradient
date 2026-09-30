@@ -12,6 +12,11 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Select};
 use tracing::warn;
 
+/// Paths signed at once. The graph commits NARs in batches and every uploader of a
+/// batch resumes together, so without a bound a batch lands on the pool as one
+/// burst and starves the sessions' dispatch claims behind it.
+static SIGNING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
     pub file_size: i64,
@@ -91,6 +96,7 @@ pub(super) async fn mark_nar_stored(
     // rather than waking a whole-table sweep. Placeholder rows only exist when a
     // cache took it (ProjectCaches); the periodic sweep stays the backfill.
     if project_id.is_some() {
+        let _slot = SIGNING.acquire().await;
         crate::signing::sign_cached_path(
             &state.worker_db,
             &state.events,

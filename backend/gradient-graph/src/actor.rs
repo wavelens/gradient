@@ -41,10 +41,10 @@ pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
 pub const GRAPH_TX_ATTEMPTS: u32 = 3;
 /// Queued ingest batches are flushed early once they carry this many derivations.
 pub const INGEST_ROW_BUDGET: usize = 5000;
-/// Queued NAR commits are flushed early once this many wait. A commit costs a
-/// dozen statements, so this keeps a flush, and the retry of one, well inside
-/// [`GRAPH_TX_BUDGET`] while sharing the commit round trip among many.
-pub const NAR_COMMIT_BUDGET: usize = 256;
+/// Queued NAR commits are flushed early once this many wait. A flush holds the
+/// anchor locks of every commit in it until it ends, so this bounds how long a
+/// dispatch claim waits behind one while still sharing the WAL flush among many.
+pub const NAR_COMMIT_BUDGET: usize = 32;
 pub const HEALTH_NAME: &str = "graph";
 
 type Reply<T> = RpcReplyPort<anyhow::Result<T>>;
