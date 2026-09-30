@@ -42,6 +42,19 @@ fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
     *abort.borrow_and_update()
 }
 
+/// Run `work` until the abort watch fires. Dropping an in-flight eval request
+/// kills its subprocess, so an abort stops Nix mid-evaluation.
+async fn unless_aborted<T>(
+    abort: &mut watch::Receiver<bool>,
+    work: impl Future<Output = Result<T>>,
+) -> Result<T> {
+    tokio::select! {
+        biased;
+        Ok(_) = abort.wait_for(|aborted| *aborted) => Err(abort_err()),
+        out = work => out,
+    }
+}
+
 /// A pulled shared eval-cache blob was corrupt, so evaluation could not read it.
 /// Typed (like [`crate::proto::prefetch::CorruptCachedNar`]) so the failure
 /// classifier maps it to `BuildFailureKind::CorruptEvalCache` and the server
@@ -970,10 +983,13 @@ pub async fn evaluate_derivations_with(
         attrs,
         mut warnings,
         mut errors,
-    } = match resolver
-        .list_flake_derivations(repo.clone(), job.wildcards.clone(), &eval_overrides)
-        .await
+    } = match unless_aborted(
+        abort,
+        resolver.list_flake_derivations(repo.clone(), job.wildcards.clone(), &eval_overrides),
+    )
+    .await
     {
+        Err(e) if e.is::<crate::executor::failure::JobAborted>() => return Err(e),
         Ok(v) => v,
         Err(e) => {
             // Surface the Nix error as an EvalResult so it appears in the UI,
@@ -1008,15 +1024,14 @@ pub async fn evaluate_derivations_with(
         });
     }
 
-    if is_aborted(abort) {
-        return Err(abort_err());
-    }
-
     // ── Step 2: resolve attr paths -> drv paths ──────────────────────────────
-    let (resolved, resolve_warnings) = match resolver
-        .resolve_derivation_paths(repo.clone(), attrs, &eval_overrides)
-        .await
+    let (resolved, resolve_warnings) = match unless_aborted(
+        abort,
+        resolver.resolve_derivation_paths(repo.clone(), attrs, &eval_overrides),
+    )
+    .await
     {
+        Err(e) if e.is::<crate::executor::failure::JobAborted>() => return Err(e),
         Ok(v) => v,
         Err(e) => {
             // Forward warnings accumulated so far so they aren't lost.
@@ -1643,6 +1658,75 @@ mod tests {
         // We should have bailed before sending an EvaluatingDerivations
         // status update, so the reporter records nothing.
         assert!(reporter.is_empty(), "reporter should not see any events");
+    }
+
+    /// Nix evaluation that never returns, so only the abort can end it.
+    #[derive(Debug)]
+    struct StalledResolver;
+
+    #[async_trait::async_trait]
+    impl DerivationResolver for StalledResolver {
+        async fn list_flake_derivations(
+            &self,
+            _: String,
+            _: Vec<String>,
+            _: &[(String, String)],
+        ) -> Result<FlakeDiscovery> {
+            std::future::pending().await
+        }
+
+        async fn resolve_derivation_paths(
+            &self,
+            _: String,
+            _: Vec<String>,
+            _: &[(String, String)],
+        ) -> Result<(Vec<gradient_sources::ResolvedDerivation>, Vec<String>)> {
+            std::future::pending().await
+        }
+
+        async fn release_evaluators(&self) {}
+
+        async fn get_derivation(&self, _: String) -> Result<gradient_derivation::Derivation> {
+            std::future::pending().await
+        }
+
+        async fn get_features(&self, _: String) -> Result<(String, Vec<String>)> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn abort_interrupts_a_running_nix_evaluation() {
+        let fixture = load_store(&fixture_dir());
+        let (_, drv_reader) = setup_from_fixture(&fixture, "https://example.com/repo", "hello");
+        let job = make_flake_job("https://example.com/repo");
+        let mut reporter = RecordingJobReporter::new();
+        let (tx, mut abort) = watch::channel(false);
+
+        let eval = evaluate_derivations_with(
+            &StalledResolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut abort,
+        );
+        let fire = async {
+            tokio::task::yield_now().await;
+            tx.send(true).unwrap();
+            std::future::pending::<()>().await
+        };
+        let err = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::select! {
+                out = eval => out,
+                _ = fire => unreachable!(),
+            }
+        })
+        .await
+        .expect("abort must end an evaluation stuck in nix")
+        .expect_err("aborted eval must return Err");
+
+        assert!(format!("{err:#}").contains("aborted by server"), "{err:#}");
     }
 
     #[tokio::test]
