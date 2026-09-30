@@ -28,9 +28,10 @@
 //! un-wholed ripples up in the same pass. The two frontiers are disjoint at the seed
 //! and both moves are relative, so a dependent reached by both composes.
 //!
-//! Every pass locks the rows it will write through [`crate::readiness::lock_anchors`],
-//! which is `derivation`-ordered, and touches `derivation_build` alone: the third
-//! class in the lock order, so a caller that already holds `cached_path` may take it.
+//! Every pass locks the rows it will write through [`crate::readiness::lock_anchors`]
+//! or its copy inside the ripple function, which is `derivation`-ordered, and touches
+//! `derivation_build` alone: the third class in the lock order, so a caller that
+//! already holds `cached_path` may take it.
 //! The seed takes [`crate::readiness::lock_seed_anchors`] instead, which also holds
 //! the dependencies it counts under shared advisory keys, and every frontier a ripple
 //! reads the edges of is held under its exclusive keys by then; that pairing, not a
@@ -42,7 +43,7 @@ use std::collections::BTreeMap;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 
-use crate::graph_sql::{anchor_whole_predicate, present_predicate, present_value};
+use crate::graph_sql::{anchor_whole_predicate, present_predicate};
 use crate::readiness::{ids, lock_anchors};
 
 fn seed_sql() -> String {
@@ -60,26 +61,6 @@ fn seed_sql() -> String {
         was_whole = anchor_whole_predicate("b"),
         dep_whole = anchor_whole_predicate("dep"),
         whole = anchor_whole_predicate("db"),
-    )
-}
-
-fn count_down_sql() -> String {
-    format!(
-        "UPDATE derivation_build db SET missing_runtime_deps = db.missing_runtime_deps - c.n \
-         FROM unnest($1::uuid[], $2::int[]) AS c(derivation, n) \
-         WHERE db.derivation = c.derivation \
-         RETURNING db.derivation, {whole} AS whole",
-        whole = anchor_whole_predicate("db"),
-    )
-}
-
-fn count_up_sql() -> String {
-    format!(
-        "UPDATE derivation_build db SET missing_runtime_deps = db.missing_runtime_deps + c.n \
-         FROM unnest($1::uuid[], $2::int[]) AS c(derivation, n) \
-         WHERE db.derivation = c.derivation \
-         RETURNING db.derivation, (db.missing_runtime_deps = c.n AND {present}) AS was_whole",
-        present = present_value("db"),
     )
 }
 
@@ -124,12 +105,6 @@ crate::sql_fn! {
     SEED_MISSING_RUNTIME_DEPS = seed_sql,
         params = [DerivationIds(64), Bools(false, 64)],
         tier = Bulk;
-
-    COUNT_DOWN_RUNTIME = count_down_sql,
-        params = [DerivationIds(64), Ints(1, 64)];
-
-    COUNT_UP_RUNTIME = count_up_sql,
-        params = [DerivationIds(64), Ints(1, 64)];
 
     WHOLE_AMONG = whole_among_sql,
         params = [DerivationIds(64)];
@@ -223,11 +198,14 @@ crate::sql! {
     SET_OUTPUTS_UNCACHED = "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
         params = [CachedPathHashes(64)];
 
-    RUNTIME_DEPENDENT_COUNTS = "SELECT e.derivation AS derivation, count(*)::int AS n \
-                                FROM derivation_dependency e \
-                                WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (1, 2) \
-                                GROUP BY e.derivation ORDER BY e.derivation",
-        params = [DerivationIds(64)];
+    /// The whole ripple in one call, `RIPPLE_MISSING_RUNTIME_DEPS_FN` in the
+    /// migration that defines it: every level's runtime dependents counted, held
+    /// under their keys and rows in `derivation` order and moved by their edge
+    /// count, in place rather than a round trip per level. Returns every anchor
+    /// that flipped.
+    RIPPLE_MISSING_RUNTIME_DEPS = "SELECT derivation FROM ripple_missing_runtime_deps($1::uuid[], $2::bool) AS r(derivation)",
+        params = [DerivationIds(64), Bool(true)],
+        tier = Bulk;
 }
 
 /// What a seed moved: the anchors that became whole, and the ones that stopped
@@ -240,14 +218,6 @@ pub struct Seeded {
 
 fn derivation_ids(rows: &[QueryResult]) -> Vec<DerivationId> {
     rows.iter()
-        .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
-        .map(DerivationId::new)
-        .collect()
-}
-
-fn flagged(rows: &[QueryResult], flag: &str) -> Vec<DerivationId> {
-    rows.iter()
-        .filter(|r| r.try_get::<bool>("", flag).unwrap_or(false))
         .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
         .map(DerivationId::new)
         .collect()
@@ -307,7 +277,7 @@ pub async fn ripple_anchors_whole(
     txn: &DatabaseTransaction,
     frontier: Vec<DerivationId>,
 ) -> Result<Vec<DerivationId>, DbErr> {
-    ripple(txn, &COUNT_DOWN_RUNTIME, "whole", frontier).await
+    ripple(txn, frontier, true).await
 }
 
 /// The mirror: count up the dependents of anchors that stopped being whole.
@@ -315,50 +285,28 @@ pub async fn ripple_anchors_unwhole(
     txn: &DatabaseTransaction,
     frontier: Vec<DerivationId>,
 ) -> Result<Vec<DerivationId>, DbErr> {
-    ripple(txn, &COUNT_UP_RUNTIME, "was_whole", frontier).await
+    ripple(txn, frontier, false).await
 }
 
-/// One level per statement: the runtime dependents of `frontier` are counted, locked
-/// in `derivation` order and moved by their edge count; the ones `flag` names form
-/// the next level.
-///
-/// The counts are read separately so the update is a nested loop over a bound array
-/// and takes its row locks in the module doc's order rather than in plan order,
-/// which is what a derived set deadlocked on.
+/// Move the counters above `frontier` level by level in one call, `down` from
+/// anchors that became whole, up from anchors that were, and return every anchor
+/// that flipped. Each level is held under its keys and rows in `derivation` order
+/// before it is written, the module doc's discipline, inside the function.
 async fn ripple(
     txn: &DatabaseTransaction,
-    step: &crate::sql::Query,
-    flag: &str,
     mut frontier: Vec<DerivationId>,
+    down: bool,
 ) -> Result<Vec<DerivationId>, DbErr> {
-    let mut reached = Vec::new();
-    while !frontier.is_empty() {
-        frontier.sort_unstable();
-        frontier.dedup();
-        let mut dependents: Vec<DerivationId> = Vec::new();
-        let mut counts: Vec<i32> = Vec::new();
-        for row in txn
-            .query_all_raw(RUNTIME_DEPENDENT_COUNTS.bind([ids(&frontier)]))
-            .await?
-        {
-            dependents.push(DerivationId::new(
-                row.try_get::<uuid::Uuid>("", "derivation")?,
-            ));
-            counts.push(row.try_get::<i32>("", "n")?);
-        }
-        if dependents.is_empty() {
-            break;
-        }
-
-        let _lock = lock_anchors(txn, &dependents).await?;
-        let rows = txn
-            .query_all_raw(step.bind([ids(&dependents), counts.into()]))
-            .await?;
-        frontier = flagged(&rows, flag);
-        reached.extend(frontier.iter().copied());
+    if frontier.is_empty() {
+        return Ok(Vec::new());
     }
+    frontier.sort_unstable();
+    frontier.dedup();
 
-    Ok(reached)
+    Ok(derivation_ids(
+        &txn.query_all_raw(RIPPLE_MISSING_RUNTIME_DEPS.bind([ids(&frontier), down.into()]))
+            .await?,
+    ))
 }
 
 /// Take `hashes` `FOR NO KEY UPDATE` in one hash-ordered statement, before the caller
@@ -533,16 +481,12 @@ mod tests {
         ])
     }
 
-    fn count_row(id: DerivationId, n: i32) -> BTreeMap<String, Value> {
-        BTreeMap::from([
-            ("derivation".to_owned(), Value::from(id.into_inner())),
-            ("n".to_owned(), Value::Int(Some(n))),
-        ])
-    }
-
     fn none() -> Vec<BTreeMap<String, Value>> {
         Vec::new()
     }
+
+    const RIPPLE_FN: &str =
+        gradient_migration::m20260930_000002_counter_ripple_functions::RIPPLE_MISSING_RUNTIME_DEPS_FN;
 
     /// The keys have to be held before the statement that reads wholeness starts:
     /// a statement that waits for a key inside itself still reads the snapshot it
@@ -584,13 +528,7 @@ mod tests {
                 seed_row(settled, true, true),
                 seed_row(flipped, false, true),
             ]])
-            .append_query_results([vec![count_row(parent, 1)]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
             .append_query_results([vec![flag_row(parent, "whole", true)]])
-            .append_query_results([none()])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -602,15 +540,15 @@ mod tests {
         assert_eq!(moved.whole, vec![flipped, parent]);
         assert!(moved.unwhole.is_empty());
         let log = crate::pool::raw_statements(db.into_transaction_log());
-        let counts: Vec<String> = log
+        let ripples: Vec<String> = log
             .iter()
             .filter(|s| {
                 s.sql
-                    .contains("count(*)::int AS n FROM derivation_dependency e")
+                    .contains("FROM ripple_missing_runtime_deps($1::uuid[], $2::bool)")
             })
             .map(|s| format!("{:?}", s.values))
             .collect();
-        assert_eq!(counts.len(), 2, "one dependents lookup per level: {log:?}");
+        assert_eq!(ripples.len(), 1, "one call runs every level: {log:?}");
         let guard = log
             .iter()
             .position(|s| s.sql.contains("pg_advisory_xact_lock_shared(643, k)"))
@@ -624,10 +562,11 @@ mod tests {
             "the keys are held before the count reads: {log:?}"
         );
         assert!(
-            counts[0].contains(&flipped.into_inner().to_string())
-                && !counts[0].contains(&settled.into_inner().to_string()),
-            "the settled row must not ripple: {}",
-            counts[0]
+            ripples[0].contains(&flipped.into_inner().to_string())
+                && !ripples[0].contains(&settled.into_inner().to_string())
+                && ripples[0].contains("Bool(Some(true))"),
+            "the settled row must not ripple, and a seed ripples down: {}",
+            ripples[0]
         );
     }
 
@@ -664,53 +603,46 @@ mod tests {
         );
     }
 
-    /// A ripple up projects presence for every row it moves, so it reads the
-    /// outputs in one probe, and only for a row whose counter was at zero.
+    /// The function decides a flip the way the module does: down, an anchor
+    /// continues the ripple when it reads whole; up, when its counter was at zero
+    /// and its outputs are present, read in one probe and only behind the counter.
     #[test]
-    fn a_ripple_up_reads_the_outputs_once_and_only_behind_the_counter() {
-        let sql = count_up_sql();
-        assert_eq!(sql.matches("FROM derivation_output").count(), 1, "{sql}");
+    fn the_ripple_flips_on_the_module_predicates() {
         assert!(
-            sql.contains("(db.missing_runtime_deps = c.n AND coalesce("),
-            "{sql}"
+            RIPPLE_FN.contains(&format!(
+                "CASE WHEN down THEN {}",
+                anchor_whole_predicate("db")
+            )),
+            "{RIPPLE_FN}"
+        );
+        assert!(
+            RIPPLE_FN.contains(&format!(
+                "ELSE (db.missing_runtime_deps = c.n AND {})",
+                crate::graph_sql::present_value("db")
+            )),
+            "{RIPPLE_FN}"
+        );
+        assert_eq!(
+            RIPPLE_FN.matches("derivation_dependency").count(),
+            RIPPLE_FN.matches("kind IN (1, 2)").count(),
+            "every edge the ripple counts is a runtime edge: {RIPPLE_FN}"
         );
     }
 
-    /// Every write of the counter takes the ordered anchor lock first, so two
-    /// ripples over overlapping frontiers cannot cycle.
-    #[tokio::test]
-    async fn every_update_follows_an_ordered_lock_on_anchor_rows() {
-        let seed = DerivationId::now_v7();
-        let parent = DerivationId::now_v7();
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .append_query_results([vec![seed_row(seed, false, true)]])
-            .append_query_results([vec![count_row(parent, 1)]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
-            .append_query_results([vec![flag_row(parent, "whole", false)]])
-            .into_connection();
-
-        let txn = db.begin().await.unwrap();
-        seed_runtime_deps(&txn, &[], &[seed]).await.unwrap();
-        txn.commit().await.unwrap();
-
-        let log = crate::pool::raw_statements(db.into_transaction_log());
-        for (i, stmt) in log.iter().enumerate() {
-            if stmt.sql.contains("SET missing_runtime_deps") {
-                assert!(
-                    log[..i]
-                        .iter()
-                        .any(|s| s.sql.contains("ORDER BY derivation FOR NO KEY UPDATE")),
-                    "an unlocked counter write: {log:?}"
-                );
-            }
-        }
+    /// Every write of the counter takes the level's keys, then its rows in
+    /// `derivation` order, so two ripples over overlapping frontiers cannot cycle.
+    #[test]
+    fn every_level_holds_its_keys_and_ordered_rows_before_it_writes() {
+        let keys = RIPPLE_FN
+            .find("PERFORM pg_advisory_xact_lock(643, k)")
+            .expect("the keys");
+        let rows = RIPPLE_FN
+            .find("WHERE derivation = ANY(dependents) ORDER BY derivation FOR NO KEY UPDATE")
+            .expect("the ordered row lock");
+        let write = RIPPLE_FN
+            .find("SET missing_runtime_deps = db.missing_runtime_deps")
+            .expect("the write");
+        assert!(keys < rows && rows < write, "{RIPPLE_FN}");
     }
 
     /// A retire is the mirror of a commit: the anchors that WERE whole are read
@@ -720,13 +652,7 @@ mod tests {
         let gone = DerivationId::now_v7();
         let parent = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![count_row(parent, 2)]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
             .append_query_results([vec![flag_row(parent, "was_whole", true)]])
-            .append_query_results([none()])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -735,10 +661,14 @@ mod tests {
 
         assert_eq!(reached, vec![parent]);
         let log = crate::pool::raw_statements(db.into_transaction_log());
+        let up = log
+            .iter()
+            .find(|s| s.sql.contains("FROM ripple_missing_runtime_deps("))
+            .expect("the retire ripples up");
+        let values = format!("{:?}", up.values);
         assert!(
-            log.iter()
-                .any(|s| s.sql.contains("missing_runtime_deps + c.n")),
-            "{log:?}"
+            values.contains(&gone.into_inner().to_string()) && values.contains("Bool(Some(false))"),
+            "{values}"
         );
     }
 

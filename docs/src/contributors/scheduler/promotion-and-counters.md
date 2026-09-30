@@ -18,7 +18,7 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 
 | Column | Meaning | Moved by |
 |---|---|---|
-| `missing_runtime_deps` | Runtime edges (`kind IN (1, 2)`) leading to an anchor that is not whole | `runtime_readiness`: seeded when a NAR lands, rippled up and down level by level |
+| `missing_runtime_deps` | Runtime edges (`kind IN (1, 2)`) leading to an anchor that is not whole | `runtime_readiness`: seeded when a NAR lands, rippled up and down by the SQL function `ripple_missing_runtime_deps` |
 | `fetchable` | Terminal success (`Completed`, `Substituted`) and whole | `readiness::became_fetchable`, `readiness::lost_fetchability` |
 | `unready_deps` | Direct dependencies (every edge in `derivation_dependency`) that are not `fetchable` | One-hop ripple from the anchors a `fetchable` flip returned |
 | `demanded` | Some open entry point still wants the anchor | `readiness::recompute_demand` |
@@ -28,6 +28,7 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 - A flip writes the flag with a `RETURNING` of exactly the changed rows, and only those ripple. A ripple from a state instead of a transition drives a counter below zero, where `= 0` never holds again.
 - Flip and ripple share one transaction under `readiness::lock_anchors` (`derivation`-ordered `FOR NO KEY UPDATE`), which returns the `AnchorLock` proof both functions require.
 - Wholeness is transitive and ripples level by level; `unready_deps` moves one hop and stops, since reaching zero queues a dependent and never makes the dependent `fetchable`.
+- A transitive ripple is one SQL function call (`m20260930_000002_counter_ripple_functions.rs`): every level is counted, locked in order and moved inside the function, so a chain of 163 levels costs one round trip instead of three per level. Unit tests in `runtime_readiness.rs` and `walk_completeness.rs` hold the function bodies to the module predicates; a predicate change needs a migration.
 
 ## Promotion Gates
 
@@ -125,7 +126,7 @@ Five columns on `evaluation`, over the anchors its `build_job` rows name:
 ## Walk Completeness
 
 - `derivation.walked`: the derivation's own record is in (outputs, every edge, input sources). Unknown inputs are inserted as stubs in the same transaction; a stub is never promoted or dispatched.
-- `derivation.unwalked_inputs`: direct build inputs (`kind IN (0, 2)`) whose subtree is not recorded. Seeded at ingest, rippled as inputs complete, recounted by the sweep (`walk_drift`).
+- `derivation.unwalked_inputs`: direct build inputs (`kind IN (0, 2)`) whose subtree is not recorded. Seeded at ingest, rippled as inputs complete by the SQL function `ripple_unwalked_inputs`, recounted by the sweep (`walk_drift`).
 - Events that clear `walked`: the orphan derivation GC (dependents surviving a deleted dependency, followed by `unpromote_ungated`), the missing-input self-heal and the demote path (`readiness::unwalk_derivations`).
 
 ## Dependency Failure

@@ -94,6 +94,7 @@ mod m20260929_000002_build_job_evaluation_anchor_index;
 mod m20260929_000003_build_job_derivation_covering_index;
 mod m20260930_000000_evaluation_hot_updates;
 mod m20260930_000001_unsettled_anchor_index;
+pub mod m20260930_000002_counter_ripple_functions;
 
 pub struct Migrator;
 
@@ -184,6 +185,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260929_000003_build_job_derivation_covering_index::Migration),
             Box::new(m20260930_000000_evaluation_hot_updates::Migration),
             Box::new(m20260930_000001_unsettled_anchor_index::Migration),
+            Box::new(m20260930_000002_counter_ripple_functions::Migration),
         ]
     }
 }
