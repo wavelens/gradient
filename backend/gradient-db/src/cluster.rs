@@ -8,6 +8,7 @@
 
 use crate::dispatch_record::{ClaimGate, abandon_open, claim_statement};
 use chrono::NaiveDateTime;
+use gradient_entity::build::BuildStatus;
 use gradient_entity::cluster_attempt::{
     ClusterAttemptOutcome, Column as CClusterAttempt, Entity as EClusterAttempt,
 };
@@ -16,13 +17,17 @@ use gradient_entity::cluster_job::{
     ClusterJobStatus, Column as CClusterJob, Entity as EClusterJob,
 };
 use gradient_entity::cluster_member::Model as MClusterMember;
+use gradient_entity::cluster_member::{Column as CClusterMember, Entity as EClusterMember};
+use gradient_entity::derivation_build::Entity as EDerivationBuild;
 use gradient_entity::dispatched_job::{Column as CDispatchedJob, Model as MDispatchedJob};
+use gradient_entity::evaluation::{Entity as EEvaluation, EvaluationStatus};
 use gradient_entity::ids::{
     ClusterAttemptId, ClusterJobId, ClusterMemberId, DerivationBuildId, EvaluationId,
 };
-use sea_orm::sea_query::{Expr, InsertStatement, OnConflict, Query};
+use gradient_types::{CDerivationBuild, CEvaluation};
+use sea_orm::sea_query::{Cond, Expr, InsertStatement, OnConflict, Query, SelectStatement};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, ExprTrait,
+    ActiveEnum, ColumnTrait, ConnectionTrait, DatabaseTransaction, DbErr, EntityTrait, ExprTrait,
     FromQueryResult, QueryFilter, TransactionTrait, Value,
 };
 
@@ -267,6 +272,89 @@ pub async fn cluster_membership<C: ConnectionTrait>(
     .await?;
 
     Ok(rows.into_iter().map(MemberOf::from).collect())
+}
+
+/// A member of the correlated `cluster_job` whose job can no longer run: a
+/// terminal evaluation, or an anchor that is done or failed for good.
+pub(crate) fn dead_member_of_cluster() -> SelectStatement {
+    let dead_evaluation = Query::select()
+        .expr(Expr::val(1))
+        .from(EEvaluation)
+        .and_where(
+            Expr::col((EEvaluation, CEvaluation::Id))
+                .equals((EClusterMember, CClusterMember::Evaluation)),
+        )
+        .and_where(
+            Expr::col((EEvaluation, CEvaluation::Status))
+                .is_in(EvaluationStatus::TERMINAL.map(|s| s.into_value())),
+        )
+        .to_owned();
+    let dead_anchor = Query::select()
+        .expr(Expr::val(1))
+        .from(EDerivationBuild)
+        .and_where(
+            Expr::col((EDerivationBuild, CDerivationBuild::Id))
+                .equals((EClusterMember, CClusterMember::DerivationBuild)),
+        )
+        .and_where(
+            Expr::col((EDerivationBuild, CDerivationBuild::Status)).is_in(
+                BuildStatus::TERMINAL_SUCCESS
+                    .into_iter()
+                    .chain(BuildStatus::REQUEUEABLE)
+                    .map(|s| s.into_value()),
+            ),
+        )
+        .to_owned();
+
+    Query::select()
+        .expr(Expr::val(1))
+        .from(EClusterMember)
+        .and_where(
+            Expr::col((EClusterMember, CClusterMember::ClusterJob))
+                .equals((EClusterJob, CClusterJob::Id)),
+        )
+        .cond_where(
+            Cond::any()
+                .add(Expr::exists(dead_evaluation))
+                .add(Expr::exists(dead_anchor)),
+        )
+        .to_owned()
+}
+
+pub async fn requeue_cluster_job<C: ConnectionTrait>(
+    db: &C,
+    cluster: ClusterJobId,
+) -> Result<bool, DbErr> {
+    let res = EClusterJob::update_many()
+        .col_expr(
+            CClusterJob::Status,
+            Expr::value(i16::from(ClusterJobStatus::Queued)),
+        )
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+        .filter(CClusterJob::Id.eq(cluster))
+        .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
+        .filter(Expr::col(CClusterJob::Attempts).lt(Expr::col(CClusterJob::RetryBudget)))
+        .filter(Expr::exists(dead_member_of_cluster()).not())
+        .exec(db)
+        .await?;
+
+    Ok(res.rows_affected == 1)
+}
+
+pub async fn finish_cluster_job<C: ConnectionTrait>(
+    db: &C,
+    cluster: ClusterJobId,
+    status: ClusterJobStatus,
+) -> Result<bool, DbErr> {
+    let res = EClusterJob::update_many()
+        .col_expr(CClusterJob::Status, Expr::value(i16::from(status)))
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+        .filter(CClusterJob::Id.eq(cluster))
+        .filter(CClusterJob::Status.is_in([ClusterJobStatus::Queued, ClusterJobStatus::Running]))
+        .exec(db)
+        .await?;
+
+    Ok(res.rows_affected == 1)
 }
 
 #[cfg(test)]
@@ -562,5 +650,58 @@ mod tests {
                 .iter()
                 .any(|s| s.sql.starts_with("UPDATE \"cluster_job\""))
         );
+    }
+
+    #[tokio::test]
+    async fn a_cluster_requeues_only_within_its_budget_with_live_members() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(1)])
+            .into_connection();
+
+        let requeued = requeue_cluster_job(&db, ClusterJobId::now_v7())
+            .await
+            .expect("requeue");
+
+        assert!(requeued);
+        let statements = logged(db);
+        let sql = &statements[0].sql;
+        assert!(
+            sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
+            "{sql}"
+        );
+        assert!(sql.contains("\"attempts\" < \"retry_budget\""), "{sql}");
+        assert!(sql.contains("NOT EXISTS(SELECT"), "{sql}");
+        assert!(sql.contains("FROM \"cluster_member\""), "{sql}");
+        assert!(
+            sql.contains("\"cluster_member\".\"cluster_job\" = \"cluster_job\".\"id\""),
+            "{sql}"
+        );
+        let queued = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Queued));
+        let running = format!("SmallInt(Some({}))", i16::from(ClusterJobStatus::Running));
+        let values = format!("{:?}", statements[0].values);
+        assert!(
+            values.contains(&queued) && values.contains(&running),
+            "{values}"
+        );
+    }
+
+    #[tokio::test]
+    async fn finishing_moves_only_a_live_cluster() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(0)])
+            .into_connection();
+
+        let finished = finish_cluster_job(&db, ClusterJobId::now_v7(), ClusterJobStatus::Failed)
+            .await
+            .expect("finish");
+
+        assert!(!finished);
+        let statements = logged(db);
+        let sql = &statements[0].sql;
+        assert!(
+            sql.starts_with("UPDATE \"cluster_job\" SET \"status\" = $1"),
+            "{sql}"
+        );
+        assert!(sql.contains("\"status\" IN ($"), "{sql}");
     }
 }
