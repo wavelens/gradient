@@ -317,6 +317,8 @@ async fn perform_setup(
             cpu_count: host.cpu_count,
             ram_total_mb: host.ram_total_mb,
             cpu_core_score,
+            zone: None,
+            endpoint: None,
         })
         .await?;
     }

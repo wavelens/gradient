@@ -5,8 +5,8 @@
  */
 
 use crate::types::{
-    CachedPath, CredentialKind, EvalCachePullOutcome, GradientCapabilities, GrantTarget, Job,
-    JobCandidate, UploadOutcome,
+    CachedPath, ClusterAddress, ClusterMembership, ClusterPeer, CredentialKind,
+    EvalCachePullOutcome, GradientCapabilities, GrantTarget, Job, JobCandidate, UploadOutcome,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -73,15 +73,33 @@ pub enum ServerMessage {
     /// [`super::client::ClientMessage::AssignJobResponse`] before starting
     /// work.
     /// `dispatch` is the `dispatched_job` id; every report for this job echoes it.
+    /// `cluster` is set when the job is one member of a cluster attempt.
     AssignJob {
         job_id: String,
         dispatch: String,
         job: Job,
+        cluster: Option<Box<ClusterMembership>>,
     },
 
     /// Cancel an in-progress job.  Worker stops, cleans up, and responds
     /// with [`super::client::ClientMessage::JobFailed`].
     AbortJob { job_id: String, reason: String },
+
+    /// Every member of the attempt accepted: run the held jobs.
+    StartCluster {
+        attempt: String,
+        roster: Vec<ClusterPeer>,
+    },
+
+    /// A control message another member of the attempt sent to this one.
+    ClusterSignal {
+        attempt: String,
+        from: ClusterAddress,
+        payload: Vec<u8>,
+    },
+
+    /// Drop or abort every job of the attempt; its slots are free again.
+    AbortCluster { attempt: String, reason: String },
 
     /// Deliver a short-lived credential.  Sent before or alongside
     /// [`ServerMessage::AssignJob`] for steps that need it.
@@ -223,6 +241,9 @@ impl ServerMessage {
             ServerMessage::JobOffer { .. } => "JobOffer",
             ServerMessage::AssignJob { .. } => "AssignJob",
             ServerMessage::AbortJob { .. } => "AbortJob",
+            ServerMessage::StartCluster { .. } => "StartCluster",
+            ServerMessage::ClusterSignal { .. } => "ClusterSignal",
+            ServerMessage::AbortCluster { .. } => "AbortCluster",
             ServerMessage::Credential { .. } => "Credential",
             ServerMessage::NarPush { .. } => "NarPush",
             ServerMessage::NarUnavailable { .. } => "NarUnavailable",

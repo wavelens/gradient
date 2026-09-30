@@ -313,8 +313,28 @@ impl DispatchState {
                 job_id,
                 dispatch,
                 job,
+                cluster: None,
             } => {
                 self.on_assign_job(job_id, dispatch, job).await?;
+            }
+            ServerMessage::AssignJob {
+                job_id,
+                cluster: Some(membership),
+                ..
+            } => {
+                warn!(%job_id, attempt = %membership.attempt, "declining a cluster member; holding is not wired yet");
+                self.writer
+                    .send(ClientMessage::AssignJobResponse {
+                        job_id,
+                        accepted: false,
+                        reason: Some("cluster jobs unsupported".into()),
+                    })
+                    .await?;
+            }
+            ServerMessage::StartCluster { attempt, .. }
+            | ServerMessage::ClusterSignal { attempt, .. }
+            | ServerMessage::AbortCluster { attempt, .. } => {
+                warn!(%attempt, "cluster message not wired yet");
             }
             ServerMessage::AbortJob { job_id, reason } => {
                 self.on_abort_job(job_id, reason).await;

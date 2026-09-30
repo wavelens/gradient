@@ -726,6 +726,38 @@ pub enum JobKind {
     Build,
 }
 
+/// One member's seat in a cluster attempt: its role and its index within
+/// that role.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct ClusterAddress {
+    pub role: String,
+    pub index: u32,
+}
+
+/// Marks an [`crate::messages::ServerMessage::AssignJob`] as one member of a
+/// cluster attempt. The worker holds the job until `StartCluster` and releases
+/// the slot itself once `hold_secs` pass without it.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct ClusterMembership {
+    pub attempt: String,
+    pub role: String,
+    pub index: u32,
+    pub hold_secs: u32,
+}
+
+/// One member of a started cluster attempt, as listed in `StartCluster`.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct ClusterPeer {
+    pub role: String,
+    pub index: u32,
+    pub worker: String,
+    pub zone: Option<String>,
+    pub endpoint: Option<String>,
+}
+
 /// Why a build failed, as classified by the worker. Drives the scheduler's
 /// retry decision.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
