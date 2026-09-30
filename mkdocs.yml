@@ -98,6 +98,7 @@ nav:
           - Cache Closure: contributors/scheduler/cache-closure.md
           - Waiting and Recovery: contributors/scheduler/waiting-and-recovery.md
           - Scoring: contributors/scheduler/scoring.md
+          - Cluster Jobs: contributors/scheduler/clusters.md
       - Eval Worker Setup: contributors/eval-worker.md
       - Migrations: contributors/migrations.md
       - Proto:
