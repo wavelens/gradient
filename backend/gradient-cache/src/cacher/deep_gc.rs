@@ -33,6 +33,8 @@ pub struct DeepGcReport {
     pub blob_check_errors: u64,
     pub logs_scanned: u64,
     pub orphan_logs_removed: u64,
+    pub legacy_logs_relocated: u64,
+    pub legacy_logs_deleted: u64,
 }
 
 impl DeepGcReport {
@@ -174,6 +176,8 @@ async fn pass_blobs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Resul
 }
 
 async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result<()> {
+    clean_legacy_logs(&state, report).await?;
+
     let on_disk = state.log_storage.list_logs().await.context("list_logs")?;
     report.logs_scanned = on_disk.len() as u64;
     if on_disk.is_empty() {
@@ -205,6 +209,26 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
         }
     }
     Ok(())
+}
+
+/// Retire the pre-shard flat layout before the sweep lists the shards. A flat
+/// S3 log is deleted, so its `build_log_chunk` rows would index nothing.
+async fn clean_legacy_logs(state: &ServerState, report: &mut DeepGcReport) -> Result<()> {
+    let cleanup = state
+        .log_storage
+        .clean_legacy_layout()
+        .await
+        .context("clean_legacy_layout")?;
+    report.legacy_logs_relocated = cleanup.relocated;
+    report.legacy_logs_deleted = cleanup.deleted.len() as u64;
+
+    gradient_db::for_each_chunk(&cleanup.deleted, |chunk| {
+        gradient_entity::build_log_chunk::Entity::delete_many()
+            .filter(gradient_entity::build_log_chunk::Column::BuildAttempt.is_in(chunk))
+            .exec(&state.worker_db)
+    })
+    .await
+    .context("drop the chunk index of deleted legacy logs")
 }
 
 #[cfg(test)]
@@ -306,6 +330,54 @@ mod tests {
         let mut report = DeepGcReport::default();
         pass_logs(Arc::clone(&state), &mut report).await.unwrap();
         assert_eq!(report.orphan_logs_removed, 1);
+    }
+
+    #[tokio::test]
+    async fn pass_logs_deletes_flat_s3_logs_and_their_chunk_index() {
+        use gradient_storage::S3LogStorage;
+        use object_store::{
+            ObjectStore as _, ObjectStoreExt as _, PutPayload, memory::InMemory,
+            path::Path as ObjectPath,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Arc::new(InMemory::new());
+        let legacy = BuildAttemptId::now_v7();
+        store
+            .put(
+                &ObjectPath::from(format!("logs/{legacy}/chunk_00000000.zst")),
+                PutPayload::from_static(b"old"),
+            )
+            .await
+            .unwrap();
+        let log: Arc<dyn LogStorage> = Arc::new(S3LogStorage::new(
+            FileLogStorage::new(tmp.path()).await.unwrap(),
+            store.clone(),
+            "",
+        ));
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([sea_orm::MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+        let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        let state = make_state(nar, log, db);
+
+        let mut report = DeepGcReport::default();
+        pass_logs(Arc::clone(&state), &mut report).await.unwrap();
+
+        assert_eq!(report.legacy_logs_deleted, 1);
+        assert_eq!(report.logs_scanned, 0);
+        assert!(
+            store
+                .list_with_delimiter(Some(&ObjectPath::from("logs")))
+                .await
+                .unwrap()
+                .common_prefixes
+                .is_empty()
+        );
     }
 
     #[tokio::test]

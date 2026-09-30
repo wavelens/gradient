@@ -48,6 +48,7 @@ logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 - **Finalized:** `finalize_build_log` appends the live file as zstd chunks after any earlier chunks, indexes them in `build_log_chunk` and drops the live file. With S3 the chunks go to `<prefix>logs/...` only.
 - **Finalize Triggers:** the anchor turning terminal, a new attempt replacing the latest one (abort, lost worker, retry) and an upstream log arriving after the build (log substitution). Every trigger queues a `LogFinalize` outbox row for the attempt.
 - **Missing Chunks:** a chunk whose object is gone renders as one `[log chunk unavailable]` line per indexed line, and a re-finalize keeps one such line in its place.
+- **Legacy Layout:** flat `logs/<attempt>.log` and `logs/<attempt>/` entries from before sharding are retired by the [deep GC](#deep-gc): moved into their shard on local disk, deleted with their `build_log_chunk` rows on S3.
 - **Reclaimed:** with their derivation by the orphan-derivation GC; logs without a `build_attempt` row by the [deep GC](#deep-gc) log pass.
 
 ## Deep GC
@@ -58,7 +59,7 @@ logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 |---|---|
 | NAR | `cleanup_orphaned_cache_files`: objects without `cached_path` rows and rows without objects. Evicting stale live paths is maintenance's job |
 | Blob | `build-request-blobs/...` objects and `build_request_blob` rows without a partner |
-| Log | Logs keyed by `BuildAttemptId` without a `build_attempt` row; an attempt without a log is legitimate |
+| Log | Flat pre-shard logs first (see [Build Logs](#build-logs)), then logs keyed by `BuildAttemptId` without a `build_attempt` row; an attempt without a log is legitimate |
 
 - **Tracking:** an `admin_task` row, `kind = deep_gc`, `pending` -> `running` -> `completed` / `failed`. The partial unique index `admin_task_one_active_per_kind` allows one active task; a second `POST` answers `409`.
 - **Progress** is flushed between passes to `admin_task.progress`, read at `GET /api/v1/admin/tasks[/{task_id}]`.

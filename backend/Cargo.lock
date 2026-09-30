@@ -2206,6 +2206,7 @@ dependencies = [
  "gradient-types",
  "gradient-util",
  "mockall",
+ "object_store",
  "ractor",
  "ring",
  "sea-orm",
