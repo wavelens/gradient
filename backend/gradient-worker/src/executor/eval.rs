@@ -26,7 +26,7 @@ use gradient_wire::messages::{
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob,
     FlakeOutputNode, FlakeSource,
 };
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tracing::{debug, info, warn};
 
 /// Abort error returned from the eval pipeline when the dispatch loop fires
@@ -628,14 +628,49 @@ fn build_discovered_derivation(
     }
 }
 
+/// Batches the walk may run ahead of the publisher before it waits.
+const PUBLISH_BACKLOG: usize = 64;
+
+/// One batch the walk hands to [`publish`]: the derivations it reports and the
+/// `.drv` paths whose runtime closure must be cached before that report.
+struct Flush {
+    drvs: Vec<String>,
+    derivations: Vec<DiscoveredDerivation>,
+    warnings: Vec<String>,
+    errors: Vec<String>,
+}
+
+/// Pushes each batch's `.drv` closure, then reports it, in walk order, beside the
+/// walk so a slow link never stalls it. Batches that queued up during a push go
+/// out as one closure: one cache query and one upload set, however many batches.
+async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>) -> Result<()> {
+    let mut pushed = HashSet::new();
+    while let Some(first) = flushes.recv().await {
+        let mut ready = vec![first];
+        while let Ok(next) = flushes.try_recv() {
+            ready.push(next);
+        }
+
+        let drvs: Vec<String> = ready.iter().flat_map(|f| f.drvs.iter().cloned()).collect();
+        reporter.push_drv_closure(&drvs, &mut pushed).await?;
+        for flush in ready {
+            reporter
+                .report_eval_result(flush.derivations, flush.warnings, flush.errors)
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
 /// BFS closure walker.
 ///
 /// Holds the walk state (frontier queue, visited set, accumulation batch)
 /// and drives the traversal in concurrent waves of up to
 /// [`DRV_READ_CONCURRENCY`] `.drv` paths.
 ///
-/// Every [`EVAL_BATCH_SIZE`] derivations the batch is flushed to the server
-/// so builds can start queuing while the walk continues.
+/// Every [`EVAL_BATCH_SIZE`] derivations the batch goes to [`publish`] so
+/// builds can start queuing while the walk continues.
 struct ClosureWalker<'a> {
     drv_reader: &'a dyn DrvReader,
     batch: Vec<DiscoveredDerivation>,
@@ -643,19 +678,18 @@ struct ClosureWalker<'a> {
     queue: VecDeque<(Option<String>, String)>,
     walked: usize,
     start: Instant,
-    /// `.drv` paths the walker parsed since the last flush (present in the
-    /// local store, not pruned via `known_set`). Drained at each flush to push
-    /// the batch's runtime closure to the cache *before* its `report_eval_result`
-    /// so a mid-eval build dispatch never races the source upload.
+    /// `.drv` paths parsed since the last flush, not pruned via `known_set`.
     produced_drvs: Vec<String>,
-    /// Store paths this evaluation already pushed or found cached, so each
-    /// flush pushes only what the earlier flushes did not cover.
-    pushed: HashSet<String>,
+    flushes: mpsc::Sender<Flush>,
 }
 
 impl<'a> ClosureWalker<'a> {
     /// Initialise the walker with `root_drvs` as the BFS frontier.
-    fn new(drv_reader: &'a dyn DrvReader, root_drvs: &[(String, String)]) -> Self {
+    fn new(
+        drv_reader: &'a dyn DrvReader,
+        root_drvs: &[(String, String)],
+        flushes: mpsc::Sender<Flush>,
+    ) -> Self {
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
         for (attr, drv) in root_drvs {
@@ -672,25 +706,25 @@ impl<'a> ClosureWalker<'a> {
             walked: 0,
             start: Instant::now(),
             produced_drvs: Vec::new(),
-            pushed: HashSet::new(),
+            flushes,
         }
     }
 
-    /// Drive the full BFS, flushing intermediate batches to `updater`.
-    ///
-    /// Returns the final unflushed batch; the caller is responsible for the
-    /// final `report_eval_result` call.
+    /// Drive the full BFS, then flush the remainder with the evaluation's
+    /// `warnings` and `errors`. Dropping the walker ends [`publish`].
     async fn walk(
-        &mut self,
-        updater: &mut dyn JobReporter,
+        mut self,
+        reporter: &dyn JobReporter,
         abort: &mut watch::Receiver<bool>,
-    ) -> Result<Vec<DiscoveredDerivation>> {
+        warnings: Vec<String>,
+        errors: Vec<String>,
+    ) -> Result<()> {
         while !self.queue.is_empty() {
             // Honour AbortJob at every wave boundary.
             if is_aborted(abort) {
                 return Err(abort_err());
             }
-            self.process_wave(updater).await?;
+            self.process_wave(reporter).await?;
         }
 
         info!(
@@ -699,12 +733,30 @@ impl<'a> ClosureWalker<'a> {
             "closure walk complete"
         );
 
-        Ok(std::mem::take(&mut self.batch))
+        self.flush(warnings, errors).await
+    }
+
+    async fn flush(&mut self, warnings: Vec<String>, errors: Vec<String>) -> Result<()> {
+        debug!(
+            count = self.batch.len(),
+            remaining = self.queue.len(),
+            "flushing eval batch"
+        );
+        let flush = Flush {
+            drvs: std::mem::take(&mut self.produced_drvs),
+            derivations: std::mem::take(&mut self.batch),
+            warnings,
+            errors,
+        };
+        self.flushes
+            .send(flush)
+            .await
+            .map_err(|_| anyhow::anyhow!("the eval publisher stopped before the walk"))
     }
 
     /// Drain one concurrent wave from the front of the queue and process it.
     #[tracing::instrument(name = "wave", level = "debug", skip_all, fields(queued = self.queue.len()))]
-    async fn process_wave(&mut self, updater: &mut dyn JobReporter) -> Result<()> {
+    async fn process_wave(&mut self, reporter: &dyn JobReporter) -> Result<()> {
         let wave_size = self.queue.len().min(DRV_READ_CONCURRENCY);
         let wave: Vec<_> = (0..wave_size)
             .map(|_| self.queue.pop_front().expect("wave_size <= queue.len()"))
@@ -733,7 +785,7 @@ impl<'a> ClosureWalker<'a> {
         let known_set: HashSet<String> = if new_deps.is_empty() {
             HashSet::new()
         } else {
-            updater
+            reporter
                 .query_known_derivations(new_deps.clone())
                 .await
                 .unwrap_or_else(|e| {
@@ -772,23 +824,8 @@ impl<'a> ClosureWalker<'a> {
                 );
             }
 
-            // Mid-walk flush: let the server start queuing builds early. Push
-            // this batch's `.drv` runtime closure (input_sources + .drvs)
-            // BEFORE reporting it, so once #392 promotes and dispatches these
-            // builds mid-eval their sources are already in the cache.
             if self.batch.len() >= EVAL_BATCH_SIZE {
-                updater
-                    .push_drv_closure(&self.produced_drvs, &mut self.pushed)
-                    .await?;
-                self.produced_drvs.clear();
-                debug!(
-                    count = self.batch.len(),
-                    remaining = self.queue.len(),
-                    "flushing eval batch"
-                );
-                updater
-                    .report_eval_result(std::mem::take(&mut self.batch), vec![], vec![])
-                    .await?;
+                self.flush(vec![], vec![]).await?;
             }
         }
 
@@ -1006,30 +1043,18 @@ pub async fn evaluate_derivations_with(
     resolver.release_evaluators().await;
 
     // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
-    let mut walker = ClosureWalker::new(drv_reader, &root_drvs);
-    let remaining = walker.walk(updater, abort).await?;
-    let remaining_drvs = std::mem::take(&mut walker.produced_drvs);
-
-    // ── Final flush: remaining derivations + deduplicated warnings/errors ─────
     warnings.sort_unstable();
     warnings.dedup();
     errors.sort_unstable();
     errors.dedup();
 
-    // Push the trailing batch's closure before its report, same as the mid-walk
-    // flushes, so the last builds' sources are cached before dispatch.
-    updater
-        .push_drv_closure(&remaining_drvs, &mut walker.pushed)
-        .await?;
-    debug!(
-        count = remaining.len(),
-        warnings = warnings.len(),
-        errors = errors.len(),
-        "flushing final eval batch"
-    );
-    updater
-        .report_eval_result(remaining, warnings, errors)
-        .await?;
+    let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
+    let walker = ClosureWalker::new(drv_reader, &root_drvs, flushes);
+    let reporter: &dyn JobReporter = updater;
+    tokio::try_join!(
+        walker.walk(reporter, abort, warnings, errors),
+        publish(reporter, published),
+    )?;
     Ok(EvalOutcome {
         flake_nodes,
         cacheable: true,
@@ -1369,8 +1394,9 @@ mod tests {
         .await
         .unwrap();
 
+        let events = reporter.events();
         let mut pushed: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for event in &reporter.events {
+        for event in &events {
             match event {
                 ReportedEvent::DrvClosurePush { drv_paths } => {
                     pushed.extend(drv_paths.iter().map(|s| s.as_str()));
@@ -1389,6 +1415,44 @@ mod tests {
         }
 
         assert!(!pushed.is_empty(), "expected at least one closure push");
+    }
+
+    /// Batches that queued up behind a push go out as one closure, and every one
+    /// is still reported after it, in walk order.
+    #[tokio::test]
+    async fn queued_batches_share_one_closure_push() {
+        let reporter = RecordingJobReporter::new();
+        let (flushes, published) = mpsc::channel(PUBLISH_BACKLOG);
+        for (drv, warning) in [("a.drv", "first"), ("b.drv", "second"), ("c.drv", "third")] {
+            flushes
+                .send(Flush {
+                    drvs: vec![drv.into()],
+                    derivations: vec![],
+                    warnings: vec![warning.into()],
+                    errors: vec![],
+                })
+                .await
+                .unwrap();
+        }
+        drop(flushes);
+
+        publish(&reporter, published).await.unwrap();
+
+        let events = reporter.events();
+        let [
+            ReportedEvent::DrvClosurePush { drv_paths },
+            ReportedEvent::EvalResult { warnings: w1, .. },
+            ReportedEvent::EvalResult { warnings: w2, .. },
+            ReportedEvent::EvalResult { warnings: w3, .. },
+        ] = events.as_slice()
+        else {
+            panic!("one push, then three reports: {events:?}");
+        };
+        assert_eq!(drv_paths, &["a.drv", "b.drv", "c.drv"]);
+        assert_eq!(
+            [w1, w2, w3].map(|w| w[0].as_str()),
+            ["first", "second", "third"]
+        );
     }
 
     /// A dependency the server already knows is neither walked nor reported:
@@ -1430,7 +1494,7 @@ mod tests {
         let pushed = reporter.all_pushed_drv_paths();
         assert_eq!(
             pushed,
-            vec![&fixture.entry_point],
+            vec![fixture.entry_point.clone()],
             "only the walked drv is pushed"
         );
     }

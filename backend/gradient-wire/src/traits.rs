@@ -50,7 +50,7 @@ pub trait DrvReader: Send + Sync {
 /// Production: `worker::job::JobUpdater`
 /// Test: `gradient_test_support::fakes::job_reporter::RecordingJobReporter`
 #[async_trait]
-pub trait JobReporter: Send {
+pub trait JobReporter: Send + Sync {
     /// Query the server's cache for path availability and optional transfer URLs.
     ///
     /// `mode` controls what is returned:
@@ -70,7 +70,7 @@ pub trait JobReporter: Send {
     /// Returns the subset of `drv_paths` that the server already knows about.
     /// The BFS closure walker uses this to skip re-traversing subtrees of
     /// derivations that were fully recorded in a previous evaluation.
-    async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>>;
+    async fn query_known_derivations(&self, drv_paths: Vec<String>) -> Result<Vec<String>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, flake_source: Option<String>) -> Result<()>;
 
@@ -95,7 +95,7 @@ pub trait JobReporter: Send {
     async fn report_evaluating_flake(&mut self) -> Result<()>;
     async fn report_evaluating_derivations(&mut self) -> Result<()>;
     async fn report_eval_result(
-        &mut self,
+        &self,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
         errors: Vec<String>,
@@ -113,7 +113,7 @@ pub trait JobReporter: Send {
     /// covered: the closure walk stops at them, and every path this call pushes
     /// or finds cached is added.
     async fn push_drv_closure(
-        &mut self,
+        &self,
         drv_paths: &[String],
         pushed: &mut std::collections::HashSet<String>,
     ) -> Result<()>;

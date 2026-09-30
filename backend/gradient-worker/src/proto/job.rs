@@ -253,7 +253,7 @@ impl JobUpdater {
     /// the rest go through `UploadRequest`. Each path carries its uncompressed
     /// size; one the caller already knows wins over the store's.
     pub async fn query_push(
-        &mut self,
+        &self,
         paths: Vec<String>,
         sizes: Vec<Option<u64>>,
     ) -> Result<Vec<CachedPath>> {
@@ -494,7 +494,7 @@ impl JobReporter for JobUpdater {
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(job_id = %self.job_id, paths = drv_paths.len()))]
-    async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
+    async fn query_known_derivations(&self, drv_paths: Vec<String>) -> Result<Vec<String>> {
         let mut guard = self.phase(JobPhase::KnownDerivationsWait);
         guard.record(drv_paths.len() as u32, 0);
         known_derivations_with_timeout(
@@ -542,7 +542,7 @@ impl JobReporter for JobUpdater {
 
     #[tracing::instrument(level = "debug", skip_all, fields(job_id = %self.job_id, derivations = derivations.len()))]
     async fn report_eval_result(
-        &mut self,
+        &self,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
         errors: Vec<String>,
@@ -556,7 +556,7 @@ impl JobReporter for JobUpdater {
     }
 
     async fn push_drv_closure(
-        &mut self,
+        &self,
         drv_paths: &[String],
         pushed: &mut std::collections::HashSet<String>,
     ) -> Result<()> {
@@ -814,7 +814,7 @@ mod tests {
                 .unwrap();
         });
 
-        let (mut updater, reader) = make_updater(job_id, conn);
+        let (updater, reader) = make_updater(job_id, conn);
         let pump = pump_replies(
             reader,
             updater.cache_waiters.clone(),
@@ -924,7 +924,7 @@ mod tests {
             widest
         });
 
-        let (mut updater, reader) = make_updater(job_id, conn);
+        let (updater, reader) = make_updater(job_id, conn);
         let pump = pump_replies(
             reader,
             updater.cache_waiters.clone(),
@@ -933,7 +933,7 @@ mod tests {
         let drvs: Vec<String> = (0..total)
             .map(|i| format!("/nix/store/d-{i}.drv"))
             .collect();
-        let got = JobReporter::query_known_derivations(&mut updater, drvs.clone())
+        let got = JobReporter::query_known_derivations(&updater, drvs.clone())
             .await
             .unwrap();
 
