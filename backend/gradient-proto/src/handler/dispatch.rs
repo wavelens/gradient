@@ -21,10 +21,10 @@ use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
-use gradient_scheduler::jobs::PendingJob;
+use gradient_scheduler::jobs::{Assignment, PendingJob};
 use gradient_wire::messages::{
-    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind,
-    ServerMessage,
+    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership,
+    JobKind, ServerMessage,
 };
 use gradient_wire::session::frame::{Frame, Inbound};
 
@@ -252,8 +252,14 @@ impl<'a> DispatchContext<'a> {
             }
             ClientMessage::RequestJobList => self.on_request_job_list().await,
             ClientMessage::RequestJob { kind } => self.on_request_job(kind).await,
-            ClientMessage::ClusterSignal { attempt, .. } => {
-                warn!(peer_id = %self.peer_id, %attempt, "cluster signal relay not wired yet");
+            ClientMessage::ClusterSignal {
+                attempt,
+                to,
+                payload,
+            } => {
+                self.scheduler
+                    .relay_cluster_signal(self.peer_id, &attempt, to, payload)
+                    .await;
                 true
             }
             ClientMessage::RequestJobChunk { scores, is_final } => {
@@ -603,45 +609,52 @@ impl<'a> DispatchContext<'a> {
     #[tracing::instrument(level = "debug", skip_all, fields(?kind, job_id = tracing::field::Empty))]
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
-        if let Some(assignment) = self.scheduler.request_job(self.peer_id, kind).await {
-            tracing::Span::current().record("job_id", assignment.job_id());
-            self.active.insert(
-                assignment.job_id().to_owned(),
-                ActiveJob {
-                    dispatch: assignment.dispatch(),
-                    pending: assignment.pending.clone(),
-                    cluster: None,
-                },
-            );
-            send_credentials_for_job(
-                self.writer,
-                self.state,
-                self.scheduler,
-                self.peer_id,
-                &assignment.job,
-                assignment.project_id,
-            )
-            .instrument(debug_span!("send_credentials"))
-            .await;
-            let job_id = assignment.job_id().to_owned();
-            let assigned = debug_span!("assign_job", %job_id);
-            if send_server_msg(
-                self.writer,
-                &ServerMessage::AssignJob {
-                    job_id,
-                    dispatch: assignment.dispatch().to_string(),
-                    job: assignment.job,
-                    cluster: None,
-                },
-            )
-            .instrument(assigned)
-            .await
-            .is_err()
-            {
-                return false;
-            }
+        match self.scheduler.request_job(self.peer_id, kind).await {
+            Some(assignment) => self.hand_out(assignment, None).await,
+            None => true,
         }
-        true
+    }
+
+    /// Record `assignment` as this session's, send its credentials and the
+    /// `AssignJob`; `false` when the write failed.
+    pub(super) async fn hand_out(
+        &mut self,
+        assignment: Assignment,
+        cluster: Option<ClusterMembership>,
+    ) -> bool {
+        tracing::Span::current().record("job_id", assignment.job_id());
+        self.active.insert(
+            assignment.job_id().to_owned(),
+            ActiveJob {
+                dispatch: assignment.dispatch(),
+                pending: assignment.pending.clone(),
+                cluster: cluster.as_ref().and_then(|m| m.attempt.parse().ok()),
+            },
+        );
+        send_credentials_for_job(
+            self.writer,
+            self.state,
+            self.scheduler,
+            self.peer_id,
+            &assignment.job,
+            assignment.project_id,
+        )
+        .instrument(debug_span!("send_credentials"))
+        .await;
+        let job_id = assignment.job_id().to_owned();
+        let assigned = debug_span!("assign_job", %job_id);
+        send_server_msg(
+            self.writer,
+            &ServerMessage::AssignJob {
+                job_id,
+                dispatch: assignment.dispatch().to_string(),
+                job: assignment.job,
+                cluster: cluster.map(Box::new),
+            },
+        )
+        .instrument(assigned)
+        .await
+        .is_ok()
     }
 
     // ── Scoring ───────────────────────────────────────────────────────────────
@@ -662,10 +675,13 @@ impl<'a> DispatchContext<'a> {
     ) {
         if accepted {
             info!(peer_id = %self.peer_id, %job_id, "job accepted");
+            self.scheduler.cluster_member_accepted(&job_id).await;
         } else {
             info!(peer_id = %self.peer_id, %job_id, ?reason, "job rejected by worker");
             self.withdraw_dispatch(&job_id).await;
-            self.scheduler.job_rejected(self.peer_id, &job_id).await;
+            if !self.scheduler.cluster_member_rejected(&job_id).await {
+                self.scheduler.job_rejected(self.peer_id, &job_id).await;
+            }
         }
     }
 

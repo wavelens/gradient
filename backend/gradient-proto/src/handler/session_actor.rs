@@ -274,7 +274,16 @@ impl Actor for SessionActor {
                 }
             }
             SessionMsg::Signal(SessionSignal::ClusterAssign { job_id }) => {
-                warn!(peer_id = %st.peer_id, %job_id, "cluster assignment not wired yet");
+                let Some(prepared) = st.scheduler.take_prepared(&job_id) else {
+                    return Ok(());
+                };
+                let (mut ctx, _) = split_uploads(st);
+                if !ctx
+                    .hand_out(prepared.assignment, Some(prepared.membership))
+                    .await
+                {
+                    myself.stop(Some("write failed".into()));
+                }
             }
             SessionMsg::Signal(SessionSignal::Close { reason }) => {
                 warn!(peer_id = %st.peer_id, %reason, "closing session at the scheduler's request");
