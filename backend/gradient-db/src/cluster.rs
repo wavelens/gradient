@@ -357,6 +357,71 @@ pub async fn finish_cluster_job<C: ConnectionTrait>(
     Ok(res.rows_affected == 1)
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ClusterRecovery {
+    pub attempts_closed: u64,
+    pub clusters_requeued: u64,
+    pub clusters_aborted: u64,
+}
+
+pub async fn recover_cluster_attempts<C: ConnectionTrait>(
+    conn: &C,
+) -> Result<ClusterRecovery, DbErr> {
+    let unstarted = close_open_attempts(conn, true, ClusterAttemptOutcome::PrepareFailed).await?;
+    let started = close_open_attempts(conn, false, ClusterAttemptOutcome::Aborted).await?;
+    let aborted = EClusterJob::update_many()
+        .col_expr(
+            CClusterJob::Status,
+            Expr::value(i16::from(ClusterJobStatus::Aborted)),
+        )
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+        .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
+        .filter(Expr::exists(dead_member_of_cluster()))
+        .exec(conn)
+        .await?
+        .rows_affected;
+    let requeued = EClusterJob::update_many()
+        .col_expr(
+            CClusterJob::Status,
+            Expr::value(i16::from(ClusterJobStatus::Queued)),
+        )
+        .col_expr(CClusterJob::UpdatedAt, Expr::value(gradient_types::now()))
+        .filter(CClusterJob::Status.eq(ClusterJobStatus::Running))
+        .exec(conn)
+        .await?
+        .rows_affected;
+
+    Ok(ClusterRecovery {
+        attempts_closed: unstarted + started,
+        clusters_requeued: requeued,
+        clusters_aborted: aborted,
+    })
+}
+
+async fn close_open_attempts<C: ConnectionTrait>(
+    conn: &C,
+    unstarted: bool,
+    outcome: ClusterAttemptOutcome,
+) -> Result<u64, DbErr> {
+    let started = if unstarted {
+        CClusterAttempt::StartedAt.is_null()
+    } else {
+        CClusterAttempt::StartedAt.is_not_null()
+    };
+    let res = EClusterAttempt::update_many()
+        .col_expr(
+            CClusterAttempt::FinishedAt,
+            Expr::value(gradient_types::now()),
+        )
+        .col_expr(CClusterAttempt::Outcome, Expr::value(i16::from(outcome)))
+        .filter(CClusterAttempt::FinishedAt.is_null())
+        .filter(started)
+        .exec(conn)
+        .await?;
+
+    Ok(res.rows_affected)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,5 +768,48 @@ mod tests {
             "{sql}"
         );
         assert!(sql.contains("\"status\" IN ($"), "{sql}");
+    }
+
+    #[tokio::test]
+    async fn startup_closes_every_open_attempt_then_requeues_live_clusters() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([exec(2), exec(1), exec(1), exec(3)])
+            .into_connection();
+
+        let recovered = recover_cluster_attempts(&db).await.expect("recover");
+
+        assert_eq!(
+            recovered,
+            ClusterRecovery {
+                attempts_closed: 3,
+                clusters_requeued: 3,
+                clusters_aborted: 1
+            }
+        );
+        let statements = logged(db);
+        let sql: Vec<&str> = statements.iter().map(|s| s.sql.as_str()).collect();
+        assert!(
+            sql[0].starts_with("UPDATE \"cluster_attempt\"")
+                && sql[0].contains("\"started_at\" IS NULL"),
+            "{sql:?}"
+        );
+        assert!(
+            sql[1].starts_with("UPDATE \"cluster_attempt\"")
+                && sql[1].contains("\"started_at\" IS NOT NULL"),
+            "{sql:?}"
+        );
+        assert!(
+            sql[2].starts_with("UPDATE \"cluster_job\"") && sql[2].contains("EXISTS(SELECT"),
+            "{sql:?}"
+        );
+        assert!(
+            sql[3].starts_with("UPDATE \"cluster_job\"") && !sql[3].contains("EXISTS"),
+            "{sql:?}"
+        );
+        let prepare_failed = format!(
+            "SmallInt(Some({}))",
+            i16::from(ClusterAttemptOutcome::PrepareFailed)
+        );
+        assert!(format!("{:?}", statements[0].values).contains(&prepare_failed));
     }
 }

@@ -924,7 +924,8 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
                 || r.builds_unpromoted > 0
                 || r.builds_aborted > 0
                 || r.evals_aborted > 0
-                || r.tasks_forced > 0 =>
+                || r.tasks_forced > 0
+                || r.cluster_attempts_closed > 0 =>
         {
             tracing::warn!(
                 dispatches_closed = r.dispatches_closed,
@@ -934,6 +935,9 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
                 builds_aborted = r.builds_aborted,
                 evals_aborted = r.evals_aborted,
                 tasks_forced = r.tasks_forced,
+                cluster_attempts_closed = r.cluster_attempts_closed,
+                clusters_requeued = r.clusters_requeued,
+                clusters_aborted = r.clusters_aborted,
                 "recovered interrupted work from previous process"
             )
         }
