@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DispatchedJobId, EvaluationId, ProjectId, TaskId};
+use crate::ids::{ClusterAttemptId, DispatchedJobId, EvaluationId, ProjectId, TaskId};
 
 /// Kind of dispatched work this telemetry row records.
 #[repr(i16)]
@@ -106,6 +106,7 @@ pub struct Model {
     pub missing_nar_size: Option<i64>,
     pub missing_count: Option<i32>,
     pub dependency_count: Option<i32>,
+    pub cluster_attempt: Option<ClusterAttemptId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -75,6 +75,9 @@ pub mod user_project_star;
 pub mod user_task_star;
 pub mod worker_registration;
 
+pub mod cluster_attempt;
+pub mod cluster_job;
+pub mod cluster_member;
 pub mod dispatched_job;
 pub mod dispatched_job_phase;
 pub mod metric_rollup;
