@@ -21,7 +21,7 @@ use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{
     Acceptance, AttemptMember, AttemptState, CLUSTER_HOLD_MARGIN_SECS, CLUSTER_RETRY_BACKOFF,
-    Committing, Placement, PreparedMember,
+    CommittedSeat, Committing, PendingCluster, Placement, PreparedMember,
 };
 use crate::jobs::Assignment;
 
@@ -85,16 +85,21 @@ impl Scheduler {
 
     pub(crate) async fn commit(&self, placement: Placement) {
         let attempt = ClusterAttemptId::now_v7();
-        let Some(committing) = self.take_placement(placement, attempt).await else {
+        let Some(Committing { cluster, seats }) = self.take_placement(placement, attempt).await
+        else {
             return;
         };
+        let cluster_id = cluster.id;
+        // Owned by the book from here on: a pass dropped mid-commit still
+        // leaves the attempt to its deadline instead of stranding the cluster.
+        self.open_attempt(attempt, cluster, &seats);
+
         let now = gradient_types::now();
         let claim = ClusterClaim {
-            cluster: committing.cluster.id,
+            cluster: cluster_id,
             attempt,
             now,
-            members: committing
-                .seats
+            members: seats
                 .iter()
                 .map(|s| {
                     (
@@ -106,27 +111,23 @@ impl Scheduler {
         };
 
         match gradient_db::claim_cluster(&self.state.worker_db, claim).await {
-            Ok(true) => self.prepare(attempt, committing).await,
-            Ok(false) => self.back_off(committing).await,
+            Ok(true) => self.prepare(attempt, seats).await,
+            Ok(false) => self.hand_back(attempt).await,
             Err(e) => {
-                warn!(error = %e, cluster = %committing.cluster.id, "cluster claim failed");
-                self.back_off(committing).await;
+                warn!(error = %e, %attempt, "cluster claim failed");
+                self.back_off(attempt).await;
             }
         }
     }
 
-    async fn back_off(&self, mut committing: Committing) {
-        committing.cluster.not_before = Some(Instant::now() + CLUSTER_RETRY_BACKOFF);
-        self.restore_cluster(committing).await;
-    }
-
-    async fn prepare(&self, attempt: ClusterAttemptId, committing: Committing) {
-        let Committing { cluster, seats } = committing;
+    fn open_attempt(
+        &self,
+        attempt: ClusterAttemptId,
+        cluster: PendingCluster,
+        seats: &[CommittedSeat],
+    ) {
         let timeout = self.state.config.scheduler.cluster_prepare_timeout_secs;
-        let hold_secs = u32::try_from(timeout)
-            .unwrap_or(u32::MAX)
-            .saturating_add(CLUSTER_HOLD_MARGIN_SECS);
-        let roster: Vec<ClusterPeer> = seats
+        let roster = seats
             .iter()
             .map(|s| ClusterPeer {
                 role: s.role.clone(),
@@ -159,7 +160,59 @@ impl Scheduler {
                 started: false,
             },
         );
+    }
 
+    /// A lost claim: another instance holds the cluster or a member's gate no
+    /// longer holds. The members go back to the ready feed, which re-reads them.
+    async fn hand_back(&self, attempt: ClusterAttemptId) {
+        let Some(state) = self.attempts.lock().take(attempt) else {
+            return;
+        };
+        let seats = state
+            .members
+            .iter()
+            .map(|m| (m.worker.clone(), m.job_id.clone()))
+            .collect();
+        if let Err(e) = self
+            .call(|reply| SchedulerMsg::DropCluster { seats, reply })
+            .await
+        {
+            warn!(error = %e, %attempt, "cluster hand-back did not reach the scheduler");
+        }
+    }
+
+    async fn back_off(&self, attempt: ClusterAttemptId) {
+        let Some(state) = self.attempts.lock().take(attempt) else {
+            return;
+        };
+        self.restore_parked(attempt, state).await;
+    }
+
+    async fn restore_parked(&self, attempt: ClusterAttemptId, state: AttemptState) {
+        let seats = state
+            .members
+            .iter()
+            .map(|m| (m.worker.clone(), m.job_id.clone()))
+            .collect();
+        let mut cluster = state.parked;
+        cluster.not_before = Some(Instant::now() + CLUSTER_RETRY_BACKOFF);
+        if let Err(e) = self
+            .call(|reply| SchedulerMsg::RestoreCluster {
+                cluster,
+                seats,
+                reply,
+            })
+            .await
+        {
+            warn!(error = %e, %attempt, "cluster restore did not reach the scheduler");
+        }
+    }
+
+    async fn prepare(&self, attempt: ClusterAttemptId, seats: Vec<CommittedSeat>) {
+        let timeout = self.state.config.scheduler.cluster_prepare_timeout_secs;
+        let hold_secs = u32::try_from(timeout)
+            .unwrap_or(u32::MAX)
+            .saturating_add(CLUSTER_HOLD_MARGIN_SECS);
         for seat in &seats {
             if let Err(e) = dispatched_transition(&self.state, &seat.record).await {
                 warn!(error = %e, %attempt, "cluster member transition failed");
@@ -214,7 +267,6 @@ impl Scheduler {
         };
         match gradient_db::start_cluster_attempt(&self.state.worker_db, cluster, attempt).await {
             Ok(true) => {
-                self.attempts.lock().mark_started(attempt);
                 let signals = workers
                     .into_iter()
                     .map(|w| {
@@ -227,12 +279,23 @@ impl Scheduler {
                     .collect();
                 self.signal_workers(signals).await;
             }
-            Ok(false) => {}
+            Ok(false) => self.fail_prepare(attempt).await,
             Err(e) => {
                 warn!(error = %e, %attempt, "cluster start failed");
                 self.fail_prepare(attempt).await;
             }
         }
+    }
+
+    /// A member that ends before its attempt started never ran: it fails the
+    /// prepare instead of reaching the graph. `true` when that happened.
+    pub async fn cluster_member_released(&self, job_id: &str) -> bool {
+        let Some(attempt) = self.attempts.lock().preparing(job_id) else {
+            return false;
+        };
+        self.fail_prepare(attempt).await;
+
+        true
     }
 
     /// `true` when `job_id` was a member of an open attempt, which failed with it.
@@ -256,16 +319,18 @@ impl Scheduler {
         )
         .await
         {
-            warn!(error = %e, %attempt, "prepare-failed attempt left open");
+            // An open attempt blocks every later claim of the cluster: keep it
+            // owned, overdue, so the next pass retries the close.
+            warn!(error = %e, %attempt, "prepare-failed attempt left open; retrying");
+            self.attempts.lock().open(attempt, state);
+            return;
         }
 
         let mut signals = Vec::with_capacity(state.members.len());
-        let mut seats = Vec::with_capacity(state.members.len());
         {
             let mut prepared = self.prepared.lock();
             for m in &state.members {
                 prepared.remove(&m.job_id);
-                seats.push((m.worker.clone(), m.job_id.clone()));
                 let abort = SessionSignal::AbortCluster {
                     attempt: attempt.to_string(),
                     reason: "cluster prepare failed".into(),
@@ -274,19 +339,7 @@ impl Scheduler {
             }
         }
         self.signal_workers(signals).await;
-
-        let mut cluster = state.parked;
-        cluster.not_before = Some(Instant::now() + CLUSTER_RETRY_BACKOFF);
-        if let Err(e) = self
-            .call(|reply| SchedulerMsg::RestoreCluster {
-                cluster,
-                seats,
-                reply,
-            })
-            .await
-        {
-            warn!(error = %e, %attempt, "cluster restore did not reach the scheduler");
-        }
+        self.restore_parked(attempt, state).await;
     }
 
     pub async fn relay_cluster_signal(

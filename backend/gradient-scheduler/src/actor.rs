@@ -158,6 +158,10 @@ pub enum SchedulerMsg {
     SignalWorkers {
         signals: Vec<(String, SessionSignal)>,
     },
+    DropCluster {
+        seats: Vec<(String, String)>,
+        reply: RpcReplyPort<()>,
+    },
     Candidates {
         worker: String,
         only_new: bool,
@@ -635,6 +639,13 @@ impl Actor for CoreActor {
             } => {
                 core.restore_placement(cluster, &seats);
                 core.bump_offers();
+                let _ = reply.send(());
+            }
+            SchedulerMsg::DropCluster { seats, reply } => {
+                for (worker, key) in &seats {
+                    core.tracker.remove_active(key);
+                    core.pool.release_job(worker, key);
+                }
                 let _ = reply.send(());
             }
             SchedulerMsg::SignalWorkers { signals } => {

@@ -1887,23 +1887,23 @@ async fn a_ready_cluster_on_idle_workers_is_assigned_then_started() {
 }
 
 #[tokio::test]
-async fn a_lost_cluster_claim_leaves_the_cluster_waiting() {
+async fn a_lost_cluster_claim_hands_the_members_back_to_the_feed() {
     // attempt insert wins, the first member claim loses
     let scheduler = test_scheduler_with(cluster_claims(&[1, 0])).await;
     let mut w1 = idle(&scheduler, "w1").await;
     let _w2 = idle(&scheduler, "w2").await;
-    let cluster = ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
 
     scheduler.plan_clusters().await.unwrap();
 
     assert!(assigned(&drain(&mut w1)).is_none());
     assert!(scheduler.active_job("eval:a").await.is_none());
-    assert!(
-        scheduler.cluster_snapshot().await.clusters.is_empty(),
-        "backing off"
+    assert!(scheduler.cluster_snapshot().await.clusters.is_empty());
+    assert_eq!(
+        scheduler.untracked(vec!["eval:a".into()]).await,
+        vec!["eval:a".to_owned()],
+        "the ready feed re-reads a member whose cluster claim was lost"
     );
-    assert!(scheduler.untracked(vec!["eval:a".into()]).await.is_empty());
-    let _ = cluster;
 }
 
 #[tokio::test]
@@ -1950,6 +1950,28 @@ async fn an_undelivered_member_times_the_attempt_out() {
             .iter()
             .any(|s| matches!(s, SessionSignal::AbortCluster { .. }))
     );
+    assert!(scheduler.active_job("eval:a").await.is_none());
+    assert!(scheduler.untracked(vec!["eval:a".into()]).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_member_ending_before_its_attempt_started_fails_the_prepare() {
+    let scheduler = test_scheduler_with(cluster_claims(&[1, 1, 1, 1, 2])).await;
+    let mut w1 = idle(&scheduler, "w1").await;
+    let mut w2 = idle(&scheduler, "w2").await;
+    ready_cluster(&scheduler, &[("eval:a", "server"), ("eval:b", "client")]).await;
+    scheduler.plan_clusters().await.unwrap();
+    let j1 = assigned(&drain(&mut w1)).expect("w1 assigned");
+    drain(&mut w2);
+
+    assert!(scheduler.cluster_member_released(&j1).await);
+
+    assert!(
+        drain(&mut w2)
+            .iter()
+            .any(|s| matches!(s, SessionSignal::AbortCluster { .. }))
+    );
+    assert!(!scheduler.cluster_member_released(&j1).await);
 }
 
 #[tokio::test]
