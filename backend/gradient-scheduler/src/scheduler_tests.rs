@@ -2047,8 +2047,11 @@ fn open_attempt(scheduler: &Scheduler, attempt: ClusterAttemptId, keys: &[&str])
             roster: Vec::new(),
             deadline: std::time::Instant::now(),
             started: true,
+            all_accepted: false,
             verdict: None,
+            resolving: false,
             resolution: None,
+            resolved_at: None,
         },
     );
 }

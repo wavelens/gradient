@@ -20,6 +20,7 @@ pub(crate) enum Route {
     Single,
     Member(MemberOf),
     Held,
+    Dead,
 }
 
 pub(crate) struct Membership {
@@ -48,10 +49,40 @@ impl Membership {
     }
 
     pub(crate) fn route(&self, key: &str) -> Route {
-        match self.by_key.get(key) {
-            None => Route::Single,
-            Some(of) if of.cluster.status == ClusterJobStatus::Queued => Route::Member(of.clone()),
-            Some(_) => Route::Held,
+        match self.by_key.get(key).map(|of| (of, of.cluster.status)) {
+            None | Some((_, ClusterJobStatus::Completed)) => Route::Single,
+            Some((of, ClusterJobStatus::Queued)) => Route::Member(of.clone()),
+            Some((_, ClusterJobStatus::Running)) => Route::Held,
+            Some((_, ClusterJobStatus::Failed | ClusterJobStatus::Aborted)) => Route::Dead,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_types::ids::ClusterJobId;
+
+    fn membership(status: ClusterJobStatus) -> Membership {
+        let mut of = crate::cluster::book::book_tests::member_of(ClusterJobId::now_v7(), 1);
+        of.cluster.status = status;
+        Membership {
+            by_key: HashMap::from([("build:a".to_owned(), of)]),
+        }
+    }
+
+    #[test]
+    fn a_member_routes_by_its_clusters_status() {
+        let route = |status| membership(status).route("build:a");
+
+        assert!(matches!(route(ClusterJobStatus::Queued), Route::Member(_)));
+        assert!(matches!(route(ClusterJobStatus::Running), Route::Held));
+        assert!(matches!(route(ClusterJobStatus::Completed), Route::Single));
+        assert!(matches!(route(ClusterJobStatus::Failed), Route::Dead));
+        assert!(matches!(route(ClusterJobStatus::Aborted), Route::Dead));
+        assert!(matches!(
+            membership(ClusterJobStatus::Queued).route("eval:x"),
+            Route::Single
+        ));
     }
 }

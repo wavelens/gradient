@@ -10,11 +10,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gradient_db::ClusterClaim;
-use gradient_entity::cluster_attempt::ClusterAttemptOutcome;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::ClusterAttemptId;
 use gradient_wire::types::{ClusterAddress, ClusterMembership, ClusterPeer};
 use tracing::{debug, info, warn};
+
+/// How long a resolved attempt waits for a survivor that never reports back.
+const RESOLVED_ATTEMPT_TTL: Duration = Duration::from_secs(600);
 
 use super::assignment::{claim_gate, dispatch_row, dispatched_transition};
 use crate::Scheduler;
@@ -70,6 +72,16 @@ impl Scheduler {
         for attempt in overdue {
             self.fail_prepare(attempt).await;
         }
+        let pending = self.attempts.lock().pending_verdicts();
+        for (attempt, fate) in pending {
+            if let Err(e) = self.resolve_attempt(attempt, fate).await {
+                warn!(error = %e, %attempt, "resolving a cluster attempt failed; retrying");
+            }
+        }
+        self.attempts
+            .lock()
+            .expire_resolved(Instant::now(), RESOLVED_ATTEMPT_TTL);
+        self.abort_dead_clusters().await?;
 
         let mut snapshot = self.cluster_snapshot().await;
         let aging = snapshot.clone();
@@ -193,8 +205,11 @@ impl Scheduler {
                 roster,
                 deadline: Instant::now() + Duration::from_secs(timeout),
                 started: false,
+                all_accepted: false,
                 verdict: None,
+                resolving: false,
                 resolution: None,
+                resolved_at: None,
             },
         );
     }
@@ -304,6 +319,9 @@ impl Scheduler {
         };
         match gradient_db::start_cluster_attempt(&self.state.worker_db, cluster, attempt).await {
             Ok(true) => {
+                let Some(decided) = self.attempts.lock().mark_started(attempt) else {
+                    return;
+                };
                 let signals = workers
                     .into_iter()
                     .map(|w| {
@@ -315,6 +333,11 @@ impl Scheduler {
                     })
                     .collect();
                 self.signal_workers(signals).await;
+                if let Some(fate) = decided
+                    && let Err(e) = self.resolve_attempt(attempt, fate).await
+                {
+                    warn!(error = %e, %attempt, "resolving a cluster attempt failed; retrying");
+                }
             }
             Ok(false) => self.fail_prepare(attempt).await,
             Err(e) => {
@@ -330,6 +353,9 @@ impl Scheduler {
         let Some(attempt) = self.attempts.lock().preparing(job_id) else {
             return false;
         };
+        if self.is_aborting(job_id).await {
+            return false;
+        }
         self.fail_prepare(attempt).await;
 
         true
@@ -349,16 +375,15 @@ impl Scheduler {
         let Some(state) = self.attempts.lock().take(attempt) else {
             return;
         };
-        if let Err(e) = gradient_db::close_cluster_attempt(
-            &self.state.worker_db,
-            attempt,
-            ClusterAttemptOutcome::PrepareFailed,
-        )
-        .await
+        if let Err(e) =
+            gradient_db::fail_prepare_attempt(&self.state.worker_db, state.cluster, attempt).await
         {
             // An open attempt blocks every later claim of the cluster: keep it
             // owned, overdue, so the next pass retries the close.
             warn!(error = %e, %attempt, "prepare-failed attempt left open; retrying");
+            let mut state = state;
+            state.started = false;
+            state.all_accepted = false;
             self.attempts.lock().open(attempt, state);
             return;
         }
@@ -435,5 +460,37 @@ impl Scheduler {
             .await
             .ok()
             .flatten()
+    }
+
+    /// A `Queued` cluster with a member that can no longer run is aborted; its
+    /// waiting members settle as aborted so their builds and evaluations finish.
+    async fn abort_dead_clusters(&self) -> anyhow::Result<()> {
+        for cluster in gradient_db::abort_dead_queued_clusters(&self.state.worker_db).await? {
+            let dropped = self
+                .call(|reply| SchedulerMsg::DropWaiting { cluster, reply })
+                .await?;
+            let Some(waiting) = dropped else {
+                continue;
+            };
+            let failure = crate::cluster::Failure {
+                error: "a member of its cluster job can no longer run".into(),
+                kind: gradient_wire::types::BuildFailureKind::Aborted,
+                missing_paths: Vec::new(),
+            };
+            for job in waiting.members.into_iter().filter_map(|m| m.job) {
+                if let Err(e) = self.settle_failed(job, &failure).await {
+                    warn!(error = %e, %cluster, "settling a member of an aborted cluster failed");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn is_aborting(&self, job_id: &str) -> bool {
+        let job_id = job_id.to_owned();
+        self.call(|reply| SchedulerMsg::IsAborting { job_id, reply })
+            .await
+            .unwrap_or(false)
     }
 }

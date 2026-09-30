@@ -50,8 +50,12 @@ pub struct AttemptState {
     pub roster: Vec<ClusterPeer>,
     pub deadline: Instant,
     pub started: bool,
+    /// Every member accepted: the deadline no longer applies while the start commits.
+    pub all_accepted: bool,
     pub verdict: Option<Fate>,
+    pub resolving: bool,
     pub resolution: Option<Resolution>,
+    pub resolved_at: Option<Instant>,
 }
 
 #[derive(Debug)]
@@ -104,11 +108,11 @@ impl AttemptBook {
         if let Some(m) = state.members.iter_mut().find(|m| m.job_id == job_id) {
             m.accepted = true;
         }
-        if state.started || !state.members.iter().all(|m| m.accepted) {
+        if state.all_accepted || !state.members.iter().all(|m| m.accepted) {
             return Acceptance::Waiting;
         }
 
-        state.started = true;
+        state.all_accepted = true;
         Acceptance::AllAccepted {
             cluster: state.cluster,
             attempt,
@@ -117,10 +121,17 @@ impl AttemptBook {
         }
     }
 
-    pub fn mark_started(&mut self, attempt: ClusterAttemptId) {
-        if let Some(state) = self.attempts.get_mut(&attempt) {
-            state.started = true;
+    /// The start committed. `None` when the attempt failed meanwhile; otherwise
+    /// the verdict that reports held back during the start now decide, if any.
+    pub fn mark_started(&mut self, attempt: ClusterAttemptId) -> Option<Option<Fate>> {
+        let state = self.attempts.get_mut(&attempt)?;
+        state.started = true;
+        if state.verdict.is_some() {
+            return Some(None);
         }
+        state.verdict = verdict(&state.members);
+
+        Some(state.verdict)
     }
 
     /// The attempt `job_id` is a member of, while it has not started yet.
@@ -144,7 +155,7 @@ impl AttemptBook {
     pub fn overdue(&self, now: Instant) -> Vec<ClusterAttemptId> {
         self.attempts
             .iter()
-            .filter(|(_, s)| !s.started && s.deadline <= now)
+            .filter(|(_, s)| !s.started && !s.all_accepted && s.deadline <= now)
             .map(|(a, _)| *a)
             .collect()
     }
@@ -182,7 +193,7 @@ impl AttemptBook {
         let Some(member) = state.members.iter_mut().find(|m| m.job_id == job_id) else {
             return Recorded::NotMember(report);
         };
-        if !state.started && report.outcome() != MemberOutcome::Aborted {
+        if !state.started && !state.all_accepted && report.outcome() != MemberOutcome::Aborted {
             return Recorded::Preparing {
                 attempt,
                 worker: member.worker.clone(),
@@ -190,6 +201,9 @@ impl AttemptBook {
             };
         }
         member.report = Some(report);
+        if !state.started {
+            return Recorded::Held;
+        }
         if state.verdict.is_some() {
             return Recorded::Deferred;
         }
@@ -211,6 +225,7 @@ impl AttemptBook {
             return (Vec::new(), Vec::new());
         };
         state.resolution = Some(resolution);
+        state.resolved_at = Some(Instant::now());
         let mut reports = Vec::new();
         let mut survivors = Vec::new();
         for member in &mut state.members {
@@ -251,6 +266,49 @@ impl AttemptBook {
             for member in state.members {
                 self.by_job.remove(&member.job_id);
             }
+        }
+    }
+
+    /// Decided attempts whose resolution is neither done nor underway: a failed
+    /// resolution is retried from here.
+    pub fn pending_verdicts(&self) -> Vec<(ClusterAttemptId, Fate)> {
+        self.attempts
+            .iter()
+            .filter(|(_, s)| s.resolution.is_none() && !s.resolving)
+            .filter_map(|(a, s)| s.verdict.map(|fate| (*a, fate)))
+            .collect()
+    }
+
+    pub fn begin_resolving(&mut self, attempt: ClusterAttemptId) -> Option<ClusterJobId> {
+        let state = self
+            .attempts
+            .get_mut(&attempt)
+            .filter(|s| !s.resolving && s.resolution.is_none())?;
+        state.resolving = true;
+
+        Some(state.cluster)
+    }
+
+    pub fn abort_resolving(&mut self, attempt: ClusterAttemptId) {
+        if let Some(state) = self.attempts.get_mut(&attempt) {
+            state.resolving = false;
+        }
+    }
+
+    /// Drop resolved attempts a survivor never reported back to after `max_age`;
+    /// the entry would otherwise hide its members from every dispatch pass.
+    pub fn expire_resolved(&mut self, now: Instant, max_age: Duration) {
+        let stale: Vec<ClusterAttemptId> = self
+            .attempts
+            .iter()
+            .filter(|(_, s)| {
+                s.resolved_at
+                    .is_some_and(|at| now.duration_since(at) >= max_age)
+            })
+            .map(|(a, _)| *a)
+            .collect();
+        for attempt in stale {
+            self.take(attempt);
         }
     }
 
@@ -304,8 +362,11 @@ mod tests {
                 roster: Vec::new(),
                 deadline,
                 started: false,
+                all_accepted: false,
                 verdict: None,
+                resolving: false,
                 resolution: None,
+                resolved_at: None,
             },
         );
 
@@ -336,7 +397,7 @@ mod tests {
         let (mut book, attempt) = book(now);
 
         assert_eq!(book.overdue(now + Duration::from_secs(1)), vec![attempt]);
-        book.mark_started(attempt);
+        let _ = book.mark_started(attempt);
         assert!(book.overdue(now + Duration::from_secs(1)).is_empty());
     }
 
@@ -364,7 +425,7 @@ mod tests {
         let (mut book, attempt) = book(Instant::now());
         assert!(book.route(attempt, "w1", None).is_none());
 
-        book.mark_started(attempt);
+        let _ = book.mark_started(attempt);
         let broadcast = book.route(attempt, "w1", None).expect("member");
         assert_eq!(broadcast.workers, vec!["w2".to_owned()]);
         assert_eq!(
@@ -386,5 +447,29 @@ mod tests {
         );
         assert!(book.route(attempt, "w9", None).is_none());
         assert!(book.route(ClusterAttemptId::now_v7(), "w1", None).is_none());
+    }
+
+    #[test]
+    fn a_report_while_the_start_commits_waits_for_it() {
+        let (mut book, attempt) = book(Instant::now());
+        book.accept("build:a");
+        book.accept("build:b");
+        let lost = MemberReport::Aborted { job: None };
+
+        assert!(matches!(book.record("build:a", lost), Recorded::Held));
+        assert_eq!(book.mark_started(attempt), Some(Some(Fate::Abort)));
+    }
+
+    #[test]
+    fn a_failed_resolution_is_retried() {
+        let (mut book, attempt) = book(Instant::now());
+        let _ = book.mark_started(attempt);
+        book.record("build:a", MemberReport::Aborted { job: None });
+        assert!(book.begin_resolving(attempt).is_some());
+        assert!(book.pending_verdicts().is_empty(), "underway");
+
+        book.abort_resolving(attempt);
+
+        assert_eq!(book.pending_verdicts(), vec![(attempt, Fate::Abort)]);
     }
 }

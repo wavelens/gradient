@@ -58,6 +58,14 @@ impl Scheduler {
             }
             crate::cluster::Route::Member(of) => self.enqueue_cluster_member(of, key, job).await,
             crate::cluster::Route::Held => Ok(()),
+            crate::cluster::Route::Dead => {
+                let failure = crate::cluster::Failure {
+                    error: "its cluster job failed or was aborted".into(),
+                    kind: gradient_wire::types::BuildFailureKind::Aborted,
+                    missing_paths: Vec::new(),
+                };
+                self.settle_failed(job, &failure).await
+            }
         }
     }
 

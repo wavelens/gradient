@@ -172,6 +172,14 @@ pub enum SchedulerMsg {
     Reservation {
         reply: RpcReplyPort<Option<crate::cluster::Reservation>>,
     },
+    DropWaiting {
+        cluster: gradient_types::ids::ClusterJobId,
+        reply: RpcReplyPort<Option<crate::cluster::PendingCluster>>,
+    },
+    IsAborting {
+        job_id: String,
+        reply: RpcReplyPort<bool>,
+    },
     ReturnMember {
         worker: String,
         key: String,
@@ -718,6 +726,12 @@ impl Actor for CoreActor {
                 core.restore_placement(cluster, &seats);
                 core.bump_offers();
                 let _ = reply.send(());
+            }
+            SchedulerMsg::DropWaiting { cluster, reply } => {
+                let _ = reply.send(core.tracker.drop_cluster(cluster));
+            }
+            SchedulerMsg::IsAborting { job_id, reply } => {
+                let _ = reply.send(core.tracker.is_aborting(&job_id));
             }
             SchedulerMsg::ReturnMember {
                 worker,
