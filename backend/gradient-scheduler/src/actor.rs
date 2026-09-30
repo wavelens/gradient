@@ -133,6 +133,15 @@ pub enum SchedulerMsg {
         job: PendingJob,
         reply: RpcReplyPort<()>,
     },
+    EnqueueMember {
+        of: gradient_db::MemberOf,
+        key: String,
+        job: PendingJob,
+        reply: RpcReplyPort<()>,
+    },
+    ClusterSnapshot {
+        reply: RpcReplyPort<crate::cluster::ClusterSnapshot>,
+    },
     Candidates {
         worker: String,
         only_new: bool,
@@ -248,6 +257,7 @@ pub struct SchedulerCore {
     tracker: JobTracker,
     offers: u64,
     policy: Arc<dyn ScoringPolicy>,
+    idle: crate::cluster::IdleSlots,
 }
 
 impl SchedulerCore {
@@ -287,8 +297,10 @@ impl SchedulerCore {
         kind: &JobKind,
         instance: &InstanceContext,
     ) -> AssignOutcome {
+        let slot = crate::cluster::SlotKind::from(kind);
         if !self.pool.has_capacity(worker, kind) {
             debug!(%worker, ?kind, "RequestJob ignored - worker at capacity");
+            self.idle.clear(worker, slot);
             return AssignOutcome::AtCapacity;
         }
         let (authorized, caps) = self.auth_and_caps(worker);
@@ -302,10 +314,48 @@ impl SchedulerCore {
             instance,
         ) {
             Some(assignment) => {
+                self.idle.clear(worker, slot);
                 self.pool.assign_job(worker, assignment.job_id());
                 AssignOutcome::Assigned(assignment)
             }
-            None => AssignOutcome::Nothing,
+            None => {
+                self.idle.record(worker, slot, Instant::now());
+                AssignOutcome::Nothing
+            }
+        }
+    }
+
+    fn cluster_snapshot(&self, now: Instant) -> crate::cluster::ClusterSnapshot {
+        let clusters: Vec<_> = self
+            .tracker
+            .ready_clusters()
+            .filter(|c| c.not_before.is_none_or(|t| t <= now))
+            .cloned()
+            .collect();
+        let slots = self
+            .idle
+            .live(now)
+            .filter_map(|(worker, kind)| {
+                let (authorized, caps) = self.auth_and_caps(worker);
+                let caps = caps?;
+                Some(crate::cluster::Slot {
+                    worker: worker.to_owned(),
+                    kind,
+                    zone: caps.zone.clone(),
+                    caps,
+                    authorized,
+                })
+            })
+            .collect();
+        let keys: HashSet<&str> = clusters
+            .iter()
+            .flat_map(|c| c.members.iter().map(|m| m.key.as_str()))
+            .collect();
+        let scores = self.tracker.member_scores(&keys);
+        crate::cluster::ClusterSnapshot {
+            clusters,
+            slots,
+            scores,
         }
     }
 }
@@ -327,6 +377,7 @@ impl Actor for CoreActor {
             tracker: JobTracker::new(),
             offers: 0,
             policy: args.policy,
+            idle: Default::default(),
         })
     }
 
@@ -354,6 +405,7 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::Unregister { worker, reply } => {
                 let orphaned = core.pool.unregister(&worker);
+                core.idle.forget_worker(&worker);
                 let gone = core.tracker.worker_disconnected(&worker);
                 let total = orphaned.len() + gone.requeued.len() + gone.cluster_members.len();
                 if total > 0 {
@@ -434,6 +486,20 @@ impl Actor for CoreActor {
                 core.pool.remove_sent_candidate(&job_id);
                 core.bump_offers();
                 let _ = reply.send(());
+            }
+            SchedulerMsg::EnqueueMember {
+                of,
+                key,
+                job,
+                reply,
+            } => {
+                core.tracker.add_member(of, key.clone(), job);
+                core.pool.remove_sent_candidate(&key);
+                core.bump_offers();
+                let _ = reply.send(());
+            }
+            SchedulerMsg::ClusterSnapshot { reply } => {
+                let _ = reply.send(core.cluster_snapshot(Instant::now()));
             }
             SchedulerMsg::Candidates {
                 worker,
@@ -626,6 +692,7 @@ mod tests {
             tracker: JobTracker::new(),
             offers: 0,
             policy: gradient_pool::score::policy_by_name("simple"),
+            idle: Default::default(),
         };
         core.pool
             .register("w1".into(), eval_worker_caps(), HashSet::new(), port().0);

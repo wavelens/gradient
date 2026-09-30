@@ -1584,3 +1584,73 @@ async fn every_connected_worker_is_sampled() {
         "{sql:#?}"
     );
 }
+
+fn member_of(cluster: gradient_types::ids::ClusterJobId, count: u32) -> gradient_db::MemberOf {
+    crate::cluster::book::book_tests::member_of(cluster, count)
+}
+
+#[tokio::test]
+async fn an_empty_answer_records_an_idle_slot_until_a_job_fills_it() {
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_none());
+    let idle = scheduler.cluster_snapshot().await.slots;
+    assert_eq!(idle.len(), 1);
+    assert_eq!(
+        (idle[0].worker.as_str(), idle[0].kind),
+        ("w1", crate::cluster::SlotKind::Eval)
+    );
+
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(peer))
+        .await
+        .unwrap();
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_some());
+    assert!(scheduler.cluster_snapshot().await.slots.is_empty());
+}
+
+#[tokio::test]
+async fn a_member_waits_until_its_cluster_is_whole() {
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let cluster = gradient_types::ids::ClusterJobId::now_v7();
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+
+    scheduler
+        .enqueue_cluster_member(
+            member_of(cluster, 2),
+            "eval:a".into(),
+            crate::jobs::PendingJob::Eval(eval_job(peer)),
+        )
+        .await
+        .unwrap();
+    assert!(scheduler.cluster_snapshot().await.clusters.is_empty());
+    assert!(scheduler.untracked(vec!["eval:a".into()]).await.is_empty());
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_none());
+
+    scheduler
+        .enqueue_cluster_member(
+            member_of(cluster, 2),
+            "eval:b".into(),
+            crate::jobs::PendingJob::Eval(eval_job(peer)),
+        )
+        .await
+        .unwrap();
+    let snapshot = scheduler.cluster_snapshot().await;
+    assert_eq!(snapshot.clusters.len(), 1);
+    assert_eq!(snapshot.clusters[0].members.len(), 2);
+    assert_eq!(scheduler.pending_job_count().await, 0);
+}
+
+#[tokio::test]
+async fn a_disconnect_drops_the_workers_idle_slots() {
+    let scheduler = test_scheduler().await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    assert!(scheduler.request_job("w1", JobKind::Flake).await.is_none());
+
+    scheduler.unregister_worker("w1").await;
+
+    assert!(scheduler.cluster_snapshot().await.slots.is_empty());
+}

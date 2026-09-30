@@ -26,6 +26,27 @@ impl Scheduler {
         .await
     }
 
+    pub async fn enqueue_cluster_member(
+        &self,
+        of: gradient_db::MemberOf,
+        key: String,
+        job: PendingJob,
+    ) -> anyhow::Result<()> {
+        self.call(|reply| SchedulerMsg::EnqueueMember {
+            of,
+            key,
+            job,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn cluster_snapshot(&self) -> crate::cluster::ClusterSnapshot {
+        self.call(|reply| SchedulerMsg::ClusterSnapshot { reply })
+            .await
+            .unwrap_or_default()
+    }
+
     pub async fn enqueue_build_job(
         &self,
         job_id: String,
