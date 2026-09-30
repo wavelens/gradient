@@ -363,6 +363,52 @@ fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
     }
 }
 
+/// The winner's persisted `dispatched_job` snapshot, reusing its already-
+/// computed breakdown and job context; only build-specific fields are
+/// derived here.
+fn dispatch_record_for(
+    job_id: &str,
+    job: &PendingJob,
+    dispatch: DispatchedJobId,
+    sc: &ScoredCandidate,
+    worker_context: serde_json::Value,
+    instance_context: serde_json::Value,
+) -> DispatchRecord {
+    let (kind_disc, derivation_build, task) = match job {
+        PendingJob::Build(b) => (DispatchedJobKind::Build, Some(b.derivation_build), None),
+        PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.task_id),
+    };
+    DispatchRecord {
+        job_id: job_id.to_owned(),
+        dispatch,
+        kind: kind_disc,
+        derivation_build,
+        evaluation_id: job.evaluation_id(),
+        project: job.project_id(),
+        task,
+        score: sc.total,
+        queued_at: job.queued_at(),
+        ready_at: job.ready_at(),
+        score_breakdown: sc.score_breakdown.clone(),
+        worker_context,
+        job_context: sc.job_context.clone(),
+        instance_context,
+        substitute: matches!(job, PendingJob::Build(b) if b.substitute),
+        build_context: match job {
+            PendingJob::Build(b) => serde_json::json!({
+                "architecture": b.architecture,
+                "required_features": b.required_features,
+                "dependency_count": b.dependency_count,
+                "closure_size": b.closure_size,
+                "prefer_local_build": b.prefer_local_build,
+                "is_fixed_output": b.is_fixed_output,
+                "substitute": b.substitute,
+            }),
+            PendingJob::Eval(_) => serde_json::json!({}),
+        },
+    }
+}
+
 /// In-flight build work per project, weighted by predicted build time; feeds the
 /// fair-share scoring rule.
 struct ProjectWorkShare {
@@ -688,13 +734,14 @@ impl JobTracker {
             .into_iter()
             .find(|(id, _)| *id == job_id)
             .expect("the winner is a scored candidate");
-        let record = self.dispatch_record_for(
+        let record = dispatch_record_for(
             &job_id,
+            self.pending.get(&job_id)?,
             DispatchedJobId::now_v7(),
             &winner_sc,
             worker_context,
             instance_context,
-        )?;
+        );
 
         self.assign_pending(worker_id, &job_id, record)
     }
@@ -730,47 +777,9 @@ impl JobTracker {
                 )
             })
             .map(|(id, job)| {
-                let s = worker_scores.and_then(|ws| ws.get(id));
-                let scored_job = match job {
-                    PendingJob::Eval(e) => ScoredJob::new_eval(
-                        id,
-                        job.project_id(),
-                        e.job.steps.contains(&FlakeStep::FetchFlake),
-                        e.history,
-                    ),
-                    PendingJob::Build(b) => ScoredJob::new_build(
-                        id,
-                        job.project_id(),
-                        b.architecture.as_str(),
-                        b.prefer_local_build,
-                        b.is_fixed_output,
-                        b.pname.as_deref(),
-                        b.closure_size,
-                        b.history,
-                    ),
-                };
-                let ctx = JobContext {
-                    job: &scored_job,
-                    missing_count: s.map(|s| s.missing_count),
-                    missing_nar_size: s.map(|s| s.missing_nar_size),
-                    outputs_present: s.is_some_and(|s| s.outputs_present),
-                    dependency_count: job.dependency_count(),
-                    queued_at: job.queued_at(),
-                    ready_at: job.ready_at(),
-                    project_work_share: shares.share(job.project_id()),
-                    prioritized: job.prioritized(),
-                    rescore_count: job.rescore_count(),
-                    now,
-                };
-                let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
-                let candidate = ScoredCandidate {
-                    total: breakdown.total,
-                    vetoed: !breakdown.vetoes.is_empty(),
-                    score_breakdown: serde_json::to_value(&breakdown)
-                        .unwrap_or(serde_json::Value::Null),
-                    job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
-                        .unwrap_or(serde_json::Value::Null),
-                };
+                let score = worker_scores.and_then(|ws| ws.get(id));
+                let candidate =
+                    self.score_job(id, job, score, &shares, policy, instance, worker_ctx, now);
                 (id.clone(), candidate)
             })
             .collect();
@@ -782,6 +791,103 @@ impl JobTracker {
                 .then_with(|| id_a.cmp(id_b))
         });
         scored
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
+    fn score_job(
+        &self,
+        id: &str,
+        job: &PendingJob,
+        score: Option<&WorkerJobScore>,
+        shares: &ProjectWorkShare,
+        policy: &dyn ScoringPolicy,
+        instance: &gradient_pool::score::InstanceContext,
+        worker_ctx: &WorkerContext<'_>,
+        now: chrono::NaiveDateTime,
+    ) -> ScoredCandidate {
+        let scored_job = match job {
+            PendingJob::Eval(e) => ScoredJob::new_eval(
+                id,
+                job.project_id(),
+                e.job.steps.contains(&FlakeStep::FetchFlake),
+                e.history,
+            ),
+            PendingJob::Build(b) => ScoredJob::new_build(
+                id,
+                job.project_id(),
+                b.architecture.as_str(),
+                b.prefer_local_build,
+                b.is_fixed_output,
+                b.pname.as_deref(),
+                b.closure_size,
+                b.history,
+            ),
+        };
+        let ctx = JobContext {
+            job: &scored_job,
+            missing_count: score.map(|s| s.missing_count),
+            missing_nar_size: score.map(|s| s.missing_nar_size),
+            outputs_present: score.is_some_and(|s| s.outputs_present),
+            dependency_count: job.dependency_count(),
+            queued_at: job.queued_at(),
+            ready_at: job.ready_at(),
+            project_work_share: shares.share(job.project_id()),
+            prioritized: job.prioritized(),
+            rescore_count: job.rescore_count(),
+            now,
+        };
+        let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
+        ScoredCandidate {
+            total: breakdown.total,
+            vetoed: !breakdown.vetoes.is_empty(),
+            score_breakdown: serde_json::to_value(&breakdown).unwrap_or(serde_json::Value::Null),
+            job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
+                .unwrap_or(serde_json::Value::Null),
+        }
+    }
+
+    /// A cluster member's dispatch record for its seat, scored exactly as a
+    /// single candidate would be; members never sit in `pending`.
+    pub fn member_record(
+        &self,
+        worker_id: &str,
+        caps: Option<&WorkerCaps>,
+        key: &str,
+        job: &PendingJob,
+        policy: &dyn ScoringPolicy,
+        instance: &gradient_pool::score::InstanceContext,
+    ) -> DispatchRecord {
+        let worker_ctx = worker_context_of(caps);
+        let score = self.scores.get(worker_id).and_then(|ws| ws.get(key));
+        let shares = self.project_work_shares(policy, instance);
+        let sc = self.score_job(
+            key,
+            job,
+            score,
+            &shares,
+            policy,
+            instance,
+            &worker_ctx,
+            gradient_types::now(),
+        );
+        let worker_context = serde_json::to_value(crate::views::WorkerContextView::new(
+            &worker_ctx,
+            caps.map(|c| c.capabilities.clone()).unwrap_or_default(),
+        ))
+        .unwrap_or(serde_json::Value::Null);
+        let instance_context = serde_json::to_value(instance).unwrap_or(serde_json::Value::Null);
+
+        dispatch_record_for(
+            key,
+            job,
+            DispatchedJobId::now_v7(),
+            &sc,
+            worker_context,
+            instance_context,
+        )
     }
 
     /// Per-project share of in-flight build work, weighted by predicted build time.
@@ -859,53 +965,6 @@ impl JobTracker {
             instance_context: instance_context.clone(),
             candidates,
         });
-    }
-
-    /// The winner's persisted `dispatched_job` snapshot, reusing its already-
-    /// computed breakdown and job context; only build-specific fields are
-    /// derived here.
-    fn dispatch_record_for(
-        &self,
-        job_id: &str,
-        dispatch: DispatchedJobId,
-        sc: &ScoredCandidate,
-        worker_context: serde_json::Value,
-        instance_context: serde_json::Value,
-    ) -> Option<DispatchRecord> {
-        let job = self.pending.get(job_id)?;
-        let (kind_disc, derivation_build, task) = match job {
-            PendingJob::Build(b) => (DispatchedJobKind::Build, Some(b.derivation_build), None),
-            PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.task_id),
-        };
-        Some(DispatchRecord {
-            job_id: job_id.to_owned(),
-            dispatch,
-            kind: kind_disc,
-            derivation_build,
-            evaluation_id: job.evaluation_id(),
-            project: job.project_id(),
-            task,
-            score: sc.total,
-            queued_at: job.queued_at(),
-            ready_at: job.ready_at(),
-            score_breakdown: sc.score_breakdown.clone(),
-            worker_context,
-            job_context: sc.job_context.clone(),
-            instance_context,
-            substitute: matches!(job, PendingJob::Build(b) if b.substitute),
-            build_context: match job {
-                PendingJob::Build(b) => serde_json::json!({
-                    "architecture": b.architecture,
-                    "required_features": b.required_features,
-                    "dependency_count": b.dependency_count,
-                    "closure_size": b.closure_size,
-                    "prefer_local_build": b.prefer_local_build,
-                    "is_fixed_output": b.is_fixed_output,
-                    "substitute": b.substitute,
-                }),
-                PendingJob::Eval(_) => serde_json::json!({}),
-            },
-        })
     }
 
     fn assign_pending(
@@ -1456,15 +1515,14 @@ mod tests {
             job_context: serde_json::json!({}),
         };
 
-        tracker
-            .dispatch_record_for(
-                job_id,
-                DispatchedJobId::now_v7(),
-                &sc,
-                serde_json::json!({}),
-                serde_json::json!({}),
-            )
-            .expect("the job is pending")
+        dispatch_record_for(
+            job_id,
+            tracker.pending_job(job_id).expect("the job is pending"),
+            DispatchedJobId::now_v7(),
+            &sc,
+            serde_json::json!({}),
+            serde_json::json!({}),
+        )
     }
 
     fn build_job_arch(
@@ -2584,5 +2642,30 @@ mod tests {
         assert_eq!(gone.cluster_members, vec![(attempt, "m1".to_owned())]);
         assert_eq!(tracker.pending_count(), 1);
         assert!(tracker.pending_job("m1").is_none());
+    }
+
+    #[test]
+    fn a_member_record_is_scored_like_a_candidate() {
+        let tracker = JobTracker::new();
+        let anchor = DerivationBuildId::now_v7();
+        let job = PendingJob::Build(PendingBuildJob {
+            substitute: true,
+            ..crate::scheduler_tests::build_job(EvaluationId::now_v7(), ProjectId::now_v7(), anchor)
+        });
+        let key = build_job_key(anchor);
+
+        let rec = tracker.member_record(
+            "w1",
+            None,
+            &key,
+            &job,
+            &*gradient_pool::score::policy_by_name("simple"),
+            &gradient_pool::score::InstanceContext::default(),
+        );
+
+        assert_eq!(rec.job_id, key);
+        assert_eq!(rec.derivation_build, Some(anchor));
+        assert!(rec.substitute);
+        assert!(rec.score_breakdown.is_object(), "{}", rec.score_breakdown);
     }
 }

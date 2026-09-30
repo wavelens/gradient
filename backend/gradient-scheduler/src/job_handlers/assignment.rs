@@ -197,24 +197,13 @@ fn window_count(job_context: &serde_json::Value, key: &str) -> Option<i32> {
         .and_then(|n| i32::try_from(n).ok())
 }
 
-/// Claim the job by writing its `dispatched_job` row, then for a build open the
-/// `build_attempt` and stamp the anchor's `dispatched_at` through the graph actor;
-/// `Ok(false)` when the claim was lost. Awaited before the assignment goes back
-/// to the session: the row is the only proof the job is out, so a worker's first
-/// report can never precede it, and an error here withdraws the claim instead of
-/// letting the job run unrecorded. The mirror holds too: a failed transition
-/// closes the row it just wrote, so a withdrawn claim never leaves an open row
-/// parking the job. What the withdrawal cannot undo is a transition that merely
-/// ran late: `Dispatched` stamps `dispatched_at` once and only once, so a claim
-/// dropped on the budget can still spend it and leave the anchor's real dispatch
-/// untimestamped.
-async fn claim(
-    state: &Arc<ServerState>,
-    worker_id: &str,
+/// The claim row of `rec` for `worker_id`.
+pub(crate) fn dispatch_row(
     rec: &DispatchRecord,
-) -> anyhow::Result<bool> {
-    let now = now();
-    let row = gradient_entity::dispatched_job::Model {
+    worker_id: &str,
+    now: chrono::NaiveDateTime,
+) -> gradient_entity::dispatched_job::Model {
+    gradient_entity::dispatched_job::Model {
         id: rec.dispatch,
         kind: rec.kind,
         evaluation_id: rec.evaluation_id,
@@ -238,21 +227,24 @@ async fn claim(
         missing_count: window_count(&rec.job_context, "missing_count"),
         dependency_count: window_count(&rec.job_context, "dependency_count"),
         ..Default::default()
-    };
+    }
+}
 
-    let won = gradient_db::claim_dispatch(&state.worker_db, row, claim_gate(rec))
-        .await
-        .context("dispatched_job claim")?;
-    let Some(derivation_build) = rec.derivation_build.filter(|_| won) else {
-        return Ok(won);
+/// For a build, open the `build_attempt` and stamp the anchor's `dispatched_at`
+/// through the graph actor, bounded by the transition budget; an eval moves nothing.
+pub(crate) async fn dispatched_transition(
+    state: &Arc<ServerState>,
+    rec: &DispatchRecord,
+) -> anyhow::Result<()> {
+    let Some(anchor) = rec.derivation_build else {
+        return Ok(());
     };
-
     let budget = transition_budget(state.config.proto.worker_heartbeat_timeout_secs);
-    let moved = match tokio::time::timeout(
+    match tokio::time::timeout(
         budget,
         state.graph.transition(Transition::Dispatched {
             evaluation: rec.evaluation_id,
-            anchor: derivation_build,
+            anchor,
             dispatched_job: rec.dispatch,
             substitute: rec.substitute,
             build_context: rec.build_context.clone(),
@@ -260,13 +252,41 @@ async fn claim(
     )
     .await
     {
-        Ok(moved) => moved.context("Dispatched transition"),
+        Ok(moved) => moved.map(|_| ()).context("Dispatched transition"),
         Err(_) => Err(anyhow::anyhow!(
             "Dispatched transition exceeded {}s",
             budget.as_secs()
         )),
-    };
+    }
+}
 
+/// Claim the job by writing its `dispatched_job` row, then run its
+/// `Dispatched` transition; `Ok(false)` when the claim was lost. Awaited before
+/// the assignment goes back to the session: the row is the only proof the job is
+/// out, so a worker's first report can never precede it, and an error here
+/// withdraws the claim instead of letting the job run unrecorded. The mirror
+/// holds too: a failed transition closes the row it just wrote, so a withdrawn
+/// claim never leaves an open row parking the job. What the withdrawal cannot
+/// undo is a transition that merely ran late: `Dispatched` stamps
+/// `dispatched_at` once and only once, so a claim dropped on the budget can
+/// still spend it and leave the anchor's real dispatch untimestamped.
+async fn claim(
+    state: &Arc<ServerState>,
+    worker_id: &str,
+    rec: &DispatchRecord,
+) -> anyhow::Result<bool> {
+    let won = gradient_db::claim_dispatch(
+        &state.worker_db,
+        dispatch_row(rec, worker_id, now()),
+        claim_gate(rec),
+    )
+    .await
+    .context("dispatched_job claim")?;
+    if !won || rec.derivation_build.is_none() {
+        return Ok(won);
+    }
+
+    let moved = dispatched_transition(state, rec).await;
     if moved.is_err()
         && let Err(e) = gradient_db::abandon_open_dispatch(&state.worker_db, rec.dispatch).await
     {
@@ -280,7 +300,7 @@ async fn claim(
 /// in the relay mode it was assembled for, because an upstream probe that lands
 /// in between turns a build into a relay and the stale build would rebuild bytes
 /// the upstream already has (#593).
-fn claim_gate(rec: &DispatchRecord) -> ClaimGate {
+pub(crate) fn claim_gate(rec: &DispatchRecord) -> ClaimGate {
     match rec.derivation_build {
         Some(anchor) => ClaimGate::Build {
             anchor,
