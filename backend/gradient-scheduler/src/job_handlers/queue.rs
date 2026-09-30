@@ -41,6 +41,26 @@ impl Scheduler {
         .await
     }
 
+    pub(crate) async fn enqueue_routed(
+        &self,
+        route: crate::cluster::Route,
+        key: String,
+        job: PendingJob,
+    ) -> anyhow::Result<()> {
+        match route {
+            crate::cluster::Route::Single => {
+                self.call(|reply| SchedulerMsg::Enqueue {
+                    job_id: key,
+                    job,
+                    reply,
+                })
+                .await
+            }
+            crate::cluster::Route::Member(of) => self.enqueue_cluster_member(of, key, job).await,
+            crate::cluster::Route::Held => Ok(()),
+        }
+    }
+
     pub async fn cluster_snapshot(&self) -> crate::cluster::ClusterSnapshot {
         self.call(|reply| SchedulerMsg::ClusterSnapshot { reply })
             .await

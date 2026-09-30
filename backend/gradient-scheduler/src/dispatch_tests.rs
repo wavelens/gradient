@@ -13,10 +13,11 @@
 //!
 //! `dispatch_queued_evals`:
 //!   1. `EEvaluation::find().filter(status=Queued).all()` → Q
-//!   2. Bulk `ECommit IN (commit ids)` → Q (skipped when no untracked evals)
-//!   3. Bulk sidecar `evaluation_input_update IN (...)` → Q (InputUpdate evals only)
-//!   4. Bulk `evaluation_flake_input_override IN (eval ids)` → Q
-//!   5. Bulk `ETask IN (task ids)` → Q (skipped when no eval has a task)
+//!   2. `cluster_membership (evaluation ids)` → Q (skipped when no untracked evals)
+//!   3. Bulk `ECommit IN (commit ids)` → Q (skipped when no untracked evals)
+//!   4. Bulk sidecar `evaluation_input_update IN (...)` → Q (InputUpdate evals only)
+//!   5. Bulk `evaluation_flake_input_override IN (eval ids)` → Q
+//!   6. Bulk `ETask IN (task ids)` → Q (skipped when no eval has a task)
 
 use std::sync::Arc;
 
@@ -96,6 +97,8 @@ async fn dispatch_queued_eval_enqueues_job() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
+        // cluster membership (none)
+        .append_query_results([no_membership()])
         // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
         // 3. bulk flake input overrides (none)
@@ -131,6 +134,8 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
         // First dispatch:
         // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
+        // cluster membership (none)
+        .append_query_results([no_membership()])
         // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
         // 3. bulk flake input overrides (none)
@@ -170,6 +175,8 @@ async fn dispatch_queued_eval_skips_missing_commit() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
+        // cluster membership (none)
+        .append_query_results([no_membership()])
         // 2. bulk commits → none found
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
         // 3. bulk flake input overrides (none)
@@ -202,6 +209,8 @@ async fn dispatch_queued_eval_without_task_is_skipped() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations - task: None
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, None)]])
+        // cluster membership (none)
+        .append_query_results([no_membership()])
         // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
         // 3. bulk flake input overrides (none)
@@ -304,4 +313,130 @@ async fn dispatch_once_skips_trigger_within_interval() {
         .expect("dispatch_once should not fail");
     // No evaluation rows means no job was enqueued
     assert_eq!(scheduler.pending_job_count().await, 0);
+}
+
+fn no_membership() -> Vec<std::collections::BTreeMap<&'static str, sea_orm::Value>> {
+    Vec::new()
+}
+
+fn membership_of(
+    evaluation: EvaluationId,
+    status: gradient_entity::cluster_job::ClusterJobStatus,
+    count: i64,
+) -> std::collections::BTreeMap<&'static str, sea_orm::Value> {
+    let now = test_date();
+    std::collections::BTreeMap::from([
+        ("member_id", ClusterMemberId::now_v7().into_inner().into()),
+        ("cluster_job", ClusterJobId::now_v7().into_inner().into()),
+        ("evaluation", Some(evaluation.into_inner()).into()),
+        ("derivation_build", Option::<uuid::Uuid>::None.into()),
+        ("role", "node".into()),
+        ("primary", false.into()),
+        ("pin", Option::<String>::None.into()),
+        ("status", i16::from(status).into()),
+        ("same_zone", false.into()),
+        ("attempts", 0i32.into()),
+        ("retry_budget", 1i32.into()),
+        ("created_at", now.into()),
+        ("updated_at", now.into()),
+        ("member_count", count.into()),
+    ])
+}
+
+/// Dispatches one queued evaluation that is a member of a cluster in `status`.
+/// With `eval_only_worker`, an idle eval-only worker is connected first, which
+/// makes the pass split fetch from evaluation for single jobs.
+async fn dispatch_one_member(
+    status: gradient_entity::cluster_job::ClusterJobStatus,
+    count: i64,
+    eval_only_worker: bool,
+) -> (Arc<Scheduler>, EvaluationId) {
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let task_id = TaskId::now_v7();
+    let mut db = MockDatabase::new(DatabaseBackend::Postgres);
+    if eval_only_worker {
+        db = db.append_query_results([no_membership()]);
+    }
+    let db = db
+        .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
+        .append_query_results([vec![membership_of(eval_id, status, count)]])
+        .append_query_results([vec![make_commit(commit_id)]])
+        .append_query_results([
+            Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
+        ])
+        .append_query_results([vec![make_task(task_id, ProjectId::now_v7())]])
+        .into_connection();
+    let scheduler = make_scheduler(db).await;
+    if eval_only_worker {
+        scheduler
+            .register_worker(
+                "w1",
+                crate::scheduler_tests::eval_worker_caps(),
+                std::collections::HashSet::new(),
+                crate::scheduler_tests::port().0,
+            )
+            .await
+            .expect("register");
+    }
+    dispatch::dispatch_queued_evals(&scheduler)
+        .await
+        .expect("dispatch");
+    (scheduler, eval_id)
+}
+
+/// A member of a queued cluster waits in the book: not pending, yet tracked.
+#[tokio::test]
+async fn a_cluster_member_evaluation_waits_for_its_cluster() {
+    let (scheduler, eval_id) = dispatch_one_member(
+        gradient_entity::cluster_job::ClusterJobStatus::Queued,
+        2,
+        false,
+    )
+    .await;
+
+    assert_eq!(scheduler.pending_job_count().await, 0);
+    let key = crate::jobs::eval_job_key(eval_id);
+    assert!(scheduler.untracked(vec![key]).await.is_empty());
+}
+
+/// A split fetch-only job would hand its evaluation to a follow-up outside the
+/// cluster, so a member always evaluates in one job.
+#[tokio::test]
+async fn a_cluster_member_evaluation_is_never_split() {
+    let (scheduler, _) = dispatch_one_member(
+        gradient_entity::cluster_job::ClusterJobStatus::Queued,
+        1,
+        true,
+    )
+    .await;
+
+    let snapshot = scheduler.cluster_snapshot().await;
+    let job = snapshot.clusters[0].members[0]
+        .job
+        .as_ref()
+        .expect("member job");
+    let crate::jobs::PendingJob::Eval(eval) = job else {
+        panic!("expected an eval member");
+    };
+    assert!(
+        eval.job
+            .steps
+            .contains(&gradient_wire::types::FlakeStep::EvaluateFlake)
+    );
+}
+
+/// A member of a cluster already running is claimed only through that cluster.
+#[tokio::test]
+async fn a_member_of_a_running_cluster_is_held_back() {
+    let (scheduler, eval_id) = dispatch_one_member(
+        gradient_entity::cluster_job::ClusterJobStatus::Running,
+        2,
+        false,
+    )
+    .await;
+
+    assert_eq!(scheduler.pending_job_count().await, 0);
+    let key = crate::jobs::eval_job_key(eval_id);
+    assert_eq!(scheduler.untracked(vec![key.clone()]).await, vec![key]);
 }

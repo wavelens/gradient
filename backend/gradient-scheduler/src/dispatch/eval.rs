@@ -55,12 +55,16 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
+    let eval_ids: Vec<_> = evals.iter().map(|e| e.id).collect();
+    let membership = crate::cluster::Membership::load(&state.worker_db, &eval_ids, &[]).await?;
     let maps = EvalDispatchMaps::load(state, &evals).await?;
     let split_fetch = scheduler.has_idle_eval_only_worker().await;
     let eval_history = scheduler.eval_history.load();
 
     for eval in evals {
         let job_id = crate::jobs::eval_job_key(eval.id);
+        let route = membership.route(&job_id);
+        let split_fetch = split_fetch && matches!(route, crate::cluster::Route::Single);
 
         let Some(commit) = maps.commits.get(&eval.commit) else {
             error!(evaluation_id = %eval.id, "commit not found for evaluation");
@@ -132,7 +136,14 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             walk_mode: eval.walk_mode,
         };
 
-        if let Err(e) = scheduler.enqueue_eval_job(job_id.clone(), pending).await {
+        if let Err(e) = scheduler
+            .enqueue_routed(
+                route,
+                job_id.clone(),
+                crate::jobs::PendingJob::Eval(pending),
+            )
+            .await
+        {
             error!(error = %e, %job_id, "enqueue_eval_job failed");
             continue;
         }
