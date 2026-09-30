@@ -41,10 +41,13 @@ pub const GRAPH_TX_BUDGET: Duration = Duration::from_secs(120);
 pub const GRAPH_TX_ATTEMPTS: u32 = 3;
 /// Queued ingest batches are flushed early once they carry this many derivations.
 pub const INGEST_ROW_BUDGET: usize = 5000;
-/// Queued NAR commits are flushed early once this many wait. A flush holds the
-/// anchor locks of every commit in it until it ends, so this bounds how long a
-/// dispatch claim waits behind one while still sharing the WAL flush among many.
+/// Queued NAR commits are flushed early once this many wait.
 pub const NAR_COMMIT_BUDGET: usize = 32;
+/// A flush stops taking NAR commits once it has run this long and leaves the rest
+/// for the next one. It holds the anchor locks of every commit in it until it ends,
+/// so this bounds how long a dispatch claim waits behind it, whatever the commits
+/// cost, while still sharing the WAL flush among the ones that fit.
+pub const NAR_FLUSH_TIME: Duration = Duration::from_millis(100);
 pub const HEALTH_NAME: &str = "graph";
 
 type Reply<T> = RpcReplyPort<anyhow::Result<T>>;
@@ -240,8 +243,12 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
             ingested.push(escalate_retryable(ingest_one(&scoped, batch).await)?);
         }
 
+        let started = Instant::now();
         let mut committed = Vec::with_capacity(commits_ref.len());
         for commit in commits_ref {
+            if !committed.is_empty() && started.elapsed() >= NAR_FLUSH_TIME {
+                break;
+            }
             committed.push(escalate_retryable(commit_one(&scoped, commit).await)?);
         }
 
@@ -252,11 +259,20 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     match written {
         Ok((outcomes, committed)) => {
             st.record(&Ok(()));
-            for ((commit, reply), outcome) in commits.iter().zip(commit_replies).zip(committed) {
+            let mut pending = commits.into_iter().zip(commit_replies);
+            for ((commit, reply), outcome) in pending.by_ref().zip(committed) {
                 if let Ok(done) = &outcome {
                     nar::after_commit(&st.ctx, done, &commit.store_path);
                 }
                 let _ = reply.send(outcome);
+            }
+            let deferred: Vec<_> = pending.collect();
+            if !deferred.is_empty() {
+                st.nars.splice(0..0, deferred);
+                if !st.flush_pending {
+                    st.flush_pending = true;
+                    let _ = myself.send_message(GraphMsg::Flush);
+                }
             }
             for ((batch, reply), outcome) in batches.into_iter().zip(replies).zip(outcomes) {
                 match outcome {
