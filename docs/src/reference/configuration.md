@@ -245,6 +245,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
+| `scheduler.clusterPrepareTimeoutSecs` | positive int | `30` | `GRADIENT_SCHEDULER_CLUSTER_PREPARE_TIMEOUT_SECS` | Seconds every member of a cluster job attempt has to accept its assignment. |
 | `scheduler.dispatchRetentionDays` | int | `30` | `GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS` | Days to keep dispatch records and delivered outbox entries. |
 | `scheduler.scoringPolicy` | one of `simple` `resource-aware` | `"resource-aware"` | `GRADIENT_SCHEDULER_SCORING_POLICY` | Policy ranking queued jobs for a requesting worker. |
 
