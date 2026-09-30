@@ -259,14 +259,14 @@ async fn flush(myself: &ActorRef<GraphMsg>, st: &mut GraphState) {
     match written {
         Ok((outcomes, committed)) => {
             st.record(&Ok(()));
-            let mut pending = commits.into_iter().zip(commit_replies);
-            for ((commit, reply), outcome) in pending.by_ref().zip(committed) {
+            let mut landed: Vec<_> = commits.into_iter().zip(commit_replies).collect();
+            let deferred = landed.split_off(committed.len());
+            for ((commit, reply), outcome) in landed.into_iter().zip(committed) {
                 if let Ok(done) = &outcome {
                     nar::after_commit(&st.ctx, done, &commit.store_path);
                 }
                 let _ = reply.send(outcome);
             }
-            let deferred: Vec<_> = pending.collect();
             if !deferred.is_empty() {
                 st.nars.splice(0..0, deferred);
                 if !st.flush_pending {
