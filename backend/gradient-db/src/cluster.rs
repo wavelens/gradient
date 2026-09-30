@@ -33,6 +33,10 @@ pub async fn claim_cluster<C>(db: &C, claim: ClusterClaim) -> Result<bool, DbErr
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
+    if claim.members.is_empty() {
+        return Ok(false);
+    }
+
     let txn = db.begin().await?;
     let claimed = claim_all(&txn, claim).await?;
     if claimed {
@@ -235,6 +239,18 @@ mod tests {
             statements.iter().any(|s| s.sql == "COMMIT"),
             "{statements:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_claim_without_members_opens_no_attempt() {
+        let claim = ClusterClaim {
+            members: Vec::new(),
+            ..claim()
+        };
+        let (won, statements) = run(vec![1], claim).await;
+
+        assert!(!won);
+        assert!(statements.is_empty(), "{statements:?}");
     }
 
     #[tokio::test]
