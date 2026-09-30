@@ -37,12 +37,6 @@ pub fn format_cache_public_key(
 }
 
 pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<String, SourceError> {
-    let secret = gradient_types::input::load_secret_bytes(secret_file).map_err(|e| {
-        SourceError::FileRead {
-            reason: e.to_string(),
-        }
-    })?;
-
     let encrypted_private_key = general_purpose::STANDARD
         .decode(cache.clone().private_key)
         .map_err(|e| SourceError::CacheKeyDecoding {
@@ -50,9 +44,8 @@ pub fn decrypt_signing_key(secret_file: &str, cache: MCache) -> Result<String, S
             reason: format!("{}. The private key in the cache appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    let decrypted_private_key =
-        crypter::decrypt_with_password(secret.expose(), encrypted_private_key)
-            .ok_or(SourceError::PrivateKeyDecryption)?;
+    let decrypted_private_key = crate::secret::decrypt_bytes(secret_file, encrypted_private_key)?
+        .ok_or(SourceError::PrivateKeyDecryption)?;
 
     let decrypted_key_str =
         String::from_utf8(decrypted_private_key).map_err(|_| SourceError::KeyUtf8Conversion)?;

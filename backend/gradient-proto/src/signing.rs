@@ -18,7 +18,6 @@ use sea_orm::{
     QueryFilter, Set,
 };
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tracing::warn;
 
 /// One freshly cached path to sign, in the narinfo terms the fingerprint needs.
@@ -75,8 +74,9 @@ pub async fn sign_cached_path<C: ConnectionTrait>(
     let nar_hash_nix32 = normalize_nar_hash(req.nar_hash);
     let nar_size = req.nar_size as u64;
 
-    // Caches whose key is absent/undecodable are simply absent.
-    let mut signers: HashMap<CacheId, Arc<CacheSigner>> = HashMap::new();
+    // One signer per distinct cache (one crypt-secret read + key decrypt each);
+    // caches whose key is absent/undecodable are simply absent.
+    let mut signers: HashMap<CacheId, CacheSigner> = HashMap::new();
     for cache_id in pending.iter().map(|r| r.cache).collect::<HashSet<_>>() {
         if let Some(signer) = build_signer(db, crypt_secret_file, serve_url, cache_id).await {
             signers.insert(cache_id, signer);
@@ -109,7 +109,7 @@ async fn build_signer<C: ConnectionTrait>(
     crypt_secret_file: &str,
     serve_url: &str,
     cache_id: CacheId,
-) -> Option<Arc<CacheSigner>> {
+) -> Option<CacheSigner> {
     let cache = ECache::find_by_id(cache_id).one(db).await.ok().flatten()?;
     if cache.private_key.is_empty() {
         return None;
