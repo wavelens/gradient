@@ -14,16 +14,12 @@ use gradient_types::ids::{ClusterAttemptId, ClusterJobId};
 use gradient_wire::types::{ClusterAddress, ClusterPeer};
 
 use super::PendingCluster;
+use super::settlement::{
+    Fate, MemberOutcome, MemberReport, Recorded, Resolution, Survivor, verdict,
+};
 
 pub const CLUSTER_HOLD_MARGIN_SECS: u32 = 10;
 pub const CLUSTER_RETRY_BACKOFF: Duration = Duration::from_secs(30);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemberOutcome {
-    Succeeded,
-    Failed,
-    Lost,
-}
 
 #[derive(Debug, Clone)]
 pub struct AttemptMember {
@@ -33,7 +29,8 @@ pub struct AttemptMember {
     pub index: u32,
     pub primary: bool,
     pub accepted: bool,
-    pub outcome: Option<MemberOutcome>,
+    pub report: Option<MemberReport>,
+    pub settled: bool,
 }
 
 impl AttemptMember {
@@ -53,6 +50,8 @@ pub struct AttemptState {
     pub roster: Vec<ClusterPeer>,
     pub deadline: Instant,
     pub started: bool,
+    pub verdict: Option<Fate>,
+    pub resolution: Option<Resolution>,
 }
 
 #[derive(Debug)]
@@ -165,6 +164,92 @@ impl AttemptBook {
         Some(SignalRoute { from, workers })
     }
 
+    pub fn record(&mut self, job_id: &str, report: MemberReport) -> Recorded {
+        let Some(&attempt) = self.by_job.get(job_id) else {
+            return Recorded::NotMember(report);
+        };
+        let Some(state) = self.attempts.get_mut(&attempt) else {
+            return Recorded::NotMember(report);
+        };
+        if let Some(resolution) = state.resolution {
+            self.settle(attempt, job_id);
+            return Recorded::Late(resolution, report);
+        }
+        let Some(member) = state.members.iter_mut().find(|m| m.job_id == job_id) else {
+            return Recorded::NotMember(report);
+        };
+        if !state.started && report.outcome() != MemberOutcome::Aborted {
+            return Recorded::Preparing {
+                attempt,
+                worker: member.worker.clone(),
+                report,
+            };
+        }
+        member.report = Some(report);
+        if state.verdict.is_some() {
+            return Recorded::Deferred;
+        }
+        match verdict(&state.members) {
+            Some(fate) => {
+                state.verdict = Some(fate);
+                Recorded::Decided(attempt, fate)
+            }
+            None => Recorded::Held,
+        }
+    }
+
+    pub fn drain(
+        &mut self,
+        attempt: ClusterAttemptId,
+        resolution: Resolution,
+    ) -> (Vec<MemberReport>, Vec<Survivor>) {
+        let Some(state) = self.attempts.get_mut(&attempt) else {
+            return (Vec::new(), Vec::new());
+        };
+        state.resolution = Some(resolution);
+        let mut reports = Vec::new();
+        let mut survivors = Vec::new();
+        for member in &mut state.members {
+            match member.report.take() {
+                Some(report) => {
+                    member.settled = true;
+                    reports.push(report);
+                }
+                None => survivors.push(Survivor {
+                    worker: member.worker.clone(),
+                    job_id: member.job_id.clone(),
+                }),
+            }
+        }
+        self.forget_if_settled(attempt);
+
+        (reports, survivors)
+    }
+
+    pub fn settle(&mut self, attempt: ClusterAttemptId, job_id: &str) {
+        if let Some(member) = self
+            .attempts
+            .get_mut(&attempt)
+            .and_then(|s| s.members.iter_mut().find(|m| m.job_id == job_id))
+        {
+            member.settled = true;
+        }
+        self.forget_if_settled(attempt);
+    }
+
+    fn forget_if_settled(&mut self, attempt: ClusterAttemptId) {
+        if self
+            .attempts
+            .get(&attempt)
+            .is_some_and(|s| s.members.iter().all(|m| m.settled))
+            && let Some(state) = self.attempts.remove(&attempt)
+        {
+            for member in state.members {
+                self.by_job.remove(&member.job_id);
+            }
+        }
+    }
+
     pub fn get(&self, attempt: ClusterAttemptId) -> Option<&AttemptState> {
         self.attempts.get(&attempt)
     }
@@ -187,7 +272,8 @@ mod tests {
             index,
             primary: false,
             accepted: false,
-            outcome: None,
+            report: None,
+            settled: false,
         }
     }
 
@@ -214,6 +300,8 @@ mod tests {
                 roster: Vec::new(),
                 deadline,
                 started: false,
+                verdict: None,
+                resolution: None,
             },
         );
 
