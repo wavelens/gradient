@@ -868,9 +868,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     WHOLE_AMONG=$(stmt WHOLE_AMONG) || exit 1
     LOCK_PATHS=$(stmt LOCK_CACHED_PATHS) || exit 1
     SEED=$(stmt SEED_MISSING_RUNTIME_DEPS) || exit 1
-    DEPENDENTS=$(stmt RUNTIME_DEPENDENT_COUNTS) || exit 1
-    COUNT_DOWN=$(stmt COUNT_DOWN_RUNTIME) || exit 1
-    COUNT_UP=$(stmt COUNT_UP_RUNTIME) || exit 1
+    RIPPLE=$(stmt RIPPLE_MISSING_RUNTIME_DEPS) || exit 1
     RECOUNT=$(stmt RECOUNT_MISSING_RUNTIME_DEPS) || exit 1
 
     send_a() { printf '%s\n' "$1" >&3; }
@@ -934,7 +932,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     send_a "$(bind "$LOCK_SEED" "'{$P}'")"
     blocked a "flip-first: the seed of P did not wait on D's key"
     send_b "$(bind "$SEED" "'{$DEP}'" "'{t}'")"
-    send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
+    send_b "$(bind "$RIPPLE" "'{$DEP}'" "true")"
     send_b "COMMIT;"
     idle b "flip-first: the flip never committed"
     idle_tx a "flip-first: the seed never resumed"
@@ -957,7 +955,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     send_a "$(bind "$SEED" "'{$P}'" "'{f}'")"
     idle_tx a "unguarded: the seed blocked without the shared keys"
     send_b "$(bind "$SEED" "'{$DEP}'" "'{t}'")"
-    send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
+    send_b "$(bind "$RIPPLE" "'{$DEP}'" "true")"
     send_b "COMMIT;"
     idle b "unguarded: the flip never committed"
     send_a "COMMIT;"
@@ -980,11 +978,10 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     idle_tx b "seed-first: the flip never resumed"
     send_b "INSERT INTO cached_path (id, hash, package, file_hash, created_at) VALUES (uuidv7(), 'lgd', 'd', 'sha256:d', now());"
     send_b "$(bind "$SEED" "'{$DEP}'" "'{t}'")"
-    send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
-    send_b "$(bind "$COUNT_DOWN" "'{$P}'" "'{1}'")"
+    send_b "$(bind "$RIPPLE" "'{$DEP}'" "true")"
     send_b "COMMIT;"
     idle b "seed-first: the flip never committed"
-    grep -q "^$P|1$" $D/b.out || fail "seed-first: the ripple did not see P's edge"
+    grep -q "^$P$" $D/b.out || fail "seed-first: the ripple did not see P's edge"
     recount seed-first
 
     # 3. A retire of D against a seed of a second referrer Q: the retire's opening lock
@@ -1004,21 +1001,20 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     idle_tx b "unwhole: the retire never resumed"
     send_b "$(bind "$WHOLE_AMONG" "'{$DEP}'")"
     send_b "DELETE FROM cached_path WHERE hash = 'lgd';"
-    send_b "$(bind "$DEPENDENTS" "'{$DEP}'")"
-    send_b "$(bind "$COUNT_UP" "'{$P,$Q}'" "'{1,1}'")"
+    send_b "$(bind "$RIPPLE" "'{$DEP}'" "false")"
     send_b "COMMIT;"
     idle b "unwhole: the retire never committed"
-    grep -q "^$Q|1$" $D/b.out || fail "unwhole: the ripple did not see Q's edge"
+    grep -q "^$Q$" $D/b.out || fail "unwhole: the ripple did not see Q's edge"
     recount unwhole
 
     # 3b. A retire that waited on a flip reads the flipped row. The flip counts D down
     # to whole under D's key; the retire's opening lock waits on that key, so the
     # statement that reads whether D was whole starts after the flip committed.
     reset present
-    q "UPDATE derivation_build SET missing_runtime_deps = 1 WHERE derivation = '$DEP';" >/dev/null
+    q "UPDATE derivation_build SET missing_runtime_deps = 1 WHERE derivation = '$DEP';
+       INSERT INTO derivation_dependency (derivation, dependency, kind) VALUES ('$DEP', '$Q', 1);" >/dev/null
     send_a "BEGIN;"
-    send_a "$(bind "$LOCK_ANCHORS" "'{$DEP}'")"
-    send_a "$(bind "$COUNT_DOWN" "'{$DEP}'" "'{1}'")"
+    send_a "$(bind "$RIPPLE" "'{$Q}'" "true")"
     idle_tx a "retire-reads: the flip never held D"
     send_b "BEGIN;"
     send_b "$(bind "$LOCK_PATHS" "'{lgd}'")"

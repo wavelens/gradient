@@ -1372,6 +1372,22 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
+    /// A batch is written inside a transaction, the actor's in production, so the
+    /// tests open one around the call the way `actor::in_savepoint` does.
+    async fn apply(ctx: &DbContext, batch: &IngestBatch) -> Result<IngestReport> {
+        let tx = std::sync::Arc::new(ctx.worker_db.begin().await.expect("begin"));
+        let scoped = ctx.in_transaction(std::sync::Arc::clone(&tx));
+        let report = apply_batch(&scoped, batch).await;
+        drop(scoped);
+        std::sync::Arc::try_unwrap(tx)
+            .expect("no handle outlives the call")
+            .commit()
+            .await
+            .expect("commit");
+
+        report
+    }
+
     #[test]
     fn a_rewalked_entry_point_is_kept_not_duplicated() {
         let row = MEntryPoint {
@@ -1576,7 +1592,7 @@ mod tests {
         let (eval, a, b) = scripted(evaluation);
         let (ctx, _pool) = ctx(walk_of_a(eval, &a, &b)).await;
 
-        let report = apply_batch(
+        let report = apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -1602,7 +1618,7 @@ mod tests {
         let db = walk_of_a(eval, &a, &b);
         let (ctx, pool) = ctx(db).await;
 
-        let report = apply_batch(
+        let report = apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -1828,7 +1844,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        apply_batch(
+        apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -1874,7 +1890,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        apply_batch(
+        apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -1958,7 +1974,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        apply_batch(
+        apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -2042,7 +2058,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        apply_batch(
+        apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -2119,7 +2135,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        apply_batch(
+        apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -2185,7 +2201,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        apply_batch(
+        apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -2253,7 +2269,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        let report = apply_batch(
+        let report = apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -2303,7 +2319,7 @@ mod tests {
             .into_connection();
         let (ctx, _pool) = ctx(db).await;
 
-        let err = apply_batch(
+        let err = apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -2332,7 +2348,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
-        let report = apply_batch(
+        let report = apply(
             &ctx,
             &IngestBatch {
                 evaluation,
@@ -2374,7 +2390,7 @@ mod tests {
 
         let mut record = drv(A, &[]);
         record.timeout_secs = Some(3600);
-        apply_batch(
+        apply(
             &ctx,
             &IngestBatch {
                 evaluation,
