@@ -576,10 +576,18 @@ impl Reattached {
     }
 }
 
+/// A cluster member whose worker left while running it.
+#[derive(Debug)]
+pub struct LostMember {
+    pub attempt: ClusterAttemptId,
+    pub key: String,
+    pub job: PendingJob,
+}
+
 #[derive(Debug, Default)]
 pub struct Disconnected {
     pub requeued: Vec<PendingJob>,
-    pub cluster_members: Vec<(ClusterAttemptId, String)>,
+    pub cluster_members: Vec<LostMember>,
 }
 
 #[derive(Debug, Default)]
@@ -1175,7 +1183,11 @@ impl JobTracker {
                 continue;
             };
             match active.cluster {
-                Some(attempt) => gone.cluster_members.push((attempt, job_id)),
+                Some(attempt) => gone.cluster_members.push(LostMember {
+                    attempt,
+                    key: job_id,
+                    job: active.job,
+                }),
                 None => {
                     gone.requeued.push(active.job.clone());
                     self.pending.insert(job_id, active.job);
@@ -2679,7 +2691,14 @@ mod tests {
         let gone = tracker.worker_disconnected("w1");
 
         assert_eq!(gone.requeued.len(), 1);
-        assert_eq!(gone.cluster_members, vec![(attempt, "m1".to_owned())]);
+        assert_eq!(gone.cluster_members.len(), 1);
+        assert_eq!(
+            (
+                gone.cluster_members[0].attempt,
+                gone.cluster_members[0].key.as_str()
+            ),
+            (attempt, "m1")
+        );
         assert_eq!(tracker.pending_count(), 1);
         assert!(tracker.pending_job("m1").is_none());
     }

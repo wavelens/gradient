@@ -117,6 +117,13 @@ impl Scheduler {
             warn!(error = %e, "failed to close the dispatch rows of reaped aborts");
         }
 
+        for job_id in reaped.iter().filter(|j| self.attempt_of(j).is_some()) {
+            let report = crate::cluster::MemberReport::Aborted { job: None };
+            if let Err(e) = self.on_cluster_member_closed(job_id, report).await {
+                warn!(error = %e, %job_id, "settling a reaped cluster member failed");
+            }
+        }
+
         warn!(jobs = ?reaped, grace_secs = grace.as_secs(), "worker never confirmed the abort; job dropped");
         reaped
     }
