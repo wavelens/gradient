@@ -26,6 +26,8 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 | `max_concurrent_builds` | Build slots | `GRADIENT_WORKER_BUILD_MAX_CONCURRENT` (1) |
 | `cpu_count`, `ram_total_mb` | Hardware | Detected |
 | `cpu_core_score` | Relative single-core speed | A startup micro-benchmark, or `GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE` |
+| `zone` | Locality label for cluster placement; unset workers share one implicit zone | `GRADIENT_WORKER_ZONE`, unset |
+| `endpoint` | Address listed for this worker in a cluster roster | `GRADIENT_WORKER_ENDPOINT`, unset |
 
 - `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` and `GRADIENT_WORKER_SYSTEM_FEATURES` replace the detected lists; an override has to list every system and feature the worker should accept.
 - A build matches a worker when the build's system is in `architectures` and every required feature is in `system_features`. A `builtin` build skips the system check.
@@ -55,6 +57,7 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 - The winner is claimed by inserting a `dispatched_job` row; a lost race tries the next job, up to 3 times. `AssignJob` goes out only after the claim.
 - `AssignJob.dispatch` is the claim's ID. Every report (`JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress`) echoes the ID, and reports with a stale ID are dropped.
 - The worker answers `AssignJobResponse`; a declined job (worker draining or full) is re-queued and offered again.
+- An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md): the worker holds the slot, runs nothing until `StartCluster`, and frees the slot after `cluster.hold_secs` without one.
 
 ## Candidate Sources
 

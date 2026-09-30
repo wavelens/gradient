@@ -14,8 +14,11 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `Draining` | Server shutting down; request no more jobs | - |
 | `JobListChunk` | Full candidate list, answer to `RequestJobList` | `candidates`, `is_final` |
 | `JobOffer` | New candidates, up to 1 000 per message | `candidates` |
-| `AssignJob` | Assigns a job | `job_id`, `dispatch`, `job` |
+| `AssignJob` | Assigns a job; `cluster` marks one member of a cluster attempt, held until `StartCluster` | `job_id`, `dispatch`, `job`, `cluster` |
 | `AbortJob` | Cancels a job | `job_id`, `reason` |
+| `StartCluster` | Every member accepted; run the held jobs | `attempt`, `roster` |
+| `ClusterSignal` | Control message from another member of the attempt | `attempt`, `from`, `payload` |
+| `AbortCluster` | Drops or aborts every job of the attempt | `attempt`, `reason` |
 | `Credential` | Short-lived credential, e.g. an SSH key | `kind`, `data` |
 | `NarStreamHeader` | Opens a NAR pull stream | `job_id`, `store_path`, `total_bytes`, `stream_token` |
 | `NarPush` (bulk) | NAR pull chunk, 512 KiB zstd | `job_id`, `store_path`, `data`, `offset`, `is_final` |
@@ -37,12 +40,13 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `AuthResponse` | One token per challenged peer | `tokens` |
 | `ReauthRequest` | Asks for a new `AuthChallenge` | - |
 | `Reject` | Declines after `InitAck`; defined, not sent by the reference worker | `code`, `reason` |
-| `WorkerCapabilities` | Systems, features, slots, CPU, RAM, core score | `architectures`, `system_features`, `max_concurrent_builds`, ... |
+| `WorkerCapabilities` | Systems, features, slots, CPU, RAM, core score, zone, endpoint | `architectures`, `system_features`, `max_concurrent_builds`, `zone`, `endpoint`, ... |
 | `WorkerMetrics` | Load heartbeat | `cpu_usage_pct`, `ram_free_mb`, `disk_speed_mbps`, `network_speed_mbps` |
 | `RequestJobList` | Asks for the full candidate list | - |
 | `RequestJobChunk` | Score deltas | `scores`, `is_final` |
 | `RequestJob` | One free slot of a kind; repeated every 10 s while idle | `kind` (`Flake` or `Build`) |
 | `AssignJobResponse` | Accepts or declines an `AssignJob` | `job_id`, `accepted`, `reason` |
+| `ClusterSignal` | Control message to one member (`to`) or every other member (`to` unset) of a started attempt | `attempt`, `to`, `payload` |
 | `JobUpdate` | Progress of a job | `job_id`, `dispatch`, `update` |
 | `JobCompleted` | Job done, with the phase timeline | `job_id`, `dispatch`, `spans` |
 | `JobFailed` | Job failed | `job_id`, `dispatch`, `error`, `kind`, `missing_paths`, `spans` |
