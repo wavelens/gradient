@@ -486,7 +486,35 @@ impl SchedulerCore {
             clusters,
             slots,
             scores,
+            connected: self.connected_slots(),
+            reservation: None,
         }
+    }
+
+    /// One slot per active worker and kind it can run, busy or idle.
+    fn connected_slots(&self) -> Vec<crate::cluster::Slot> {
+        use crate::cluster::{Slot, SlotKind};
+
+        let mut slots = Vec::new();
+        for worker in self.pool.all_workers().into_iter().filter(|w| !w.draining) {
+            let (authorized, Some(caps)) = self.auth_and_caps(&worker.id) else {
+                continue;
+            };
+            for kind in [SlotKind::Eval, SlotKind::Build] {
+                if runs(&caps, kind) {
+                    slots.push(Slot {
+                        worker: worker.id.clone(),
+                        kind,
+                        zone: caps.zone.clone(),
+                        caps: caps.clone(),
+                        authorized: authorized.clone(),
+                    });
+                }
+            }
+        }
+        slots.sort_by(|a, b| (&a.worker, a.kind).cmp(&(&b.worker, b.kind)));
+
+        slots
     }
 }
 
