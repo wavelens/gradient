@@ -124,16 +124,19 @@ impl WorkerPool {
     }
 
     /// Push an abort to the worker's session; `false` when it is not connected.
-    pub fn send_abort(&self, worker_id: &str, job_id: String, reason: String) -> bool {
+    /// Push `signal` to one worker's session; `false` when it is not connected.
+    pub fn signal(&self, worker_id: &str, signal: SessionSignal) -> bool {
         match self.workers.get(worker_id) {
             Some(slot) => {
-                slot.shared()
-                    .session
-                    .signal(SessionSignal::Abort { job_id, reason });
+                slot.shared().session.signal(signal);
                 true
             }
             None => false,
         }
+    }
+
+    pub fn send_abort(&self, worker_id: &str, job_id: String, reason: String) -> bool {
+        self.signal(worker_id, SessionSignal::Abort { job_id, reason })
     }
 
     /// Push `signal` to every active (not draining) worker's session.
