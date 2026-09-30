@@ -117,24 +117,13 @@ RETURNING d.id, x.was_complete, (d.walked AND d.unwalked_inputs = 0) AS complete
         params = [DerivationIds(64), Bools(false, 64)],
         tier = Bulk;
 
-    DEPENDENT_COUNTS = "SELECT e.derivation AS id, count(*)::int AS n FROM derivation_dependency e WHERE e.dependency = ANY($1::uuid[]) AND e.kind IN (0, 2) GROUP BY e.derivation ORDER BY e.derivation",
-        params = [DerivationIds(64)];
-
-    COUNT_DOWN_UNWALKED = r#"
-UPDATE derivation d SET unwalked_inputs = d.unwalked_inputs - c.n
-FROM unnest($1::uuid[], $2::int[]) AS c(id, n)
-WHERE d.id = c.id
-RETURNING d.id, (d.walked AND d.unwalked_inputs = 0) AS complete
-"#,
-        params = [DerivationIds(64), Ints(1, 64)];
-
-    COUNT_UP_UNWALKED = r#"
-UPDATE derivation d SET unwalked_inputs = d.unwalked_inputs + c.n
-FROM unnest($1::uuid[], $2::int[]) AS c(id, n)
-WHERE d.id = c.id
-RETURNING d.id, (d.walked AND d.unwalked_inputs = c.n) AS was_complete
-"#,
-        params = [DerivationIds(64), Ints(1, 64)];
+    /// The whole ripple in one call, `RIPPLE_UNWALKED_INPUTS_FN` in the migration
+    /// that defines it: every level's dependents counted over build edges, locked
+    /// in id order and moved by their edge count, in place rather than a round
+    /// trip per level. Returns every row that flipped.
+    RIPPLE_UNWALKED_INPUTS = "SELECT id FROM ripple_unwalked_inputs($1::uuid[], $2::bool) AS r(id)",
+        params = [DerivationIds(64), Bool(true)],
+        tier = Bulk;
 
     COMPLETE_AMONG = "SELECT id FROM derivation WHERE id = ANY($1::uuid[]) AND walked AND unwalked_inputs = 0 ORDER BY id FOR NO KEY UPDATE",
         params = [DerivationIds(64)];
@@ -150,14 +139,6 @@ RETURNING d.id, (d.walked AND d.unwalked_inputs = c.n) AS was_complete
 
 fn derivation_ids(rows: &[QueryResult]) -> Vec<DerivationId> {
     rows.iter()
-        .filter_map(|r| r.try_get::<uuid::Uuid>("", "id").ok())
-        .map(DerivationId::new)
-        .collect()
-}
-
-fn flagged(rows: &[QueryResult], flag: &str) -> Vec<DerivationId> {
-    rows.iter()
-        .filter(|r| r.try_get::<bool>("", flag).unwrap_or(false))
         .filter_map(|r| r.try_get::<uuid::Uuid>("", "id").ok())
         .map(DerivationId::new)
         .collect()
@@ -195,7 +176,7 @@ pub async fn seed_walk_completeness(
         .map(DerivationId::new)
         .collect();
     let mut reached = flipped.clone();
-    reached.extend(ripple(txn, &COUNT_DOWN_UNWALKED, "complete", flipped).await?);
+    reached.extend(ripple(txn, flipped, true).await?);
 
     Ok(reached)
 }
@@ -212,51 +193,30 @@ pub async fn unwalk(txn: &DatabaseTransaction, derivations: &[DerivationId]) -> 
             .await?,
     );
     txn.execute_raw(UNWALK.bind([ids(derivations)])).await?;
-    ripple(txn, &COUNT_UP_UNWALKED, "was_complete", complete).await?;
+    ripple(txn, complete, false).await?;
 
     Ok(())
 }
 
-/// One level per statement: the dependents of `frontier` are counted, locked in id
-/// order and moved by their edge count; the ones `flag` names form the next level.
-///
-/// The counts are read separately so the update is a nested loop over a bound array
-/// and takes its row locks in id order, which is the module doc's discipline; every
-/// caller holds the rows through [`LOCK_WALK_ROWS`], so no edge can land between the
-/// two halves.
+/// Move the counters above `frontier` level by level, `down` from rows that became
+/// complete, up from rows that were, and return every row that flipped. Every
+/// caller holds `frontier` through [`LOCK_WALK_ROWS`], so no edge can land under the
+/// ripple.
 async fn ripple(
     txn: &DatabaseTransaction,
-    step: &crate::sql::Query,
-    flag: &str,
     mut frontier: Vec<DerivationId>,
+    down: bool,
 ) -> Result<Vec<DerivationId>, DbErr> {
-    let mut reached = Vec::new();
-    while !frontier.is_empty() {
-        frontier.sort_unstable();
-        frontier.dedup();
-        let mut dependents: Vec<DerivationId> = Vec::new();
-        let mut counts: Vec<i32> = Vec::new();
-        for row in txn
-            .query_all_raw(DEPENDENT_COUNTS.bind([ids(&frontier)]))
-            .await?
-        {
-            dependents.push(DerivationId::new(row.try_get::<uuid::Uuid>("", "id")?));
-            counts.push(row.try_get::<i32>("", "n")?);
-        }
-        if dependents.is_empty() {
-            break;
-        }
-
-        txn.query_all_raw(LOCK_WALK_ROWS.bind([ids(&dependents)]))
-            .await?;
-        let rows = txn
-            .query_all_raw(step.bind([ids(&dependents), counts.into()]))
-            .await?;
-        frontier = flagged(&rows, flag);
-        reached.extend(frontier.iter().copied());
+    if frontier.is_empty() {
+        return Ok(Vec::new());
     }
+    frontier.sort_unstable();
+    frontier.dedup();
 
-    Ok(reached)
+    Ok(derivation_ids(
+        &txn.query_all_raw(RIPPLE_UNWALKED_INPUTS.bind([ids(&frontier), down.into()]))
+            .await?,
+    ))
 }
 
 /// The sweep's recount, and the backfill after the column's migration.
@@ -304,22 +264,50 @@ mod tests {
 
     #[test]
     fn every_edge_this_module_counts_is_a_build_edge() {
-        let statements =
-            crate::sql::registry().filter(|q| q.file.ends_with("walk_completeness.rs"));
+        let statements = crate::sql::registry()
+            .filter(|q| q.file.ends_with("walk_completeness.rs"))
+            .map(|q| (q.name, q.text()))
+            .chain([("RIPPLE_UNWALKED_INPUTS_FN", RIPPLE_FN.into())]);
         let mut edges = 0;
-        for query in statements {
-            let sql = query.text();
+        for (name, sql) in statements {
             assert_eq!(
                 sql.matches("derivation_dependency").count(),
                 sql.matches("kind IN (0, 2)").count(),
-                "{} reads an edge with no build-edge filter: {sql}",
-                query.name
+                "{name} reads an edge with no build-edge filter: {sql}",
             );
             edges += sql.matches("derivation_dependency").count();
         }
         assert!(
-            edges > 0,
+            edges > 1,
             "the registry did not reach this module's statements"
+        );
+    }
+
+    const RIPPLE_FN: &str =
+        gradient_migration::m20260930_000002_counter_ripple_functions::RIPPLE_UNWALKED_INPUTS_FN;
+
+    /// The function is the loop this module ran a level per round trip, under the
+    /// same discipline: the level's dependents are locked in id order before the
+    /// write, and a row continues the ripple on the transition the direction names.
+    #[test]
+    fn the_ripple_locks_each_level_in_id_order_before_it_writes() {
+        let lock = RIPPLE_FN
+            .find("FROM derivation WHERE id = ANY(dependents) ORDER BY id FOR NO KEY UPDATE")
+            .expect("the ordered lock");
+        let write = RIPPLE_FN
+            .find("SET unwalked_inputs = d.unwalked_inputs")
+            .expect("the write");
+        assert!(lock < write, "{RIPPLE_FN}");
+        assert!(
+            RIPPLE_FN.contains(
+                "(d.walked AND d.unwalked_inputs = CASE WHEN down THEN 0 ELSE c.n END) AS flipped"
+            ),
+            "{RIPPLE_FN}"
+        );
+        assert!(
+            RIPPLE_FN.contains("SELECT unnest(wave)")
+                && RIPPLE_FN.contains("FROM moved WHERE flipped"),
+            "only the rows that flipped form the next level and the result: {RIPPLE_FN}"
         );
     }
 
@@ -332,20 +320,13 @@ mod tests {
         row
     }
 
-    fn count_row(id: DerivationId, n: i32) -> BTreeMap<String, Value> {
-        BTreeMap::from([
-            ("id".to_owned(), Value::from(id.into_inner())),
-            ("n".to_owned(), Value::Int(Some(n))),
-        ])
-    }
-
     fn none() -> Vec<BTreeMap<String, Value>> {
         Vec::new()
     }
 
     /// A row that was complete before the seed and after it flipped nothing, so no
     /// dependent ever counted it and it must not count them down; only a row the
-    /// seed flipped ripples, and the ripple stops at a level that flips nothing.
+    /// seed flipped ripples, and the one call reports what the ripple reached.
     #[tokio::test]
     async fn only_a_row_the_seed_flipped_ripples() {
         let settled = DerivationId::now_v7();
@@ -357,10 +338,7 @@ mod tests {
                 id_row(settled, &[("was_complete", true), ("complete", true)]),
                 id_row(flipped, &[("was_complete", false), ("complete", true)]),
             ]])
-            .append_query_results([vec![count_row(parent, 1)]])
-            .append_query_results([none()])
-            .append_query_results([vec![id_row(parent, &[("complete", true)])]])
-            .append_query_results([none()])
+            .append_query_results([vec![id_row(parent, &[])]])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -371,20 +349,21 @@ mod tests {
 
         assert_eq!(reached, vec![flipped, parent]);
         let log = crate::pool::raw_statements(db.into_transaction_log());
-        let counts: Vec<String> = log
+        let ripples: Vec<String> = log
             .iter()
             .filter(|s| {
                 s.sql
-                    .contains("count(*)::int AS n FROM derivation_dependency e WHERE e.dependency")
+                    .contains("FROM ripple_unwalked_inputs($1::uuid[], $2::bool)")
             })
             .map(|s| format!("{:?}", s.values))
             .collect();
-        assert_eq!(counts.len(), 2, "one dependents lookup per level: {log:?}");
+        assert_eq!(ripples.len(), 1, "one call runs every level: {log:?}");
         assert!(
-            counts[0].contains(&flipped.into_inner().to_string())
-                && !counts[0].contains(&settled.into_inner().to_string()),
-            "the settled row must not ripple: {}",
-            counts[0]
+            ripples[0].contains(&flipped.into_inner().to_string())
+                && !ripples[0].contains(&settled.into_inner().to_string())
+                && ripples[0].contains("Bool(Some(true))"),
+            "the settled row must not ripple, and a seed ripples down: {}",
+            ripples[0]
         );
     }
 
@@ -395,16 +374,13 @@ mod tests {
     #[tokio::test]
     async fn a_freshly_walked_leaf_ripples_though_the_row_reads_complete_throughout() {
         let leaf = DerivationId::now_v7();
-        let parent = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([none()])
             .append_query_results([vec![id_row(
                 leaf,
                 &[("was_complete", false), ("complete", true)],
             )]])
-            .append_query_results([vec![count_row(parent, 1)]])
             .append_query_results([none()])
-            .append_query_results([vec![id_row(parent, &[("complete", false)])]])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -423,9 +399,8 @@ mod tests {
             seed.values
         );
         assert!(
-            log.iter().any(|s| s
-                .sql
-                .contains("SET unwalked_inputs = d.unwalked_inputs - c.n")),
+            log.iter()
+                .any(|s| s.sql.contains("FROM ripple_unwalked_inputs(")),
             "the leaf counts its dependents down: {log:?}"
         );
     }
@@ -479,9 +454,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            .append_query_results([vec![count_row(parent, 2)]])
-            .append_query_results([none()])
-            .append_query_results([vec![id_row(parent, &[("was_complete", false)])]])
+            .append_query_results([vec![id_row(parent, &[])]])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -489,18 +462,15 @@ mod tests {
         txn.commit().await.unwrap();
 
         let log = crate::pool::raw_statements(db.into_transaction_log());
-        assert_eq!(
-            log.iter()
-                .filter(|s| s.sql.contains("unwalked_inputs + c.n"))
-                .count(),
-            1,
-            "one count-up, then the ripple stops: {log:?}"
-        );
         let up = log
             .iter()
-            .find(|s| s.sql.contains("unwalked_inputs + c.n"))
-            .unwrap();
-        assert!(format!("{:?}", up.values).contains(&parent.into_inner().to_string()));
+            .find(|s| s.sql.contains("FROM ripple_unwalked_inputs("))
+            .expect("the un-walk ripples up from what was complete");
+        let values = format!("{:?}", up.values);
+        assert!(
+            values.contains(&gone.into_inner().to_string()) && values.contains("Bool(Some(false))"),
+            "{values}"
+        );
     }
 
     /// The recount is the sweep's backfill and repair: the incomplete set is every
