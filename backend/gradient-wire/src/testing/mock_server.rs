@@ -222,6 +222,7 @@ impl MockServerConn {
             job_id: job_id.into(),
             dispatch: dispatch.into(),
             job,
+            cluster: None,
         })
         .await?;
         self.recv_until(|msg| match msg {

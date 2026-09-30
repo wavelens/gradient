@@ -11,11 +11,11 @@ pub mod server;
 // backward compatibility so existing `crate::messages::FlakeJob` paths still work.
 pub use crate::types::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec, BuildSpecKind,
-    BumpedInputWire, CacheInfo, CachedPath, CandidateScore, CredentialKind, DerivationOutput,
-    DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport,
-    FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities,
-    InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode,
-    RequiredPath,
+    BumpedInputWire, CacheInfo, CachedPath, CandidateScore, ClusterAddress, ClusterMembership,
+    ClusterPeer, CredentialKind, DerivationOutput, DiscoveredDerivation, EvalAttrCost,
+    EvalCachePullOutcome, EvalMessageLevel, EvalStatsReport, FlakeInputOverride, FlakeJob,
+    FlakeOutputNode, FlakeSource, FlakeStep, GradientCapabilities, InputUpdateSpec, Job,
+    JobCandidate, JobKind, JobPhase, JobPhaseSpan, JobUpdateKind, QueryMode, RequiredPath,
 };
 pub use crate::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, PresignedMultipart, UploadMetadata,
@@ -57,7 +57,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      on uploads; pulls still open with it), `EvalCachePush*`,
 ///      `CachedPath.multipart`.
 /// v20: removed `RevokeJob`, `RequestAllScores` and `RequestAllCandidates`.
-pub const PROTO_VERSION: u16 = 20;
+/// v21: cluster jobs: `AssignJob.cluster`, `StartCluster`, `ClusterSignal`
+///      (both directions), `AbortCluster`; `WorkerCapabilities.zone` and `endpoint`.
+pub const PROTO_VERSION: u16 = 21;
 
 /// How often a worker reports a running download's progress, skipping an
 /// interval in which no bytes arrived.

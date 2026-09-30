@@ -5,8 +5,8 @@
  */
 
 use crate::types::{
-    BuildFailureKind, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
-    JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
+    BuildFailureKind, CandidateScore, ClusterAddress, EvalMessageLevel, GradientCapabilities,
+    JobKind, JobPhaseSpan, JobUpdateKind, QueryMode, UploadMetadata, UploadObject,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -59,6 +59,11 @@ pub enum ClientMessage {
         ram_total_mb: u64,
         /// Relative single-core performance score (higher is faster).
         cpu_core_score: u32,
+        /// Locality label; members of a `same_zone` cluster share one. `None`
+        /// is one implicit zone of its own.
+        zone: Option<String>,
+        /// Address other members of a cluster reach this worker at, as given.
+        endpoint: Option<String>,
     },
 
     /// Live resource-utilisation heartbeat. Sent periodically while connected so
@@ -187,6 +192,14 @@ pub enum ClientMessage {
         kind: JobKind,
     },
 
+    /// A control message for other members of a started cluster attempt;
+    /// `to: None` reaches every other member.
+    ClusterSignal {
+        attempt: String,
+        to: Option<ClusterAddress>,
+        payload: Vec<u8>,
+    },
+
     /// Bulk query against the server cache.
     ///
     /// Server responds with [`super::server::ServerMessage::CacheStatus`].
@@ -312,6 +325,7 @@ impl ClientMessage {
             ClientMessage::NarRequestResume { .. } => "NarRequestResume",
             ClientMessage::EvalCachePull { .. } => "EvalCachePull",
             ClientMessage::RequestJob { .. } => "RequestJob",
+            ClientMessage::ClusterSignal { .. } => "ClusterSignal",
             ClientMessage::CacheQuery { .. } => "CacheQuery",
             ClientMessage::EvalMessage { .. } => "EvalMessage",
             ClientMessage::QueryKnownDerivations { .. } => "QueryKnownDerivations",

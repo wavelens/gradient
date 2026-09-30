@@ -125,6 +125,8 @@ impl ProtoPeer {
                 cpu_count: 1,
                 ram_total_mb: 1024,
                 cpu_core_score: 1,
+                zone: None,
+                endpoint: None,
             })
             .await?;
         }
@@ -193,6 +195,7 @@ impl ProtoPeer {
                     job_id,
                     dispatch,
                     job,
+                    ..
                 } => Some(Assignment {
                     job_id,
                     dispatch,

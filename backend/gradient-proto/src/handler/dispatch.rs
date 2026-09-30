@@ -215,6 +215,8 @@ impl<'a> DispatchContext<'a> {
                 cpu_count,
                 ram_total_mb,
                 cpu_core_score,
+                zone: _,
+                endpoint: _,
             } => {
                 self.on_worker_capabilities(
                     architectures,
@@ -243,6 +245,10 @@ impl<'a> DispatchContext<'a> {
             }
             ClientMessage::RequestJobList => self.on_request_job_list().await,
             ClientMessage::RequestJob { kind } => self.on_request_job(kind).await,
+            ClientMessage::ClusterSignal { attempt, .. } => {
+                warn!(peer_id = %self.peer_id, %attempt, "cluster signal relay not wired yet");
+                true
+            }
             ClientMessage::RequestJobChunk { scores, is_final } => {
                 self.on_request_job_chunk(scores, is_final).await;
                 true
@@ -639,6 +645,7 @@ impl<'a> DispatchContext<'a> {
                     job_id,
                     dispatch: assignment.dispatch().to_string(),
                     job: assignment.job,
+                    cluster: None,
                 },
             )
             .instrument(assigned)
