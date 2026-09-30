@@ -18,6 +18,7 @@ pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
 pub mod log_limit;
+mod source;
 mod substitute;
 pub mod timeline;
 
@@ -327,9 +328,9 @@ impl JobExecutor {
                     }
 
                     updater
-                        .report_fetch_result(outcome.flake_source.clone())
+                        .report_fetch_result(Some(outcome.source_path.clone()))
                         .await?;
-                    local_flake_path = Some(outcome.local_flake_path);
+                    local_flake_path = Some(outcome.source_path);
                 }
                 FlakeStep::EvaluateFlake => {
                     let _g = updater.phase(JobPhase::EvalFlake);
@@ -702,6 +703,10 @@ mod tests {
     #[async_trait::async_trait]
     impl WorkerStore for NoDaemon {
         async fn has_path(&self, _store_path: &str) -> Result<bool> {
+            Err(anyhow::anyhow!("acquire daemon connection: no such file"))
+        }
+
+        async fn add_nar(&self, _name: &str, _nar: Vec<u8>) -> Result<String> {
             Err(anyhow::anyhow!("acquire daemon connection: no such file"))
         }
     }

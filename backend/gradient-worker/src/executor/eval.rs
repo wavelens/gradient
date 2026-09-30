@@ -460,24 +460,11 @@ async fn write_eval_cache_blob(path: &str, bytes: &[u8]) -> Result<()> {
 
 // ── Pipeline helpers ─────────────────────────────────────────────────────────
 
-/// Build the flake reference string from a job and an optional local checkout.
-///
-/// When `FetchFlake` archived the repo into the Nix store the returned path
-/// starts with `/nix/store/` - content-addressed and immutable, valid in pure
-/// eval mode.  For a temporary `/tmp/` checkout we use `git+file://?rev=` to
-/// stay pure (bare `path:/tmp/...` would allow impure `builtins.fetchGit`
-/// calls that bypass `builtins.tryEval`).
+/// Build the flake reference string from a job and the source `FetchFlake` put
+/// in the store: `/nix/store/<hash>-source`, content-addressed and immutable,
+/// valid in pure eval mode.
 fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     if let Some(path) = local_flake_path {
-        if path.starts_with("/nix/store/") {
-            return format!("path:{}", path);
-        }
-        // A tmp git checkout - pair it with the commit from source when we
-        // know we're on a Repository source; else fall back to a bare
-        // `path:` reference.
-        if let FlakeSource::Repository { commit, .. } = &job.source {
-            return format!("git+file://{}?rev={}", path, commit);
-        }
         return format!("path:{}", path);
     }
     match &job.source {

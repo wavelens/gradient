@@ -58,4 +58,10 @@ impl WorkerStore for FakeNixStoreProvider {
     async fn has_path(&self, store_path: &str) -> Result<bool> {
         Ok(self.present.lock().unwrap().contains(store_path))
     }
+
+    async fn add_nar(&self, name: &str, nar: Vec<u8>) -> Result<String> {
+        let path = super::worker_store::fake_nar_path(name, &nar);
+        self.present.lock().unwrap().insert(path.clone());
+        Ok(path)
+    }
 }

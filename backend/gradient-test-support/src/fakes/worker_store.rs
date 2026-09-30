@@ -56,4 +56,17 @@ impl WorkerStore for FakeWorkerStore {
     async fn has_path(&self, store_path: &str) -> Result<bool> {
         Ok(self.present.lock().unwrap().contains(store_path))
     }
+
+    async fn add_nar(&self, name: &str, nar: Vec<u8>) -> Result<String> {
+        let path = fake_nar_path(name, &nar);
+        self.present.lock().unwrap().insert(path.clone());
+        Ok(path)
+    }
+}
+
+/// A path that follows from the bytes, as the daemon's would, without nix's
+/// hashing: the store shape with the NAR's length and a byte sum in the hash slot.
+pub fn fake_nar_path(name: &str, nar: &[u8]) -> String {
+    let sum: u64 = nar.iter().map(|b| u64::from(*b)).sum();
+    format!("/nix/store/{:016x}{:016x}-{name}", nar.len(), sum)
 }

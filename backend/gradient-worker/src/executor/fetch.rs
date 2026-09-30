@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Fetch task - clone the repository, archive it into the Nix store, and
-//! upload the source + all flake inputs to the Gradient cache.
+//! Fetch task - clone the repository, add the tree at the pinned commit to the
+//! Nix store as its `source` path ([`super::source`]), fetch the flake inputs
+//! that are not in the store yet, and upload source and inputs to the Gradient
+//! cache.
 //!
 //! Private repositories are accessed using the SSH private key delivered by the
 //! server as a [`gradient_wire::messages::ServerMessage::Credential`] with
@@ -26,18 +28,13 @@ use crate::proto::credentials::CredentialStore;
 
 /// Outcome of a successful `fetch_repository` call.
 ///
-/// `local_flake_path` is the path eval tasks should point at (the nix-store
-/// source produced by `nix flake archive` or the per-input prefetch fallback).
-/// `flake_source` is `Some(store_path)` whenever the source landed in the
-/// cache - either `nix flake archive` succeeded or the fallback prefetched at
-/// least the source - and is reported back so subsequent eval-only jobs can use
-/// `FlakeSource::Cached { store_path }`. `archived_paths` lists every store path
-/// pushed to the cache (source plus every input the archive or fallback managed
-/// to fetch) - the caller pushes and optionally signs these. The fallback may
-/// legitimately omit inputs the project has no credentials for.
+/// `source_path` is the flake's own `/nix/store/<hash>-source`, what eval tasks
+/// point at and what a later eval-only job names as `FlakeSource::Cached`.
+/// `archived_paths` lists every store path to push: the source plus every input
+/// the archive or the per-input fallback fetched, which may legitimately omit
+/// inputs the project has no credentials for.
 pub struct FetchOutcome {
-    pub local_flake_path: String,
-    pub flake_source: Option<String>,
+    pub source_path: String,
     pub archived_paths: Vec<String>,
 }
 
@@ -77,11 +74,11 @@ pub async fn fetch_repository(
         .ssh_key()
         .map(|k| String::from_utf8_lossy(k.expose()).to_string());
 
-    // Repository sources are cloned and archived from a git checkout; a Cached
+    // A Repository source is cloned and its tree added to the store; a Cached
     // build source is already a `/nix/store/...-source` path (ensured present by
-    // the caller) that we archive in place so its `git+ssh` inputs are fetched
-    // into the shared store with credentials.
-    let (flake_ref, flake_root) = match &job.source {
+    // the caller). Either way the inputs are fetched from the source's own lock
+    // into the shared store, with credentials.
+    let (source_path, flake_root) = match &job.source {
         FlakeSource::Repository { url, commit } => {
             let (url, commit) = (url.clone(), commit.clone());
             debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
@@ -110,11 +107,12 @@ pub async fn fetch_repository(
                 run_input_update(spec, &tmp_path, ssh_key.as_deref(), updater).await?;
             }
 
-            (format!("git+file://{tmp_path}?rev={commit}"), tmp_path)
+            let source_path = super::source::add_git_tree(store, &tmp_path, &commit).await?;
+            (source_path, tmp_path)
         }
         FlakeSource::Cached { store_path } => {
             debug!(%store_path, has_ssh_key = ssh_key.is_some(), "archiving cached build source");
-            (format!("path:{store_path}"), store_path.clone())
+            (store_path.clone(), store_path.clone())
         }
     };
 
@@ -149,18 +147,15 @@ pub async fn fetch_repository(
         );
     }
 
-    // Archive the flake source and all locked inputs into the nix store via a
-    // subprocess (so fetching goes through the nix daemon with proper network
-    // and store-write access).  Returns the nix store source path so the
-    // evaluator can use `path:/nix/store/xxx` - a pure, content-addressed
-    // reference - instead of the git checkout in /tmp.
+    // The inputs are fetched by a nix subprocess, so fetching goes through the
+    // nix daemon with proper network and store-write access.
     let tools = NixTools {
         nix: binpath_nix,
         ssh: binpath_ssh,
         store,
     };
     match archive_flake(
-        &flake_ref,
+        &source_path,
         &flake_root,
         &tools,
         ssh_key.as_deref(),
@@ -169,24 +164,23 @@ pub async fn fetch_repository(
     )
     .await
     {
-        Ok((source_path, archived_paths)) => {
+        Ok(archived_paths) => {
             info!(%source_path, inputs = archived_paths.len(), "flake archived to nix store");
             Ok(FetchOutcome {
-                local_flake_path: source_path.clone(),
-                flake_source: Some(source_path),
+                source_path,
                 archived_paths,
             })
         }
         // `nix flake archive` is all-or-nothing: one unfetchable input (e.g. a
         // private `git+ssh` input the project has no key for) fails the whole
         // command even though eval targets never reference it. Nix evaluation is
-        // lazy, so fall back to prefetching the source and each locked input
-        // independently as best-effort cache population.
+        // lazy, so fall back to prefetching each locked input independently as
+        // best-effort cache population.
         Err(archive_err) => {
             let archive_msg = archive_err.to_string();
             warn!(error = %archive_msg, "nix flake archive failed; falling back to per-input prefetch");
             match prefetch_flake_best_effort(
-                &flake_ref,
+                &source_path,
                 &flake_root,
                 &tools,
                 ssh_key.as_deref(),
@@ -195,7 +189,7 @@ pub async fn fetch_repository(
             )
             .await
             {
-                Ok((source_path, archived_paths, input_warnings)) => {
+                Ok((archived_paths, input_warnings)) => {
                     updater
                         .send_eval_message(
                             gradient_wire::types::EvalMessageLevel::Warning,
@@ -217,8 +211,7 @@ pub async fn fetch_repository(
                     }
                     info!(%source_path, inputs = archived_paths.len(), "flake prefetched to nix store after archive fallback");
                     Ok(FetchOutcome {
-                        local_flake_path: source_path.clone(),
-                        flake_source: Some(source_path),
+                        source_path,
                         archived_paths,
                     })
                 }
@@ -324,61 +317,54 @@ fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<St
     argv
 }
 
-/// Run `nix flake archive --json` and collect all store paths (source + all
-/// transitive flake inputs). Returns the source store path and every archived
-/// path, verified present via `nix path-info`.
+/// Every store path of the flake at `source_path`: the source and all transitive
+/// inputs, verified present.
 ///
-/// When every locked input is already in the local store, only the flake's own
-/// source is fetched: `nix flake archive` re-hashes each `path:` and `git+file:`
-/// input to verify it, which on a nixpkgs checkout is a walk of every file.
+/// When every locked input is already in the local store nothing runs: `nix
+/// flake archive` re-hashes each `path:` and `git+file:` input to verify it, which
+/// on a nixpkgs checkout is a walk of every file. Otherwise `nix flake archive
+/// --json` fetches them.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn archive_flake(
-    flake_ref: &str,
+    source_path: &str,
     flake_root: &str,
     tools: &NixTools<'_>,
     ssh_key: Option<&str>,
     overrides: &[(String, String)],
     abort: &mut watch::Receiver<bool>,
-) -> Result<(String, Vec<String>)> {
+) -> Result<Vec<String>> {
     let NixTools {
         nix: binpath_nix,
         ssh: binpath_ssh,
         store,
     } = *tools;
-    let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
     if overrides.is_empty()
-        && let Some(inputs) = present_locked_inputs(flake_root, store).await
+        && let Some(mut inputs) = present_locked_inputs(flake_root, store).await
     {
-        let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
-        let source_path = prefetch_one(flake_ref, binpath_nix, ssh_command, abort).await?;
-        debug!(%source_path, inputs = inputs.len(), "every locked input present; archived the source alone");
-        let mut all_paths = inputs;
-        all_paths.push(source_path.clone());
-        return Ok((source_path, all_paths));
+        debug!(%source_path, inputs = inputs.len(), "every locked input present; nothing to fetch");
+        inputs.push(source_path.to_owned());
+        return Ok(inputs);
     }
 
+    let flake_ref = format!("path:{source_path}");
     trace!(binpath_nix, flake_ref, "executing nix flake archive");
+    let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
     let mut cmd = tokio::process::Command::new(binpath_nix);
-    cmd.args(build_archive_argv(flake_ref, overrides));
+    cmd.args(build_archive_argv(&flake_ref, overrides));
     if let Some((_guard, ssh_command)) = &key_env {
         cmd.env("GIT_SSH_COMMAND", ssh_command);
     }
     let output = run_nix_subprocess(cmd, "nix flake archive", abort).await?;
 
     let json: serde_json::Value = parse_nix_json(&output.stdout, "nix flake archive")?;
-    let source_path = json["path"]
-        .as_str()
-        .context("nix flake archive JSON missing 'path' field")?
-        .to_owned();
-
     let mut all_paths: HashSet<String> = HashSet::new();
-    all_paths.insert(source_path.clone());
+    all_paths.insert(source_path.to_owned());
     collect_input_paths(&json, &mut all_paths);
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
     require_present(store, &all_paths).await?;
 
-    Ok((source_path, all_paths))
+    Ok(all_paths)
 }
 
 /// Spawn a `nix` subprocess, honoring `abort` (killing the child via
@@ -497,19 +483,18 @@ async fn prefetch_one(
         .map(str::to_owned)
 }
 
-/// Best-effort fallback for when `nix flake archive` fails: prefetch the flake
-/// source itself (a hard error if that fails) then every locked input from
-/// `flake.lock` independently, collecting the successes and turning per-input
-/// failures into warnings. Returns `(source_path, collected_paths, warnings)`.
+/// Best-effort fallback for when `nix flake archive` fails: prefetch every locked
+/// input from `flake.lock` independently, collecting the successes and turning
+/// per-input failures into warnings. Returns `(collected_paths, warnings)`.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn prefetch_flake_best_effort(
-    flake_ref: &str,
+    source_path: &str,
     flake_root: &str,
     tools: &NixTools<'_>,
     ssh_key: Option<&str>,
     overrides: &[(String, String)],
     abort: &mut watch::Receiver<bool>,
-) -> Result<(String, Vec<String>, Vec<String>)> {
+) -> Result<(Vec<String>, Vec<String>)> {
     let NixTools {
         nix: binpath_nix,
         ssh: binpath_ssh,
@@ -519,12 +504,8 @@ async fn prefetch_flake_best_effort(
     let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
     let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
 
-    let source_path = prefetch_one(flake_ref, binpath_nix, ssh_command, abort)
-        .await
-        .context("nix flake prefetch of source failed")?;
-
     let mut all_paths: HashSet<String> = HashSet::new();
-    all_paths.insert(source_path.clone());
+    all_paths.insert(source_path.to_owned());
     let mut warnings: Vec<String> = Vec::new();
 
     let lock_path = std::path::Path::new(flake_root).join("flake.lock");
@@ -558,7 +539,7 @@ async fn prefetch_flake_best_effort(
     let all_paths: Vec<String> = all_paths.into_iter().collect();
     require_present(store, &all_paths).await?;
 
-    Ok((source_path, all_paths, warnings))
+    Ok((all_paths, warnings))
 }
 
 /// Recursively walk the `inputs` tree from `nix flake archive --json` output
@@ -1041,12 +1022,12 @@ mod tests {
         );
     }
 
-    /// fetch_repository clones the repo then runs nix flake archive.
-    /// In a unit-test context nix is unavailable, so the whole fetch fails -
-    /// this verifies the git clone step is reached (Fetching event emitted)
-    /// and that the error propagates rather than silently falling back.
+    /// A clone's tree lands in the store without nix, and a flake with nothing
+    /// locked has nothing left to fetch, so the fetch succeeds where `nix` is not
+    /// even installed: the archive fails, the per-input fallback finds no input,
+    /// and the source alone is what gets pushed.
     #[tokio::test]
-    async fn fetch_repository_actually_clones() {
+    async fn fetch_repository_adds_the_clone_to_the_store_without_nix() {
         use std::process::Command;
 
         let tmp = tempfile::tempdir().unwrap();
@@ -1110,21 +1091,24 @@ mod tests {
 
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
+        let store = FakeWorkerStore::new();
 
-        // Clone succeeds; nix flake archive fails (nix not available in test context).
-        // Without the fallback, the error propagates.
-        let result = fetch_repository(
+        let outcome = fetch_repository(
             &job,
             &mut reporter,
             &credentials,
-            &FakeWorkerStore::new(),
+            &store,
             "nix",
             "ssh",
             no_abort(),
         )
-        .await;
-        assert!(result.is_err(), "expected error when nix is unavailable");
-        // The Fetching event was still emitted before the failure.
+        .await
+        .unwrap();
+
+        assert!(outcome.source_path.starts_with("/nix/store/"));
+        assert!(outcome.source_path.ends_with("-source"));
+        assert_eq!(outcome.archived_paths, vec![outcome.source_path.clone()]);
+        assert!(store.has_path(&outcome.source_path).await.unwrap());
         assert!(matches!(reporter.events()[0], ReportedEvent::Fetching));
     }
 

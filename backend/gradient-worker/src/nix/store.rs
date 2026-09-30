@@ -19,15 +19,21 @@
 //! surface downstream as `"serialised integer N is too large for type 'j'"`
 //! or `query_path_info` returning `Ok(None)` for a path that exists).
 
+use std::collections::BTreeSet;
+use std::pin::pin;
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt as _};
 use gradient_util::store_path::strip_store_prefix;
-use harmonia_store_path::StorePath;
+use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
+use harmonia_store_content_address::{ContentAddress, make_store_path_from_ca};
+use harmonia_store_path::{StoreDir, StorePath, StorePathName};
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
+use harmonia_utils_hash::{Algorithm, Hash};
+use sha2::{Digest as _, Sha256};
 use tracing::{debug, warn};
 
 use gradient_wire::traits::WorkerStore;
@@ -162,6 +168,50 @@ impl LocalNixStore {
         Ok(info.nar_size)
     }
 
+    /// Stream `nar` into the daemon as `info` describes it; the transport that
+    /// delivered the bytes is what authenticated them, so no signature is checked.
+    pub async fn import_nar(&self, info: &ValidPathInfo, nar: &[u8]) -> Result<()> {
+        let mut guard = self.acquire().await?;
+        guard
+            .execute(|client| async move {
+                let logs = client.add_to_store_nar(info, nar, false, true);
+                let mut logs = pin!(logs);
+                while let Some(_msg) = logs.next().await {}
+                logs.await
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("daemon add_to_store_nar({}) failed: {e}", info.path))
+    }
+
+    /// The content address of `nar` under `name`, the path every nix fetcher of
+    /// the same tree lands on, and the path info that registers it as such.
+    fn content_addressed(name: &str, nar: &[u8]) -> Result<ValidPathInfo> {
+        let hash = Hash::new(Algorithm::SHA256, &Sha256::digest(nar));
+        let store_dir = StoreDir::default();
+        let name: StorePathName = name
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid store path name {name}: {e}"))?;
+        let path = make_store_path_from_ca(&store_dir, name, ContentAddress::NixArchive(hash));
+        let nar_hash = hash
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("nar hash: {e}"))?;
+
+        Ok(ValidPathInfo {
+            path,
+            info: UnkeyedValidPathInfo {
+                deriver: None,
+                nar_hash,
+                references: BTreeSet::new(),
+                registration_time: None,
+                nar_size: nar.len() as u64,
+                ultimate: false,
+                signatures: BTreeSet::new(),
+                ca: Some(ContentAddress::NixArchive(hash)),
+                store_dir,
+            },
+        })
+    }
+
     /// Register `gcroot_symlink` as an indirect GC root with the daemon.
     ///
     /// The caller must have already created the symlink on disk; the daemon
@@ -190,6 +240,17 @@ const DAEMON_LOOKUPS: usize = 32;
 impl WorkerStore for LocalNixStore {
     async fn has_path(&self, store_path: &str) -> Result<bool> {
         self.has_path(store_path).await
+    }
+
+    async fn add_nar(&self, name: &str, nar: Vec<u8>) -> Result<String> {
+        let info = Self::content_addressed(name, &nar)?;
+        let path = info.info.store_dir.display(&info.path).to_string();
+        if !self.has_path(&path).await? {
+            self.import_nar(&info, &nar).await?;
+            debug!(%path, bytes = nar.len(), "added NAR to local store");
+        }
+
+        Ok(path)
     }
 }
 
