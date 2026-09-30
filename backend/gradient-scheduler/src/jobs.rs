@@ -12,13 +12,15 @@ use std::time::{Duration, Instant};
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::evaluation::WalkMode;
 use gradient_types::ids::{
-    CommitId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId, ProjectId, TaskId,
+    ClusterAttemptId, ClusterJobId, CommitId, DerivationBuildId, DerivationId, DispatchedJobId,
+    EvaluationId, ProjectId, TaskId,
 };
 use gradient_wire::types::{
     BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate, JobKind,
     RequiredPath,
 };
 
+use crate::cluster::{ClusterBook, PendingCluster};
 use gradient_pool::WorkerCaps;
 use gradient_pool::score::{JobContext, ScoredJob, ScoringPolicy, WorkerContext};
 
@@ -327,6 +329,15 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     }
 }
 
+fn visible_to(
+    job: &PendingJob,
+    authorized: Option<&HashSet<ProjectId>>,
+    caps: Option<&WorkerCaps>,
+) -> bool {
+    authorized.is_none_or(|peers| peers.contains(&job.project_id()))
+        && job_eligible_for_caps(job, caps)
+}
+
 /// A vetoed candidate never wins (a rule said "not yet"); below the floor,
 /// dispatching now is worse than idling this round.
 fn wins(sc: &ScoredCandidate) -> bool {
@@ -483,6 +494,7 @@ struct ActiveJob {
     worker: String,
     job: PendingJob,
     aborted_at: Option<Instant>,
+    cluster: Option<ClusterAttemptId>,
 }
 
 impl ActiveJob {
@@ -491,8 +503,15 @@ impl ActiveJob {
             worker: worker.to_owned(),
             job,
             aborted_at: None,
+            cluster: None,
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub struct Disconnected {
+    pub requeued: Vec<PendingJob>,
+    pub cluster_members: Vec<(ClusterAttemptId, String)>,
 }
 
 #[derive(Debug, Default)]
@@ -503,6 +522,7 @@ pub struct JobTracker {
     active: HashMap<String, ActiveJob>,
     /// Bounded ring of recent dispatch decisions for the Live Jobs view.
     decisions: VecDeque<DispatchDecision>,
+    clusters: ClusterBook,
 }
 
 impl JobTracker {
@@ -532,7 +552,12 @@ impl JobTracker {
         authorized: Option<&HashSet<ProjectId>>,
         caps: Option<&WorkerCaps>,
     ) -> Vec<JobCandidate> {
+        let members = self
+            .clusters
+            .jobs()
+            .filter(|(_, job)| visible_to(job, authorized, caps));
         self.eligible_for_worker(authorized, caps)
+            .chain(members)
             .map(|(id, job)| job.as_candidate(id))
             .collect()
     }
@@ -544,10 +569,9 @@ impl JobTracker {
         authorized: Option<&'s HashSet<ProjectId>>,
         caps: Option<&'s WorkerCaps>,
     ) -> impl Iterator<Item = (&'s String, &'s PendingJob)> {
-        self.pending.iter().filter(move |(_, job)| {
-            authorized.is_none_or(|peers| peers.contains(&job.project_id()))
-                && job_eligible_for_caps(job, caps)
-        })
+        self.pending
+            .iter()
+            .filter(move |(_, job)| visible_to(job, authorized, caps))
     }
 
     /// Record scores from a worker without assigning anything. The server only
@@ -916,9 +940,63 @@ impl JobTracker {
     }
 
     pub fn release_to_pending(&mut self, job_id: &str) {
-        if let Some(active) = self.active.remove(job_id) {
+        if let Some(active) = self.active.remove(job_id)
+            && active.cluster.is_none()
+        {
             self.pending.insert(job_id.to_owned(), active.job);
         }
+    }
+
+    pub fn add_member(&mut self, of: gradient_db::MemberOf, key: String, job: PendingJob) {
+        if self.active.contains_key(&key) {
+            return;
+        }
+        self.clusters.add(of, key, job);
+    }
+
+    pub fn ready_clusters(&self) -> impl Iterator<Item = &PendingCluster> {
+        self.clusters.ready()
+    }
+
+    pub fn take_cluster(&mut self, id: ClusterJobId) -> Option<PendingCluster> {
+        self.clusters.take(id)
+    }
+
+    pub fn restore_cluster(&mut self, cluster: PendingCluster) {
+        self.clusters.restore(cluster);
+    }
+
+    pub fn activate_members(
+        &mut self,
+        attempt: ClusterAttemptId,
+        members: Vec<(String, String, PendingJob)>,
+    ) {
+        for (worker, key, job) in members {
+            self.forget_job_scores(&key);
+            self.active.insert(
+                key,
+                ActiveJob {
+                    cluster: Some(attempt),
+                    ..ActiveJob::new(&worker, job)
+                },
+            );
+        }
+    }
+
+    pub fn active_cluster(&self, job_id: &str) -> Option<ClusterAttemptId> {
+        self.active.get(job_id).and_then(|a| a.cluster)
+    }
+
+    pub fn member_scores(&self, keys: &HashSet<&str>) -> HashMap<(String, String), WorkerJobScore> {
+        self.scores
+            .iter()
+            .flat_map(|(worker, scores)| {
+                scores
+                    .iter()
+                    .filter(|(key, _)| keys.contains(key.as_str()))
+                    .map(|(key, score)| ((worker.clone(), key.clone()), score.clone()))
+            })
+            .collect()
     }
 
     pub fn remove_active(&mut self, job_id: &str) -> Option<PendingJob> {
@@ -974,7 +1052,9 @@ impl JobTracker {
             .map(|(id, _)| id.clone())
             .collect();
         for job_id in &to_requeue {
-            if let Some(active) = self.active.remove(job_id) {
+            if let Some(active) = self.active.remove(job_id)
+                && active.cluster.is_none()
+            {
                 self.pending.insert(job_id.clone(), active.job);
             }
         }
@@ -983,7 +1063,7 @@ impl JobTracker {
 
     /// Move all of `worker_id`'s active jobs back to pending and return the
     /// requeued jobs so the caller can reset their DB rows for re-dispatch.
-    pub fn worker_disconnected(&mut self, worker_id: &str) -> Vec<PendingJob> {
+    pub fn worker_disconnected(&mut self, worker_id: &str) -> Disconnected {
         self.scores.remove(worker_id);
         let orphaned: Vec<String> = self
             .active
@@ -991,24 +1071,33 @@ impl JobTracker {
             .filter(|(_, a)| a.worker == worker_id)
             .map(|(id, _)| id.clone())
             .collect();
-        let mut requeued = Vec::with_capacity(orphaned.len());
-        for job_id in &orphaned {
-            if let Some(active) = self.active.remove(job_id) {
-                requeued.push(active.job.clone());
-                self.pending.insert(job_id.clone(), active.job);
+        let mut gone = Disconnected::default();
+        for job_id in orphaned {
+            let Some(active) = self.active.remove(&job_id) else {
+                continue;
+            };
+            match active.cluster {
+                Some(attempt) => gone.cluster_members.push((attempt, job_id)),
+                None => {
+                    gone.requeued.push(active.job.clone());
+                    self.pending.insert(job_id, active.job);
+                }
             }
         }
-        requeued
+        gone
     }
 
     pub fn contains_job(&self, job_id: &str) -> bool {
-        self.pending.contains_key(job_id) || self.active.contains_key(job_id)
+        self.pending.contains_key(job_id)
+            || self.active.contains_key(job_id)
+            || self.clusters.contains(job_id)
     }
 
     pub fn remove_job(&mut self, job_id: &str) {
         self.forget_job_scores(job_id);
         self.pending.remove(job_id);
         self.active.remove(job_id);
+        self.clusters.forget(job_id);
     }
 
     /// Start the abort deadline of an active job; a repeat abort keeps the first.
@@ -1095,6 +1184,16 @@ impl JobTracker {
             self.pending.remove(id);
             self.forget_job_scores(id);
         }
+        let members: Vec<String> = self
+            .clusters
+            .jobs()
+            .filter(|(_, job)| job.evaluation_id() == evaluation_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in &members {
+            self.clusters.forget(key);
+            self.forget_job_scores(key);
+        }
     }
 
     /// Lift the tracked jobs a prioritization reached: `evaluation`'s own eval
@@ -1130,8 +1229,18 @@ impl JobTracker {
             self.pending.remove(id);
             self.forget_job_scores(id);
         }
+        let members: Vec<String> = self
+            .clusters
+            .jobs()
+            .filter(|(_, job)| matches!(job, PendingJob::Build(b) if stale(b)))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in &members {
+            self.clusters.forget(key);
+            self.forget_job_scores(key);
+        }
 
-        pruned.len()
+        pruned.len() + members.len()
     }
 
     pub fn pending_count(&self) -> usize {
@@ -2143,7 +2252,7 @@ mod tests {
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
 
-        let orphaned = tracker.worker_disconnected("w1");
+        let orphaned = tracker.worker_disconnected("w1").requeued;
         assert_eq!(orphaned.len(), 2);
         assert_eq!(tracker.pending_count(), 2);
         assert_eq!(tracker.active_count(), 0);
@@ -2379,5 +2488,101 @@ mod tests {
             ..fetch_only.clone()
         };
         assert!(!is_fetch_only(&cached));
+    }
+
+    fn member(cluster: ClusterJobId, count: u32) -> gradient_db::MemberOf {
+        crate::cluster::book::book_tests::member_of(cluster, count)
+    }
+
+    #[test]
+    fn members_are_offered_for_scoring_but_never_assigned_singly() {
+        let peer = ProjectId::now_v7();
+        let mut tracker = JobTracker::new();
+        tracker.add_member(
+            member(ClusterJobId::now_v7(), 2),
+            "m1".into(),
+            eval_job(peer),
+        );
+
+        let offered = tracker.candidates_for_worker(None, None);
+        assert_eq!(offered.len(), 1);
+        assert_eq!(offered[0].job_id, "m1");
+        assert!(tracker.contains_job("m1"));
+
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_pruned_member_unreadies_its_cluster() {
+        let peer = ProjectId::now_v7();
+        let cluster = ClusterJobId::now_v7();
+        let mut tracker = JobTracker::new();
+        tracker.add_member(
+            member(cluster, 2),
+            "build:a".into(),
+            build_job(peer, vec![]),
+        );
+        tracker.add_member(member(cluster, 2), "eval:b".into(), eval_job(peer));
+        assert_eq!(tracker.ready_clusters().count(), 1);
+
+        assert_eq!(tracker.prune_pending_builds(|_| true), 1);
+
+        assert_eq!(tracker.ready_clusters().count(), 0);
+        assert!(!tracker.contains_job("build:a"));
+        assert!(tracker.contains_job("eval:b"));
+    }
+
+    #[test]
+    fn cancelling_an_evaluation_forgets_its_member() {
+        let peer = ProjectId::now_v7();
+        let job = eval_job(peer);
+        let evaluation = job.evaluation_id();
+        let mut tracker = JobTracker::new();
+        tracker.add_member(member(ClusterJobId::now_v7(), 1), "eval:x".into(), job);
+
+        tracker.remove_pending_for_evaluation(evaluation);
+
+        assert!(!tracker.contains_job("eval:x"));
+        assert_eq!(tracker.ready_clusters().count(), 0);
+    }
+
+    #[test]
+    fn a_released_member_is_not_requeued() {
+        let mut tracker = JobTracker::new();
+        tracker.activate_members(
+            ClusterAttemptId::now_v7(),
+            vec![("w1".into(), "m1".into(), eval_job(ProjectId::now_v7()))],
+        );
+
+        tracker.release_to_pending("m1");
+
+        assert_eq!(tracker.pending_count(), 0);
+        assert_eq!(tracker.active_count(), 0);
+    }
+
+    #[test]
+    fn a_disconnect_keeps_cluster_members_out_of_pending() {
+        let peer = ProjectId::now_v7();
+        let attempt = ClusterAttemptId::now_v7();
+        let mut tracker = JobTracker::new();
+        tracker.add_pending("single".into(), eval_job(peer));
+        let p = gradient_pool::score::policy_by_name("simple");
+        let inst = gradient_pool::score::InstanceContext::default();
+        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &*p, &inst);
+        tracker.activate_members(attempt, vec![("w1".into(), "m1".into(), eval_job(peer))]);
+        assert_eq!(tracker.active_cluster("m1"), Some(attempt));
+
+        let gone = tracker.worker_disconnected("w1");
+
+        assert_eq!(gone.requeued.len(), 1);
+        assert_eq!(gone.cluster_members, vec![(attempt, "m1".to_owned())]);
+        assert_eq!(tracker.pending_count(), 1);
+        assert!(tracker.pending_job("m1").is_none());
     }
 }

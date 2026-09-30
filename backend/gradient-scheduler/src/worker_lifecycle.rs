@@ -275,11 +275,14 @@ impl Scheduler {
     pub async fn unregister_worker(&self, worker_id: &str) {
         self.close_worker_connection(worker_id).await;
         let worker = worker_id.to_owned();
-        let requeued = self
+        let gone = self
             .call(|reply| SchedulerMsg::Unregister { worker, reply })
             .await
             .unwrap_or_default();
-        build::requeue_orphaned_jobs(&self.state, &requeued).await;
+        build::requeue_orphaned_jobs(&self.state, &gone.requeued).await;
+        if !gone.cluster_members.is_empty() {
+            info!(%worker_id, members = gone.cluster_members.len(), "cluster members lost with their worker");
+        }
         self.state.events.publish(worker::Disconnected {
             worker_id: worker_id.to_owned(),
         });
