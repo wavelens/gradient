@@ -210,7 +210,7 @@ crate::sql! {
             EvaluationId,
         ],
         tier = Bulk,
-        budget = crate::sql::Budget::bulk().buffers(200_000)
+        budget = crate::sql::Budget::bulk().buffers(100_000)
             .because("counts the closure of 64 entry points inside the fixture's largest \
                       evaluation, ~98k jobs"),
         flags = [Walk];
