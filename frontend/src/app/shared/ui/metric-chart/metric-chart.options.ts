@@ -27,6 +27,8 @@ export interface MetricChartConfig {
   yAxisTitle?: string;
   valueFormatter?: (value: number) => string;
   secondary?: { title?: string; valueFormatter?: (value: number) => string };
+  /// Fixed plot margins in px: charts stacked with the same inset share their x positions.
+  inset?: { left: number; right: number };
 }
 
 /// Resolved from semantic tokens by the component, so charts follow the active theme.
@@ -94,7 +96,8 @@ export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme
 function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, theme: ChartTheme): EChartsOption {
   const kindOf = (s: MetricSeries): MetricSeriesType => s.type ?? (cfg.type === 'bar' ? 'bar' : 'line');
   const hasBars = cfg.series.some((s) => kindOf(s) === 'bar') || cfg.type === 'bar';
-  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: hasBars, axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
+  const inset = cfg.horizontal ? undefined : cfg.inset;
+  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: hasBars || !!inset, axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
   // Two value axes tick independently, so each draws its own grid: one set of
   // lines, and a shared tick count so the right-hand labels land on them.
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false) => ({
@@ -115,7 +118,9 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   const axisOf = (s: MetricSeries) => (s.axis === 'right' ? 1 : 0);
 
   return {
-    grid: { left: 8, right: secondary ? 8 : 12, top: 28, bottom: 4, containLabel: true },
+    grid: inset
+      ? { left: inset.left, right: inset.right, top: 28, bottom: 24, containLabel: false }
+      : { left: 8, right: secondary ? 8 : 12, top: 28, bottom: 4, containLabel: true },
     xAxis: cfg.horizontal ? primary : categoryAxis,
     yAxis: cfg.horizontal ? categoryAxis : values,
     ...(secondary ? { tooltip: dualAxisTooltip(cfg, format, secondaryFormat, theme) } : {}),

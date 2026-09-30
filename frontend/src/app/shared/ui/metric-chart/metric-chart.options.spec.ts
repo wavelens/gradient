@@ -266,3 +266,19 @@ describe('buildMetricChartOption dual axis', () => {
     expect((opt.series as any[])[0].yAxisIndex).toBeUndefined();
   });
 });
+
+describe('plot inset', () => {
+  it('pins the plot area and bucket slots so stacked charts line up', () => {
+    const inset = { left: 64, right: 56 };
+    const line = buildMetricChartOption({ type: 'line', series: one, categories: cats, inset }, THEME) as any;
+    const bars = buildMetricChartOption(
+      { type: 'bar', series: one, categories: cats, inset, secondary: { title: 'stalls' } },
+      THEME
+    ) as any;
+
+    for (const opt of [line, bars]) {
+      expect(opt.grid).toMatchObject({ left: 64, right: 56, containLabel: false });
+      expect(opt.xAxis.boundaryGap).toBe(true);
+    }
+  });
+});
