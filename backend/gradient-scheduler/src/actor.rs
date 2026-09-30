@@ -90,7 +90,7 @@ pub enum SchedulerMsg {
     Register(Registration, RpcReplyPort<Registered>),
     Unregister {
         worker: String,
-        reply: RpcReplyPort<Vec<PendingJob>>,
+        reply: RpcReplyPort<crate::jobs::Disconnected>,
     },
     IsConnected {
         worker: String,
@@ -354,12 +354,12 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::Unregister { worker, reply } => {
                 let orphaned = core.pool.unregister(&worker);
-                let requeued = core.tracker.worker_disconnected(&worker);
-                let total = orphaned.len() + requeued.len();
+                let gone = core.tracker.worker_disconnected(&worker);
+                let total = orphaned.len() + gone.requeued.len() + gone.cluster_members.len();
                 if total > 0 {
                     info!(%worker, orphaned_jobs = total, "worker disconnected; jobs re-queued");
                 }
-                let _ = reply.send(requeued);
+                let _ = reply.send(gone);
             }
             SchedulerMsg::IsConnected { worker, reply } => {
                 let _ = reply.send(core.pool.is_connected(&worker));
