@@ -46,6 +46,8 @@ describe('job timeline', () => {
 
   it('labels every phase the API can send', () => {
     expect(phaseLabel('nar_push')).toBe('NAR push');
+    expect(phaseLabel('nar_fetch')).toBe('NAR fetch');
+    expect(phaseLabel('nar_import')).toBe('NAR import');
     expect(phaseLabel('unknown_99')).toBe('unknown_99');
   });
 });

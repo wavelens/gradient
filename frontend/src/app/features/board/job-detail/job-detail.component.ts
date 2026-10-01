@@ -91,6 +91,12 @@ interface RuleRow {
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
         <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
         <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | date: 'medium') : '-' }}</span></div>
+        @if (j.worker_tail_ms !== null) {
+          <div class="step"><span class="label">Worker tail</span><span>{{ formatDuration(j.worker_tail_ms) }}</span></div>
+        }
+        @if (j.transit_ms !== null) {
+          <div class="step"><span class="label">Transit</span><span>{{ formatDuration(j.transit_ms) }}</span></div>
+        }
         <div class="step"><span class="label">Current State</span><span class="hl">{{ currentState() }}</span></div>
       </section>
 
