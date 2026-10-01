@@ -60,6 +60,8 @@ pub struct AppState {
     /// Resolved-once registry of forge providers (reporters, webhook parsing,
     /// signature verification) shared into every [`CiContext`].
     pub forge: ForgeRegistry,
+    /// GitHub's install page for the configured App, looked up on first use.
+    pub github_app_install_url: Arc<tokio::sync::OnceCell<String>>,
     /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.
     pub manifest_state: Arc<ManifestStateStore>,
     /// Manifest results awaiting one-shot pickup by the superuser's browser.

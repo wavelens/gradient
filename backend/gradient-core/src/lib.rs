@@ -217,6 +217,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         )),
         upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
+        github_app_install_url: Default::default(),
         shutdown: Shutdown::new(),
         last_used_stamps: last_used_stamps(),
         download_progress: download_progress(),

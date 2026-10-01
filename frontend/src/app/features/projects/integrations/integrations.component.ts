@@ -32,6 +32,7 @@ import {
   InputDirective,
   LabelHelpComponent,
   LoadingSpinnerComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
   SelectComponent,
   SettingsSectionComponent,
@@ -48,6 +49,7 @@ interface Option<T> {
   selector: 'app-integrations',
   standalone: true,
   imports: [
+    MessageBannerComponent,
     CommonModule,
     RouterModule,
     FormsModule,
@@ -143,6 +145,7 @@ export class IntegrationsComponent implements OnInit {
     this.integrations().filter((i) => i.forge_type === 'github' && i.kind === 'outbound'),
   );
   githubAppInstalled = computed(() => this.githubInstallations().length > 0);
+  githubAppInstallUrl = computed(() => this.project()?.github_app_install_url ?? null);
 
   outboundForgeOptions = computed<Option<ForgeType>[]>(() => [
     { label: 'Gitea', value: 'gitea' },

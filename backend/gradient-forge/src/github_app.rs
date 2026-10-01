@@ -126,7 +126,7 @@ pub async fn get_installation_token(
     Ok(token_resp.token)
 }
 
-// ── Installation account lookup ───────────────────────────────────────────
+// ── App-authenticated lookups ─────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct InstallationResponse {
@@ -138,6 +138,11 @@ struct InstallationAccount {
     login: String,
 }
 
+#[derive(Deserialize)]
+struct AppResponse {
+    html_url: String,
+}
+
 /// Validates that `installation_id` belongs to this App and returns the GitHub
 /// account login it is installed on. Errors (incl. 404) mean the id is not a
 /// valid installation for this App.
@@ -147,30 +152,55 @@ pub async fn get_installation(
     private_key_pem: &str,
     installation_id: i64,
 ) -> Result<String> {
+    let installation: InstallationResponse = app_get(
+        client,
+        app_id,
+        private_key_pem,
+        &format!("app/installations/{installation_id}"),
+    )
+    .await?;
+    Ok(installation.account.login)
+}
+
+/// The page where a GitHub account installs this App on its repositories.
+pub async fn get_install_url(
+    client: &reqwest::Client,
+    app_id: u64,
+    private_key_pem: &str,
+) -> Result<String> {
+    let app: AppResponse = app_get(client, app_id, private_key_pem, "app").await?;
+    Ok(format!(
+        "{}/installations/new",
+        app.html_url.trim_end_matches('/')
+    ))
+}
+
+async fn app_get<T: serde::de::DeserializeOwned>(
+    client: &reqwest::Client,
+    app_id: u64,
+    private_key_pem: &str,
+    path: &str,
+) -> Result<T> {
     let jwt = generate_jwt(app_id, private_key_pem)?;
-    let url = format!("https://api.github.com/app/installations/{installation_id}");
     let resp = client
-        .get(&url)
+        .get(format!("https://api.github.com/{path}"))
         .bearer_auth(&jwt)
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .header("User-Agent", "gradient")
         .send()
         .await
-        .context("GitHub get-installation request failed")?;
+        .with_context(|| format!("GitHub GET /{path} failed"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        bail!("GitHub get-installation API returned {status}: {body}");
+        bail!("GitHub GET /{path} returned {status}: {body}");
     }
 
-    let parsed: InstallationResponse = resp
-        .json()
+    resp.json()
         .await
-        .context("failed to parse GitHub installation response")?;
-
-    Ok(parsed.account.login)
+        .with_context(|| format!("failed to parse GitHub GET /{path} response"))
 }
 
 // ── Webhook signature verification ────────────────────────────────────────
