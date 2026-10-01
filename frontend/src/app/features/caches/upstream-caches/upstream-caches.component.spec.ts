@@ -193,6 +193,13 @@ describe('UpstreamCachesComponent - activation', () => {
     expect(updateUpstream).toHaveBeenCalledWith('demo', 'u1', { active: false });
   });
 
+  it('keeps Deactivate usable on a state-managed cache, since state restores it on restart', () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    const toggle = findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement | null;
+    expect(toggle).not.toBeNull();
+    expect(toggle!.disabled).toBe(false);
+  });
+
   it('marks an inactive upstream cache and offers Activate', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...httpUpstream, active: false }]);
     expect(fixture.nativeElement.textContent).toContain('Inactive');

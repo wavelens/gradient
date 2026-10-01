@@ -68,13 +68,14 @@ export class UpstreamCachesComponent implements OnInit {
 
   access = injectCacheAccess();
 
-  rowDisabled = computed(
+  rowBusy = computed(
     () =>
       this.removingUpstreamId() !== null ||
       this.togglingUpstreamId() !== null ||
-      this.testingUpstreamId() !== null ||
-      this.accessSvc.shouldDisableInput(this.access()),
+      this.testingUpstreamId() !== null,
   );
+
+  rowDisabled = computed(() => this.rowBusy() || this.accessSvc.shouldDisableInput(this.access()));
 
   loading = signal(true);
   addingUpstream = signal(false);
