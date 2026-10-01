@@ -14,5 +14,12 @@
     "./ui": "./src/ui/index.ts",
     "./chrome": "./src/chrome/index.ts",
     "./tokens": "./src/styles/tokens.ts"
+  },
+  "peerDependencies": {
+    "@angular/cdk": "^22.2.0",
+    "@angular/common": "^22.2.0",
+    "@angular/core": "^22.2.0",
+    "@angular/forms": "^22.2.0",
+    "@angular/router": "^22.2.0"
   }
 }
