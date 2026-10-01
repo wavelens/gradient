@@ -30,7 +30,6 @@ impl EventKind for Swept {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeepFinished {
-    pub succeeded: bool,
     pub report: serde_json::Value,
 }
 

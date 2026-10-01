@@ -18,9 +18,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
-/// Per-pass counters returned by `cleanup_orphaned_cache_files`. The deep-GC
-/// sweep threads these into its progress report; the hourly loop just logs
-/// the result.
+/// Per-shard counters returned by `reconcile_nar_shard`, which the deep GC
+/// threads into its progress report.
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct CleanupReport {
     pub orphan_nars_scanned: u64,
@@ -259,10 +258,12 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
     Ok(evicted)
 }
 
-pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<CleanupReport> {
+/// Reconcile one NAR key shard with the database in both directions: objects
+/// no row keeps are deleted, confirmed rows whose object is gone are retired.
+pub async fn reconcile_nar_shard(state: Arc<ServerState>, shard: &str) -> Result<CleanupReport> {
     let on_disk = state
         .nar_storage
-        .list_hashes_with_modified()
+        .list_shard(shard)
         .await
         .context("Failed to list NAR store")?;
     let on_disk_set: HashSet<String> = on_disk.iter().map(|(h, _)| h.clone()).collect();
@@ -293,14 +294,19 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<Cle
             .await;
     }
 
-    report.zombie_cached_paths_purged = purge_zombie_cached_paths(&state, &on_disk_set).await?;
+    report.zombie_cached_paths_purged =
+        purge_zombie_cached_paths(&state, shard, &on_disk_set).await?;
     Ok(report)
 }
 
-/// Rows whose object should be in storage: an unconfirmed row's object is
-/// legitimately absent while the uploader owes it.
-fn zombie_candidates() -> sea_orm::Select<ECachedPath> {
+/// Rows of `shard` whose object should be in storage: an unconfirmed row's
+/// object is legitimately absent while the uploader owes it. The range keeps the
+/// unique `hash` index usable, which a `LIKE` prefix would not under a non-C
+/// collation; `z` is the last Nix base32 character.
+fn zombie_candidates(shard: &str) -> sea_orm::Select<ECachedPath> {
+    let last = format!("{shard}{}", "z".repeat(32usize.saturating_sub(shard.len())));
     ECachedPath::find()
+        .filter(CCachedPath::Hash.between(shard.to_owned(), last))
         .filter(CCachedPath::FileHash.is_not_null())
         .filter(CCachedPath::Confirmed.eq(true))
 }
@@ -313,8 +319,12 @@ fn zombie_candidates() -> sea_orm::Select<ECachedPath> {
 /// nobody: one pass did that to two anchors and wedged 550 dependents of theirs
 /// for the rest of the run. The listing is the prefilter; storage decides, and a
 /// probe that errors preserves.
-async fn zombie_hashes(state: &Arc<ServerState>, on_disk: &HashSet<String>) -> Result<Vec<String>> {
-    let rows = zombie_candidates()
+async fn zombie_hashes(
+    state: &Arc<ServerState>,
+    shard: &str,
+    on_disk: &HashSet<String>,
+) -> Result<Vec<String>> {
+    let rows = zombie_candidates(shard)
         .all(&state.worker_db)
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
@@ -346,9 +356,10 @@ async fn zombie_hashes(state: &Arc<ServerState>, on_disk: &HashSet<String>) -> R
 /// sign-sweep workload.
 async fn purge_zombie_cached_paths(
     state: &Arc<ServerState>,
+    shard: &str,
     on_disk: &HashSet<String>,
 ) -> Result<u64> {
-    let zombies = zombie_hashes(state, on_disk).await?;
+    let zombies = zombie_hashes(state, shard, on_disk).await?;
     if zombies.is_empty() {
         return Ok(0);
     }
@@ -490,12 +501,12 @@ mod tests {
     async fn removes_only_what_the_probe_names_unreferenced() {
         let tmp = tempfile::tempdir().unwrap();
         let active = "aabbccdd11111111111111111111111111";
-        let orphan = "eeff001122222222222222222222222222";
+        let orphan = "aaff001122222222222222222222222222";
         write_nar_file(tmp.path(), active);
         write_nar_file(tmp.path(), orphan);
 
         let state = make_state(tmp.path(), vec![orphan]);
-        let report = cleanup_orphaned_cache_files(state).await.unwrap();
+        let report = reconcile_nar_shard(state, "aa").await.unwrap();
 
         assert!(nar_file_exists(tmp.path(), active));
         assert!(!nar_file_exists(tmp.path(), orphan));
@@ -547,7 +558,7 @@ mod tests {
         write_nar_file(tmp.path(), drv);
 
         let state = make_state(tmp.path(), vec![]);
-        cleanup_orphaned_cache_files(state).await.unwrap();
+        reconcile_nar_shard(state, "dd").await.unwrap();
 
         assert!(nar_file_exists(tmp.path(), drv));
     }
@@ -564,12 +575,12 @@ mod tests {
     async fn every_unreferenced_candidate_is_removed() {
         let tmp = tempfile::tempdir().unwrap();
         let h1 = "1111aaaa44444444444444444444444444";
-        let h2 = "2222bbbb55555555555555555555555555";
+        let h2 = "1122bbbb55555555555555555555555555";
         write_nar_file(tmp.path(), h1);
         write_nar_file(tmp.path(), h2);
 
         let state = make_state(tmp.path(), vec![h1, h2]);
-        cleanup_orphaned_cache_files(state).await.unwrap();
+        reconcile_nar_shard(state, "11").await.unwrap();
 
         assert!(!nar_file_exists(tmp.path(), h1));
         assert!(!nar_file_exists(tmp.path(), h2));
@@ -607,7 +618,7 @@ mod tests {
             config.gc.nar_upload_grace_hours = 24;
         });
 
-        cleanup_orphaned_cache_files(state)
+        reconcile_nar_shard(state, "dd")
             .await
             .expect("a pass with no candidate issues no probe");
         assert!(
@@ -640,7 +651,7 @@ mod tests {
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
         let state = test_server_state(nar_storage, db, |_| {});
 
-        let zombies = zombie_hashes(&state, &HashSet::new()).await.unwrap();
+        let zombies = zombie_hashes(&state, "cc", &HashSet::new()).await.unwrap();
 
         assert!(zombies.is_empty(), "storage decides, not the stale listing");
         assert!(nar_file_exists(tmp.path(), fresh));
@@ -682,7 +693,7 @@ mod tests {
 
         let state = test_server_state(nar_storage, db, |_| {});
 
-        let zombies = zombie_hashes(&state, &HashSet::new()).await.unwrap();
+        let zombies = zombie_hashes(&state, "", &HashSet::new()).await.unwrap();
 
         assert_eq!(zombies, vec![zombie_hash.to_owned()]);
         assert!(nar_file_exists(tmp.path(), live), "live NAR must survive");
@@ -799,7 +810,7 @@ mod tests {
     #[test]
     fn the_zombie_purge_never_reads_an_unconfirmed_row() {
         use sea_orm::QueryTrait;
-        let sql = zombie_candidates()
+        let sql = zombie_candidates("0a")
             .build(DatabaseBackend::Postgres)
             .to_string()
             .to_uppercase();

@@ -35,9 +35,9 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
     /// Permanently delete the log for `attempt_id` from all backing stores.
     fn delete<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>>;
 
-    /// Enumerate every `BuildAttemptId` that currently has a log in this backend,
-    /// inline or chunked. Used by the deep-GC sweep to find orphan logs.
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>>;
+    /// Every `BuildAttemptId` with a log in one of the [`log_shards`], inline or
+    /// chunked. The deep GC walks the shards one by one to find orphan logs.
+    fn list_shard<'a>(&'a self, shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>>;
 
     /// Write one compressed log chunk object.
     fn write_chunk<'a>(
@@ -96,6 +96,16 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
 pub struct LegacyCleanup {
     pub relocated: u64,
     pub deleted: Vec<BuildAttemptId>,
+}
+
+/// Every shard below `logs/`, in ascending key order.
+pub fn log_shards() -> Vec<String> {
+    (0..=u8::MAX).map(|b| format!("{b:02x}")).collect()
+}
+
+/// The one of the [`log_shards`] holding `attempt_id`'s log.
+pub fn log_shard(attempt_id: BuildAttemptId) -> String {
+    layout::shard(attempt_id)
 }
 
 /// Whether `err` says a log file or object does not exist, as opposed to a
@@ -245,24 +255,17 @@ impl LogStorage for FileLogStorage {
         })
     }
 
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
+    fn list_shard<'a>(&'a self, shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async move {
             let mut out = BTreeSet::new();
-            let mut shards = match fs::read_dir(&self.logs_dir).await {
+            let mut entries = match fs::read_dir(self.logs_dir.join(shard)).await {
                 Ok(e) => e,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
                 Err(e) => return Err(e.into()),
             };
-            while let Some(shard) = shards.next_entry().await? {
-                if !shard.file_type().await?.is_dir() {
-                    continue;
-                }
-
-                let mut entries = fs::read_dir(shard.path()).await?;
-                while let Some(entry) = entries.next_entry().await? {
-                    if let Some(id) = entry.file_name().to_str().and_then(layout::attempt_of) {
-                        out.insert(id);
-                    }
+            while let Some(entry) = entries.next_entry().await? {
+                if let Some(id) = entry.file_name().to_str().and_then(layout::attempt_of) {
+                    out.insert(id);
                 }
             }
             Ok(out.into_iter().collect())
@@ -395,18 +398,16 @@ impl LogStorage for S3LogStorage {
         })
     }
 
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
+    fn list_shard<'a>(&'a self, shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async move {
             use futures::StreamExt as _;
             let mut out: BTreeSet<BuildAttemptId> =
-                self.local.list_logs().await?.into_iter().collect();
-            let root = self.logs_root();
+                self.local.list_shard(shard).await?.into_iter().collect();
+            let root = self.object_path(shard);
             let mut stream = self.object_store.list(Some(&root));
             while let Some(item) = stream.next().await {
                 let location = item?.location;
-                let entry = location
-                    .prefix_match(&root)
-                    .and_then(|mut parts| parts.nth(1));
+                let entry = location.prefix_match(&root).and_then(|mut parts| parts.next());
                 if let Some(id) = entry.and_then(|p| layout::attempt_of(p.as_ref())) {
                     out.insert(id);
                 }
@@ -559,8 +560,17 @@ mod tests {
         assert_eq!(storage.read(id).await.unwrap(), "hello");
     }
 
+    async fn list_all(storage: &dyn LogStorage) -> Vec<BuildAttemptId> {
+        let mut out = Vec::new();
+        for shard in log_shards() {
+            out.extend(storage.list_shard(&shard).await.unwrap());
+        }
+        out.sort();
+        out
+    }
+
     #[tokio::test]
-    async fn file_list_logs_reports_chunk_only_logs_once() {
+    async fn file_list_shard_reports_chunk_only_logs_once() {
         let dir = tempfile::tempdir().unwrap();
         let storage = FileLogStorage::new(dir.path()).await.unwrap();
         let live = BuildAttemptId::new(uuid::Uuid::now_v7());
@@ -571,14 +581,12 @@ mod tests {
         storage.delete_inline_log(finalized).await.unwrap();
         storage.write_chunk(live, 0, b"z").await.unwrap();
 
-        let mut listed = storage.list_logs().await.unwrap();
-        listed.sort();
         let mut expected = vec![live, finalized];
         expected.sort();
-        assert_eq!(listed, expected);
+        assert_eq!(list_all(&storage).await, expected);
 
         storage.delete(finalized).await.unwrap();
-        assert_eq!(storage.list_logs().await.unwrap(), vec![live]);
+        assert_eq!(list_all(&storage).await, vec![live]);
     }
 
     #[tokio::test]
@@ -670,7 +678,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn s3_list_logs_reports_finalized_logs_and_delete_removes_them() {
+    async fn s3_list_shard_reports_finalized_logs_and_delete_removes_them() {
         let dir = tempfile::tempdir().unwrap();
         let (s3, _store) = s3_storage(dir.path()).await;
         let live = BuildAttemptId::new(uuid::Uuid::now_v7());
@@ -679,13 +687,11 @@ mod tests {
         s3.write_chunk(finalized, 0, b"a").await.unwrap();
         s3.write_chunk(finalized, 1, b"b").await.unwrap();
 
-        let mut listed = s3.list_logs().await.unwrap();
-        listed.sort();
         let mut expected = vec![live, finalized];
         expected.sort();
-        assert_eq!(listed, expected);
+        assert_eq!(list_all(&s3).await, expected);
 
         s3.delete(finalized).await.unwrap();
-        assert_eq!(s3.list_logs().await.unwrap(), vec![live]);
+        assert_eq!(list_all(&s3).await, vec![live]);
     }
 }

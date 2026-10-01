@@ -97,6 +97,7 @@ pub struct Model {
     pub progress: Option<Json>,
     pub error: Option<String>,
     pub created_by: Option<UserId>,
+    pub checkpoint: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

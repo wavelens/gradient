@@ -62,6 +62,7 @@ pub mod project_user;
 pub mod role;
 pub mod server;
 pub mod session;
+pub mod storage_migration;
 pub mod task;
 pub mod task_action;
 pub mod task_action_delivery;

@@ -54,6 +54,7 @@ pub mod sql;
 pub mod state_machine;
 pub mod status;
 pub mod status_sql;
+pub mod storage_migrations;
 pub mod task_board;
 pub mod walk_completeness;
 

@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use gradient_storage::LogStorage;
+use gradient_storage::{LogStorage, log_shard};
 use gradient_types::ids::BuildAttemptId;
 
 /// Minimal no-op log storage for tests.
@@ -30,7 +30,7 @@ impl LogStorage for NoopLogStorage {
     fn delete<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
+    fn list_shard<'a>(&'a self, _shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
     fn write_chunk<'a>(
@@ -106,14 +106,14 @@ impl LogStorage for RecordingLogStorage {
         })
     }
 
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
+    fn list_shard<'a>(&'a self, shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async move {
             use std::collections::HashSet;
             let entries = self.entries.lock().expect("recording log mutex");
             let mut seen: HashSet<BuildAttemptId> = HashSet::new();
             let mut out = Vec::new();
             for (b, _) in entries.iter() {
-                if seen.insert(*b) {
+                if log_shard(*b) == shard && seen.insert(*b) {
                     out.push(*b);
                 }
             }
@@ -197,7 +197,7 @@ impl LogStorage for InMemoryLogStorage {
         })
     }
 
-    fn list_logs<'a>(&'a self) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
+    fn list_shard<'a>(&'a self, shard: &'a str) -> BoxFuture<'a, Result<Vec<BuildAttemptId>>> {
         Box::pin(async move {
             Ok(self
                 .store
@@ -205,6 +205,7 @@ impl LogStorage for InMemoryLogStorage {
                 .expect("in-memory log mutex")
                 .keys()
                 .copied()
+                .filter(|id| log_shard(*id) == shard)
                 .collect())
         })
     }

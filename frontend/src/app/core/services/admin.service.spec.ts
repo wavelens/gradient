@@ -21,6 +21,7 @@ const sampleTask: AdminTask = {
   started_at: null,
   finished_at: null,
   progress: null,
+  checkpoint: null,
   error: null,
   created_by: 'user-1',
 };

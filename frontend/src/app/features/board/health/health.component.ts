@@ -82,18 +82,19 @@ import { formatBytes, formatDuration } from '@shared/text';
       </div>
 
       <gr-table class="http">
-        <thead><tr><th>Task</th><th>Status</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
+        <thead><tr><th>Task</th><th>Status</th><th>Checkpoint</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
         <tbody>
           @for (t of tasks(); track t.id) {
             <tr>
               <td>{{ t.kind }}</td>
               <td>{{ t.status }}</td>
+              <td class="muted">{{ t.checkpoint ?? '-' }}</td>
               <td>{{ t.created_at | date: 'short' }}</td>
               <td>{{ t.finished_at ? (t.finished_at | date: 'short') : '-' }}</td>
               <td [class.bad]="!!t.error">{{ t.error ?? '' }}</td>
             </tr>
           } @empty {
-            <tr><td colspan="5" class="muted">No admin tasks yet.</td></tr>
+            <tr><td colspan="6" class="muted">No admin tasks yet.</td></tr>
           }
         </tbody>
       </gr-table>

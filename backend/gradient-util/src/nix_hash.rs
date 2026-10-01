@@ -16,14 +16,15 @@
 
 use base64::Engine as _;
 
+/// The Nix base32 alphabet in ascending order (omits `e`, `o`, `t`, `u`).
+pub const NIX32_CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+
 pub fn is_nix32_hash(s: &str) -> bool {
-    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
-    s.len() == 32 && s.bytes().all(|b| CHARS.contains(&b))
+    s.len() == 32 && s.bytes().all(|b| NIX32_CHARS.contains(&b))
 }
 
-/// Encode bytes using the Nix base32 alphabet (omits `e`, `o`, `t`, `u`).
+/// Encode bytes using the Nix base32 alphabet.
 pub fn nix32_encode(bytes: &[u8]) -> String {
-    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
     let len = (bytes.len() * 8 - 1) / 5 + 1;
     let mut out = String::with_capacity(len);
     for n in (0..len).rev() {
@@ -33,7 +34,7 @@ pub fn nix32_encode(bytes: &[u8]) -> String {
         let byte0 = bytes.get(i).copied().unwrap_or(0) as u32;
         let byte1 = bytes.get(i + 1).copied().unwrap_or(0) as u32;
         let c = ((byte0 >> j) | (byte1 << (8 - j))) & 0x1f;
-        out.push(CHARS[c as usize] as char);
+        out.push(NIX32_CHARS[c as usize] as char);
     }
     out
 }

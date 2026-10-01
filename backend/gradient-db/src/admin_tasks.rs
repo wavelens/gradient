@@ -7,7 +7,8 @@
 //! CRUD helpers for the `admin_task` table.
 
 use anyhow::{Context, Result};
-use sea_orm::ActiveValue::Set;
+use chrono::{NaiveDateTime, SubsecRound};
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, QueryOrder, QuerySelect,
@@ -107,89 +108,99 @@ pub async fn get<C: ConnectionTrait>(conn: &C, id: AdminTaskId) -> Result<Option
         .context("get admin_task")
 }
 
-pub async fn mark_running<C: ConnectionTrait>(conn: &C, id: AdminTaskId) -> Result<()> {
-    let Some(model) = get(conn, id).await? else {
-        return Ok(());
-    };
-    let mut a: AAdminTask = model.into_active_model();
-    a.status = Set(AdminTaskStatus::Running);
-    a.started_at = Set(Some(now()));
-    a.update(conn).await.context("mark_running")?;
-    Ok(())
-}
-
-pub async fn update_progress<C: ConnectionTrait>(
-    conn: &C,
-    id: AdminTaskId,
-    progress: JsonValue,
-) -> Result<()> {
-    let Some(model) = get(conn, id).await? else {
-        return Ok(());
-    };
-    let mut a: AAdminTask = model.into_active_model();
-    a.progress = Set(Some(progress));
-    a.update(conn).await.context("update_progress")?;
-    Ok(())
-}
-
-pub async fn mark_completed<C: ConnectionTrait>(
-    conn: &C,
-    id: AdminTaskId,
-    progress: JsonValue,
-) -> Result<()> {
-    let Some(model) = get(conn, id).await? else {
-        return Ok(());
-    };
-    let mut a: AAdminTask = model.into_active_model();
-    a.status = Set(AdminTaskStatus::Completed);
-    a.progress = Set(Some(progress));
-    a.finished_at = Set(Some(now()));
-    a.update(conn).await.context("mark_completed")?;
-    Ok(())
-}
-
-pub async fn mark_failed<C: ConnectionTrait>(
-    conn: &C,
-    id: AdminTaskId,
-    error: String,
-    progress: Option<JsonValue>,
-) -> Result<()> {
-    let Some(model) = get(conn, id).await? else {
-        return Ok(());
-    };
-    let mut a: AAdminTask = model.into_active_model();
-    a.status = Set(AdminTaskStatus::Failed);
-    a.error = Set(Some(error));
-    if let Some(p) = progress {
-        a.progress = Set(Some(p));
-    }
-    a.finished_at = Set(Some(now()));
-    a.update(conn).await.context("mark_failed")?;
-    Ok(())
-}
-
-pub const STARTUP_FAILURE_MESSAGE: &str = "server restarted before completion";
-
-crate::sql! {
-    MARK_ALL_ACTIVE_FAILED = r#"UPDATE admin_task
-               SET status = $1,
-                   error = COALESCE(error, $2),
-                   finished_at = NOW() AT TIME ZONE 'UTC'
-               WHERE status IN ($3, $4)"#,
-        params = [Int(3), Text("server restarted before completion"), Int(0), Int(1)];
-}
-
-pub async fn mark_all_active_failed<C: ConnectionTrait>(conn: &C) -> Result<u64> {
-    let res = conn
-        .execute_raw(MARK_ALL_ACTIVE_FAILED.bind([
-            sea_orm::Value::Int(Some(AdminTaskStatus::Failed as i32)),
-            sea_orm::Value::String(Some(STARTUP_FAILURE_MESSAGE.into())),
-            sea_orm::Value::Int(Some(AdminTaskStatus::Pending as i32)),
-            sea_orm::Value::Int(Some(AdminTaskStatus::Running as i32)),
-        ]))
+/// Move a pending task to running and return the `started_at` that names this
+/// run in [`save_checkpoint`] and [`complete`]. `None` when it is not pending.
+pub async fn start<C: ConnectionTrait>(conn: &C, id: AdminTaskId) -> Result<Option<NaiveDateTime>> {
+    let started_at = now().trunc_subsecs(6);
+    let res = EAdminTask::update_many()
+        .col_expr(CAdminTask::Status, Expr::value(AdminTaskStatus::Running))
+        .col_expr(CAdminTask::StartedAt, Expr::value(started_at))
+        .filter(CAdminTask::Id.eq(id))
+        .filter(CAdminTask::Status.eq(AdminTaskStatus::Pending))
+        .exec(conn)
         .await
-        .context("mark_all_active_failed")?;
-    Ok(res.rows_affected())
+        .context("start admin_task")?;
+    Ok((res.rows_affected == 1).then_some(started_at))
+}
+
+/// Record the last finished unit of the run begun at `started_at`. `false` when
+/// [`restart`] or an end of the task took it away from this run meanwhile.
+pub async fn save_checkpoint<C: ConnectionTrait>(
+    conn: &C,
+    id: AdminTaskId,
+    started_at: NaiveDateTime,
+    checkpoint: &str,
+    progress: JsonValue,
+) -> Result<bool> {
+    let res = EAdminTask::update_many()
+        .col_expr(CAdminTask::Checkpoint, Expr::value(checkpoint))
+        .col_expr(CAdminTask::Progress, Expr::value(progress))
+        .filter(CAdminTask::Id.eq(id))
+        .filter(CAdminTask::Status.eq(AdminTaskStatus::Running))
+        .filter(CAdminTask::StartedAt.eq(started_at))
+        .exec(conn)
+        .await
+        .context("save admin_task checkpoint")?;
+    Ok(res.rows_affected == 1)
+}
+
+/// Complete the run begun at `started_at`, unless it was restarted meanwhile.
+pub async fn complete<C: ConnectionTrait>(
+    conn: &C,
+    id: AdminTaskId,
+    started_at: NaiveDateTime,
+    progress: JsonValue,
+) -> Result<bool> {
+    let res = EAdminTask::update_many()
+        .col_expr(CAdminTask::Status, Expr::value(AdminTaskStatus::Completed))
+        .col_expr(CAdminTask::Progress, Expr::value(progress))
+        .col_expr(CAdminTask::FinishedAt, Expr::value(now()))
+        .filter(CAdminTask::Id.eq(id))
+        .filter(CAdminTask::Status.eq(AdminTaskStatus::Running))
+        .filter(CAdminTask::StartedAt.eq(started_at))
+        .exec(conn)
+        .await
+        .context("complete admin_task")?;
+    Ok(res.rows_affected == 1)
+}
+
+/// Send an active task back to pending with no checkpoint, owned by
+/// `created_by`, so the next run starts over from its first unit.
+pub async fn restart<C: ConnectionTrait>(
+    conn: &C,
+    id: AdminTaskId,
+    created_by: Option<UserId>,
+) -> Result<bool> {
+    let res = EAdminTask::update_many()
+        .col_expr(CAdminTask::Status, Expr::value(AdminTaskStatus::Pending))
+        .col_expr(CAdminTask::StartedAt, Expr::value(Option::<NaiveDateTime>::None))
+        .col_expr(CAdminTask::Checkpoint, Expr::value(Option::<String>::None))
+        .col_expr(CAdminTask::Progress, Expr::value(Option::<JsonValue>::None))
+        .col_expr(CAdminTask::CreatedBy, Expr::value(created_by))
+        .filter(CAdminTask::Id.eq(id))
+        .filter(CAdminTask::Status.is_in([AdminTaskStatus::Pending, AdminTaskStatus::Running]))
+        .exec(conn)
+        .await
+        .context("restart admin_task")?;
+    Ok(res.rows_affected == 1)
+}
+
+/// When the last task of `kind` finished, if any did.
+pub async fn last_finished_at<C: ConnectionTrait>(
+    conn: &C,
+    kind: AdminTaskKind,
+) -> Result<Option<NaiveDateTime>> {
+    Ok(EAdminTask::find()
+        .select_only()
+        .column(CAdminTask::FinishedAt)
+        .filter(CAdminTask::Kind.eq(kind))
+        .filter(CAdminTask::FinishedAt.is_not_null())
+        .order_by_desc(CAdminTask::FinishedAt)
+        .into_tuple::<Option<NaiveDateTime>>()
+        .one(conn)
+        .await
+        .context("last finished admin_task")?
+        .flatten())
 }
 
 #[cfg(test)]

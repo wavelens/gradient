@@ -681,6 +681,24 @@ in {
             blocking evaluation garbage collection. `0` blocks forever.
           '';
         };
+
+        deepIntervalSecs = lib.mkOption {
+          type = lib.types.ints.unsigned;
+          default = 3600;
+          description = ''
+            Seconds from the end of one background deep garbage collection round to the start of the
+            next. `0` runs a round only when one is requested.
+          '';
+        };
+
+        deepPaceMs = lib.mkOption {
+          type = lib.types.ints.unsigned;
+          default = 1000;
+          description = ''
+            Milliseconds between two units of a storage migration or a background deep garbage
+            collection round. A requested round runs its units without a pause.
+          '';
+        };
       };
 
       eval = {
@@ -1361,6 +1379,8 @@ in {
         GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS = toString cfg.gc.narUploadGraceHours;
         GRADIENT_GC_ORPHAN_DERIVATION_HOURS = toString cfg.gc.orphanDerivationHours;
         GRADIENT_GC_WEDGED_EVAL_HOURS = toString cfg.gc.wedgedEvalHours;
+        GRADIENT_GC_DEEP_INTERVAL_SECS = toString cfg.gc.deepIntervalSecs;
+        GRADIENT_GC_DEEP_PACE_MS = toString cfg.gc.deepPaceMs;
         GRADIENT_EVAL_MAX_KEEP = toString cfg.eval.maxKeep;
         GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES = toString cfg.eval.cache.maxTotalBytes;
         GRADIENT_EVAL_CACHE_MAX_AGE_DAYS = toString cfg.eval.cache.maxAgeDays;

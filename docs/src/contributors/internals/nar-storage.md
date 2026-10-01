@@ -48,21 +48,36 @@ logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 - **Finalized:** `finalize_build_log` appends the live file as zstd chunks after any earlier chunks, indexes them in `build_log_chunk` and drops the live file. With S3 the chunks go to `<prefix>logs/...` only.
 - **Finalize Triggers:** the anchor turning terminal, a new attempt replacing the latest one (abort, lost worker, retry) and an upstream log arriving after the build (log substitution). Every trigger queues a `LogFinalize` outbox row for the attempt.
 - **Missing Chunks:** a chunk whose object is gone renders as one `[log chunk unavailable]` line per indexed line, and a re-finalize keeps one such line in its place.
-- **Legacy Layout:** flat `logs/<attempt>.log` and `logs/<attempt>/` entries from before sharding are retired by the [deep GC](#deep-gc): moved into their shard on local disk, deleted with their `build_log_chunk` rows on S3.
+- **Legacy Layout:** flat `logs/<attempt>.log` and `logs/<attempt>/` entries from before sharding are retired by the [storage migration](#storage-migrations) `m20261001_000000_shard_build_logs`: moved into their shard on local disk, deleted with their `build_log_chunk` rows on S3.
 - **Reclaimed:** with their derivation by the orphan-derivation GC; logs without a `build_attempt` row by the [deep GC](#deep-gc) log pass.
+
+## Storage Migrations
+
+Layout changes of NAR, log and blob storage ship as storage migrations, the storage counterpart of the database migrations (`gradient-cache/src/cacher/storage_migrations/`).
+
+- **Units:** a migration lists its units in ascending order; each unit is idempotent and runs again in full when a restart cuts it short.
+- **Ledger:** `storage_migration` holds one row per migration: `checkpoint` names the last finished unit, `applied_at` marks it done.
+- **Order:** pending migrations run in registry order, one unit per `gc.deepPaceMs`, and before any [deep GC](#deep-gc) unit: the deep GC reads only the current layout.
+- **Readers:** a migration that moves live objects keeps the old location readable until it is applied.
+
+| Migration | Units | Change |
+|---|---|---|
+| `m20261001_000000_shard_build_logs` | `logs` | Flat pre-shard logs move into their shard (local) or are deleted with their `build_log_chunk` rows (S3) |
 
 ## Deep GC
 
-`POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) reconciles every storage backend against the database in four passes (`gradient-cache/src/cacher/deep_gc.rs`).
+The deep GC reconciles every storage backend against the database, one unit at a time (`gradient-cache/src/cacher/deep_gc/`). A round walks every unit once, in ascending key order.
 
-| Pass | Removes |
+| Unit | Removes |
 |---|---|
-| NAR | `cleanup_orphaned_cache_files`: objects without `cached_path` rows and rows without objects. Evicting stale live paths is maintenance's job |
-| Blob | `build-request-blobs/...` objects and `build_request_blob` rows without a partner |
-| Log | Flat pre-shard logs first (see [Build Logs](#build-logs)), then logs keyed by `BuildAttemptId` without a `build_attempt` row; an attempt without a log is legitimate |
-| Partial | Unfinished uploads under `nar-partial`, `nar-upload-partial` and `source-upload-partial` older than `nar.partialTtlSecs`, and directories left empty by the older nested layout. No other sweep walks these roots: a walk on a session or request path stalls it behind the filesystem |
+| `blobs` | `build-request-blobs/...` objects and `build_request_blob` rows without a partner |
+| `logs/<xx>` | Logs of one shard keyed by `BuildAttemptId` without a `build_attempt` row; an attempt without a log is legitimate |
+| `nars/<xx>` | One of the 1024 two-character NAR shards: objects past `gc.narUploadGraceHours` without a keeping row, and confirmed `cached_path` rows of the shard (an index range on `hash`) whose object is gone. Evicting stale live paths is maintenance's job |
+| `partials` | Unfinished uploads under `nar-partial`, `nar-upload-partial` and `source-upload-partial` older than `nar.partialTtlSecs`, and directories left empty by the older nested layout. No other sweep walks these roots: a walk on a session or request path stalls it behind the filesystem |
 
-- **Tracking:** an `admin_task` row, `kind = deep_gc`, `pending` -> `running` -> `completed` / `failed`. The partial unique index `admin_task_one_active_per_kind` allows one active task; a second `POST` answers `409`.
-- **Progress** is flushed between passes to `admin_task.progress`, read at `GET /api/v1/admin/tasks[/{task_id}]`.
-- **Failure** of a pass stops the sweep and keeps the partial report.
-- **Restart** marks every non-terminal task `failed` before the web layer serves; each pass is idempotent, a new `POST` starts over.
+- **Rounds:** an `admin_task` row, `kind = deep_gc`, `pending` -> `running` -> `completed`. The partial unique index `admin_task_one_active_per_kind` allows one active round.
+- **Background:** a round starts `gc.deepIntervalSecs` after the last one finished (`0` disables background rounds) and runs one unit per `gc.deepPaceMs`.
+- **Requested:** `POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) starts a round, or sends the active one back to its first unit. A requested round runs its units back to back.
+- **Checkpoint:** `admin_task.checkpoint` names the last finished unit and `progress` the running report, read at `GET /api/v1/admin/tasks[/{task_id}]`. A server restart resumes the round after its checkpoint.
+- **Restart Race:** a checkpoint is saved only while `started_at` still matches the run that took the unit; a `POST` in between resets `started_at` and wins.
+- **Failure** of a unit leaves the checkpoint in place; the next tick retries the same unit.
