@@ -186,7 +186,7 @@ async fn apply_base_worker<C: ConnectionTrait>(
     reconcile_pre_enabled_projects(db, base_worker_id, worker, project_map, user_id).await?;
 
     if sweep_projects {
-        let enabled = gradient_db::base_workers::enable_base_worker_for_all_projects(
+        let enabled = gradient_db::projects::base_workers::enable_base_worker_for_all_projects(
             db,
             base_worker_id,
             user_id,

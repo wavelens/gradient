@@ -353,7 +353,12 @@ async fn enqueue_backfill_signatures(
     project_id: ProjectId,
     cache_id: CacheId,
 ) {
-    let drv_ids = match gradient_db::derivation_ids_for_project(&state.web_db, project_id).await {
+    let drv_ids = match gradient_db::projects::derivations::derivation_ids_for_project(
+        &state.web_db,
+        project_id,
+    )
+    .await
+    {
         Ok(ids) => ids,
         Err(e) => {
             tracing::warn!(%project_id, error = %e, "backfill: failed to load derivations");

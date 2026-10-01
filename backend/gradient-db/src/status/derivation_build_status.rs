@@ -53,13 +53,21 @@ pub async fn update_derivation_build_status(
     }
 
     if status == BuildStatus::Building {
-        let _ =
-            crate::build_attempt::stamp_attempt_started(&ctx.worker_db, shared_build.id, now).await;
+        let _ = crate::scheduling::build_attempt::stamp_attempt_started(
+            &ctx.worker_db,
+            shared_build.id,
+            now,
+        )
+        .await;
     }
 
     if BuildStateMachine::is_terminal(&status) {
-        let _ = crate::build_attempt::stamp_attempt_finished(&ctx.worker_db, shared_build.id, now)
-            .await;
+        let _ = crate::scheduling::build_attempt::stamp_attempt_finished(
+            &ctx.worker_db,
+            shared_build.id,
+            now,
+        )
+        .await;
     }
 
     let updated = match active.update(&ctx.worker_db).await {
@@ -90,7 +98,9 @@ pub async fn update_derivation_build_status(
     // `cascade_dependency_failed` on that failure's own transition, and by the
     // eval-scoped `repair_dependency_failed` for the ones it could not reach.
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
-        match crate::can_start::advance_fetchable(&ctx.worker_db, &[updated.derivation]).await {
+        match crate::graph::can_start::advance_fetchable(&ctx.worker_db, &[updated.derivation])
+            .await
+        {
             Ok(changes) => emit_transition_effects(ctx, &changes).await,
             Err(e) => error!(error = %e, "failed to advance the parents"),
         }
@@ -100,7 +110,8 @@ pub async fn update_derivation_build_status(
         status,
         BuildStatus::FailedPermanent | BuildStatus::FailedTimeout | BuildStatus::DependencyFailed
     ) {
-        match crate::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation).await
+        match crate::graph::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation)
+            .await
         {
             Ok(changes) => emit_transition_effects(ctx, &changes).await,
             Err(e) => error!(error = %e, "failed to cascade dependency failure"),
@@ -110,10 +121,11 @@ pub async fn update_derivation_build_status(
     // Awaited, not spawned: the emitter above already wrote this transition's
     // pending deliveries in this transaction, and a detached writer racing it was how a
     // phase timeline went missing for a build the reader had already seen.
-    let worker = crate::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id)
-        .await
-        .ok()
-        .flatten();
+    let worker =
+        crate::scheduling::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id)
+            .await
+            .ok()
+            .flatten();
     record_phase_event(
         &ctx.worker_db,
         PhaseSubjectKind::Build,
@@ -221,7 +233,7 @@ pub async fn announce_entry_point_statuses(
             continue;
         };
 
-        if let Err(e) = crate::events::record(
+        if let Err(e) = crate::deliveries::events::record(
             db,
             &ctx.events,
             gradient_types::events::build::Reported {

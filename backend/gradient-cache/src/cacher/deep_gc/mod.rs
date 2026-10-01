@@ -16,7 +16,7 @@ use super::units::{Step, next_unit};
 use anyhow::Result;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
-use gradient_db::admin_tasks::{self, InsertPendingError};
+use gradient_db::maintenance::admin_tasks::{self, InsertPendingError};
 use gradient_entity::ids::AdminTaskId;
 use gradient_types::events::gc::DeepFinished;
 use gradient_types::*;

@@ -33,11 +33,13 @@ pub async fn substitute_log(
     derivation_id: DerivationId,
     drv_path: String,
 ) -> Result<()> {
-    let Some(attempt_id) = gradient_db::latest_attempt_id(&state.worker_db, derivation_build)
-        .await
-        .ok()
-        .flatten()
-    else {
+    let Some(attempt_id) = gradient_db::scheduling::build_attempt::latest_attempt_id(
+        &state.worker_db,
+        derivation_build,
+    )
+    .await
+    .ok()
+    .flatten() else {
         return Ok(());
     };
 
@@ -55,7 +57,7 @@ pub async fn substitute_log(
         return Ok(());
     };
 
-    let sources = match gradient_db::upstream_endpoints_for_project(
+    let sources = match gradient_db::caches::upstream::upstream_endpoints_for_project(
         &state.worker_db,
         project_id,
         UPSTREAM_WINDOW_MINUTES,
@@ -90,7 +92,7 @@ pub async fn substitute_log(
             if let Err(e) = state.log_storage.append(attempt_id, &body).await {
                 warn!(error = %e, "substitute_log: log_storage.append failed");
             } else if let Err(e) =
-                gradient_db::enqueue_log_finalize(&state.worker_db, [attempt_id]).await
+                gradient_db::status::enqueue_log_finalize(&state.worker_db, [attempt_id]).await
             {
                 warn!(error = %e, "substitute_log: failed to finalize the substituted log");
             }
@@ -106,9 +108,10 @@ async fn project_for_derivation(
     state: &Arc<ServerState>,
     derivation: DerivationId,
 ) -> Option<ProjectId> {
-    let jobs = gradient_db::build_jobs_for_derivation(&state.worker_db, derivation)
-        .await
-        .ok()?;
+    let jobs =
+        gradient_db::graph::reachability::build_jobs_for_derivation(&state.worker_db, derivation)
+            .await
+            .ok()?;
     for job in jobs {
         if let Ok(Some(eval)) = EEvaluation::find_by_id(job.evaluation)
             .one(&state.worker_db)

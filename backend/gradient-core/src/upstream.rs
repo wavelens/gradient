@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use gradient_util::sync::Mutex;
 use tokio::sync::Semaphore;
 
-use gradient_db::{UpstreamAccum, UpstreamEndpoint};
+use gradient_db::caches::upstream::{UpstreamAccum, UpstreamEndpoint};
 use gradient_types::ids::CacheUpstreamId;
 use gradient_wire::types::CachedPath;
 

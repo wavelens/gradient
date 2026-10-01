@@ -199,7 +199,11 @@ async fn get_nar_by_hash_inner(
     let nar_size = cached_path_row
         .nar_size
         .or_not_found("NarSize not recorded")? as u64;
-    let references = gradient_db::references_for_hash(&state.web_db, &cached_path_row.hash).await?;
+    let references = gradient_db::graph::runtime_closure::references_for_hash(
+        &state.web_db,
+        &cached_path_row.hash,
+    )
+    .await?;
     let deriver = cached_path_row.deriver.clone();
     let ca = cached_path_row.ca.clone();
 
@@ -294,7 +298,11 @@ async fn get_nar_by_cached_path(
     let nar_size = cached_path_row
         .nar_size
         .or_not_found("NarSize not recorded")? as u64;
-    let references = gradient_db::references_for_hash(&state.web_db, &cached_path_row.hash).await?;
+    let references = gradient_db::graph::runtime_closure::references_for_hash(
+        &state.web_db,
+        &cached_path_row.hash,
+    )
+    .await?;
     let file_hash_nix32 = strip_hash_algo(&normalize_nar_hash(&file_hash)).to_string();
 
     Ok(NixPathInfo {

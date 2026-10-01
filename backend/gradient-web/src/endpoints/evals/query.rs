@@ -209,7 +209,9 @@ pub async fn get_evaluation_builds(
             .await?
             .ok_or_else(|| WebError::not_found("build"))?
             .derivation;
-        let allowed = gradient_db::transitive_closure_reachable(&state.web_db, &[root]).await?;
+        let allowed =
+            gradient_db::graph::closure::transitive_closure_reachable(&state.web_db, &[root])
+                .await?;
 
         jobs.into_iter()
             .filter(|j| allowed.contains(&j.derivation))
@@ -257,9 +259,9 @@ pub async fn get_evaluation_builds(
     // point on top, every build above the builds it needs. Layers are taken
     // over the jobs that survived the scope filter, so a scoped view layers
     // relative to its own root.
-    let layers = gradient_db::dependency_layers(
+    let layers = gradient_db::graph::layers::dependency_layers(
         &drv_ids.iter().copied().collect(),
-        &gradient_db::eval_dependency_edges(&state.web_db, evaluation.id).await?,
+        &gradient_db::graph::layers::eval_dependency_edges(&state.web_db, evaluation.id).await?,
     );
 
     let mut sorted: Vec<(u32, u32, &str, &MBuildJob, BuildStatus)> = jobs
@@ -324,7 +326,11 @@ pub async fn get_evaluation_builds(
         .iter()
         .map(|(_, _, _, j, _)| j.derivation_build)
         .collect();
-    let attempts = gradient_db::latest_attempts(&state.web_db, &page_shared_build_ids).await?;
+    let attempts = gradient_db::scheduling::build_attempt::latest_attempts(
+        &state.web_db,
+        &page_shared_build_ids,
+    )
+    .await?;
 
     let mut page = Vec::with_capacity(page_slice.len());
     for (_, layer, _, j, status) in &page_slice {

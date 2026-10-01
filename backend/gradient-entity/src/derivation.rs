@@ -26,7 +26,7 @@ pub struct Model {
     /// input source. A row a batch only named (a stub) is `false` until walked.
     pub walked: bool,
     /// Direct inputs whose subtree is not recorded. The walk prunes on
-    /// `walked AND unwalked_inputs = 0`; see `gradient_db::walk_completeness`.
+    /// `walked AND unwalked_inputs = 0`; see `gradient_db::graph::walk_completeness`.
     pub unwalked_inputs: i32,
     pub closure_size: Option<i64>,
     pub created_at: NaiveDateTime,

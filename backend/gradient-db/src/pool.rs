@@ -196,7 +196,7 @@ macro_rules! impl_connection_trait {
 /// The read pools forward `TransactionTrait` for the same reason [`WorkerDb`]
 /// implements it: a graph walk has to raise `work_mem` with `SET LOCAL`, which
 /// Postgres honours only inside a transaction block (see
-/// [`crate::graph_sql::begin_walk`]).
+/// [`crate::graph::walks::begin_walk`]).
 macro_rules! impl_transaction_trait {
     ($ty:ty) => {
         #[async_trait::async_trait]

@@ -62,7 +62,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
 
     entry_points::copy_entry_points(db, &prev_entry_points, new_eval_id, now).await?;
     if initial_status == EvaluationStatus::Building {
-        gradient_db::inherit_names(db, prev_eval.id, new_eval_id).await?;
+        gradient_db::graph::reachability::inherit_names(db, prev_eval.id, new_eval_id).await?;
     }
 
     let mut atask: ATask = task.clone().into();

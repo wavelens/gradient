@@ -26,7 +26,7 @@ use crate::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
 };
 use gradient_core::ServerState;
-use gradient_db::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
+use gradient_db::lookup::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
 use gradient_types::{
@@ -793,7 +793,7 @@ mod tests {
             shutdown: gradient_util::shutdown::Shutdown::new(),
             last_used_stamps: gradient_core::last_used_stamps(),
             download_progress: gradient_core::download_progress(),
-            cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
+            cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
             jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
             pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),

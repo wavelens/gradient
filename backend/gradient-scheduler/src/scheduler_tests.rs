@@ -1591,7 +1591,10 @@ async fn every_connected_worker_is_sampled() {
     );
 }
 
-fn member_of(cluster: gradient_types::ids::ClusterJobId, count: u32) -> gradient_db::MemberOf {
+fn member_of(
+    cluster: gradient_types::ids::ClusterJobId,
+    count: u32,
+) -> gradient_db::scheduling::cluster::MemberOf {
     crate::cluster::book::book_tests::member_of(cluster, count)
 }
 
@@ -1727,7 +1730,7 @@ async fn ready_cluster(scheduler: &Scheduler, members: &[(&str, &str)]) -> Clust
             role: (*role).into(),
             ..Default::default()
         };
-        let of = gradient_db::MemberOf {
+        let of = gradient_db::scheduling::cluster::MemberOf {
             cluster: cluster.clone(),
             member,
             member_count: members.len() as u32,

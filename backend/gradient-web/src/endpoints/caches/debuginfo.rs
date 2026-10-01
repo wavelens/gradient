@@ -53,7 +53,8 @@ pub async fn debuginfo(
     let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
 
     if let Some(target) =
-        gradient_db::lookup_for_cache(&state.web_db, ctx.cache.id, &build_id).await?
+        gradient_db::caches::debug_info::lookup_for_cache(&state.web_db, ctx.cache.id, &build_id)
+            .await?
     {
         let file_hash = strip_hash_algo(&normalize_nar_hash(&target.file_hash)).to_string();
         return Ok(redirect_response(

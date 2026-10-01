@@ -49,19 +49,27 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
         was_backed,
     } = upsert_cached_path(db, sp.hash(), sp.name(), c).await?;
 
-    let producers = gradient_db::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
+    let producers =
+        gradient_db::graph::reachability::producers_of_hashes(txn, &[sp.hash().to_owned()]).await?;
 
     // The NAR is where a built output's runtime references are learned, so the
     // graph edges they name are written from the same report the index is, and what
     // need those edges carry is updated from the shared build they hang off.
-    let referenced = gradient_db::producers_of_tokens(txn, &c.references).await?;
+    let referenced =
+        gradient_db::graph::runtime_dependencies::producers_of_tokens(txn, &c.references).await?;
     if !referenced.is_empty() {
         for producer in &producers {
-            gradient_db::insert_runtime_dependencies(txn, *producer, &referenced).await?;
+            gradient_db::graph::runtime_dependencies::insert_runtime_dependencies(
+                txn,
+                *producer,
+                &referenced,
+            )
+            .await?;
         }
 
-        let settled = gradient_db::update_and_settle_need(txn, &producers).await?;
-        gradient_db::emit_transition_effects(ctx, &settled.changes).await;
+        let settled =
+            gradient_db::graph::can_start::update_and_settle_need(txn, &producers).await?;
+        gradient_db::status::emit_transition_effects(ctx, &settled.changes).await;
     }
 
     // Complete closure is counted on the shared build, and the seed needs the endpoint this
@@ -73,11 +81,14 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     } else {
         (&producers, &[])
     };
-    let seeded = gradient_db::seed_runtime_deps(txn, freshly_present, recounted).await?;
+    let seeded =
+        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, freshly_present, recounted)
+            .await?;
     let owners = if was_backed {
         Vec::new()
     } else {
-        gradient_db::derivations_with_hashes(txn, &[sp.hash().to_owned()]).await?
+        gradient_db::graph::reachability::derivations_with_hashes(txn, &[sp.hash().to_owned()])
+            .await?
     };
     trace!(store_path = %c.store_path, complete = seeded.complete.len(), "shared build complete-closure ripple");
     advance_shared_builds(ctx, txn, &seeded.complete, &owners).await?;
@@ -150,10 +161,13 @@ pub(crate) async fn commit_batch(
 
     commit_runtime_dependencies(ctx, txn, commits, &hashes).await?;
 
-    let freshly_present = gradient_db::producers_of_hashes(txn, &fresh).await?;
-    let recounted = gradient_db::producers_of_hashes(txn, &backed).await?;
-    let seeded = gradient_db::seed_runtime_deps(txn, &freshly_present, &recounted).await?;
-    let owners = gradient_db::derivations_with_hashes(txn, &fresh).await?;
+    let freshly_present =
+        gradient_db::graph::reachability::producers_of_hashes(txn, &fresh).await?;
+    let recounted = gradient_db::graph::reachability::producers_of_hashes(txn, &backed).await?;
+    let seeded =
+        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &freshly_present, &recounted)
+            .await?;
+    let owners = gradient_db::graph::reachability::derivations_with_hashes(txn, &fresh).await?;
     advance_shared_builds(ctx, txn, &seeded.complete, &owners).await?;
     if !seeded.incomplete.is_empty() {
         warn!(
@@ -252,7 +266,7 @@ async fn commit_runtime_dependencies(
         .collect();
     let candidates: Vec<String> = referencing.iter().map(|(_, h)| (*h).clone()).collect();
     if candidates.is_empty()
-        || gradient_db::producers_of_hashes(txn, &candidates)
+        || gradient_db::graph::reachability::producers_of_hashes(txn, &candidates)
             .await?
             .is_empty()
     {
@@ -260,19 +274,29 @@ async fn commit_runtime_dependencies(
     }
 
     for (c, hash) in referencing {
-        let producers = gradient_db::producers_of_hashes(txn, std::slice::from_ref(hash)).await?;
+        let producers =
+            gradient_db::graph::reachability::producers_of_hashes(txn, std::slice::from_ref(hash))
+                .await?;
         if producers.is_empty() {
             continue;
         }
-        let referenced = gradient_db::producers_of_tokens(txn, &c.references).await?;
+        let referenced =
+            gradient_db::graph::runtime_dependencies::producers_of_tokens(txn, &c.references)
+                .await?;
         if referenced.is_empty() {
             continue;
         }
         for producer in &producers {
-            gradient_db::insert_runtime_dependencies(txn, *producer, &referenced).await?;
+            gradient_db::graph::runtime_dependencies::insert_runtime_dependencies(
+                txn,
+                *producer,
+                &referenced,
+            )
+            .await?;
         }
-        let settled = gradient_db::update_and_settle_need(txn, &producers).await?;
-        gradient_db::emit_transition_effects(ctx, &settled.changes).await;
+        let settled =
+            gradient_db::graph::can_start::update_and_settle_need(txn, &producers).await?;
+        gradient_db::status::emit_transition_effects(ctx, &settled.changes).await;
     }
 
     Ok(())
@@ -313,10 +337,11 @@ async fn advance_shared_builds(
     complete: &[DerivationId],
     owners: &[DerivationId],
 ) -> anyhow::Result<()> {
-    let lock = gradient_db::lock_shared_builds(txn, &union(complete, owners)).await?;
-    let mut changes = gradient_db::became_fetchable(&lock).await?;
-    changes.extend(gradient_db::promote(txn, owners).await?);
-    gradient_db::emit_transition_effects(ctx, &changes).await;
+    let lock =
+        gradient_db::graph::can_start::lock_shared_builds(txn, &union(complete, owners)).await?;
+    let mut changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
+    changes.extend(gradient_db::graph::can_start::promote(txn, owners).await?);
+    gradient_db::status::emit_transition_effects(ctx, &changes).await;
 
     Ok(())
 }
@@ -330,9 +355,9 @@ async fn retract_shared_builds(
     txn: &sea_orm::DatabaseTransaction,
     incomplete: &[DerivationId],
 ) -> anyhow::Result<()> {
-    let lock = gradient_db::lock_shared_builds(txn, incomplete).await?;
-    let changes = gradient_db::lost_fetchability(&lock).await?;
-    gradient_db::emit_transition_effects(ctx, &changes).await;
+    let lock = gradient_db::graph::can_start::lock_shared_builds(txn, incomplete).await?;
+    let changes = gradient_db::graph::can_start::lost_fetchability(&lock).await?;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await;
 
     Ok(())
 }
@@ -351,7 +376,7 @@ pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path
     let Ok(sp) = StorePath::parse(store_path) else {
         return;
     };
-    if !gradient_db::carries_debug_info(sp.name()) {
+    if !gradient_db::caches::debug_info::carries_debug_info(sp.name()) {
         return;
     }
 
@@ -360,7 +385,14 @@ pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path
     let hash = sp.hash().to_owned();
     let cached_path = committed.cached_path;
     ctx.shutdown.spawn(async move {
-        match gradient_db::index_cached_path(&db, &nar_storage, cached_path, &hash).await {
+        match gradient_db::caches::debug_info::index_cached_path(
+            &db,
+            &nar_storage,
+            cached_path,
+            &hash,
+        )
+        .await
+        {
             Ok(0) => {}
             Ok(count) => debug!(%hash, count, "indexed debug-info build ids"),
             Err(e) => warn!(%hash, error = %e, "failed to index debug info"),
@@ -489,7 +521,7 @@ async fn sign_into_caches(
         .iter()
         .map(|&i| committed[i].1.hash().to_owned())
         .collect();
-    let private = gradient_db::private_output_hashes(db, &hashes).await?;
+    let private = gradient_db::graph::reachability::private_output_hashes(db, &hashes).await?;
     let mut signers: std::collections::HashMap<SignTargets, Vec<(CacheId, Option<CacheSigner>)>> =
         Default::default();
     let mut rows = Vec::new();

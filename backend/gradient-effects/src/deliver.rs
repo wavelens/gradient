@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
-use gradient_db::pending_deliveries::{Outcome, PendingDelivery};
+use gradient_db::deliveries::pending::{Outcome, PendingDelivery};
 use gradient_db::{DbContext, WorkerDb};
 use gradient_types::ids::PendingDeliveryId;
 use ractor::factory::{FactoryMessage, Job, JobOptions, Worker, WorkerId};
@@ -57,11 +57,11 @@ impl DbStore {
 
 impl PendingDeliveryStore for DbStore {
     async fn claim_due(&self, limit: usize) -> anyhow::Result<Vec<PendingDelivery>> {
-        Ok(gradient_db::pending_deliveries::claim_due(&self.db, limit).await?)
+        Ok(gradient_db::deliveries::pending::claim_due(&self.db, limit).await?)
     }
 
     async fn mark(&self, row: &PendingDelivery, outcome: &Outcome) -> anyhow::Result<()> {
-        Ok(gradient_db::pending_deliveries::mark(&self.db, row, outcome).await?)
+        Ok(gradient_db::deliveries::pending::mark(&self.db, row, outcome).await?)
     }
 }
 

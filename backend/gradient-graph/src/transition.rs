@@ -8,9 +8,13 @@
 
 use anyhow::{Context, Result};
 use gradient_db::{
-    DbContext, cascade_dependency_failed, emit_transition_effects, fail_latest_attempt,
-    succeed_latest_attempt, unpromote_ungated, update_derivation_build_status,
-    update_evaluation_status, update_evaluation_status_with_error,
+    DbContext,
+    graph::{can_start::unpromote_ungated, promotion::cascade_dependency_failed},
+    scheduling::build_attempt::{fail_latest_attempt, succeed_latest_attempt},
+    status::{
+        emit_transition_effects, update_derivation_build_status, update_evaluation_status,
+        update_evaluation_status_with_error,
+    },
 };
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -145,7 +149,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             Ok(TransitionReport::default())
         }
         Transition::Repair { scope } => {
-            gradient_db::repair_build_graph(ctx, scope).await?;
+            gradient_db::graph::repair::repair_build_graph(ctx, scope).await?;
             Ok(TransitionReport::default())
         }
         Transition::AbortEvaluationSharedBuilds { evaluation } => {
@@ -156,14 +160,18 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 return Ok(TransitionReport::default());
             };
 
-            let aborted_shared_builds = gradient_db::abort_eval_shared_builds(ctx, &eval).await?;
+            let aborted_shared_builds =
+                gradient_db::status::abort_eval_shared_builds(ctx, &eval).await?;
             Ok(TransitionReport {
                 aborted_shared_builds,
                 ..Default::default()
             })
         }
         Transition::PrioritizeEvaluation { evaluation } => Ok(TransitionReport {
-            prioritized_shared_builds: gradient_db::prioritize_evaluation(ctx, evaluation).await?,
+            prioritized_shared_builds: gradient_db::scheduling::priority::prioritize_evaluation(
+                ctx, evaluation,
+            )
+            .await?,
             ..Default::default()
         }),
         Transition::PrioritizeBuild { shared_build } => {
@@ -175,7 +183,8 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             };
 
             Ok(TransitionReport {
-                prioritized_shared_builds: gradient_db::prioritize_build_closure(ctx, &row).await?,
+                prioritized_shared_builds:
+                    gradient_db::scheduling::priority::prioritize_build_closure(ctx, &row).await?,
                 ..Default::default()
             })
         }
@@ -188,10 +197,14 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
     // healing pipeline scoped to this eval, which thaws its closure, settles the
     // shared builds whose outputs are already complete and advances their parents, fails
     // the closure's dependency-failed victims, and promotes the closure (see
-    // `gradient_db::repair`).
-    gradient_db::repair_build_graph(ctx, gradient_db::RepairScope::Eval(evaluation_id)).await?;
+    // `gradient_db::graph::repair`).
+    gradient_db::graph::repair::repair_build_graph(
+        ctx,
+        gradient_db::graph::repair::RepairScope::Eval(evaluation_id),
+    )
+    .await?;
 
-    // Promotion is graph-driven (gradient_db::promotion), independent of eval
+    // Promotion is graph-driven (gradient_db::graph::promotion), independent of eval
     // completion, so finishing the stream just advances the eval to Building.
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&ctx.worker_db)
@@ -207,7 +220,7 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
 
     // If every build was already terminal (e.g. all Substituted), close the
     // evaluation out via the shared decision function.
-    gradient_db::check_evaluation_done(ctx, evaluation_id).await?;
+    gradient_db::status::check_evaluation_done(ctx, evaluation_id).await?;
     Ok(())
 }
 
@@ -229,7 +242,11 @@ async fn eval_failed(
     }
 
     if kind == BuildFailureKind::Transient {
-        let attempts = gradient_db::eval_attempts(&ctx.worker_db, evaluation_id).await?;
+        let attempts = gradient_db::scheduling::assignment_record::eval_attempts(
+            &ctx.worker_db,
+            evaluation_id,
+        )
+        .await?;
         if crate::policy::retry_failed_eval(kind, attempts, ctx.config.build.max_attempts) {
             warn!(%evaluation_id, attempts, %error, "eval job hit an outage; re-queued");
             requeue_evaluation(ctx, evaluation_id).await?;
@@ -421,8 +438,11 @@ async fn report_missing_artefacts(
         return Ok(());
     }
 
-    let referencing =
-        gradient_db::evals_referencing_derivations(&ctx.worker_db, &[derivation]).await?;
+    let referencing = gradient_db::graph::reachability::evals_referencing_derivations(
+        &ctx.worker_db,
+        &[derivation],
+    )
+    .await?;
     let active = EEvaluation::find()
         .filter(CEvaluation::Id.is_in(referencing))
         .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
@@ -432,7 +452,7 @@ async fn report_missing_artefacts(
 
     for evaluation in &active {
         for product in missing {
-            gradient_db::record_evaluation_message(
+            gradient_db::status::record_evaluation_message(
                 ctx,
                 evaluation.id,
                 MessageLevel::Warning,
@@ -525,10 +545,11 @@ async fn build_failed(
 
     // Without this banner a pre-`nix build` abort renders as a Failed badge over
     // an empty log.
-    if let Some(attempt_id) = gradient_db::latest_attempt_id(&ctx.worker_db, shared_build.id)
-        .await
-        .ok()
-        .flatten()
+    if let Some(attempt_id) =
+        gradient_db::scheduling::build_attempt::latest_attempt_id(&ctx.worker_db, shared_build.id)
+            .await
+            .ok()
+            .flatten()
         && let Err(e) = ctx
             .storage
             .log_storage
@@ -548,9 +569,12 @@ async fn build_failed(
     // Counted before this failure is recorded, so the breaker decision excludes
     // the attempt we are about to mark.
     let prior_inputs_unavailable = if matches!(kind, BuildFailureKind::InputsUnavailable) {
-        gradient_db::inputs_unavailable_attempt_count(&ctx.worker_db, derivation_build)
-            .await
-            .unwrap_or(0)
+        gradient_db::scheduling::build_attempt::inputs_unavailable_attempt_count(
+            &ctx.worker_db,
+            derivation_build,
+        )
+        .await
+        .unwrap_or(0)
     } else {
         0
     };
@@ -664,18 +688,24 @@ async fn substitute_misses(
         return 0;
     }
 
-    let Ok(Some(evaluation)) =
-        gradient_db::latest_attempt_evaluation(&ctx.worker_db, derivation_build).await
+    let Ok(Some(evaluation)) = gradient_db::scheduling::build_attempt::latest_attempt_evaluation(
+        &ctx.worker_db,
+        derivation_build,
+    )
+    .await
     else {
         return 0;
     };
 
-    gradient_db::substitute_miss_counts(&ctx.worker_db, &[derivation_build])
-        .await
-        .unwrap_or_default()
-        .get(&(derivation_build, evaluation))
-        .copied()
-        .unwrap_or(0)
+    gradient_db::scheduling::build_attempt::substitute_miss_counts(
+        &ctx.worker_db,
+        &[derivation_build],
+    )
+    .await
+    .unwrap_or_default()
+    .get(&(derivation_build, evaluation))
+    .copied()
+    .unwrap_or(0)
 }
 
 gradient_db::sql! {
@@ -719,27 +749,31 @@ async fn exhaust_substitution(
     .await
     .context("clear the outputs' upstream record")?;
 
-    let mut changes = vec![gradient_db::TransitionChange {
+    let mut changes = vec![gradient_db::status::TransitionChange {
         derivation: shared_build.derivation,
         from: shared_build.status,
         to: BuildStatus::Created,
     }];
     // The shared build is a builder again, so need reaches its whole pending closure.
     changes.extend(
-        gradient_db::update_and_settle_need(db, &[shared_build.derivation])
+        gradient_db::graph::can_start::update_and_settle_need(db, &[shared_build.derivation])
             .await?
             .changes,
     );
-    changes.extend(gradient_db::promote(db, &[shared_build.derivation]).await?);
+    changes.extend(gradient_db::graph::can_start::promote(db, &[shared_build.derivation]).await?);
     emit_transition_effects(ctx, &changes).await;
 
     if let Ok(Some(drv)) = EDerivation::find_by_id(shared_build.derivation)
         .one(db)
         .await
     {
-        let jobs = gradient_db::build_jobs_for_derivations(db, &[shared_build.derivation]).await?;
+        let jobs = gradient_db::graph::reachability::build_jobs_for_derivations(
+            db,
+            &[shared_build.derivation],
+        )
+        .await?;
         for job in jobs.values().flatten() {
-            gradient_db::insert_evaluation_message(
+            gradient_db::status::insert_evaluation_message(
                 db,
                 job.evaluation,
                 MessageLevel::Warning,
@@ -761,7 +795,7 @@ async fn exhaust_substitution(
 /// belt-and-braces around the emitter's own finalize (which is skipped when
 /// the state machine rejects a racing transition).
 async fn check_referencing_evals_done(ctx: &DbContext, derivation: DerivationId) -> Result<()> {
-    gradient_db::finalize_evals_for_derivations(ctx, &[derivation]).await?;
+    gradient_db::status::finalize_evals_for_derivations(ctx, &[derivation]).await?;
     Ok(())
 }
 
@@ -801,11 +835,14 @@ async fn record_metrics(
         peak_network_mbps: metrics.peak_network_mbps.map(|v| v as f64),
         oom_killed: metrics.oom_killed,
         build_time_ms: metrics.build_time_ms.map(|v| v as i64),
-        worker_id: gradient_db::latest_attempt_worker(&ctx.worker_db, shared_build.id)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default(),
+        worker_id: gradient_db::scheduling::build_attempt::latest_attempt_worker(
+            &ctx.worker_db,
+            shared_build.id,
+        )
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default(),
         created_at: now(),
     }
     .into_active_model();
@@ -827,8 +864,12 @@ async fn assigned(
     build_context: serde_json::Value,
 ) {
     if let Some(build_job) = find_or_create_build_job(ctx, evaluation, derivation_build).await {
-        let superseded = gradient_db::latest_attempt_id(&ctx.worker_db, derivation_build).await;
-        match gradient_db::open_attempt(
+        let superseded = gradient_db::scheduling::build_attempt::latest_attempt_id(
+            &ctx.worker_db,
+            derivation_build,
+        )
+        .await;
+        match gradient_db::scheduling::build_attempt::open_attempt(
             &ctx.worker_db,
             build_job,
             derivation_build,
@@ -861,7 +902,7 @@ async fn finalize_superseded_log(
     superseded: Result<Option<BuildAttemptId>, sea_orm::DbErr>,
 ) {
     let result = match superseded {
-        Ok(attempt) => gradient_db::enqueue_log_finalize(&ctx.worker_db, attempt).await,
+        Ok(attempt) => gradient_db::status::enqueue_log_finalize(&ctx.worker_db, attempt).await,
         Err(e) => Err(e),
     };
     if let Err(e) = result {

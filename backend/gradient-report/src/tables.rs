@@ -680,7 +680,7 @@ mod tests {
         }
     }
 
-    /// One fragment behind all of them, for the reason `can_start.rs` keeps one
+    /// One fragment behind all of them, for the reason `graph/can_start/fetchable.rs` keeps one
     /// behind its seed and its recount: two spellings of the same scope drift,
     /// and a reader cannot see that they have.
     #[test]

@@ -19,7 +19,7 @@ use crate::messages::{DemoteReport, Demotion};
 pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteReport> {
     match demotion {
         Demotion::MissingNar { hash } => {
-            let producers = gradient_db::demote_cached_output(ctx, &hash).await?;
+            let producers = gradient_db::caches::demotion::demote_cached_output(ctx, &hash).await?;
             warn!(%hash, producers = producers.len(), "self-heal: NAR missing from storage; cached path demoted");
             Ok(DemoteReport {
                 producers,
@@ -27,7 +27,7 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
             })
         }
         Demotion::Path { hash } => {
-            let producers = gradient_db::demote_cached_output(ctx, &hash).await?;
+            let producers = gradient_db::caches::demotion::demote_cached_output(ctx, &hash).await?;
             info!(%hash, producers = producers.len(), "invalidated cache for path");
             Ok(DemoteReport {
                 producers,
@@ -72,7 +72,7 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
     // producer shared build, gate flags and parent counters reset symmetrically (a
     // bare is_cached clear leaves a Completed producer with no backing NAR).
     if !others_remain {
-        gradient_db::demote_cached_output(ctx, hash).await?;
+        gradient_db::caches::demotion::demote_cached_output(ctx, hash).await?;
     }
 
     ctx.events.publish(cache::Changed {});

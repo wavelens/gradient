@@ -30,7 +30,7 @@ flowchart LR
 
 ## Claim
 
-`claim_cluster` (`backend/gradient-db/src/cluster.rs`) is running in one transaction:
+`claim_cluster` (`backend/gradient-db/src/scheduling/cluster/claim.rs`) is running in one transaction:
 
 1. Insert the `cluster_attempt` row, gated on `cluster_job.status = Queued`. `ON CONFLICT` on `idx-cluster_attempt-open` inserts nothing.
 2. Claim each member with the single-assignment claim statement (`claim_assignment`): its own job key (`eval:<evaluation>`, `build:<shared_build>`), its own start condition, and `cluster_attempt` set.

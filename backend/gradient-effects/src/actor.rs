@@ -15,7 +15,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gradient_db::pending_deliveries::{Outcome, PendingDelivery};
+use gradient_db::deliveries::pending::{Outcome, PendingDelivery};
 use gradient_types::ids::PendingDeliveryId;
 use gradient_util::supervision::SupervisorHealth;
 use ractor::{Actor, ActorProcessingErr, ActorRef};

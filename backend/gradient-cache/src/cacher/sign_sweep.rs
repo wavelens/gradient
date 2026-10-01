@@ -128,7 +128,8 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         .collect();
 
     let hashes: Vec<String> = cached_paths.values().map(|cp| cp.hash.clone()).collect();
-    let private = gradient_db::private_output_hashes(&state.worker_db, &hashes).await?;
+    let private =
+        gradient_db::graph::reachability::private_output_hashes(&state.worker_db, &hashes).await?;
     let skipped: HashSet<CachedPathId> = cached_paths
         .values()
         .filter(|cp| private.contains(&cp.hash))
@@ -186,9 +187,10 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
             continue;
         };
 
-        let refs = gradient_db::references_for_hash(&state.worker_db, &cp.hash)
-            .await
-            .unwrap_or_default();
+        let refs =
+            gradient_db::graph::runtime_closure::references_for_hash(&state.worker_db, &cp.hash)
+                .await
+                .unwrap_or_default();
 
         let nar_hash_nix32 = normalize_nar_hash(nar_hash);
 

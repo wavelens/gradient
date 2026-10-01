@@ -36,7 +36,8 @@ impl Scheduler {
             .await
         {
             Ok(Some(eval)) => {
-                gradient_db::update_evaluation_status(&self.state.db(), eval, new_status).await;
+                gradient_db::status::update_evaluation_status(&self.state.db(), eval, new_status)
+                    .await;
             }
             Ok(None) => warn!(%evaluation_id, "evaluation not found for status update"),
             Err(e) => {
@@ -251,7 +252,7 @@ impl Scheduler {
             }
         };
 
-        gradient_db::insert_evaluation_message(
+        gradient_db::status::insert_evaluation_message(
             &self.state.worker_db,
             evaluation_id,
             entity_level,

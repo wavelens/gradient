@@ -28,7 +28,7 @@ impl Scheduler {
 
     pub async fn enqueue_cluster_member(
         &self,
-        of: gradient_db::MemberOf,
+        of: gradient_db::scheduling::cluster::MemberOf,
         key: String,
         job: PendingJob,
     ) -> anyhow::Result<()> {

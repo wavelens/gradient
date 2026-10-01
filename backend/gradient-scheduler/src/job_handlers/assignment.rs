@@ -14,7 +14,7 @@ use anyhow::Context as _;
 use tracing::{Instrument as _, info, warn};
 
 use gradient_core::ServerState;
-use gradient_db::ClaimGate;
+use gradient_db::scheduling::assignment_record::ClaimGate;
 use gradient_graph::Transition;
 use gradient_types::*;
 use gradient_wire::types::{CandidateScore, JobKind};
@@ -279,7 +279,7 @@ async fn claim(
     worker_id: &str,
     rec: &AssignmentRecord,
 ) -> anyhow::Result<bool> {
-    let won = gradient_db::claim_assignment(
+    let won = gradient_db::scheduling::assignment_record::claim_assignment(
         &state.worker_db,
         assignment_row(rec, worker_id, now()),
         claim_gate(rec),
@@ -292,8 +292,11 @@ async fn claim(
 
     let moved = assigned_transition(state, rec).await;
     if moved.is_err()
-        && let Err(e) =
-            gradient_db::abandon_open_assignment(&state.worker_db, rec.assignment_id).await
+        && let Err(e) = gradient_db::scheduling::assignment_record::abandon_open_assignment(
+            &state.worker_db,
+            rec.assignment_id,
+        )
+        .await
     {
         warn!(error = %e, dispatch = %rec.assignment_id, "dispatch row left open after a failed transition");
     }

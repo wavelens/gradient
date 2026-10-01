@@ -10,7 +10,7 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::latest_attempt;
+use gradient_db::scheduling::build_attempt::latest_attempt;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use gradient_util::latest::Latest;

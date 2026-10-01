@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_db::LostCompletion;
+use gradient_db::evaluations::watchdog::LostCompletion;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::Transition;
 use gradient_types::ids::DispatchedJobId;
@@ -61,7 +61,8 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
 /// `info` on the clean branch too, because a healthy instance is exactly the case
 /// whose cost is unmeasured.
 pub(super) async fn consistency_check_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
-    let report = gradient_db::graph_consistency_report(&scheduler.state.db()).await?;
+    let report =
+        gradient_db::graph::consistency::graph_consistency_report(&scheduler.state.db()).await?;
     if report.total() > 0 {
         warn!(
             counter_drift = report.counter_drift,
@@ -227,7 +228,11 @@ pub(super) async fn abandoned_assignment_pass(scheduler: Arc<Scheduler>) -> anyh
         return Ok(());
     }
 
-    let reaped = gradient_db::abandon_open_assignments(&scheduler.state.worker_db, &reap).await?;
+    let reaped = gradient_db::scheduling::assignment_record::abandon_open_assignments(
+        &scheduler.state.worker_db,
+        &reap,
+    )
+    .await?;
 
     warn!(
         rows = reaped,
@@ -277,9 +282,11 @@ fn plan_eval_repairs(
 /// eval's closure, promotes out of the evaluating pair and finalizes - so
 /// re-driving one that did land costs a repair pass and changes nothing.
 pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
-    let lost =
-        gradient_db::lost_eval_completions(&scheduler.state.worker_db, LOST_COMPLETION_GRACE_SECS)
-            .await?;
+    let lost = gradient_db::evaluations::watchdog::lost_eval_completions(
+        &scheduler.state.worker_db,
+        LOST_COMPLETION_GRACE_SECS,
+    )
+    .await?;
     if lost.is_empty() {
         debug!("eval completion watchdog clean");
         return Ok(());
@@ -347,7 +354,7 @@ fn plan_stranded_requeue(
 /// the build half of the completion watchdog. `OrphanedBuilds` moves only rows
 /// still `Building`, so re-sending a re-queue that did land changes nothing.
 pub(super) async fn stranded_build_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
-    let stranded = gradient_db::stranded_building_shared_builds(
+    let stranded = gradient_db::scheduling::build_watchdog::stranded_building_shared_builds(
         &scheduler.state.worker_db,
         LOST_COMPLETION_GRACE_SECS,
     )

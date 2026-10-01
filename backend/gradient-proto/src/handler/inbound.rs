@@ -539,10 +539,12 @@ impl<'a> InboundContext<'a> {
 
         // A base worker must never reach PeerAuth::Open (empty == Open). If it has no
         // authorized projects (toggled off everywhere, or globally disabled), disconnect.
-        let is_base =
-            gradient_db::base_workers::worker_id_is_base(&self.state.worker_db, self.peer_id)
-                .await
-                .unwrap_or(false);
+        let is_base = gradient_db::projects::base_workers::worker_id_is_base(
+            &self.state.worker_db,
+            self.peer_id,
+        )
+        .await
+        .unwrap_or(false);
         if is_base && authorized_peers.is_empty() {
             info!(peer_id = %self.peer_id, "base worker not enabled by any project - disconnecting");
             let _ = send_server_msg(
@@ -715,8 +717,11 @@ impl<'a> InboundContext<'a> {
             return;
         };
 
-        if let Err(e) =
-            gradient_db::abandon_open_assignment(&self.state.worker_db, active.assignment_id).await
+        if let Err(e) = gradient_db::scheduling::assignment_record::abandon_open_assignment(
+            &self.state.worker_db,
+            active.assignment_id,
+        )
+        .await
         {
             warn!(peer_id = %self.peer_id, %job_id, dispatch = %active.assignment_id, error = %e, "rejected assignment left its dispatch row open");
         }

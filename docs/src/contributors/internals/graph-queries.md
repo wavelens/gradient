@@ -13,16 +13,16 @@ flowchart LR
 
 ## Walks
 
-`gradient-db/src/graph_sql.rs` generates the shared walks. Callers pass a seed and a direction and get a `WITH RECURSIVE` prelude; walks run under `begin_walk`, which sets `work_mem = '64MB'`.
+`gradient-db/src/graph/walks.rs` generates the shared walks. Callers pass a seed and a direction and get a `WITH RECURSIVE` prelude; walks run under `begin_walk`, which sets `work_mem = '64MB'`.
 
 | Walk | Generator | Fenced |
 |---|---|---|
 | Build closure, failure cascade | `dependency_closure_cte` | Yes |
 | Runtime closure (`kind IN (1, 2)`) | `runtime_closure_cte` | Yes |
 | GC keep-set | `live_cached_paths_cte` | Yes |
-| Walk completeness | `walk_completeness.rs` (hand-written) | Yes |
-| Runtime recount | `runtime_can_start.rs`, `recount_sql` | No |
-| Task board dependency counts | `task_board.rs`, `DEP_COUNTS_SQL` | No |
+| Walk completeness | `graph/walk_completeness.rs` (hand-written) | Yes |
+| Runtime recount | `graph/runtime_can_start.rs`, `recount_sql` | No |
+| Task board dependency counts | `task_board/mod.rs`, `DEP_COUNTS_SQL` | No |
 
 ## The `OFFSET 0` Fence
 
@@ -94,5 +94,5 @@ Every 30 s (`GRADIENT_METRICS_INSTANCE_INTERVAL_SECS`) the instance pass average
 PostgreSQL 19's SQL/PGQ (`GRAPH_TABLE`) is not used: the first implementation matches fixed-length patterns only, and every walk here has unbounded depth.
 
 - `derivation` and `derivation_dependency` already have the vertex and edge table shape `CREATE PROPERTY GRAPH` needs.
-- A switch touches `graph_sql.rs` and the hand-written walks above.
+- A switch touches `graph/walks.rs` and the hand-written walks above.
 - Revisit when quantified path patterns land.

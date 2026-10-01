@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use chrono::NaiveDateTime;
-use gradient_db::MemberOf;
+use gradient_db::scheduling::cluster::MemberOf;
 use gradient_types::ids::{ClusterJobId, ClusterMemberId};
 
 use super::SlotKind;
@@ -57,7 +57,9 @@ impl PendingCluster {
     }
 
     pub fn slot_kind(m: &ClusterMember) -> SlotKind {
-        if m.key.starts_with(gradient_db::BUILD_KEY_PREFIX) {
+        if m.key
+            .starts_with(gradient_db::scheduling::assignment_record::BUILD_KEY_PREFIX)
+        {
             SlotKind::Build
         } else {
             SlotKind::Eval

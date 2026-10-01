@@ -1,0 +1,634 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+//! Background aggregator that folds fact tables into `metric_rollup`.
+//!
+//! Each pass updates minute buckets for a trailing window from the fact
+//! tables (idempotent via `ON CONFLICT`), then cascades minute -> hour -> day -> week
+//! over `metric_rollup` itself. Best-effort: SQL failures are logged, never
+//! propagated. Timestamps are compared in UTC to match the naive-UTC values the
+//! recording layer writes via `gradient_types::now()`.
+
+use std::time::Duration;
+
+use gradient_entity::metric_rollup::RollupGranularity;
+use gradient_util::supervision::ChildSpec;
+use gradient_wire::types::JobPhase;
+use sea_orm::ConnectionTrait;
+use tracing::{debug, warn};
+
+use crate::DbContext;
+
+/// A simple count metric over the global `derivation_build` shared build, attributed
+/// to an owning project once per referencing `build_job` (its eval -> task join).
+struct BuildCount {
+    name: &'static str,
+    time_col: &'static str,
+    filter: String,
+}
+
+fn build_counts() -> Vec<BuildCount> {
+    use gradient_entity::build::BuildStatus;
+    vec![
+        BuildCount {
+            name: "builds.created",
+            time_col: "created_at",
+            filter: "TRUE".into(),
+        },
+        BuildCount {
+            name: "builds.dispatched",
+            time_col: "dispatched_at",
+            filter: "TRUE".into(),
+        },
+        // The Build/BuildAttempt split moved per-attempt finish times to
+        // `build_attempt`; `build.updated_at` is set on every status transition, so
+        // it is the terminal-state timestamp here and also covers builds with no
+        // attempt row (substituted at eval, dependency-failed).
+        BuildCount {
+            name: "builds.completed",
+            time_col: "updated_at",
+            filter: format!(
+                "b.status = {}",
+                crate::sql::status::build(BuildStatus::Completed)
+            ),
+        },
+        BuildCount {
+            name: "builds.substituted",
+            time_col: "updated_at",
+            filter: format!(
+                "b.status = {}",
+                crate::sql::status::build(BuildStatus::Substituted)
+            ),
+        },
+        BuildCount {
+            name: "builds.failed",
+            time_col: "updated_at",
+            filter: format!(
+                "b.status IN ({})",
+                crate::sql::status::build_in(&BuildStatus::FAILURE)
+            ),
+        },
+    ]
+}
+
+/// A duration metric over the `build` table: milliseconds between two columns.
+struct BuildDuration {
+    name: &'static str,
+    start_col: &'static str,
+    end_col: &'static str,
+    filter: &'static str,
+}
+
+const BUILD_DURATIONS: &[BuildDuration] = &[
+    // Queue wait excluding dependency wait: can start (deps satisfied) -> dispatched.
+    BuildDuration {
+        name: "dispatch.wait_ms",
+        start_col: "ready_at",
+        end_col: "dispatched_at",
+        filter: "TRUE",
+    },
+    // Dependency wait: entered the queue -> all dependencies satisfied.
+    BuildDuration {
+        name: "deps.wait_ms",
+        start_col: "queued_at",
+        end_col: "ready_at",
+        filter: "TRUE",
+    },
+];
+
+/// A count metric over `evaluation`, attributed to the project via the task join.
+struct EvalCount {
+    name: &'static str,
+    filter: String,
+}
+
+fn eval_counts() -> Vec<EvalCount> {
+    use gradient_entity::evaluation::EvaluationStatus;
+    vec![
+        EvalCount {
+            name: "evals.completed",
+            filter: format!(
+                "e.status = {}",
+                crate::sql::status::eval(EvaluationStatus::Completed)
+            ),
+        },
+        EvalCount {
+            name: "evals.failed",
+            filter: format!(
+                "e.status IN ({})",
+                crate::sql::status::eval_in(&[EvaluationStatus::Failed, EvaluationStatus::Aborted])
+            ),
+        },
+    ]
+}
+
+/// (target granularity, source granularity, trailing window).
+const CASCADES: &[(RollupGranularity, RollupGranularity, &str)] = &[
+    (
+        RollupGranularity::Hour,
+        RollupGranularity::Minute,
+        "3 hours",
+    ),
+    (RollupGranularity::Day, RollupGranularity::Hour, "2 days"),
+    (RollupGranularity::Week, RollupGranularity::Day, "2 weeks"),
+];
+
+const MINUTE_WINDOW: &str = "15 minutes";
+
+/// Cache traffic per minute per cache (scope `{cache}`): `count` = requests,
+/// `sum` = bytes served. Source is the already-minute-bucketed `cache_metric`.
+fn cache_traffic_sql() -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'cache.bytes_sent', {minute}, cm.bucket_time, \
+           jsonb_build_object('cache', cm.cache::text), hashtextextended(cm.cache::text, 0), \
+           sum(cm.nar_count)::bigint, sum(cm.bytes_sent), \
+           min(cm.bytes_sent), max(cm.bytes_sent), sum(power(cm.bytes_sent, 2)), NULL \
+    FROM cache_metric cm \
+    WHERE cm.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY cm.bucket_time, cm.cache \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                  min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
+
+/// Cache storage added per minute per cache (scope `{cache}`): `count` =
+/// packages added, `sum` = compressed bytes added.
+fn cache_storage_sql() -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'cache.bytes_added', {minute}, date_trunc('minute', cps.created_at), \
+           jsonb_build_object('cache', cps.cache::text), hashtextextended(cps.cache::text, 0), \
+           count(*)::bigint, sum(coalesce(cp.file_size, 0)), 0, 0, 0, NULL \
+    FROM cached_path_signature cps JOIN cached_path cp ON cp.id = cps.cached_path \
+    WHERE cps.created_at >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY date_trunc('minute', cps.created_at), cps.cache \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
+
+/// Upstream narinfo latency per minute per URL (scope `{upstream_url}`):
+/// `count` = completed requests, `sum` = summed latency ms (avg = sum/count).
+fn upstream_latency_sql() -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'upstream.latency_ms', {minute}, um.bucket_time, \
+           jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
+           sum(um.request_count)::bigint, sum(um.latency_ms_sum), 0, 0, 0, NULL \
+    FROM upstream_metric um \
+    WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY um.bucket_time, um.upstream_url \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
+
+/// Upstream narinfo hits per minute per URL (scope `{upstream_url}`).
+fn upstream_hits_sql() -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'upstream.narinfo_hits', {minute}, um.bucket_time, \
+           jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
+           sum(um.request_count)::bigint, sum(um.narinfo_hits), 0, 0, 0, NULL \
+    FROM upstream_metric um \
+    WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY um.bucket_time, um.upstream_url \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
+
+/// Upstream narinfo misses per minute per URL (scope `{upstream_url}`).
+fn upstream_misses_sql() -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'upstream.narinfo_misses', {minute}, um.bucket_time, \
+           jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
+           sum(um.request_count)::bigint, sum(um.narinfo_misses), 0, 0, 0, NULL \
+    FROM upstream_metric um \
+    WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY um.bucket_time, um.upstream_url \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
+
+/// The rollup aggregation pass as a supervised child.
+pub fn child_spec(ctx: DbContext) -> ChildSpec {
+    let secs = ctx.config.metrics_args.rollup_interval_secs.max(1);
+    ChildSpec::periodic(
+        "rollup",
+        Duration::from_secs(secs),
+        Duration::from_secs(300),
+        move || {
+            let ctx = ctx.clone();
+            async move {
+                run_rollup(&ctx).await;
+                Ok(())
+            }
+        },
+    )
+}
+
+async fn run_rollup(ctx: &DbContext) {
+    let db = &ctx.worker_db;
+    for m in build_counts() {
+        if let Err(e) = db.execute_unprepared(&build_count_sql(&m)).await {
+            warn!(metric = m.name, error = %e, "rollup build-count failed");
+        }
+    }
+
+    for m in BUILD_DURATIONS {
+        if let Err(e) = db.execute_unprepared(&build_duration_sql(m)).await {
+            warn!(metric = m.name, error = %e, "rollup build-duration failed");
+        }
+    }
+
+    if let Err(e) = db.execute_unprepared(&build_duration_attempt_sql()).await {
+        warn!(metric = "builds.duration_ms", error = %e, "rollup build-duration failed");
+    }
+
+    if let Err(e) = db.execute_unprepared(&phase_duration_sql()).await {
+        warn!(metric = "phase.*.ms", error = %e, "rollup phase-duration failed");
+    }
+
+    for m in eval_counts() {
+        if let Err(e) = db.execute_unprepared(&eval_count_sql(&m)).await {
+            warn!(metric = m.name, error = %e, "rollup eval-count failed");
+        }
+    }
+
+    if let Err(e) = db.execute_unprepared(&cache_traffic_sql()).await {
+        warn!(error = %e, "rollup cache-traffic failed");
+    }
+
+    if let Err(e) = db.execute_unprepared(&cache_storage_sql()).await {
+        warn!(error = %e, "rollup cache-storage failed");
+    }
+
+    if let Err(e) = crate::caches::usage::recount_cache_usage(db).await {
+        warn!(error = %e, "rollup cache-usage recount failed");
+    }
+
+    for (sql, label) in [
+        (upstream_latency_sql(), "upstream.latency_ms"),
+        (upstream_hits_sql(), "upstream.narinfo_hits"),
+        (upstream_misses_sql(), "upstream.narinfo_misses"),
+    ] {
+        if let Err(e) = db.execute_unprepared(&sql).await {
+            warn!(metric = label, error = %e, "rollup upstream metric failed");
+        }
+    }
+
+    for (target, source, window) in CASCADES {
+        if let Err(e) = db
+            .execute_unprepared(&cascade_sql(*target, *source, window))
+            .await
+        {
+            warn!(target = target.trunc_unit(), error = %e, "rollup cascade failed");
+        }
+    }
+
+    debug!("rollup pass complete");
+}
+
+fn build_count_sql(m: &BuildCount) -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), '{name}', 0, date_trunc('minute', b.{col}), \
+                jsonb_build_object('project', pr.project::text), \
+                hashtextextended(pr.project::text, 0), \
+                count(*)::bigint, 0, 0, 0, 0, NULL \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
+         JOIN task pr ON pr.id = ev.task \
+         WHERE b.{col} IS NOT NULL \
+           AND b.{col} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND ({filter}) \
+         GROUP BY date_trunc('minute', b.{col}), pr.project \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count",
+        name = m.name,
+        col = m.time_col,
+        window = MINUTE_WINDOW,
+        filter = m.filter,
+    )
+}
+
+fn build_duration_sql(m: &BuildDuration) -> String {
+    let ms = format!(
+        "extract(epoch from (b.{} - b.{})) * 1000",
+        m.end_col, m.start_col
+    );
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), '{name}', 0, date_trunc('minute', b.{end}), \
+                jsonb_build_object('project', pr.project::text), \
+                hashtextextended(pr.project::text, 0), \
+                count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
+         FROM build_job bj \
+         JOIN derivation_build b ON b.id = bj.derivation_build \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
+         JOIN task pr ON pr.id = ev.task \
+         WHERE b.{end} IS NOT NULL AND b.{start} IS NOT NULL \
+           AND b.{end} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND ({filter}) \
+         GROUP BY date_trunc('minute', b.{end}), pr.project \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                       min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
+        name = m.name,
+        end = m.end_col,
+        start = m.start_col,
+        window = MINUTE_WINDOW,
+        filter = m.filter,
+        ms = ms,
+    )
+}
+
+/// `builds.duration_ms`: wall-clock time of the newest finished attempt per
+/// build, seeded from the attempts finished inside the window.
+fn build_duration_attempt_sql() -> String {
+    let ms = "extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000";
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), 'builds.duration_ms', 0, date_trunc('minute', ba.build_finished_at), \
+                jsonb_build_object('project', pr.project::text), \
+                hashtextextended(pr.project::text, 0), \
+                count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
+         FROM build_attempt ba \
+         JOIN derivation_build b ON b.id = ba.derivation_build AND b.status = {completed} \
+         JOIN build_job bj ON bj.derivation_build = b.id \
+         JOIN evaluation ev ON ev.id = bj.evaluation \
+         JOIN task pr ON pr.id = ev.task \
+         WHERE ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND ba.build_started_at IS NOT NULL \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM build_attempt later \
+             WHERE later.derivation_build = ba.derivation_build \
+               AND (later.created_at > ba.created_at \
+                    OR (later.created_at = ba.created_at AND later.id > ba.id))) \
+         GROUP BY date_trunc('minute', ba.build_finished_at), pr.project \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                       min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
+        ms = ms,
+        window = MINUTE_WINDOW,
+        completed = crate::sql::status::build(gradient_entity::build::BuildStatus::Completed),
+    )
+}
+
+/// `phase.<kind>.<phase>.ms`: one series per job kind and phase, so the board
+/// can compare where eval and build time actually goes. The phase name array is
+/// indexed by `phase + 1` because Postgres arrays are 1-based, and it is per
+/// `JobPhase::as_i16`, not by the enum's current order: position 10 is the retired
+/// discriminant 9 (`substitute_passthrough`), which historical rows still carry.
+fn phase_duration_sql() -> String {
+    let ms = "(p.end_ms - p.start_ms)::double precision";
+    let last = JobPhase::ALL.iter().map(|p| p.as_i16()).max().unwrap_or(0);
+    let names = (0..=last)
+        .map(|v| format!("'{}'", JobPhase::name_of(v)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), \
+                'phase.' || CASE dj.kind WHEN 0 THEN 'eval' ELSE 'build' END || '.' || \
+                  (ARRAY[{names}])[p.phase + 1] || '.ms', \
+                {minute}, date_trunc('minute', p.created_at), \
+                jsonb_build_object('project', dj.project::text), \
+                hashtextextended(dj.project::text, 0), \
+                count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
+         FROM dispatched_job_phase p \
+         JOIN dispatched_job dj ON dj.id = p.dispatched_job \
+         WHERE p.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND p.phase BETWEEN 0 AND {last} \
+         GROUP BY date_trunc('minute', p.created_at), dj.project, dj.kind, p.phase \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                       min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
+        minute = i16::from(RollupGranularity::Minute),
+        window = MINUTE_WINDOW,
+        ms = ms,
+        names = names,
+        last = last,
+    )
+}
+
+fn eval_count_sql(m: &EvalCount) -> String {
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), '{name}', 0, date_trunc('minute', e.finished_at), \
+                jsonb_build_object('project', p.project::text), \
+                hashtextextended(p.project::text, 0), \
+                count(*)::bigint, 0, 0, 0, 0, NULL \
+         FROM evaluation e JOIN task p ON p.id = e.task \
+         WHERE e.finished_at IS NOT NULL \
+           AND e.finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND ({filter}) \
+         GROUP BY date_trunc('minute', e.finished_at), p.project \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count",
+        name = m.name,
+        window = MINUTE_WINDOW,
+        filter = m.filter,
+    )
+}
+
+/// Fold `source` buckets into `target` buckets. The grouping key is exactly the
+/// unique index `(metric, granularity, bucket_start, scope_hash)`: grouping by
+/// `scope` as well would split one conflict key across two rows whenever the
+/// scope payload is re-shaped mid-window (the organization -> project rename,
+/// #571), and Postgres rejects the whole statement with "ON CONFLICT DO UPDATE
+/// command cannot affect row a second time". `scope_hash` identifies the series,
+/// so the newest source bucket supplies the representative `scope`.
+fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &str) -> String {
+    let unit = target.trunc_unit();
+    let target = i16::from(target);
+    let source = i16::from(source);
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), metric, {target}, date_trunc('{unit}', bucket_start), \
+                (array_agg(scope ORDER BY bucket_start DESC))[1], scope_hash, \
+                sum(count)::bigint, sum(sum), min(min), max(max), sum(sum_sq), NULL \
+         FROM metric_rollup \
+         WHERE granularity = {source} \
+           AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+         GROUP BY metric, scope_hash, date_trunc('{unit}', bucket_start) \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                       min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every statement the rollup pass executes, in one iterator.
+    fn all_rollup_sql() -> Vec<String> {
+        build_counts()
+            .iter()
+            .map(build_count_sql)
+            .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
+            .chain(eval_counts().iter().map(eval_count_sql))
+            .chain([
+                build_duration_attempt_sql(),
+                cache_traffic_sql(),
+                cache_storage_sql(),
+                upstream_latency_sql(),
+                upstream_hits_sql(),
+                upstream_misses_sql(),
+            ])
+            .chain(CASCADES.iter().map(|(t, s, w)| cascade_sql(*t, *s, w)))
+            .collect()
+    }
+
+    /// The Build/BuildAttempt split moved `build_started_at`/`build_finished_at`
+    /// to `build_attempt`; rollups over `build b` must not reference them.
+    #[test]
+    fn build_table_rollups_avoid_moved_columns() {
+        let counts = build_counts();
+        let sqls = counts
+            .iter()
+            .map(build_count_sql)
+            .chain(BUILD_DURATIONS.iter().map(build_duration_sql));
+        for sql in sqls {
+            assert!(!sql.contains("build_started_at"), "stale column: {sql}");
+            assert!(!sql.contains("build_finished_at"), "stale column: {sql}");
+        }
+    }
+
+    /// The window must be the seed, not a filter after a join over every
+    /// Completed shared build: an idle window then reads nothing (#629).
+    #[test]
+    fn duration_rollup_seeds_from_attempts_finished_in_the_window() {
+        let sql = build_duration_attempt_sql();
+
+        assert!(sql.contains("FROM build_attempt ba"), "{sql}");
+        assert!(
+            sql.contains(
+                "WHERE ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '15 minutes'"
+            ),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("NOT EXISTS ( SELECT 1 FROM build_attempt later"),
+            "{sql}"
+        );
+        assert!(!sql.contains("LATERAL"), "{sql}");
+        assert!(sql.contains("ba.build_started_at IS NOT NULL"), "{sql}");
+    }
+
+    /// Every rollup statement's `GROUP BY` must be exactly the unique index
+    /// `(metric, granularity, bucket_start, scope_hash)`. A coarser grouping key
+    /// (adding `scope`, #571) proposes two rows for one conflict key and
+    /// Postgres aborts the whole statement with "ON CONFLICT DO UPDATE command
+    /// cannot affect row a second time".
+    #[test]
+    fn upserts_never_group_by_scope() {
+        for sql in all_rollup_sql() {
+            let group_by = sql
+                .split("GROUP BY")
+                .nth(1)
+                .unwrap_or_else(|| panic!("no GROUP BY: {sql}"));
+            let group_by = group_by.split("ON CONFLICT").next().unwrap();
+            assert!(
+                !group_by.contains("scope,") && !group_by.contains(" scope "),
+                "grouping by scope splits one conflict key: {group_by}"
+            );
+        }
+    }
+
+    /// A row written before a scope re-key keeps the stale shape forever unless
+    /// the upsert refreshes it, which is how the pre-rename `{'org': id}` rows
+    /// survived alongside `{'project': id}` on the same `scope_hash`.
+    #[test]
+    fn upserts_refresh_scope_on_conflict() {
+        for sql in all_rollup_sql() {
+            let update = sql
+                .split("DO UPDATE SET")
+                .nth(1)
+                .unwrap_or_else(|| panic!("no DO UPDATE: {sql}"));
+            assert!(
+                update.contains("scope = EXCLUDED.scope"),
+                "stale scope shape never self-heals: {sql}"
+            );
+        }
+    }
+
+    /// The cascade still has to carry a scope forward, just not as a grouping
+    /// column: the newest source bucket in the group supplies it.
+    #[test]
+    fn cascade_carries_the_newest_scope() {
+        let sql = cascade_sql(RollupGranularity::Day, RollupGranularity::Hour, "2 days");
+        assert!(sql.contains("(array_agg(scope ORDER BY bucket_start DESC))[1]"));
+    }
+
+    /// Every phase a worker reports lands in its own series: the filter admits
+    /// its discriminant and the name array names it at that position.
+    #[test]
+    fn every_reported_phase_reaches_its_series() {
+        let sql = phase_duration_sql();
+        let bound: i16 = sql
+            .split("p.phase BETWEEN 0 AND ")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|n| n.parse().ok())
+            .expect("a bounded phase filter");
+        let names: Vec<&str> = sql
+            .split("ARRAY[")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("a phase name array")
+            .split(',')
+            .map(|n| n.trim_matches('\''))
+            .collect();
+        for phase in JobPhase::ALL {
+            let v = phase.as_i16();
+            assert!(v <= bound, "{} is filtered out", phase.as_str());
+            assert_eq!(names[v as usize], phase.as_str());
+        }
+    }
+
+    /// Derivations are global; build rollups must attribute project through the
+    /// build's evaluation -> task, never a (now column-less) derivation join.
+    #[test]
+    fn build_rollups_attribute_project_via_task() {
+        let counts = build_counts();
+        let sqls = counts
+            .iter()
+            .map(build_count_sql)
+            .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
+            .chain(std::iter::once(build_duration_attempt_sql()));
+        for sql in sqls {
+            assert!(sql.contains("JOIN task pr"), "missing task join: {sql}");
+            assert!(
+                !sql.contains("d.project"),
+                "stale derivation project: {sql}"
+            );
+        }
+    }
+}

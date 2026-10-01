@@ -102,7 +102,7 @@ impl<'a> StateApplicator<'a> {
                 project.insert(self.db).await?;
                 // No worker can be connected yet: state is applied before the
                 // proto endpoint serves, so no re-auth request is needed here.
-                gradient_db::base_workers::enable_auto_base_workers_for_project(
+                gradient_db::projects::base_workers::enable_auto_base_workers_for_project(
                     self.db,
                     project_id,
                     Some(created_by_id),

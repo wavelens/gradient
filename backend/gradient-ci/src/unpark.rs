@@ -19,7 +19,7 @@
 //! [`unpark_no_workers_for_project`] when a registration is created or its
 //! `active`/`enable_eval` flags transition to `true`.
 
-use gradient_db::project_has_eval_capable_worker_registration;
+use gradient_db::projects::workers::project_has_eval_capable_worker_registration;
 use gradient_types::ids::ProjectId;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
@@ -47,7 +47,9 @@ pub async fn unpark_storage_full_for_project<C: ConnectionTrait>(
     project: ProjectId,
     instance_max_storage_gb: i32,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
-    if gradient_db::project_caches_all_full(db, project, instance_max_storage_gb).await? {
+    if gradient_db::caches::capacity::project_caches_all_full(db, project, instance_max_storage_gb)
+        .await?
+    {
         return Ok(Vec::new());
     }
     unpark_for_project(db, project, |r| {

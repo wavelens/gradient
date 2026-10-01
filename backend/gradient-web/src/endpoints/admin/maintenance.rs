@@ -11,7 +11,7 @@ use crate::helpers::ok_json;
 use axum::http::StatusCode;
 use axum::{Extension, Json, extract::State};
 use gradient_core::ServerState;
-use gradient_db::admin_tasks::{self, InsertPendingError};
+use gradient_db::maintenance::admin_tasks::{self, InsertPendingError};
 use gradient_entity::ids::AdminTaskId;
 use gradient_types::{AdminTaskKind, BaseResponse, MUser};
 use serde::Serialize;

@@ -120,7 +120,8 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
             continue;
         }
 
-        let plan = match gradient_db::evaluation_gc_plan(&ctx, task.id, keep).await {
+        let plan = match gradient_db::maintenance::gc::evaluation_gc_plan(&ctx, task.id, keep).await
+        {
             Ok(plan) if plan.is_empty() => continue,
             Ok(plan) => plan,
             Err(e) => {
@@ -147,7 +148,9 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
                 .filter(|e| report.deleted_evaluations.contains(&e.id))
                 .cloned()
                 .collect();
-            if let Err(e) = gradient_db::after_evaluation_delete(&ctx, &deleted).await {
+            if let Err(e) =
+                gradient_db::maintenance::gc::after_evaluation_delete(&ctx, &deleted).await
+            {
                 warn!(error = %e, task_id = %task.id, "Evaluation GC cleanup failed for task");
             }
         }
@@ -201,7 +204,7 @@ fn keep_hours(ttl_hours: u64, grace_hours: i64) -> i64 {
 }
 
 /// Evict every cached path outside the live closure that nobody fetched within
-/// `nar_ttl_hours`. The live set is `gradient_db::graph_sql::live_cached_paths_cte`,
+/// `nar_ttl_hours`. The live set is `gradient_db::graph::walks::live_cached_paths_cte`,
 /// so what goes here is what no retained evaluation can reach and what no client
 /// has asked for since the bound.
 ///
@@ -215,7 +218,7 @@ pub async fn evict_stale_cached_paths(state: Arc<ServerState>) -> Result<u64> {
         state.config.gc.nar_upload_grace_hours,
     );
     let scanned_at = now();
-    let stale = gradient_db::stale_cached_paths(&state.worker_db, keep)
+    let stale = gradient_db::maintenance::gc::stale_cached_paths(&state.worker_db, keep)
         .await
         .context("stale cached-path selection failed")?;
     if stale.is_empty() {

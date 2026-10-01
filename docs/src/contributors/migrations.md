@@ -48,7 +48,7 @@ A column added in one release and dropped in a later one leaves an `add_X` / `dr
 
 **Removal must not** edit the original `create_table_*` migration of the table: that changes the schema of every install path. Intermediate migrations may change only mechanically, e.g. dropping a column declaration the `drop_X` would remove anyway.
 
-**Existing installs** keep `seaql_migrations` rows for deleted files, which SeaORM rejects ("Applied migrations not found in migration list"). `prune_removed_migrations` (`backend/gradient-db/src/connection.rs`) deletes every row not in `Migrator::migrations()` before `Migrator::up` and logs the pruned versions at `info`. Deleting the file and its `lib.rs` entry is the whole change.
+**Existing installs** keep `seaql_migrations` rows for deleted files, which SeaORM rejects ("Applied migrations not found in migration list"). `prune_removed_migrations` (`backend/gradient-db/src/connection/mod.rs`) deletes every row not in `Migrator::migrations()` before `Migrator::up` and logs the pruned versions at `info`. Deleting the file and its `lib.rs` entry is the whole change.
 
 ## Retired Pairs
 

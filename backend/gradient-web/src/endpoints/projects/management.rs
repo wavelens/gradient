@@ -266,7 +266,7 @@ pub async fn put(
     .insert(&tx)
     .await?;
 
-    let auto_enabled = gradient_db::base_workers::enable_auto_base_workers_for_project(
+    let auto_enabled = gradient_db::projects::base_workers::enable_auto_base_workers_for_project(
         &tx,
         project.id,
         Some(user.id),

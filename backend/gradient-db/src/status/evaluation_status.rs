@@ -99,7 +99,7 @@ pub async fn update_evaluation_status(
             e
         });
 
-    if let Err(e) = crate::events::record(
+    if let Err(e) = crate::deliveries::events::record(
         &ctx.worker_db,
         &ctx.events,
         gradient_types::events::evaluation::Reported {

@@ -19,7 +19,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::get_any_project_by_name;
+use gradient_db::lookup::get_any_project_by_name;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
 use gradient_entity::evaluation::{EvaluationStatus, WalkMode};
@@ -113,9 +113,11 @@ pub(super) async fn evaluations_to_summaries(
         .map(|u| (u.id, u.name))
         .collect();
 
-    let status_counts = gradient_db::build_status_counts_by_evaluation(db, &eval_ids).await?;
-    let message_counts = gradient_db::evaluation_message_counts(db, &eval_ids).await?;
-    let eval_jobs = gradient_db::latest_eval_jobs(db, &eval_ids).await?;
+    let status_counts =
+        gradient_db::task_board::build_status_counts_by_evaluation(db, &eval_ids).await?;
+    let message_counts = gradient_db::task_board::evaluation_message_counts(db, &eval_ids).await?;
+    let eval_jobs =
+        gradient_db::scheduling::assignment_record::latest_eval_jobs(db, &eval_ids).await?;
 
     let mut out = Vec::with_capacity(evaluations.len());
     for evaluation in evaluations {
@@ -244,7 +246,7 @@ pub async fn post_task_evaluate(
             state
                 .graph
                 .transition(gradient_graph::Transition::Repair {
-                    scope: gradient_db::RepairScope::Eval(eval.id),
+                    scope: gradient_db::graph::repair::RepairScope::Eval(eval.id),
                 })
                 .await
                 .map_err(|e| {
@@ -468,7 +470,8 @@ pub async fn get_task_details(
 
     let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
-    let (building, queued) = gradient_db::task_queue_summary(&state.web_db, task.id).await?;
+    let (building, queued) =
+        gradient_db::task_board::task_queue_summary(&state.web_db, task.id).await?;
 
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
@@ -803,14 +806,21 @@ impl EntryPointRelatedData {
         let attempts: HashMap<DerivationId, MBuildAttempt> = {
             let shared_build_ids: Vec<DerivationBuildId> =
                 shared_builds.values().map(|a| a.id).collect();
-            let mut by_shared_build = gradient_db::latest_attempts(db, &shared_build_ids).await?;
+            let mut by_shared_build =
+                gradient_db::scheduling::build_attempt::latest_attempts(db, &shared_build_ids)
+                    .await?;
             shared_builds
                 .iter()
                 .filter_map(|(drv, a)| by_shared_build.remove(&a.id).map(|att| (*drv, att)))
                 .collect()
         };
 
-        let raw = gradient_db::cached_entry_point_dep_counts(db, evaluation, entry_points).await?;
+        let raw = gradient_db::task_board::dep_counts::cached_entry_point_dep_counts(
+            db,
+            evaluation,
+            entry_points,
+        )
+        .await?;
         let mut deps = HashMap::new();
         let mut deps_total = HashMap::new();
         for (ep, per_status) in raw {

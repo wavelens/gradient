@@ -16,7 +16,7 @@
 use anyhow::{Context, Result, anyhow};
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
-use gradient_db::pending_deliveries::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
+use gradient_db::deliveries::pending::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
 use gradient_types::ids::{BuildAttemptId, TaskActionId, WebhookId};
@@ -242,7 +242,7 @@ async fn deliver_action(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_db::pending_deliveries::PendingDelivery;
+    use gradient_db::deliveries::pending::PendingDelivery;
     use gradient_types::ids::PendingDeliveryId;
 
     fn row(payload: JsonValue) -> PendingDelivery {

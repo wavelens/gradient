@@ -43,9 +43,9 @@ pub async fn set_draining(
     scheduler.draining.store(req.enabled, Ordering::Relaxed);
 
     let evaluations = if req.enabled {
-        gradient_db::park_active_evals(&state.worker_db).await
+        gradient_db::evaluations::draining::park_active_evals(&state.worker_db).await
     } else {
-        gradient_db::unpark_draining_evals(&state.worker_db).await
+        gradient_db::evaluations::draining::unpark_draining_evals(&state.worker_db).await
     }
     .map_err(|e| WebError::internal(format!("draining transition failed: {e}")))?;
 

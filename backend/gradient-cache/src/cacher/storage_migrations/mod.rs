@@ -16,7 +16,7 @@ use super::units::{Step, next_unit};
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 use gradient_core::ServerState;
-use gradient_db::storage_migrations;
+use gradient_db::maintenance::storage_migrations;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::info;

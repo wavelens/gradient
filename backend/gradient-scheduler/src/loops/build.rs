@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use crate::assign_mode::decide_build_spec_kind;
 use gradient_core::ServerState;
-use gradient_db::StartableMoves;
+use gradient_db::scheduling::startable_set::StartableMoves;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::{RequeueScope, Transition};
 use gradient_sources::get_path_from_derivation_output;
@@ -256,7 +256,8 @@ impl BuildAssignMaps {
         // build_job, preferring one whose evaluation is not terminal. The driving
         // eval is the job's peer-routing source and the build_job attributed on win.
         let mut driving_eval: HashMap<DerivationBuildId, EvaluationId> = HashMap::new();
-        let jobs_by_drv = gradient_db::build_jobs_for_derivations(db, &drv_ids).await?;
+        let jobs_by_drv =
+            gradient_db::graph::reachability::build_jobs_for_derivations(db, &drv_ids).await?;
         let mut jobs_by_shared_build: HashMap<DerivationBuildId, Vec<EvaluationId>> =
             HashMap::new();
         for shared_build in shared_builds {
@@ -686,7 +687,7 @@ async fn load_sizes_and_histories(
     let computed = if need.is_empty() {
         HashMap::new()
     } else {
-        gradient_db::transitive_closure_sizes(&state.worker_db, &need)
+        gradient_db::graph::closure::transitive_closure_sizes(&state.worker_db, &need)
             .await
             .unwrap_or_else(|e| {
                 error!(error = %e, "failed to compute closure sizes");
@@ -758,9 +759,11 @@ pub(crate) async fn admit_startable_moves(scheduler: &Scheduler) -> anyhow::Resu
             left.contains(&b.derivation) || entered.contains(&b.derivation)
         })
         .await;
-    let shared_builds =
-        gradient_db::find_startable_shared_builds_among(&scheduler.state.worker_db, &derivations)
-            .await?;
+    let shared_builds = gradient_db::graph::promotion::find_startable_shared_builds_among(
+        &scheduler.state.worker_db,
+        &derivations,
+    )
+    .await?;
 
     enqueue_startable_shared_builds(scheduler, shared_builds).await
 }
@@ -775,7 +778,8 @@ pub(crate) async fn resync_startable_set(scheduler: &Scheduler) -> anyhow::Resul
     }
 
     let shared_builds =
-        gradient_db::find_startable_shared_builds(&scheduler.state.worker_db).await?;
+        gradient_db::graph::promotion::find_startable_shared_builds(&scheduler.state.worker_db)
+            .await?;
     let startable: HashSet<DerivationBuildId> = shared_builds.iter().map(|a| a.id).collect();
     let pruned = scheduler
         .prune_pending_builds(move |b| !startable.contains(&b.derivation_build))
@@ -793,7 +797,7 @@ pub(crate) async fn resync_startable_set(scheduler: &Scheduler) -> anyhow::Resul
 /// Assemble and enqueue the shared builds the tracker does not hold yet. The select
 /// re-derives no can-start term: it trusts `Queued` to mean the gates held,
 /// which holds because of the one rule every writer of that status obeys, stated
-/// at `graph_sql::promotable_predicate`.
+/// at `graph::predicates::promotable_predicate`.
 async fn enqueue_startable_shared_builds(
     scheduler: &Scheduler,
     shared_builds: Vec<MDerivationBuild>,

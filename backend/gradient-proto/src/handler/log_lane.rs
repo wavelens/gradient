@@ -72,9 +72,10 @@ impl LogLane {
 }
 
 async fn append_to_storage(state: &ServerState, build: DerivationBuildId, data: &[u8]) {
-    let Some(attempt) = gradient_db::latest_attempt_id(&state.worker_db, build)
-        .await
-        .unwrap_or(None)
+    let Some(attempt) =
+        gradient_db::scheduling::build_attempt::latest_attempt_id(&state.worker_db, build)
+            .await
+            .unwrap_or(None)
     else {
         debug!(%build, bytes = data.len(), "log chunk dropped: no open attempt for the shared build");
         return;

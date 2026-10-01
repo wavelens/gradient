@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::project_has_writable_cache;
+use gradient_db::projects::caches::project_has_writable_cache;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;

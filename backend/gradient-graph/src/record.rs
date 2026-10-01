@@ -14,7 +14,8 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result, anyhow};
 use gradient_db::{
-    DbContext, WorkerDb, record_evaluation_message, update_evaluation_status_with_error,
+    DbContext, WorkerDb,
+    status::{record_evaluation_message, update_evaluation_status_with_error},
 };
 use gradient_entity::StorePath;
 use gradient_entity::build::BuildStatus;
@@ -121,7 +122,7 @@ fn flip_cache_available_sql() -> String {
          WHERE derivation = ANY($1::uuid[]) AND NOT cache_available \
            AND status NOT IN ({terminal_success}) \
          RETURNING derivation",
-        terminal_success = gradient_db::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+        terminal_success = gradient_db::sql::status::build_in(&BuildStatus::TERMINAL_SUCCESS),
     )
 }
 
@@ -426,7 +427,7 @@ impl BatchWriter<'_> {
             return Ok(());
         }
 
-        gradient_db::seed_walk_completeness(self.txn()?, &walked, grew)
+        gradient_db::graph::walk_completeness::seed_walk_completeness(self.txn()?, &walked, grew)
             .await
             .context("seed unwalked_inputs")?;
 
@@ -607,10 +608,11 @@ impl BatchWriter<'_> {
 
         if !truly.is_empty() {
             let truly_ids: Vec<DerivationId> = truly.iter().copied().collect();
-            let changes = gradient_db::substitute_created_shared_builds(db, &truly_ids)
-                .await
-                .context("substitute created shared builds")?;
-            gradient_db::emit_transition_effects(self.ctx, &changes).await;
+            let changes =
+                gradient_db::graph::promotion::substitute_created_shared_builds(db, &truly_ids)
+                    .await
+                    .context("substitute created shared builds")?;
+            gradient_db::status::emit_transition_effects(self.ctx, &changes).await;
         }
 
         Ok(())
@@ -696,25 +698,25 @@ impl BatchWriter<'_> {
         }
 
         let txn = self.txn()?;
-        let lock = gradient_db::lock_seed_shared_builds(txn, &locked).await?;
-        let mut changes = gradient_db::became_fetchable(&lock)
+        let lock = gradient_db::graph::can_start::lock_seed_shared_builds(txn, &locked).await?;
+        let mut changes = gradient_db::graph::can_start::became_fetchable(&lock)
             .await
             .context("advance fetchable shared builds")?;
-        gradient_db::seed_blocking_deps(&lock)
+        gradient_db::graph::can_start::seed_blocking_deps(&lock)
             .await
             .context("seed blocking_deps")?;
         changes.extend(
-            gradient_db::promote(txn, &locked)
+            gradient_db::graph::can_start::promote(txn, &locked)
                 .await
                 .context("promote the batch's shared builds")?,
         );
         changes.extend(
-            gradient_db::unpromote_ungated(txn, &locked)
+            gradient_db::graph::can_start::unpromote_ungated(txn, &locked)
                 .await
                 .context("settle the queue against the seeded counts")?,
         );
-        let net = gradient_db::collapse_transitions(changes);
-        gradient_db::emit_transition_effects(self.ctx, &net).await;
+        let net = gradient_db::status::collapse_transitions(changes);
+        gradient_db::status::emit_transition_effects(self.ctx, &net).await;
         self.move_batch_need(&to_seed, entry_points).await
     }
 
@@ -741,9 +743,10 @@ impl BatchWriter<'_> {
         }
 
         let txn = self.txn()?;
-        let wanted_by = gradient_db::adopt_referenced_outputs(txn, &walked)
-            .await
-            .context("adopt the references naming newly walked outputs")?;
+        let wanted_by =
+            gradient_db::graph::runtime_dependencies::adopt_referenced_outputs(txn, &walked)
+                .await
+                .context("adopt the references naming newly walked outputs")?;
         if wanted_by.is_empty() {
             return Ok(wanted_by);
         }
@@ -752,15 +755,17 @@ impl BatchWriter<'_> {
             wanted_by = wanted_by.len(),
             "adopted runtime dependencies recorded before their producers were walked"
         );
-        let mut changes = gradient_db::update_and_settle_need(txn, &wanted_by)
+        let mut changes = gradient_db::graph::can_start::update_and_settle_need(txn, &wanted_by)
             .await?
             .changes;
-        let seeded = gradient_db::seed_runtime_deps(txn, &[], &wanted_by).await?;
+        let seeded =
+            gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &[], &wanted_by).await?;
         if !seeded.incomplete.is_empty() {
-            let lock = gradient_db::lock_shared_builds(txn, &seeded.incomplete).await?;
-            changes.extend(gradient_db::lost_fetchability(&lock).await?);
+            let lock =
+                gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.incomplete).await?;
+            changes.extend(gradient_db::graph::can_start::lost_fetchability(&lock).await?);
         }
-        gradient_db::emit_transition_effects(self.ctx, &changes).await;
+        gradient_db::status::emit_transition_effects(self.ctx, &changes).await;
 
         Ok(wanted_by)
     }
@@ -784,13 +789,13 @@ impl BatchWriter<'_> {
         let mut changes = Vec::new();
         let mut gained_need = Vec::new();
         for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
-            let settled = gradient_db::update_and_settle_need(db, chunk)
+            let settled = gradient_db::graph::can_start::update_and_settle_need(db, chunk)
                 .await
                 .context("settle what this batch needs built")?;
             gained_need.extend_from_slice(&settled.moved.gained);
             changes.extend(settled.changes);
         }
-        gradient_db::emit_transition_effects(self.ctx, &changes).await;
+        gradient_db::status::emit_transition_effects(self.ctx, &changes).await;
 
         Ok(gained_need)
     }
@@ -873,7 +878,7 @@ impl BatchWriter<'_> {
                 continue;
             };
 
-            if let Err(e) = gradient_db::add_features(
+            if let Err(e) = gradient_db::graph::features::add_features(
                 self.ctx,
                 d.required_features.clone(),
                 gradient_entity::feature::FeatureKind::Feature,
@@ -1051,16 +1056,19 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &RecordBatch) -> Result<
                 .filter_map(|h| resolved.by_hash.get(h).copied()),
         );
 
-        gradient_db::bump_graph_version(writer.db(), &[evaluation_id])
+        gradient_db::task_board::dep_counts::bump_graph_version(writer.db(), &[evaluation_id])
             .await
             .context("bump the graph version for the batch")?;
 
         // Edges are global: a derivation an older evaluation kept as a stub gains
         // a closure here, so that evaluation's histogram is stale too.
         if !grew.is_empty() {
-            gradient_db::bump_graph_version_for_derivations(writer.db(), &grew)
-                .await
-                .context("bump the graph version of evaluations sharing the new edges")?;
+            gradient_db::task_board::dep_counts::bump_graph_version_for_derivations(
+                writer.db(),
+                &grew,
+            )
+            .await
+            .context("bump the graph version of evaluations sharing the new edges")?;
         }
 
         report.walked = newly_walked.len();
@@ -1171,11 +1179,12 @@ pub(crate) async fn apply_upstream_hits(
         .collect();
     let newly_cache_available = flip_cache_available(db, &served).await?;
 
-    let seeded = gradient_db::seed_runtime_deps(txn, &[], &touched).await?;
+    let seeded =
+        gradient_db::graph::runtime_can_start::seed_runtime_deps(txn, &[], &touched).await?;
     if !seeded.complete.is_empty() {
-        let lock = gradient_db::lock_shared_builds(txn, &seeded.complete).await?;
-        let changes = gradient_db::became_fetchable(&lock).await?;
-        gradient_db::emit_transition_effects(ctx, &changes).await;
+        let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
+        let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
+        gradient_db::status::emit_transition_effects(ctx, &changes).await;
     }
 
     let mut roots = touched;
@@ -1186,13 +1195,13 @@ pub(crate) async fn apply_upstream_hits(
     let mut changes = Vec::new();
     let mut gained_need = Vec::new();
     for chunk in roots.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let settled = gradient_db::update_and_settle_need(db, chunk)
+        let settled = gradient_db::graph::can_start::update_and_settle_need(db, chunk)
             .await
             .context("settle what an upstream hit needs built")?;
         changes.extend(settled.changes);
         gained_need.extend_from_slice(&settled.moved.gained);
     }
-    gradient_db::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await;
 
     Ok(gained_need)
 }
@@ -1232,7 +1241,7 @@ pub(crate) async fn mark_probed(
     let mut changes = Vec::new();
     let mut gained_need = Vec::new();
     for chunk in answered.chunks(gradient_db::IN_CHUNK_SIZE) {
-        let settled = gradient_db::update_and_settle_need(db, chunk)
+        let settled = gradient_db::graph::can_start::update_and_settle_need(db, chunk)
             .await
             .context("settle what an answered shared build needs built")?;
         changes.extend(settled.changes);
@@ -1240,12 +1249,12 @@ pub(crate) async fn mark_probed(
         // `probed` is a gate of its own: a shared build wanted before its answer
         // gained no need here, and nothing else would queue it before a sweep.
         changes.extend(
-            gradient_db::promote(db, chunk)
+            gradient_db::graph::can_start::promote(db, chunk)
                 .await
                 .context("queue the shared builds the answer made promotable")?,
         );
     }
-    gradient_db::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await;
 
     Ok(gained_need)
 }
@@ -1294,8 +1303,14 @@ async fn persist_narinfo(
     // A narinfo is the other place runtime references are learned, so the edges
     // they name are written from the hit that carried them.
     for (derivation, tokens) in &learned {
-        let producers = gradient_db::producers_of_tokens(db, tokens).await?;
-        gradient_db::insert_runtime_dependencies(db, *derivation, &producers).await?;
+        let producers =
+            gradient_db::graph::runtime_dependencies::producers_of_tokens(db, tokens).await?;
+        gradient_db::graph::runtime_dependencies::insert_runtime_dependencies(
+            db,
+            *derivation,
+            &producers,
+        )
+        .await?;
     }
 
     Ok(())
@@ -1315,8 +1330,12 @@ pub(crate) async fn after_commit(
     }
 
     if let Some(task_id) = batch.task {
-        gradient_db::announce_entry_point_statuses(ctx, report.evaluation, &report.entry_points)
-            .await;
+        gradient_db::status::announce_entry_point_statuses(
+            ctx,
+            report.evaluation,
+            &report.entry_points,
+        )
+        .await;
         if let Ok(Some(task)) = ETask::find_by_id(task_id).one(&ctx.worker_db).await {
             let gc_ctx = ctx.detached();
             let keep = task.keep_evaluations as usize;

@@ -15,7 +15,7 @@
 //! historical dead-zone class.
 
 use crate::DbContext;
-use crate::graph_sql::BUILDER_STATUSES;
+use crate::graph::predicates::BUILDER_STATUSES;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use std::collections::{HashMap, HashSet};
@@ -135,17 +135,17 @@ fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
 
 /// Update need below every shared build that just became, or stopped being, something
 /// this fleet will build, and settle the queue against what moved. The two statements
-/// embed [`crate::graph_sql::gates_predicate`], so the candidate list is a bound and
+/// embed [`crate::graph::predicates::gates_predicate`], so the candidate list is a bound and
 /// never a claim.
 ///
-/// A shared build already `Building` keeps building: [`crate::can_start::unpromote_ungated`]
+/// A shared build already `Building` keeps building: [`crate::graph::can_start::unpromote_ungated`]
 /// moves only `Queued` rows. The bytes a running build produces are cached and useful,
 /// while an abort throws the work away and complicates attempt attribution.
 async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
     let db = &ctx.worker_db;
     let mut moved_out = Moved::default();
     for chunk in need_moves(changes).chunks(crate::IN_CHUNK_SIZE) {
-        let moved = match crate::can_start::update_need(db, chunk).await {
+        let moved = match crate::graph::can_start::update_need(db, chunk).await {
             Ok(moved) => moved,
             Err(e) => {
                 error!(error = %e, "failed to update what a shared build needs");
@@ -153,7 +153,7 @@ async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
             }
         };
 
-        match crate::can_start::settle_need(db, &moved).await {
+        match crate::graph::can_start::settle_need(db, &moved).await {
             Ok(changes) => moved_out.regated.extend(changes),
             Err(e) => error!(error = %e, "failed to settle the queue against a need move"),
         }
@@ -236,11 +236,11 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
         .into_iter()
         .collect();
 
-    if let Err(e) = crate::dep_counts::bump_graph_version(db, &moved).await {
+    if let Err(e) = crate::task_board::dep_counts::bump_graph_version(db, &moved).await {
         error!(
             error = %e,
             evaluations = moved.len(),
-            max_age_secs = crate::dep_counts::DEP_COUNTS_MAX_AGE_SECS,
+            max_age_secs = crate::task_board::dep_counts::DEP_COUNTS_MAX_AGE_SECS,
             "failed to bump the graph version; the histograms heal on the age ceiling"
         );
     }
@@ -262,7 +262,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
             // build owes no row rather than a row every consumer drops.
             if ci_reports(c.to)
                 && entry_keys.contains(&(job.evaluation, job.derivation))
-                && let Err(e) = crate::events::record(
+                && let Err(e) = crate::deliveries::events::record(
                     db,
                     &ctx.events,
                     gradient_types::events::build::Reported {
@@ -318,7 +318,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
         .map(|c| c.derivation)
         .collect();
     if !finished.is_empty() {
-        match crate::build_attempt::latest_attempts_by_derivation(db, &finished).await {
+        match crate::scheduling::build_attempt::latest_attempts_by_derivation(db, &finished).await {
             Ok(attempts) => {
                 if let Err(e) =
                     super::logging::enqueue_log_finalize(db, attempts.into_values()).await

@@ -58,7 +58,7 @@ where
     C: sea_orm::ConnectionTrait
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
 {
-    Ok(gradient_db::transitive_closure_reachable(db, &seed_drv_ids).await?)
+    Ok(gradient_db::graph::closure::transitive_closure_reachable(db, &seed_drv_ids).await?)
 }
 
 /// Sum coalesced output sizes across `drv_ids`. `Some(total)` when > 0 else `None`.
@@ -66,7 +66,7 @@ pub async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
     db: &C,
     drv_ids: Vec<DerivationId>,
 ) -> WebResult<Option<i64>> {
-    let by_drv = gradient_db::output_sizes_by_drv(db, &drv_ids).await?;
+    let by_drv = gradient_db::graph::closure::output_sizes_by_drv(db, &drv_ids).await?;
     let total: i64 = by_drv.values().sum();
     Ok(if total > 0 { Some(total) } else { None })
 }
@@ -81,7 +81,7 @@ where
     let closure = derivation_closure_reachable(db, roots.clone()).await?;
     let all_ids: Vec<DerivationId> = closure.iter().cloned().collect();
 
-    let size_by_drv = gradient_db::output_sizes_by_drv(db, &all_ids).await?;
+    let size_by_drv = gradient_db::graph::closure::output_sizes_by_drv(db, &all_ids).await?;
     let total: i64 = size_by_drv.values().sum();
     let total_size_bytes = if total > 0 { Some(total) } else { None };
 
@@ -177,7 +177,8 @@ where
     C: sea_orm::ConnectionTrait
         + sea_orm::TransactionTrait<Transaction = sea_orm::DatabaseTransaction>,
 {
-    let reached = gradient_db::runtime_closure_reachable(db, &seed_hashes).await?;
+    let reached =
+        gradient_db::graph::runtime_closure::runtime_closure_reachable(db, &seed_hashes).await?;
 
     let total: i64 = reached.values().filter_map(|r| r.nar_size).sum();
     let total_size_bytes = (total > 0).then_some(total);
@@ -201,7 +202,9 @@ where
 
     let kept_hashes: Vec<String> = kept.iter().cloned().collect();
     let mut edges: Vec<ClosureEdge> = Vec::new();
-    for (parent, dep) in gradient_db::reference_edges(db, &kept_hashes).await? {
+    for (parent, dep) in
+        gradient_db::graph::runtime_closure::reference_edges(db, &kept_hashes).await?
+    {
         if dep != parent && kept.contains(&dep) {
             edges.push(ClosureEdge {
                 source: dep,
@@ -234,8 +237,11 @@ pub async fn get_build_runtime_closure(
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<ClosureGraph>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let seeds =
-        gradient_db::output_hashes_for_drvs(&state.web_db, &[ctx.build_job.derivation]).await?;
+    let seeds = gradient_db::graph::runtime_closure::output_hashes_for_drvs(
+        &state.web_db,
+        &[ctx.build_job.derivation],
+    )
+    .await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph))
 }
@@ -258,7 +264,8 @@ pub async fn get_eval_runtime_closure(
         .map(|ep| ep.derivation)
         .collect();
 
-    let seeds = gradient_db::output_hashes_for_drvs(&state.web_db, &roots).await?;
+    let seeds =
+        gradient_db::graph::runtime_closure::output_hashes_for_drvs(&state.web_db, &roots).await?;
     let graph = build_runtime_closure_graph(&state.web_db, seeds).await?;
     Ok(ok_json(graph))
 }

@@ -63,7 +63,7 @@ impl Scheduler {
         let Some(cluster) = self.attempts.lock().begin_resolving(attempt) else {
             return Ok(());
         };
-        let resolved = gradient_db::resolve_cluster_attempt(
+        let resolved = gradient_db::scheduling::cluster::resolve_cluster_attempt(
             &self.state.worker_db,
             cluster,
             attempt,

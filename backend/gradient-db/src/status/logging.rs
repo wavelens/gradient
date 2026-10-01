@@ -67,9 +67,9 @@ pub async fn enqueue_log_finalize(
         .into_iter()
         .map(|a| (a.to_string(), serde_json::json!({ "attempt": a })))
         .collect();
-    crate::pending_deliveries::enqueue_many(
+    crate::deliveries::pending::enqueue_many(
         db,
-        crate::pending_deliveries::PendingDeliveryKind::LogFinalize,
+        crate::deliveries::pending::PendingDeliveryKind::LogFinalize,
         rows,
     )
     .await

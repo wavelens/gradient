@@ -47,7 +47,9 @@ pub async fn post_build_log(
 
     // Capture current log length so the stream only delivers new content,
     // avoiding duplication of what the client already received via GET.
-    let initial_log_key = gradient_db::latest_attempt_id(&state.web_db, shared_build_id).await?;
+    let initial_log_key =
+        gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build_id)
+            .await?;
     let initial_offset = match initial_log_key {
         Some(key) => state.log_storage.read(key).await.unwrap_or_default().len(),
         None => 0,
@@ -67,7 +69,7 @@ pub async fn post_build_log(
                 Ok(None) => break,
                 Err(_) => break,
             };
-            let Some(log_key) = gradient_db::latest_attempt_id(&state.web_db, shared_build_id).await.unwrap_or(None) else {
+            let Some(log_key) = gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build_id).await.unwrap_or(None) else {
                 if matches!(shared_build.status, BuildStatus::Created | BuildStatus::Queued) {
                     continue;
                 }

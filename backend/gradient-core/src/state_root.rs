@@ -19,8 +19,10 @@ use uuid::Uuid;
 
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
-use gradient_db::cache_metric::CacheTraffic;
-use gradient_db::{CacheDb, DbContext, ProbeRequests, StartableSet, WebDb, WorkerDb};
+use gradient_db::metrics::cache_traffic::CacheTraffic;
+use gradient_db::{
+    CacheDb, DbContext, ProbeRequests, WebDb, WorkerDb, scheduling::startable_set::StartableSet,
+};
 use gradient_git_host::GitHostRegistry;
 use gradient_graph::Graph;
 use gradient_notify::EmailSender;
@@ -71,7 +73,7 @@ pub struct AppState {
     /// Auth rows stamped `last_used_at` recently, so a burst of requests writes once.
     pub last_used_stamps: Debounce<Uuid>,
     /// Served NAR bytes and counts per cache and minute, flushed by
-    /// `gradient_db::cache_metric` instead of written per request.
+    /// `gradient_db::metrics::cache_traffic` instead of written per request.
     pub cache_traffic: Arc<CacheTraffic>,
     /// JWT signing/verification secret loaded once at startup.
     pub jwt_secret: SecretString,
@@ -161,7 +163,9 @@ impl AppState {
     pub async fn record(&self, event: impl Into<gradient_types::Event>) {
         let event = event.into();
         let name = event.name();
-        if let Err(e) = gradient_db::events::record(&self.worker_db, &self.events, event).await {
+        if let Err(e) =
+            gradient_db::deliveries::events::record(&self.worker_db, &self.events, event).await
+        {
             tracing::error!(error = %e, event = %name, "failed to record an event");
         }
         self.delivery_wake.notify_one();
@@ -169,7 +173,7 @@ impl AppState {
 
     pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
         self.eval_assign_wake.notify_one();
-        if let Some(event) = gradient_db::events::evaluation_created(eval) {
+        if let Some(event) = gradient_db::deliveries::events::evaluation_created(eval) {
             self.record(event).await;
         }
     }

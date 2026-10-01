@@ -32,7 +32,7 @@ use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebError;
 use crate::helpers::OptionExt;
 use gradient_core::ServerState;
-use gradient_db::get_any_project_by_name;
+use gradient_db::lookup::get_any_project_by_name;
 use gradient_types::*;
 
 // ── Query parameters ─────────────────────────────────────────────────────────

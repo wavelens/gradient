@@ -239,7 +239,8 @@ pub async fn show(
         .await?
         .or_not_found("Signature")?;
     let store_path = cp.as_store_path().base();
-    let references = gradient_db::references_for_hash(&state.web_db, &hash).await?;
+    let references =
+        gradient_db::graph::runtime_closure::references_for_hash(&state.web_db, &hash).await?;
     Ok(ok_json(NarDetail {
         hash: cp.hash,
         store_path,

@@ -20,8 +20,8 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
-use gradient_db::graph_sql::{ClosureDirection, dependency_closure_cte_body};
-use gradient_db::{DbContext, retire_outputs};
+use gradient_db::graph::walks::{ClosureDirection, dependency_closure_cte_body};
+use gradient_db::{DbContext, graph::runtime_can_start::retire_outputs};
 use gradient_types::ids::{BuildAttemptId, DerivationId, EvaluationId};
 use gradient_types::*;
 use ractor::ActorRef;
@@ -68,11 +68,11 @@ fn stale_after_scan_sql() -> String {
          SELECT u.h AS hash FROM unnest($1::text[]) AS u(h) \
          WHERE NOT EXISTS (SELECT 1 FROM live l WHERE l.hash = u.h)",
         fresh = fresh_cte(),
-        runtime = gradient_db::graph_sql::runtime_closure_cte_body(
+        runtime = gradient_db::graph::walks::runtime_closure_cte_body(
             "runtime",
             "SELECT derivation FROM roots",
         ),
-        live = gradient_db::graph_sql::kept_hashes_cte_body("roots", "runtime"),
+        live = gradient_db::graph::walks::kept_hashes_cte_body("roots", "runtime"),
     )
 }
 
@@ -128,7 +128,7 @@ pub(crate) async fn gc_task_evaluations(
     task_id: TaskId,
     keep: usize,
 ) -> Result<()> {
-    let plan = gradient_db::evaluation_gc_plan(ctx, task_id, keep).await?;
+    let plan = gradient_db::maintenance::gc::evaluation_gc_plan(ctx, task_id, keep).await?;
 
     for chunk in plan.chunks(gradient_db::IN_CHUNK_SIZE) {
         let ids: Vec<EvaluationId> = chunk.iter().map(|e| e.id).collect();
@@ -148,7 +148,7 @@ pub(crate) async fn gc_task_evaluations(
             .filter(|e| report.deleted_evaluations.contains(&e.id))
             .cloned()
             .collect();
-        gradient_db::after_evaluation_delete(ctx, &deleted).await?;
+        gradient_db::maintenance::gc::after_evaluation_delete(ctx, &deleted).await?;
     }
 
     Ok(())
@@ -219,16 +219,16 @@ async fn delete_derivations(
     let survivors: Vec<DerivationId> = orphaned_survivors(&wanted_by, &deleted);
     if !survivors.is_empty() {
         let txn = db.begin().await.context("GC: begin the survivor un-walk")?;
-        gradient_db::unwalk(&txn, &survivors)
+        gradient_db::graph::walk_completeness::unwalk(&txn, &survivors)
             .await
             .context("GC: failed to re-walk the survivors of a deleted dependency")?;
         txn.commit()
             .await
             .context("GC: commit the survivor un-walk")?;
-        let changes = gradient_db::unpromote_ungated(db, &survivors)
+        let changes = gradient_db::graph::can_start::unpromote_ungated(db, &survivors)
             .await
             .context("GC: failed to settle the survivors of a deleted dependency")?;
-        gradient_db::emit_transition_effects(ctx, &changes).await;
+        gradient_db::status::emit_transition_effects(ctx, &changes).await;
     }
 
     info!(deleted = deleted.len(), "Orphan derivation GC done");
@@ -284,7 +284,7 @@ async fn retire_stale_paths(
         .commit()
         .await
         .context("GC: failed to release the retire savepoint")?;
-    gradient_db::emit_transition_effects(ctx, &retired.transitions).await;
+    gradient_db::status::emit_transition_effects(ctx, &retired.transitions).await;
 
     Ok(GcReport {
         retired: retired.deleted,
@@ -319,10 +319,10 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
             .context("GC: failed to delete an evaluation")?;
     }
 
-    let (adopted, changes) = gradient_db::settle_after_delete(ctx, &lost)
+    let (adopted, changes) = gradient_db::maintenance::gc::settle_after_delete(ctx, &lost)
         .await
         .context("GC: failed to settle the queue after deleting evaluations")?;
-    gradient_db::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await;
 
     info!(
         deleted = evaluations.len(),

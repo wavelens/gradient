@@ -136,7 +136,7 @@ pub enum SchedulerMsg {
         reply: RpcReplyPort<()>,
     },
     EnqueueMember {
-        of: gradient_db::MemberOf,
+        of: gradient_db::scheduling::cluster::MemberOf,
         key: String,
         job: PendingJob,
         reply: RpcReplyPort<()>,

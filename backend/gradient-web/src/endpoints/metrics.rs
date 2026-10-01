@@ -454,8 +454,8 @@ fn observations_sql() -> String {
                COALESCE(SUM(nar_count)::bigint, 0)
         FROM cache_metric
     "#,
-        build_terminal = gradient_db::status_sql::build_in(&build_terminal),
-        eval_terminal = gradient_db::status_sql::eval_in(&EvaluationStatus::TERMINAL),
+        build_terminal = gradient_db::sql::status::build_in(&build_terminal),
+        eval_terminal = gradient_db::sql::status::eval_in(&EvaluationStatus::TERMINAL),
     )
 }
 

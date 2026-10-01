@@ -15,7 +15,7 @@ flowchart LR
 
 ## Repair Scopes
 
-`gradient_db::repair_build_graph(ctx, scope)` (`backend/gradient-db/src/repair.rs`) takes place as `Transition::Repair` in the graph writer: a repair pass never interleaves with a batch import. Both scopes name an evaluation; every statement is bounded to that evaluation's dependency closure.
+`gradient_db::graph::repair::repair_build_graph(ctx, scope)` (`backend/gradient-db/src/graph/repair.rs`) takes place as `Transition::Repair` in the graph writer: a repair pass never interleaves with a batch import. Both scopes name an evaluation; every statement is bounded to that evaluation's dependency closure.
 
 | Scope | Sent by | Thaw |
 |---|---|---|
@@ -62,7 +62,7 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 
 ## Task Page Histogram
 
-`evaluation.graph_version` invalidates the per-entry-point status histogram (`backend/gradient-db/src/dep_counts.rs`).
+`evaluation.graph_version` invalidates the per-entry-point status histogram (`backend/gradient-db/src/task_board/dep_counts.rs`).
 
 | Bumped by | Scope |
 |---|---|
@@ -77,7 +77,7 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 
 ## Consistency Check
 
-`graph_consistency_report` (`backend/gradient-db/src/consistency.rs`) starts every `metrics.graphConsistencyIntervalSecs` (300 s, `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS`). The counters are moved, never derived: this check is their only backstop. Each step completes before the one that reads its column.
+`graph_consistency_report` (`backend/gradient-db/src/graph/consistency.rs`) starts every `metrics.graphConsistencyIntervalSecs` (300 s, `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS`). The counters are moved, never derived: this check is their only backstop. Each step completes before the one that reads its column.
 
 | # | Step | Report field |
 |---|---|---|

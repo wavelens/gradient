@@ -124,7 +124,7 @@ pub fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
 /// hand the actor bounded chunks to apply. The log files of what it actually
 /// deleted are reclaimed here, because they live outside the database.
 async fn run_derivation_gc(state: &Arc<ServerState>) -> anyhow::Result<usize> {
-    let (candidates, scanned_at) = gradient_db::orphan_derivation_candidates(
+    let (candidates, scanned_at) = gradient_db::maintenance::gc::orphan_derivation_candidates(
         &state.worker_db,
         state.config.gc.orphan_derivation_hours,
     )

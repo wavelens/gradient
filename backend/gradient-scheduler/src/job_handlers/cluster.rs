@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gradient_db::ClusterClaim;
+use gradient_db::scheduling::cluster::ClusterClaim;
 use gradient_pool::session_port::SessionSignal;
 use gradient_types::ids::ClusterAttemptId;
 use gradient_wire::types::{ClusterAddress, ClusterMembership, ClusterPeer};
@@ -166,7 +166,7 @@ impl Scheduler {
                 .collect(),
         };
 
-        match gradient_db::claim_cluster(&self.state.worker_db, claim).await {
+        match gradient_db::scheduling::cluster::claim_cluster(&self.state.worker_db, claim).await {
             Ok(true) => self.prepare(attempt, seats).await,
             Ok(false) => self.hand_back(attempt).await,
             Err(e) => {
@@ -329,7 +329,13 @@ impl Scheduler {
         else {
             return;
         };
-        match gradient_db::start_cluster_attempt(&self.state.worker_db, cluster, attempt).await {
+        match gradient_db::scheduling::cluster::start_cluster_attempt(
+            &self.state.worker_db,
+            cluster,
+            attempt,
+        )
+        .await
+        {
             Ok(true) => {
                 let Some(decided) = self.attempts.lock().mark_started(attempt) else {
                     return;
@@ -387,8 +393,12 @@ impl Scheduler {
         let Some(state) = self.attempts.lock().take(attempt) else {
             return;
         };
-        if let Err(e) =
-            gradient_db::fail_prepare_attempt(&self.state.worker_db, state.cluster, attempt).await
+        if let Err(e) = gradient_db::scheduling::cluster::fail_prepare_attempt(
+            &self.state.worker_db,
+            state.cluster,
+            attempt,
+        )
+        .await
         {
             // An open attempt blocks every later claim of the cluster: keep it
             // owned, overdue, so the next pass retries the close.
@@ -480,7 +490,10 @@ impl Scheduler {
     /// A `Queued` cluster with a member that can no longer run is aborted; its
     /// waiting members settle as aborted so their builds and evaluations finish.
     async fn abort_dead_clusters(&self) -> anyhow::Result<()> {
-        for cluster in gradient_db::abort_dead_queued_clusters(&self.state.worker_db).await? {
+        for cluster in
+            gradient_db::scheduling::cluster::abort_dead_queued_clusters(&self.state.worker_db)
+                .await?
+        {
             let dropped = self
                 .call(|reply| SchedulerMsg::DropWaiting { cluster, reply })
                 .await?;

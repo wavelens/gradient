@@ -124,12 +124,18 @@ pub enum PendingJob {
 /// The tracker's key for an evaluation job, persisted on `dispatched_job.job_id`
 /// and rebuilt in SQL by the dispatch gates from the same prefix.
 pub fn eval_job_key(evaluation: EvaluationId) -> String {
-    format!("{}{evaluation}", gradient_db::EVAL_KEY_PREFIX)
+    format!(
+        "{}{evaluation}",
+        gradient_db::scheduling::assignment_record::EVAL_KEY_PREFIX
+    )
 }
 
 /// The tracker's key for a build job, one per build-once shared build.
 pub fn build_job_key(shared_build: DerivationBuildId) -> String {
-    format!("{}{shared_build}", gradient_db::BUILD_KEY_PREFIX)
+    format!(
+        "{}{shared_build}",
+        gradient_db::scheduling::assignment_record::BUILD_KEY_PREFIX
+    )
 }
 
 impl PendingJob {
@@ -1048,7 +1054,12 @@ impl JobTracker {
         }
     }
 
-    pub fn add_member(&mut self, of: gradient_db::MemberOf, key: String, job: PendingJob) {
+    pub fn add_member(
+        &mut self,
+        of: gradient_db::scheduling::cluster::MemberOf,
+        key: String,
+        job: PendingJob,
+    ) {
         if self.active.contains_key(&key) {
             return;
         }
@@ -2615,7 +2626,7 @@ mod tests {
         assert!(!is_fetch_only(&cached));
     }
 
-    fn member(cluster: ClusterJobId, count: u32) -> gradient_db::MemberOf {
+    fn member(cluster: ClusterJobId, count: u32) -> gradient_db::scheduling::cluster::MemberOf {
         crate::cluster::book::book_tests::member_of(cluster, count)
     }
 

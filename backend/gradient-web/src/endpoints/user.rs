@@ -21,7 +21,7 @@ use gradient_types::events::audit::Action;
 
 use chrono::Duration;
 use gradient_core::ServerState;
-use gradient_db::get_any_project_by_name;
+use gradient_db::lookup::get_any_project_by_name;
 use gradient_types::consts::*;
 use gradient_types::input::{validate_display_name, validate_username};
 use gradient_types::*;

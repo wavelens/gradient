@@ -28,7 +28,7 @@ All on `derivation_build`, moved by transitions and never derived by a per-row w
 - A flip writes the flag with a `RETURNING` of exactly the changed rows, and only those ripple. A ripple from a state instead of a transition drives a counter below zero, where `= 0` never holds again.
 - Flip and ripple share one transaction under `can_start::lock_shared_builds` (`derivation`-ordered `FOR NO KEY UPDATE`), which returns the `SharedBuildLock` proof both functions require.
 - A complete closure is transitive and ripples level by level; `blocking_deps` moves one hop and stops: reaching zero queues the waiting build and never makes that build `fetchable`.
-- A transitive ripple is one SQL function call (current bodies in `m20261001_000001_plain_concept_names.rs`): every level is counted, locked in order and moved inside the function. A chain of 163 levels costs one round trip instead of three per level. Unit tests in `runtime_can_start.rs` and `walk_completeness.rs` hold the function bodies to the module predicates; a predicate change needs a migration.
+- A transitive ripple is one SQL function call (current bodies in `m20261001_000001_plain_concept_names.rs`): every level is counted, locked in order and moved inside the function. A chain of 163 levels costs one round trip instead of three per level. Unit tests in `graph/runtime_can_start.rs` and `graph/walk_completeness.rs` hold the function bodies to the module predicates; a predicate change needs a migration.
 
 ## Promotion Gates
 
@@ -111,7 +111,7 @@ Five columns on `evaluation`, over the shared builds its `build_job` rows name:
 
 - **Triggers** (current bodies in `m20261001_000001_plain_concept_names.rs`): `evaluation_shared_build_moved` (per row, `AFTER UPDATE OF status, wanted`), `evaluation_shared_build_named` / `evaluation_shared_build_unnamed` (per statement on `build_job` insert/delete). Raw SQL and ORM writes are covered alike.
 - Triggers append signed rows to `evaluation_shared_build_delta`, for live evaluations only, and take no lock.
-- **Membership:** the SQL function `evaluation_shared_build_counts(status, wanted)`. A unit test in `eval_counters.rs` holds its body to `graph_sql`; a predicate change needs a migration.
+- **Membership:** the SQL function `evaluation_shared_build_counts(status, wanted)`. A unit test in `evaluations/counters.rs` holds its body to `graph/predicates.rs`; a predicate change needs a migration.
 - **Fold:** `fold_shared_build_deltas` is running at the start of every waiting-state pass, one `DELETE ... RETURNING` under advisory lock `640`; an instance that finds the lock taken skips.
 - **Read:** `eval_counters` returns folded columns plus unfolded deltas.
 - **Counters answer only "not yet":** a naming and a transition in flight together can miss each other. A zero is confirmed by `reachability::eval_blocked`; a contradicted value is recounted (`recount_evaluations`, under the fold lock).
