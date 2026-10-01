@@ -27,13 +27,13 @@ flowchart LR
 | Repository URL | Where the flake lives |
 | Evaluation Wildcard | Which flake outputs to build, see [wildcards](../reference/wildcards.md) |
 | Triggers | When an evaluation starts and on which branch: push, pull request, polling (every 300 s by default) or a cron schedule |
-| Actions | What happens after: mail, web request, forge status, flake update pull request |
-| Flake Input Overrides | Replace a flake input for every run, e.g. a newer nixpkgs |
+| Actions | What happens after: mail, web request, Git host status, flake update pull request |
+| Flake Input Overrides | Replace a flake input for every evaluation, e.g. a newer nixpkgs |
 | Keep Evaluations | How many finished evaluations stay, 30 by default |
 
 ## Concurrency
 
-A task executes one evaluation at a time. A trigger that fires during a running evaluation follows the task's concurrency policy:
+A task has one active evaluation at a time. A trigger that fires during a running evaluation follows the task's concurrency policy:
 
 | Policy | Running evaluation | Running builds |
 |---|---|---|

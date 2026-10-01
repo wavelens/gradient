@@ -1,26 +1,26 @@
 # Scheduler
 
-How an evaluated derivation becomes a finished, cached build. Every derivation is built once globally (the build *anchor*); the pages follow an anchor from creation to dispatch.
+How an evaluated derivation becomes a finished, cached build. Every derivation is built once globally (the *shared build*); the pages follow a shared build from creation to assignment.
 
 ```mermaid
 flowchart LR
-    anchor[Build Anchors] --> promo[Promotion and Counters]
+    shared[Shared Builds] --> promo[Promotion and Counters]
     promo --> subst[Upstream Substitution]
     promo --> score[Scoring]
     subst --> closure[Cache Closure]
-    promo --> recon[Reconciler]
+    promo --> recon[Repair Pass]
     recon --> wait[Waiting and Recovery]
 ```
 
 <div class="grid cards" markdown>
 
--   :material-anchor: **[Build Anchors](build-anchors.md)**
+-   :material-source-branch: **[Shared Builds](shared-builds.md)**
 
-    One `derivation_build` row per derivation, and the `graph` actor that owns every write.
+    One `derivation_build` row per derivation, and the graph writer that owns every write.
 
 -   :material-counter: **[Promotion and Counters](promotion-and-counters.md)**
 
-    How an anchor moves from `Created` to `Queued`, and the counters every gate reads.
+    How a shared build moves from `Created` to `Queued`, and the counters every start condition reads.
 
 -   :material-cloud-download: **[Upstream Substitution](upstream-substitution.md)**
 
@@ -28,11 +28,11 @@ flowchart LR
 
 -   :material-shield-check: **[Cache Closure](cache-closure.md)**
 
-    The whole-closure invariant, its runtime counter and the self-heal after a failed build.
+    The complete-closure invariant, its runtime counter and the self-heal after a failed build.
 
--   :material-sync: **[Reconciler](reconciler.md)**
+-   :material-sync: **[Repair Pass](repair-pass.md)**
 
-    Heals for state no event reaches, and the emitter every anchor move fans out through.
+    Heals for state no event reaches, and the emitter every shared build move fans out through.
 
 -   :material-timer-sand: **[Waiting and Recovery](waiting-and-recovery.md)**
 
@@ -51,4 +51,4 @@ flowchart LR
 ## Related
 
 - [Scheduler Policies](../../reference/scheduler-policies.md): the rules and their magnitudes
-- [Capabilities and Dispatch](../proto/capabilities-and-dispatch.md): the worker side of assignment
+- [Capabilities and Assignment](../proto/capabilities-and-dispatch.md): the worker side of assignment

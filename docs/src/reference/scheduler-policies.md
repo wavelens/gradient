@@ -1,6 +1,6 @@
 # Scheduler Policies
 
-When a worker asks for work, the scheduler scores every queued job the worker can take and hands out the highest. The score is the sum of the policy's rules; the [Job Board](../ui/job-board.md#job-inspection) shows each rule's share for every dispatched job.
+When a worker asks for work, the scheduler scores every queued job the worker can take and hands out the highest. The score is the sum of the policy's rules; the [Job Board](../ui/job-board.md#job-inspection) shows each rule's share for every assigned job.
 
 ```nix
 services.gradient.scheduler.scoringPolicy = "resource-aware"; # (1)!
@@ -59,7 +59,7 @@ A policy is a named list of rules, and every rule is a small, separately tested 
 2. Combine the rule with the existing ones into a new named policy in `backend/gradient-pool/src/score/policy.rs`.
 3. Add the name to the allowed values of `scheduler.scoringPolicy` in `nix/modules/gradient.nix` and select the policy there.
 
-The Job Board then shows the new rule's share in every dispatch decision, next to the built-in rules.
+The Job Board then shows the new rule's share in every assignment decision, next to the built-in rules.
 
 ## Related
 

@@ -1,6 +1,6 @@
 # Report a Bug with a Diagnostic Report
 
-One SQLite file with everything that explains a stuck or failed evaluation, ready to attach to a [bug report](https://github.com/wavelens/gradient/issues). Maintainers answer from the file, without access to the instance.
+One SQLite file with everything that explains a stuck or failed evaluation, for attaching to a [bug report](https://github.com/wavelens/gradient/issues). Maintainers answer from the file, without access to the instance.
 
 **Requirements:**
 
@@ -33,7 +33,7 @@ One SQLite file with everything that explains a stuck or failed evaluation, read
 - Store hashes stay for checking a path against public caches.
 
 !!! note "Never in the File"
-    API keys, sessions, passwords, worker tokens, upstream cache keys and forge credentials are left out entirely, not redacted.
+    API keys, sessions, passwords, worker tokens, upstream cache keys and Git host credentials are left out entirely, not redacted.
 
 ## 3. Attach the Report
 

@@ -26,7 +26,7 @@ The theme (**System**, **Light**, **Dark**) is stored per browser, not per accou
 | Section | Shows | Actions |
 |---|---|---|
 | General | Name, display name, description, visibility | Edit; **Hide Build Requests task** hides the task holding `gradient build` evaluations from task lists; the evaluations continue |
-| More Settings | Links to Members and Roles, Workers, Cache Subscriptions, Integrations, Webhooks | Open each page |
+| More Settings | Links to Members & Roles, Workers, Cache Subscriptions, Integrations, Webhooks | Open each page |
 | SSH Key | The public key the project clones with | Copy as a deploy key on the Git host |
 | Danger Zone | | **Regenerate Key**, the old key stops working at once; **Delete Project** |
 
@@ -43,12 +43,12 @@ A public project shows its evaluations and builds to everyone, signed in or not.
 | Max Storage (GB) | New evaluations wait when every writable cache of the project has less than 10 MiB left; `0` is unlimited |
 | Visibility | A public cache serves paths without credentials |
 
-The cache page also holds **Upstreams**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
+The cache page also holds **Upstream Caches**, **NARs**, **Members & Roles**, **Subscriptions** and **Webhooks**.
 
 ![Cache NARs](../assets/screenshots/cache_nars.png)
 
 ## Related
 
 - [Members and Roles](members-and-roles.md): members, invitations and permissions
-- [Caches](../concepts/caches.md): upstreams and substitution order
+- [Caches](../concepts/caches.md): upstream caches and substitution order
 - [Share a Cache](../guides/share-a-cache.md): subscriptions and netrc

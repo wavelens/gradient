@@ -33,14 +33,14 @@ Install the App from its GitHub page on the account that owns the repositories. 
 
 Gradient matches the granted repositories against task repository URLs (`https://`, SSH and `github:owner/repo` all match) and creates a `github-<account>` integration pair in each matching project.
 
-For a project created after the installation: **Integrations -> New Integration**, forge GitHub, with the **Installation ID** from the App's installation page on GitHub.
+For a project created after the installation: **Integrations -> New Integration**, **Git Host** GitHub, with the **App Installation ID** from the App's installation page on GitHub.
 
 ## 4. Wire the Task
 
-A task with a matching repository URL gets a **Push (reporter)** trigger and a **Forge Status Report** action automatically. Otherwise, on the task:
+A task with a matching repository URL gets a **Push (reporter)** trigger and a **Git Host Status Report** action automatically. Otherwise, on the task:
 
 - **Triggers -> New Trigger**: **Push (reporter)** and, for pull requests, **Pull Request (reporter)**, each with the `github-<account>` integration.
-- **Actions -> New Action**: **Forge Status Report** with the `github-<account>` integration.
+- **Actions -> New Action**: **Git Host Status Report** with the `github-<account>` integration.
 
 ## Verify Deployment
 
@@ -57,7 +57,7 @@ The automatic setup covers pushes only; pull requests need the **Pull Request (r
 | Comment `/gradient run` | Starts an evaluation of the pull request |
 | Comment `/gradient approve` or approve the review | Releases a pull request from a fork waiting for maintainer approval |
 
-The approval gate is a task setting: **Require maintainer approval for PRs from non-writers**.
+The approval gate is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**.
 
 ??? note "Registering the App by Hand"
     When the manifest flow does not fit, register the App following [GitHub's documentation](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) with these values:
@@ -65,7 +65,6 @@ The approval gate is a task setting: **Require maintainer approval for PRs from 
     | Setting | Value |
     |---|---|
     | Webhook URL | `https://gradient.example.com/api/v1/hooks/github` |
-    | Setup URL | `https://gradient.example.com/admin/github-app` (optional) |
     | Permissions | `metadata: read`, `contents: read`, `pull_requests: write`, `issues: write`, `statuses: write`, `checks: write` |
     | Events | `push`, `pull_request`, `release`, `check_run`, `issue_comment`, `pull_request_review` |
 

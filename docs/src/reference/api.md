@@ -58,15 +58,15 @@ The closure endpoints (`/builds/{build}/closure`, `/runtime-closure` and the sam
 
 ## Live Updates
 
-These paths upgrade to a WebSocket and push JSON frames with a `type` field whenever the resource changes.
+These paths upgrade to a WebSocket and push one [event envelope](events.md#envelope) per frame whenever the resource changes.
 
-| Path | Frames |
+| Path | Events |
 |---|---|
-| `/tasks/{project}/{task}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` |
+| `/tasks/{project}/{task}/live` | `evaluation.<phase>`, `evaluation.progress` and `build.status_changed` of the task's evaluations |
 | `/evals/{evaluation}/live` | The same, for one evaluation |
-| `/builds/{build}/live` | `build_status_changed`, `build_progress` with downloaded and total bytes |
-| `/board/live` | `queue_depth`, `job_dispatched`, `worker_connected`, `worker_disconnected` |
-| `/board/cache/live` | `cache_changed`, a ping to refetch `/board/cache` |
+| `/builds/{build}/live` | The same for the build's evaluation, plus `build.progress` with downloaded and total bytes |
+| `/board/live` | `worker.queue_depth`, `worker.job_dispatched`, `worker.connected`, and `worker.disconnected` for superusers |
+| `/board/cache/live` | `cache.changed`, a ping to refetch `/board/cache` |
 
 ## Binary Cache
 
@@ -83,5 +83,5 @@ At the root, without `/api/v1`. Private caches take HTTP Basic auth with any use
 | `GET` | `/cache/{cache}/serve/{hash}/{path}` | One file, or a directory as `tar.zst`, from a NAR |
 
 - Unknown keys always answer `404`, and Nix moves on to the next substituter.
-- `log` and `debuginfo` fall back to the upstreams for substituted paths.
+- `log` and `debuginfo` fall back to the upstream caches for substituted paths.
 - `ls`, `serve` and `log` refill one request every 333 ms (about 180 per minute), with a burst of 180 for `ls` and `serve` and 900 for `log`.

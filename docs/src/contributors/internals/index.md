@@ -1,10 +1,10 @@
 # Internals
 
-Implementation details outside the scheduler and the protocol: how forge events enter, how NARs are stored and served, how the graph is queried in SQL, and how requests authenticate. Paths are relative to `backend/`.
+Implementation details outside the scheduler and the protocol: how Git host events enter, how NARs are stored and served, how the graph is queried in SQL, and how requests authenticate. Paths are relative to `backend/`.
 
 ```mermaid
 flowchart LR
-    forge[Forge] -->|webhook| hooks[Forge Webhooks]
+    githost[Git host] -->|webhook| hooks[Git Host Webhooks]
     hooks --> eval[Evaluation]
     worker[Worker] -->|NAR| storage[NAR Storage]
     storage --> serving[Cache Serving]
@@ -15,7 +15,7 @@ flowchart LR
 
 <div class="grid cards" markdown>
 
--   :material-webhook: **[Forge Webhooks](forge-webhooks.md)**
+-   :material-webhook: **[Git Host Webhooks](git-host-webhooks.md)**
 
     Hook routes, signature checks and the chain from a push to a queued evaluation.
 
@@ -42,10 +42,10 @@ flowchart LR
 | Topic | Page |
 |---|---|
 | Evaluation steps, fetch and walk | [Jobs](../proto/jobs.md), [Eval Worker Setup](../eval-worker.md) |
-| Batch ingest, anchors | [Build Anchors](../scheduler/build-anchors.md) |
-| Promotion, dispatch gates, failure cascade | [Promotion and Counters](../scheduler/promotion-and-counters.md) |
-| Offers, assignment, scoring | [Capabilities and Dispatch](../proto/capabilities-and-dispatch.md), [Scoring](../scheduler/scoring.md) |
+| Batch import, shared builds | [Shared Builds](../scheduler/shared-builds.md) |
+| Promotion, assignment gates, failure cascade | [Promotion and Counters](../scheduler/promotion-and-counters.md) |
+| Offers, assignment, scoring | [Capabilities and Assignment](../proto/capabilities-and-dispatch.md), [Scoring](../scheduler/scoring.md) |
 | Uploads and downloads | [Transfer](../proto/transfer.md) |
-| Wholeness, cache access | [Cache Closure](../scheduler/cache-closure.md) |
+| Complete closures, cache access | [Cache Closure](../scheduler/cache-closure.md) |
 | Worker registration and auth | [Connection](../proto/connection.md) |
 | Statuses | [Evaluations and Builds](../../concepts/evaluations-and-builds.md) |

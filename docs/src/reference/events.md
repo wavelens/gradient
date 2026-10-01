@@ -2,7 +2,7 @@
 
 Every state change Gradient makes is a typed event with a dotted name (`build.completed`, `task.star`, `proto.client.nar_push`).
 
-- **Durable** events are written to the outbox with the change that caused them and delivered to webhooks and task actions, with retries.
+- **Durable** events are stored as pending deliveries together with the change that caused them, then delivered to webhooks and task actions, with retries.
 - **Firehose-only** events are high-rate telemetry. They are only visible on the debug stream.
 
 `GET /api/v1/events/catalog` lists every name with its `durable` flag.
@@ -29,12 +29,12 @@ The same JSON everywhere: websocket frames, webhook bodies, task action bodies.
 | `gc.*` | yes | `gc.swept`, `gc.deep_finished` |
 | account activity | yes, instance webhooks only | `login.success`, `api_key.create`, `session.revoke` |
 | `build.status_changed`, `build.progress`, `evaluation.progress` | no | every build job transition, download progress |
-| `graph.*` | no | `graph.ingested`, `graph.demoted`, `graph.collected` |
+| `graph.*` | no | `graph.recorded`, `graph.demoted`, `graph.collected` |
 | `worker.*` | no | `worker.connected`, `worker.job_dispatched`, `worker.queue_depth` |
 | `proto.client.*`, `proto.server.*` | no | message type, worker, job id and size; never the payload |
 | `cache.changed`, `cache.nar.fetched`, `cache.narinfo.served`, `cache.nar.signed` | no | cache traffic; `cache.nar.signed` names the cache a fresh upload was signed into |
 
-Every `build.*` event carrying a per-evaluation `build_id` also carries `derivation_build`, the shared build anchor that `worker.job_dispatched` names as its `build_id`.
+Every `build.*` event carrying a per-evaluation `build_id` also carries `derivation_build`, the shared build that `worker.job_dispatched` names as its `build_id`.
 
 ## Webhooks
 

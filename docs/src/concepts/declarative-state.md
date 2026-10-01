@@ -15,8 +15,8 @@ flowchart LR
 | Users | Password or OIDC-only accounts, superusers |
 | Projects | Members, SSH key, workers, cache subscriptions |
 | Tasks | Repository, wildcard, triggers, actions, concurrency |
-| Integrations | Forge connections for incoming events and outgoing status |
-| Caches | Signing key, upstreams, members |
+| Integrations | Git host connections for incoming events and outgoing status |
+| Caches | Signing key, upstream caches, members |
 | Roles | Custom project and cache roles, OIDC and SCIM group mappings |
 | API Keys | Scoped keys, the token hash read from a secret file |
 | Workers | Project workers and base workers |
@@ -46,10 +46,10 @@ Secrets never go into the Nix store: every `*_file` option points at a file on t
 | `caches.<name>.signing_key_file` | Nix signing key, base64 only | `nix-store --generate-binary-cache-key main main-key main-key.pub`, then `sed -i 's/^[^:]*://' main-key` |
 | `api_keys.<name>.key_file` | SHA-256 hex digest of the token, without `GRAD` | See [API Key Files](#api-key-files) |
 | `workers.<name>.token_file` | Worker registration token | `openssl rand -base64 48` |
-| `integrations.<name>.secret_file` | Webhook secret shared with the forge | `openssl rand -hex 32` |
-| `integrations.<name>.access_token_file` | Forge access token | From the forge |
+| `integrations.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
+| `integrations.<name>.access_token_file` | Git host access token | From the Git host |
 
-- `gradient hash` prompts for the password twice and prints the hash. A password piped through `<<<` gets a trailing newline hashed with it, and later sign-ins fail.
+- `gradient hash` prompts for the password twice and prints the hash. A password piped through `<<<` carries a trailing newline into the hash, and later sign-ins fail.
 - The public half `acme-ssh-key.pub` goes to the Git host as a deploy key.
 - `nix-store` writes `main:<key>`; Gradient expects the key without the `main:` prefix and derives the public key itself.
 - A user without `password_file` signs in through OIDC only.

@@ -144,7 +144,7 @@ gradient login https://gradient.example.com
 
 ## Local Evaluation
 
-`gradient eval` executes the worker's evaluator locally, like `nix-eval-jobs`: one JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.
+`gradient eval` starts the worker's evaluator locally, like `nix-eval-jobs`: one JSON line per attribute with `attr`, `attrPath` and `drvPath`, or `error` for a failed attribute.
 
 ```sh
 gradient eval 'packages.x86_64-linux.#'             # the flake in the current directory

@@ -29,26 +29,29 @@ The proxy authorizes its own workers from its small Postgres database.
 - Each authorized worker is a row: ID, name, argon2 token hash and allowed capabilities.
 - `AuthChallenge` names only the worker's own ID; the negotiated capabilities are the worker's offer AND the allowed set, `federate` always off.
 - Revoking a row closes the worker's live session.
-- Every worker behind the proxy serves every peer the upstream authorized.
+- Every worker behind the proxy serves every peer the upstream server authorized.
 
-## Job Relay
+## Job Forwarding
 
 | Step | Proxy behavior |
 |---|---|
 | Offers | Mirrors the upstream offer book and fans candidates out to capable workers |
-| Scores | Relays the best score per candidate, changes only, once per second |
+| Scores | Forwards the best score per candidate, changes only, once per second |
 | `RequestJob` | A worker's poll becomes an upstream poll; the best capable waiting worker gets the `AssignJob`, otherwise the proxy declines |
 | Reports | Routed by `job_id`; queries get a fresh `query_id`; reports for jobs a worker does not own are dropped |
+| Uploads | Each `UploadRequest` gets a fresh `request_id`; grants, chunks and commits are mapped back to the requesting worker |
+| Cluster jobs | `StartCluster`, `ClusterSignal` and `AbortCluster` reach every worker holding a member of the attempt; the roster names the worker behind the proxy, with its zone and endpoint |
 | Worker lost | Disconnect or 120 s heartbeat timeout reports `JobFailed` (transient) upstream |
 | Upstream lost | Sends `AbortJob` to workers, answers open queries with errors, closes worker sessions with `Draining` |
 
 ## NAR Cache
 
 - Worker pulls are served from the proxy's store first: local (`/var/lib/gradient-proxy/nars`) or S3.
-- With S3, NARs above the small-NAR threshold (1 MiB) go out as presigned URLs; smaller ones are relayed.
-- Relayed bytes from upstream are written to a partial file and committed only when size and hash match.
+- With S3, NARs above the small-NAR threshold (1 MiB) go out as presigned URLs; smaller ones pass through the proxy.
+- Passthrough bytes from the upstream server are written to a partial file and committed only when size and hash match.
+- Passthrough uploads from workers are written the same way and committed only after the upstream server answers `UploadCommitted` with `Ok`.
 - Transfers over upstream presigned URLs bypass the proxy and are not cached.
-- The proxy exposes no cache to its upstream.
+- The proxy exposes no cache to its upstream server.
 
 ## Access Control
 

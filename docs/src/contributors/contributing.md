@@ -50,15 +50,15 @@ Gradient is **AGPL-3.0-only**; a contribution is released under the same license
 | Backend tests | `nix build .#checks.x86_64-linux.unittest -L` |
 | CLI tests | `nix build .#checks.x86_64-linux.cli-unittest -L` |
 | Clippy | `nix build .#checks.x86_64-linux.clippy -L`, `...cli-clippy -L`, `...cli-static-clippy -L` (the CLI without Nix support) |
-| VM tests | `nix build .#checks.x86_64-linux.gradient-<name> -L` for `api`, `deploy`, `e2e`, `eval`, `local-worker`, `scheduler` |
+| VM tests | `nix build .#checks.x86_64-linux.gradient-<name> -L` for `api`, `cluster`, `deploy`, `e2e`, `eval`, `local-worker`, `scheduler`, `standalone`, `standalone-docker` |
 | Format | `cargo fmt --all --check`, in `backend/` and `cli/` |
 | Licenses and advisories | `cargo deny check`, in `backend/` and `cli/`; GPL-family dependencies are banned |
 
-CI (`.github/workflows/rust.yml`) executes fmt, the `#[allow]` grep gate and cargo-deny over both workspaces; clippy executes as the flake checks.
+CI (`.github/workflows/rust.yml`) checks fmt, the `#[allow]` grep gate and cargo-deny over both workspaces; clippy is part of the flake checks.
 
 ## Rust
 
-- `cargo fmt` before committing. The toolchain comes from the devShell (`flake.lock`); `rust-toolchain.toml` mirrors it for rustup users; `rustfmt.toml` sets `style_edition = "2024"`.
+- `cargo fmt` before committing. The toolchain comes from the devShell (`flake.lock`); `rust-toolchain.toml` mirrors the toolchain for rustup users; `rustfmt.toml` sets `style_edition = "2024"`.
 - Each workspace carries its own `deny.toml`, `clippy.toml` and `rustfmt.toml`, kept in step; the backend `clippy.toml` adds the `tokio::spawn` and raw `Statement` bans.
 - No `unwrap()` in production paths (`clippy::unwrap_used = "deny"`): use `?`, an explicit error branch, or `.expect("<the invariant>")` where the call cannot fail by construction.
 - Shared state uses `gradient_util::sync::Mutex`, not `std::sync::Mutex`: poisoning is ignored and one panicking critical section does not break every later `lock()`.

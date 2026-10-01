@@ -1,6 +1,6 @@
 # Jobs
 
-The two job kinds, how their progress is reported, and what happens when a job fails, is aborted or loses its worker. Every job arrives as `AssignJob { job_id, dispatch, job, cluster }`; every report echoes `dispatch`. `cluster` is set only for a [cluster member](../scheduler/clusters.md).
+The two job kinds, how their progress is reported, and what happens when a job fails, is aborted or loses its worker. Every job arrives as `AssignJob { job_id, assignment_id, job, cluster }`; every report echoes `assignment_id`. `cluster` is set only for a [cluster member](../scheduler/clusters.md).
 
 ## Flake Jobs
 
@@ -48,14 +48,14 @@ sequenceDiagram
 - Each batch uploads its `.drv` files and their input sources before its `EvalResult`: builds start while the walk goes on. An input's `.drv` goes with the batch that walks it.
 - The walk goes on while a batch uploads, up to 64 batches ahead, and the uploads of consecutive batches overlap: each `EvalResult` follows its own batch's uploads, in walk order.
 - A path an earlier batch of the same evaluation pushed is neither queried nor uploaded again.
-- The server ingests each batch and promotes ready builds to `Queued` right away.
+- The server records each batch and promotes builds that can start to `Queued` right away.
 - The evaluation turns `Building` on `JobCompleted`; evaluation errors become error messages that fail the evaluation at the end.
 
 ## Build Jobs
 
-A build job carries exactly one `BuildSpec`: one shared build (anchor).
+A build job carries exactly one `BuildSpec`: one shared build (`derivation_build`).
 
-| `kind` | When | Executes |
+| `kind` | When | Action |
 |---|---|---|
 | `Build` | Default | Prefetch inputs, then the Nix daemon builds the derivation |
 | `Substitute` | The outputs exist in an upstream cache | Fetches the outputs without a Nix store |
@@ -76,22 +76,22 @@ A build job carries exactly one `BuildSpec`: one shared build (anchor).
 |---|---|
 | `Fetching`, `EvaluatingFlake`, `EvaluatingDerivations` | Evaluation status |
 | `FetchResult { flake_source }` | Stores the fetched source |
-| `EvalResult` | Ingests a batch of derivations |
+| `EvalResult` | Records a batch of derivations |
 | `EvalStats` | Evaluation metrics |
 | `InputUpdateResult`, `InputUpdateExpansion` | Flake update candidate lock and bumped inputs |
 | `Building { build_id }` | Build turns `Building`; an already aborted build gets `AbortJob` instead |
 | `BuildOutput` | Output sizes, build products, metrics, the `substituted` flag |
 | `Compressing` | No change |
 
-`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). Reports from a stale `dispatch` are dropped.
+`JobCompleted` and `JobFailed` carry the phase timeline shown on the [Job Board](../../ui/job-board.md#job-inspection). Reports from a stale `assignment_id` are dropped.
 
 ## Failures
 
 | `BuildFailureKind` | Result |
 |---|---|
 | `Transient` | Retried up to `build.maxAttempts` (3), backoff `build.retryBackoffSecs` (30 s) doubling |
-| `Permanent` | Failed; dependents turn `DependencyFailed` |
-| `Timeout` | Timed out; dependents turn `DependencyFailed` |
+| `Permanent` | Failed; builds that need the failed build turn `DependencyFailed` |
+| `Timeout` | Timed out; builds that need the timed-out build turn `DependencyFailed` |
 | `SubstituteUnavailable` | Re-queued; built normally after `build.substituteMissEscalationThreshold` (2) misses |
 | `InputsUnavailable` | Self-heal, see below |
 | `CorruptEvalCache` | The evaluation cache blob is purged, the evaluation re-queued |
@@ -122,4 +122,4 @@ A [cluster member](../scheduler/clusters.md) arrives as `AssignJob` with `cluste
 ## Abort and Lost Workers
 
 - **Abort** (API or a newer evaluation): the evaluation turns `Aborted`, `AbortJob` goes to its jobs, pending jobs are removed. The worker stops the daemon build at once and answers `JobFailed { Aborted }`. Aborts unconfirmed after 5 min are reaped.
-- **Lost worker:** open dispatches close as abandoned, building builds return to `Queued`, a running evaluation goes to `Waiting` and is re-queued; the evaluation fails after 10 lost dispatches.
+- **Lost worker:** open assignments close as abandoned, building builds return to `Queued`, a running evaluation goes to `Waiting` and is re-queued; the evaluation fails after 10 lost assignments.

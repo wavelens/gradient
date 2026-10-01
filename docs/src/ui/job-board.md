@@ -12,7 +12,7 @@ What the scheduler and the workers do right now and over time: live jobs, why a 
 | Throughput | Builds created, completed and failed, evaluations per hour, active jobs per worker | |
 | Durations | Average and maximum build time, the wait split over time | |
 | Workers | Fleet size, load by capability, system and feature, slot use per worker | Spot the missing kind of worker |
-| Cache | Stored size, traffic, growth, latency per upstream | |
+| Cache | Stored size, traffic, growth, latency per upstream cache | |
 | Storage | NAR storage latency and errors per operation (file or S3), writer lane fill and send stalls, NAR serve queue and failures; every chart on one time axis over the whole window, minute resolution up to 6 h; superusers only | Pick the time window |
 | Network | NAR egress, worker network and disk speed, HTTP latency per route | |
 | Jobs | The costliest builds by wall time, peak RAM, CPU time, disk I/O and network | Pick the time window |
@@ -31,7 +31,7 @@ What the scheduler and the workers do right now and over time: live jobs, why a 
 
     ![Jobs tab](../assets/screenshots/job_board_expensive_jobs.png)
 
-Draining stops new dispatches and parks running evaluations for a safe server stop; the next start clears the flag.
+Draining stops handing out new jobs and parks running evaluations for a safe server stop; the next start clears the flag.
 
 ## Storage Metrics
 
@@ -48,7 +48,7 @@ The **Storage** tab reads these metric keys. Counts are summed per bucket; an em
 | `nar.serves_active` | `active` | peak serves | NAR serves |
 | `nar.serve_failures` | `not_found`, `storage_timeout`, `storage_error`, `send_stalled` | count | NAR serves (bars) |
 
-- A `cancelled` call was dropped before it finished, usually by a timeout on a hung backend.
+- A `cancelled` call was dropped before finishing, usually by a timeout on a hung backend.
 - Lane fill and send stalls cover every protocol session, worker and cache alike; a stall is a send that waited past `send_chunk_timeout` for lane capacity.
 - Build log objects on S3 go through the same store and share the storage operation labels.
 
@@ -58,7 +58,7 @@ The **Storage** tab reads these metric keys. Counts are summed per bucket; an em
 
 A job from **Live Jobs** opens with:
 
-- The server's marks: queued, ready, dispatched, finished.
+- The server's marks: **Queued**, **Ready**, **Assigned**, **Finished**.
 - The worker timeline: nested phases (fetch, evaluate, build, compress, NAR push) with duration, share and bytes moved.
 - The score breakdown: each scoring rule's contribution to the winning worker.
 
@@ -72,11 +72,11 @@ The timeline shows where a slow job spent its time, the score shows why the job 
     | `eval_flake` | Evaluating the flake outputs |
     | `eval_derivations` | Resolving the outputs to derivations |
     | `eval_cache_pull`, `eval_cache_push` | Waiting for and returning the shared evaluation cache |
-    | `known_derivations_wait` | Waiting for the server to name the `.drv` files it already knows |
+    | `known_derivations_wait` | Waiting for the server to name the `.drv` files the server already knows |
     | `drv_closure_push` | Pushing a batch of `.drv` closures |
     | `prefetch` | Importing a build's inputs from the cache |
-    | `substitute_fetch` | Fetching one output from an upstream |
-    | `download` | One `builtin:fetchurl`, run by the worker without Nix |
+    | `substitute_fetch` | Fetching one output from an upstream cache |
+    | `download` | One `builtin:fetchurl`, fetched by the worker without Nix |
     | `build` | One derivation build |
     | `compress` | Packing the job's outputs for upload |
     | `nar_push` | One output upload, nested under `compress` |
@@ -90,7 +90,7 @@ The timeline shows where a slow job spent its time, the score shows why the job 
 
 Each load chart sets the running jobs of one kind against the slots of the workers that serve that kind. A chart near 100% names the worker type to add: evaluation, build, a system such as `aarch64-linux`, or a feature such as `kvm`.
 
-Per-worker CPU, memory, disk and network history lives under **Project -> Workers -> Metrics**.
+Per-worker CPU, memory, disk and network history lives under **Project -> Workers -> Metrics**. The connection and disconnect history there is kept for [`retentionDays`](../reference/configuration.md#general) (90 days by default).
 
 ## Visibility
 

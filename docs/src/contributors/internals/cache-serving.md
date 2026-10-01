@@ -1,6 +1,6 @@
 # Cache Serving
 
-How `/cache/{cache}/` answers Nix: signatures, narinfo from the database, pull-through from upstreams, debug info and the status codes clients depend on. Access and wholeness are on [Cache Closure](../scheduler/cache-closure.md).
+How `/cache/{cache}/` answers Nix: signatures, narinfo from the database, pull-through from upstream caches, debug info and the status codes clients depend on. Access and complete closures are on [Cache Closure](../scheduler/cache-closure.md).
 
 ```mermaid
 sequenceDiagram
@@ -12,11 +12,11 @@ sequenceDiagram
     C->>D: cached_path + signature
     alt known locally
         D-->>C: row
-        C-->>N: narinfo (X-Cache local)
+        C-->>N: narinfo (X-Cache HIT)
     else upstream serves
         C->>U: narinfo
         U-->>C: signed narinfo
-        C-->>N: re-signed, URL nar/upstream/{id}/...
+        C-->>N: re-signed, URL nar/upstream/{id}/... (X-Cache MISS)
     else unknown
         C-->>N: 404
     end
@@ -25,7 +25,7 @@ sequenceDiagram
 ## Signing
 
 - **Keys:** one Ed25519 key per cache, encrypted with the crypt secret. `format_cache_key` returns the decrypted private key; `format_cache_public_key` the `<host>-<name>:<base64>` public key.
-- **The server signs**, never the worker: `gradient_proto::signing::sign_cached_path`, on a NAR commit and on a REST upload.
+- **The server signs**, never the worker: `sign_into_caches` (`gradient-graph/src/nar.rs`) inside the NAR commit, for a worker upload and a REST upload alike.
 - **Signatures:** a commit writes the `cached_path_signature` row of every subscribed cache, signed with the cache's key in the same statement. The sign sweep (`sign_missing_signatures` in `gradient-cache/src/cacher/sign_sweep.rs`) fills the rows a later subscription inserts and any a commit left unsigned.
 
 ## Narinfo
@@ -38,7 +38,7 @@ sequenceDiagram
 | `cached_path` | Sizes, hashes, references, `CA:` for content-addressed paths; the fallback for `.drv` files and standalone paths |
 | `cached_path_signature` | `Sig:` lines, and the access gate |
 
-**Pull-through:** an upstream narinfo gets `URL:` rewritten to `nar/upstream/{id}/...` and is re-signed only after the upstream signature verifies; `X-Cache` tells local from upstream.
+**Pull-through:** an upstream narinfo gets `URL:` rewritten to `nar/upstream/{id}/...` and is re-signed only after the upstream signature verifies; `X-Cache` answers `HIT` for a local narinfo and `MISS` for an upstream one.
 
 ## Debug Info
 
@@ -50,7 +50,7 @@ sequenceDiagram
 
 - `archive` is relative to the requested key. Both spellings are accepted: `<build-id>` (Hydra) and `<build-id>.debug` (`nix copy`). The signature join is the access gate.
 - The `debug_info` index comes from the NARs of paths ending in `-debug` (`separateDebugInfo` outputs). An upload walks its own NAR on a detached task; `cached_path.debug_info_indexed` marks a scanned NAR, and the `debug-index` sweep reads each `file_hash` at most once.
-- A miss falls through to the upstreams with `archive` rewritten through `nar/upstream/{id}/...`; an `archive` that is absolute or escapes the upstream root is refused.
+- A miss falls through to the upstream caches with `archive` rewritten through `nar/upstream/{id}/...`; an `archive` that is absolute or escapes the upstream root is refused.
 
 ## Status Codes
 

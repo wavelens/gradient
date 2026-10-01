@@ -11,8 +11,8 @@ sequenceDiagram
     W->>S: CacheQuery { mode: Push }
     S->>W: CacheStatus (cached or not)
     W->>S: UploadRequest { request_id, object, size }
-    S->>W: UploadGrant { Skip / Relay / Put / Multipart }
-    W->>S: UploadChunk ... (Relay only)
+    S->>W: UploadGrant { Skip / Passthrough / Put / Multipart }
+    W->>S: UploadChunk ... (Passthrough only)
     W->>S: UploadFinished { metadata }
     S->>W: UploadCommitted { Ok / Retry / Rejected }
 ```
@@ -20,14 +20,14 @@ sequenceDiagram
 | Grant | When | Transfer |
 |---|---|---|
 | `Skip` | The object arrived meanwhile, or the server does not want the evaluation cache blob | Nothing |
-| `Relay { resume_offset }` | Local NAR storage | 512 KiB `UploadChunk` frames into `<baseDir>/nar-partial`, resuming after a break |
+| `Passthrough { resume_offset }` | Local NAR storage | 512 KiB `UploadChunk` frames into `<baseDir>/nar-partial`, resuming after a break |
 | `Put { url }` | S3, NAR up to 1 GiB | One presigned PUT, valid 1 h |
 | `Multipart` | S3, NAR over 1 GiB | Presigned parts of at least 64 MiB |
 
-- **Admission** is server-wide and fair across sessions: `upload.concurrency` (16) large uploads and `upload.bytesBudget` (8 GiB) at once. A small upload (at most 1 MiB of NAR, `SMALL_UPLOAD_BYTES`) has a window of its own, `SMALL_UPLOADS_IN_FLIGHT` (128): its cost is its two round trips, and an evaluation's `EvalResult` batches each wait on the push of their own `.drv` files. It goes ahead of larger ones in its session, and a session with one waiting is served first. A permit returns once the object is in storage, before the graph records it. Requests for the same object coalesce; followers get `Skip` once the first is stored.
-- **Worker side:** `worker.nar.maxConcurrentUploads` (16) slots for large uploads, of which one job holds at most half, and 128 for small ones. A slot is held from the request until `UploadFinished` is sent, not through the commit, so the graph actor receives commits in bursts it batches. `Retry` is retried up to 3 times, `Rejected` fails the upload, also when either answers the request before a grant. A failed transfer or an abandoned request sends `UploadCancel`.
-- **Commit:** a relay is checked by length and SHA-256, then moved into the NAR store. A presigned upload completes the multipart and checks the object size; the full digest only with `nar.verifyDigest`.
-- **Leases:** a relay expires after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session releases its uploads.
+- **Admission** is server-wide and fair across sessions: `upload.concurrency` (16) large uploads and `upload.bytesBudget` (8 GiB) at once. A small upload (at most 1 MiB of NAR, `SMALL_UPLOAD_BYTES`) has a window of its own, `SMALL_UPLOADS_IN_FLIGHT` (128): its cost is its two round trips, and an evaluation's `EvalResult` batches each wait on the push of their own `.drv` files. A small upload goes ahead of larger ones in its session, and a session with one waiting is served first. A permit returns once the object is in storage, before the graph records it. Requests for the same object coalesce; followers get `Skip` once the first is stored.
+- **Worker side:** `worker.nar.maxConcurrentUploads` (16) slots for large uploads, of which one job holds at most half, and 128 for small ones. A slot is held from the request until `UploadFinished` is sent, not through the commit; the graph writer receives commits in bursts and batches them. `Retry` is retried up to 3 times, `Rejected` fails the upload, also when either answers the request before a grant. A failed transfer or an abandoned request sends `UploadCancel`.
+- **Commit:** a passthrough upload is checked by length and SHA-256, then moved into the NAR store. A presigned upload completes the multipart and checks the object size; the full digest only with `nar.verifyDigest`.
+- **Leases:** a passthrough upload expires after `upload.leaseIdleSecs` (300 s) without progress. A failed job or closed session releases its uploads.
 - **Evaluation cache blobs** use the same handshake with `UploadObject::EvalCache`.
 
 ## Download for a Build
@@ -72,4 +72,4 @@ The worker prefetches every input the local store lacks before the build starts.
 ## Memory
 
 - A `Put` upload and a presigned download each hold the whole compressed NAR in memory, up to 1 GiB.
-- Relayed and multipart uploads from a store path stream through a packer and never hold the whole NAR.
+- Passthrough and multipart uploads from a store path stream through a packer and never hold the whole NAR.
