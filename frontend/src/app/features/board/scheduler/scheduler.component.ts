@@ -20,7 +20,7 @@ import { formatDuration } from '@shared/text';
       <gr-loading-spinner message="Loading scheduler stats..." />
     } @else {
       <div class="kpis">
-        <div class="kpi"><span class="label">Scored dispatches (24h)</span><span class="value">{{ summary()?.sample_size ?? 0 }}</span></div>
+        <div class="kpi"><span class="label">Scored assignments (24h)</span><span class="value">{{ summary()?.sample_size ?? 0 }}</span></div>
         <div class="kpi"><span class="label">Avg score</span><span class="value">{{ summary()?.score_avg | number: '1.2-2' }}</span></div>
         <div class="kpi"><span class="label">Min / Max</span><span class="value sm">{{ summary()?.score_min | number: '1.1-1' }} / {{ summary()?.score_max | number: '1.1-1' }}</span></div>
       </div>
@@ -60,7 +60,7 @@ import { formatDuration } from '@shared/text';
               <td class="bar-cell"><div class="bar" [class.neg]="r.avg < 0" [style.width.%]="r.share"></div></td>
             </tr>
           } @empty {
-            <tr><td colspan="5" class="muted">No scored dispatches in window.</td></tr>
+            <tr><td colspan="5" class="muted">No scored assignments in window.</td></tr>
           }
         </tbody>
       </gr-table>
@@ -100,7 +100,7 @@ export class BoardSchedulerComponent implements OnInit {
     (this.summary()?.histogram ?? []).map((b) => b.lo.toFixed(1))
   );
   histogramSeries = computed(() => [
-    { name: 'dispatches', data: (this.summary()?.histogram ?? []).map((b) => b.count) },
+    { name: 'assignments', data: (this.summary()?.histogram ?? []).map((b) => b.count) },
   ]);
 
   ruleRows = computed(() => {

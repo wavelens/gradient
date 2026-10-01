@@ -93,7 +93,7 @@ describe('buildDuration', () => {
     expect(buildDuration({ status: 'Completed', build_time_ms: 7_000, build_started_at: null }, now)).toBe(7_000);
   });
 
-  it('runs from the attempt start while building, not from the queue', () => {
+  it('counts from the attempt start while building, not from the queue', () => {
     expect(buildDuration({ status: 'Building', build_time_ms: null, build_started_at: '2026-05-20T12:04:00' }, now))
       .toBe(60_000);
   });

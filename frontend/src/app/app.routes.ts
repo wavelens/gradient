@@ -206,12 +206,12 @@ export const routes: Routes = [
           ),
       },
       {
-        path: 'upstreams',
+        path: 'upstream-caches',
         title: 'Upstream Caches',
         canActivate: [authGuard],
         loadComponent: () =>
-          import('./features/caches/cache-upstreams/cache-upstreams.component').then(
-            (m) => m.CacheUpstreamsComponent,
+          import('./features/caches/upstream-caches/upstream-caches.component').then(
+            (m) => m.UpstreamCachesComponent,
           ),
       },
       {
@@ -306,7 +306,7 @@ export const routes: Routes = [
           },
           {
             path: 'jobs/:id',
-            title: 'Dispatched Job',
+            title: 'Assigned Job',
             loadComponent: () =>
               import('./features/board/job-detail/job-detail.component').then(
                 (m) => m.BoardJobDetailComponent

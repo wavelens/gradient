@@ -23,7 +23,7 @@ export class IntegrationsService {
   }
 
   /** Credential-free integration list available to any project member.
-   *  Use this for UIs that only need name/forge_type - e.g. populating the
+   *  Use this for UIs that only need name/git_host_type - e.g. populating the
    *  trigger create/edit dropdown - instead of the admin-gated full list. */
   listProjectIntegrationSummaries(project: string): Observable<IntegrationSummary[]> {
     return this.api.get<IntegrationSummary[]>(`projects/${project}/integrations/summary`);

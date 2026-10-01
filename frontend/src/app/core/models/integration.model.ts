@@ -5,8 +5,8 @@
  */
 
 export type IntegrationKind = 'inbound' | 'outbound';
-export type ForgeType = 'gitea' | 'forgejo' | 'gitlab' | 'github';
-export type InboundForge = 'gitea' | 'forgejo' | 'gitlab';
+export type GitHostType = 'gitea' | 'forgejo' | 'gitlab' | 'github';
+export type InboundGitHost = 'gitea' | 'forgejo' | 'gitlab';
 
 export interface Integration {
   id: string;
@@ -14,7 +14,7 @@ export interface Integration {
   name: string;
   display_name: string;
   kind: IntegrationKind;
-  forge_type: ForgeType;
+  git_host_type: GitHostType;
   endpoint_url: string | null;
   has_secret: boolean;
   has_access_token: boolean;
@@ -32,14 +32,14 @@ export interface IntegrationSummary {
   name: string;
   display_name: string;
   kind: IntegrationKind;
-  forge_type: ForgeType;
+  git_host_type: GitHostType;
 }
 
 export interface CreateIntegrationRequest {
   name: string;
   display_name?: string;
   kind: IntegrationKind;
-  forge_type: ForgeType;
+  git_host_type: GitHostType;
   secret?: string;
   endpoint_url?: string;
   access_token?: string;
@@ -50,7 +50,7 @@ export interface CreateIntegrationRequest {
 export interface PatchIntegrationRequest {
   name?: string;
   display_name?: string;
-  forge_type?: ForgeType;
+  git_host_type?: GitHostType;
   secret?: string;
   endpoint_url?: string;
   access_token?: string;

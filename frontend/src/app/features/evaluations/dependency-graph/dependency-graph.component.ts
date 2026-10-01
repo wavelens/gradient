@@ -175,16 +175,16 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     const edges = this.layoutEdges;
 
     // deps.get(N)       = what N directly depends on (tree children - built first)
-    // dependents.get(N) = what directly depends on N (tree parents - built after)
+    // wantedBy.get(N)   = what directly depends on N (tree parents - built after)
     const deps = new Map<string, string[]>();
-    const dependents = new Map<string, string[]>();
-    for (const n of nodes) { deps.set(n.id, []); dependents.set(n.id, []); }
+    const wantedBy = new Map<string, string[]>();
+    for (const n of nodes) { deps.set(n.id, []); wantedBy.set(n.id, []); }
     for (const e of edges) {
       deps.get(e.target)?.push(e.source);
-      dependents.get(e.source)?.push(e.target);
+      wantedBy.get(e.source)?.push(e.target);
     }
 
-    // BFS assigning MAXIMUM depth (longest path from root → minimises upward long-edges)
+    // BFS assigning MAXIMUM depth (longest path from root -> minimises upward long-edges)
     const depth = new Map<string, number>();
     depth.set(rootId, 0);
     const q: string[] = [rootId];
@@ -217,8 +217,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
       if (lv > 0) {
         group.sort((a, b) => {
-          const ax = this.avgX(a.id, dependents, posX);
-          const bx = this.avgX(b.id, dependents, posX);
+          const ax = this.avgX(a.id, wantedBy, posX);
+          const bx = this.avgX(b.id, wantedBy, posX);
           return ax - bx;
         });
       }
@@ -233,8 +233,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     }
   }
 
-  private avgX(nodeId: string, dependents: Map<string, string[]>, posX: Map<string, number>): number {
-    const parentIds = dependents.get(nodeId) || [];
+  private avgX(nodeId: string, wantedBy: Map<string, string[]>, posX: Map<string, number>): number {
+    const parentIds = wantedBy.get(nodeId) || [];
     const xs = parentIds.map((pid) => posX.get(pid)).filter((x): x is number => x !== undefined);
     if (!xs.length) return 0;
     return xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -409,8 +409,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Update edge paths - every edge uses a smooth bottom→top bezier; hovering a
-    // node (highlightNode) makes its incident edges legible on demand.
+    // Update edge paths - every edge uses a smooth bottom-to-top bezier; hovering a
+    // node (highlightNode) makes its incident edges legible while hovered.
     for (const edge of this.edgeEls) {
       const child = this.nodeMap.get(edge.source);
       const parent = this.nodeMap.get(edge.target);

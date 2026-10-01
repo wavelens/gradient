@@ -24,7 +24,7 @@
 <gr-copy-field [value]="publicKey" [multiline]="true" [rows]="4" />
 
 <h2>Read-only rows</h2>
-<gr-field-row label="Endpoint URL" value="https://forge.example/api/v1" />
+<gr-field-row label="Endpoint URL" value="https://git.example/api/v1" />
 <gr-field-row label="Secret"><gr-badge severity="success">Configured</gr-badge></gr-field-row>
 <gr-field-row label="Closure hash" value="sha256-3f9a" [mono]="true" />
 
@@ -64,7 +64,7 @@
 
 <h2>Feedback</h2>
 <gr-loading-spinner message="Loading integrations..." />
-<gr-empty-state icon="hub" title="No integrations" message="Create one to receive forge webhooks." />
+<gr-empty-state icon="hub" title="No integrations" message="Create one to receive Git host webhooks." />
 
 <p>With the action that resolves it. The button centres under the message.</p>
 <gr-empty-state icon="schedule_send" title="No triggers configured"

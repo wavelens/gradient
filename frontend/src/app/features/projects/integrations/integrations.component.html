@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Integrations' }]" title="Integrations" subtitle="Forge webhooks and status reporters for this project">
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Integrations' }]" title="Integrations" subtitle="Git host webhooks and status reporters for this project">
   <button slot="actions"
       *appWritable="access()"
       grButton
@@ -44,7 +44,7 @@
 
     <gr-settings-section title="Configured Integrations" [card]="false" maxWidth="none">
       @if (integrations().length === 0) {
-        <gr-empty-state icon="hub" title="No integrations" message="Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.">
+        <gr-empty-state icon="hub" title="No integrations" message="Create an inbound integration to receive Git host webhooks, or an outbound integration to report build statuses.">
           <button slot="action"
             *appWritable="access()"
             grButton
@@ -70,13 +70,13 @@
                       <gr-badge [severity]="integration.kind === 'inbound' ? 'info' : 'warning'">
                         {{ integration.kind === 'inbound' ? 'Inbound' : 'Outbound' }}
                       </gr-badge>
-                      <gr-badge>{{ forgeLabel(integration.forge_type) }}</gr-badge>
+                      <gr-badge>{{ gitHostLabel(integration.git_host_type) }}</gr-badge>
                       <span>Created {{ formatDate(integration.created_at) }}</span>
                     </div>
                   </div>
                 </div>
                 <div class="integration-actions">
-                  @if (integration.forge_type !== 'github') {
+                  @if (integration.git_host_type !== 'github') {
                     <button
                       *appWritable="access()"
                       grButton
@@ -103,7 +103,7 @@
                 </div>
               </div>
 
-              @if (integration.forge_type === 'github') {
+              @if (integration.git_host_type === 'github') {
                 <div class="integration-body">
                   @if (integration.account_login) {
                     <gr-field-row label="Account" [value]="'@' + integration.account_login" mono />
@@ -112,14 +112,14 @@
                 </div>
               } @else if (integration.kind === 'inbound') {
                 <div class="integration-body">
-                  <gr-form-field label="Forge" hint="This integration can serve webhooks from any supported forge. Pick the one you are configuring.">
+                  <gr-form-field label="Git Host" hint="This integration can serve webhooks from any supported Git host. Pick the one being configured.">
                     <gr-tab-switch
-                      ariaLabel="Forge"
-                      [options]="inboundForgeOptions"
+                      ariaLabel="Git host"
+                      [options]="inboundGitHostOptions"
                       optionLabel="label"
                       optionValue="value"
-                      [ngModel]="inboundForge(integration.id)"
-                      (ngModelChange)="setInboundForge(integration.id, $event)"
+                      [ngModel]="inboundGitHost(integration.id)"
+                      (ngModelChange)="setInboundGitHost(integration.id, $event)"
                     />
                   </gr-form-field>
                   <gr-form-field label="Webhook URL">
@@ -133,7 +133,7 @@
                     }
                   </gr-form-field>
                   <gr-form-field label="Events to enable">
-                    <small class="text-secondary">Enable {{ requiredWebhookEvents(integration.id) }} on the forge webhook. A push-only webhook never delivers PR CI or the <code>/gradient</code> comment commands.</small>
+                    <small class="text-secondary">Enable {{ requiredWebhookEvents(integration.id) }} on the Git host webhook. A push-only webhook never delivers PR CI or the <code>/gradient</code> comment commands.</small>
                   </gr-form-field>
                 </div>
               } @else {
@@ -176,14 +176,14 @@
     error="Lowercase letters, digits, and dashes only. Cannot start or end with a dash."
     hint="Used in the webhook URL. Lowercase letters, digits, and dashes."
   >
-    <gr-label-help slot="label" doc="guides/forge-gitea/#1-create-the-integrations" title="Learn about forge integrations" />
+    <gr-label-help slot="label" doc="guides/gitea/#1-create-the-integrations" title="Learn about Git host integrations" />
     <input grInput id="int-name" [(ngModel)]="formData.name" placeholder="e.g. main-gitea" />
   </gr-form-field>
   <gr-form-field label="Display Name" for="int-display-name" hint="Human-readable label shown in the integrations list.">
     <input grInput id="int-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" />
   </gr-form-field>
   <gr-form-field label="Kind" for="int-kind">
-    <gr-label-help slot="label" doc="guides/forge-gitea/#1-create-the-integrations" title="Inbound vs outbound integrations" />
+    <gr-label-help slot="label" doc="guides/gitea/#1-create-the-integrations" title="Inbound vs outbound integrations" />
     <gr-select
       inputId="int-kind"
       [(ngModel)]="formData.kind"
@@ -192,28 +192,28 @@
       optionValue="value"
     />
   </gr-form-field>
-  <gr-form-field label="Forge" for="int-forge">
+  <gr-form-field label="Git Host" for="int-git-host">
     <gr-select
-      inputId="int-forge"
-      [(ngModel)]="formData.forge_type"
-      [options]="formData.kind === 'outbound' ? outboundForgeOptions() : allForgeOptions()"
+      inputId="int-git-host"
+      [(ngModel)]="formData.git_host_type"
+      [options]="formData.kind === 'outbound' ? outboundGitHostOptions() : allGitHostOptions()"
       optionLabel="label"
       optionValue="value"
     />
   </gr-form-field>
 
-  @if (formData.forge_type === 'github') {
-    <gr-form-field label="App Installation ID" for="int-installation-id" hint="The numeric installation ID from your GitHub App installation.">
-      <gr-label-help slot="label" doc="guides/forge-github/#3-install-the-app" title="Install the GitHub App" />
+  @if (formData.git_host_type === 'github') {
+    <gr-form-field label="App Installation ID" for="int-installation-id" hint="The numeric installation ID of the GitHub App installation.">
+      <gr-label-help slot="label" doc="guides/github/#3-install-the-app" title="Install the GitHub App" />
       <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id"
         placeholder="e.g. 12345678" />
     </gr-form-field>
   } @else if (formData.kind === 'inbound') {
     <div class="dialog-info">
       <gr-icon name="info" />
-      The webhook URL is shown after the integration is created. Enable push, pull/merge-request, comment, and review events on the forge webhook - a push-only webhook never delivers PR CI or <code>/gradient</code> commands.
+      The webhook URL is shown after the integration is created. Enable push, pull/merge-request, comment, and review events on the Git host webhook. A push-only webhook never delivers PR CI or <code>/gradient</code> commands.
     </div>
-    <gr-form-field label="Webhook Secret" for="int-secret" hint="Copy this into your forge's webhook secret field. Store it now - it will not be shown again.">
+    <gr-form-field label="Webhook Secret" for="int-secret" hint="Copy this into the webhook secret field of the Git host. Store it now - it will not be shown again.">
       <div class="field-actions">
         <input grInput id="int-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to omit verification" />
         <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
@@ -223,7 +223,7 @@
       <textarea id="int-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
     </gr-form-field>
   } @else {
-    <gr-form-field label="Endpoint URL" for="int-endpoint" hint="Base URL of your forge instance.">
+    <gr-form-field label="Endpoint URL" for="int-endpoint" hint="Base URL of the Git host instance.">
       <input grInput id="int-endpoint" [(ngModel)]="formData.endpoint_url"
         placeholder="e.g. https://gitea.example.com" />
     </gr-form-field>
@@ -258,11 +258,11 @@
     <gr-form-field label="Display Name" for="edit-display-name">
       <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" />
     </gr-form-field>
-    <gr-form-field label="Forge" for="edit-forge">
+    <gr-form-field label="Git Host" for="edit-git-host">
       <gr-select
-        inputId="edit-forge"
-        [(ngModel)]="formData.forge_type"
-        [options]="target.kind === 'outbound' ? outboundForgeOptions() : allForgeOptions()"
+        inputId="edit-git-host"
+        [(ngModel)]="formData.git_host_type"
+        [options]="target.kind === 'outbound' ? outboundGitHostOptions() : allGitHostOptions()"
         optionLabel="label"
         optionValue="value"
       />

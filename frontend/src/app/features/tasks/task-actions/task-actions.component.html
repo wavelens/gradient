@@ -24,7 +24,7 @@
     <gr-loading-spinner message="Loading actions..." />
   } @else {
     @if (actions().length === 0) {
-      <gr-empty-state icon="notifications_active" title="No actions configured" message="Create an action to send mail, post webhooks, or report build status back to your forge.">
+      <gr-empty-state icon="notifications_active" title="No actions configured" message="Create an action to send mail, post webhooks, or report build status back to the Git host.">
         <button slot="action"
           *appWritable="access()"
           grButton

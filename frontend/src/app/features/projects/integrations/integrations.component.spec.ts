@@ -21,7 +21,7 @@ const baseIntegration: Integration = {
   name: 'gitea-prod',
   display_name: 'Gitea Prod',
   kind: 'inbound',
-  forge_type: 'gitea',
+  git_host_type: 'gitea',
   endpoint_url: null,
   has_secret: true,
   has_access_token: false,
@@ -36,7 +36,7 @@ const githubOutbound: Integration = {
   name: 'github-app',
   display_name: 'GitHub App',
   kind: 'outbound',
-  forge_type: 'github',
+  git_host_type: 'github',
   endpoint_url: null,
   has_secret: false,
   has_access_token: false,
@@ -198,7 +198,7 @@ describe('IntegrationsComponent - required webhook events', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [baseIntegration]);
     await settled(fixture);
     const comp = fixture.componentInstance;
-    comp.setInboundForge(baseIntegration.id, 'gitlab');
+    comp.setInboundGitHost(baseIntegration.id, 'gitlab');
     const events = comp.requiredWebhookEvents(baseIntegration.id);
     expect(events).toContain('Merge request');
     expect(events).toContain('Comments (note)');
@@ -226,7 +226,7 @@ describe('IntegrationsComponent - GitHub App install banner', () => {
 });
 
 describe('IntegrationsComponent - create github integration', () => {
-  it('createIntegration sends forge_type=github with installation_id', () => {
+  it('createIntegration sends git_host_type=github with installation_id', () => {
     const createSpy = vi.fn().mockReturnValue(of({}));
     TestBed.configureTestingModule({
       imports: [IntegrationsComponent],
@@ -256,7 +256,7 @@ describe('IntegrationsComponent - create github integration', () => {
 
     const comp = fixture.componentInstance;
     comp.formData.name = 'github-app';
-    comp.formData.forge_type = 'github';
+    comp.formData.git_host_type = 'github';
     comp.formData.installation_id = '12345';
     comp.formData.kind = 'outbound';
     comp.createIntegration();
@@ -264,7 +264,7 @@ describe('IntegrationsComponent - create github integration', () => {
     expect(createSpy).toHaveBeenCalledOnce();
     expect(createSpy).toHaveBeenCalledWith('acme', expect.objectContaining({
       name: 'github-app',
-      forge_type: 'github',
+      git_host_type: 'github',
       installation_id: 12345,
     }));
   });
@@ -299,7 +299,7 @@ describe('IntegrationsComponent - create github integration', () => {
 
     const comp = fixture.componentInstance;
     comp.formData.name = 'github-app';
-    comp.formData.forge_type = 'github';
+    comp.formData.git_host_type = 'github';
     comp.formData.installation_id = 'not-a-number';
     comp.createIntegration();
 

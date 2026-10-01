@@ -10,7 +10,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import {
   BoardService,
-  DispatchedJobDetail,
+  AssignedJobDetail,
   GradientCapabilities,
   InstanceContextView,
   PendingJobSummary,
@@ -41,7 +41,7 @@ interface RuleRow {
       <header class="head">
         <div>
           <span class="kind" [class.build]="j.kind === 1">{{ j.kind === 1 ? 'build' : 'eval' }}</span>
-          <h1>{{ j.passed_over ? 'Passed over' : 'Dispatched job' }}</h1>
+          <h1>{{ j.passed_over ? 'Passed over' : 'Assigned job' }}</h1>
         </div>
         <div class="total">
           <span class="label">Total score</span>
@@ -83,7 +83,7 @@ interface RuleRow {
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | date: 'medium' }}</span></div>
         <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | date: 'medium') : '-' }}</span></div>
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
-        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Dispatched' }}</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
+        <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Assigned' }}</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
         <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | date: 'medium') : '-' }}</span></div>
         <div class="step"><span class="label">Current State</span><span class="hl">{{ currentState() }}</span></div>
       </section>
@@ -256,7 +256,7 @@ interface RuleRow {
           <h1>Pending job</h1>
         </div>
       </header>
-      <p class="muted">Still queued - limited details are available until it is dispatched.</p>
+      <p class="muted">Still queued - limited details are available until the job is assigned.</p>
       <section class="ids">
         @if (p.subject) {
           <div><span class="label">{{ p.kind === 1 ? 'Derivation' : 'Repository' }}</span><span class="mono">{{ p.subject }}</span></div>
@@ -319,7 +319,7 @@ export class BoardJobDetailComponent implements OnInit {
   private evaluations = inject(EvaluationsService);
   private destroyRef = inject(DestroyRef);
 
-  job = signal<DispatchedJobDetail | null>(null);
+  job = signal<AssignedJobDetail | null>(null);
   pending = signal<PendingJobSummary | null>(null);
   notFound = signal(false);
   private descriptions = signal<Map<string, string>>(new Map());

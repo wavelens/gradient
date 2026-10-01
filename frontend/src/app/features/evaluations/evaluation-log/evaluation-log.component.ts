@@ -1541,8 +1541,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       case 'draining':
         return 'The instance is draining. This evaluation resumes when draining is disabled or the server restarts.';
       case 'graph_stuck': {
-        const buildWord = reason.pending_anchors === 1 ? 'build is' : 'builds are';
-        return `Workers are available, but ${reason.pending_anchors} ${buildWord} blocked on dependencies. Recovering automatically.`;
+        const buildWord = reason.pending_shared_builds === 1 ? 'build is' : 'builds are';
+        return `Workers are available, but ${reason.pending_shared_builds} ${buildWord} blocked on dependencies. Recovering automatically.`;
       }
     }
   }

@@ -9,13 +9,13 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { BoardService, DispatchedJobSummary, DispatchDecisionView, PendingJobSummary } from '@core/services/board.service';
+import { BoardService, AssignedJobSummary, AssignmentDecisionView, PendingJobSummary } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
 import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 
 type KindFilter = 'all' | 'eval' | 'build';
-type StatusFilter = 'all' | 'pending' | 'dispatched';
+type StatusFilter = 'all' | 'pending' | 'assigned';
 type ScoreScope = 'current' | 'all';
 
 interface DecisionRow {
@@ -37,13 +37,13 @@ interface DecisionRow {
       <gr-loading-spinner message="Loading jobs..." />
     } @else {
       <div class="view-toggle">
-        <button [class.active]="view() === 'dispatched'" (click)="setView('dispatched')">Dispatched</button>
+        <button [class.active]="view() === 'assigned'" (click)="setView('assigned')">Assigned</button>
         <button [class.active]="view() === 'pending'" (click)="setView('pending')">Pending</button>
       </div>
 
-      @if (view() === 'dispatched') {
+      @if (view() === 'assigned') {
         <div class="banner">
-          Showing {{ filteredJobs().length }} of {{ jobs().length }} dispatched job(s) you can see.
+          Showing {{ filteredJobs().length }} of {{ jobs().length }} assigned job(s) visible to this account.
           @if (otherRunning() > 0) {
             <span class="muted">+ {{ otherRunning() }} other running (hidden).</span>
           }
@@ -52,7 +52,7 @@ interface DecisionRow {
         <div class="filters">
           <label>Scores
             <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
-              <option value="current">dispatched</option>
+              <option value="current">assigned</option>
               <option value="all">incl. rejected</option>
             </select>
           </label>
@@ -67,7 +67,7 @@ interface DecisionRow {
             <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
               <option value="all">all</option>
               <option value="pending">pending (live)</option>
-              <option value="dispatched">dispatched</option>
+              <option value="assigned">assigned</option>
             </select>
           </label>
           <label>Score min
@@ -81,7 +81,7 @@ interface DecisionRow {
         @if (scoreScope() === 'current') {
           <gr-table class="jobs">
             <thead>
-              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation</th><th>Score</th><th>Dispatched</th><th></th></tr>
+              <tr><th>Kind</th><th>Worker</th><th>Derivation / Evaluation</th><th>Score</th><th>Assigned</th><th></th></tr>
             </thead>
             <tbody>
               @for (j of filteredJobs(); track j.id) {
@@ -94,7 +94,7 @@ interface DecisionRow {
                   <td>{{ canInspect(j) ? '›' : '' }}</td>
                 </tr>
               } @empty {
-                <tr><td colspan="6" class="muted">No matching dispatched jobs.</td></tr>
+                <tr><td colspan="6" class="muted">No matching assigned jobs.</td></tr>
               }
             </tbody>
           </gr-table>
@@ -106,7 +106,7 @@ interface DecisionRow {
             <tbody>
               @for (r of decisionRows(); track r.id) {
                 <tr [class.negative]="r.score < 0" class="clickable" (click)="inspectDecision(r)">
-                  <td>{{ r.won ? 'dispatched' : 'passed over' }}</td>
+                  <td>{{ r.won ? 'assigned' : 'passed over' }}</td>
                   <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
                   <td class="mono">{{ r.worker_id }}</td>
                   <td class="mono subject" [title]="r.subject ?? ''">{{ r.subject ?? '-' }}</td>
@@ -124,7 +124,7 @@ interface DecisionRow {
 
       @if (view() === 'pending') {
         <div class="banner">
-          {{ pendingJobs().length }} pending job(s) you can see.
+          {{ pendingJobs().length }} pending job(s) visible to this account.
           @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
         </div>
         <gr-table class="jobs">
@@ -151,8 +151,8 @@ interface DecisionRow {
 export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private static readonly STATE_KEY = 'board.live-jobs.filters';
   // Mirror the server's `board/jobs/dispatched` cap so optimistic live rows and
-  // the reconciled API list converge instead of flipping the count.
-  private static readonly MAX_DISPATCHED = 500;
+  // the refreshed API list converge instead of flipping the count.
+  private static readonly MAX_ASSIGNED = 500;
 
   private board = inject(BoardService);
   private live = inject(BoardLiveService);
@@ -161,10 +161,10 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private refreshTimer?: ReturnType<typeof setTimeout>;
   protected first = firstLoad();
 
-  jobs = signal<DispatchedJobSummary[]>([]);
+  jobs = signal<AssignedJobSummary[]>([]);
   otherRunning = signal(0);
 
-  view = signal<'dispatched' | 'pending'>('dispatched');
+  view = signal<'assigned' | 'pending'>('assigned');
   pendingJobs = signal<PendingJobSummary[]>([]);
   otherPending = signal(0);
 
@@ -174,7 +174,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   scoreMax = signal<number | null>(null);
 
   scoreScope = signal<ScoreScope>('current');
-  decisions = signal<DispatchDecisionView[]>([]);
+  decisions = signal<AssignmentDecisionView[]>([]);
 
   constructor() {
     this.restoreState();
@@ -204,7 +204,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
       if (kind === 'eval' && j.kind !== 0) return false;
       if (kind === 'build' && j.kind !== 1) return false;
       if (status === 'pending' && !this.isLive(j)) return false;
-      if (status === 'dispatched' && this.isLive(j)) return false;
+      if (status === 'assigned' && this.isLive(j)) return false;
       if (min !== null && j.score < min) return false;
       if (max !== null && j.score > max) return false;
 
@@ -241,7 +241,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    this.loadDispatched();
+    this.loadAssigned();
     if (this.view() === 'pending') this.loadPending();
     if (this.scoreScope() === 'all') this.loadDecisions();
     this.sub = this.live.connect().subscribe({
@@ -261,7 +261,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
                 subject: null,
               },
               ...list,
-            ].slice(0, BoardLiveJobsComponent.MAX_DISPATCHED)
+            ].slice(0, BoardLiveJobsComponent.MAX_ASSIGNED)
           );
           this.scheduleRefresh();
         }
@@ -275,7 +275,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     clearTimeout(this.refreshTimer);
   }
 
-  setView(v: 'dispatched' | 'pending'): void {
+  setView(v: 'assigned' | 'pending'): void {
     this.view.set(v);
     if (v === 'pending') this.loadPending();
   }
@@ -286,27 +286,27 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   }
 
   private loadDecisions(): void {
-    this.board.getDispatchDecisions().pipe(this.first.track()).subscribe({
+    this.board.getAssignmentDecisions().pipe(this.first.track()).subscribe({
       next: (d) => this.decisions.set(d),
       error: () => this.decisions.set([]),
     });
   }
 
-  private loadDispatched(): void {
-    this.board.getDispatchedJobs().pipe(this.first.track()).subscribe((r) => {
+  private loadAssigned(): void {
+    this.board.getAssignedJobs().pipe(this.first.track()).subscribe((r) => {
       this.jobs.set(r.jobs);
       this.otherRunning.set(r.other_running);
     });
   }
 
-  /// Reconcile the optimistic live rows with the persisted, selectable rows.
+  /// Merge the optimistic live rows with the persisted, selectable rows.
   /// Throttled so a busy board refreshes at most once per window instead of
   /// deferring forever under a steady event stream.
   private scheduleRefresh(): void {
     if (this.refreshTimer) return;
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      this.loadDispatched();
+      this.loadAssigned();
     }, 1500);
   }
 
@@ -333,15 +333,15 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     });
   }
 
-  isLive(j: DispatchedJobSummary): boolean {
+  isLive(j: AssignedJobSummary): boolean {
     return j.id.startsWith('live:');
   }
 
-  canInspect(j: DispatchedJobSummary): boolean {
+  canInspect(j: AssignedJobSummary): boolean {
     return !this.isLive(j);
   }
 
-  inspect(j: DispatchedJobSummary): void {
+  inspect(j: AssignedJobSummary): void {
     if (this.isLive(j)) return;
     this.router.navigate(['/board/jobs', j.id]);
   }

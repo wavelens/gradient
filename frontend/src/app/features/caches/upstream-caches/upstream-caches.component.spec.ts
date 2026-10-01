@@ -9,7 +9,7 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
-import { CacheUpstreamsComponent } from './cache-upstreams.component';
+import { UpstreamCachesComponent } from './upstream-caches.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
 
@@ -47,9 +47,9 @@ function findIconButton(root: HTMLElement, icon: string): HTMLButtonElement | nu
   );
 }
 
-function setup(access: AccessState): ComponentFixture<CacheUpstreamsComponent> {
+function setup(access: AccessState): ComponentFixture<UpstreamCachesComponent> {
   TestBed.configureTestingModule({
-    imports: [CacheUpstreamsComponent],
+    imports: [UpstreamCachesComponent],
     providers: [
       provideRouter([]),
       provideHttpClient(),
@@ -59,17 +59,17 @@ function setup(access: AccessState): ComponentFixture<CacheUpstreamsComponent> {
         provide: CachesService,
         useValue: {
           getCache: () => of({ display_name: 'Demo' }),
-          getCacheUpstreams: () => of(oneUpstream),
+          getUpstreamCaches: () => of(oneUpstream),
         },
       },
     ],
   });
-  const fixture = TestBed.createComponent(CacheUpstreamsComponent);
+  const fixture = TestBed.createComponent(UpstreamCachesComponent);
   fixture.detectChanges();
   return fixture;
 }
 
-describe('CacheUpstreamsComponent - HTTP upstream probe', () => {
+describe('UpstreamCachesComponent - HTTP upstream probe', () => {
   const realFetch = globalThis.fetch;
   afterEach(() => { globalThis.fetch = realFetch; });
 
@@ -110,22 +110,22 @@ describe('CacheUpstreamsComponent - HTTP upstream probe', () => {
   });
 });
 
-describe('CacheUpstreamsComponent - access gating', () => {
-  it('renders the upstream list under read-only access', () => {
+describe('UpstreamCachesComponent - access gating', () => {
+  it('renders the upstream cache list under read-only access', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(fixture.nativeElement.textContent).toContain('Upstream A');
   });
 
-  it('hides Add Upstream, Edit, Delete under read-only access', () => {
+  it('hides Add Upstream Cache, Edit, Delete under read-only access', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
-    expect(findByText(fixture.nativeElement, 'add upstream')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'add upstream cache')).toBeNull();
     expect(findIconButton(fixture.nativeElement, 'edit')).toBeNull();
     expect(findIconButton(fixture.nativeElement, 'delete')).toBeNull();
   });
 
   it('shows but disables Add / Edit / Delete under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const addBtn = findByText(fixture.nativeElement, 'add upstream') as HTMLButtonElement | null;
+    const addBtn = findByText(fixture.nativeElement, 'add upstream cache') as HTMLButtonElement | null;
     const editBtn = findIconButton(fixture.nativeElement, 'edit');
     const delBtn = findIconButton(fixture.nativeElement, 'delete');
     expect(addBtn).not.toBeNull();
@@ -138,7 +138,7 @@ describe('CacheUpstreamsComponent - access gating', () => {
 
   it('renders Add / Edit / Delete enabled under full access', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
-    const addBtn = findByText(fixture.nativeElement, 'add upstream') as HTMLButtonElement | null;
+    const addBtn = findByText(fixture.nativeElement, 'add upstream cache') as HTMLButtonElement | null;
     expect(addBtn).not.toBeNull();
     expect(addBtn!.disabled).toBe(false);
   });

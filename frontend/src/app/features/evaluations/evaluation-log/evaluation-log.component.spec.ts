@@ -293,7 +293,7 @@ describe('EvaluationLogComponent', () => {
 
     it('titles and explains a graph-stuck stall', () => {
       const { cmp } = setup();
-      const reason = { kind: 'graph_stuck', pending_anchors: 9 } as const;
+      const reason = { kind: 'graph_stuck', pending_shared_builds: 9 } as const;
       expect(cmp.waitingTitle(reason)).toBe('Recovering Build Graph');
       expect(cmp.formatWaitingReason(reason)).toBe(
         'Workers are available, but 9 builds are blocked on dependencies. Recovering automatically.',
@@ -316,7 +316,7 @@ describe('EvaluationLogComponent', () => {
       return new Map(labelled.map((i) => [i.label, i]));
     }
 
-    it('offers graph, job, artefacts and log download for a dispatched build', () => {
+    it('offers graph, job, artefacts and log download for an assigned build', () => {
       const { cmp } = setup();
       const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
       expect([...items.keys()]).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log']);
@@ -327,7 +327,7 @@ describe('EvaluationLogComponent', () => {
       expect([...items.values()].some((i) => i.disabled)).toBe(false);
     });
 
-    it('disables the job entry for a build that was never dispatched', () => {
+    it('disables the job entry for a build that was never assigned', () => {
       const { cmp } = setup();
       expect(open(cmp, target({ dispatched_job: null })).get('Show Job')!.disabled).toBe(true);
     });

@@ -86,7 +86,7 @@ export class CacheDetailComponent implements OnInit {
   }
 
   // Only this cache's own key: the server re-signs everything it serves, paths
-  // proxied from an upstream included, so a client never needs the key of a
+  // proxied from an upstream cache included, so a client never needs the key of a
   // cache we happen to proxy.
   trustedPublicKeys = computed(() => {
     const own = this.cache()?.public_key;

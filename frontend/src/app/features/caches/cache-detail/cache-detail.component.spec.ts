@@ -44,7 +44,7 @@ describe('CacheDetailComponent cache usage instructions', () => {
   }
 
   // The server re-signs everything it serves, proxied paths included, so this
-  // one key is all a client needs. Listing the upstreams' keys made every user
+  // one key is all a client needs. Listing the upstream caches' keys made every user
   // of the cache configure a key for every cache it happens to proxy.
   it('trusts only the cache own signing key', () => {
     const component = setup();

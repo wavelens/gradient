@@ -11,8 +11,8 @@ import { auditTime } from 'rxjs/operators';
 import {
   BoardService,
   BoardCacheStats,
-  BoardUpstream,
-  BoardUpstreamStats,
+  BoardUpstreamCache,
+  BoardUpstreamCacheStats,
 } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
 import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
@@ -62,8 +62,8 @@ import { firstLoad } from '../first-load';
         [valueFormatter]="bytes"
       ></gr-metric-chart>
 
-      <h3 class="upstreams-title">Upstreams</h3>
-      @for (u of upstreams()?.upstreams ?? []; track u.upstream_id) {
+      <h3 class="upstream-caches-title">Upstream Caches</h3>
+      @for (u of upstreamCacheStats()?.upstream_caches ?? []; track u.upstream_id) {
         <gr-metric-chart
           [title]="upstreamTitle(u)"
           type="line"
@@ -84,7 +84,7 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
   private liveSub?: Subscription;
   protected first = firstLoad();
   stats = signal<BoardCacheStats | null>(null);
-  upstreams = signal<BoardUpstreamStats | null>(null);
+  upstreamCacheStats = signal<BoardUpstreamCacheStats | null>(null);
 
   trafficCats = computed(() => (this.stats()?.traffic ?? []).map((p) => p.bucket_start.slice(11, 16)));
   trafficSeries = computed(() => [
@@ -102,7 +102,7 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
   readonly count = formatCount;
   readonly duration = formatDuration;
 
-  upstreamTitle(u: BoardUpstream): string {
+  upstreamTitle(u: BoardUpstreamCache): string {
     const lat = u.avg_latency_ms !== null ? formatDuration(u.avg_latency_ms) : 'n/a';
     const hit = u.hit_rate !== null ? `${formatPercent(u.hit_rate)} hit` : 'n/a';
     return `${u.display_name} latency · ${lat} · ${hit} · ${formatCount(u.requests_total)} req`;
@@ -122,6 +122,6 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
 
   private load(): void {
     this.board.getCache(24).pipe(this.first.track()).subscribe((s) => this.stats.set(s));
-    this.board.getUpstreams(24).pipe(this.first.track()).subscribe((u) => this.upstreams.set(u));
+    this.board.getUpstreamCacheStats(24).pipe(this.first.track()).subscribe((u) => this.upstreamCacheStats.set(u));
   }
 }

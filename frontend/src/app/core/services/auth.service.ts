@@ -134,7 +134,7 @@ export class AuthService {
     );
   }
 
-  /// Re-runs the probe after an outage, so a guard does not decide on an answer
+  /// Repeats the probe after an outage, so a guard does not decide on an answer
   /// that never arrived.
   resolveSession(): Observable<boolean> {
     if (!this.unreachableSignal()) {

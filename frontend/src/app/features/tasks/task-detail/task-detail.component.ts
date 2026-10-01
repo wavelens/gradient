@@ -255,7 +255,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   /// Merge a refreshed page with the rows already shown. The page is the server's
   /// rows at offset 0, so every row it does not hold ranks after it and keeps its
   /// display order behind it; matching on id rather than on position is what lets
-  /// entry points ingested into the page fall out of the tail without a hole.
+  /// entry points newly added to the page fall out of the tail without a gap.
   private spliceEntryPoints(page: EntryPointSummary[], shown: EntryPointSummary[]): EntryPointSummary[] {
     const inPage = new Set(page.map(e => e.id));
 

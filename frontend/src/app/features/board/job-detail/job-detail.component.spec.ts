@@ -9,10 +9,10 @@ import { ActivatedRoute, convertToParamMap, provideRouter, RouterLink } from '@a
 import { By } from '@angular/platform-browser';
 import { EMPTY, of, throwError } from 'rxjs';
 import { BoardJobDetailComponent } from './job-detail.component';
-import { BoardService, DispatchedJobDetail, PendingJobSummary } from '@core/services/board.service';
+import { BoardService, AssignedJobDetail, PendingJobSummary } from '@core/services/board.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
 
-const DETAIL: DispatchedJobDetail = {
+const DETAIL: AssignedJobDetail = {
   id: 'job-1',
   kind: 1,
   project: 'o1',
@@ -97,7 +97,7 @@ const DETAIL: DispatchedJobDetail = {
   previous_attempts: [],
 };
 
-const EVAL_DETAIL: DispatchedJobDetail = {
+const EVAL_DETAIL: AssignedJobDetail = {
   ...DETAIL,
   kind: 0,
   derivations: [],
@@ -200,7 +200,7 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(drv.textContent).toContain('/nix/store/xxx-foo');
   });
 
-  it('opens the build popup on the per-eval build id, not the scheduler anchor', () => {
+  it('opens the build popup on the per-eval build id, not the shared build', () => {
     const ids: string[] = [];
     TestBed.overrideProvider(EvaluationsService, {
       useValue: { getBuild: (id: string) => { ids.push(id); return EMPTY; } },
@@ -242,7 +242,7 @@ describe('BoardJobDetailComponent - structured context panels', () => {
 });
 
 describe('BoardJobDetailComponent - pending fallback', () => {
-  it('renders a limited pending view when the job is not yet dispatched', () => {
+  it('renders a limited pending view when the job is not yet assigned', () => {
     const el = setup(
       {
         getJob: () => throwError(() => new Error('not found')),
@@ -254,7 +254,7 @@ describe('BoardJobDetailComponent - pending fallback', () => {
     expect(el.textContent).not.toContain('Score breakdown');
   });
 
-  it('shows "Job not found" when neither dispatched nor pending', () => {
+  it('shows "Job not found" when neither assigned nor pending', () => {
     const el = setup(
       {
         getJob: () => throwError(() => new Error('not found')),
@@ -267,7 +267,7 @@ describe('BoardJobDetailComponent - pending fallback', () => {
 });
 
 describe('BoardJobDetailComponent - previous build attempts', () => {
-  const WITH_ATTEMPTS: DispatchedJobDetail = {
+  const WITH_ATTEMPTS: AssignedJobDetail = {
     ...DETAIL,
     previous_attempts: [
       { dispatched_job_id: 'dj-a1', substitute: false, outcome: 3, reason: 5, failure_message: 'builder for ... failed with exit code 1', created_at: '2026-06-08T00:00:00Z' },
@@ -287,10 +287,10 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     expect(rows.length).toBe(2);
   });
 
-  // A dispatch the worker never reported back on used to read as 'running'
+  // An assignment the worker never reported back on used to read as 'running'
   // forever, on a worker that had long since left the fleet.
-  it('reports an abandoned dispatch as abandoned, not running', () => {
-    const abandoned: DispatchedJobDetail = {
+  it('reports an abandoned assignment as abandoned, not running', () => {
+    const abandoned: AssignedJobDetail = {
       ...DETAIL,
       finished_at: '2026-06-08T00:31:00Z',
       outcome: 'abandoned',
@@ -300,7 +300,7 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     expect(el.textContent).not.toContain('running');
   });
 
-  it('still reports an unfinished dispatch as running', () => {
+  it('still reports an unfinished assignment as running', () => {
     const el = setup({ getJob: () => of(DETAIL) }).nativeElement as HTMLElement;
     expect(el.textContent).toContain('running');
   });
@@ -314,7 +314,7 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     expect(section.textContent).toContain('substituted');
   });
 
-  it('each row links to the dispatched job', () => {
+  it('each row links to the assigned job', () => {
     const fixture = setup({ getJob: () => of(WITH_ATTEMPTS) });
     const links = fixture.debugElement
       .query(By.css('section.attempts'))
@@ -325,7 +325,7 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
   });
 
   it('hides the section when there is only one attempt', () => {
-    const singleAttempt: DispatchedJobDetail = {
+    const singleAttempt: AssignedJobDetail = {
       ...DETAIL,
       previous_attempts: [
         { dispatched_job_id: 'dj-a1', substitute: false, outcome: 1, reason: null, failure_message: null, created_at: '2026-06-08T00:00:00Z' },
@@ -360,7 +360,7 @@ describe('BoardJobDetailComponent - #636', () => {
   });
 
   it('marks the attempt being viewed instead of linking it to itself', () => {
-    const job: DispatchedJobDetail = {
+    const job: AssignedJobDetail = {
       ...DETAIL,
       previous_attempts: [
         { dispatched_job_id: 'dj-old', substitute: false, outcome: 3, reason: null, failure_message: null, created_at: '2026-06-08T00:00:00Z' },

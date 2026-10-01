@@ -13,7 +13,7 @@ import { PageLayoutComponent } from './page-layout.component';
   standalone: true,
   imports: [PageLayoutComponent],
   template: `
-    <gr-page-layout title="Integrations" subtitle="Forge webhooks">
+    <gr-page-layout title="Integrations" subtitle="Git host webhooks">
       <button slot="actions">New</button>
       <p slot="banner" class="banner">heads up</p>
       <p class="body">content</p>
@@ -59,7 +59,7 @@ describe('gr-page-layout', () => {
   it('renders title and subtitle', async () => {
     const root = await render();
     expect(root.querySelector('h1')?.textContent).toContain('Integrations');
-    expect(root.querySelector('.page-layout__subtitle')?.textContent).toContain('Forge webhooks');
+    expect(root.querySelector('.page-layout__subtitle')?.textContent).toContain('Git host webhooks');
   });
 
   it('projects actions, banner and body into their own slots', async () => {

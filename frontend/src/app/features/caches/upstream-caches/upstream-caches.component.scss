@@ -4,31 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.upstreams-list {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-sm;
-}
+@use '../../../styles/variables' as *;
 
-.upstream-info {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
-
-  gr-icon { color: var(--gr-text-secondary); flex-shrink: 0; }
-}
-
-.upstream-name {
-  font-weight: 500;
-  font-size: $font-size-sm;
-}
-
-.upstream-actions {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  flex-shrink: 0;
-}
 .upstream-form {
   display: flex;
   flex-direction: column;

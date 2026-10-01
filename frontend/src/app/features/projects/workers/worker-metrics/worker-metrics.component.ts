@@ -38,13 +38,13 @@ import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
         { label: workerName() }
       ]"
       [title]="workerName()"
-      subtitle="Live metrics, connection history and dispatched jobs for this worker"
+      subtitle="Live metrics, connection history and assigned jobs for this worker"
     >
       <span slot="meta" class="mono">{{ workerId }}</span>
 
       <gr-card-grid min="160px">
         <gr-stat-card label="Samples" [value]="samples().length" />
-        <gr-stat-card label="Jobs dispatched" [value]="jobsDispatched()" />
+        <gr-stat-card label="Jobs assigned" [value]="jobsAssigned()" />
         <gr-stat-card label="Sessions" [value]="connections().length" />
       </gr-card-grid>
 
@@ -83,7 +83,7 @@ export class WorkerMetricsComponent implements OnInit {
   displayName = signal<string | null>(null);
   samples = signal<WorkerSamplePoint[]>([]);
   connections = signal<WorkerConnectionEntry[]>([]);
-  jobsDispatched = signal(0);
+  jobsAssigned = signal(0);
 
   /// The id is the last resort: history outlives the registration that named it.
   workerName = computed(() => this.displayName() || this.workerId);
@@ -110,7 +110,7 @@ export class WorkerMetricsComponent implements OnInit {
       this.displayName.set(stats.display_name);
       this.samples.set(stats.samples);
       this.connections.set(stats.connections);
-      this.jobsDispatched.set(stats.jobs_dispatched);
+      this.jobsAssigned.set(stats.jobs_dispatched);
     });
   }
 }

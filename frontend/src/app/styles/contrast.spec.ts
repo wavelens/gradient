@@ -49,7 +49,7 @@ const PAIRS: Array<[string, string, number]> = [
 const SURFACES = ['--gr-surface-sunken', '--gr-surface-base', '--gr-surface-raised', '--gr-surface-hover', '--gr-surface-active'];
 
 /// Badges and banners composite the status colour over a surface at a low alpha,
-/// so the shipped background is never the raw token. Model that here.
+/// so the rendered background is never the raw token. Model that here.
 function mix(fg: string, bg: string, pct: number): string {
   const parse = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const [f, b] = [parse(fg), parse(bg)];

@@ -38,8 +38,8 @@ const HEALTH: BoardHealth = {
   ],
   proto_sessions: 2,
   unconfirmed_nars: 0,
-  outbox_pending: 0,
-  outbox_failed: 0,
+  pending_deliveries: 0,
+  failed_deliveries: 0,
   hot_nar_cache: { entries: 0, bytes: 0, hits: 0, misses: 0, evictions: 0 },
 };
 

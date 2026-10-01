@@ -150,8 +150,8 @@ export class CachesService {
     return this.api.get<CacheStats>(`caches/${cache}/stats`);
   }
 
-  getCacheUpstreams(cache: string): Observable<UpstreamCache[]> {
-    return this.api.get<UpstreamCache[]>(`caches/${cache}/upstreams`);
+  getUpstreamCaches(cache: string): Observable<UpstreamCache[]> {
+    return this.api.get<UpstreamCache[]>(`caches/${cache}/upstream-caches`);
   }
 
   addInternalUpstream(cache: string, data: {
@@ -159,7 +159,7 @@ export class CachesService {
     display_name?: string;
     mode?: CacheSubscriptionMode;
   }): Observable<string> {
-    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'internal', ...data });
+    return this.api.put<string>(`caches/${cache}/upstream-caches`, { type: 'internal', ...data });
   }
 
   addGradientProtoUpstream(cache: string, data: {
@@ -169,7 +169,7 @@ export class CachesService {
     mode?: CacheSubscriptionMode;
     api_key?: string;
   }): Observable<string> {
-    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'gradient_proto', ...data });
+    return this.api.put<string>(`caches/${cache}/upstream-caches`, { type: 'gradient_proto', ...data });
   }
 
   addHttpUpstream(cache: string, data: {
@@ -177,7 +177,7 @@ export class CachesService {
     url: string;
     public_key: string;
   }): Observable<string> {
-    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'http', ...data });
+    return this.api.put<string>(`caches/${cache}/upstream-caches`, { type: 'http', ...data });
   }
 
   updateUpstream(cache: string, upstreamId: string, data: {
@@ -186,11 +186,11 @@ export class CachesService {
     url?: string;
     public_key?: string;
   }): Observable<string> {
-    return this.api.patch<string>(`caches/${cache}/upstreams/${upstreamId}`, data);
+    return this.api.patch<string>(`caches/${cache}/upstream-caches/${upstreamId}`, data);
   }
 
   removeUpstream(cache: string, upstreamId: string): Observable<void> {
-    return this.api.delete<void>(`caches/${cache}/upstreams/${upstreamId}`);
+    return this.api.delete<void>(`caches/${cache}/upstream-caches/${upstreamId}`);
   }
 
   getCacheNars(cache: string, query: NarListQuery = {}): Observable<NarListResponse> {

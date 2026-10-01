@@ -257,7 +257,7 @@ export class TaskActionsComponent implements OnInit {
     switch (type) {
       case 'send_mail': return 'Send Mail';
       case 'send_web_request': return 'Web Request';
-      case 'forge_status_report': return 'Forge Status';
+      case 'git_host_status_report': return 'Git Host Status';
       case 'open_pr': return 'Open PR';
     }
   }
@@ -266,7 +266,7 @@ export class TaskActionsComponent implements OnInit {
     switch (type) {
       case 'send_mail': return 'info';
       case 'send_web_request': return 'success';
-      case 'forge_status_report': return 'warning';
+      case 'git_host_status_report': return 'warning';
       case 'open_pr': return 'neutral';
     }
   }
@@ -275,7 +275,7 @@ export class TaskActionsComponent implements OnInit {
     switch (type) {
       case 'send_mail': return 'mail';
       case 'send_web_request': return 'public';
-      case 'forge_status_report': return 'published_with_changes';
+      case 'git_host_status_report': return 'published_with_changes';
       case 'open_pr': return 'code';
     }
   }
