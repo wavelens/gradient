@@ -44,7 +44,7 @@ def latency_report(spec):
             for out in node["outputs"].values():
                 valid_at.setdefault(out["path"], b["at_us"] + b["duration_us"])
 
-    ready_to_dispatch: list[float] = []
+    startable_to_dispatch: list[float] = []
     build_ms: dict[str, float] = {}
     first: int | None = None
     last = 0
@@ -53,8 +53,8 @@ def latency_report(spec):
         if not b:
             continue
         inputs = [o["path"] for d in node["deps"] for o in nodes[d]["outputs"].values()]
-        ready = max([valid_at.get(i, b["at_us"]) for i in inputs] or [b["at_us"]])
-        ready_to_dispatch.append((b["at_us"] - ready) / 1000)
+        startable = max([valid_at.get(i, b["at_us"]) for i in inputs] or [b["at_us"]])
+        startable_to_dispatch.append((b["at_us"] - startable) / 1000)
         build_ms[name] = b["duration_us"] / 1000
         first = b["at_us"] if first is None else min(first, b["at_us"])
         last = max(last, b["at_us"] + b["duration_us"])
@@ -67,7 +67,7 @@ def latency_report(spec):
         "wall_ms": wall_ms,
         "critical_path_ms": critical,
         "overhead_factor": wall_ms / critical if critical else None,
-        "ready_to_dispatch_ms": spread(ready_to_dispatch),
+        "startable_to_dispatch_ms": spread(startable_to_dispatch),
         "build_ms": spread(list(build_ms.values())),
         "ops": {w.name: daemon(w, "latency") for w in WORKER_NODES},
     }

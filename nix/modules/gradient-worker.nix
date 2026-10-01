@@ -181,7 +181,7 @@ in {
     };
 
     capabilities = {
-      federate = lib.mkEnableOption "relaying work and NARs between workers and servers (requires `discoverable`)";
+      federate = lib.mkEnableOption "forwarding work and NARs between workers and servers (requires `discoverable`)";
       fetch = lib.mkEnableOption "prefetching flake inputs and sources" // { default = true; };
       eval = lib.mkEnableOption "Nix flake evaluations" // { default = true; };
       build = lib.mkEnableOption "Nix builds" // { default = true; };
@@ -261,7 +261,7 @@ in {
         default = 8589934592;
         description = ''
           Memory in bytes above which an evaluation subprocess is recycled after its current call.
-          This is not a hard limit: a subprocess may exceed it while a call runs. Keep it above a
+          This is not a hard limit: a subprocess may exceed it during a call. Keep it above a
           typical evaluation's heap so warm subprocesses are not recycled mid-evaluation.
         '';
       };
@@ -599,7 +599,7 @@ in {
           locations."/proto" = {
             proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
             proxyWebsockets = true;
-            # Matches the server module: the default relay buffer is a single
+            # Matches the server module: the default proxy buffer is a single
             # page, which shreds a 4 MiB NAR chunk into hundreds of reads.
             extraConfig = ''
               proxy_buffer_size 256k;

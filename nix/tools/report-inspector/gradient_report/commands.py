@@ -51,17 +51,17 @@ ATTEMPT_REASON = {
 NON_TERMINAL_BUILD_STATUS = (0, 1, 2, 8)
 
 # What `why_stuck` needs to weigh the promotion gates. `walked` is a boolean on the
-# derivation and `unready_deps` a count on its anchor, and they cannot share one
+# derivation and `blocking_deps` a count on its shared build, and they cannot share one
 # truthiness test - `not 0` is True, so folding the count into a boolean list would
-# report a ready anchor as blocked and a blocked one as fine. `substitutable` is not
-# a gate of its own: it is one arm of `(substitutable OR drv_whole)`, and the report
-# carries no `.drv` wholeness, so it decides whether that gate is knowable here.
-# `demanded` sits OUTSIDE that arm, so a relay that passes every other gate is still
+# report a startable build as blocked and a blocked one as fine. `cache_available` is not
+# a gate of its own: it is one arm of `(cache_available OR drv_complete)`, and the report
+# carries no `.drv` completeness, so it decides whether that gate is knowable here.
+# `wanted` sits OUTSIDE that arm, so a passthrough that passes every other gate is still
 # never promoted while it is false. The last gate, a `build_job` referencing the
-# derivation, is open for every anchor this walk visits: it selects them by one.
-# `probed` gates no anchor of its own: it is why the ones BELOW it are undemanded,
-# which is the one reading of a false `demanded` the columns above cannot explain.
-GATE_COLUMNS = ("d.walked", "db.unready_deps", "db.substitutable", "db.demanded", "db.probed")
+# derivation, is open for every shared build this walk visits: it selects them by one.
+# `probed` gates no shared build of its own: it is why the ones BELOW it are unwanted,
+# which is the one reading of a false `wanted` the columns above cannot explain.
+GATE_COLUMNS = ("d.walked", "db.blocking_deps", "db.cache_available", "db.wanted", "db.probed")
 
 
 def _lines(rows: list[str]) -> str:
@@ -168,15 +168,15 @@ def timeline(conn: sqlite3.Connection) -> str:
 
 
 def why_stuck(conn: sqlite3.Connection) -> str:
-    """For each anchor this evaluation drove that never reached a terminal state,
+    """For each shared build this evaluation drove that never reached a terminal state,
     name the gate that is false and the dependency holding it there, and say
     plainly when the only remaining candidate is the one gate the report does not
     carry."""
     placeholders = ", ".join("?" for _ in NON_TERMINAL_BUILD_STATUS)
-    # Anchors with a `build_job` of this evaluation's. The rest of the export is
+    # Shared builds with a `build_job` of this evaluation's. The rest of the export is
     # their dependency boundary: evidence about this evaluation's work, not work
     # of its own.
-    anchors = conn.execute(
+    shared_builds = conn.execute(
         f"SELECT db.id, db.derivation, db.status, d.name, {', '.join(GATE_COLUMNS)} "
         f"FROM derivation_build db LEFT JOIN derivation d ON d.id = db.derivation "
         f"WHERE db.status IN ({placeholders}) "
@@ -185,41 +185,41 @@ def why_stuck(conn: sqlite3.Connection) -> str:
         NON_TERMINAL_BUILD_STATUS,
     ).fetchall()
 
-    if not anchors:
-        return "no anchor is waiting: every build reached a terminal state"
+    if not shared_builds:
+        return "no build is waiting: every build reached a terminal state"
 
     out = []
-    for a in anchors:
+    for a in shared_builds:
         blocked = []
         if not a["walked"]:
             blocked.append("walked")
-        if not a["demanded"]:
-            blocked.append("demanded")
+        if not a["wanted"]:
+            blocked.append("wanted")
         if not a["probed"]:
-            blocked.append("probed: the upstream probe has not answered, so nothing below is demanded")
-        if a["unready_deps"]:
-            blocked.append(f"unready_deps = {a['unready_deps']}")
+            blocked.append("probed: the upstream probe has not answered, so nothing below is wanted")
+        if a["blocking_deps"]:
+            blocked.append(f"blocking_deps = {a['blocking_deps']}")
 
         label = a["name"] or a["derivation"]
         status = BUILD_STATUS.get(a["status"], a["status"])
         if blocked:
             out.append(f"{label}: {status}, waiting on {', '.join(blocked)}")
-        elif a["substitutable"]:
+        elif a["cache_available"]:
             out.append(f"{label}: {status}, every gate open")
         else:
             out.append(
                 f"{label}: {status}, every gate the report carries is open; "
-                f"the one it cannot see is whether this anchor's own .drv is whole"
+                f"the one it cannot see is whether this build's own .drv is complete"
             )
 
-        # A dependency that is not fetchable is exactly what holds `unready_deps`
+        # A dependency that is not fetchable is exactly what holds `blocking_deps`
         # above zero, terminal-success or not, so it is listed alongside the
         # non-terminal ones. Both joins are LEFT: an inner join on `derivation`
         # drops an edge whose far end the file does not carry, which turns "this
         # export is too narrow to answer you" into a count with nothing under it.
         for dep in conn.execute(
             "SELECT dd.dependency AS id, d.id AS derivation_row, d.name, d.walked, "
-            "       d.unwalked_inputs, b.derivation AS anchor_row, b.status, b.fetchable "
+            "       d.unwalked_inputs, b.derivation AS build_row, b.status, b.fetchable "
             "FROM derivation_dependency dd "
             "LEFT JOIN derivation d ON d.id = dd.dependency "
             "LEFT JOIN derivation_build b ON b.derivation = dd.dependency "
@@ -228,7 +228,7 @@ def why_stuck(conn: sqlite3.Connection) -> str:
             (a["derivation"],),
         ):
             label = dep["name"] or dep["id"]
-            if dep["derivation_row"] is None and dep["anchor_row"] is None:
+            if dep["derivation_row"] is None and dep["build_row"] is None:
                 out.append(f"    dep {label} not in this report")
             elif dep["derivation_row"] is not None and not dep["walked"]:
                 out.append(f"    dep {label} is a stub: never walked")
@@ -236,8 +236,8 @@ def why_stuck(conn: sqlite3.Connection) -> str:
                 out.append(
                     f"    dep {label} walked over {dep['unwalked_inputs']} unwalked inputs"
                 )
-            elif dep["anchor_row"] is None:
-                out.append(f"    dep {label} no anchor row")
+            elif dep["build_row"] is None:
+                out.append(f"    dep {label} no build row")
             else:
                 fetchable = "fetchable" if dep["fetchable"] else "not fetchable"
                 out.append(

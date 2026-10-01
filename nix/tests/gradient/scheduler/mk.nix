@@ -11,7 +11,7 @@ let
   daemon = self.packages.${pkgs.stdenv.hostPlatform.system}.gradient.daemon;
   storeSpec = import ../../store-spec { inherit pkgs lib daemon; };
 
-  # Keyed by file: chain-4 keeps the name chain-3, so it lands in chain-3's repo with c0-c2 unchanged.
+  # Per file: chain-4 keeps the name chain-3, so it lands in chain-3's repo with c0-c2 unchanged.
   specFiles = lib.mapAttrs (_: import) {
     chain-3 = ./specs/chain.nix;
     chain-4 = ./specs/chain-4.nix;

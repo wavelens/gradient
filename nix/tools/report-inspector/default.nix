@@ -3,9 +3,9 @@
 { lib, python3Packages }:
 
 let
-  # The inspector refuses every report version but the one it pins, and it ships
+  # The inspector refuses every report version but the one it pins, and it is released
   # separately from the server that writes them - so a bump that reaches only the
-  # exporter turns it into a tool that refuses every real report. That shipped:
+  # exporter turns it into a tool that refuses every real report. That was released:
   # it sat on 10 while the exporter wrote 11. This is the only place both
   # constants are visible, so the check belongs here, at evaluation.
   constantAfter =

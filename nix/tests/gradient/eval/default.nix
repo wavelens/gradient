@@ -57,7 +57,7 @@
 
       # ── Drive the eval-worker over the production rkyv transport ───────────
       # The wire is binary frames, so the hidden `--eval-driver` harness reads
-      # these requests as JSON lines, runs them through the real parent-side
+      # these requests as JSON lines, passes them through the real parent-side
       # transport (spawn, version handshake, frames, streamed resolve) against
       # a real subprocess, and prints one JSON response line per request.
       # Shutdown produces no response, so we expect one line per other request.
@@ -144,7 +144,7 @@
       # re-eval that pays it again is a re-eval that read nothing back. The
       # fingerprint has to match too: a different key is a different blob, which
       # would be cold for a reason the timing alone cannot tell apart.
-      banner("Assert the second eval runs warm off the eval cache")
+      banner("Assert the second eval starts warm off the eval cache")
       warm, warm_ms = drive("warm")
       assert warm[4].get("fingerprint") == fp, f"fingerprint moved: {fp} -> {warm[4].get('fingerprint')}"
 

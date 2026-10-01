@@ -20,7 +20,7 @@ PHASES = {
     6: "known_derivations_wait",
     7: "drv_closure_push",
     8: "prefetch",
-    9: "substitute_relay",
+    9: "substitute_passthrough",
     10: "build",
     11: "compress",
     12: "nar_push",

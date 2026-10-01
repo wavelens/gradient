@@ -7,7 +7,7 @@
 # `gradient`. Resources are created at runtime so the creation endpoints are
 # tested too. No worker / build store is present, so build-dependent endpoints
 # are checked for correct empty/not-found behaviour. Endpoints needing external
-# services (OIDC, SMTP e-mail verification, forge webhooks, proto websockets,
+# services (OIDC, SMTP e-mail verification, Git host webhooks, proto websockets,
 # build-request dispatch) have dedicated tests and are out of scope here.
 
 import hashlib
@@ -326,7 +326,7 @@ api("GET", "caches/maincache/key", token=token)
 api("GET", "caches/maincache/stats", token=token)
 api("GET", "caches/maincache/members", token=token)
 api("GET", "caches/maincache/roles", token=token)
-api("GET", "caches/maincache/upstreams", token=token)
+api("GET", "caches/maincache/upstream-caches", token=token)
 api("PATCH", "caches/maincache", token=token, body=json.dumps({"priority": 20}))
 # Subscribe the project so the cache is usable in project context.
 api("POST", "projects/myproject/subscribe/maincache", token=token)
@@ -339,8 +339,8 @@ cli("cache show clicache")
 cli("cache delete clicache")
 api("GET", "caches/clicache", token=token, expect_error=True)
 
-# ── Phase 6b: cache sub-resources (members, roles, upstreams, subscription) ───
-banner("Phase 6b: cache members / roles / upstreams")
+# ── Phase 6b: cache sub-resources (members, roles, upstream caches, subscription) ───
+banner("Phase 6b: cache members / roles / upstream caches")
 # Members are invited, not added (second user, by username; "View"/"Write" are
 # built-in cache roles).
 api("POST", "caches/maincache/members", token=token,
@@ -371,16 +371,16 @@ api("PATCH", f"caches/maincache/roles/{crole_id}", token=token,
 api("DELETE", f"caches/maincache/roles/{crole_id}", token=token)
 
 # HTTP upstream lifecycle (self-contained: no second cache needed).
-up_id = api("PUT", "caches/maincache/upstreams", token=token, body=json.dumps({
+up_id = api("PUT", "caches/maincache/upstream-caches", token=token, body=json.dumps({
     "type": "http", "display_name": "mirror",
     "url": "https://cache.example.com",
     "public_key": "cache.example.com-1:" + "A" * 44}))
-assert any(u["id"] == up_id for u in api("GET", "caches/maincache/upstreams", token=token)), \
+assert any(u["id"] == up_id for u in api("GET", "caches/maincache/upstream-caches", token=token)), \
     "upstream not created"
-api("PATCH", f"caches/maincache/upstreams/{up_id}", token=token, body=json.dumps({
+api("PATCH", f"caches/maincache/upstream-caches/{up_id}", token=token, body=json.dumps({
     "url": "https://mirror.example.com",
     "public_key": "mirror.example.com-1:" + "B" * 44}))
-api("DELETE", f"caches/maincache/upstreams/{up_id}", token=token)
+api("DELETE", f"caches/maincache/upstream-caches/{up_id}", token=token)
 
 # Project subscription removal then restore.
 api("DELETE", "projects/myproject/subscribe/maincache", token=token)
@@ -572,7 +572,7 @@ assert any(m["id"] == "statemember" for m in api("GET", "caches/statecache/membe
 assert any(r["name"] == "cachereaders"
            for r in api("GET", "caches/statecache/roles", token=sa_token)["roles"])
 assert any(u["url"] == "https://cache.nixos.org"
-           for u in api("GET", "caches/statecache/upstreams", token=sa_token))
+           for u in api("GET", "caches/statecache/upstream-caches", token=sa_token))
 
 # Worker registration applied with its capability gates.
 worker = next(w for w in api("GET", "projects/stateproject/workers", token=sa_token)

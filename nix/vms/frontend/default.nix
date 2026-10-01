@@ -215,7 +215,7 @@ in {
       };
     };
 
-    # Allow git-daemon (runs as nobody) to access repos owned by other users.
+    # Allow git-daemon (executes as nobody) to access repos owned by other users.
     environment.etc."gitconfig".text = ''
       [safe]
         directory = *

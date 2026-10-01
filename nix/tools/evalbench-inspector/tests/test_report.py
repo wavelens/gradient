@@ -128,9 +128,9 @@ def test_the_dispatch_path_measures_each_step_from_the_evaluate_request():
     run = Run(
         name="r", path=None, meta={}, metrics={}, jobs=[], statements=[], explain_log=None,
         spans=[
-            span("server (1)", "dispatch_queued_evals", 0, 10_000),
+            span("server (1)", "assign_queued_evals", 0, 10_000),
             span("server (1)", "http_request", 100_000, 50_000, route="/api/v1/tasks/{project}/{task}/evaluate"),
-            span("server (1)", "dispatch_queued_evals", 400_000, 10_000),
+            span("server (1)", "assign_queued_evals", 400_000, 10_000),
             span("server (1)", "offer_jobs", 420_000, 5_000),
             span("server (1)", "on_request_job", 440_000, 5_000, kind="Build"),
             span("worker (2)", "job", 900_000, 100_000, job_id="eval:1"),
@@ -138,7 +138,7 @@ def test_the_dispatch_path_measures_each_step_from_the_evaluate_request():
     )
     assert dispatch_path(run) == [
         ("server http_request", 0.0, 50.0, 0.0),
-        ("server dispatch_queued_evals", 300.0, 10.0, 250.0),
+        ("server assign_queued_evals", 300.0, 10.0, 250.0),
         ("server offer_jobs", 320.0, 5.0, 10.0),
         ("worker job", 800.0, 100.0, 475.0),
     ]

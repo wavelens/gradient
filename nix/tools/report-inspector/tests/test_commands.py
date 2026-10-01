@@ -31,8 +31,8 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
         CREATE TABLE derivation (id TEXT, name TEXT, walked INTEGER,
             unwalked_inputs INTEGER);
         CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER,
-            substitutable INTEGER, probed INTEGER, fetchable INTEGER, unready_deps INTEGER,
-            demanded INTEGER, missing_runtime_deps INTEGER);
+            cache_available INTEGER, probed INTEGER, fetchable INTEGER, blocking_deps INTEGER,
+            wanted INTEGER, missing_runtime_deps INTEGER);
         CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT,
             kind INTEGER);
         CREATE TABLE build_job (id TEXT, evaluation TEXT, derivation TEXT,
@@ -64,20 +64,20 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
     conn.execute("INSERT INTO derivation VALUES ('d7', 'libidn2-2.3.8', 1, 0)")
     # b1 is blocked on both gates the report carries, b3 only on the count, so the
     # two are proven separately and neither is named while it is open. b4 and b5 both
-    # have every visible gate open; only b5 is substitutable, so only b5's `.drv`
-    # gate is knowable from the report. b7 is a relay nothing demands: the one gate
+    # have every visible gate open; only b5 is cache_available, so only b5's `.drv`
+    # gate is knowable from the report. b7 is a passthrough nothing wants: the one gate
     # that used to be missing from the export entirely.
     conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 1, 0, 1, 1, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 1, 0, 0, 1, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 1, 0, 2, 1, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 1, 0, 0, 1, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b5', 'd5', 1, 1, 1, 1, 0, 1, 0)")
-    # b6 is the dependency boundary: exported so b1's readiness can be read, but not
+    # b6 is the dependency boundary: exported so whether b1 can start can be read, but not
     # this evaluation's work, so it has no build_job row.
     conn.execute("INSERT INTO derivation_build VALUES ('b6', 'd6', 0, 0, 1, 0, 0, 0, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b7', 'd7', 0, 1, 1, 1, 0, 0, 0)")
-    # d10 is demanded with every visible gate open, but the probe has not answered
-    # for it: nothing below it is demanded yet, and the columns above cannot say so.
+    # d10 is wanted with every visible gate open, but the probe has not answered
+    # for it: nothing below it is wanted yet, and the columns above cannot say so.
     conn.execute("INSERT INTO derivation VALUES ('d10', 'gzip-1.14', 1, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b10', 'd10', 0, 0, 0, 0, 0, 1, 0)")
     # A stub d1 names but no walk ever read: `walked` is false and its subtree is
@@ -87,10 +87,10 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
     conn.execute("INSERT INTO derivation VALUES ('d9', 'curl-8.21.0', 1, 2)")
     conn.execute("INSERT INTO derivation_build VALUES ('b8', 'd8', 0, 0, 1, 0, 1, 1, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b9', 'd9', 0, 0, 1, 0, 1, 1, 0)")
-    for anchor, drv in (("b1", "d1"), ("b2", "d2"), ("b3", "d3"), ("b4", "d4"),
+    for build, drv in (("b1", "d1"), ("b2", "d2"), ("b3", "d3"), ("b4", "d4"),
                         ("b5", "d5"), ("b7", "d7"), ("b10", "d10")):
         conn.execute(
-            "INSERT INTO build_job VALUES (?, ?, ?, ?)", (f"j-{anchor}", EVAL_ID, drv, anchor)
+            "INSERT INTO build_job VALUES (?, ?, ?, ?)", (f"j-{build}", EVAL_ID, drv, build)
         )
     conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2', 0)")
     conn.execute("INSERT INTO derivation_dependency VALUES ('dd2', 'd3', 'd1', 0)")
@@ -197,11 +197,11 @@ def test_why_stuck_names_the_gate_and_the_blocking_dependency(report):
     counted = next(line for line in lines if line.startswith("nixos-system-builder-1"))
 
     assert "walked" in stuck
-    assert "unready_deps = 1" in stuck
-    # `fetchable` says whether this anchor can serve its DEPENDENTS, so it is
-    # never a gate on the anchor itself, and `walked` is open on b3.
+    assert "blocking_deps = 1" in stuck
+    # `fetchable` says whether this build can serve the builds that WANT it, so it is
+    # never a gate on the build itself, and `walked` is open on b3.
     assert "fetchable" not in stuck
-    assert "unready_deps = 2" in counted
+    assert "blocking_deps = 2" in counted
     assert "walked" not in counted
 
     assert "    dep cargo-package-clap_complete-4.6.9 status FailedPermanent not fetchable" in lines
@@ -209,32 +209,32 @@ def test_why_stuck_names_the_gate_and_the_blocking_dependency(report):
 
 def test_why_stuck_only_claims_the_gates_the_report_can_see(report):
     lines = commands.why_stuck(report).splitlines()
-    non_substitutable = next(
+    not_cached = next(
         line for line in lines if line.startswith("openssl-3.7.2")
     )
-    substitutable = next(line for line in lines if line.startswith("zlib-1.3.2"))
+    cache_available = next(line for line in lines if line.startswith("zlib-1.3.2"))
 
-    # The `build_job` gate is open for every exported anchor by construction, so the
-    # only gate the report cannot weigh is a non-substitutable anchor's own `.drv`.
-    assert "every gate open" not in non_substitutable
-    assert "own .drv is whole" in non_substitutable
-    assert "build_job" not in non_substitutable
-    assert substitutable.endswith("every gate open")
+    # The `build_job` gate is open for every exported build by construction, so the
+    # only gate the report cannot weigh is a non-cache_available build's own `.drv`.
+    assert "every gate open" not in not_cached
+    assert "own .drv is complete" in not_cached
+    assert "build_job" not in not_cached
+    assert cache_available.endswith("every gate open")
 
 
-def test_why_stuck_names_the_demand_gate(report):
-    """An undemanded relay passes every other gate and is never promoted. The
-    export used to omit `demanded` entirely, so the inspector called that anchor
+def test_why_stuck_names_the_wanted_gate(report):
+    """An unwanted passthrough passes every other gate and is never promoted. The
+    export used to omit `wanted` entirely, so the inspector called that build
     fully open and the operator went looking in the wrong place."""
     lines = commands.why_stuck(report).splitlines()
-    undemanded = next(line for line in lines if line.startswith("libidn2-2.3.8"))
+    unwanted = next(line for line in lines if line.startswith("libidn2-2.3.8"))
 
-    assert "demanded" in undemanded
-    assert "every gate open" not in undemanded
+    assert "wanted" in unwanted
+    assert "every gate open" not in unwanted
 
 
-def test_why_stuck_names_an_anchor_the_probe_has_not_answered(report):
-    """Demand stops at an unprobed anchor, so its inputs read as undemanded with
+def test_why_stuck_names_a_build_the_probe_has_not_answered(report):
+    """Wanting stops at an unprobed build, so its inputs read as unwanted with
     no reason of their own. The probe's answer is the reason, and it is the one
     the other gate columns cannot carry."""
     lines = commands.why_stuck(report).splitlines()
@@ -244,8 +244,8 @@ def test_why_stuck_names_an_anchor_the_probe_has_not_answered(report):
     assert "every gate open" not in unprobed
 
 
-def test_why_stuck_reports_only_the_anchors_this_evaluation_drove(report):
-    """The dependency boundary is in the file so readiness can be read off it,
+def test_why_stuck_reports_only_the_builds_this_evaluation_drove(report):
+    """The dependency boundary is in the file so the start check can be read off it,
     not because the evaluation is waiting on it as work of its own."""
     lines = commands.why_stuck(report).splitlines()
 
@@ -255,7 +255,7 @@ def test_why_stuck_reports_only_the_anchors_this_evaluation_drove(report):
 
 def test_why_stuck_names_a_stub_dependency(report):
     """A dependency a walk named but never read is the shape the prune bit used to
-    hide: the anchor counts it unready and nothing in the file said why."""
+    hide: the build counts it as blocking and nothing in the file said why."""
     lines = commands.why_stuck(report).splitlines()
 
     assert "    dep openssl-3.6.3 is a stub: never walked" in lines
@@ -269,7 +269,7 @@ def test_why_stuck_names_an_incomplete_subtree(report):
 
 def test_why_stuck_says_when_a_dependency_is_not_in_the_report(report):
     """A dependency the export left out used to be dropped by an inner join, so
-    the anchor named a count it then listed nothing for. Whatever the scope, the
+    the build named a count it then listed nothing for. Whatever the scope, the
     edge is evidence and has to be printed as what it is."""
     lines = commands.why_stuck(report).splitlines()
 

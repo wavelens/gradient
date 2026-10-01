@@ -111,7 +111,7 @@ in {
                 created_by = "stateadmin";
                 members = [ { user = "statemember"; role = "View"; } ];
                 roles = [ { name = "cachereaders"; permissions = [ "viewCache" ]; } ];
-                upstreams = [{
+                upstream_caches = [{
                   type = "external";
                   display_name = "cache.nixos.org";
                   url = "https://cache.nixos.org";
@@ -158,14 +158,14 @@ in {
                 state-inbound = {
                   project = "stateproject";
                   kind = "inbound";
-                  forge_type = "gitea";
+                  git_host_type = "gitea";
                   secret_file = toString stateIntSecret;
                   created_by = "stateadmin";
                 };
                 state-outbound = {
                   project = "stateproject";
                   kind = "outbound";
-                  forge_type = "gitea";
+                  git_host_type = "gitea";
                   endpoint_url = "https://gitea.example.com";
                   access_token_file = toString stateIntSecret;
                   created_by = "stateadmin";
