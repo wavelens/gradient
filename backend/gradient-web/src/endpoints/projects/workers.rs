@@ -105,10 +105,10 @@ pub struct PatchWorkerRequest {
     pub enable_build: Option<bool>,
 }
 
-/// Base workers are server-managed: the only patch a member may apply is the
-/// per-project `active` opt-in/out. Any attempt to edit name or capability gates is
-/// a conflict.
-fn patch_edits_base_worker_fields(body: &PatchWorkerRequest) -> bool {
+/// State owns base and managed workers: the only patch a member may apply is
+/// `active`, which state restores on restart. Editing the name or capability
+/// gates is a conflict.
+fn patch_edits_managed_fields(body: &PatchWorkerRequest) -> bool {
     body.display_name.is_some()
         || body.enable_fetch.is_some()
         || body.enable_eval.is_some()
@@ -564,7 +564,7 @@ pub async fn patch_project_worker(
     )
     .await?
     {
-        if patch_edits_base_worker_fields(&body) {
+        if patch_edits_managed_fields(&body) {
             return Err(WebError::conflict(
                 "base workers are managed by server state",
             ));
@@ -620,6 +620,10 @@ pub async fn patch_project_worker(
         .one(&state.web_db)
         .await?
         .or_not_found("worker registration")?;
+
+    if reg.managed && patch_edits_managed_fields(&body) {
+        return Err(WebError::conflict("worker is managed by server state"));
+    }
 
     let mut active_model: AWorkerRegistration = reg.into();
 
@@ -793,17 +797,17 @@ mod tests {
     }
 
     #[test]
-    fn active_only_patch_is_allowed_on_base_worker() {
+    fn active_only_patch_is_allowed_on_managed_worker() {
         let body = PatchWorkerRequest {
             active: Some(true),
             ..empty_patch()
         };
-        assert!(!patch_edits_base_worker_fields(&body));
-        assert!(!patch_edits_base_worker_fields(&empty_patch()));
+        assert!(!patch_edits_managed_fields(&body));
+        assert!(!patch_edits_managed_fields(&empty_patch()));
     }
 
     #[test]
-    fn editing_name_or_caps_is_rejected_on_base_worker() {
+    fn editing_name_or_caps_is_rejected_on_managed_worker() {
         for body in [
             PatchWorkerRequest {
                 display_name: Some("x".into()),
@@ -822,7 +826,7 @@ mod tests {
                 ..empty_patch()
             },
         ] {
-            assert!(patch_edits_base_worker_fields(&body));
+            assert!(patch_edits_managed_fields(&body));
         }
     }
 

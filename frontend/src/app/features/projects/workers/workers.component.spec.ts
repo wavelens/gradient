@@ -190,19 +190,17 @@ describe('WorkersComponent - base workers', () => {
     expect(del!.disabled).toBe(true);
   });
 
-  it('actionAccess drops the managed flag for base workers but not for normal managed workers', async () => {
+  it('keeps Deactivate usable on a managed worker in a managed project, since state restores it on restart', async () => {
     const fixture = setup({
-      access: { managed: false, canEdit: true, canTrigger: true },
-      workers: [],
-      caches: [],
+      access: { managed: true, canEdit: true, canTrigger: true },
+      workers: [workerManaged],
+      caches: [{ id: 'c', name: 'c' }],
     });
     await settled(fixture);
-    const cmp = fixture.componentInstance;
-
-    expect(cmp.actionAccess(workerBase).managed).toBe(false);
-    expect(cmp.actionAccess(workerBase).canEdit).toBe(true);
-    expect(cmp.actionAccess(workerManaged).managed).toBe(true);
-    expect(cmp.actionAccess(workerUnmanaged)).toEqual(cmp.rowAccess(workerUnmanaged));
+    const deactivate = findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement | null;
+    const edit = findByText(fixture.nativeElement, 'edit') as HTMLButtonElement | null;
+    expect(deactivate!.disabled).toBe(false);
+    expect(edit!.disabled).toBe(true);
   });
 
   it('fireTest calls the service and surfaces the result via a toast', async () => {

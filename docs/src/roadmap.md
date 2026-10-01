@@ -1,6 +1,6 @@
 # Roadmap
 
-**Where Gradient goes next.** The upcoming releases and the features each one brings.
+Upcoming releases and the features
 
 <div class="timeline" markdown>
 
@@ -34,7 +34,7 @@ The first release with a stability pledge.
 
 -   :material-palette: **Corporate Design**
 
-    Own logo, name and colors for the web interface.
+    Own logo for web interface.
 
 </div>
 

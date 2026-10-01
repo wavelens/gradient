@@ -81,11 +81,10 @@ export class WorkersComponent implements OnInit {
     };
   }
 
-  // Base workers are state-managed, but Enable/Disable and Fire Test stay available:
-  // drop `managed` while keeping permission gating.
-  actionAccess(worker: Worker): AccessState {
-    const a = this.rowAccess(worker);
-    return worker.is_base ? { ...a, managed: false } : a;
+  // Activate/Deactivate and Fire Test stay available on state-managed workers:
+  // state restores `active` on restart and a test changes nothing.
+  actionAccess(): AccessState {
+    return { ...this.access(), managed: false };
   }
 
   readonly capLabels: { key: keyof GradientCapabilities; label: string }[] = [

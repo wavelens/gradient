@@ -321,7 +321,8 @@ pub struct StateWorker {
     /// per-project challenge. Ignored for non-base workers.
     #[serde(default)]
     pub authorize_against: Option<String>,
-    /// Global enable for a base worker. Ignored for non-base workers.
+    /// Enables a base worker globally, or every registration of a
+    /// non-base worker. Restored on every startup.
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// When true, every project enables this base worker at creation time

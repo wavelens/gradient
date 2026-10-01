@@ -104,7 +104,7 @@ services.gradient.state = {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `active` | bool | `true` | Whether the cache is active. |
+| `active` | bool | `true` | Whether the cache is active. The UI can toggle it until the next server start restores this value. |
 | `created_by` | string | - | User name of the cache's creator. |
 | `description` | null or string | `null` | Description of the cache. |
 | `display_name` | string | `name` | Display name of the cache. |
@@ -122,7 +122,7 @@ services.gradient.state = {
 | `roles.*.permissions` | list of string | `[ ]` | Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. |
 | `signing_key_file` | string | - | File containing the Nix cache signing key. |
 | `upstream_caches` | list of submodule | cache.nixos.org | Upstream caches used as substituters: internal Gradient caches or external Nix binary caches. |
-| `upstream_caches.*.active` | boolean | `true` | Whether the upstream cache is active. Inactive upstream caches are stored but never queried. |
+| `upstream_caches.*.active` | boolean | `true` | Whether the upstream cache is active. Inactive upstream caches are stored but never queried. The UI can toggle it until the next server start restores this value. |
 | `upstream_caches.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. |
 | `upstream_caches.*.display_name` | null or string | `null` | Display name of the upstream cache. |
 | `upstream_caches.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Access mode of an internal upstream cache. |
@@ -162,7 +162,7 @@ services.gradient.state = {
 | `enable_build` | bool | `true` | Whether the server grants this registration the worker's `build` capability. |
 | `enable_eval` | bool | `true` | Whether the server grants this registration the worker's `eval` capability. |
 | `enable_fetch` | bool | `true` | Whether the server grants this registration the worker's `fetch` capability. |
-| `enabled` | bool | `true` | Whether the base worker is available at all. |
+| `enabled` | bool | `true` | Whether the worker is active. The UI can toggle it until the next server start restores this value. |
 | `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project. A single worker can serve several projects. |
 | `token_file` | path | - | File containing the worker's authentication token. |
 | `url` | null or string | `null` | WebSocket URL on which the worker accepts server connections. |

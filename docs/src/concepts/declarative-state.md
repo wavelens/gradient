@@ -28,6 +28,7 @@ flowchart LR
 | Editing | In the UI and the API | Only in Nix; UI controls are visible but disabled |
 | Removal | Delete button | Removed from Nix, then deleted on the next start |
 | Validation | On save | While building the NixOS configuration |
+| Activate / Deactivate | In the UI and the API | Also in the UI for caches, upstream caches and workers, until the next start restores the declared value |
 
 Both kinds live side by side: a declared project can hold tasks created in the UI.
 

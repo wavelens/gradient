@@ -130,7 +130,7 @@
                 size="small"
                 class="worker-action-btn"
                 [disabled]="togglingId() !== null || deletingId() !== null || testingId() !== null"
-                [appManagedDisable]="actionAccess(worker)"
+                [appManagedDisable]="actionAccess()"
                 [loading]="togglingId() === worker.worker_id"
                 (click)="requestToggleWorker(worker)"
               ></button>
@@ -143,7 +143,7 @@
                 size="small"
                 class="worker-action-btn"
                 [disabled]="testingId() !== null || togglingId() !== null || deletingId() !== null"
-                [appManagedDisable]="actionAccess(worker)"
+                [appManagedDisable]="actionAccess()"
                 [loading]="testingId() === worker.worker_id"
                 (click)="fireTest(worker)"
               ></button>

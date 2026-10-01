@@ -5345,6 +5345,8 @@ paths:
         Sets the `active` flag on a worker registration. Deactivating a worker
         triggers an immediate re-auth request, causing the worker to be disconnected
         if it is currently connected. Active jobs may be aborted.
+        A state-managed or base worker accepts only `active` and answers `409` for other fields.
+        The next server start restores the declared value.
       operationId: patchProjectWorker
       security:
         - bearerAuth: []
@@ -6095,6 +6097,7 @@ paths:
     post:
       tags: [caches]
       summary: Enable cache
+      description: Also allowed on a state-managed cache. The next server start restores the declared `active` value.
       operationId: enableCache
       responses:
         '200':
@@ -6110,6 +6113,7 @@ paths:
     delete:
       tags: [caches]
       summary: Disable cache
+      description: Also allowed on a state-managed cache. The next server start restores the declared `active` value.
       operationId: disableCache
       responses:
         '200':
