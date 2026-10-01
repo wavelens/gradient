@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use gradient_util::shutdown::CancellationToken;
 use gradient_util::sync::Mutex;
 use tokio::sync::Semaphore;
 
@@ -151,12 +152,12 @@ pub fn http1_pins() -> &'static Http1Pins {
     PINS.get_or_init(Http1Pins::default)
 }
 
-pub async fn persist_http1_pins(db: gradient_db::WebDb) {
+pub async fn persist_http1_pins(db: gradient_db::WebDb, shutdown: CancellationToken) {
     let (writer, mut pins) = tokio::sync::mpsc::unbounded_channel();
     if http1_pins().writer.set(writer).is_err() {
         return;
     }
-    while let Some(id) = pins.recv().await {
+    while let Some(Some(id)) = shutdown.run_until_cancelled(pins.recv()).await {
         if let Err(e) = gradient_db::caches::upstream::pin_upstream_to_http1(db.inner(), id).await {
             tracing::warn!(upstream = %id, error = %e, "failed to persist the HTTP/1.1 pin");
         }
@@ -580,6 +581,18 @@ mod tests {
 
     fn upstream(n: u128) -> CacheUpstreamId {
         CacheUpstreamId::new(uuid::Uuid::from_u128(n))
+    }
+
+    #[tokio::test]
+    async fn pin_writer_drains_on_shutdown() {
+        let shutdown = gradient_util::shutdown::Shutdown::new();
+        let db = gradient_db::WebDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        );
+        shutdown.spawn(super::persist_http1_pins(db, shutdown.token()));
+        tokio::task::yield_now().await;
+
+        assert!(shutdown.cancel_and_drain(Duration::from_secs(1)).await);
     }
 
     /// The failure this exists for: a cache that accepts the connection and
