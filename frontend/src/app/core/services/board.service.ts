@@ -165,6 +165,9 @@ export interface AssignedJobDetail extends Omit<AssignedJobSummary, 'subject'> {
   ready_at: string | null;
   outcome: 'completed' | 'failed' | 'abandoned' | null;
   phases: JobPhase[];
+  worker_elapsed_ms: number | null;
+  worker_tail_ms: number | null;
+  transit_ms: number | null;
   derivation_build_id: string | null;
   derivations: JobDerivationView[];
   score_breakdown: { rules: Record<string, number>; total: number };

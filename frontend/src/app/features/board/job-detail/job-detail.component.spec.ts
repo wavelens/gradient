@@ -33,6 +33,9 @@ const DETAIL: AssignedJobDetail = {
     { seq: 1, parent_seq: null, phase: 'compress', start_ms: 5000, end_ms: 6000, paths: 2, bytes: 0 },
     { seq: 2, parent_seq: 1, phase: 'nar_push', start_ms: 5100, end_ms: 5900, paths: 1, bytes: 1024 },
   ],
+  worker_elapsed_ms: null,
+  worker_tail_ms: null,
+  transit_ms: null,
   derivation_build_id: 'a1',
   derivations: [{ build: 'bj1', derivation_build: 'a1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
   score_breakdown: { rules: { wait: 3.5, missing: -1.2 }, total: 12.5 },
@@ -164,6 +167,24 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixtur
 function noJsonDump(el: HTMLElement): void {
   expect(el.querySelectorAll('pre').length).toBe(0);
 }
+
+describe('BoardJobDetailComponent - report gap', () => {
+  it('splits the time after the last phase into worker tail and transit', () => {
+    const finished = { ...DETAIL, finished_at: '2026-06-08T00:01:10Z', worker_elapsed_ms: 9000, worker_tail_ms: 500, transit_ms: 1000 };
+    const el = setup({ getJob: () => of(finished) }).nativeElement as HTMLElement;
+    const steps = el.querySelector('section.timeline')?.textContent ?? '';
+    expect(steps).toContain('Worker tail');
+    expect(steps).toContain('500 ms');
+    expect(steps).toContain('Transit');
+    expect(steps).toContain('1.0 s');
+  });
+
+  it('shows no split for a row the server closed without a worker report', () => {
+    const steps = (setup().nativeElement as HTMLElement).querySelector('section.timeline')?.textContent ?? '';
+    expect(steps).not.toContain('Worker tail');
+    expect(steps).not.toContain('Transit');
+  });
+});
 
 describe('BoardJobDetailComponent - structured context panels', () => {
   it('renders the worker cpu_count under a Worker-context section', () => {
