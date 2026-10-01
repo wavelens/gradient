@@ -54,9 +54,9 @@ nav:
       - Declarative State: concepts/declarative-state.md
   - Guides:
       - Add a Remote Worker: guides/remote-worker.md
-      - Connect GitHub: guides/forge-github.md
-      - Connect Gitea or Forgejo: guides/forge-gitea.md
-      - Connect GitLab: guides/forge-gitlab.md
+      - Connect GitHub: guides/github.md
+      - Connect Gitea or Forgejo: guides/gitea.md
+      - Connect GitLab: guides/gitlab.md
       - Build Before Pushing: guides/build-before-push.md
       - Share a Cache: guides/share-a-cache.md
       - Upload NARs: guides/upload-nars.md
@@ -88,16 +88,16 @@ nav:
       - Architecture: contributors/architecture.md
       - Internals:
           - contributors/internals/index.md
-          - Forge Webhooks: contributors/internals/forge-webhooks.md
+          - Git Host Webhooks: contributors/internals/git-host-webhooks.md
           - NAR Storage: contributors/internals/nar-storage.md
           - Cache Serving: contributors/internals/cache-serving.md
           - Graph Queries: contributors/internals/graph-queries.md
           - Authentication: contributors/internals/authentication.md
       - Scheduler:
           - contributors/scheduler/index.md
-          - Build Anchors: contributors/scheduler/build-anchors.md
+          - Shared Builds: contributors/scheduler/shared-builds.md
           - Promotion and Counters: contributors/scheduler/promotion-and-counters.md
-          - Reconciler: contributors/scheduler/reconciler.md
+          - Repair Pass: contributors/scheduler/repair-pass.md
           - Upstream Substitution: contributors/scheduler/upstream-substitution.md
           - Cache Closure: contributors/scheduler/cache-closure.md
           - Waiting and Recovery: contributors/scheduler/waiting-and-recovery.md
@@ -108,7 +108,7 @@ nav:
       - Proto:
           - contributors/proto/index.md
           - Connection: contributors/proto/connection.md
-          - Capabilities and Dispatch: contributors/proto/capabilities-and-dispatch.md
+          - Capabilities and Assignment: contributors/proto/capabilities-and-dispatch.md
           - Jobs: contributors/proto/jobs.md
           - Messages: contributors/proto/messages.md
           - Transfer: contributors/proto/transfer.md

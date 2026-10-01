@@ -26,8 +26,8 @@ Gradient stores secrets hashed or encrypted, and the export returns every `*_fil
 | `projects.<name>.private_key_file` | SSH key for cloning | `ssh-keygen -t ed25519 -N "" -f key` |
 | `caches.<name>.signing_key_file` | Nix signing key, without the `<name>:` prefix | `nix-store --generate-binary-cache-key` |
 | `api_keys.<name>.key_file` | SHA-256 hex digest of the token, without `GRAD` | See [API Key Files](../concepts/declarative-state.md#api-key-files) |
-| `integrations.<name>.secret_file` | Webhook secret shared with the forge | `openssl rand -hex 32` |
-| `integrations.<name>.access_token_file` | Forge access token | From the forge |
+| `integrations.<name>.secret_file` | Webhook secret shared with the Git host | `openssl rand -hex 32` |
+| `integrations.<name>.access_token_file` | Git host access token | From the Git host |
 | `tasks.<name>.actions.*.config.token_file` | Web request token | `openssl rand -hex 32` |
 
 !!! tip "Superuser Through OIDC"

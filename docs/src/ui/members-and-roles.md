@@ -31,7 +31,7 @@ Who can do what in a project or a cache. Projects and caches each have their own
 | `viewProject` | Seeing the project and its evaluations |
 | `manageProjectSettings`, `deleteProject` | Editing or deleting the project |
 | `manageMembers`, `manageRoles` | Inviting members, editing custom roles |
-| `manageIntegrations`, `manageWebhooks` | Forge integrations and webhooks |
+| `manageIntegrations`, `manageWebhooks` | Git host integrations and webhooks |
 | `manageWorkers`, `manageSubscriptions`, `manageSshKey` | Workers, cache subscriptions and the SSH key |
 | `createTask`, `editTask` | Creating and editing tasks |
 | `manageTriggers`, `manageActions` | Triggers and actions on tasks |
@@ -50,7 +50,7 @@ Who can do what in a project or a cache. Projects and caches each have their own
 | `viewCache` | Seeing the cache |
 | `readStore`, `writeStore` | Downloading and uploading paths |
 | `manageCacheSettings`, `deleteCache` | Editing or deleting the cache |
-| `manageCacheKeys`, `manageCacheUpstreams` | Signing keys and upstreams |
+| `manageCacheKeys`, `manageUpstreamCaches` | Signing keys and upstream caches |
 | `manageCacheMembers`, `manageCacheRoles` | Members and custom roles |
 | `manageCacheSubscriptions` | Approving project subscriptions |
 | `manageCacheWebhooks` | Cache webhooks |

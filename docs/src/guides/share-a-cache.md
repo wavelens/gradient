@@ -18,7 +18,7 @@ nix.settings = {
 };
 ```
 
-The one key covers every path, even paths pulled through from an [upstream](../concepts/caches.md#pull-through): Gradient verifies them against the upstream's key and signs them again with the cache's own.
+The one key covers every path, even paths pulled through from an [upstream cache](../concepts/caches.md#pull-through): Gradient verifies them against the upstream cache's key and signs them again with the cache's own.
 
 A public cache needs nothing more. A private cache needs an API key from **Settings -> API Keys** in a netrc file for the Nix daemon:
 
@@ -100,6 +100,6 @@ nix store info --store https://gradient.example.com/cache/main
 
 ## Next Steps
 
-- [Caches](../concepts/caches.md): upstreams, pull-through and substitution order
+- [Caches](../concepts/caches.md): upstream caches, pull-through and substitution order
 - [Members and Roles](../ui/members-and-roles.md#cache-roles): custom roles with single permissions
 - [Upload NARs](upload-nars.md): push paths built outside Gradient

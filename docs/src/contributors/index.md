@@ -34,15 +34,15 @@ flowchart LR
 
 -   :material-graph: **[Scheduler](scheduler/index.md)**
 
-    Build anchors, readiness counters, upstream substitution, cache closure and scoring.
+    Shared builds, start counters, upstream substitution, cache closure and scoring.
 
 -   :material-lan-connect: **[Proto](proto/index.md)**
 
-    The worker protocol on `/proto`: handshake, dispatch, jobs, transfers and federation.
+    The worker protocol on `/proto`: handshake, assignment, jobs, transfers and federation.
 
 -   :material-code-braces: **[Internals](internals/index.md)**
 
-    Forge webhooks, NAR storage, cache serving, graph queries and authentication.
+    Git host webhooks, NAR storage, cache serving, graph queries and authentication.
 
 -   :material-database-arrow-up: **[Migrations](migrations.md)**
 

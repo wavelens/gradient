@@ -1,6 +1,6 @@
 # Messages
 
-Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_id`, `dispatch`, peer IDs) are strings on the wire. **Bulk** messages carry payload chunks and travel on the bulk lane, everything else on the control lane.
+Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_id`, `assignment_id`, peer IDs) are strings on the wire. **Bulk** messages carry payload chunks and travel on the bulk lane, everything else on the control lane.
 
 ## Server -> Worker
 
@@ -14,7 +14,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `Draining` | Server shutting down; request no more jobs | - |
 | `JobListChunk` | Full candidate list, answer to `RequestJobList` | `candidates`, `is_final` |
 | `JobOffer` | New candidates, up to 1 000 per message | `candidates` |
-| `AssignJob` | Assigns a job; `cluster` marks one member of a cluster attempt, held until `StartCluster` | `job_id`, `dispatch`, `job`, `cluster` |
+| `AssignJob` | Assigns a job; `cluster` marks one member of a cluster attempt, held until `StartCluster` | `job_id`, `assignment_id`, `job`, `cluster` |
 | `AbortJob` | Cancels a job | `job_id`, `reason` |
 | `StartCluster` | Every member accepted; run the held jobs | `attempt`, `roster` |
 | `ClusterSignal` | Control message from another member of the attempt | `attempt`, `from`, `payload` |
@@ -29,7 +29,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `CacheStatus` | Answer to `CacheQuery` | `query_id`, `cached` |
 | `KnownDerivations` | Answer to `QueryKnownDerivations` | `query_id`, `known` |
 | `CacheError` | Cache state unknown; the worker retries | `query_id`, `message` |
-| `UploadGrant` | Upload admission: skip, relay (with resume offset), presigned PUT or multipart | `request_id`, `target` |
+| `UploadGrant` | Upload admission: skip, passthrough (with resume offset), presigned PUT or multipart | `request_id`, `target` |
 | `UploadCommitted` | Upload outcome: ok, retry or rejected | `request_id`, `outcome` |
 
 ## Worker -> Server
@@ -47,10 +47,10 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `RequestJob` | One free slot of a kind; repeated every 10 s while idle | `kind` (`Flake` or `Build`) |
 | `AssignJobResponse` | Accepts or declines an `AssignJob` | `job_id`, `accepted`, `reason` |
 | `ClusterSignal` | Control message to one member (`to`) or every other member (`to` unset) of a started attempt | `attempt`, `to`, `payload` |
-| `JobUpdate` | Progress of a job | `job_id`, `dispatch`, `update` |
-| `JobCompleted` | Job done, with the phase timeline | `job_id`, `dispatch`, `spans` |
-| `JobFailed` | Job failed | `job_id`, `dispatch`, `error`, `kind`, `missing_paths`, `spans` |
-| `BuildProgress` | Bytes fetched by a substitute or download | `job_id`, `dispatch`, `build_id`, `downloaded`, `total` |
+| `JobUpdate` | Progress of a job | `job_id`, `assignment_id`, `update` |
+| `JobCompleted` | Job done, with the phase timeline | `job_id`, `assignment_id`, `spans` |
+| `JobFailed` | Job failed | `job_id`, `assignment_id`, `error`, `kind`, `missing_paths`, `spans` |
+| `BuildProgress` | Bytes fetched by a substitute or download | `job_id`, `assignment_id`, `build_id`, `downloaded`, `total` |
 | `Draining` | Worker draining | - |
 | `LogChunk` (bulk) | Build log | `job_id`, `task_index`, `data` |
 | `EvalMessage` | Warning or error on the evaluation | `job_id`, `level`, `source`, `message` |
@@ -60,7 +60,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `CacheQuery` | Bulk cache lookup | `job_id`, `query_id`, `paths`, `mode`, `nar_sizes`, `external` |
 | `QueryKnownDerivations` | Which `.drv` files the server knows, to prune the walk | `job_id`, `query_id`, `drv_paths` |
 | `UploadRequest` | Asks for an upload slot for a NAR or the evaluation cache | `job_id`, `request_id`, `object`, `size` |
-| `UploadChunk` (bulk) | Relayed upload bytes | `request_id`, `data`, `offset`, `is_final` |
+| `UploadChunk` (bulk) | Passthrough upload bytes | `request_id`, `data`, `offset`, `is_final` |
 | `UploadFinished` | Upload done, with NAR metadata | `request_id`, `metadata` |
 | `UploadCancel` | Cancels an upload | `request_id` |
 
@@ -69,7 +69,7 @@ Every message on `/proto`, from `backend/gradient-wire/src/messages`. IDs (`job_
 | `mode` | Asks |
 |---|---|
 | `Normal` | Which paths the caches hold; no URLs |
-| `Pull` | Held paths with transfer URLs; without a URL the worker streams with `NarRequest`. With `external`, one named path may come from an upstream |
+| `Pull` | Held paths with transfer URLs; without a URL the worker streams with `NarRequest`. With `external`, one named path may come from an upstream cache |
 | `Push` | Which paths still need an upload |
 
 ## Evaluation Messages

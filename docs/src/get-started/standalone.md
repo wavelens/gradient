@@ -1,6 +1,6 @@
 # Standalone
 
-A complete Gradient on one machine, for trying it on a personal repository: server, web UI, PostgreSQL and a worker in one container or VM.
+A complete Gradient on one machine, for trying Gradient on a personal repository: server, web UI, PostgreSQL and a worker in one container or VM.
 
 **Requirements:**
 
@@ -33,7 +33,7 @@ The first boot takes a minute: PostgreSQL initializes and Gradient generates its
 
 ## 2. Log In
 
-Gradient generates a random admin password on first boot and prints it on every boot:
+Gradient generates a random admin password on first boot and prints the password on every boot:
 
 ```text
 Gradient is running at http://localhost:8080 - log in with admin / <password>

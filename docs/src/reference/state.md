@@ -15,16 +15,16 @@ services.gradient.state = {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `api_keys` | attrs of submodule | `{ }` | API keys to create, keyed by name. |
-| `caches` | attrs of submodule | `{ }` | Caches to create, keyed by name. |
+| `api_keys` | attrs of submodule | `{ }` | API keys to create, one entry per name. |
+| `caches` | attrs of submodule | `{ }` | Caches to create, one entry per name. |
 | `delete` | bool | `true` | Whether to delete users, projects and caches no longer declared here. |
-| `integrations` | attrs of submodule | `{ }` | Forge integrations per project, keyed by name. |
-| `projects` | attrs of submodule | `{ }` | Projects to create, keyed by name. |
-| `roles` | attrs of submodule | `{ }` | Custom roles, keyed by role name. |
-| `tasks` | attrs of submodule | `{ }` | Tasks to create, keyed by name. |
-| `users` | attrs of submodule | `{ }` | Users to create, keyed by user name. |
+| `integrations` | attrs of submodule | `{ }` | Git host integrations per project, one entry per name. |
+| `projects` | attrs of submodule | `{ }` | Projects to create, one entry per name. |
+| `roles` | attrs of submodule | `{ }` | Custom roles, one entry per role name. |
+| `tasks` | attrs of submodule | `{ }` | Tasks to create, one entry per name. |
+| `users` | attrs of submodule | `{ }` | Users to create, one entry per user name. |
 | `validate` | bool | `true` | Whether to validate the generated state at build time with the server's `--state-validate`. Schema and reference errors then fail the Nix build instead of the first server start. |
-| `workers` | attrs of submodule | `{ }` | Worker registrations, keyed by worker ID. |
+| `workers` | attrs of submodule | `{ }` | Worker registrations, one entry per worker ID. |
 
 ## `users.<name>`
 
@@ -57,27 +57,27 @@ services.gradient.state = {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `actions` | list of submodule | `[ ]` | Task actions: email notifications, web requests, forge status reports and pull request automation. |
+| `actions` | list of submodule | `[ ]` | Task actions: email notifications, web requests, Git host status reports and pull request automation. |
 | `actions.*.active` | bool | `true` | Whether the action is active. |
 | `actions.*.config` | attribute set | `{ }` | Type-specific configuration. |
 | `actions.*.events` | list of string | `[ ]` | Events the action subscribes to. |
 | `actions.*.name` | string | - | Action name, unique within the task. |
-| `actions.*.type` | one of `send_mail` `send_web_request` `forge_status_report` `open_pr` | - | Action kind, which determines the expected `config`. |
+| `actions.*.type` | one of `send_mail` `send_web_request` `git_host_status_report` `open_pr` | - | Action kind, which determines the expected `config`. |
 | `active` | bool | `true` | Whether the task is active. |
 | `concurrency` | one of `hard_abort` `soft_abort` `skip` `all` | `"soft_abort"` | What a new trigger event does while an evaluation is running. |
 | `created_by` | string | - | User name of the task's creator. |
 | `description` | null or string | `null` | Description of the task. |
 | `display_name` | string | `name` | Display name of the task. |
-| `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, keyed by input name. |
+| `flake_input_overrides` | attrs of submodule | `{ }` | Overrides applied when fetching flake inputs, one entry per input name. |
 | `flake_input_overrides.<name>.keep_url` | bool | `false` | Whether to force-update this input from its flake-declared URL. |
 | `flake_input_overrides.<name>.url` | null or string | `null` | Flake reference overriding this input. |
-| `keep_evaluations` | int | `30` | Number of finished evaluations kept for metrics and history, regardless of outcome; capped by `eval.maxKeep`. |
+| `keep_evaluations` | int | `30` | Number of finished evaluations kept for metrics and history, regardless of outcome. Must be at least 1 and is capped by `eval.maxKeep`. |
 | `name` | string | attribute name | Unique task name. |
 | `project` | string | - | Name of the project the task belongs to. |
 | `repository` | string | - | Git repository URL of the task. |
 | `sign_cache` | bool | `true` | Whether to sign the narinfo of outputs pushed by this task. |
 | `wait_for_workers` | bool | `false` | Whether an evaluation waits for a worker when its builds need an architecture or system features no connected worker provides. When disabled, such an evaluation is aborted with a warning naming what is missing. |
-| `triggers` | null or list of submodule | `null` | Evaluation triggers of the task: polling, forge push, forge pull request or cron schedule. |
+| `triggers` | null or list of submodule | `null` | Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule. |
 | `triggers.*.active` | bool | `true` | Whether the trigger is active. |
 | `triggers.*.config` | attribute set | `{ }` | Type-specific configuration. |
 | `triggers.*.integration` | null or string | `null` | Name of an inbound integration in the same project backing this trigger. |
@@ -88,14 +88,14 @@ services.gradient.state = {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `access_token_file` | null or path | `null` | File containing the forge API token of an outbound integration. |
+| `access_token_file` | null or path | `null` | File containing the Git host API token of an outbound integration. |
 | `account_login` | null or string | `null` | GitHub account login of the installation, used for naming only. |
 | `created_by` | string | - | User name of the integration's creator. |
 | `display_name` | null or string | `null` | Display name of the integration. |
-| `endpoint_url` | null or string | `null` | Base URL of the forge API for outbound integrations, such as `https://gitea.example.com`. |
-| `forge_type` | one of `gitea` `forgejo` `gitlab` `github` | - | Forge this integration targets. |
+| `endpoint_url` | null or string | `null` | Base URL of the Git host API for outbound integrations, such as `https://gitea.example.com`. |
+| `git_host_type` | one of `gitea` `forgejo` `gitlab` `github` | - | Git host this integration targets. |
 | `installation_id` | null or int | `null` | GitHub App installation ID, the trailing number of the installation URL. |
-| `kind` | one of `inbound` `outbound` | - | Direction of the integration: `inbound` for HMAC-verified webhooks from the forge, `outbound` for CI status reports to the forge. |
+| `kind` | one of `inbound` `outbound` | - | Direction of the integration: `inbound` for HMAC-verified webhooks from the Git host, `outbound` for CI status reports to the Git host. |
 | `name` | string | attribute name | Integration name, unique per project and kind. |
 | `project` | string | - | Name of the project the integration belongs to. |
 | `secret_file` | null or path | `null` | File containing the HMAC signing secret of an inbound integration. |
@@ -119,15 +119,15 @@ services.gradient.state = {
 | `public` | bool | `false` | Whether the cache is available to all projects. |
 | `roles` | list of submodule | `[ ]` | Custom roles of this cache. |
 | `roles.*.name` | string | - | Custom role name, distinct from the built-in roles. |
-| `roles.*.permissions` | list of string | `[ ]` | Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageCacheUpstreams`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. |
+| `roles.*.permissions` | list of string | `[ ]` | Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`, `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`, `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`. |
 | `signing_key_file` | string | - | File containing the Nix cache signing key. |
-| `upstreams` | list of submodule | cache.nixos.org | Upstream caches used as substituters: internal Gradient caches or external Nix binary caches. |
-| `upstreams.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. |
-| `upstreams.*.display_name` | null or string | `null` | Display name of the upstream. |
-| `upstreams.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Access mode of an internal upstream. |
-| `upstreams.*.public_key` | null or string | `null` | Public key of the external Nix binary cache. Required for `external` upstreams. |
-| `upstreams.*.type` | one of `internal` `external` | - | Upstream type: `internal` (another Gradient cache) or `external` (a Nix binary cache URL). |
-| `upstreams.*.url` | null or string | `null` | URL of the external Nix binary cache. |
+| `upstream_caches` | list of submodule | cache.nixos.org | Upstream caches used as substituters: internal Gradient caches or external Nix binary caches. |
+| `upstream_caches.*.cache_name` | null or string | `null` | Name of the internal Gradient cache to use. |
+| `upstream_caches.*.display_name` | null or string | `null` | Display name of the upstream cache. |
+| `upstream_caches.*.mode` | one of `ReadWrite` `ReadOnly` `WriteOnly` | `"ReadWrite"` | Access mode of an internal upstream cache. |
+| `upstream_caches.*.public_key` | null or string | `null` | Public key of the external Nix binary cache. Required for `external` upstream caches. |
+| `upstream_caches.*.type` | one of `internal` `external` | - | Upstream type: `internal` (another Gradient cache) or `external` (a Nix binary cache URL). |
+| `upstream_caches.*.url` | null or string | `null` | URL of the external Nix binary cache. |
 
 ## `roles.<name>`
 
@@ -162,7 +162,7 @@ services.gradient.state = {
 | `enable_eval` | bool | `true` | Whether the server grants this registration the worker's `eval` capability. |
 | `enable_fetch` | bool | `true` | Whether the server grants this registration the worker's `fetch` capability. |
 | `enabled` | bool | `true` | Whether the base worker is available at all. |
-| `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project; a single worker can serve several projects. |
+| `projects` | list of string | `[ ]` | Projects the worker is registered under, one registration per project. A single worker can serve several projects. |
 | `token_file` | path | - | File containing the worker's authentication token. |
 | `url` | null or string | `null` | WebSocket URL on which the worker accepts server connections. |
 | `worker_id` | string | - | Worker identity. |
@@ -173,10 +173,10 @@ services.gradient.state = {
 |---|---|---|
 | `polling` | - | `interval_secs` (at least 10, default 300), `branch` (default: the remote HEAD) |
 | `reporter_push` | Inbound integration | `branches`, `tags` (globs, empty matches all), `releases_only` |
-| `reporter_pull_request` | Inbound integration | `branches`, `actions` (default `opened`, `synchronize`, `reopened`) |
+| `reporter_pull_request` | Inbound integration | `branches`, `actions` (default `opened`, `synchronize`, `reopened`), `require_approval` (default `true`: pull requests from non-writers wait for a maintainer's approval) |
 | `time` | - | `cron`, six fields in UTC: `sec min hour dom mon dow`, e.g. `"0 0 2 * * *"` |
 
-`triggers = null` keeps the existing triggers; a new task gets a `polling` trigger every 300 seconds until triggers are declared.
+`triggers = null` keeps the existing triggers; a new task declared without `triggers` has none. An empty list is rejected.
 
 ## Action Types
 
@@ -184,7 +184,7 @@ services.gradient.state = {
 |---|---|---|
 | `send_mail` | Required | `recipients`, `subject_template` |
 | `send_web_request` | Required | `url`, `token_file` |
-| `forge_status_report` | Empty | `integration`: an outbound integration |
+| `git_host_status_report` | Empty | `integration`: an outbound integration |
 | `open_pr` | Empty | `integration`, `generator`, `granularity`, `verify_gate`, `branch_pattern`, `title_template`, `body_template`, `update_existing`, see [Update Flake Inputs](../guides/flake-updates.md) |
 
 The event names are in the [events reference](events.md).

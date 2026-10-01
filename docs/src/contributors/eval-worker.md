@@ -53,11 +53,11 @@ Two layers bound evaluation memory.
 | | Gradient | nix-eval-jobs |
 |---|---|---|
 | Parallelism | Long-lived pool; one evaluation sharded across the pool | Short-lived children forked from a warm parent |
-| Warmth across evaluations | Persistent eval cache keyed by flake fingerprint | None; copy-on-write warmth lasts one run |
+| Warmth across evaluations | Persistent eval cache per flake fingerprint | None; copy-on-write warmth lasts one run |
 | Across machines | Fleet-shared `<fp>.sqlite` cache (pull and push). Staging a pulled blob drops the previous local `-wal` / `-shm` sidecars | None |
 | Concurrent writers | Shards write one cache without deadlock: WAL-append commits, one checkpoint at the end | Not applicable |
 | Memory | Automatic pool sizing; a many-system flake degrades to one shard and completes | Manual `--workers` and `--max-memory-size` |
-| Pipeline | Discovery writes rows and dispatch starts mid-evaluation; the closure walk prunes server-known derivations | JSON job stream for the consumer (Hydra and similar) |
+| Pipeline | Discovery writes rows and build assignment starts mid-evaluation; the closure walk prunes server-known derivations | JSON job stream for the consumer (Hydra and similar) |
 | Failure isolation | A bad attribute becomes an error and the evaluation goes on; a crash keeps everything streamed and retries the in-flight attribute | Per-job errors through the fork boundary |
 | Compute across machines | Single-host pool today | Single host |
 

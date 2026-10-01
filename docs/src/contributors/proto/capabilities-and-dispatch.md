@@ -1,4 +1,4 @@
-# Capabilities and Dispatch
+# Capabilities and Assignment
 
 What a worker advertises, how offers reach the worker, and how the server picks the job for each free slot. Assignment is pull-based: the server only assigns in answer to `RequestJob`.
 
@@ -11,7 +11,7 @@ sequenceDiagram
     S->>W: JobListChunk ... (is_final)
     W->>S: RequestJobChunk { scores }
     W->>S: RequestJob { kind }
-    S->>W: AssignJob { job_id, dispatch, job }
+    S->>W: AssignJob { job_id, assignment_id, job }
     W->>S: AssignJobResponse { accepted }
 ```
 
@@ -31,7 +31,7 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 
 - `GRADIENT_WORKER_SYSTEM_ARCHITECTURES` and `GRADIENT_WORKER_SYSTEM_FEATURES` replace the detected lists; an override has to list every system and feature the worker should accept.
 - A build matches a worker when the build's system is in `architectures` and every required feature is in `system_features`. A `builtin` build skips the system check.
-- A later `WorkerCapabilities` replaces the fields and triggers dispatch; running jobs and existing offers stay.
+- A later `WorkerCapabilities` replaces the fields and triggers job assignment; running jobs and existing offers stay.
 
 ## Metrics and Liveness
 
@@ -53,15 +53,15 @@ Workers with the `build` capability send `WorkerCapabilities` after the handshak
 ## Assignment
 
 - The worker sends `RequestJob { kind }` for each free slot, again after every `AssignJob` while slots remain, and every 10 s while idle. An unanswered request is remembered as an idle slot for [cluster placement](../scheduler/clusters.md#tracking), not as a queued request.
-- On `RequestJob`, the server scores every pending job of that kind for this worker with the [scheduling policy](../../reference/scheduler-policies.md) and picks the highest; ties go to the smaller job ID. Nothing below the dispatch floor of 0 is handed out.
+- On `RequestJob`, the server scores every pending job of that kind for this worker with the [scheduling policy](../../reference/scheduler-policies.md) and picks the highest; ties go to the smaller job ID. Nothing below the assignment floor of 0 is handed out.
 - The winner is claimed by inserting a `dispatched_job` row; a lost race tries the next job, up to 3 times. `AssignJob` goes out only after the claim.
-- `AssignJob.dispatch` is the claim's ID. Every report (`JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress`) echoes the ID, and reports with a stale ID are dropped.
+- `AssignJob.assignment_id` is the claim's ID. Every report (`JobUpdate`, `JobCompleted`, `JobFailed`, `BuildProgress`) echoes the ID, and reports with a stale ID are dropped.
 - The worker answers `AssignJobResponse`; a declined job (worker draining or full) is re-queued and offered again.
-- An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md). The server pushes it instead of answering a `RequestJob`; the worker holds the slot, executes nothing until `StartCluster`, and frees the slot after `cluster.hold_secs` without one.
+- An `AssignJob` with `cluster` set is one member of a [cluster job](../scheduler/clusters.md). The server pushes such a job instead of answering a `RequestJob`; the worker holds the slot, starts nothing until `StartCluster`, and frees the slot after `cluster.hold_secs` without one.
 
 ## Candidate Sources
 
 | Kind | Enters the pool |
 |---|---|
-| Evaluation | Every 5 s: each `Queued` evaluation without an open dispatch; the worker limits itself with `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` (1) |
-| Build | From the ready set, on a kick (a build turned ready, a capability change, a finished job) or every 5 s, with a full resync every 60 s |
+| Evaluation | Every 5 s: each `Queued` evaluation without an open assignment; the worker limits itself with `GRADIENT_WORKER_EVAL_MAX_CONCURRENT` (1) |
+| Build | From the set of builds that can start, on a kick (a build that can now start, a capability change, a finished job) or every 5 s, with a full resync every 60 s |

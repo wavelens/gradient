@@ -15,8 +15,8 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
 
     | Kind | Fields |
     |---|---|
-    | Inbound | Name, forge GitLab. Gradient generates the **Secret** and shows the **Webhook URL**; copy both, the secret is shown once. |
-    | Outbound | Name, forge GitLab, **Endpoint URL** (e.g. `https://gitlab.com`) and the **Access Token** |
+    | Inbound | Name, **Git Host** GitLab and a **Webhook Secret** (the refresh button generates one; copy the value, the secret is shown once). The created integration shows the **Webhook URL**. |
+    | Outbound | Name, **Git Host** GitLab, **Endpoint URL** (e.g. `https://gitlab.com`) and the **Access Token** |
 
 === "Declarative"
 
@@ -25,14 +25,14 @@ Evaluations on every push and merge request, with commit statuses back on GitLab
       gitlab-in = {
         project = "acme";
         kind = "inbound";
-        forge_type = "gitlab";
+        git_host_type = "gitlab";
         secret_file = "/run/secrets/gitlab-webhook-secret"; # (1)!
         created_by = "alice";
       };
       gitlab-out = {
         project = "acme";
         kind = "outbound";
-        forge_type = "gitlab";
+        git_host_type = "gitlab";
         endpoint_url = "https://gitlab.com";
         access_token_file = "/run/secrets/gitlab-token";
         created_by = "alice";
@@ -58,10 +58,10 @@ A push-only webhook never delivers merge requests or the `/gradient` comment com
 
 ## 3. Wire the Task
 
-A task created after the integrations, whose repository host matches exactly one inbound and one outbound integration, gets a **Push (reporter)** trigger and a **Forge Status Report** action automatically. Otherwise, on the task:
+A task created after the integrations, whose repository host matches exactly one inbound and one outbound integration, gets a **Push (reporter)** trigger and a **Git Host Status Report** action automatically. Otherwise, on the task:
 
 - **Triggers -> New Trigger**: **Push (reporter)** and, for merge requests, **Pull Request (reporter)**, each with the inbound integration.
-- **Actions -> New Action**: **Forge Status Report** with the outbound integration.
+- **Actions -> New Action**: **Git Host Status Report** with the outbound integration.
 
 ## Verify Deployment
 
@@ -76,20 +76,19 @@ A task created after the integrations, whose repository host matches exactly one
 | Comment `/gradient run` | Starts an evaluation of the merge request |
 | Comment `/gradient approve` | Releases a merge request from a fork waiting for maintainer approval |
 
-The approval gate is a task setting: **Require maintainer approval for PRs from non-writers**. GitLab sends no webhook for review approvals; the comment is the only way to approve.
+The approval gate is a setting of the **Pull Request (reporter)** trigger: **Require maintainer approval for PRs from non-writers**. GitLab sends no webhook for review approvals; the comment is the only way to approve.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `401` in the webhook's recent events | Secret mismatch; copy the secret again or rotate the integration |
+| `401` in the webhook's recent events | Secret mismatch; enter the secret again on both sides (**Edit -> Webhook Secret** in Gradient) |
 | `403 forbidden_source_ip` | GitLab's address is missing from the integration's allowed source IPs |
-| `404` | Wrong project or integration name in the webhook URL |
-| `503` | The inbound integration has no secret yet |
+| `404` | Wrong project or integration name in the webhook URL, or the inbound integration has no secret |
 | `200`, but no evaluation | No task trigger uses this integration, or no task repository URL matches |
 | No status on the commit | The token lacks the `api` scope or the Developer role |
 
 ## Next Steps
 
 - [Actions](actions.md): mail, web requests and flake update merge requests
-- [Connect Gitea or Forgejo](forge-gitea.md): the same setup for Gitea and Forgejo
+- [Connect Gitea or Forgejo](gitea.md): the same setup for Gitea and Forgejo

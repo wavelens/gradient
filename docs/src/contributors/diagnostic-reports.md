@@ -1,6 +1,6 @@
 # Diagnostic Reports
 
-A diagnostic report is one SQLite file with the tables the UI never shows: dispatch gates on `derivation_build`, the attempt history behind a self-heal loop, disconnect reasons, upstream probe metrics and the resolved server settings. Generating and attaching one is in [Report a Bug](../guides/diagnostic-report.md); this page covers what the file holds and how to read it.
+A diagnostic report is one SQLite file with the tables the UI never shows: assignment gates on `derivation_build`, the attempt history behind a self-heal loop, disconnect reasons, upstream probe metrics and the resolved server settings. Generating and attaching one is in [Report a Bug](../guides/diagnostic-report.md); this page covers what the file holds and how to read the data.
 
 ```mermaid
 flowchart LR
@@ -35,8 +35,8 @@ The dialog always sends all four explicitly.
 
 ## Never Exported
 
-- API keys, sessions, device-authorization records, worker token hashes, upstream cache keys, password hashes and forge credentials are absent, not redacted.
-- Every exported column is named in the extractor: a table that later gains a secret column cannot start exporting it.
+- API keys, sessions, device-authorization records, worker token hashes, upstream cache keys, password hashes and Git host credentials are absent, not redacted.
+- Every exported column is named in the extractor: a table that later gains a secret column cannot start exporting that column.
 - `cached_path_signature` exports only whether a signature exists, never the signature.
 
 ## Scope
@@ -46,7 +46,7 @@ The dialog always sends all four explicitly.
 | Scope | Tables |
 |---|---|
 | This evaluation only | The evaluation's own rows, `dispatched_job`, `dispatched_job_phase` |
-| Shared anchors | `build_attempt`, `phase_event`, `derivation*`: rows made for other evaluations of the same derivation, older attempts included |
+| Shared builds | `build_attempt`, `phase_event`, `derivation*`: rows made for other evaluations of the same derivation, older attempts included |
 | Whole instance | `worker_registration`, `base_worker`, `upstream_metric` |
 | This project | `project_base_worker` |
 | Workers of this evaluation | `worker_connection`, `worker_sample`, from creation until finish or the report |
@@ -57,7 +57,7 @@ The dialog always sends all four explicitly.
 
 ## Closure Boundary
 
-The readiness counters count edges; the far end of every edge is in the file. An absent row then means the *instance* never had the path, not that the export skipped it.
+The start counters count edges; the far end of every edge is in the file. An absent row then means the *instance* never had the path, not that the export skipped the path.
 
 | Table | Carries |
 |---|---|
@@ -66,16 +66,16 @@ The readiness counters count edges; the far end of every edge is in the file. An
 | `cached_path` | Those derivations' outputs **and every path they reference** |
 | `build_job` | The evaluation's jobs **and every job an exported attempt ran under** |
 
-- One hop is enough: `unready_deps` counts one per build edge and reads the dependency's own anchor, outputs and cached paths. Deeper levels are summarised in the dependency's stored `unready_deps`.
-- `missing_runtime_deps` is the same count over the runtime edges (`derivation_dependency.kind IN (1, 2)`).
+- One hop is enough: `blocking_deps` counts one per build edge and reads the dependency's own shared build, outputs and cached paths. Deeper levels are summarised in the dependency's stored `blocking_deps`.
+- `missing_runtime_deps` is the same count over the runtime dependencies (`derivation_dependency.kind IN (1, 2)`).
 - A dependency row without a `build_job` row is evidence, not work of its own; `why-stuck` tells the two apart this way.
-- `build_job` reaches past the evaluation: the substitute-miss budget is scoped per `(anchor, evaluation)` through `build_attempt.build_job`.
+- `build_job` reaches past the evaluation: the substitute-miss budget is scoped per `(shared build, evaluation)` through `build_attempt.build_job`.
 
 ## Queries
 
 Any SQLite client opens the file.
 
-**Substitute-miss loops** per anchor and evaluation:
+**Substitute-miss loops** per shared build and evaluation:
 
 ```sh
 sqlite3 report.db \
@@ -110,7 +110,7 @@ sqlite3 report.db \
     WHERE s.id IS NULL OR s.signed = 0'
 ```
 
-**Unwhole anchors:** an anchor is *whole* (what `fetchable` and every dispatch gate read) when every output has a NAR and `missing_runtime_deps` is zero. Non-zero means no dispatch trusts the anchor; negative means a lost ripple.
+**Incomplete Closures:** a shared build has a *complete closure* (what `fetchable` and every assignment gate read) when every output has a NAR and `missing_runtime_deps` is zero. Non-zero means no assignment trusts the shared build; negative means a lost ripple.
 
 ```sh
 sqlite3 report.db \
@@ -120,7 +120,7 @@ sqlite3 report.db \
     ORDER BY b.missing_runtime_deps DESC'
 ```
 
-- `cached_path.references` is the narinfo `References:` line the count was built from, for checking a counter by hand. The server recounts table-wide on every consistency sweep and logs mismatches as `runtime_drift`.
+- `cached_path.references` is the narinfo `References:` line the count was built from, for checking a counter by hand. The server recounts table-wide on every consistency check and logs mismatches as `runtime_drift`.
 - `commit` is a reserved word: query `"commit"` in quotes.
 
 ## Signs in the Data
@@ -129,7 +129,7 @@ sqlite3 report.db \
 |---|---|
 | Evaluation in `EvaluatingFlake` / `EvaluatingDerivation`, newest eval job has `finished_at` | The terminal report never landed; the `eval-completion-watchdog` pass re-drives the transition |
 | `evaluation_input_update` row on an active evaluation | While active, no further input-update run starts for the task; a wedged one stops the flake updater |
-| Anchor `Created`, `substitutable`, undemanded | Nothing will fetch the anchor; a cached output referencing the path stays unwhole |
+| Shared build `Created`, `cache_available`, not wanted | Nothing will fetch the shared build; a cached output referencing the path stays without a complete closure |
 
 ## Inspector
 
@@ -138,18 +138,18 @@ sqlite3 report.db \
 | Command | Shows |
 |---|---|
 | `summary` | Status, timings, build and failure counts (default) |
-| `timeline` | Phase events, dispatches and attempts in order |
-| `why-stuck` | Which gate holds each waiting anchor |
+| `timeline` | Phase events, assignments and attempts in order |
+| `why-stuck` | Which gate holds each waiting shared build |
 | `failed` | Failed attempts; `--log ATTEMPT` dumps one log |
 | `workers` | Registration and connection history |
 | `manifest` | What the report contains and what the report left out |
 | `sql "QUERY"` | Raw access |
 | `store-spec -o FILE` | A `gradient-daemon` store spec replaying the evaluation |
 
-**`why-stuck`** is the first stop on a hung evaluation. For every anchor the evaluation drove that never finished, the command names the gate (`walked`, `demanded`, `unready_deps`), lists every dependency below that is not `fetchable`, and says when the only gate left is the `.drv` wholeness the report does not carry.
+**`why-stuck`** is the first stop on a hung evaluation. For every shared build the evaluation drove that never finished, the command names the gate (`walked`, `wanted`, `probed`, `blocking_deps`), lists every dependency below that is not `fetchable`, and says when the only gate left is the complete `.drv` closure the report does not carry.
 
 ```text
-vendor-registry: Queued, waiting on walked, unready_deps = 1
+vendor-registry: Queued, waiting on walked, blocking_deps = 1
     dep openssl-3.6.3 is a stub: never walked
     dep curl-8.21.0 walked over 2 unwalked inputs
 ```
@@ -160,12 +160,12 @@ vendor-registry: Queued, waiting on walked, unready_deps = 1
 | `is a stub: never walked` | A walk named the derivation but never read the derivation |
 | `walked over N unwalked inputs` | `derivation.unwalked_inputs`: a subtree below was never recorded, as after a walk abandoned between batches |
 
-- `demanded` sits outside the `(substitutable OR unready_deps = 0)` arm and stops at relays and finished builds: `ed-1.22.5: Created, waiting on demanded` is an anchor nothing will ever fetch.
+- `wanted` sits outside the `(cache_available OR blocking_deps = 0)` arm and stops at passthroughs and finished builds: `ed-1.22.5: Created, waiting on wanted` is a shared build nothing will ever fetch.
 - A stub or unwalked line points at the walk, not the build.
 
 ## Schema Versions
 
-- The inspector reads exactly one schema (currently 17) and refuses every other; the message names both schemas.
+- The inspector reads exactly one schema (currently 18) and refuses every other; the message names both schemas.
 - A schema bump changes `SCHEMA_VERSION` in `backend/gradient-report/src/schema.rs` and `SUPPORTED_SCHEMA` in `nix/tools/report-inspector/gradient_report/db.py` together; the inspector package fails to evaluate while the two differ.
 - The schema moves on its own, not with the release (12 to 16 inside 1.3.0). Build the inspector from the revision that wrote the report: `nix build .#gradient-report`.
 - A `nix develop` shell entered before a schema bump keeps the old inspector until re-entered.

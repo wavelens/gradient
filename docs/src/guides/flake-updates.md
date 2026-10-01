@@ -4,8 +4,8 @@ Pull requests that bump `flake.lock`, opened only after the updated flake builds
 
 **Requirements:**
 
-- A task connected to a forge with an outbound integration, see [Connect GitHub](forge-github.md), [Connect Gitea or Forgejo](forge-gitea.md) or [Connect GitLab](forge-gitlab.md)
-- A **Polling** or **Time (cron)** trigger on the task, which sets how often updates run
+- A task connected to a Git host with an outbound integration, see [Connect GitHub](github.md), [Connect Gitea or Forgejo](gitea.md) or [Connect GitLab](gitlab.md)
+- A **Polling** or **Time (cron)** trigger on the task, which sets how often updates start
 
 ## 1. Track the Inputs
 
@@ -50,7 +50,8 @@ Pull requests that bump `flake.lock`, opened only after the updated flake builds
 | Granularity | `per_run` | `per_input` opens one pull request per input instead of one for all |
 | Verify Gate | `build` | `eval` and `none` open the pull request once the updated flake evaluates, before the builds finish |
 | Branch Pattern | `gradient/flake-lock-update` | Must contain `{input}` with `per_input` |
-| Title / Body Template | `flake.lock: update <inputs>` | Placeholders `{input}`, `{inputs}`, `{count}` |
+| Title Template | `flake.lock: update <inputs>` | Placeholders `{input}`, `{inputs}`, `{count}` |
+| Body Template | Each input's old and new revision | Same placeholders as the title |
 | Update existing PR | on | Refreshes an open pull request instead of opening a second one |
 
 ## Update Run
@@ -69,7 +70,7 @@ flowchart LR
 ## Verify Deployment
 
 - **Start Evaluation** on the task shows a second evaluation for the update.
-- After the evaluation completes, the forge shows the pull request with each input's old and new revision.
+- After the evaluation completes, the Git host shows the pull request with each input's old and new revision.
 
 ## Next Steps
 

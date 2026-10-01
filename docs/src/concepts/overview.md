@@ -26,11 +26,11 @@ flowchart LR
 | [Build](evaluations-and-builds.md#build) | One derivation, built once and shared by every evaluation that needs the same derivation |
 | [Worker](workers.md) | A machine that evaluates flakes and builds derivations for the projects that enable the worker |
 | [Cache](caches.md) | A Nix binary cache that stores build outputs and serves them to `nix` |
-| Action | Reacts to evaluation and build events: mail, web request, forge status, pull request |
+| Action | Reacts to evaluation and build events: mail, web request, Git host status, pull request |
 
 ## Shared Builds
 
-A derivation is built once across the whole instance. Two projects that depend on the same derivation share one build: the first evaluation to reach the derivation dispatches the build, the others wait for the same result.
+A derivation is built once across the whole instance. Two projects that depend on the same derivation share one build: the first evaluation to reach the derivation starts the build, the others wait for the same result.
 
 ## Related
 

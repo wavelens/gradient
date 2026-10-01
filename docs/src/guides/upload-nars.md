@@ -56,4 +56,4 @@ A NAR held by several caches stays stored until the last cache deletes the NAR; 
 ## Next Steps
 
 - [Share a Cache](share-a-cache.md): use the uploaded paths on other machines
-- [Caches](../concepts/caches.md): upstreams, pull-through and substitution order
+- [Caches](../concepts/caches.md): upstream caches, pull-through and substitution order

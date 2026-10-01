@@ -30,7 +30,7 @@ flowchart LR
 
 ## Server
 
-The server is one process. Its long-lived work executes under a supervision tree (`gradient_util::supervision`, on ractor), started from the shared `Shutdown` coordinator; subsystems register children with `Shutdown::supervise` or `supervise_now`.
+The server is one process. Its long-lived work lives under a supervision tree (`gradient_util::supervision`, on ractor), started from the shared `Shutdown` coordinator; subsystems register children with `Shutdown::supervise` or `supervise_now`.
 
 ```text
 root
@@ -39,8 +39,9 @@ root
 │   ├── scheduler-core                   actor: WorkerPool and JobTracker behind messages
 │   ├── trigger-dispatch                 every 5 s
 │   ├── eval-dispatch                    5 s tick, woken by every created evaluation
-│   ├── build-dispatch                   actor: 5 s tick, kicks, ready-set resync every 60 s
-│   └── upstream-probe                   every 1 s: asks upstreams about newly demanded anchors
+│   ├── build-dispatch                   actor: 5 s tick, kicks, startable-set resync every 60 s
+│   ├── cluster-dispatch                 5 s tick, woken when a worker finds no single job
+│   └── upstream-probe                   every 1 s: asks upstream caches about shared builds newly wanted
 ├── sessions                             supervisor: one actor per worker connection
 ├── worker-sample, instance-metrics      metrics passes
 ├── worker-liveness, graph-consistency,
@@ -50,7 +51,7 @@ root
 │   abandoned-dispatch-sweep             every 60 s
 ├── cache-maintenance, sign-sweep,
 │   debug-index, eval-cache-sweep        cache sweeps
-├── effects                              actor: delivers outbox rows; effects-workers factory beneath
+├── effects                              actor: sends pending deliveries; effects-workers factory beneath
 ├── retention (hourly), rollup,
 │   cache_metric_flush, otlp-snapshot    metrics pipeline; otlp-snapshot only with an OTLP endpoint
 └── outbound-connect                     every 15 s: dials workers with a registered URL
@@ -58,16 +59,16 @@ root
 
 | Actor | Owns | Details |
 |---|---|---|
-| `graph` | Every request-path write to `derivation*`, `build_job`, `build_attempt`, `cached_path`, and the retires of maintenance | [Build Anchors](scheduler/build-anchors.md) |
-| `scheduler-core` | `WorkerPool` and the candidate cache (`JobTracker`); `Scheduler` is a facade, one message per method | [Capabilities and Dispatch](proto/capabilities-and-dispatch.md) |
-| `SessionActor` | One worker connection; the reader hands it frames in order, up to 64 unanswered, then TCP backpressure holds | [Connection](proto/connection.md) |
-| `effects` | Outbox delivery: 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
+| `graph` | Every request-path write to `derivation*`, `build_job`, `build_attempt`, `cached_path`, and the retires of maintenance | [Shared Builds](scheduler/shared-builds.md) |
+| `scheduler-core` | `WorkerPool` and the candidate cache (`JobTracker`); `Scheduler` is a facade, one message per method | [Capabilities and Assignment](proto/capabilities-and-dispatch.md) |
+| `SessionActor` | One worker connection; the reader hands the actor frames in order, up to 64 unanswered, then TCP backpressure holds | [Connection](proto/connection.md) |
+| `effects` | Pending deliveries (`pending_delivery`): 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
 
-- **Pull-based dispatch:** a claim is a `dispatched_job` insert in Postgres (`gradient_db::claim_dispatch`); the scheduler actor only caches candidates.
+- **Pull-based assignment:** a claim is a `dispatched_job` insert in Postgres (`gradient_db::claim_assignment`); the scheduler actor only caches candidates.
 - **Session signals:** the scheduler reaches a session only through `SessionPort` (`Offers`, `Reauth`, `Abort`, `Drain`, `Close`); a burst of enqueues collapses into one offer per generation.
-- **Off-session RPCs:** the reader starts `CacheQuery` and `QueryKnownDerivations` as tracked tasks the moment they arrive, and the session starts `WorkerMetrics` the same way, so a slow frame never holds back a lookup the worker waits on. Log chunks go through a per-session lane, flushed before a job's completion. A respawned core actor gets every live session and its jobs back from the sessions supervisor.
-- **State:** `AppState` (alias `ServerState`) holds three pools (`worker_db`, `web_db`, `cache_db`), `RuntimeConfig`, the NAR store, `UploadAdmission`, the graph handle, the event bus, `ready_set` and `probe_requests` channels for build-dispatch and the probe.
-- **Events** are typed (`gradient_types::events::Event`) and flow two ways: the in-process `EventBus` for live sockets and `/api/v1/metrics/events` (a slow subscriber skips), and durable `outbox` rows written by `gradient_db::events::record` in the caller's transaction, fanned out by `effects` into action and webhook deliveries.
+- **Off-session RPCs:** the reader starts `CacheQuery` and `QueryKnownDerivations` as tracked tasks the moment they arrive, and the session starts `WorkerMetrics` the same way: a slow frame never holds back a lookup the worker waits on. Log chunks go through a per-session lane, flushed before a job's completion. A respawned core actor gets every live session and its jobs back from the sessions supervisor.
+- **State:** `AppState` (alias `ServerState`) holds three pools (`worker_db`, `web_db`, `cache_db`), `RuntimeConfig`, the NAR store, `UploadAdmission`, the graph handle, the event bus, `startable_set` and `probe_requests` channels for build-dispatch and the probe.
+- **Events** are typed (`gradient_types::events::Event`) and flow two ways: the in-process `EventBus` for live sockets and `/api/v1/metrics/events` (a slow subscriber skips), and durable pending deliveries (`pending_delivery` rows) written by `gradient_db::events::record` in the caller's transaction, fanned out by `effects` into action and webhook deliveries.
 - **Uploads** are admitted before a byte moves: one server-wide count and byte budget, round-robin across sessions, FIFO within one, small uploads first. See [Transfer](proto/transfer.md#upload) and [NAR Storage](internals/nar-storage.md).
 
 **Supervision rules:**
@@ -75,13 +76,13 @@ root
 - A child that panics or exits is respawned after a backoff of 1 s doubling to 60 s, reset after five healthy minutes.
 - A pass over its budget is cancelled in place and ticks again.
 - Restarts, errors, timeouts and the last good pass per child are on `/api/v1/board/health`.
-- Work that outlives a request executes as a tracked task: shutdown drains the task. Bare `tokio::spawn` is a clippy error in the backend workspace.
+- Work that outlives a request lives in a tracked task: shutdown drains the task. Bare `tokio::spawn` is a clippy error in the backend workspace.
 
 ## Worker
 
 - Connects to the server at `/proto`, or accepts connections with `discoverable`.
-- Executes flake jobs (fetch, evaluate) and build jobs, see [Jobs](proto/jobs.md). Evaluation takes place in a subprocess pool, see [Eval Worker Setup](eval-worker.md).
-- Talks to the local `nix-daemon` through harmonia and keeps GC roots for what it builds.
+- Takes flake jobs (fetch, evaluate) and build jobs, see [Jobs](proto/jobs.md). Evaluation takes place in a subprocess pool, see [Eval Worker Setup](eval-worker.md).
+- Talks to the local `nix-daemon` through harmonia and keeps GC roots for what the worker builds.
 - Never signs: the server signs every cached path, see [Cache Serving](internals/cache-serving.md).
 
 ## Crates
@@ -91,24 +92,24 @@ Every backend crate is `backend/gradient-<name>`; the workspace root is `gradien
 | Group | Crate | Role |
 |---|---|---|
 | Server state | `core` | `AppState`, upstream narinfo lookup and sources |
-| | `db` | Every query and the graph reconciler, over the pools; `DbContext` |
+| | `db` | Every query and the graph repair pass, over the pools; `DbContext` |
 | | `entity` | SeaORM entities, one module per table |
 | | `migration` | SeaORM migrator |
-| | `graph` | The graph actor |
+| | `graph` | The graph writer |
 | | `effects` | The effects actor |
-| Scheduling | `scheduler` | Scheduler actor, dispatch passes, upstream probe |
+| Scheduling | `scheduler` | Scheduler actor, assignment passes, upstream probe |
 | | `pool` | Worker registry, capability aggregate, scoring rules |
 | Protocol | `wire` | Protocol types, framing, handshake, dial and accept |
-| | `proto` | Server side: sessions, NAR transfer, signing, dispatch handlers |
+| | `proto` | Server side: sessions, NAR transfer, signing, assignment handlers |
 | | `worker-client` | Peer side: connection, reconnect, reply correlation; shared by worker and proxy |
 | HTTP | `web` | Axum API and the binary cache endpoints |
-| | `forge` | Per-forge reporters, webhook parsing, signature checks |
+| | `git-host` | Reporters per Git host, webhook parsing, signature checks |
 | Background | `cache` | Cache sweeps: maintenance, signing backfill, debug index, eval cache, deep GC |
-| | `ci` | Triggers, `apply_trigger`, evaluation creation, forge checks |
+| | `ci` | Triggers, `apply_trigger`, evaluation creation, Git host checks |
 | | `state` | Declarative state DTOs and apply |
 | | `notify` | Email through `EmailSender` |
 | | `report` | Diagnostic report extractor |
-| Storage and Nix | `storage` | NAR and log storage (file or S3), upload admission, partial transfers, relay, hot cache |
+| Storage and Nix | `storage` | NAR and log storage (file or S3), upload admission, partial transfers, passthrough, hot cache |
 | | `sources` | Store paths, the daemon pool, git and SSH sources, cache keys, the `flake.lock` updater |
 | | `derivation` | `.drv` parsing |
 | | `eval` | Flake evaluator, used by the worker and `gradient eval` |
@@ -122,9 +123,9 @@ Every backend crate is `backend/gradient-<name>`; the workspace root is `gradien
 
 ## Database
 
-- PostgreSQL 18 or newer is the only database. Migrations live in `backend/gradient-migration/src/` and run at startup, see [Migrations](migrations.md).
-- Graph transactions aborted by a deadlock or serialization failure run at most three times; passes outside the graph actor are not retried and repeat on their next tick.
-- Advisory locks in namespace `643` (`gradient_db::anchor_guard`) and hash-ordered row locks keep counter seeds and flips consistent, see [Build Anchors](scheduler/build-anchors.md).
+- PostgreSQL 18 or newer is the only database. Migrations live in `backend/gradient-migration/src/` and apply at startup, see [Migrations](migrations.md).
+- Graph transactions aborted by a deadlock or serialization failure get at most three attempts; passes outside the graph writer are not retried and repeat on their next tick.
+- Advisory locks in namespace `643` (`gradient_db::shared_build_guard`) and hash-ordered row locks keep counter seeds and flips consistent, see [Shared Builds](scheduler/shared-builds.md).
 - Postgres needs `max_locks_per_transaction` of at least 256; the server logs an error below that.
 - Timestamps are `NaiveDateTime` in UTC; `NULL_TIME` (`1970-01-01 00:00:00`) means "never".
 - `backend/clippy.toml` forbids `reqwest::Client::new` and raw `Statement` construction: statements go through `gradient_db::sql!` for the plan gate.
@@ -142,5 +143,5 @@ Every backend crate is `backend/gradient-<name>`; the workspace root is `gradien
 
 ## Related
 
-- [Internals](internals/index.md): forge hooks, NAR storage, cache serving, graph queries, authentication
+- [Internals](internals/index.md): Git host webhooks, NAR storage, cache serving, graph queries, authentication
 - [Scheduler](scheduler/index.md) and [Proto](proto/index.md)

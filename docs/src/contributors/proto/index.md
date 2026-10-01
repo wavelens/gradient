@@ -4,7 +4,7 @@ The protocol between server and workers: one WebSocket at `/proto` with binary r
 
 ```mermaid
 flowchart LR
-    conn[Connection] --> cap[Capabilities and Dispatch]
+    conn[Connection] --> cap[Capabilities and Assignment]
     cap --> jobs[Jobs]
     jobs --> transfer[Transfer]
     conn --> fed[Federation]
@@ -16,7 +16,7 @@ flowchart LR
 
     Handshake, authorization, server restarts, graceful shutdown and cache sessions.
 
--   :material-clipboard-list: **[Capabilities and Dispatch](capabilities-and-dispatch.md)**
+-   :material-clipboard-list: **[Capabilities and Assignment](capabilities-and-dispatch.md)**
 
     What a worker advertises, job offers and pull-based assignment.
 

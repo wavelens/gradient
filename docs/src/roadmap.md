@@ -66,7 +66,7 @@ Jobs beyond the Nix sandbox.
 
 -   :material-play-network: **Runner Workers**
 
-    Workers that execute jobs outside the sandbox. Integration tests with network access, real hardware or deployment credentials.
+    Workers that build outside the sandbox. Integration tests with network access, real hardware or deployment credentials.
 
 </div>
 

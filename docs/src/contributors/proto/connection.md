@@ -47,8 +47,8 @@ A capability is active only when both sides support the capability; `core` and `
 | `core` | The server side of the protocol; always on for the server, off for workers |
 | `cache` | Serves as a binary cache; always on for the server |
 | `fetch` | Clones repositories and prefetches flake inputs |
-| `eval` | Executes flake evaluations |
-| `build` | Executes Nix builds |
+| `eval` | Evaluates flakes |
+| `build` | Builds derivations with Nix |
 | `federate` | Reserved: negotiated in the handshake, no behavior yet |
 
 New features are gated by capability flags, not by version numbers.
@@ -86,8 +86,8 @@ A restart loses work in flight, never a queued job.
 |---|---|
 | Worker | Aborts every running job and reconnects with backoff (1 s, doubling up to 60 s) |
 | Worker | Sends a full handshake, then `RequestJobList` and one `RequestJob` per kind |
-| Server | Drops every report whose `job_id` and dispatch ID the current session did not hand out |
-| Server | Before any session opens, `recover_interrupted_work` closes open dispatches, aborts running attempts, re-queues `Building` builds and re-evaluates interrupted evaluations |
+| Server | Drops every report whose `job_id` and `assignment_id` the current session did not hand out |
+| Server | Before any session opens, `recover_interrupted_work` closes open assignments, aborts running attempts, re-queues `Building` builds and re-evaluates interrupted evaluations |
 
 ## Graceful Shutdown
 
@@ -107,7 +107,7 @@ sequenceDiagram
 
 ## Versioning
 
-`PROTO_VERSION` is `21` and rises with every breaking wire change; both sides must match exactly. The check lives once, in `session::handshake::on_init_connection`, for every session kind.
+`PROTO_VERSION` is `22` and rises with every breaking wire change; both sides must match exactly. The check lives once, in `session::handshake::on_init_connection`, for every session kind.
 
 ## Cache Sessions
 

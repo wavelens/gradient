@@ -21,7 +21,7 @@ flowchart LR
 | Runtime closure (`kind IN (1, 2)`) | `runtime_closure_cte` | Yes |
 | GC keep-set | `live_cached_paths_cte` | Yes |
 | Walk completeness | `walk_completeness.rs` (hand-written) | Yes |
-| Runtime recount | `runtime_readiness.rs`, `recount_sql` | No |
+| Runtime recount | `runtime_can_start.rs`, `recount_sql` | No |
 | Task board dependency counts | `task_board.rs`, `DEP_COUNTS_SQL` | No |
 
 ## The `OFFSET 0` Fence
@@ -44,7 +44,7 @@ WITH RECURSIVE closure(derivation) AS (
 | Evaluation closure, 43 898 nodes | 5 278 ms | 955 ms |
 | GC keep-set, 315 155 nodes | 40 069 ms | 9 746 ms |
 
-**`UNION`, not `UNION ALL`:** the set operator deduplicates the frontier each iteration. The dependents walk emits 940 000 rows for 68 000 distinct nodes; `UNION ALL` grows exponentially with depth on diamond graphs.
+**`UNION`, not `UNION ALL`:** the set operator deduplicates the frontier each iteration. The walk up to the derivations that need a node emits 940 000 rows for 68 000 distinct nodes; `UNION ALL` grows exponentially with depth on diamond graphs.
 
 ## Indexes
 
@@ -52,18 +52,18 @@ WITH RECURSIVE closure(derivation) AS (
 |---|---|---|
 | `derivation_dependency_pkey` | `(derivation, dependency)` | Walks down; the pair is the key, no surrogate |
 | `idx-derivation_dependency-reverse-pair` | `(dependency, derivation)` | Walks up |
-| `idx-derivation_dependency-runtime` | `(dependency) INCLUDE (derivation) WHERE kind IN (1, 2)` | The wholeness ripple, from a dependency to the anchors counting it |
+| `idx-derivation_dependency-runtime` | `(dependency) INCLUDE (derivation) WHERE kind IN (1, 2)` | The complete-closure ripple, from a dependency to the shared builds counting it |
 | `idx-build_job-created_at`, `idx-entry_point-created_at` | `created_at INCLUDE (derivation)` | The GC freshness seed |
 
 All edge indexes are covering: walks are index-only. The GC freshness seed's cutoff is the candidate scan's start; the seed matches almost nothing and must not scan to find that out.
 
 ## Counter Ripples
 
-A ripple moves `missing_runtime_deps` (or `derivation.unwalked_inputs`) up the graph in one call of a SQL function (`ripple_missing_runtime_deps`, `ripple_unwalked_inputs`), each level in three steps inside it:
+A ripple moves `missing_runtime_deps` (or `derivation.unwalked_inputs`) up the graph in one call of a SQL function (`ripple_missing_runtime_deps`, `ripple_unwalked_inputs`), each level in three steps inside the function:
 
 ```mermaid
 flowchart LR
-    a["read dependents + edge counts<br/>of the level"] --> b["advisory keys, then rows<br/>in derivation order"]
+    a["read the derivations that need the level<br/>+ edge counts"] --> b["advisory keys, then rows<br/>in derivation order"]
     b --> c["update by the bound set<br/>next level = the rows that flipped"]
 ```
 
@@ -86,7 +86,7 @@ Every 30 s (`GRADIENT_METRICS_INSTANCE_INTERVAL_SECS`) the instance pass average
 | Frontier | `BuildJobId`s; a dependency without a `build_job` in the evaluation is dropped |
 | Cap | 500 nodes, soft, checked before each wave |
 | Cost | About five queries per wave: follows the depth, not the node count |
-| Edges | No `kind` filter: runtime edges appear too. `DependencyEdge { source, target }`: `source` is built before `target` |
+| Edges | No `kind` filter: runtime dependencies appear too. `DependencyEdge { source, target }`: `source` is built before `target` |
 | Neighbours | `GET /builds/{build}/dependencies` lists direct dependencies |
 
 ## SQL/PGQ

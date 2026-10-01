@@ -31,7 +31,7 @@ Gradient evaluates and builds Nix flakes on a pool of workers, starts builds whi
 
 | | |
 |---|---|
-| **[Forge Integration](https://wavelens.github.io/gradient/guides/forge-github/)** | GitHub, Gitea / Forgejo and GitLab: builds on push and pull request, status checks sent back |
+| **[Git Host Integration](https://wavelens.github.io/gradient/guides/github/)** | GitHub, Gitea / Forgejo and GitLab: builds on push and pull request. Sends status checks back |
 | **[Build Before Pushing](https://wavelens.github.io/gradient/guides/build-before-push/)** | Uncommitted changes built on the CI workers with `gradient build` |
 | **[Built-in Binary Cache](https://wavelens.github.io/gradient/concepts/caches/)** | Per-project caches with S3 storage, signing and sharing between projects |
 | **[Scales With Workers](https://wavelens.github.io/gradient/concepts/workers/)** | Evaluation and builds both run on workers; each added machine adds capacity |
@@ -56,26 +56,28 @@ gradient build .#hello
 
 All commands: [CLI Reference](https://wavelens.github.io/gradient/reference/cli/).
 
-## Compared to Hydra
+## Compared to Hydra and GitHub Actions
 
-| | [Hydra](https://github.com/NixOS/hydra) | Gradient |
-|---|---|---|
-| Build start | After the whole evaluation finishes | While the evaluation is still running |
-| Evaluation | On the server, limited by one machine | On workers, scales with them |
-| Build outputs | Pass through the server | Large outputs go from worker straight to S3 |
-| Server host | Needs a writable Nix store | Needs no Nix store, fits in a micro-VM |
-| Heavy builds | Static machine list with speed factors | Scoring system places them by predicted memory, learned from past builds |
-| Private caches | One store for the whole instance | Per-project caches with access control |
-| Sign-in | Local accounts, LDAP | OIDC single sign-on, SCIM provisioning |
-| Integrations | Minimal JSON API | REST API, webhooks, Git Integrations and MCP server |
-| Web UI | Server-rendered pages | Responsive UI with live log streaming |
-| Stars | ![](https://img.shields.io/github/stars/NixOS/hydra?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=high) | ![](https://img.shields.io/github/stars/wavelens/gradient?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=low) |
+| | [Hydra](https://github.com/NixOS/hydra) | GitHub Actions + [Cachix](https://www.cachix.org) | Gradient |
+|---|---|---|---|
+| Build start | After the whole evaluation finishes | After the job has evaluated the flake | While the evaluation is still running |
+| Evaluation | On the server, limited by one machine | Inside each job, limited by the runner | On workers, scales with them |
+| Nix store | Kept on the server and builders | Empty on every job; each job downloads its closure again | Kept on the workers between builds |
+| Shared work | One build per derivation | Parallel jobs can build the same derivation twice | Every derivation built once, shared across projects |
+| Build outputs | Pass through the server | Pushed from the runner to Cachix | Large outputs go from worker straight to S3 |
+| Server host | Needs a writable Nix store | Hosted by GitHub | Needs no Nix store, fits in a micro-VM |
+| Heavy builds | Static machine list with speed factors | Fixed runner sizes | Scoring system places them by predicted memory, learned from past builds |
+| Private caches | One store for the whole instance | Free plan: 5 GB, filled quickly by full closures | Per-project caches with access control, on own S3 or disk storage |
+| Sign-in | Local accounts, LDAP, OIDC with roles for the whole instance | GitHub accounts | [OIDC](https://wavelens.github.io/gradient/guides/sso/) with provider groups mapped to roles per project, SCIM provisioning |
+| Integrations | Minimal JSON API | GitHub only | REST API, webhooks, Git Integrations and MCP server |
+| Web UI | Server-rendered pages | GitHub job logs | Responsive UI with live log streaming |
+| Stars | ![](https://img.shields.io/github/stars/NixOS/hydra?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=high) | - | ![](https://img.shields.io/github/stars/wavelens/gradient?style=for-the-badge&labelColor=rgba(225%2C227%2C232%2C0.82)&color=rgba(30%2C34%2C42%2C1)&label=low) |
 
 ## Installation
 
-A NixOS module sets up the server, a local worker, PostgreSQL and the reverse proxy. The [Quick Start](https://wavelens.github.io/gradient/get-started/quick-start/) walks through the setup in five steps.
+A NixOS module sets up the server, a local worker, PostgreSQL and the reverse proxy. The [Quick Start](https://wavelens.github.io/gradient/get-started/quick-start/) walks through the setup in three steps.
 
-For a first try on a personal repository, the [Standalone](https://wavelens.github.io/gradient/get-started/standalone/) instance runs everything in one container or VM:
+For a first try on a personal repository, the [Standalone](https://wavelens.github.io/gradient/get-started/standalone/) instance puts everything into one container or VM:
 
 ```sh
 docker run -dt --name gradient --privileged --cgroupns=host -p 127.0.0.1:8080:80 -v gradient:/var/lib ghcr.io/wavelens/gradient-standalone

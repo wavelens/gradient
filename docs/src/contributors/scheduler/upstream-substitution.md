@@ -1,56 +1,56 @@
 # Upstream Substitution
 
-A build whose outputs an upstream cache already serves is fetched, not built. The `upstream-probe` loop asks upstreams only for anchors something demands, and the answer decides whether the anchor is a relay (`substitutable`) or a builder.
+A build whose outputs an upstream cache already serves is fetched, not built. The `upstream-probe` loop asks upstream caches only about [shared builds](shared-builds.md) another build or an evaluation needs, and the answer decides whether the shared build is a passthrough (fetched from upstream, `cache_available`) or a real build.
 
 ```mermaid
 flowchart LR
-    D[Anchor gains demand] --> P[upstream-probe]
-    P -->|every output served| R[Relay: Substitute job]
-    P -->|miss| B[Builder: Build job]
+    D[Shared build is needed] --> P[upstream-probe]
+    P -->|every output served| R[Passthrough: Substitute job]
+    P -->|miss| B[Build: Build job]
     R -->|narinfo References| D
     B -->|build inputs| D
 ```
 
 ## Probe Loop
 
-`gradient-scheduler/src/probe.rs`, a supervised periodic child outside the graph actor. Probing is HTTP; a round trip inside a graph transaction would hold the single graph writer.
+`gradient-scheduler/src/probe.rs`, a supervised periodic child outside the [graph writer](shared-builds.md#graph-writer). Probing is HTTP; a round trip inside a graph transaction would hold the single graph writer.
 
 | Constant | Value | Role |
 |---|---|---|
 | `PROBE_TICK` | 1 s | Pass interval |
 | `PROBE_BUDGET` | 120 s | Supervision budget of one pass |
 | `PROBE_DESCENT` | 60 s | A pass stops descending after this; the rest waits for the next tick |
-| `PROBE_MEMORY` | 300 s | An answered anchor is not asked again within this window |
-| `PROBE_BATCH` | 256 | Outputs per request round, and rows per recovery sweep |
-| `PROBE_SWEEP` | 60 s | Recovery sweep interval, only on an idle tick |
+| `PROBE_MEMORY` | 300 s | An answered shared build is not asked about again within this window |
+| `PROBE_BATCH` | 256 | Outputs per request round, and rows per recovery check |
+| `PROBE_SWEEP` | 60 s | Recovery check interval, only on an idle tick |
 
-- **Requests:** an in-memory channel (`ProbeRequests`) fed by the batch ingest (every anchor the batch walked, plus demand it moved), the transition emitter (`gradient-db/src/status/effects.rs`) and the graph actor after `UpstreamHits` / `UpstreamProbed`.
-- **Descent:** each round's answer moves demand and hands the next level straight back; one pass follows the closure down instead of one level per tick.
-- **Recovery sweep:** demanded, walked anchors with `probed = false`. Covers a process that stopped between a commit and the channel send.
+- **Requests:** an in-memory channel (`ProbeRequests`) fed when a batch is recorded (every shared build the batch walked, plus the needs-build marks the batch moved), the transition emitter (`gradient-db/src/status/effects.rs`) and the graph writer after `UpstreamHits` / `UpstreamProbed`.
+- **Descent:** each round's answer moves the needs-build marks and hands the next level straight back; one pass follows the closure down instead of one level per tick.
+- **Recovery check:** walked shared builds that need building, with `probed = false`. Covers a process that stopped between a commit and the channel send.
 
 ## One Round
 
 `plan_probes` builds the round; `probe_round` applies the round.
 
-1. Drop anchors without `demanded = true`.
-2. Drop anchors without `derivation_output` rows (unwalked stubs). A stub stays unanswered until the batch that walks the stub sends the stub again.
+1. Drop shared builds nothing wants (`wanted = false`).
+2. Drop shared builds without `derivation_output` rows (unwalked stubs). A stub stays unanswered until the batch that walks the stub sends the stub again.
 3. Skip outputs already cached anywhere (`is_cached` or `external_url`).
-4. Group the rest by an evaluation naming the anchor (`build_job`); the evaluation's project picks the upstreams.
+4. Group the rest by an evaluation naming the shared build (`build_job`); the evaluation's project picks the upstream caches.
 5. `probe_outputs` (`gradient-scheduler/src/eval.rs`) asks each output's `<hash>.narinfo` and flushes `upstream_metric`.
-6. Hits go to `GraphMsg::UpstreamHits`, then every anchor of step 2 goes to `GraphMsg::UpstreamProbed`, hit or miss.
+6. Hits go to `GraphMsg::UpstreamHits`, then every shared build of step 2 goes to `GraphMsg::UpstreamProbed`, hit or miss.
 
-An anchor with `probed = false` is not a builder. Nothing below the anchor is demanded or dispatched until the answer lands; a build queued on "no answer yet" cannot be recalled once a worker holds the job.
+A shared build with `probed = false` is not yet a real build. Nothing below the shared build needs building or is handed out until the answer lands; a build queued on "no answer yet" cannot be recalled once a worker holds the job.
 
 ## Applying a Hit
 
-`apply_upstream_hits` in `gradient-graph/src/ingest.rs`:
+`apply_upstream_hits` in `gradient-graph/src/record.rs`:
 
 - **Persist:** `external_url`, `nar_hash`, `file_hash`, `file_size`, `references_list`, `deriver`, plus `nar_size` and `ca` when unset, on every `derivation_output` sharing the hash and not already cached.
-- **Runtime edges:** the narinfo `References:` line writes runtime edges to the referenced producers.
-- **Relay:** `substitutable = true` only when every output of the anchor is served. A terminal-success anchor is never flipped. A failed anchor is flipped and becomes a relay.
-- **Demand:** recomputed for touched and newly substitutable anchors; the gained set returns to the probe.
+- **Runtime dependencies:** the narinfo `References:` line records runtime dependencies on the referenced producers.
+- **Passthrough:** `cache_available = true` only when every output of the shared build is served. A terminal-success shared build is never flipped. A failed one is flipped and becomes a passthrough.
+- **Needs build:** updated for touched shared builds and those newly available in a cache; the newly needed set returns to the probe.
 
-`mark_probed` sets `probed = true` (`MARK_PROBED`) and recomputes demand. A miss leaves the anchor a builder, which now demands its build inputs.
+`mark_probed` sets `probed = true` (`MARK_PROBED`) and updates the needs-build marks. A miss leaves the shared build a real build, which now needs its build inputs.
 
 ## Upstream Selection
 
@@ -60,8 +60,8 @@ An anchor with `probed = false` is not a builder. Nothing below the anchor is de
 |---|---|
 | Candidates | `cache_upstream` rows with `kind = Http`, a URL, neither upstream nor project subscription `WriteOnly` (`upstream_endpoints_for_project`) |
 | Trust | A hit needs a `Sig` that verifies against the upstream's `public_key` and a `StorePath` matching the asked hash (`verified_narinfo`); an upstream without a key never hits |
-| Order | Hit rate, then average latency over the last 60 min of `upstream_metric`; unmeasured upstreams last |
-| At most 4 upstreams | Asked in parallel; the lowest-latency hit wins |
+| Order | Hit rate, then average latency over the last 60 min of `upstream_metric`; unmeasured upstream caches last |
+| At most 4 upstream caches | Asked in parallel; the lowest-latency hit wins |
 | More than 4 | Asked in order; the first hit wins |
 | Timeout | 2 s per narinfo request; 30 s for a `upstream_query` semaphore permit |
 | Concurrency | `GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY` (default 32), server-wide |
@@ -70,41 +70,41 @@ An anchor with `probed = false` is not a builder. Nothing below the anchor is de
 
 ## Substitute Jobs
 
-`decide_build_spec_kind` (`gradient-scheduler/src/dispatch_mode.rs`) reads the flag and nothing else:
+`decide_build_spec_kind` (`gradient-scheduler/src/assign_mode.rs`) reads the flag and nothing else:
 
-| Anchor | Kind | Worker |
+| Shared build | Kind | Worker |
 |---|---|---|
-| `substitutable` | `Substitute` | Any |
+| `cache_available` | `Substitute` | Any |
 | `builtin` system, fixed-output | `Download` | Any, no Nix store |
 | Everything else, `builtin:buildenv` included | `Build` | Matching system |
 
 The `BuildSpec` carries the `(name, store_path)` pairs; the worker never reads the `.drv` (`gradient-worker/src/executor/substitute.rs`):
 
 1. Skip outputs the Gradient cache already holds.
-2. Locate each remaining output with `CacheQuery { external: true }` (one path per query). The server answers from the persisted `external_url`, else probes `Http` upstreams, else `GradientProto` upstreams.
+2. Locate each remaining output with `CacheQuery { external: true }` (one path per query). The server answers from the persisted `external_url`, else probes `Http` upstream caches, else `GradientProto` upstream caches.
 3. Download with the redirect-following client; a body whose length differs from the declared `file_size` counts as missing.
 4. Detect compression from the magic bytes, with the URL extension as fallback.
 5. Check the NAR against `nar_hash`, then push the bytes like any other output.
 
-Nothing below the outputs is fetched: the referenced paths are anchors of their own, demanded by the server. Build jobs keep `use_substitutes = false` in the daemon.
+Nothing below the outputs is fetched: the referenced paths are shared builds of their own, marked as needed by the server. Build jobs keep `use_substitutes = false` in the daemon.
 
 ## Failures and the Miss Budget
 
 | Worker error | Kind | Server |
 |---|---|---|
 | No upstream serves an output | `SubstituteUnavailable` | Penalty-free requeue to `Queued` |
-| Upstream NAR missing, wrong size or not matching `nar_hash` (`CorruptCachedNar`) | `InputsUnavailable` | Self-heal reconcile, retry |
+| Upstream NAR missing, wrong size or not matching `nar_hash` (`CorruptCachedNar`) | `InputsUnavailable` | Self-heal repair pass, retry |
 | Anything else, hash mismatch included | `Transient` | Retry |
 
 **Escalation to a build:**
 
-- A relay whose `InputsUnavailable` / `Transient` retries run out enters the same budget instead of `FailedPermanent`.
-- At `build.substituteMissEscalationThreshold` (default 2) misses within one evaluation, `exhaust_substitution` clears `substitutable`, the upstream columns of the outputs and `attempt`, and sets the anchor `Created`.
-- The anchor then builds through the ordinary gates.
+- A passthrough whose `InputsUnavailable` / `Transient` retries run out enters the same budget instead of `FailedPermanent`.
+- At `build.substituteMissEscalationThreshold` (default 2) misses within one evaluation, `exhaust_substitution` clears `cache_available`, the upstream columns of the outputs and `attempt`, and sets the shared build `Created`.
+- The shared build then builds through the ordinary gates.
 
 ## Cache Endpoints
 
-`gradient-web/src/endpoints/caches/`. Every endpoint asks only the cache's own upstreams that the workers would substitute from (`kind = Http`, a URL, not `WriteOnly`; `substitution_sources` in `gradient-core/src/upstream_source.rs`), skips tripped upstreams and feeds the shared breakers. NAR and log fetches follow redirects.
+`gradient-web/src/endpoints/caches/`. Every endpoint asks only the cache's own upstream caches that the workers would substitute from (`kind = Http`, a URL, not `WriteOnly`; `substitution_sources` in `gradient-core/src/upstream_source.rs`), skips tripped upstream caches and feeds the shared breakers. NAR and log fetches follow redirects.
 
 | Endpoint | Upstream behaviour |
 |---|---|
@@ -114,7 +114,7 @@ Nothing below the outputs is fetched: the referenced paths are anchors of their 
 
 ## Build Log Substitution
 
-`gradient-scheduler/src/log_substitution.rs`. After `BuildCompleted` on a `substitutable` anchor, the scheduler fetches the upstream's build log.
+`gradient-scheduler/src/log_substitution.rs`. After `BuildCompleted` on a `cache_available` shared build, the scheduler fetches the upstream's build log.
 
 - **Source:** `<upstream>/log/<drv basename>` from the project's candidates (`upstream_endpoints_for_project`, best first), through `fetch_upstream_log`, the same fetch the cache log endpoint uses.
 - **Limits:** the first non-empty body wins; 10 s timeout, capped at 16 MiB with a `[truncated]` marker.
@@ -123,5 +123,5 @@ Nothing below the outputs is fetched: the referenced paths are anchors of their 
 
 ## Related
 
-- [Build Anchors](build-anchors.md)
+- [Shared Builds](shared-builds.md)
 - [Jobs](../proto/jobs.md)

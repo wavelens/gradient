@@ -5,7 +5,7 @@ A **cache** is a Nix binary cache built into Gradient. Projects subscribe to cac
 ```mermaid
 flowchart LR
     project[Project] -- build outputs --> cache[(Cache)]
-    cache -- pull-through --> upstream[(Upstreams)]
+    cache -- pull-through --> upstream[(Upstream caches)]
     cache -- one URL, one key --> clients[nix clients]
 ```
 
@@ -17,9 +17,9 @@ Each cache announces a priority to `nix` (lower wins, default `10`) and can anno
 
 ## Upstream Types
 
-Upstreams are set under **Settings -> Upstream Caches** on the cache page.
+Upstream caches are set under **Settings -> Upstream Caches** on the cache page.
 
-| Type | Upstream | Modes |
+| Type | Upstream Cache | Modes |
 |---|---|---|
 | Internal | Another cache on the same Gradient instance | Read & Write, Read Only, Write Only |
 | Gradient Proto | A cache on another Gradient instance, reached over that instance's cache protocol | Read & Write, Read Only, Write Only |
@@ -29,22 +29,22 @@ Upstreams are set under **Settings -> Upstream Caches** on the cache page.
 - **Read Only**: pull through only.
 - **Write Only**: push only.
 
-Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstreams; Gradient Proto upstreams are set in the UI.
+Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstream caches; Gradient Proto upstream caches are set in the UI.
 
 ## Pull-Through
 
-A cache serves paths from its upstreams as if the cache held them. A client asking for a missing path gets the upstream's copy through the cache, re-signed with the cache's own key. Clients configure one URL and one key, wherever a path came from.
+A cache serves paths from its upstream caches as if the cache held them. A client asking for a missing path gets the upstream cache's copy through the cache, re-signed with the cache's own key. Clients configure one URL and one key, wherever a path came from.
 
 ## Substitution
 
 Before a build starts, Gradient decides per derivation whether building is needed at all:
 
 1. An output already in any cache on the instance needs no work.
-2. Otherwise Gradient asks the upstreams of the caches the project subscribes to for each output.
+2. Otherwise Gradient asks the upstream caches of the caches the project subscribes to for each output.
 3. When every output is found, the build is **substituted**: a worker fetches the outputs, and nothing below the derivation is built or fetched.
 4. When an output is missing, the derivation is built, and its inputs go through the same check.
 
-Gradient only asks for derivations an evaluation actually needs. An upstream that stops answering is paused for a minute instead of slowing every lookup.
+Gradient only asks for derivations an evaluation actually needs. An upstream cache that stops answering is paused for a minute instead of slowing every lookup.
 
 ## Sharing
 

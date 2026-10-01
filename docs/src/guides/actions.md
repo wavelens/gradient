@@ -77,13 +77,13 @@ A `POST` with a JSON body; receivers read `content`:
 |---|---|
 | `X-Gradient-Event` | The event name |
 | `Authorization` | `Bearer <token>`, with a token only |
-| `X-Gradient-Signature` | `sha256=<HMAC-SHA256 of the body, keyed by the token>`, with a token only |
+| `X-Gradient-Signature` | `sha256=<HMAC-SHA256 of the body, with the token as key>`, with a token only |
 
 The signature lets the receiver reject requests that did not come from Gradient.
 
-## Forge Status Report
+## Git Host Status Report
 
-The **Forge Status Report** action, set up by the [forge guides](forge-github.md#4-wire-the-task), posts one check per step on each commit and pull request:
+The **Git Host Status Report** action, set up by the [Git host guides](github.md#4-wire-the-task), posts one check per step on each commit and pull request:
 
 | Check | State |
 |---|---|
@@ -91,7 +91,7 @@ The **Forge Status Report** action, set up by the [forge guides](forge-github.md
 | `gradient/<task>: Evaluation` | Pending while the evaluation is active, then success or failure |
 | `gradient/<task>: Build <entry point>` | One per entry point: pending, running, then success or failure |
 
-A `/gradient run <wildcard>` run reports as `gradient/<task>: Evaluation: <wildcard>` next to the default checks. **Test** checks the integration's access to the repository without posting a status.
+An evaluation started by `/gradient run <wildcard>` reports as `gradient/<task>: Evaluation: <wildcard>` next to the default checks. **Test** checks the integration's access to the repository without posting a status.
 
 ## Verify Deployment
 
@@ -109,5 +109,5 @@ A `/gradient run <wildcard>` run reports as `gradient/<task>: Evaluation: <wildc
 ## Next Steps
 
 - [Update Flake Inputs](flake-updates.md): pull requests that bump `flake.lock`
-- [Connect GitHub](forge-github.md): status checks with the **Forge Status Report** action
+- [Connect GitHub](github.md): status checks with the **Git Host Status Report** action
 - [Projects and Tasks](../concepts/projects-and-tasks.md): triggers and actions
