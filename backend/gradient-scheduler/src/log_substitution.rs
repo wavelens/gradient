@@ -71,6 +71,7 @@ pub async fn substitute_log(
                 .map(|e| UpstreamSource {
                     id: e.id,
                     url: e.url,
+                    http1_only: e.http1_only,
                 })
                 .collect::<Vec<_>>()
         }

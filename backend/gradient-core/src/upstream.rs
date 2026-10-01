@@ -10,7 +10,7 @@
 //! `<hash>.narinfo` into a [`CachedPath`] carrying the absolute NAR URL plus the
 //! metadata needed to import the path.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -117,6 +117,52 @@ pub fn breakers() -> &'static UpstreamBreakers {
     BREAKERS.get_or_init(UpstreamBreakers::new)
 }
 
+/// Upstreams asked over HTTP/1.1 because their HTTP/2 reset a stream. A pin
+/// takes effect in this process at once and is written to
+/// `cache_upstream.http1_only` by [`persist_http1_pins`], so it outlives a restart.
+#[derive(Debug, Default)]
+pub struct Http1Pins {
+    pinned: Mutex<HashSet<CacheUpstreamId>>,
+    writer: OnceLock<tokio::sync::mpsc::UnboundedSender<CacheUpstreamId>>,
+}
+
+impl Http1Pins {
+    pub fn wants_http1(&self, id: CacheUpstreamId, stored: bool) -> bool {
+        stored || self.pinned.lock().contains(&id)
+    }
+
+    pub fn pin(&self, id: CacheUpstreamId) {
+        if !self.pinned.lock().insert(id) {
+            return;
+        }
+        tracing::warn!(upstream = %id, "upstream reset an HTTP/2 stream; asking it over HTTP/1.1");
+        if let Some(writer) = self.writer.get() {
+            let _ = writer.send(id);
+        }
+    }
+
+    pub fn on_failure(&'static self, id: CacheUpstreamId) -> impl FnOnce() + Send + 'static {
+        move || self.pin(id)
+    }
+}
+
+pub fn http1_pins() -> &'static Http1Pins {
+    static PINS: OnceLock<Http1Pins> = OnceLock::new();
+    PINS.get_or_init(Http1Pins::default)
+}
+
+pub async fn persist_http1_pins(db: gradient_db::WebDb) {
+    let (writer, mut pins) = tokio::sync::mpsc::unbounded_channel();
+    if http1_pins().writer.set(writer).is_err() {
+        return;
+    }
+    while let Some(id) = pins.recv().await {
+        if let Err(e) = gradient_db::caches::upstream::pin_upstream_to_http1(db.inner(), id).await {
+            tracing::warn!(upstream = %id, error = %e, "failed to persist the HTTP/1.1 pin");
+        }
+    }
+}
+
 pub const PARALLEL_THRESHOLD: usize = 4;
 
 pub fn should_race(n: usize) -> bool {
@@ -173,7 +219,6 @@ pub struct ProbeResult {
 }
 
 async fn probe_one(
-    http: &reqwest::Client,
     pool: &Arc<Semaphore>,
     ep: &UpstreamEndpoint,
     hash: &str,
@@ -192,11 +237,13 @@ async fn probe_one(
     };
     let narinfo_url = format!("{}/{}.narinfo", ep.url.trim_end_matches('/'), hash);
     let started = Instant::now();
-    let resp = http
-        .get(&narinfo_url)
-        .timeout(std::time::Duration::from_secs(PROBE_TIMEOUT_SECS))
-        .send()
-        .await;
+    let resp = gradient_util::http1_fallback::get(
+        &narinfo_url,
+        http1_pins().wants_http1(ep.id, ep.http1_only),
+        http1_pins().on_failure(ep.id),
+        |r| r.timeout(PROBE_TIMEOUT),
+    )
+    .await;
     let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
 
     let out = match resp {
@@ -224,6 +271,7 @@ pub struct UpstreamProbe {
     pub id: CacheUpstreamId,
     pub url: String,
     pub public_key: String,
+    pub http1_only: bool,
 }
 
 /// A verified narinfo body and the upstream it came from.
@@ -240,7 +288,6 @@ pub struct UpstreamNarinfo {
 /// keeps it out of rotation entirely. Bodies whose `Sig` does not verify against
 /// that upstream's configured key are dropped, never served on.
 pub async fn fetch_narinfo_body(
-    http: &reqwest::Client,
     upstream_caches: &[UpstreamProbe],
     path_hash: &str,
 ) -> Option<UpstreamNarinfo> {
@@ -251,7 +298,13 @@ pub async fn fetch_narinfo_body(
         .filter(|u| breakers().allows(u.id))
         .map(|u| async move {
             let url = format!("{}/{}.narinfo", u.url.trim_end_matches('/'), path_hash);
-            let resp = http.get(&url).timeout(PROBE_TIMEOUT).send().await;
+            let resp = gradient_util::http1_fallback::get(
+                &url,
+                http1_pins().wants_http1(u.id, u.http1_only),
+                http1_pins().on_failure(u.id),
+                |r| r.timeout(PROBE_TIMEOUT),
+            )
+            .await;
             let kind = match &resp {
                 Ok(r) if r.status().is_success() => SampleKind::Hit,
                 Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => SampleKind::Miss,
@@ -286,7 +339,6 @@ pub async fn fetch_narinfo_body(
 }
 
 pub async fn lookup_upstream_narinfo(
-    http: reqwest::Client,
     endpoints: Arc<Vec<UpstreamEndpoint>>,
     pool: Arc<Semaphore>,
     hash: String,
@@ -314,12 +366,11 @@ pub async fn lookup_upstream_narinfo(
         let mut futs: FuturesUnordered<_> = endpoints
             .iter()
             .map(|ep| {
-                let http = http.clone();
                 let pool = Arc::clone(&pool);
                 let hash = hash.clone();
                 let path = store_path.clone();
                 async move {
-                    let (latency, kind, cp) = probe_one(&http, &pool, ep, &hash, &path).await;
+                    let (latency, kind, cp) = probe_one(&pool, ep, &hash, &path).await;
                     (ep.id, latency, kind, cp)
                 }
             })
@@ -340,7 +391,7 @@ pub async fn lookup_upstream_narinfo(
     }
 
     for ep in endpoints.iter() {
-        let (latency, kind, cp) = probe_one(&http, &pool, ep, &hash, &store_path).await;
+        let (latency, kind, cp) = probe_one(&pool, ep, &hash, &store_path).await;
         let is_hit = matches!(kind, SampleKind::Hit);
         samples.push(ProbeSample {
             upstream: ep.id,
@@ -362,7 +413,6 @@ pub async fn lookup_upstream_narinfo(
 }
 
 pub async fn probe_batch(
-    http: reqwest::Client,
     mut endpoints: Vec<UpstreamEndpoint>,
     pool: Arc<Semaphore>,
     targets: Vec<(String, String)>,
@@ -384,11 +434,10 @@ pub async fn probe_batch(
     let mut futs = FuturesUnordered::new();
     let mut iter = targets.into_iter();
     let push = |futs: &mut FuturesUnordered<_>, hash: String, path: String| {
-        let http = http.clone();
         let eps = Arc::clone(&endpoints);
         let pool = Arc::clone(&pool);
         futs.push(async move {
-            let res = lookup_upstream_narinfo(http, eps, pool, hash.clone(), path).await;
+            let res = lookup_upstream_narinfo(eps, pool, hash.clone(), path).await;
             (hash, res)
         });
     };
@@ -623,13 +672,6 @@ mod tests {
         );
     }
 
-    /// The same constructor the server uses. `reqwest::Client::new()` panics
-    /// where no system CA bundle exists (the nix build sandbox); `build_client`
-    /// folds in `webpki_roots`, so it builds with or without native certs.
-    fn client() -> reqwest::Client {
-        gradient_util::http::build_client().expect("http client builds")
-    }
-
     /// The exact failure that cost every narinfo miss 30s: a port that completes
     /// the handshake and then never answers. Never accepting is enough - the
     /// kernel finishes the connection from the backlog, so the client is
@@ -653,11 +695,11 @@ mod tests {
             id: upstream(10),
             url,
             public_key: "test:0000000000000000000000000000000000000000000=".into(),
+            http1_only: false,
         }];
 
         let started = Instant::now();
-        let got =
-            super::fetch_narinfo_body(&client(), &probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
+        let got = super::fetch_narinfo_body(&probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
         let elapsed = started.elapsed();
 
         assert!(got.is_none());
@@ -680,11 +722,11 @@ mod tests {
             id,
             url,
             public_key: "test:0000000000000000000000000000000000000000000=".into(),
+            http1_only: false,
         }];
 
         let started = Instant::now();
-        let got =
-            super::fetch_narinfo_body(&client(), &probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
+        let got = super::fetch_narinfo_body(&probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
         let elapsed = started.elapsed();
 
         assert!(got.is_none());
@@ -863,6 +905,7 @@ mod tests {
             id: CacheUpstreamId::now_v7(),
             url: "https://up.example/".into(),
             public_key: None,
+            http1_only: false,
             avg_latency_ms: latency,
             hit_rate: hit,
         }

@@ -79,7 +79,7 @@ pub async fn upstream_nar(
         return Err(WebError::not_found("Upstream"));
     }
 
-    let Some(resp) =
+    let Some(object) =
         fetch_from_upstream_caches(&sources, &upstream_nar_path(&path, query.as_deref()), None)
             .await
     else {
@@ -90,11 +90,11 @@ pub async fn upstream_nar(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/x-nix-nar"),
     );
-    if let Some(len) = resp.content_length() {
+    if let Some(len) = object.content_length {
         builder = builder.header(header::CONTENT_LENGTH, len);
     }
     builder
-        .body(Body::from_stream(resp.bytes_stream()))
+        .body(Body::from_stream(object.body))
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 

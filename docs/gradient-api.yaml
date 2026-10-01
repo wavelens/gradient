@@ -12613,7 +12613,7 @@ components:
 
     UpstreamCache:
       type: object
-      required: [id, display_name, mode, kind]
+      required: [id, display_name, mode, kind, http1_only]
       properties:
         id:
           type: string
@@ -12646,6 +12646,10 @@ components:
           type: string
           nullable: true
           description: Set for http upstream caches - Nix-format public key used to verify signatures
+        http1_only:
+          type: boolean
+          readOnly: true
+          description: Set once the upstream cache reset an HTTP/2 stream; it is asked over HTTP/1.1 from then on
 
     AddUpstreamCacheRequest:
       oneOf:

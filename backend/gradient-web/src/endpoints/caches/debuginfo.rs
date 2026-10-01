@@ -27,6 +27,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
+use gradient_core::upstream_source::UpstreamSource;
 use gradient_types::ids::{CacheId, CacheUpstreamId};
 use gradient_types::*;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
@@ -67,13 +68,7 @@ pub async fn debuginfo(
     }
 
     let upstream_caches = upstream_caches_for(&state, ctx.cache.id).await;
-    match fetch_from_upstream_caches(
-        gradient_util::http::download_client(),
-        &upstream_caches,
-        &build_id,
-    )
-    .await
-    {
+    match fetch_from_upstream_caches(&upstream_caches, &build_id).await {
         Some(doc) => Ok(redirect_response(doc, "MISS")),
         None => Err(WebError::not_found("DebugInfo")),
     }
@@ -90,17 +85,20 @@ fn redirect_response(doc: DebugInfoRedirect, cache_status: &'static str) -> Resp
     response
 }
 
-async fn upstream_caches_for(
-    state: &Arc<ServerState>,
-    cache: CacheId,
-) -> Vec<(CacheUpstreamId, String)> {
+async fn upstream_caches_for(state: &Arc<ServerState>, cache: CacheId) -> Vec<UpstreamSource> {
     ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache))
         .all(&state.web_db)
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|upstream| Some((upstream.id, upstream.url?)))
+        .filter_map(|upstream| {
+            Some(UpstreamSource {
+                id: upstream.id,
+                url: upstream.url?,
+                http1_only: upstream.http1_only,
+            })
+        })
         .collect()
 }
 
@@ -111,14 +109,21 @@ async fn upstream_caches_for(
 /// debug index - so an upstream that 404s, errors, or answers something we
 /// cannot rewrite is skipped.
 async fn fetch_from_upstream_caches(
-    client: &reqwest::Client,
-    upstream_caches: &[(CacheUpstreamId, String)],
+    upstream_caches: &[UpstreamSource],
     build_id: &str,
 ) -> Option<DebugInfoRedirect> {
-    for (upstream_id, base_url) in upstream_caches {
+    let pins = gradient_core::upstream::http1_pins();
+    for upstream in upstream_caches {
         for key in [build_id.to_owned(), format!("{build_id}.debug")] {
-            let url = format!("{}/debuginfo/{}", base_url.trim_end_matches('/'), key);
-            let Ok(response) = client.get(&url).send().await else {
+            let url = format!("{}/debuginfo/{}", upstream.url.trim_end_matches('/'), key);
+            let Ok(response) = gradient_util::http1_fallback::get(
+                &url,
+                pins.wants_http1(upstream.id, upstream.http1_only),
+                pins.on_failure(upstream.id),
+                |r| r,
+            )
+            .await
+            else {
                 continue;
             };
             if !response.status().is_success() {
@@ -127,7 +132,7 @@ async fn fetch_from_upstream_caches(
             let Ok(doc) = response.json::<DebugInfoRedirect>().await else {
                 continue;
             };
-            if let Some(archive) = proxied_archive(*upstream_id, &doc.archive) {
+            if let Some(archive) = proxied_archive(upstream.id, &doc.archive) {
                 return Some(DebugInfoRedirect {
                     archive,
                     member: doc.member,

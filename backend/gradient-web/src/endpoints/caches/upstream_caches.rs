@@ -53,6 +53,7 @@ pub struct UpstreamCacheItem {
     pub public_key: Option<String>,
     pub kind: String,
     pub remote_cache: Option<String>,
+    pub http1_only: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,6 +159,7 @@ pub async fn get_upstream_caches(
             public_key: u.public_key,
             kind: format!("{:?}", u.kind).to_lowercase(),
             remote_cache: u.remote_cache_name,
+            http1_only: u.http1_only,
         })
         .collect();
 

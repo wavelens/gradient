@@ -739,6 +739,11 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .shutdown
         .supervise(gradient_db::metrics::infra::child_spec(state.db()));
     gradient_db::metrics::infra::flush_on_shutdown(state.db());
+    state
+        .shutdown
+        .spawn(gradient_core::upstream::persist_http1_pins(
+            state.web_db.clone(),
+        ));
     otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
     let sessions = gradient_proto::SessionsHandle::new();
     state

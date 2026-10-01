@@ -68,6 +68,12 @@ A shared build with `probed = false` is not yet a real build. Nothing below the 
 
 **Breaker:** 3 consecutive errors (transport failure, or a status other than 2xx and 404) trip an upstream for 60 s. After the cooldown requests pass again; one more error re-trips. A 404 is a miss, not an error, and resets the count. The breakers are process-wide and shared with the cache narinfo endpoint.
 
+**HTTP/1.1 pin:** requests offer HTTP/2. Some upstreams negotiate HTTP/2 and then reset streams mid-body; a proxied NAR then breaks after its `200`, and Nix reports `HTTP error 200 (curl error: Stream error in the HTTP/2 framing layer)`. The first HTTP/2 error from an upstream pins it to HTTP/1.1 (`gradient-util/src/http1_fallback.rs`, `http1_pins` in `gradient-core/src/upstream.rs`):
+
+- The failed request is sent again over HTTP/1.1.
+- A body cut short resumes over HTTP/1.1 with `Range: bytes=<sent>-`. Only a `206` whose `Content-Range` starts at that offset is spliced in; anything else ends the body with the original error.
+- The pin applies process-wide at once and is stored in `cache_upstream.http1_only`. Every later request to that upstream, after restarts too, uses HTTP/1.1. The API returns the flag read-only, and the upstream list shows an `HTTP/1.1` badge.
+
 ## Substitute Jobs
 
 `decide_build_spec_kind` (`gradient-scheduler/src/assign_mode.rs`) reads the flag and nothing else:

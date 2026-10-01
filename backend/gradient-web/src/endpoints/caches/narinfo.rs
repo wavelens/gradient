@@ -16,7 +16,6 @@ use gradient_core::upstream_source::substitutes_from;
 use gradient_sources::{CacheSigner, get_hash_from_url};
 use gradient_types::events::cache::NarinfoServed;
 use gradient_types::*;
-use gradient_util::http;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use tracing::warn;
@@ -269,16 +268,12 @@ async fn fetch_from_upstream(
                 id: upstream.id,
                 url,
                 public_key,
+                http1_only: upstream.http1_only,
             })
         })
         .collect();
 
-    let found = gradient_core::upstream::fetch_narinfo_body(
-        http::download_client(),
-        &upstream_caches,
-        path_hash,
-    )
-    .await?;
+    let found = gradient_core::upstream::fetch_narinfo_body(&upstream_caches, path_hash).await?;
 
     let body = rewrite_nar_url(&found.body, found.upstream);
 
