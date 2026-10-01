@@ -19,6 +19,7 @@ let nextCheckboxId = 0;
       [id]="resolvedId()"
       [checked]="checked()"
       [disabled]="isDisabled()"
+      [required]="required()"
       (change)="onToggle($event)"
       (blur)="onTouched()"
     />
@@ -36,6 +37,7 @@ export class CheckboxComponent implements ControlValueAccessor {
   inputId = input('');
   label = input('');
   binary = input(true, { transform: booleanAttribute });
+  required = input(false, { transform: booleanAttribute });
 
   // A label only toggles the box it is bound to, so a caller that gives no id
   // still gets one rather than an inert `for=""`.
