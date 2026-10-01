@@ -31,12 +31,28 @@ flowchart LR
 - Every element stays legible in both themes; nothing hard-codes black or white.
 - Text sits at most one step from body: 16px interactive, 14px secondary, 12px badges only.
 
+## Shared UI Package
+
+`@gradient/ui` is a pnpm workspace package at `frontend/packages/ui`. Gradient and the frontend of [`gradient-proxy`](architecture.md) for servers.gradient.ci are both building on it.
+
+| Entry | Content |
+|---|---|
+| `@gradient/ui/ui` | Generic primitives, listed under [`gr-ui`](#gr-ui) |
+| `@gradient/ui/chrome` | `gr-header` and `gr-footer`, configured through brand, nav and footer link inputs plus a `[slot=lang]` |
+| `@gradient/ui/tokens` | Colour tokens from `tokens.ts` |
+| `@gradient/ui/styles/*` | SCSS partials `variables`, `themes` and `grids` |
+
+- Primitives go into the package only when they import nothing from `@core`, `@shared` or `@features`. An ESLint rule is blocking such imports inside `packages/ui`.
+- `pnpm tokens:generate` and `pnpm tokens:check` are delegating to the package. `ng test` is covering the package specs too.
+- The `gradient-proxy` frontend is linking the package with `link:../../frontend/packages/ui`.
+
 ## `gr-ui`
 
-`frontend/src/app/shared/ui/`, built on `@angular/cdk`, imported from the barrel:
+Generic primitives live in `frontend/packages/ui/src/ui/`, built on `@angular/cdk`. The Gradient-specific ones (`gr-eval-status-badge`, `gr-status-icon`, `gr-metric-chart`, `gr-star-button`, `gr-label-help`) live in `frontend/src/app/shared/ui/`. Each layer is imported from its own barrel.
 
 ```ts
-import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } from '@shared/ui';
+import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 ```
 
 | Group | Selectors |
@@ -53,7 +69,7 @@ import { FormFieldComponent, PageLayoutComponent, SettingsSectionComponent } fro
 
 ## Grid Utilities
 
-`frontend/src/app/styles/_grids.scss`, registered globally in `src/styles.scss`.
+`frontend/packages/ui/src/styles/_grids.scss`, registered globally in `src/styles.scss`.
 
 | Class | Layout |
 |---|---|
