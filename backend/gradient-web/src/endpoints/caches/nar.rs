@@ -18,6 +18,7 @@ use gradient_core::upstream_source::{
 use gradient_sources::get_hash_from_url;
 use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
+use gradient_wire::messages::TRANSFER_TIMEOUT;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -79,9 +80,12 @@ pub async fn upstream_nar(
         return Err(WebError::not_found("Upstream"));
     }
 
-    let Some(object) =
-        fetch_from_upstream_caches(&sources, &upstream_nar_path(&path, query.as_deref()), None)
-            .await
+    let Some(object) = fetch_from_upstream_caches(
+        &sources,
+        &upstream_nar_path(&path, query.as_deref()),
+        Some(TRANSFER_TIMEOUT),
+    )
+    .await
     else {
         return Err(WebError::not_found("NAR in upstream"));
     };

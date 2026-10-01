@@ -13,7 +13,7 @@ use std::fmt;
 
 use anyhow::{Context, Result, bail};
 use gradient_util::nix_hash::nix32_encode;
-use gradient_wire::messages::{BuildSpec, QueryMode};
+use gradient_wire::messages::{BuildSpec, QueryMode, TRANSFER_TIMEOUT};
 use sha2::{Digest, Sha256};
 
 use super::substitute::RawNar;
@@ -244,6 +244,7 @@ impl DownloadIo for JobUpdaterIo<'_> {
     ) -> Result<Option<Vec<u8>>> {
         let response = gradient_worker_client::http::download_client()
             .get(url)
+            .timeout(TRANSFER_TIMEOUT)
             .send()
             .await?;
         if matches!(response.status().as_u16(), 404 | 410) {
