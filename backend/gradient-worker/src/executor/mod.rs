@@ -128,6 +128,7 @@ pub(crate) async fn upload_all(
     // span to the innermost open one, so per-path spans would chart as nested
     // and count their durations twice.
     let mut guard = updater.phase(JobPhase::NarPush);
+    guard.record(pending as u32, 0);
     let mut uploaded = nar::UploadedNar::default();
     let mut running: FuturesUnordered<_> = uploads
         .into_iter()
@@ -137,7 +138,7 @@ pub(crate) async fn upload_all(
         uploaded += result?;
     }
 
-    guard.record(pending as u32, uploaded.file_size);
+    guard.record(0, uploaded.file_size);
     Ok(uploaded)
 }
 
