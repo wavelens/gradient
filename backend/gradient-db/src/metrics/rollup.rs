@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_util::supervision::ChildSpec;
 use gradient_wire::types::JobPhase;
@@ -83,13 +84,6 @@ struct BuildDuration {
 }
 
 const BUILD_DURATIONS: &[BuildDuration] = &[
-    // Queue wait excluding dependency wait: can start (deps satisfied) -> dispatched.
-    BuildDuration {
-        name: "dispatch.wait_ms",
-        start_col: "ready_at",
-        end_col: "dispatched_at",
-        filter: "TRUE",
-    },
     // Dependency wait: entered the queue -> all dependencies satisfied.
     BuildDuration {
         name: "deps.wait_ms",
@@ -263,6 +257,10 @@ async fn run_rollup(ctx: &DbContext) {
         warn!(metric = "builds.duration_ms", error = %e, "rollup build-duration failed");
     }
 
+    if let Err(e) = db.execute_unprepared(&dispatch_wait_sql()).await {
+        warn!(metric = "dispatch.wait_ms", error = %e, "rollup dispatch-wait failed");
+    }
+
     if let Err(e) = db.execute_unprepared(&phase_duration_sql()).await {
         warn!(metric = "phase.*.ms", error = %e, "rollup phase-duration failed");
     }
@@ -397,6 +395,32 @@ fn build_duration_attempt_sql() -> String {
     )
 }
 
+/// `dispatch.wait_ms`: ready -> dispatched per build dispatch. The dispatch row's
+/// `ready_at` is the moment that dispatch entered the pending set, unlike the
+/// first-time stamp on `derivation_build`.
+fn dispatch_wait_sql() -> String {
+    let ms = "extract(epoch from (dj.dispatched_at - dj.ready_at)) * 1000";
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), 'dispatch.wait_ms', {minute}, date_trunc('minute', dj.dispatched_at), \
+                jsonb_build_object('project', dj.project::text), \
+                hashtextextended(dj.project::text, 0), \
+                count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
+         FROM dispatched_job dj \
+         WHERE dj.kind = {build} \
+           AND dj.ready_at IS NOT NULL \
+           AND dj.dispatched_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+         GROUP BY date_trunc('minute', dj.dispatched_at), dj.project \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                       min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
+        minute = i16::from(RollupGranularity::Minute),
+        build = i16::from(DispatchedJobKind::Build),
+        window = MINUTE_WINDOW,
+    )
+}
+
 /// `phase.<kind>.<phase>.ms`: one series per job kind and phase, so the board
 /// can compare where eval and build time actually goes. The phase name array is
 /// indexed by `phase + 1` because Postgres arrays are 1-based, and it is per
@@ -496,6 +520,7 @@ mod tests {
             .chain(eval_counts().iter().map(eval_count_sql))
             .chain([
                 build_duration_attempt_sql(),
+                dispatch_wait_sql(),
                 cache_traffic_sql(),
                 cache_storage_sql(),
                 upstream_latency_sql(),
@@ -611,6 +636,17 @@ mod tests {
             assert!(v <= bound, "{} is filtered out", phase.as_str());
             assert_eq!(names[v as usize], phase.as_str());
         }
+    }
+
+    /// A shared build queued again keeps its first `derivation_build.ready_at`,
+    /// so only the dispatch row knows when this dispatch became ready.
+    #[test]
+    fn dispatch_wait_measures_each_dispatch_from_its_own_readiness() {
+        let sql = dispatch_wait_sql();
+
+        assert!(sql.contains("FROM dispatched_job dj"), "{sql}");
+        assert!(sql.contains("dj.dispatched_at - dj.ready_at"), "{sql}");
+        assert!(!sql.contains("derivation_build"), "{sql}");
     }
 
     /// Derivations are global; build rollups must attribute project through the
