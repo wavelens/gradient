@@ -40,7 +40,7 @@ flowchart LR
 | `@gradient/ui/ui` | Generic primitives, listed under [`gr-ui`](#gr-ui) |
 | `@gradient/ui/chrome` | `gr-header` and `gr-footer`, configured through brand, nav and footer link inputs plus a `[slot=lang]` |
 | `@gradient/ui/tokens` | Colour tokens from `tokens.ts` |
-| `@gradient/ui/styles/*` | SCSS partials `variables`, `themes` and `grids` |
+| `@gradient/ui/styles/*` | SCSS partials `variables`, `themes`, `grids` and the global `base` styles |
 
 - Primitives go into the package only when they import nothing from `@core`, `@shared` or `@features`. An ESLint rule is blocking such imports inside `packages/ui`.
 - `pnpm tokens:generate` and `pnpm tokens:check` are delegating to the package. `ng test` is covering the package specs too.

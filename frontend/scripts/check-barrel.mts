@@ -179,6 +179,7 @@ function orphanClasses(): string[] {
   const globals = new Set<string>([
     ...scssClasses(readFileSync(join(root, 'src/styles.scss'), 'utf8')),
     ...scssClasses(readFileSync(join(root, 'packages/ui/src/styles/_grids.scss'), 'utf8')),
+    ...scssClasses(readFileSync(join(root, 'packages/ui/src/styles/_base.scss'), 'utf8')),
     ...scssClasses(readFileSync(join(root, 'src/app/app.scss'), 'utf8')),
   ]);
 
