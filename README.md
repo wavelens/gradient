@@ -94,6 +94,16 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 
 A REST API backs the web UI and the CLI: [OpenAPI spec](./docs/gradient-api.yaml), [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/main/docs/gradient-api.yaml).
 
+## Roadmap
+
+| Release | Highlights |
+|---|---|
+| **v2.0.0** | Stability pledge, organizations, storage migrations, continuous deep GC, corporate design |
+| **v2.1.0** | Multi-node evaluations |
+| **v2.2.0** | Runner workers, executing jobs outside the Nix sandbox |
+
+Details in the [Roadmap](https://wavelens.github.io/gradient/roadmap/); feedback in [GitHub Discussions](https://github.com/wavelens/gradient/discussions) or on [Matrix](https://matrix.to/#/#gradient-ci:matrix.org).
+
 ## Contributing
 
 Contributions are welcome: see the [Contributing Guidelines](CONTRIBUTING.md) and the [Contributor Docs](https://wavelens.github.io/gradient/contributors/).

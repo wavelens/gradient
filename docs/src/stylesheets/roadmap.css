@@ -1,0 +1,54 @@
+.timeline {
+  --timeline-line: 0.25rem;
+  --timeline-dot: 1.1rem;
+  --timeline-gutter: 3rem;
+  position: relative;
+  padding-left: var(--timeline-gutter);
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 0.5rem;
+  bottom: 0;
+  left: calc((var(--timeline-dot) - var(--timeline-line)) / 2);
+  width: var(--timeline-line);
+  border-radius: var(--timeline-line);
+  background: linear-gradient(
+    to bottom,
+    var(--md-accent-fg-color) 0%,
+    var(--md-primary-fg-color) 50%,
+    var(--md-default-fg-color--lightest) 100%
+  );
+}
+
+.timeline-item {
+  position: relative;
+  padding-bottom: 1.5rem;
+}
+
+.timeline-item > h2:first-child {
+  margin-top: 0;
+}
+
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  top: 0.35rem;
+  left: calc(-1 * var(--timeline-gutter));
+  width: var(--timeline-dot);
+  height: var(--timeline-dot);
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: var(--md-default-bg-color);
+  border: var(--timeline-line) solid var(--timeline-color);
+}
+
+.timeline-item.now   { --timeline-color: var(--md-accent-fg-color); }
+.timeline-item.next  { --timeline-color: var(--md-primary-fg-color); }
+.timeline-item.later { --timeline-color: var(--md-default-fg-color--lighter); }
+
+.timeline-item.now::before {
+  background: var(--timeline-color);
+  box-shadow: 0 0 0 0.35rem color-mix(in srgb, var(--timeline-color) 25%, transparent);
+}
