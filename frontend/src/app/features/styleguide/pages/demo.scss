@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
+@use '@gradient/ui/styles/variables' as *;
 
 // Demo rows lay their samples out; without this every sibling sits at a 0px gap.
 :host {

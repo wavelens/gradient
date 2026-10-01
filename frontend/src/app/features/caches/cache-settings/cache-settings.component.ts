@@ -21,7 +21,7 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { Cache } from '@core/models';

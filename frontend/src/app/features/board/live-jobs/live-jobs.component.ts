@@ -11,7 +11,7 @@ import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { BoardService, AssignedJobSummary, AssignmentDecisionView, PendingJobSummary } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 
 type KindFilter = 'all' | 'eval' | 'build';

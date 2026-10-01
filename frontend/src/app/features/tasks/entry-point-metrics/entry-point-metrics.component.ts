@@ -11,9 +11,9 @@ import {
   ButtonComponent,
   EmptyStateComponent,
   LoadingSpinnerComponent,
-  MetricChartComponent,
   PageLayoutComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { TasksService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';

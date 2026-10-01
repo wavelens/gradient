@@ -9,7 +9,8 @@ import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { BoardService, MetricPoint } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
+import { LoadingSpinnerComponent } from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 
 @Component({

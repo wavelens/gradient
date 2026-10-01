@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
+@use '@gradient/ui/styles/variables' as *;
 
 .banner { color: var(--gr-text-secondary); margin-bottom: 1rem; }
 .muted { color: var(--gr-text-muted); }

@@ -8,7 +8,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { RouterLink } from '@angular/router';
 import { EvaluationStatus, HistoryBar } from '@core/models';
 import { formatDuration } from '@shared/text';
-import { TooltipDirective } from '@shared/ui';
+import { TooltipDirective } from '@gradient/ui/ui';
 
 const TONE: Partial<Record<EvaluationStatus, string>> = { Completed: 'ok', Failed: 'fail', Aborted: 'fail' };
 const MIN_HEIGHT_PCT = 15;

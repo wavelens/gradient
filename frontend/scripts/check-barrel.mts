@@ -8,12 +8,13 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const UI = join(dirname(fileURLToPath(import.meta.url)), '../src/app/shared/ui');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const LAYERS = [join(ROOT, 'packages/ui/src/ui'), join(ROOT, 'src/app/shared/ui')];
 
-function modules(): string[] {
+function modules(ui: string): string[] {
   const out: string[] = [];
-  for (const entry of readdirSync(UI)) {
-    const path = join(UI, entry);
+  for (const entry of readdirSync(ui)) {
+    const path = join(ui, entry);
     if (statSync(path).isDirectory()) {
       for (const file of readdirSync(path)) {
         if (file.endsWith('.ts') && !file.endsWith('.spec.ts')) out.push(`./${entry}/${file.slice(0, -3)}`);
@@ -25,24 +26,29 @@ function modules(): string[] {
   return out.sort();
 }
 
-const barrel = readFileSync(join(UI, 'index.ts'), 'utf8');
-const missing = modules().filter((m) => !barrel.includes(`from '${m}'`));
+const componentDirs = (): string[] =>
+  LAYERS.flatMap((ui) => readdirSync(ui).map((entry) => join(ui, entry))).filter((path) => statSync(path).isDirectory());
+
+const missing = LAYERS.flatMap((ui) => {
+  const barrel = readFileSync(join(ui, 'index.ts'), 'utf8');
+  return modules(ui)
+    .filter((m) => !barrel.includes(`from '${m}'`))
+    .map((m) => `${ui.split('/frontend/')[1]}: ${m}`);
+});
 
 const specless: string[] = [];
-for (const entry of readdirSync(UI)) {
-  const path = join(UI, entry);
-  if (!statSync(path).isDirectory()) continue;
+for (const path of componentDirs()) {
   const files = readdirSync(path);
   const impl = files.filter((f) => /\.(component|directive|service)\.ts$/.test(f));
   for (const f of impl) {
-    if (!files.includes(f.replace(/\.ts$/, '.spec.ts'))) specless.push(`${entry}/${f}`);
+    if (!files.includes(f.replace(/\.ts$/, '.spec.ts'))) specless.push(`${path.split('/frontend/')[1]}/${f}`);
   }
 }
 
 // Rule 3: a primitive that is not demonstrated in the styleguide does not exist as far as
 // consumers are concerned, so an undemoed selector is a conformance failure.
-const SG = join(dirname(fileURLToPath(import.meta.url)), '../src/app/features/styleguide');
-const APP = join(dirname(fileURLToPath(import.meta.url)), '../src/app');
+const SG = join(ROOT, 'src/app/features/styleguide');
+const APP = join(ROOT, 'src/app');
 
 function styleguideMarkup(): string {
   const parts: string[] = [];
@@ -63,9 +69,7 @@ const EXEMPT = new Set(['gr-tooltip-panel']);
 
 const markup = styleguideMarkup();
 const undemoed: string[] = [];
-for (const entry of readdirSync(UI)) {
-  const path = join(UI, entry);
-  if (!statSync(path).isDirectory()) continue;
+for (const path of componentDirs()) {
   for (const file of readdirSync(path)) {
     if (!file.endsWith('.component.ts') || file.endsWith('.spec.ts')) continue;
     const match = SELECTOR.exec(readFileSync(join(path, file), 'utf8'));
@@ -171,10 +175,10 @@ function htmlClasses(text: string): Set<string> {
 }
 
 function orphanClasses(): string[] {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const root = ROOT;
   const globals = new Set<string>([
     ...scssClasses(readFileSync(join(root, 'src/styles.scss'), 'utf8')),
-    ...scssClasses(readFileSync(join(root, 'src/app/styles/_grids.scss'), 'utf8')),
+    ...scssClasses(readFileSync(join(root, 'packages/ui/src/styles/_grids.scss'), 'utf8')),
     ...scssClasses(readFileSync(join(root, 'src/app/app.scss'), 'utf8')),
   ]);
 
@@ -190,7 +194,7 @@ function orphanClasses(): string[] {
       }
     }
   };
-  collectUi(UI);
+  LAYERS.forEach(collectUi);
   const hits: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
@@ -215,6 +219,7 @@ function orphanClasses(): string[] {
     }
   };
   walk(join(root, 'src/app'));
+  walk(join(root, 'packages/ui/src'));
   return hits;
 }
 
@@ -240,7 +245,7 @@ if (undemoed.length) {
   failed = true;
 }
 if (missing.length) {
-  console.error(`Not exported from @shared/ui (${missing.length}):`);
+  console.error(`Not exported from its barrel (${missing.length}):`);
   missing.forEach((m) => console.error(`  ${m}`));
   failed = true;
 }
@@ -251,4 +256,4 @@ if (specless.length) {
 }
 
 if (failed) process.exit(1);
-console.log('@shared/ui is complete: every module is exported, specced and demonstrated.');
+console.log('@gradient/ui and @shared/ui are complete: every module is exported, specced and demonstrated.');

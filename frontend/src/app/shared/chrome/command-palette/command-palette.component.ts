@@ -21,7 +21,7 @@ import {
   startWith,
   switchMap,
 } from 'rxjs';
-import { IconComponent } from '@shared/ui';
+import { IconComponent } from '@gradient/ui/ui';
 import { SearchService } from '@core/services/search.service';
 import { SearchHit } from '@core/models';
 import { CommandPaletteService } from './command-palette.service';

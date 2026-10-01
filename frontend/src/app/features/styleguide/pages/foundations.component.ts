@@ -5,9 +5,9 @@
  */
 
 import { Component, DestroyRef, inject, signal, effect, ChangeDetectionStrategy } from '@angular/core';
-import { SEMANTIC_ROLES } from '../../../styles/tokens';
+import { SEMANTIC_ROLES } from '@gradient/ui/tokens';
 import { ThemeService } from '@core/services/theme.service';
-import { TableComponent } from '@shared/ui';
+import { TableComponent } from '@gradient/ui/ui';
 
 const SPACING = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
 const RADIUS = ['sm', 'md'];

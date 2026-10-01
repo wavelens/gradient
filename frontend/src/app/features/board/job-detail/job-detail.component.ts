@@ -18,7 +18,13 @@ import {
   Windowed,
 } from '@core/services/board.service';
 import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
-import { ButtonComponent, DialogComponent, LoadingSpinnerComponent, PopoverComponent, TableComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  LoadingSpinnerComponent,
+  PopoverComponent,
+  TableComponent,
+} from '@gradient/ui/ui';
 import { formatBytes, formatDuration, formatMegabytes } from '@shared/text';
 import { JobTimelineComponent } from './job-timeline.component';
 

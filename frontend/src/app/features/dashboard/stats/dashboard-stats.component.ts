@@ -7,7 +7,12 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { DashboardService } from '@core/services/dashboard.service';
 import { DashboardStats } from '@core/models';
-import { ButtonComponent, CardGridComponent, MessageBannerComponent, StatCardComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  CardGridComponent,
+  MessageBannerComponent,
+  StatCardComponent,
+} from '@gradient/ui/ui';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
 import { formatCpuTime } from '../format';
 

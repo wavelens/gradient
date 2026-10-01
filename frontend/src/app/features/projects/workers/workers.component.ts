@@ -22,7 +22,6 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   MessageService,
@@ -30,7 +29,8 @@ import {
   RowComponent,
   RowListComponent,
   ToastComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 @Component({

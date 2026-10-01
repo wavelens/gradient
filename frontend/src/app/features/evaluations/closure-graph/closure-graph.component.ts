@@ -17,7 +17,7 @@ import {
   ButtonComponent,
   IconComponent,
   LoadingSpinnerComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { formatBytes } from '@shared/text';
 import { buildClosureSankey, SankeyNode, SankeyLink } from './closure-aggregate';
 

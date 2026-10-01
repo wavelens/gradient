@@ -19,11 +19,11 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   TableComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { relativeTime } from '@shared/text';
 import { ActionEventsComponent } from '../tasks/task-actions/action-events.component';
 

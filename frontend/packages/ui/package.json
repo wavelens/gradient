@@ -1,0 +1,17 @@
+{
+  "name": "@gradient/ui",
+  "version": "1.4.1",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "tokens:generate": "node scripts/generate-tokens.mts",
+    "tokens:check": "node scripts/generate-tokens.mts --check"
+  },
+  "exports": {
+    "./styles/*": "./src/styles/_*.scss",
+    "./ui": "./src/ui/index.ts",
+    "./chrome": "./src/chrome/index.ts",
+    "./tokens": "./src/styles/tokens.ts"
+  }
+}

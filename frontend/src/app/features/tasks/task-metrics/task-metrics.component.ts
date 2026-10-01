@@ -7,12 +7,8 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import {
-  EmptyStateComponent,
-  LoadingSpinnerComponent,
-  MetricChartComponent,
-  PageLayoutComponent,
-} from '@shared/ui';
+import { EmptyStateComponent, LoadingSpinnerComponent, PageLayoutComponent } from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { TasksService, TaskMetricPoint, TaskMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';

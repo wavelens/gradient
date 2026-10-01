@@ -9,14 +9,14 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
-import { HeaderComponent } from './header.component';
+import { AppHeaderComponent } from './header.component';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { CommandPaletteService } from '../command-palette/command-palette.service';
 
-function setup(registrationDisabled: boolean, signedIn = false): ComponentFixture<HeaderComponent> {
+function setup(registrationDisabled: boolean, signedIn = false): ComponentFixture<AppHeaderComponent> {
   TestBed.configureTestingModule({
-    imports: [HeaderComponent],
+    imports: [AppHeaderComponent],
     providers: [
       provideRouter([]),
       provideHttpClient(),
@@ -32,7 +32,7 @@ function setup(registrationDisabled: boolean, signedIn = false): ComponentFixtur
       { provide: ConfigService, useValue: { registrationDisabled } },
     ],
   });
-  const fixture = TestBed.createComponent(HeaderComponent);
+  const fixture = TestBed.createComponent(AppHeaderComponent);
   fixture.detectChanges();
   return fixture;
 }
@@ -43,7 +43,7 @@ function registerLink(root: HTMLElement): HTMLAnchorElement | null {
   ) ?? null;
 }
 
-describe('HeaderComponent - registration visibility', () => {
+describe('AppHeaderComponent - registration visibility', () => {
   it('renders the Register link when registration is enabled', () => {
     const fixture = setup(false);
     expect(registerLink(fixture.nativeElement)).not.toBeNull();
@@ -55,7 +55,7 @@ describe('HeaderComponent - registration visibility', () => {
   });
 });
 
-describe('HeaderComponent - search', () => {
+describe('AppHeaderComponent - search', () => {
   it('opens the command palette from the header search field', () => {
     const root = setup(false, true).nativeElement as HTMLElement;
     (root.querySelector('.search-trigger') as HTMLElement).click();

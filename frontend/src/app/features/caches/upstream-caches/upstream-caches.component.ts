@@ -18,7 +18,6 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageService,
   PageLayoutComponent,
@@ -26,7 +25,8 @@ import {
   RowListComponent,
   SelectComponent,
   ToastComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';

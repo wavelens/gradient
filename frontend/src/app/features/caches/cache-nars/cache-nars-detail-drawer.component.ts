@@ -24,7 +24,7 @@ import {
   FieldRowComponent,
   IconComponent,
   LoadingSpinnerComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { formatBytes } from '@shared/text';
 
 @Component({

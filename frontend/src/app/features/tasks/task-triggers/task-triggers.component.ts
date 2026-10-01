@@ -21,11 +21,11 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   SelectComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import {

@@ -20,7 +20,7 @@ import {
   RowComponent,
   RowListComponent,
   SettingsSectionComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 
 @Component({
   selector: 'app-sg-patterns',

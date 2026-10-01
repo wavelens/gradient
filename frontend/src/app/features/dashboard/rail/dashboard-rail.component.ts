@@ -8,7 +8,8 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } fr
 import { RouterLink } from '@angular/router';
 import { DashboardService } from '@core/services/dashboard.service';
 import { Rail } from '@core/models';
-import { ButtonComponent, StarButtonComponent } from '@shared/ui';
+import { ButtonComponent } from '@gradient/ui/ui';
+import { StarButtonComponent } from '@shared/ui';
 import { formatCount } from '@shared/text';
 
 @Component({

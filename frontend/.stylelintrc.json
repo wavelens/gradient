@@ -14,7 +14,7 @@
   "overrides": [
     {
       "files": [
-        "src/app/shared/ui/icon/**/*.scss"
+        "packages/ui/src/ui/icon/**/*.scss"
       ],
       "rules": {
         "declaration-property-unit-allowed-list": null

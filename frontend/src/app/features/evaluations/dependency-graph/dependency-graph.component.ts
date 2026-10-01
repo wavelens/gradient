@@ -29,7 +29,7 @@ import {
   ButtonComponent,
   IconComponent,
   LoadingSpinnerComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { formatDuration } from '@shared/text';
 
 const CARD_W = 200;

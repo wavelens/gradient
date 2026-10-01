@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { BoardService, BoardHealth } from '@core/services/board.service';
 import { AdminService, AdminTask } from '@core/services/admin.service';
 import { ConfigService } from '@core/services/config.service';

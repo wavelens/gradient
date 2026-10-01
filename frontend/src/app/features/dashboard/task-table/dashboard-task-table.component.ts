@@ -28,9 +28,9 @@ import {
   MessageBannerComponent,
   RowComponent,
   RowListComponent,
-  StatusIconComponent,
   TabSwitchComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { StatusIconComponent } from '@shared/ui';
 import { formatDuration, relativeTime } from '@shared/text';
 import { EvaluationHistoryComponent } from '../evaluation-history/evaluation-history.component';
 import { barsThatFit } from '../format';

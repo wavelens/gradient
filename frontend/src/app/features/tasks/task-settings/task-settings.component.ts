@@ -17,7 +17,6 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
@@ -26,7 +25,8 @@ import {
   SelectComponent,
   SettingsSectionComponent,
   TooltipDirective,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConcurrencyPolicy, Task } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';

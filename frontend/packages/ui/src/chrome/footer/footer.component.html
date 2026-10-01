@@ -1,0 +1,40 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<ng-template #anchor let-link>
+  @if (external(link)) {
+    <a [href]="link.href" target="_blank" rel="noopener" class="footer-link">
+      @if (link.icon) { <gr-icon [name]="link.icon" size="sm" /> }
+      {{ link.label }}
+    </a>
+  } @else {
+    <a [routerLink]="link.href" class="footer-link">
+      @if (link.icon) { <gr-icon [name]="link.icon" size="sm" /> }
+      {{ link.label }}
+    </a>
+  }
+</ng-template>
+
+<footer class="app-footer">
+  <div class="footer-content">
+    @for (link of links(); track link.href; let first = $first) {
+      @if (!first) { <span class="footer-sep" aria-hidden="true">·</span> }
+      @if (link.prefix) {
+        <span class="footer-license">
+          {{ link.prefix }}
+          <ng-container *ngTemplateOutlet="anchor; context: { $implicit: link }" />
+        </span>
+      } @else {
+        <ng-container *ngTemplateOutlet="anchor; context: { $implicit: link }" />
+      }
+    }
+    @if (note(); as note) {
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <span class="footer-version">{{ note }}</span>
+    }
+    <span class="footer-lang"><ng-content select="[slot=lang]" /></span>
+  </div>
+</footer>

@@ -8,7 +8,12 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { DashboardService } from '@core/services/dashboard.service';
 import { ActivityDay } from '@core/models';
 import { FormsModule } from '@angular/forms';
-import { ButtonComponent, MessageBannerComponent, TabSwitchComponent, TooltipDirective } from '@shared/ui';
+import {
+  ButtonComponent,
+  MessageBannerComponent,
+  TabSwitchComponent,
+  TooltipDirective,
+} from '@gradient/ui/ui';
 
 type Mode = 'evaluations' | 'failed';
 const STEP = 13;

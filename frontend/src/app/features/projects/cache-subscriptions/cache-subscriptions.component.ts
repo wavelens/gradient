@@ -19,13 +19,13 @@ import {
   EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
   TooltipDirective,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState, CacheSubscription } from '@core/models';
 

@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
 import { firstLoad } from '../first-load';
 import { formatQuantity } from '@shared/text';
 import { BoardService, ExpensiveEval } from '@core/services/board.service';

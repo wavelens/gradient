@@ -30,14 +30,14 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   SelectComponent,
   SettingsSectionComponent,
   TabSwitchComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 interface Option<T> {

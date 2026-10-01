@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component } from '@angular/core';
-import { CardGridComponent, NavCardComponent } from '@shared/ui';
+import { CardGridComponent, NavCardComponent } from '@gradient/ui/ui';
 
 @Component({
   selector: 'app-dashboard-start',

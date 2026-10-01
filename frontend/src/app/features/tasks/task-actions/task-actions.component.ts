@@ -20,7 +20,7 @@ import {
   LoadingSpinnerComponent,
   PageLayoutComponent,
   BadgeSeverity,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import {

@@ -8,16 +8,27 @@ import { Component, DestroyRef, inject, computed, ChangeDetectionStrategy } from
 import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
-import { HeaderComponent } from '@shared/chrome/header/header.component';
-import { FooterComponent } from '@shared/chrome/footer/footer.component';
+import { FooterComponent, FooterLink } from '@gradient/ui/chrome';
+import { AppHeaderComponent } from '@shared/chrome/header/header.component';
 import { CommandPaletteComponent } from '@shared/chrome/command-palette/command-palette.component';
 import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
 import { ThemeService } from '@core/services/theme.service';
 import { followOverscroll } from '@core/overscroll/overscroll';
 
+const FOOTER_LINKS: FooterLink[] = [
+  {
+    prefix: 'Licensed under',
+    label: 'AGPL-3.0-only',
+    href: 'https://github.com/wavelens/gradient/blob/main/LICENSE',
+  },
+  { label: 'GitHub', href: 'https://github.com/wavelens/gradient', icon: 'code' },
+  { label: 'Wavelens', href: 'https://wavelens.io' },
+];
+
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, HeaderComponent, FooterComponent, CommandPaletteComponent],
+  imports: [RouterOutlet, AppHeaderComponent, FooterComponent, CommandPaletteComponent],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './app.scss'
@@ -26,6 +37,12 @@ export class App {
   authService = inject(AuthService);
   private router = inject(Router);
   private theme = inject(ThemeService);
+  private config = inject(ConfigService);
+
+  protected readonly footerLinks = FOOTER_LINKS;
+  protected get version(): string | null {
+    return this.config.backendVersion ? `v${this.config.backendVersion}` : null;
+  }
 
   constructor() {
     inject(DestroyRef).onDestroy(followOverscroll(window));

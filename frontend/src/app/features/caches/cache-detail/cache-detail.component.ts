@@ -17,15 +17,17 @@ import {
   CopyFieldComponent,
   DividerComponent,
   FormFieldComponent,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
-  MetricChartComponent,
-  MetricSeries,
   PageLayoutComponent,
   TabSwitchComponent,
   SettingsSectionComponent,
-  StarButtonComponent,
   StatCardComponent,
+} from '@gradient/ui/ui';
+import {
+  LabelHelpComponent,
+  MetricChartComponent,
+  MetricSeries,
+  StarButtonComponent,
 } from '@shared/ui';
 import { Cache, StarTarget } from '@core/models';
 import { docsUrl } from '@core/docs';

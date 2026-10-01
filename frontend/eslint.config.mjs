@@ -10,7 +10,7 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   { ignores: ['dist/**', 'node_modules/**', '.angular/**'] },
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'packages/ui/src/**/*.ts'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     rules: {
       // The design system has one entry point; reaching past it re-creates the tangle
@@ -20,8 +20,8 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ['@shared/ui/*', '**/shared/ui/*/*'],
-              message: 'Import from @shared/ui instead of reaching into a component directory.',
+              group: ['@shared/ui/*', '**/shared/ui/*/*', '@gradient/ui/ui/*', '@gradient/ui/chrome/*'],
+              message: 'Import from a barrel instead of reaching into a component directory.',
             },
           ],
         },
@@ -31,7 +31,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/app/shared/ui/**/*.ts', 'src/app/features/styleguide/**/*.ts'],
+    files: ['packages/ui/src/**/*.ts', 'src/app/shared/ui/**/*.ts', 'src/app/features/styleguide/**/*.ts'],
     rules: { '@typescript-eslint/no-explicit-any': 'error' },
   },
   {
@@ -47,6 +47,26 @@ export default tseslint.config(
             {
               group: ['@shared/ui', '@shared/ui/*'],
               message: 'Import the sibling directly; the barrel is for consumers.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/ui/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@gradient/ui/*'],
+              message: 'Import the sibling directly; the barrels are for consumers.',
+            },
+            {
+              group: ['@core/*', '@shared/*', '@features/*', '@app/*'],
+              message: 'The shared package knows nothing about the app consuming it.',
             },
           ],
         },

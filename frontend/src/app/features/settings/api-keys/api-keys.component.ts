@@ -31,7 +31,7 @@ import {
   SelectButtonComponent,
   SelectComponent,
   TooltipDirective,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 import { permissionLabel } from '@shared/text';

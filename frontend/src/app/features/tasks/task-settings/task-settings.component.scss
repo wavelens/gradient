@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.settings-card {
+@use '@gradient/ui/styles/variables' as *;.settings-card {
   background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;

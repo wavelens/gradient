@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
+@use '@gradient/ui/styles/variables' as *;
 
 gr-metric-chart { margin-bottom: 1rem; }
 .windows { display: flex; gap: 0.5rem; margin-bottom: 1rem; }

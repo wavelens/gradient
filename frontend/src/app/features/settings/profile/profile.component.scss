@@ -4,4 +4,4 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
+@use '@gradient/ui/styles/variables' as *;.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
