@@ -12,8 +12,8 @@
     packages.x86_64-linux = {
       default = pkgs.hello;
 
-      # A dependent of something only the upstream serves: busywrap is built
-      # here, busybox is relayed, and only because busywrap demands it.
+      # Needs something only the upstream cache serves: busywrap is built
+      # here, busybox is passed through, and only because busywrap needs it.
       busywrap = pkgs.runCommand "busywrap" { __structuredAttrs = true; } ''
         mkdir -p $out/bin
         ln -s ${pkgs.busybox}/bin/busybox $out/bin/bb

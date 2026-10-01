@@ -103,7 +103,7 @@
           projects = [ "project" ];
           public = true;
           created_by = "admin";
-          upstreams = [{
+          upstream_caches = [{
             type = "external";
             display_name = "spec-upstream";
             url = "http://server/upstream";

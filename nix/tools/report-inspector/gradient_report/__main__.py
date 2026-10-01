@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("summary", help="status, timings, build and failure counts (default)")
     sub.add_parser("timeline", help="phase events, dispatches and attempts in order")
-    sub.add_parser("why-stuck", help="which gate each waiting anchor is held by")
+    sub.add_parser("why-stuck", help="which gate holds each waiting build")
     sub.add_parser("workers", help="registration and connection history")
     sub.add_parser("manifest", help="what the report contains and what it left out")
 

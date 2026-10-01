@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
 # SPDX-License-Identifier: AGPL-3.0-only
 # mk.nix prepends FLAKES, RESOLVED, WORKER_IDS, the topology prelude and ../scheduler/helpers.py.
-# No producer creates cluster jobs yet: members are anchors held behind a hanging `gate`, seeded by SQL meanwhile.
+# No producer creates cluster jobs yet: members are shared builds held behind a hanging `gate`, seeded by SQL meanwhile.
 
 import uuid
 
 NODES = {node.name: node for node in WORKER_NODES}
 
 
-def anchor_of(spec, node):
+def shared_build_of(spec, node):
     drv_hash = drv_of(spec, node).split("/")[-1].split("-")[0]
     return sql(
         "SELECT db.id FROM derivation_build db JOIN derivation d ON d.id = db.derivation "
@@ -28,11 +28,11 @@ def wait_running(spec, node, timeout=300):
 def hold_members(spec, members):
     gate = wait_running(spec, "gate")
     for _ in range(120):
-        if all(anchor_of(spec, m) for m in members):
+        if all(shared_build_of(spec, m) for m in members):
             break
         server.sleep(1)
     for m in members:
-        status = sql(f"SELECT status FROM derivation_build WHERE id = '{anchor_of(spec, m)}'")
+        status = sql(f"SELECT status FROM derivation_build WHERE id = '{shared_build_of(spec, m)}'")
         assert status == "0", f"{spec}/{m} is {status} before its cluster exists"
     return gate
 
@@ -47,7 +47,7 @@ def seed_cluster(spec, members, same_zone, retry_budget):
         pin_sql = f"'{pin}'" if pin else "NULL"
         rows.append(
             'INSERT INTO cluster_member (id, cluster_job, derivation_build, role, "primary", pin) '
-            f"VALUES (gen_random_uuid(), '{cluster}', '{anchor_of(spec, node)}', '{role}', false, {pin_sql});"
+            f"VALUES (gen_random_uuid(), '{cluster}', '{shared_build_of(spec, node)}', '{role}', false, {pin_sql});"
         )
     sql("\n".join(rows))
     return cluster
@@ -71,7 +71,7 @@ def seats_of(attempt):
 
 
 def member_key(spec, node):
-    return f"build:{anchor_of(spec, node)}"
+    return f"build:{shared_build_of(spec, node)}"
 
 
 def assert_no_single_member_rows(spec, members):

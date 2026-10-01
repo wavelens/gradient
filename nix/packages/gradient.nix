@@ -119,7 +119,7 @@ craneLib.buildPackage (commonArgs // rec {
   separateDebugInfo = true;
 
   # `separateDebugInfo` exports `NIX_RUSTFLAGS=-g -C strip=none` for the whole
-  # derivation. Keep that on the shipped binary and off the ~105 test targets:
+  # derivation. Keep that on the released binary and off the ~105 test targets:
   # the suite is its own check, so it neither carries full DWARF nor blocks
   # everything that only needs the binary.
   doCheck = false;
@@ -154,7 +154,7 @@ craneLib.buildPackage (commonArgs // rec {
       ln -s ${testStore} ./test-store
     '';
 
-    # nextest runs no doc tests. Here the workspace is already compiled and
+    # nextest executes no doc tests. Here the workspace is already compiled and
     # they cost 24 s; a derivation of their own spent six minutes rebuilding
     # it to run the two that exist.
     postCheck = ''

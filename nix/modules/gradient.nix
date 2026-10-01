@@ -13,13 +13,14 @@
   proxyMaxBodyBytes = lib.max cfg.http.maxRequestSize
     (lib.max cfg.nar.maxUploadSize cfg.http.maxSourceUploadSize);
 
-  augmentedIntegrations = lib.mapAttrs (_: int: int // {
+  augmentedIntegrations = lib.mapAttrs (_: int: builtins.removeAttrs int [ "forge_type" ] // {
     has_secret_file = int.secret_file != null;
     has_access_token_file = int.access_token_file != null;
   }) cfg.state.integrations;
 
   stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" (builtins.removeAttrs cfg.state [ "validate" "delete" ] // {
     integrations = augmentedIntegrations;
+    caches = lib.mapAttrs (_: cache: builtins.removeAttrs cache [ "upstreams" ]) cfg.state.caches;
   });
 
   # GoBGP-style build-time check: run the server binary's `--state-validate`
@@ -92,6 +93,7 @@ in {
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "commitConcurrency" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "nar" "maxBufferBytes" ] "replaced by services.gradient.upload.concurrency and services.gradient.upload.bytesBudget")
     (lib.mkRemovedOptionModule [ "services" "gradient" "scheduler" "recordCandidates" ] "runner-up candidates were never recorded")
+    (lib.mkRenamedOptionModule [ "services" "gradient" "scheduler" "dispatchRetentionDays" ] [ "services" "gradient" "retentionDays" ])
   ];
 
   options = {
@@ -141,6 +143,19 @@ in {
       useTls = lib.mkEnableOption "TLS" // { default = true; };
 
       useQuic = lib.mkEnableOption "advertising HTTP/3 (QUIC) to clients";
+
+      retentionDays = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 90;
+        description = ''
+          Days to keep job assignment records, completed deliveries, worker connection history,
+          webhook and task action deliveries, expired sessions and CLI logins, finished admin tasks,
+          the audit log, per-build resource samples and finished cluster jobs. Pruned resource
+          samples no longer feed build predictions. A finished cluster job whose members are gone
+          goes right away. Open worker connections, the newest finished admin task of each kind and
+          active cluster jobs are kept. `0` keeps them forever.
+        '';
+      };
 
       localWorker = lib.mkOption {
         type = lib.types.bool;
@@ -282,7 +297,7 @@ in {
       database = {
         url = lib.mkOption {
           type = lib.types.str;
-          # Peer auth on the local socket demands the role match the unit's system
+          # Peer auth on the local socket requires the role match the unit's system
           # user, and sqlx no longer infers one from the process: with no user in
           # the URL it asks whoami, which answers "anonymous" under systemd.
           default = "postgresql://gradient@localhost/gradient?host=/run/postgresql";
@@ -324,7 +339,7 @@ in {
             default = 32;
             description = ''
               Maximum connections of the cache query pool. It is separate from the scheduler pool so
-              a large evaluation's prefetch traffic cannot starve dispatch.
+              a large evaluation's prefetch traffic cannot starve job assignment.
             '';
           };
 
@@ -374,7 +389,7 @@ in {
           default = null;
           description = ''
             Git author and committer name for commits pushed by the `open_pr` action. `null` lets
-            each forge choose: GitHub credits the App bot and marks the commit verified, Gitea,
+            each Git host choose: GitHub credits the App bot and marks the commit verified, Gitea,
             Forgejo and GitLab use the token owner (which needs the `read:user` or `read_user`
             scope) and fall back to `Gradient <gradient@users.noreply.HOST>`.
           '';
@@ -507,7 +522,7 @@ in {
           default = 8589934592;
           description = ''
             Total size in bytes of admitted uploads. An upload that does not fit waits; one larger
-            than the budget runs alone once nothing else is in flight.
+            than the budget proceeds alone once nothing else is in flight.
           '';
         };
 
@@ -515,7 +530,7 @@ in {
           type = lib.types.ints.positive;
           default = 300;
           description = ''
-            Seconds a granted relay upload may go without data before its permit is reclaimed and
+            Seconds a granted worker upload may go without data before its permit is reclaimed and
             the worker is told to retry.
           '';
         };
@@ -558,7 +573,7 @@ in {
           description = ''
             Whether to download NARs committed through presigned S3 uploads and verify their hash,
             catching same-length corruption at the cost of a full object read. Without it the size
-            is still checked; relayed and REST uploads are always verified.
+            is still checked; passthrough and REST uploads are always verified.
           '';
         };
 
@@ -748,7 +763,7 @@ in {
           type = lib.types.ints.positive;
           default = 2;
           description = ''
-            Free re-queues of a substitutable derivation within one evaluation before it is built
+            Free re-queues of a derivation available in a cache within one evaluation before it is built
             like any other. A re-queue does not count as a build attempt: this is the only bound
             on that loop.
           '';
@@ -802,7 +817,7 @@ in {
           type = lib.types.ints.positive;
           default = 600;
           description = ''
-            Seconds a ready cluster job waits for enough simultaneously idle workers before
+            Seconds a cluster job that can start waits for enough simultaneously idle workers before
             it reserves a placement. Reserved workers receive no new single jobs until the
             cluster starts or the reservation expires.
           '';
@@ -824,14 +839,6 @@ in {
             NAR size, dependency count, waiting time, builtins and fetch worker reservation.
             `resource-aware` also weighs memory fit, worker saturation, CPU, disk and network affinity
             and `preferLocalBuild`.
-          '';
-        };
-
-        dispatchRetentionDays = lib.mkOption {
-          type = lib.types.ints.unsigned;
-          default = 30;
-          description = ''
-            Days to keep dispatch records and delivered outbox entries. `0` keeps them forever.
           '';
         };
       };
@@ -856,7 +863,10 @@ in {
           rawDays = lib.mkOption {
             type = lib.types.ints.unsigned;
             default = 14;
-            description = "Days to keep raw phase and worker samples. `0` keeps them forever.";
+            description = ''
+              Days to keep raw phase and worker samples and the per-minute cache and upstream traffic
+              counters. `0` keeps them forever.
+            '';
           };
 
           rollupDays = lib.mkOption {
@@ -890,7 +900,7 @@ in {
         instanceIntervalSecs = lib.mkOption {
           type = lib.types.ints.positive;
           default = 30;
-          description = "Seconds between recomputations of the instance-wide metric window.";
+          description = "Seconds between updates of the instance-wide metric window.";
         };
 
         graphConsistencyIntervalSecs = lib.mkOption {
@@ -1332,6 +1342,7 @@ in {
         GRADIENT_BASE_DIR = cfg.baseDir;
         GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
         GRADIENT_USE_QUIC = lib.boolToString cfg.useQuic;
+        GRADIENT_RETENTION_DAYS = toString cfg.retentionDays;
         GRADIENT_SECRETS_CRYPT_FILE = "%d/gradient_crypt_secret";
         GRADIENT_SECRETS_JWT_FILE = "%d/gradient_jwt_secret";
         GRADIENT_STATE_FILE = "%d/gradient_state";
@@ -1395,7 +1406,6 @@ in {
         GRADIENT_SCHEDULER_CLUSTER_RESERVE_AFTER_SECS = toString cfg.scheduler.clusterReserveAfterSecs;
         GRADIENT_SCHEDULER_CLUSTER_RESERVE_TIMEOUT_SECS = toString cfg.scheduler.clusterReserveTimeoutSecs;
         GRADIENT_SCHEDULER_SCORING_POLICY = cfg.scheduler.scoringPolicy;
-        GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS = toString cfg.scheduler.dispatchRetentionDays;
         GRADIENT_METRICS_ROLLUP_INTERVAL_SECS = toString cfg.metrics.rollupIntervalSecs;
         GRADIENT_METRICS_RETENTION_RAW_DAYS = toString cfg.metrics.retention.rawDays;
         GRADIENT_METRICS_RETENTION_ROLLUP_DAYS = toString cfg.metrics.retention.rollupDays;
@@ -1502,7 +1512,7 @@ in {
             "/proto" = lib.mkIf (cfg.proto.discoverable && cfg.proto.public) {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
-              # An upgraded connection is relayed through a buffer sized by
+              # An upgraded connection passes through a buffer sized by
               # proxy_buffer_size, which defaults to a single page. NAR chunks
               # are 512 KiB, so the default turns one frame into hundreds of
               # read/write pairs inside nginx. proxy_buffers has to move with
@@ -1521,7 +1531,7 @@ in {
 
             # Regex, so it wins over the "/cache/" prefix: this is the only
             # upgraded connection under it, and it is the only one that wants a
-            # relay buffer sized for 4 MiB NAR chunks. Widening "/cache/"
+            # proxy buffer sized for 4 MiB NAR chunks. Widening "/cache/"
             # instead would cost that much memory per in-flight NAR download.
             "~ ^/cache/[^/]+/proto$" = {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
@@ -1558,7 +1568,7 @@ in {
         enable = true;
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
           inherit (cfg.reverseProxy.caddy) useACMEHost;
-          # No counterpart to the nginx relay-buffer tuning: Caddy tunnels an
+          # No counterpart to the nginx proxy-buffer tuning: Caddy tunnels an
           # upgraded connection bidirectionally with no intermediate buffer to
           # size, and its request/response buffering is off by default, which
           # is what streaming NARs want.

@@ -104,7 +104,7 @@ tags:
   - name: general
     description: Health check and server configuration
   - name: board
-    description: Job Board - metric queries, live dispatched jobs, workers, scoring, and expensive builds
+    description: Job Board - metric queries, live assigned jobs, workers, scoring, and expensive builds
   - name: webhooks
     description: Project, cache and instance webhooks for durable events
   - name: auth
@@ -140,11 +140,11 @@ tags:
   - name: commits
     description: Commit records
   - name: actions
-    description: Per-task Actions (Send Mail, Send Web Request, Forge Status Report)
-  - name: forge-webhooks
-    description: Incoming forge webhooks (external forges -> Gradient push triggers)
+    description: Per-task Actions (Send Mail, Send Web Request, Git Host Status Report)
+  - name: git-host-webhooks
+    description: Incoming Git host webhooks (external Git hosts -> Gradient push triggers)
   - name: integrations
-    description: Per-project named forge integrations (inbound HMAC secrets + outbound API credentials)
+    description: Per-project named Git host integrations (inbound HMAC secrets + outbound API credentials)
   - name: admin
     description: Server-wide administrative endpoints. All routes require the caller to have the `superuser` flag.
   - name: scim
@@ -1392,7 +1392,7 @@ paths:
       summary: Stat tiles of the current user
       description: |-
         Totals over the projects the viewer may see (all for a superuser, public plus member projects otherwise).
-        `builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median dispatch wait of the last 24 hours.
+        `builds_completed` counts recorded derivation metrics; `queue_wait_p50_ms` is the median wait for a worker over the last 24 hours.
         `cache_size_bytes` sums the stored size of each cache the viewer created or reaches through a project membership (all caches for a superuser); each size is recounted every metrics rollup pass, and a path held by two caches counts in both.
         `workers` covers connected workers of visible projects only: `busy_pct` is assigned jobs over summed capacity, capped at 100.
       operationId: getDashboardStats
@@ -1591,7 +1591,7 @@ paths:
       tags: [dashboard]
       summary: Typed search for the command palette
       description: |-
-        Classifies `q` and runs every lookup it could mean; the name lookup always runs, so a project named like a commit hash is still found.
+        Classifies `q` and performs every lookup it could mean. The name lookup always takes place, and a project named like a commit hash is still found.
         - Store path or bare 32-char nix32 hash: NARs of that hash in readable caches (`nar`, at most 10).
         - 7 to 40 hex characters: evaluations of commits with that prefix in readable projects, newest first, PR-triggered ones included (`commit`, at most 5).
         - Any text: projects, tasks and caches whose name or display name contains it, at most `limit` per kind, starred first.
@@ -2705,7 +2705,7 @@ paths:
             double-quote segments containing dots, exactly as in a wildcard
             (`packages."x86_64-linux".hello`), and URL-encode `"` as `%22`.
 
-            Matching runs in the server over at most the 1000 most recent
+            Matching takes place in the server over at most the 1000 most recent
             evaluations that pass the other filters.
           schema:
             type: string
@@ -3179,9 +3179,9 @@ paths:
       operationId: testTaskAction
       description: >-
         Fires the action immediately with a synthetic test event, bypassing event matching.
-        Forge-integration actions (`forge_status_report`, `open_pr`) instead run a non-mutating
+        Git host integration actions (`git_host_status_report`, `open_pr`) instead perform a non-mutating
         connectivity check against the task's repository, since a synthetic status/PR posted
-        against a placeholder commit is always rejected by the forge.
+        against a placeholder commit is always rejected by the Git host.
       responses:
         '200':
           description: Action fired
@@ -3928,7 +3928,7 @@ paths:
       tags: [evals]
       summary: Prioritize evaluation
       description: |-
-        Dispatches every build of a running evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires project membership. A finished evaluation is left unchanged; a failed or aborted one loses its priority.
+        Hands out every build of an active evaluation, including builds it has not resolved yet, ahead of unprioritized work. Requires project membership. A finished evaluation is left unchanged; a failed or aborted one loses its priority.
       operationId: prioritizeEvaluation
       responses:
         '200':
@@ -3960,7 +3960,7 @@ paths:
 
         Each item is a per-evaluation `build_job`; its `id` is used for log,
         downloads, and dependency-graph endpoints. The build *state* (status,
-        timing, log) comes from the global `derivation_build` anchor shared by
+        timing, log) comes from the global `derivation_build` row, a shared build for
         every evaluation that needs the same derivation, so a derivation is
         built once and the outcome is reused across evaluations and projects.
       operationId: listEvaluationBuilds
@@ -4091,7 +4091,7 @@ paths:
 
         The export carries the direct dependencies of the evaluation's
         derivations, build-time and runtime alike, and their outputs' paths, so
-        `unready_deps` and `missing_runtime_deps` can be recomputed from the file
+        `blocking_deps` and `missing_runtime_deps` can be recomputed from the file
         alone and an absent row means the instance never had it.
 
         Requires authentication even for a public project, whose evaluations are
@@ -4364,7 +4364,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Session has already been dispatched.
+          description: Session has already been submitted.
         '410':
           description: Session expired.
 
@@ -4415,7 +4415,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Session already dispatched or has blobs still missing.
+          description: Session already submitted or has blobs still missing.
         '410':
           description: Session expired.
 
@@ -4430,7 +4430,7 @@ paths:
         a deployment tool resolving a commit, for instance - without creating a
         task for it.
 
-        Runs on the project's reserved `build-request` task, created lazily on
+        Executes on the project's reserved `build-request` task, created lazily on
         first use and shared by every build request in the project, so no task is
         created per job. Evaluations queued here are `concurrent`: build requests
         are independent one-shot jobs and never queue behind or abort each other.
@@ -4454,7 +4454,7 @@ paths:
               properties:
                 project:
                   type: string
-                  description: Project the build runs under; supplies the cache, the workers, and the deploy key.
+                  description: Project the build belongs to; supplies the cache, the workers, and the deploy key.
                 url:
                   type: string
                   description: Repository URL, `https://`, `ssh://`, or SCP-style.
@@ -4707,7 +4707,7 @@ paths:
       description: |-
         Returns full build details including status, derivation path, architecture, assigned server, and output store paths.
 
-        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuild
       responses:
         '200':
@@ -4733,7 +4733,7 @@ paths:
       tags: [builds]
       summary: Prioritize build
       description: |-
-        Dispatches the build and every open build of its dependency closure ahead of unprioritized work. Requires project membership. A build loses its priority when it fails permanently, dependency-fails, times out, is aborted or is skipped.
+        Hands out the build and every open build of its dependency closure ahead of unprioritized work. Requires project membership. A build loses its priority when it fails permanently, dependency-fails, times out, is aborted or is skipped.
       operationId: prioritizeBuild
       responses:
         '200':
@@ -4763,7 +4763,7 @@ paths:
         own, so the log of the most recent prior build of the same derivation is
         returned instead. The chunk/lines endpoints fall back the same way.
 
-        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuildLog
       responses:
         '200':
@@ -4955,7 +4955,7 @@ paths:
         capped at 500 nodes. Each edge `source -> target` means `source` must be built
         before `target`.
 
-        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuildGraph
       responses:
         '200':
@@ -5075,7 +5075,7 @@ paths:
 
         Accessible without authentication when the owning project is public.
 
-        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (a derivation is built once and shared across projects via cache reachability). See `docs/src/concepts/overview.md#shared-builds`.
       operationId: getBuildDownloads
       responses:
         '200':
@@ -5783,7 +5783,7 @@ paths:
         Receives the redirect from GitHub after the operator submits the
         manifest. Validates the `state` token, exchanges the temporary `code`
         for the App's permanent credentials, stashes them in a one-shot
-        in-memory store keyed by the superuser who initiated the manifest
+        in-memory store per superuser who initiated the manifest
         flow, and redirects the browser to `/admin/github-app?ready=1`.
 
         **Unauthenticated** - GitHub redirects the operator's browser here
@@ -6395,7 +6395,7 @@ paths:
       summary: Append a chunk of a NAR being uploaded
       description: |-
         Appends one slice of a NAR to a server-side `.partial` staging file,
-        keyed by `(cache, hash)`. Used to upload NARs larger than the reverse
+        one per `(cache, hash)`. Used to upload NARs larger than the reverse
         proxy's per-request body limit by splitting them across several requests.
         Requires `writeStore`. `offset == 0` starts fresh (truncating any stale
         partial); otherwise the chunk is appended only when `offset` equals the
@@ -6467,7 +6467,7 @@ paths:
       summary: Finalize a chunked NAR upload
       description: |-
         Validates the fully staged NAR against its narinfo (the staged byte
-        length must equal `file_size`), ingests it exactly like the single-shot
+        length must equal `file_size`), imports it exactly like the single-shot
         upload, and drops the `.partial`. Requires `writeStore`.
       operationId: finalizeCacheNarUpload
       requestBody:
@@ -6638,7 +6638,7 @@ paths:
         '404':
           description: Not Found - cache or NAR not found, or caller is not the cache owner.
 
-  /caches/{cache}/upstreams:
+  /caches/{cache}/upstream-caches:
     parameters:
       - $ref: '#/components/parameters/CacheSlug'
     get:
@@ -6650,7 +6650,7 @@ paths:
         `public_key` so clients can trust pull-through paths. Follows the same
         visibility as `GET /caches/{cache}`: public caches are readable by
         anyone, private caches only by members and subscribed projects.
-      operationId: listCacheUpstreams
+      operationId: listUpstreamCaches
       responses:
         '200':
           description: List of upstream entries
@@ -6664,7 +6664,7 @@ paths:
                       message:
                         type: array
                         items:
-                          $ref: '#/components/schemas/CacheUpstream'
+                          $ref: '#/components/schemas/UpstreamCache'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -6679,8 +6679,8 @@ paths:
         - **gradient_proto** - a remote Gradient cache accessed via the binary WebSocket protocol (`/cache/{cache}/proto`). Supports optional `api_key` (stored encrypted at rest; write-only - never returned by the API) and pull mode.
         - **http** - an arbitrary Nix binary cache URL. Always ReadOnly.
 
-        Requires `manageCacheUpstreams`.
-      operationId: addCacheUpstream
+        Requires `manageUpstreamCaches`.
+      operationId: addUpstreamCache
       security:
         - bearerAuth: []
       requestBody:
@@ -6688,7 +6688,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AddUpstreamRequest'
+              $ref: '#/components/schemas/AddUpstreamCacheRequest'
       responses:
         '200':
           description: Upstream added - returns the new upstream UUID
@@ -6709,7 +6709,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /caches/{cache}/upstreams/{id}:
+  /caches/{cache}/upstream-caches/{id}:
     parameters:
       - $ref: '#/components/parameters/CacheSlug'
       - name: id
@@ -6723,10 +6723,10 @@ paths:
       tags: [caches]
       summary: Update upstream cache
       description: |-
-        Updates an upstream entry. For external upstreams the mode is always forced to ReadOnly;
-        `url` and `public_key` may be updated. For internal upstreams only `mode` and `display_name` apply.
-        Requires `manageCacheUpstreams`.
-      operationId: patchCacheUpstream
+        Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;
+        `url` and `public_key` may be updated. For internal upstream caches only `mode` and `display_name` apply.
+        Requires `manageUpstreamCaches`.
+      operationId: patchUpstreamCache
       security:
         - bearerAuth: []
       requestBody:
@@ -6734,7 +6734,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchUpstreamRequest'
+              $ref: '#/components/schemas/PatchUpstreamCacheRequest'
       responses:
         '200':
           description: Updated
@@ -6749,7 +6749,7 @@ paths:
     delete:
       tags: [caches]
       summary: Remove upstream cache
-      operationId: deleteCacheUpstream
+      operationId: deleteUpstreamCache
       security:
         - bearerAuth: []
       responses:
@@ -7249,11 +7249,11 @@ paths:
         Name is unique within `(project, kind)`.
 
         One **inbound** integration can serve Gitea/Forgejo/GitLab
-        simultaneously - the caller picks the forge path segment in the webhook
+        simultaneously - the caller picks the Git host path segment in the webhook
         URL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).
-        The stored `forge_type` is display metadata only for inbound.
+        The stored `git_host_type` is display metadata only for inbound.
 
-        `forge_type: "github"` integrations are creatable by supplying
+        `git_host_type: "github"` integrations are creatable by supplying
         `installation_id`. The server App must be configured (else `400`);
         the installation id is validated against the App (invalid id returns
         `400`). An inbound and outbound integration pair is created
@@ -7279,7 +7279,7 @@ paths:
                       message:
                         $ref: '#/components/schemas/Integration'
         '400':
-          description: Invalid name / kind / forge_type
+          description: Invalid name / kind / git_host_type
         '409':
           description: Name already in use within this kind
         '401':
@@ -7303,7 +7303,7 @@ paths:
         The response excludes `secret`, `endpoint_url`, `access_token`, and
         the `has_secret` / `has_access_token` booleans so non-admin members
         cannot fingerprint credential state. Intended for UIs that only need
-        an integration's name and forge type - e.g. populating the trigger
+        an integration's name and Git host type - e.g. populating the trigger
         create/edit dropdown for users who hold `EditTask` but not
         `ManageIntegrations`.
       operationId: listProjectIntegrationSummaries
@@ -7363,7 +7363,7 @@ paths:
         Patch-updates an integration. Omit a field to leave it unchanged.
         Pass an empty string for `secret` or `access_token` to **clear** it.
 
-        `forge_type=github` rows are managed by the App and installation; PATCH
+        `git_host_type=github` rows are managed by the App and installation; PATCH
         rejects them with `400`. Delete the row to remove the integration.
       operationId: patchProjectIntegration
       requestBody:
@@ -7398,7 +7398,7 @@ paths:
       description: >-
         Deletes an integration. Any task `task_integration` rows
         referencing it are cleared via `ON DELETE SET NULL`.
-        `forge_type=github` rows can be deleted; deleting removes the
+        `git_host_type=github` rows can be deleted; deleting removes the
         installation binding for that account.
       operationId: deleteProjectIntegration
       responses:
@@ -7415,11 +7415,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  # ── Forge Webhooks (incoming) ────────────────────────────────────────────────
+  # ── Git Host Webhooks (incoming) ───────────────────────────────────────────────
 
   /hooks/github:
     post:
-      tags: [forge-webhooks]
+      tags: [git-host-webhooks]
       summary: Receive GitHub App webhook
       description: |-
         Receives events from a configured GitHub App. Payloads are authenticated using
@@ -7429,7 +7429,7 @@ paths:
         **Handled events:**
         - `push` / `pull_request` / `release` - trigger an evaluation on any task whose
           repository URL matches the matching trigger. A `push` carrying an
-          all-zero `after` SHA (a branch/tag deletion or a forge "test" delivery)
+          all-zero `after` SHA (a branch/tag deletion or a Git host "test" delivery)
           is accepted as a `200` no-op rather than rejected.
         - `check_run` - the "Approve and Run" action clears a fork-PR approval gate.
         - `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.
@@ -7473,7 +7473,7 @@ paths:
                       message:
                         $ref: '#/components/schemas/WebhookResponse'
         '400':
-          description: Unparseable JSON payload or unsupported forge
+          description: Unparseable JSON payload or unsupported Git host
         '401':
           description: Invalid webhook signature
         '404':
@@ -7483,18 +7483,18 @@ paths:
         '503':
           description: GitHub App not configured (GitHub endpoint only)
 
-  /hooks/{forge}/{project}/{integration_name}:
+  /hooks/{git_host}/{project}/{integration_name}:
     parameters:
-      - name: forge
+      - name: git_host
         in: path
         required: true
         schema:
           type: string
           enum: [gitea, forgejo, gitlab]
         description: >-
-          Forge type path segment. Determines the HMAC scheme; does **not**
+          Git host type path segment. Determines the HMAC scheme; does **not**
           filter the integration lookup - a single inbound integration can
-          serve all three forges. GitHub deliveries go through
+          serve all three Git hosts. GitHub deliveries go through
           `POST /hooks/github` (the App webhook) instead.
       - name: project
         in: path
@@ -7509,13 +7509,13 @@ paths:
           type: string
         description: Name of the inbound integration within the project
     post:
-      tags: [forge-webhooks]
-      summary: Receive forge push webhook
+      tags: [git-host-webhooks]
+      summary: Receive Git host push webhook
       description: |-
         Receives push events for a named inbound integration.
         Authenticated via the integration's stored HMAC secret.
 
-        Signature header by forge:
+        Signature header by Git host:
         - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)
         - `gitlab`: `X-Gitlab-Token` (plain token comparison)
 
@@ -7524,17 +7524,17 @@ paths:
         repository URL matches the webhook payload's clone URL.
 
         A push carrying an all-zero `after` SHA (a branch/tag deletion or a
-        forge "test" delivery) is accepted as a `200` no-op rather than rejected.
+        Git host "test" delivery) is accepted as a `200` no-op rather than rejected.
 
-        This endpoint is unauthenticated (verified via forge-specific signature).
-      operationId: forgeWebhook
+        This endpoint is unauthenticated (verified via Git host specific signature).
+      operationId: gitHostWebhook
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              description: Forge push event payload
+              description: Git host push event payload
       responses:
         '200':
           description: Webhook processed (may include zero queued evaluations)
@@ -7548,7 +7548,7 @@ paths:
                       message:
                         $ref: '#/components/schemas/WebhookResponse'
         '400':
-          description: Unparseable JSON payload or unsupported forge
+          description: Unparseable JSON payload or unsupported Git host
         '401':
           description: Invalid webhook signature
         '404':
@@ -7680,7 +7680,7 @@ paths:
       tags: [nix-cache]
       summary: Narinfo
       description: >-
-        Path info of a store path. A miss here is looked up in the cache's upstreams,
+        Path info of a store path. A miss here is looked up in the cache's upstream caches,
         re-signed with the cache key. `X-Cache` reports `HIT` (ours) or `MISS` (upstream).
       operationId: getNarinfo
       security:
@@ -7798,7 +7798,7 @@ paths:
       description: >-
         DWARF debug info for an ELF build id, in the Nix `index-debug-info` format.
         Indexed from `separateDebugInfo` outputs; a miss falls through to the
-        upstreams. `X-Cache` reports `HIT` or `MISS`.
+        upstream caches. `X-Cache` reports `HIT` or `MISS`.
       operationId: getDebugInfo
       security:
         - {}
@@ -7975,7 +7975,7 @@ paths:
       | `GET /cache/{cache}/gradient-cache-info` | Gradient-specific cache metadata. Add `?json` for JSON response (`GradientCacheInfo`). Responds with `Access-Control-Allow-Origin: *` for browser probes. |
       | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path. Add `?json` for JSON response (`NixPathInfo`). |
       | `GET /cache/{cache}/nar/{hash}.nar.zst` | Compressed NAR archive |
-      | `GET /cache/{cache}/debuginfo/{build_id}` | DWARF debug info for an ELF build id, in nix's `index-debug-info` format: `{"archive": "../nar/<file>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}`. Both `{build_id}` and `{build_id}.debug` resolve. Indexed from `separateDebugInfo` outputs (store paths ending in `-debug`); a miss falls through to the cache's upstreams with their `archive` link rewritten through `nar/upstream/{id}/...`, so `X-Cache` reports `HIT` (ours) or `MISS` (upstream). Unknown build ids - and any other key this cache does not serve - answer `404`, never a `4xx` that debuginfod clients treat as fatal. |
+      | `GET /cache/{cache}/debuginfo/{build_id}` | DWARF debug info for an ELF build id, in nix's `index-debug-info` format: `{"archive": "../nar/<file>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}`. Both `{build_id}` and `{build_id}.debug` resolve. Indexed from `separateDebugInfo` outputs (store paths ending in `-debug`); a miss falls through to the cache's upstream caches with their `archive` link rewritten through `nar/upstream/{id}/...`, so `X-Cache` reports `HIT` (ours) or `MISS` (upstream). Unknown build ids - and any other key this cache does not serve - answer `404`, never a `4xx` that debuginfod clients treat as fatal. |
 
       ### Gradient Proto surface
 
@@ -7989,7 +7989,7 @@ paths:
       |---|---|
       | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at ~180 req/min, burst 180. |
       | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at ~180 req/min, burst 180. |
-      | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`). Serves this cache's own log for any build that produced one, successful or failed; otherwise asks the cache's upstreams in order and proxies the first hit, so a pull-through cache exposes logs for paths it substituted rather than built. `X-Cache: HIT` (ours) or `MISS` (upstream). Rate-limited at ~180 req/min, burst 900. |
+      | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`). Serves this cache's own log for any build that produced one, successful or failed; otherwise asks the cache's upstream caches in order and proxies the first hit, so a pull-through cache exposes logs for paths it substituted rather than built. `X-Cache: HIT` (ours) or `MISS` (upstream). Rate-limited at ~180 req/min, burst 900. |
 
   /projects/{project}/webhooks:
     get:
@@ -8813,12 +8813,12 @@ paths:
   /board/jobs/dispatched:
     get:
       tags: [board]
-      summary: Live dispatched jobs
-      description: In-flight dispatched jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count.
+      summary: Live assigned jobs
+      description: In-flight assigned jobs visible to the caller; out-of-scope jobs collapse to an aggregate `other_running` count.
       operationId: getBoardDispatchedJobs
       responses:
         '200':
-          description: Dispatched jobs plus other_running count
+          description: Assigned jobs plus other_running count
           content:
             application/json:
               schema:
@@ -8834,16 +8834,16 @@ paths:
   /board/jobs/decisions:
     get:
       tags: [board]
-      summary: Recent dispatch decisions (all candidate scores)
+      summary: Recent assignment decisions (all candidate scores)
       description: >
-        Bounded ring of the most recent dispatch decisions, each with every
-        scored candidate including the rejected/negative ones the dispatcher
+        Bounded ring of the most recent assignment decisions, each with every
+        scored candidate including the rejected/negative ones the scheduler
         passed over. For tuning scoring rules. Superuser-only, as candidates
         span all projects.
       operationId: getBoardDispatchDecisions
       responses:
         '200':
-          description: Recent dispatch decisions, most recent first
+          description: Recent assignment decisions, most recent first
           content:
             application/json:
               schema:
@@ -8858,8 +8858,8 @@ paths:
   /board/jobs/pending:
     get:
       tags: [board]
-      summary: Pending (undispatched) jobs
-      description: Queued jobs not yet dispatched to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count.
+      summary: Pending (unassigned) jobs
+      description: Queued jobs not yet assigned to a worker, visible to the caller; out-of-scope jobs collapse to an aggregate `other_pending` count.
       operationId: getBoardPendingJobs
       responses:
         '200':
@@ -8959,8 +8959,8 @@ paths:
   /board/jobs/{id}:
     get:
       tags: [board]
-      summary: Dispatched job detail
-      description: Full dispatch record incl. per-rule scoring breakdown, job/worker/instance contexts. Runner-up candidates are superuser-only.
+      summary: Assigned job detail
+      description: Full assignment record incl. per-rule scoring breakdown, job/worker/instance contexts. Runner-up candidates are superuser-only.
       operationId: getBoardJob
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -8977,7 +8977,7 @@ paths:
     get:
       tags: [board]
       summary: Aggregate scoring summary
-      description: Score histogram and mean per-rule contribution over recently dispatched jobs, masked to the caller's projects.
+      description: Score histogram and mean per-rule contribution over recently assigned jobs, masked to the caller's projects.
       operationId: getBoardScoringSummary
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
@@ -9053,18 +9053,19 @@ paths:
         '200':
           description: Cache statistics
 
-  /board/cache/upstreams:
+  /board/cache/upstream-caches:
     get:
       tags: [board]
       summary: Per-URL cache latency and narinfo hit-rate
       description: >-
         Per-upstream-URL trailing latency, narinfo hit-rate, and request counts
-        with hourly series. Metrics are keyed by URL, so the same URL registered
+        with hourly series. Metrics are per URL: the same URL registered
         under several caches/projects contributes to one series; `display_name` is
         the URL host. Project-scoped: superusers see all URLs; members see the URLs
         used by their projects plus public projects. Each series' `url` is the caller's
-        own upstream, so it is returned unmasked.
-      operationId: getBoardUpstreams
+        own upstream, so it is returned unmasked. The entries are returned as
+        `upstream_caches`.
+      operationId: getBoardUpstreamCaches
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
       responses:
@@ -9243,10 +9244,10 @@ paths:
                           unconfirmed_nars:
                             type: integer
                             description: cached_path rows whose object the background uploader still owes to storage.
-                          outbox_pending:
+                          pending_deliveries:
                             type: integer
-                            description: Effect rows still owed to the outside world (forge reports, action deliveries, log finalization).
-                          outbox_failed:
+                            description: Effect rows still owed to the outside world (Git host reports, action deliveries, log finalization).
+                          failed_deliveries:
                             type: integer
                             description: Effect rows that gave up after their last retry and stay as dead letters until the retention pass.
                           hot_nar_cache:
@@ -9292,7 +9293,7 @@ paths:
     get:
       tags: [board]
       summary: Per-worker metrics
-      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total dispatched-job count for one worker. Project members only, and only for a worker registered in the project or enabled for it as a base worker; the telemetry covers everything the worker did, not only this project's jobs.
+      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total assigned-job count for one worker. Project members only, and only for a worker registered in the project or enabled for it as a base worker; the telemetry covers everything the worker did, not only this project's jobs.
       operationId: getProjectWorkerMetrics
       parameters:
         - { name: project, in: path, required: true, schema: { type: string } }
@@ -9916,7 +9917,7 @@ components:
           additionalProperties: true
           nullable: true
           description: |
-            Free-form JSON object emitted by the sweep. For `deep_gc` this
+            Free-form JSON object emitted by the task. For `deep_gc` this
             mirrors `DeepGcReport` (counts per pass, summed over finished units).
         checkpoint:
           type: string
@@ -10127,7 +10128,7 @@ components:
           description: Number of jobs currently assigned to this worker
         draining:
           type: boolean
-          description: Whether the worker is draining (no new jobs will be dispatched)
+          description: Whether the worker is draining (no new jobs will be assigned)
 
     ProjectWorkerEntry:
       type: object
@@ -10204,7 +10205,7 @@ components:
           description: Number of jobs currently assigned to this worker
         draining:
           type: boolean
-          description: Whether the worker is draining (no new jobs will be dispatched)
+          description: Whether the worker is draining (no new jobs will be assigned)
 
     WorkerTestResponse:
       type: object
@@ -10652,7 +10653,7 @@ components:
 
     ActionType:
       type: string
-      enum: [send_mail, send_web_request, forge_status_report, open_pr]
+      enum: [send_mail, send_web_request, git_host_status_report, open_pr]
 
     ActionConfigSendMail:
       type: object
@@ -10673,11 +10674,11 @@ components:
           nullable: true
           description: "Write-only; never returned in reads"
 
-    ActionConfigForgeStatusReport:
+    ActionConfigGitHostStatusReport:
       type: object
       required: [type, integration_id]
       properties:
-        type: { type: string, enum: [forge_status_report] }
+        type: { type: string, enum: [git_host_status_report] }
         integration_id: { type: string, format: uuid }
 
     ActionConfigOpenPr:
@@ -10688,7 +10689,7 @@ components:
         integration_id:
           type: string
           format: uuid
-          description: Outbound forge integration in the same project
+          description: Outbound Git host integration in the same project
         generator:
           type: string
           enum: [flake_lock]
@@ -10719,7 +10720,7 @@ components:
       oneOf:
         - { $ref: '#/components/schemas/ActionConfigSendMail' }
         - { $ref: '#/components/schemas/ActionConfigSendWebRequest' }
-        - { $ref: '#/components/schemas/ActionConfigForgeStatusReport' }
+        - { $ref: '#/components/schemas/ActionConfigGitHostStatusReport' }
         - { $ref: '#/components/schemas/ActionConfigOpenPr' }
       discriminator:
         propertyName: type
@@ -11126,7 +11127,7 @@ components:
       type: object
       required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, deps_total, created_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The entry point's build dispatches ahead of unprioritized work." }
+        prioritized: { type: boolean, description: "The entry point's build is handed out ahead of unprioritized work." }
         id: { type: string, format: uuid }
         build_id: { type: string, format: uuid }
         derivation_path: { type: string, description: "Prefix-free `.drv` store path (`<hash>-<name>.drv`, no `/nix/store/`)" }
@@ -11143,7 +11144,7 @@ components:
           description: |-
             Map of output name to **full** `/nix/store` path (e.g.
             `{"out": "/nix/store/xyz-hello-2.12.1"}`). Written at evaluation time
-            from the resolved `.drv`, so it is populated before the build runs -
+            from the resolved `.drv`, so it is populated before the build starts -
             `build_status` is what says whether the path is realised. Outputs
             whose store path the evaluator could not resolve are omitted rather
             than reported with a placeholder, so this map can be empty or miss
@@ -11203,7 +11204,7 @@ components:
       type: object
       required: [id, commit, status, wildcard, total_builds, builds, errors, warnings, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The evaluation's whole build tree dispatches ahead of unprioritized work." }
+        prioritized: { type: boolean, description: "The evaluation's whole build tree is handed out ahead of unprioritized work." }
         id:
           type: string
           format: uuid
@@ -11232,7 +11233,7 @@ components:
         triggered_by:
           type: string
           nullable: true
-          description: Display name of the user who manually started the evaluation; null for trigger-driven runs
+          description: Display name of the user who manually started the evaluation; null for trigger-driven evaluations
         pr_number:
           type: integer
           nullable: true
@@ -11464,7 +11465,7 @@ components:
       type: object
       required: [id, repository, commit, wildcard, status, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The evaluation's whole build tree dispatches ahead of unprioritized work. Cleared when the evaluation fails or is aborted." }
+        prioritized: { type: boolean, description: "The evaluation's whole build tree is handed out ahead of unprioritized work. Cleared when the evaluation fails or is aborted." }
         id:
           type: string
           format: uuid
@@ -11550,7 +11551,7 @@ components:
           `eval` while `Queued`/`EvaluatingFlake`/`EvaluatingDerivation` (the
           worker must run the evaluation). Auto-unparks to `Queued` the moment a
           worker with that capability connects (issue #381).
-        - `approval`: the PR comes from a contributor who is not a forge
+        - `approval`: the PR comes from a contributor who is not a Git host
           repo writer, and the trigger has `require_approval = true`. The
           evaluation stays parked until a maintainer clicks "Approve and
           run" on the GitHub Check or comments `/gradient approve` (or
@@ -11569,11 +11570,11 @@ components:
         - `draining`: a superuser put the instance into draining; every
           in-flight evaluation is parked until draining is disabled or the
           server restarts.
-        - `graph_stuck`: the connected pool can build every pending anchor, but
-          none is dispatchable - the whole pending set is blocked behind the
+        - `graph_stuck`: the connected pool can build every pending shared build, but
+          none can start - the whole pending set is blocked behind the
           dependency-closure gate with no in-flight build to drive promotion. The
           scheduler self-heals the gate and re-promotes on each pass;
-          `pending_anchors` is the blocked count.
+          `pending_shared_builds` is the blocked count.
       oneOf:
         - $ref: '#/components/schemas/WaitingReasonWorkers'
         - $ref: '#/components/schemas/WaitingReasonEvalWorkers'
@@ -11629,10 +11630,10 @@ components:
         pr_number:
           type: integer
           minimum: 0
-          description: PR / MR number on the forge that the maintainer must approve.
+          description: PR / MR number on the Git host that the maintainer must approve.
         pr_author:
           type: string
-          description: Forge login of the PR author whose contribution is being gated.
+          description: Git host login of the PR author whose contribution is being gated.
 
     WaitingReasonEvalWorkers:
       type: object
@@ -11682,12 +11683,12 @@ components:
 
     WaitingReasonGraphStuck:
       type: object
-      required: [kind, pending_anchors]
+      required: [kind, pending_shared_builds]
       properties:
         kind:
           type: string
           enum: [graph_stuck]
-        pending_anchors:
+        pending_shared_builds:
           type: integer
           minimum: 0
           description: Number of pending builds blocked behind the dependency-closure gate.
@@ -11752,7 +11753,7 @@ components:
       type: object
       required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
+        prioritized: { type: boolean, description: "The build is handed out ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
         id:
           type: string
           format: uuid
@@ -11783,9 +11784,9 @@ components:
           format: uuid
           nullable: true
           description: |-
-            The dispatched job behind the build's latest attempt, i.e. its Job
+            The assigned job behind the build's latest attempt, i.e. its Job
             Board entry (`GET /board/jobs/{id}`). Null until the build has been
-            dispatched at least once.
+            assigned at least once.
         depth:
           type: integer
           minimum: 0
@@ -11982,7 +11983,7 @@ components:
           format: uuid
           description: |-
             ID of the per-project reserved `build-request` task. Lazily created
-            on first dispatch and reused thereafter.
+            on first use and reused thereafter.
         commit:
           type: string
           format: uuid
@@ -12007,16 +12008,16 @@ components:
 
         | Value | Terminal | Meaning |
         |---|---|---|
-        | `Queued` | No | Waiting to be dispatched to a worker |
+        | `Queued` | No | Waiting to be assigned to a worker |
         | `Building` | No | Actively executing on a worker |
         | `Completed` | Yes | Build executed successfully |
-        | `Substituted` | Yes | Outputs were already present (in the local store or pre-evaluated); no build ran |
+        | `Substituted` | Yes | Outputs were already present (in the local store or pre-evaluated); no build took place |
         | `FailedPermanent` | Yes | Builder exited non-zero; no retry will be attempted |
         | `FailedTransient` | No | Transient failure (OOM, disk full, network error); an automatic retry is pending |
         | `FailedTimeout` | Yes | Exceeded the wall-clock or silent-output timeout |
         | `Aborted` | Yes | Cancelled by user |
         | `DependencyFailed` | Yes | A dependency build failed, so this build was not attempted |
-        | `Skipped` | No | A build-time dependency nothing needs: no entry point names it and nothing demands it, so it will not be built. Returns to `Queued` if demand comes back |
+        | `Skipped` | No | A build-time dependency nothing needs: no entry point names it and nothing wants it, and it will not be built. Returns to `Queued` once something wants it again |
 
         `FailedTransient` is non-terminal: the scheduler will re-queue the build
         automatically. Treat it as in-progress when deciding whether an evaluation
@@ -12040,14 +12041,14 @@ components:
       type: object
       required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at, prioritized]
       properties:
-        prioritized: { type: boolean, description: "The build dispatches ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
+        prioritized: { type: boolean, description: "The build is handed out ahead of unprioritized work. Cleared when it fails permanently, dependency-fails, times out, is aborted or is skipped." }
         id:
           type: string
           format: uuid
           description: |-
             Per-evaluation build identity (`build_job` id). The build *state*
             (status, worker, log) comes from the global `derivation_build`
-            anchor shared by every evaluation that needs this derivation, so a
+            row, a shared build for every evaluation that needs this derivation, so a
             derivation is built exactly once and the result is reused.
         evaluation:
           type: string
@@ -12065,17 +12066,17 @@ components:
           nullable: true
           description: |-
             Worker identity (the `worker_id` string the worker sent in
-            `InitConnection`) that executed this build's anchor. `null` if the
+            `InitConnection`) that executed this shared build. `null` if the
             build has not yet reached a worker (still queued, aborted
-            before dispatch, or never dispatched in this evaluation).
+            before assignment, or never assigned in this evaluation).
         dispatched_job:
           type: string
           format: uuid
           nullable: true
           description: |-
-            The dispatched job behind the build's latest attempt, i.e. its Job
+            The assigned job behind the build's latest attempt, i.e. its Job
             Board entry (`GET /board/jobs/{id}`). Null until the build has been
-            dispatched at least once.
+            assigned at least once.
         output:
           type: object
           additionalProperties:
@@ -12610,7 +12611,7 @@ components:
         available:
           type: boolean
 
-    CacheUpstream:
+    UpstreamCache:
       type: object
       required: [id, display_name, mode, kind]
       properties:
@@ -12631,22 +12632,22 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: Set for internal upstreams - UUID of the referenced Gradient-managed cache
+          description: Set for internal upstream caches - UUID of the referenced Gradient-managed cache
         url:
           type: string
           format: uri
           nullable: true
-          description: Set for gradient_proto and http upstreams
+          description: Set for gradient_proto and http upstream caches
         remote_cache:
           type: string
           nullable: true
-          description: Set for gradient_proto upstreams - cache name on the remote server
+          description: Set for gradient_proto upstream caches - cache name on the remote server
         public_key:
           type: string
           nullable: true
-          description: Set for http upstreams - Nix-format public key used to verify signatures
+          description: Set for http upstream caches - Nix-format public key used to verify signatures
 
-    AddUpstreamRequest:
+    AddUpstreamCacheRequest:
       oneOf:
         - title: Internal upstream
           type: object
@@ -12713,7 +12714,7 @@ components:
               description: Nix-format public key for signature verification
               example: "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
 
-    PatchUpstreamRequest:
+    PatchUpstreamCacheRequest:
       type: object
       properties:
         display_name:
@@ -12723,16 +12724,16 @@ components:
           type: string
           enum: [read_only, read_write, write_only]
           nullable: true
-          description: Only applies to internal upstreams; external upstreams are always read_only
+          description: Only applies to internal upstream caches; external upstream caches are always read_only
         url:
           type: string
           format: uri
           nullable: true
-          description: Only applies to external upstreams
+          description: Only applies to external upstream caches
         public_key:
           type: string
           nullable: true
-          description: Only applies to external upstreams
+          description: Only applies to external upstream caches
 
     # ── Commits ───────────────────────────────────────────────────────────────
 
@@ -12763,7 +12764,7 @@ components:
 
     Integration:
       type: object
-      required: [id, project, name, display_name, kind, forge_type, has_secret, has_access_token, created_by, created_at]
+      required: [id, project, name, display_name, kind, git_host_type, has_secret, has_access_token, created_by, created_at]
       properties:
         id:
           type: string
@@ -12783,19 +12784,19 @@ components:
           type: string
           enum: [inbound, outbound]
           description: >-
-            `inbound` - the forge calls Gradient (HMAC-verified webhook).
-            `outbound` - Gradient calls the forge (status reports, etc).
-        forge_type:
+            `inbound` - the Git host calls Gradient (HMAC-verified webhook).
+            `outbound` - Gradient calls the Git host (status reports, etc).
+        git_host_type:
           type: string
           enum: [gitea, forgejo, gitlab, github]
           description: >-
-            Which forge this integration targets. For inbound integrations this
+            Which Git host this integration targets. For inbound integrations this
             is display metadata only - a single inbound row can serve
-            Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
+            Gitea/Forgejo/GitLab via the Git host path segment of the webhook URL.
         endpoint_url:
           type: string
           nullable: true
-          description: Forge base URL (outbound integrations only).
+          description: Git host base URL (outbound integrations only).
           example: https://gitea.example.com
         has_secret:
           type: boolean
@@ -12815,11 +12816,11 @@ components:
           type: integer
           format: int64
           nullable: true
-          description: GitHub App installation id. Non-null for `forge_type=github` rows.
+          description: GitHub App installation id. Non-null for `git_host_type=github` rows.
         account_login:
           type: string
           nullable: true
-          description: GitHub account login the installation is bound to. Non-null for `forge_type=github` rows.
+          description: GitHub account login the installation is bound to. Non-null for `git_host_type=github` rows.
         created_by:
           type: string
           format: uuid
@@ -12834,7 +12835,7 @@ components:
         `GET /projects/{project}/integrations/summary`. Available to any project member;
         excludes `endpoint_url`, `has_secret`, and `has_access_token` so
         non-admins cannot fingerprint credential state.
-      required: [id, name, display_name, kind, forge_type]
+      required: [id, name, display_name, kind, git_host_type]
       properties:
         id:
           type: string
@@ -12847,13 +12848,13 @@ components:
         kind:
           type: string
           enum: [inbound, outbound]
-        forge_type:
+        git_host_type:
           type: string
           enum: [gitea, forgejo, gitlab, github]
 
     CreateIntegrationRequest:
       type: object
-      required: [name, kind, forge_type]
+      required: [name, kind, git_host_type]
       properties:
         name:
           type: string
@@ -12864,7 +12865,7 @@ components:
         kind:
           type: string
           enum: [inbound, outbound]
-        forge_type:
+        git_host_type:
           type: string
           enum: [gitea, forgejo, gitlab, github]
           description: >-
@@ -12875,7 +12876,7 @@ components:
           format: int64
           nullable: true
           description: >-
-            Required when `forge_type` is `github`. The GitHub App installation
+            Required when `git_host_type` is `github`. The GitHub App installation
             id to bind. Validated against the App; invalid ids return `400`.
         secret:
           type: string
@@ -12884,7 +12885,7 @@ components:
             Omit for outbound integrations.
         endpoint_url:
           type: string
-          description: Forge base URL for outbound integrations.
+          description: Git host base URL for outbound integrations.
         access_token:
           type: string
           description: >-
@@ -12911,13 +12912,13 @@ components:
         display_name:
           type: string
           description: Update the human-readable display name. Cannot be empty.
-        forge_type:
+        git_host_type:
           type: string
           enum: [gitea, forgejo, gitlab]
           description: >-
             `github` is intentionally excluded from this enum: github rows are
             installation-managed and not editable (PATCH returns `400`). The
-            schema itself prevents supplying `forge_type=github` here; delete
+            schema itself prevents supplying `git_host_type=github` here; delete
             the row to remove a GitHub installation integration.
         endpoint_url:
           type: string
@@ -12941,7 +12942,7 @@ components:
       type: string
       enum: [hard_abort, soft_abort, all, skip]
       default: soft_abort
-      description: 'Task-level policy for handling new trigger events while an evaluation is in flight. Defaults to `soft_abort`: marks the running evaluation Aborted but lets its in-flight builds finish so the new evaluation can reuse cached outputs. `all` runs a new evaluation alongside the in-flight one.'
+      description: 'Task-level policy for handling new trigger events while an evaluation is in flight. Defaults to `soft_abort`: marks the active evaluation Aborted but lets its in-flight builds finish so the new evaluation can reuse cached outputs. `all` starts a new evaluation alongside the in-flight one.'
 
     PollingTriggerConfig:
       type: object
@@ -12974,7 +12975,7 @@ components:
           description: 'Glob patterns matched against tag names. Empty = match all.'
         releases_only:
           type: boolean
-          description: 'When true, fires only on forge release events with a matching tag glob.'
+          description: 'When true, fires only on Git host release events with a matching tag glob.'
 
     ReporterPullRequestTriggerConfig:
       type: object
@@ -12997,7 +12998,7 @@ components:
           type: boolean
           default: true
           description: |
-            When `true` (default), PRs from contributors who are not forge
+            When `true` (default), PRs from contributors who are not Git host
             repo writers are parked in `Waiting + WaitingReason::Approval`
             until a maintainer clicks "Approve and run" on the GitHub Check
             or comments `/gradient approve` (or `/gradient run`) on the PR.
@@ -13029,7 +13030,7 @@ components:
         Slim integration handle inlined into reporter trigger responses so
         the trigger UI can render an integration's name without a separate
         admin-gated call to `/projects/{project}/integrations`.
-      required: [id, name, display_name, forge_type]
+      required: [id, name, display_name, git_host_type]
       properties:
         id:
           type: string
@@ -13038,7 +13039,7 @@ components:
           type: string
         display_name:
           type: string
-        forge_type:
+        git_host_type:
           type: string
           enum: [gitea, forgejo, gitlab, github]
 
@@ -13332,7 +13333,7 @@ components:
         - writeStore
         - manageCacheSettings
         - manageCacheKeys
-        - manageCacheUpstreams
+        - manageUpstreamCaches
         - manageCacheMembers
         - manageCacheRoles
         - manageCacheSubscriptions
@@ -13457,7 +13458,7 @@ components:
 
     WorkerContext:
       type: object
-      description: Worker capabilities and live load at dispatch time.
+      description: Worker capabilities and live load at assignment time.
       properties:
         architectures: { type: array, items: { type: string } }
         system_features: { type: array, items: { type: string } }
@@ -13525,9 +13526,9 @@ components:
       type: object
       nullable: true
       description: |
-        Instance-wide windowed averages and live counts at dispatch time,
-        recomputed every `GRADIENT_METRICS_INSTANCE_INTERVAL_SECS` seconds. `null`
-        for jobs dispatched before the first snapshot.
+        Instance-wide windowed averages and live counts at assignment time,
+        updated every `GRADIENT_METRICS_INSTANCE_INTERVAL_SECS` seconds. `null`
+        for jobs assigned before the first snapshot.
       properties:
         wait_secs: { $ref: '#/components/schemas/Windowed' }
         build_time_ms: { $ref: '#/components/schemas/Windowed' }
@@ -13550,7 +13551,7 @@ components:
 
     DispatchedJobDetail:
       type: object
-      description: Full dispatch record with per-rule scoring breakdown and the three scoring contexts.
+      description: Full assignment record with per-rule scoring breakdown and the three scoring contexts.
       properties:
         id: { type: string, format: uuid }
         kind: { type: integer }
@@ -13587,7 +13588,7 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: The scheduler anchor (`derivation_build`) this job was dispatched for; the id the worker is handed as `BuildSpec.build_id`.
+          description: The shared build (`derivation_build`) this job was assigned for; the id the worker is handed as `BuildSpec.build_id`.
         derivations:
           type: array
           description: The derivations this job builds, each carrying both identities.
@@ -13622,7 +13623,7 @@ components:
           items: { $ref: '#/components/schemas/AttemptSummary' }
         passed_over:
           type: boolean
-          description: True when this detail is an in-memory candidate the dispatcher scored but passed over (never persisted); the UI labels it "Passed over".
+          description: True when this detail is an in-memory candidate the scheduler scored but passed over (never persisted); the UI labels it "Passed over".
 
     JobPhase:
       type: object
@@ -13665,7 +13666,7 @@ components:
 
     JobDerivation:
       type: object
-      description: One derivation a dispatched job builds, with the scheduler anchor resolved to the build id the API navigates by.
+      description: One derivation an assigned job builds, with the shared build resolved to the build id the API navigates by.
       properties:
         build:
           type: string
@@ -13689,7 +13690,7 @@ components:
 
     DispatchedJobSummary:
       type: object
-      description: Summary of a single in-flight dispatched job.
+      description: Summary of a single in-flight assigned job.
       properties:
         id: { type: string, format: uuid }
         kind: { type: integer }
@@ -13703,7 +13704,7 @@ components:
 
     PendingJobSummary:
       type: object
-      description: Summary of a single queued but not-yet-dispatched job.
+      description: Summary of a single queued but not-yet-assigned job.
       properties:
         kind: { type: integer }
         project: { type: string, format: uuid }
@@ -13715,7 +13716,7 @@ components:
 
     DispatchDecisionCandidate:
       type: object
-      description: One scored candidate weighed in a dispatch decision.
+      description: One scored candidate weighed in an assignment decision.
       properties:
         id:
           type: string
@@ -13728,7 +13729,7 @@ components:
         evaluation_id: { type: string, format: uuid }
         subject: { type: string, nullable: true, description: The derivation's name for a build job, the repository for an eval job. }
         score: { type: number }
-        won: { type: boolean, description: Whether this candidate won the decision and was dispatched. }
+        won: { type: boolean, description: Whether this candidate won the decision and was assigned. }
 
     BoardStorage:
       type: object
@@ -13791,7 +13792,7 @@ components:
 
     DispatchDecision:
       type: object
-      description: A recorded dispatch decision - the candidates a worker was scored against and which (if any) won.
+      description: A recorded assignment decision - the candidates a worker was scored against and which (if any) won.
       properties:
         at: { type: string, format: date-time }
         worker_id: { type: string }

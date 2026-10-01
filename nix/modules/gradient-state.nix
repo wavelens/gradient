@@ -4,7 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ lib, config, ... }: with lib; let
+{ lib, config, options, ... }: with lib; let
+  renamedStateOptions = [
+    { group = "caches"; from = "upstreams"; to = "upstream_caches"; }
+    { group = "integrations"; from = "forge_type"; to = "git_host_type"; }
+  ];
+
+  stateAlias = from: to: doRename {
+    from = [ from ];
+    to = [ to ];
+    visible = false;
+    warn = false;
+    use = x: x;
+  };
+
   upstreamType = types.submodule {
     options = {
       type = mkOption {
@@ -18,35 +31,35 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Name of the internal Gradient cache to use. Required for `internal` upstreams.
+          Name of the internal Gradient cache to use. Required for `internal` upstream caches.
         '';
       };
 
       display_name = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Display name of the upstream. Required for `external` upstreams.";
+        description = "Display name of the upstream cache. Required for `external` upstream caches.";
       };
 
       mode = mkOption {
         type = types.enum [ "ReadWrite" "ReadOnly" "WriteOnly" ];
         default = "ReadWrite";
         description = ''
-          Access mode of an internal upstream. External upstreams are always read-only.
+          Access mode of an internal upstream cache. External upstream caches are always read-only.
         '';
       };
 
       url = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "URL of the external Nix binary cache. Required for `external` upstreams.";
+        description = "URL of the external Nix binary cache. Required for `external` upstream caches.";
       };
 
       public_key = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Public key of the external Nix binary cache. Required for `external` upstreams.
+          Public key of the external Nix binary cache. Required for `external` upstream caches.
         '';
       };
     };
@@ -249,7 +262,7 @@
         default = 30;
         description = ''
           Number of finished evaluations kept for metrics and history, regardless of outcome. Older
-          ones are garbage collected, and collection pauses while an evaluation runs. Must be at
+          ones are garbage collected, and collection pauses while an evaluation is active. Must be at
           least 1 and is capped by {option}`services.gradient.eval.maxKeep`.
         '';
       };
@@ -284,7 +297,7 @@
           - `soft_abort` marks the running evaluation aborted so the new one becomes canonical,
             but lets its builds finish; their outputs flow into the new evaluation.
           - `skip` discards the new event.
-          - `all` runs the new evaluation alongside the running one.
+          - `all` starts the new evaluation alongside the running one.
         '';
       };
 
@@ -309,11 +322,9 @@
           ]
         '';
         description = ''
-          Evaluation triggers of the task: polling, forge push, forge pull request or cron schedule.
-          `null` leaves existing triggers untouched. An empty list is rejected, since every task
-          needs a trigger.
-
-          New tasks get a polling trigger every 300 seconds; declaring triggers replaces it.
+          Evaluation triggers of the task: polling, Git host push, Git host pull request or cron schedule.
+          `null` leaves existing triggers untouched, and a new task declared with `null` has none.
+          An empty list is rejected.
         '';
       };
 
@@ -327,7 +338,7 @@
           }
         '';
         description = ''
-          Overrides applied when fetching flake inputs, keyed by input name. An empty set uses
+          Overrides applied when fetching flake inputs, one entry per input name. An empty set uses
           {file}`flake.lock` as is.
         '';
       };
@@ -357,7 +368,7 @@
             }
             {
               name = "report-status";
-              type = "forge_status_report";
+              type = "git_host_status_report";
               config = { integration = "gitea-prod"; };
             }
             {
@@ -377,7 +388,7 @@
           ]
         '';
         description = ''
-          Task actions: email notifications, web requests, forge status reports and pull request
+          Task actions: email notifications, web requests, Git host status reports and pull request
           automation. Actions missing on the next state apply are removed, matched by `name`.
 
           Token files of `send_web_request` actions must live at the systemd credential path
@@ -393,6 +404,8 @@
   });
 
   integrationType = types.submodule ({ config, name, ... }: {
+    imports = [ (stateAlias "forge_type" "git_host_type") ];
+
     options = {
       name = mkOption {
         type = types.str;
@@ -415,21 +428,21 @@
       kind = mkOption {
         type = types.enum [ "inbound" "outbound" ];
         description = ''
-          Direction of the integration: `inbound` for HMAC-verified webhooks from the forge,
-          `outbound` for CI status reports to the forge.
+          Direction of the integration: `inbound` for HMAC-verified webhooks from the Git host,
+          `outbound` for CI status reports to the Git host.
         '';
       };
 
-      forge_type = mkOption {
+      git_host_type = mkOption {
         type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
         description = ''
-          Forge this integration targets. For inbound integrations it is display metadata only,
-          since one inbound row serves Gitea, Forgejo and GitLab through the webhook URL's forge
+          Git host this integration targets. For inbound integrations it is display metadata only,
+          since one inbound row serves Gitea, Forgejo and GitLab through the webhook URL's Git host
           segment.
 
           `github` requires `installation_id` instead of a secret, token or endpoint, and provisions
           the linked GitHub App installation. GitHub rows are also created when the App is installed
-          on the project; a declared one is reconciled additively.
+          on the project; a declared one is merged additively.
         '';
       };
 
@@ -438,7 +451,7 @@
         default = null;
         description = ''
           GitHub App installation ID, the trailing number of the installation URL. Required for
-          `forge_type = "github"`, ignored otherwise.
+          `git_host_type = "github"`, ignored otherwise.
         '';
       };
 
@@ -461,7 +474,7 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Base URL of the forge API for outbound integrations, such as `https://gitea.example.com`.
+          Base URL of the Git host API for outbound integrations, such as `https://gitea.example.com`.
           Ignored for inbound integrations.
         '';
       };
@@ -470,7 +483,7 @@
         type = types.nullOr types.path;
         default = null;
         description = ''
-          File containing the forge API token of an outbound integration. It is loaded as a systemd
+          File containing the Git host API token of an outbound integration. It is loaded as a systemd
           credential and stored encrypted. Not used for GitHub, whose credentials come from
           {option}`services.gradient.githubApp`.
         '';
@@ -520,7 +533,7 @@
           Empty `branches`/`tags`/`actions` lists mean "match all".
 
           `require_approval` (PR triggers only, default `true`) parks evaluations
-          for PRs from contributors who are not repo writers on the forge until
+          for PRs from contributors who are not repo writers on the Git host until
           a maintainer clicks "Approve and run" on the GitHub check or comments
           `/gradient approve` (or `/gradient run`) on the PR. Set to `false` to
           disable the gate and run every PR build automatically.
@@ -546,7 +559,7 @@
       };
 
       type = mkOption {
-        type = types.enum [ "send_mail" "send_web_request" "forge_status_report" "open_pr" ];
+        type = types.enum [ "send_mail" "send_web_request" "git_host_status_report" "open_pr" ];
         description = "Action kind, which determines the expected `config`.";
       };
 
@@ -560,7 +573,7 @@
         type = types.listOf types.str;
         default = [];
         description = ''
-          Events the action subscribes to. Must be empty for `forge_status_report`, whose events
+          Events the action subscribes to. Must be empty for `git_host_status_report`, whose events
           derive from build state.
         '';
       };
@@ -575,12 +588,12 @@
 
           - `send_mail`: `{ recipients = [ "ops@example.com" ]; subject_template = null; }`
           - `send_web_request`: `{ url = "https://hooks.example.com/gradient"; token_file = "/etc/gradient/secrets/<name>-token"; }`
-          - `forge_status_report`: `{ integration = "gitea-prod"; }` (name of an outbound integration in the same project)
-          - `open_pr`: opens a pull request on the forge with the result of a
+          - `git_host_status_report`: `{ integration = "gitea-prod"; }` (name of an outbound integration in the same project)
+          - `open_pr`: opens a pull request on the Git host with the result of a
             generator (currently `flake_lock`, which updates `flake.lock`).
             Fields:
             - `integration` (string): name of an outbound integration in the
-              same project, same convention as `forge_status_report`.
+              same project, same convention as `git_host_status_report`.
             - `generator` (string, default `"flake_lock"`): which change
               generator produces the PR contents.
             - `granularity` (string, default `"per_run"`): one of `"per_run"`
@@ -652,7 +665,7 @@
         type = types.listOf types.str;
         description = ''
           Cache permissions granted by the role: `viewCache`, `readStore`, `writeStore`,
-          `manageCacheSettings`, `manageCacheKeys`, `manageCacheUpstreams`, `manageCacheMembers`,
+          `manageCacheSettings`, `manageCacheKeys`, `manageUpstreamCaches`, `manageCacheMembers`,
           `manageCacheRoles`, `manageCacheSubscriptions`, `manageCacheWebhooks` or `deleteCache`.
         '';
       };
@@ -660,6 +673,8 @@
   };
 
   cacheType = types.submodule ({ config, name, ... }: {
+    imports = [ (stateAlias "upstreams" "upstream_caches") ];
+
     options = {
       name = mkOption {
         type = types.str;
@@ -725,7 +740,7 @@
         description = "Names of the projects using this cache.";
       };
 
-      upstreams = mkOption {
+      upstream_caches = mkOption {
         type = types.listOf upstreamType;
         default = [{
           type = "external";
@@ -1001,19 +1016,19 @@
       users = mkOption {
         type = types.attrsOf userType;
         default = { };
-        description = "Users to create, keyed by user name.";
+        description = "Users to create, one entry per user name.";
       };
 
       projects = mkOption {
         type = types.attrsOf projectType;
         default = { };
-        description = "Projects to create, keyed by name.";
+        description = "Projects to create, one entry per name.";
       };
 
       tasks = mkOption {
         type = types.attrsOf taskType;
         default = { };
-        description = "Tasks to create, keyed by name.";
+        description = "Tasks to create, one entry per name.";
       };
 
       integrations = mkOption {
@@ -1024,14 +1039,14 @@
             acme-prod-inbound = {
               project = "acme-corp";
               kind = "inbound";
-              forge_type = "gitea";
+              git_host_type = "gitea";
               secret_file = "/etc/gradient/secrets/acme-inbound-hmac";
               created_by = "alice";
             };
             acme-status-reports = {
               project = "acme-corp";
               kind = "outbound";
-              forge_type = "gitea";
+              git_host_type = "gitea";
               endpoint_url = "https://gitea.example.com";
               access_token_file = "/etc/gradient/secrets/acme-gitea-token";
               created_by = "alice";
@@ -1039,7 +1054,7 @@
             acme-github-out = {
               project = "acme-corp";
               kind = "outbound";
-              forge_type = "github";
+              git_host_type = "github";
               installation_id = 12345678;
               account_login = "acme-corp";
               created_by = "alice";
@@ -1047,7 +1062,7 @@
           }
         '';
         description = ''
-          Forge integrations per project, keyed by name. Secrets of inbound and tokens of outbound
+          Git host integrations per project, one entry per name. Secrets of inbound and tokens of outbound
           integrations are read as systemd credentials and stored encrypted.
         '';
       };
@@ -1055,21 +1070,21 @@
       caches = mkOption {
         type = types.attrsOf cacheType;
         default = { };
-        description = "Caches to create, keyed by name.";
+        description = "Caches to create, one entry per name.";
       };
 
       roles = mkOption {
         type = types.attrsOf roleType;
         default = { };
         description = ''
-          Custom roles, keyed by role name. They cannot be modified or deleted through the API.
+          Custom roles, one entry per role name. They cannot be modified or deleted through the API.
         '';
       };
 
       api_keys = mkOption {
         type = types.attrsOf apiKeyType;
         default = { };
-        description = "API keys to create, keyed by name.";
+        description = "API keys to create, one entry per name.";
       };
 
       workers = mkOption {
@@ -1086,7 +1101,7 @@
           }
         '';
         description = ''
-          Worker registrations, keyed by worker ID. The token from `token_file` is stored hashed and
+          Worker registrations, one entry per worker ID. The token from `token_file` is stored hashed and
           never persisted in plain text.
         '';
       };
@@ -1165,6 +1180,15 @@ in
     };
   };
 
+  config.warnings = concatMap (def:
+    concatMap (r:
+      let entries = def.value.${r.group} or { }; in
+      mapAttrsToList (entry: _:
+        "The option `services.gradient.state.${r.group}.${entry}.${r.from}' defined in ${def.file} has been renamed to `${r.to}'."
+      ) (filterAttrs (_: v: isAttrs v && v ? ${r.from}) (if isAttrs entries then entries else { }))
+    ) renamedStateOptions
+  ) options.services.gradient.state.definitionsWithLocations;
+
   config.assertions = let
     bad = flatten (mapAttrsToList (pName: p:
       mapAttrsToList (iName: o: {
@@ -1179,7 +1203,7 @@ in
       map (a: {
         task = pName;
         action = a.name;
-        valid = !(a.type == "forge_status_report" && a.events != []);
+        valid = !(a.type == "git_host_status_report" && a.events != []);
       }) p.actions
     ) config.services.gradient.state.tasks);
 
@@ -1194,7 +1218,7 @@ in
     assertion = false;
     message = ''
       services.gradient.state.tasks.${b.task}.actions.${b.action}: \
-      forge_status_report actions cannot declare custom `events`.
+      git_host_status_report actions cannot declare custom `events`.
     '';
   }) invalidActions;
 }

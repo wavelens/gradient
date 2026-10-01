@@ -39,7 +39,7 @@ let
     ];
   };
 
-  # harmonia/nix-bindings (git deps) ship crates whose Cargo.toml points at a
+  # harmonia/nix-bindings (git deps) come with crates whose Cargo.toml points at a
   # README.md outside the crate dir; strip the readme key so vendoring works.
   cargoVendorDir = craneLib.vendorCargoDeps {
     inherit src;
@@ -111,7 +111,7 @@ craneLib.buildPackage (commonArgs // rec {
   version = "1.4.1";
   separateDebugInfo = true;
 
-  # Same split as the server: the binary keeps the debug output, the suite runs
+  # Same split as the server: the binary keeps the debug output, the suite builds
   # as its own check instead of inside the package.
   doCheck = false;
 

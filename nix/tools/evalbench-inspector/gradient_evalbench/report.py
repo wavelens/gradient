@@ -20,7 +20,7 @@ METRICS = ("fetch_ms", "eval_drv_ms", "total_eval_ms", "total_thunks", "peak_rss
 # passes them; each is the first such span after the request.
 DISPATCH_PATH = (
     ("server", "http_request"),
-    ("server", "dispatch_queued_evals"),
+    ("server", "assign_queued_evals"),
     ("server", "offer_jobs"),
     ("worker", "on_job_offer"),
     ("worker", "score_candidates"),
