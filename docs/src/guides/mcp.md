@@ -12,7 +12,7 @@ Evaluations, builds and build logs readable by any [Model Context Protocol](http
 gradient login https://gradient.example.com
 ```
 
-Every tool call runs as this user and sees only the user's projects. `gradient project select <name>` sets the default project for tools that take one.
+Every tool call executes as this user and sees only the user's projects. `gradient project select <name>` sets the default project for tools that take one.
 
 ## 2. Add the Server to the Client
 

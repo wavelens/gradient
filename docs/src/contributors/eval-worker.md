@@ -41,7 +41,7 @@ Two layers bound evaluation memory.
 | Pool sizing | `worker.eval.maxRss` (8 GiB) | `pool_size * maxRss` stays within a host-RAM share; a subprocess over the cap is recycled **between** calls |
 | Free-RAM reaper | `worker.system.minFreeRamMb` (`0` = 10% of RAM, clamped to 128 MiB - 1 GiB) | Samples `MemAvailable` every 500 ms; below the margin, SIGKILLs the largest evaluation subprocess whose resident memory covers the whole shortfall, then waits 5 s |
 
-- The recycle check runs after a call: one unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within a call. The reaper is the guard against that peak.
+- The recycle check takes place after a call: one unit (a large aggregate, IFD chains, runaway recursion) can grow the Boehm heap past the cap within a call. The reaper is the guard against that peak.
 - When no evaluation is large enough to cover the shortfall, the pressure comes from elsewhere and nothing is killed (#579: a fixed 1 GiB floor on a 2 GiB host killed evaluations that were never the cause).
 - A killed subprocess closes its pipe and the evaluation fails. One bounded failure replaces a host OOM that could kill the worker and strand the job: the server only registers a clean disconnect.
 - Once an evaluation has resolved its attributes, the idle subprocesses shut down: their heaps do not sit through the closure walk, and the next evaluation starts fresh subprocesses.
@@ -53,7 +53,7 @@ Two layers bound evaluation memory.
 | | Gradient | nix-eval-jobs |
 |---|---|---|
 | Parallelism | Long-lived pool; one evaluation sharded across the pool | Short-lived children forked from a warm parent |
-| Warmth across runs | Persistent eval cache keyed by flake fingerprint | None; copy-on-write warmth lasts one run |
+| Warmth across evaluations | Persistent eval cache keyed by flake fingerprint | None; copy-on-write warmth lasts one run |
 | Across machines | Fleet-shared `<fp>.sqlite` cache (pull and push). Staging a pulled blob drops the previous local `-wal` / `-shm` sidecars | None |
 | Concurrent writers | Shards write one cache without deadlock: WAL-append commits, one checkpoint at the end | Not applicable |
 | Memory | Automatic pool sizing; a many-system flake degrades to one shard and completes | Manual `--workers` and `--max-memory-size` |

@@ -54,7 +54,7 @@ Gradient is **AGPL-3.0-only**; a contribution is released under the same license
 | Format | `cargo fmt --all --check`, in `backend/` and `cli/` |
 | Licenses and advisories | `cargo deny check`, in `backend/` and `cli/`; GPL-family dependencies are banned |
 
-CI (`.github/workflows/rust.yml`) runs fmt, the `#[allow]` grep gate and cargo-deny over both workspaces; clippy runs as the flake checks.
+CI (`.github/workflows/rust.yml`) executes fmt, the `#[allow]` grep gate and cargo-deny over both workspaces; clippy executes as the flake checks.
 
 ## Rust
 

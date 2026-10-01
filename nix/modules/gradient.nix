@@ -623,7 +623,7 @@ in {
           type = lib.types.ints.positive;
           default = 3600;
           description = ''
-            Seconds between NAR signature backfill runs. Uploads are signed immediately; this
+            Seconds between NAR signature backfill passes. Uploads are signed immediately; this
             only catches subscription placeholders and unsigned leftovers.
           '';
         };
@@ -632,7 +632,7 @@ in {
           type = lib.types.ints.positive;
           default = 300;
           description = ''
-            Seconds between DWARF build ID index backfill runs. Uploads are indexed immediately;
+            Seconds between DWARF build ID index backfill passes. Uploads are indexed immediately;
             this only catches paths cached before the index existed or interrupted by a restart.
           '';
         };
@@ -642,7 +642,7 @@ in {
         intervalSecs = lib.mkOption {
           type = lib.types.ints.positive;
           default = 3600;
-          description = "Seconds between garbage collection runs.";
+          description = "Seconds between garbage collection passes.";
         };
 
         narTtlHours = lib.mkOption {
@@ -687,7 +687,7 @@ in {
           default = 3600;
           description = ''
             Seconds from the end of one background deep garbage collection round to the start of the
-            next. `0` runs a round only when one is requested.
+            next. `0` starts a round only when one is requested.
           '';
         };
 
@@ -696,7 +696,7 @@ in {
           default = 1000;
           description = ''
             Milliseconds between two units of a storage migration or a background deep garbage
-            collection round. A requested round runs its units without a pause.
+            collection round. A requested round executes its units without a pause.
           '';
         };
       };
@@ -732,7 +732,7 @@ in {
           sweepIntervalSecs = lib.mkOption {
             type = lib.types.ints.positive;
             default = 3600;
-            description = "Seconds between eval cache eviction runs.";
+            description = "Seconds between eval cache eviction passes.";
           };
         };
       };
@@ -849,7 +849,7 @@ in {
         rollupIntervalSecs = lib.mkOption {
           type = lib.types.ints.positive;
           default = 60;
-          description = "Seconds between metric rollup runs.";
+          description = "Seconds between metric rollup passes.";
         };
 
         retention = {

@@ -37,9 +37,9 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `cache.debugIndexIntervalSecs` | int | `300` | `GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS` | Seconds between DWARF build ID index backfill runs. |
+| `cache.debugIndexIntervalSecs` | int | `300` | `GRADIENT_CACHE_DEBUG_INDEX_INTERVAL_SECS` | Seconds between DWARF build ID index backfill passes. |
 | `cache.maxStorageGb` | int | `0` | `GRADIENT_CACHE_MAX_STORAGE_GB` | Instance-wide limit on cached NAR storage in GB. |
-| `cache.signSweepIntervalSecs` | int | `3600` | `GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS` | Seconds between NAR signature backfill runs. |
+| `cache.signSweepIntervalSecs` | int | `3600` | `GRADIENT_CACHE_SIGN_SWEEP_INTERVAL_SECS` | Seconds between NAR signature backfill passes. |
 | `cache.upstreamQueryConcurrency` | int | `32` | `GRADIENT_CACHE_UPSTREAM_QUERY_CONCURRENCY` | Maximum simultaneous narinfo requests to upstream caches across the server. |
 
 ## `database`
@@ -75,7 +75,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `eval.cache.maxAgeDays` | int | `30` | `GRADIENT_EVAL_CACHE_MAX_AGE_DAYS` | Days after which an eval cache blob is evicted regardless of the size limit. |
 | `eval.cache.maxTotalBytes` | int | `10737418240` | `GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES` | Total size in bytes of shared eval cache blobs. |
-| `eval.cache.sweepIntervalSecs` | int | `3600` | `GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS` | Seconds between eval cache eviction runs. |
+| `eval.cache.sweepIntervalSecs` | int | `3600` | `GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS` | Seconds between eval cache eviction passes. |
 | `eval.maxKeep` | int | `30` | `GRADIENT_EVAL_MAX_KEEP` | Maximum number of evaluations kept per task. |
 
 ## `frontend`
@@ -89,13 +89,13 @@ Declarative entities under `services.gradient.state` are in the [state reference
 
 | Option | Type | Default | Env | Description |
 |---|---|---|---|---|
-| `gc.intervalSecs` | int | `3600` | `GRADIENT_GC_INTERVAL_SECS` | Seconds between garbage collection runs. |
+| `gc.intervalSecs` | int | `3600` | `GRADIENT_GC_INTERVAL_SECS` | Seconds between garbage collection passes. |
 | `gc.narTtlHours` | int | `336` | `GRADIENT_GC_NAR_TTL_HOURS` | Hours a cached path outside the live closure of retained evaluations is kept after its last fetch, or its upload if never fetched. |
 | `gc.narUploadGraceHours` | int | `24` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | Hours before an unreferenced NAR object is deleted, covering the window between its upload and the commit of its database rows. |
 | `gc.orphanDerivationHours` | int | `24` | `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` | Hours before a derivation outside the build closure of every retained evaluation is deleted. |
 | `gc.wedgedEvalHours` | int | `24` | `GRADIENT_GC_WEDGED_EVAL_HOURS` | Hours an evaluation may stay in one phase before it is considered stuck and stops blocking evaluation garbage collection. |
-| `gc.deepIntervalSecs` | int | `3600` | `GRADIENT_GC_DEEP_INTERVAL_SECS` | Seconds from the end of one background [deep GC](../contributors/internals/nar-storage.md#deep-gc) round to the start of the next. `0` runs a round only when one is requested. |
-| `gc.deepPaceMs` | int | `1000` | `GRADIENT_GC_DEEP_PACE_MS` | Milliseconds between two units of a [storage migration](../contributors/internals/nar-storage.md#storage-migrations) or a background deep GC round. A requested round runs its units without a pause. |
+| `gc.deepIntervalSecs` | int | `3600` | `GRADIENT_GC_DEEP_INTERVAL_SECS` | Seconds from the end of one background [deep GC](../contributors/internals/nar-storage.md#deep-gc) round to the start of the next. `0` starts a round only when one is requested. |
+| `gc.deepPaceMs` | int | `1000` | `GRADIENT_GC_DEEP_PACE_MS` | Milliseconds between two units of a [storage migration](../contributors/internals/nar-storage.md#storage-migrations) or a background deep GC round. A requested round executes its units without a pause. |
 
 ## `githubApp`
 
@@ -139,7 +139,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `metrics.otlp.pushIntervalSecs` | int | `30` | `GRADIENT_METRICS_OTLP_PUSH_INTERVAL_SECS` | Seconds between OTLP metric pushes. |
 | `metrics.retention.rawDays` | int | `14` | `GRADIENT_METRICS_RETENTION_RAW_DAYS` | Days to keep raw phase and worker samples. |
 | `metrics.retention.rollupDays` | int | `400` | `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | Days to keep minute and hour rollups; day and week rollups are kept forever. |
-| `metrics.rollupIntervalSecs` | int | `60` | `GRADIENT_METRICS_ROLLUP_INTERVAL_SECS` | Seconds between metric rollup runs. |
+| `metrics.rollupIntervalSecs` | int | `60` | `GRADIENT_METRICS_ROLLUP_INTERVAL_SECS` | Seconds between metric rollup passes. |
 | `metrics.tokenFile` | null or path | `null` | - | File containing the bearer token required to scrape `GET /metrics`. |
 | `metrics.workerSampleIntervalSecs` | int | `15` | `GRADIENT_METRICS_WORKER_SAMPLE_INTERVAL_SECS` | Seconds between worker metric samples. |
 
@@ -364,7 +364,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `worker.packages.git` | package | `config.programs.git.package` | - | Git package available to the worker for cloning repositories. |
 | `worker.packages.gradient` | package | derived | - | The gradient package to use. |
-| `worker.packages.nix` | package | derived | `GRADIENT_WORKER_NIX_BIN` (part) | Nix package whose `nix` the worker runs for evaluation and fetching. |
+| `worker.packages.nix` | package | derived | `GRADIENT_WORKER_NIX_BIN` (part) | Nix package whose `nix` the worker executes for evaluation and fetching. |
 | `worker.packages.ssh` | package | `config.programs.ssh.package` | `GRADIENT_WORKER_SSH_BIN` (part) | OpenSSH package used as `GIT_SSH_COMMAND` for fetching private flake inputs. |
 
 ## `worker.reverseProxy`

@@ -33,14 +33,14 @@ flowchart LR
 
 ## Concurrency
 
-A task runs one evaluation at a time. A trigger that fires during a running evaluation follows the task's concurrency policy:
+A task executes one evaluation at a time. A trigger that fires during a running evaluation follows the task's concurrency policy:
 
 | Policy | Running evaluation | Running builds |
 |---|---|---|
 | `soft_abort` (default) | Aborted, the new one takes over | Finish, and the new evaluation reuses their outputs |
 | `hard_abort` | Aborted | Cancelled |
 | `skip` | Keeps running | Keep running; the new event is dropped |
-| `all` | Keeps running, the new one runs alongside | Keep running |
+| `all` | Keeps running, the new one starts alongside | Keep running |
 
 ## Related
 

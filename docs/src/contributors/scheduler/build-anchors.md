@@ -60,7 +60,7 @@ Every other message flushes the queue first: a write after a batch or a commit s
 
 - Queued ingest batches share one transaction with a savepoint each (`ingest_one`); one that fails for its content fails only its caller.
 - Queued NAR commits run set-based under one savepoint (`nar::commit_batch`): one statement per step for the whole batch instead of a dozen per NAR, since a commit's cost is round trips. If the batch fails, its NARs commit one by one (`commit_one`), each under its own savepoint, so a bad one fails only its uploader.
-- A flush runs on the next mailbox turn, or at once when the queue reaches `INGEST_ROW_BUDGET` (5000 derivations) or `NAR_COMMIT_BUDGET` (32 commits). A flush stops taking NAR commits after `NAR_FLUSH_TIME` (100 ms) and leaves the rest to the next mailbox turn, since it holds every commit's anchor locks to its end.
+- A flush takes place on the next mailbox turn, or at once when the queue reaches `INGEST_ROW_BUDGET` (5000 derivations) or `NAR_COMMIT_BUDGET` (32 commits). A flush stops taking NAR commits after `NAR_FLUSH_TIME` (100 ms) and leaves the rest to the next mailbox turn, since it holds every commit's anchor locks to its end.
 - The worker's wire has no acknowledgement to retry on. A failed batch fails its evaluation (`fail_evaluation`) instead of leaving a hole.
 - `IngestBatch.truly_substituted` is the one fact from outside the graph: derivations already whole in our cache, established by the scheduler and keyed by drv path. Their new anchors start `Substituted`. Ids are assigned inside the transaction.
 - Upstream availability is not part of a batch; the probe answers through `UpstreamHits` for demanded anchors. A batch writes `substitutable = false` on new anchors only.
@@ -72,12 +72,12 @@ Every other message flushes the queue first: a write after a batch or a commit s
 |---|---|---|
 | `CALL_TIMEOUT` | 30 s | Wait for the actor to exist after a restart |
 | `GRAPH_TX_BUDGET` | 120 s | Per transaction; past this the transaction rolls back and the caller gets `graph transaction exceeded 120s`. Also set as the transaction's `statement_timeout`: the rollback waits for the running statement, so only Postgres can end it |
-| `GRAPH_TX_ATTEMPTS` | 3 | Runs of a transaction aborted with SQLSTATE `40P01` or `40001` |
+| `GRAPH_TX_ATTEMPTS` | 3 | Attempts of a transaction aborted with SQLSTATE `40P01` or `40001` |
 
-- A caller waits for its reply without a deadline. The actor runs a message whose caller gave up, so a caller-side timeout would report a write that still lands as failed. A worker session behind a backlog blocks its reader as backpressure.
+- A caller waits for its reply without a deadline. The actor executes a message whose caller gave up, so a caller-side timeout would report a write that still lands as failed. A worker session behind a backlog blocks its reader as backpressure.
 - A deadlock inside one batch fails the whole flush (`escalate_retryable`), and `transact` retries the flush.
 - Board events and probe requests an aborted attempt already sent are sent again by the retry.
-- `Transition::Reconcile` (`gradient_db::reconcile_build_graph`) and cache demotion run inside the actor. The consistency sweep (`consistency_sweep_pass`, `gradient-scheduler`) runs outside and is not retried; its next run picks the work up.
+- `Transition::Reconcile` (`gradient_db::reconcile_build_graph`) and cache demotion run inside the actor. The consistency sweep (`consistency_sweep_pass`, `gradient-scheduler`) executes outside and is not retried; its next run picks the work up.
 - No state is held between messages: a restart loses only batches still queued, and their callers get an error.
 
 ## Concurrent Walks

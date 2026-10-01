@@ -25,7 +25,7 @@ The theme (**System**, **Light**, **Dark**) is stored per browser, not per accou
 
 | Section | Shows | Actions |
 |---|---|---|
-| General | Name, display name, description, visibility | Edit; **Hide Build Requests task** hides the task holding `gradient build` runs from task lists; the runs continue |
+| General | Name, display name, description, visibility | Edit; **Hide Build Requests task** hides the task holding `gradient build` evaluations from task lists; the evaluations continue |
 | More Settings | Links to Members and Roles, Workers, Cache Subscriptions, Integrations, Webhooks | Open each page |
 | SSH Key | The public key the project clones with | Copy as a deploy key on the Git host |
 | Danger Zone | | **Regenerate Key**, the old key stops working at once; **Delete Project** |

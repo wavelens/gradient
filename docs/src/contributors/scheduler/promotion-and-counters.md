@@ -112,7 +112,7 @@ Five columns on `evaluation`, over the anchors its `build_job` rows name:
 - **Triggers** (`m20260923_000002_evaluation_anchor_counters.rs`): `evaluation_anchor_moved` (per row, `AFTER UPDATE OF status, demanded`), `evaluation_anchor_named` / `evaluation_anchor_unnamed` (per statement on `build_job` insert/delete). Raw SQL and ORM writes are covered alike.
 - Triggers append signed rows to `evaluation_anchor_delta`, for live evaluations only, and take no lock.
 - **Membership:** the SQL function `evaluation_anchor_counts(status, demanded)`. A unit test in `eval_counters.rs` holds its body to `graph_sql`; a predicate change needs a migration.
-- **Fold:** `fold_anchor_deltas` runs at the start of every waiting-state pass, one `DELETE ... RETURNING` under advisory lock `640`; an instance that finds the lock taken skips.
+- **Fold:** `fold_anchor_deltas` executes at the start of every waiting-state pass, one `DELETE ... RETURNING` under advisory lock `640`; an instance that finds the lock taken skips.
 - **Read:** `eval_counters` returns folded columns plus unfolded deltas.
 - **Counters answer only "not yet":** a naming and a transition in flight together can miss each other. A zero is confirmed by `reachability::eval_blocked`; a contradicted value is recounted (`recount_evaluations`, under the fold lock).
 - The consistency sweep recounts every in-flight evaluation and reports `eval_counter_drift`.
@@ -120,7 +120,7 @@ Five columns on `evaluation`, over the anchors its `build_job` rows name:
 ## Naming and Adoption
 
 - A batch names what it walked plus the direct inputs; the walk prunes on `walked AND unwalked_inputs = 0`. The interior of a pruned subtree is named only by the evaluation that walked the subtree.
-- Deleting that evaluation cascades those names away. `reachability::adopt_pending_closures` runs the open-closure walk from every `build_job` of a live evaluation and inserts the missing `(evaluation, derivation)` rows (`ON CONFLICT DO NOTHING`).
+- Deleting that evaluation cascades those names away. `reachability::adopt_pending_closures` performs the open-closure walk from every `build_job` of a live evaluation and inserts the missing `(evaluation, derivation)` rows (`ON CONFLICT DO NOTHING`).
 - Callers: the per-task GC (`settle_after_delete`, only when a cascaded name belonged to an open anchor), the graph reconciler (`adopt_pending_closure` for one evaluation), and the sweep when `pending_orphan_frontier` finds an unnamed open anchor one edge below a named one.
 
 ## Walk Completeness

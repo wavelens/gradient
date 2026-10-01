@@ -57,7 +57,7 @@ flowchart LR
 
 ## Instance Windows
 
-`instance_metrics_pass` runs every `metrics.instanceIntervalSecs` (30 s) and publishes the snapshot through an `ArcSwap`.
+`instance_metrics_pass` executes every `metrics.instanceIntervalSecs` (30 s) and publishes the snapshot through an `ArcSwap`.
 
 | Source table | Windows |
 |---|---|

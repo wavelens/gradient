@@ -35,9 +35,9 @@ The primary output lands in a `result` symlink, fetched from the project cache i
 gradient build .#hello --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable
 ```
 
-Applies to this run only and repeats for several inputs. The evaluation runs on a worker: the reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path. For an override on every run, see [Update Flake Inputs](flake-updates.md).
+Applies to this run only and repeats for several inputs. The evaluation takes place on a worker: the reference must be remote (`github:`, `git+ssh://`, `https://`, ...), never a local path. For an override on every run, see [Update Flake Inputs](flake-updates.md).
 
-## Background Runs
+## Background Evaluations
 
 ```sh
 eval=$(gradient build -b)
