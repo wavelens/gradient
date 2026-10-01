@@ -23,7 +23,7 @@ flowchart LR
 | Failed | The evaluation or at least one build failed |
 | Aborted | Stopped by hand or replaced by a newer evaluation |
 
-An evaluation skips every dependency subtree already recorded from earlier runs. **Full rewalk** in the task menu starts an evaluation that walks the whole closure again.
+An evaluation skips every dependency subtree already recorded by earlier evaluations. **Full rewalk** in the task menu starts an evaluation that walks the whole closure again.
 
 The evaluation page lists the builds grouped by status, each entry point above its dependencies, with the merged live log and **Abort**. Right-clicking a build opens **Graph**, **Show Job** (the [Job Board](../ui/job-board.md) dispatch), **Artefacts** and **Download Log**.
 

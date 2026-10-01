@@ -88,7 +88,7 @@ The **Forge Status Report** action, set up by the [forge guides](forge-github.md
 | Check | State |
 |---|---|
 | `gradient/<task>: Approval` | Only for pull requests from forks, until a maintainer approves |
-| `gradient/<task>: Evaluation` | Pending while the evaluation runs, then success or failure |
+| `gradient/<task>: Evaluation` | Pending while the evaluation is active, then success or failure |
 | `gradient/<task>: Build <entry point>` | One per entry point: pending, running, then success or failure |
 
 A `/gradient run <wildcard>` run reports as `gradient/<task>: Evaluation: <wildcard>` next to the default checks. **Test** checks the integration's access to the repository without posting a status.

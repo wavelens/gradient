@@ -54,7 +54,7 @@ sudo gradient-update
 journalctl -u gradient-deploy
 ```
 
-`gradient-update` runs the deployment at once, without waiting for the timer. The journal ends with `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or with the reason no deployment ran.
+`gradient-update` starts the deployment at once, without waiting for the timer. The journal ends with `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or with the reason no deployment ran.
 
 `... without a deployment for <name>` means no system matched: the `networking.hostName` of the built configuration differs from `deployFor`.
 
@@ -77,7 +77,7 @@ None of these fail the unit. While waiting, the service follows the task's live 
 | `waitForBuild` | `true` | `false` stops at once when the newest system is not built yet |
 | `websockets` | `true` | `false` checks every `pollIntervalSec` instead, for networks that block WebSocket upgrades |
 | `pollIntervalSec` | `60` | Check interval without WebSockets |
-| `randomizedDelaySec` | `"0"` | Spreads the runs of many machines |
+| `randomizedDelaySec` | `"0"` | Spreads the deployments of many machines |
 
 ## Next Steps
 

@@ -1,6 +1,6 @@
 # Proto
 
-The protocol between server and workers: one WebSocket at `/proto` with binary rkyv frames. A session runs handshake, authorization, capabilities, then the job loop.
+The protocol between server and workers: one WebSocket at `/proto` with binary rkyv frames. A session passes through handshake, authorization, capabilities, then the job loop.
 
 ```mermaid
 flowchart LR

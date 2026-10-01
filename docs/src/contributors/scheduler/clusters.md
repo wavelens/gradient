@@ -29,7 +29,7 @@ flowchart LR
 
 ## Claim
 
-`claim_cluster` (`backend/gradient-db/src/cluster.rs`) runs in one transaction:
+`claim_cluster` (`backend/gradient-db/src/cluster.rs`) executes in one transaction:
 
 1. Insert the `cluster_attempt` row, gated on `cluster_job.status = Queued`. `ON CONFLICT` on `idx-cluster_attempt-open` inserts nothing.
 2. Claim each member with the single-dispatch claim statement (`claim_dispatch`): its own job key (`eval:<evaluation>`, `build:<anchor>`), its own gate, and `cluster_attempt` set.
@@ -58,7 +58,7 @@ flowchart LR
 
 ## Placement
 
-The `cluster-dispatch` pass runs every 5 s and whenever a `RequestJob` goes unanswered. It first expires overdue prepares, then places every ready cluster, prioritized clusters first, then the oldest.
+The `cluster-dispatch` pass executes every 5 s and whenever a `RequestJob` goes unanswered. It first expires overdue prepares, then places every ready cluster, prioritized clusters first, then the oldest.
 
 - A worker is a seat for a member when it has an idle slot of the member's kind, can run the job (capabilities, project access) and matches the member's `pin`.
 - Every member sits on its own worker (bipartite matching).

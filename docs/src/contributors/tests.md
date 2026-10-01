@@ -22,7 +22,7 @@ How testing is structured and which patterns a new test follows. Individual test
 
 ## Running
 
-| Command | Runs |
+| Command | Executes |
 |---|---|
 | `nix flake check` | Every check below |
 | `nix build .#checks.x86_64-linux.unittest` | Backend tests (nextest, then doc tests) |
@@ -77,7 +77,7 @@ The prelude also re-exports the protocol doubles: `MockProtoServer` (`gradient-w
 
 ### VM Tests
 
-- **A module under test gets a scripted API.** A module that only consumes the HTTP API (`gradient-deploy.nix`) runs against a stdlib-only stub driven through `/control`, which swaps the scripted state and pushes the matching WebSocket event. The VM needs no Postgres and no builder.
+- **A module under test gets a scripted API.** A module that only consumes the HTTP API (`gradient-deploy.nix`) executes against a stdlib-only stub driven through `/control`, which swaps the scripted state and pushes the matching WebSocket event. The VM needs no Postgres and no builder.
 - **Assert on the database's own accounting.** The e2e test checks plan shapes (`EXPLAIN`: nested loop, no merge join) and bills the run through `pg_stat_statements`. Thresholds stay loose (pathology detectors on a slow VM), and the top statements are printed.
 - **Two database sessions prove a lock.** Two FIFO-fed `psql` sessions from one script, a third connection polling `pg_stat_activity` for `wait_event_type = 'Lock'`, and the same interleaving twice: with and without the lock. Assert the contrast.
     - Bound every wait and dump `pg_stat_activity` into the failure.
@@ -87,7 +87,7 @@ The prelude also re-exports the protocol doubles: `MockProtoServer` (`gradient-w
 
 ### SQL Plan Gate
 
-`gradient_db::sql!` declares every hand-written statement with its parameter kinds and tier; `backend/clippy.toml` forbids building a `Statement` any other way. The e2e test's last phase amplifies the database to production scale and runs `gradient-sql-gate`, which draws real parameters and explains each statement in a rolled-back transaction.
+`gradient_db::sql!` declares every hand-written statement with its parameter kinds and tier; `backend/clippy.toml` forbids building a `Statement` any other way. The e2e test's last phase amplifies the database to production scale and executes `gradient-sql-gate`, which draws real parameters and explains each statement in a rolled-back transaction.
 
 | Tier | Covers | Extra |
 |---|---|---|
@@ -105,7 +105,7 @@ The prelude also re-exports the protocol doubles: `MockProtoServer` (`gradient-w
 
 ### CLI and Lints
 
-- **CLI tests drive the real binary:** `assert_cmd` runs `gradient` with `HOME` and `XDG_CONFIG_HOME` in a `TempDir` with a seeded `config.toml`; `wiremock` stands in for the server.
+- **CLI tests drive the real binary:** `assert_cmd` executes `gradient` with `HOME` and `XDG_CONFIG_HOME` in a `TempDir` with a seeded `config.toml`; `wiremock` stands in for the server.
 - **`unwrap` needs a reason.** Both workspaces deny `clippy::unwrap_used`; test scaffolding opts out per file:
 
 ```rust
@@ -142,7 +142,7 @@ The scheduler and e2e suites are `mk.nix { self, pkgs, topology }`. Their `defau
 - `nix/tests/harness/contract.nix` (`lib.tests.contract`) is asserted at evaluation; `check.nix` (the `test-topologies` check) pins the direct topology.
 - Scripts use the prelude, never a hardcoded unit or ID: `WORKER_NODES`, `wait_workers_ready()`, `fleet_units()`, `requires(what, *tags)`.
 - An assertion that needs the server to see each worker directly goes under `requires(..., "distinct-upstream-workers")`. Gate the assertion, not the phase, when later phases need the state.
-- The proxy repository runs both suites over `topologies.proxied` as `scheduler-proxied` and `e2e-proxied`.
+- The proxy repository executes both suites over `topologies.proxied` as `scheduler-proxied` and `e2e-proxied`.
 
 ## Conventions
 

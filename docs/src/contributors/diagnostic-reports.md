@@ -15,7 +15,7 @@ flowchart LR
 | Part | Path | Role |
 |---|---|---|
 | Extractor | `backend/gradient-report` | Writes the SQLite file: `schema.rs` (tables, `SCHEMA_VERSION`), `extract.rs`, `redact.rs`, `logs.rs`, `config_snapshot.rs` |
-| Inspector | `nix/tools/report-inspector` | The `gradient-report` tool: Python stdlib only, runs on any maintainer machine; pytest suite in `tests/`, run by the package build |
+| Inspector | `nix/tools/report-inspector` | The `gradient-report` tool: Python stdlib only, works on any maintainer machine; pytest suite in `tests/`, executed by the package build |
 
 ## Anonymisation
 
@@ -133,7 +133,7 @@ sqlite3 report.db \
 
 ## Inspector
 
-`gradient-report` is on `PATH` in `nix develop` and runs as `nix run .#gradient-report`.
+`gradient-report` is on `PATH` in `nix develop` and starts as `nix run .#gradient-report`.
 
 | Command | Shows |
 |---|---|

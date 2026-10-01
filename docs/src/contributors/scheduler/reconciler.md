@@ -15,7 +15,7 @@ flowchart LR
 
 ## Reconcile Scopes
 
-`gradient_db::reconcile_build_graph(ctx, scope)` (`backend/gradient-db/src/reconcile.rs`) runs as `Transition::Reconcile` in the graph actor: a reconcile never interleaves with an ingest. Both scopes name an evaluation; every statement is bounded to that evaluation's dependency closure.
+`gradient_db::reconcile_build_graph(ctx, scope)` (`backend/gradient-db/src/reconcile.rs`) executes as `Transition::Reconcile` in the graph actor: a reconcile never interleaves with an ingest. Both scopes name an evaluation; every statement is bounded to that evaluation's dependency closure.
 
 | Scope | Sent by | Thaw |
 |---|---|---|
@@ -23,8 +23,8 @@ flowchart LR
 | `Unstick(id)` | A `Building` evaluation judged graph-stuck (`waiting_state::attempt_graph_unstick`), and the `graph-stuck-reheal` pass | Same, minus the `deterministic_build_failure` subtree |
 
 - A failure is valid for the evaluation that recorded the failure: a fresh evaluation rebuilds the anchor once, an unstick of the same evaluation leaves the anchor alone.
-- `restart_failed` never walks; `inherit_names` copies the previous evaluation's `build_job` rows and the `Eval` heal runs on them.
-- No tick runs a reconcile and no step iterates to a fixpoint.
+- `restart_failed` never walks; `inherit_names` copies the previous evaluation's `build_job` rows and the `Eval` heal executes on them.
+- No tick starts a reconcile and no step iterates to a fixpoint.
 
 ## Reconcile Steps
 
@@ -56,7 +56,7 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 | `LogFinalize` outbox row | Latest attempt of every anchor that really finished |
 | Demand recompute, queue settle, upstream probe request | Anchor crossed the `BUILDER_STATUSES` boundary; regated anchors are announced in a second round |
 
-- Outbox rows are written in the transaction that moved the anchor. The `gradient-effects` actor expands `Event` rows into forge, action and webhook deliveries and runs them with retries.
+- Outbox rows are written in the transaction that moved the anchor. The `gradient-effects` actor expands `Event` rows into forge, action and webhook deliveries and executes them with retries.
 - Moves inside a graph transaction are staged on the `ReadySet` and published after the commit: the dispatcher reads on its own connection.
 - `collapse_transitions` reduces two moves of one anchor in one transaction to the net move.
 
@@ -77,7 +77,7 @@ Both mutation models report `(derivation, from, to)` moves to `emit_transition_e
 
 ## Consistency Sweep
 
-`graph_consistency_report` (`backend/gradient-db/src/consistency.rs`) runs every `metrics.graphConsistencyIntervalSecs` (300 s, `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS`). The counters are moved, never derived: this sweep is their only backstop. Each step runs before the one that reads its column.
+`graph_consistency_report` (`backend/gradient-db/src/consistency.rs`) executes every `metrics.graphConsistencyIntervalSecs` (300 s, `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS`). The counters are moved, never derived: this sweep is their only backstop. Each step executes before the one that reads its column.
 
 | # | Step | Report field |
 |---|---|---|
@@ -130,7 +130,7 @@ A `dispatched_job` row is the proof a job is out; `claim_dispatch` inserts the r
 
 ## Missing Inputs
 
-A build failing `InputsUnavailable` runs `self_heal::reconcile_missing_inputs` (`backend/gradient-graph/src/self_heal.rs`) per missing path:
+A build failing `InputsUnavailable` executes `self_heal::reconcile_missing_inputs` (`backend/gradient-graph/src/self_heal.rs`) per missing path:
 
 1. `demote_cached_output`: clears `is_cached` and `external_url`, clears `substitutable`, retires the `cached_path` row, deletes the NAR.
 2. A producerless path (`.drv`, source) is kept while its NAR still exists; the rebuildable output referrers are demoted instead (`demote_referrers_of`).

@@ -11,7 +11,7 @@ Server metrics in Prometheus or any OpenTelemetry collector: workers, queue, bui
 |---|---|---|
 | Direction | Prometheus scrapes `GET /metrics` | Gradient pushes OTLP over HTTP |
 | Metrics | All metrics below | Workers, jobs and cache gauges |
-| Pick when | Prometheus already runs | A collector already runs, or the server is unreachable for a scraper |
+| Pick when | Prometheus is already active | A collector is already active, or the server is unreachable for a scraper |
 
 ## 1. Prometheus
 

@@ -18,7 +18,7 @@ in {
         default = pkgs.gradient-nix;
         defaultText = lib.literalExpression "pkgs.gradient-nix";
         description = ''
-          Nix package whose {command}`nix` the worker runs for evaluation and fetching. Defaults to
+          Nix package whose {command}`nix` the worker executes for evaluation and fetching. Defaults to
           Gradient's Nix fork so it matches the worker's embedded evaluator.
         '';
       };

@@ -37,7 +37,7 @@ A cache serves paths from its upstreams as if the cache held them. A client aski
 
 ## Substitution
 
-Before a build runs, Gradient decides per derivation whether building is needed at all:
+Before a build starts, Gradient decides per derivation whether building is needed at all:
 
 1. An output already in any cache on the instance needs no work.
 2. Otherwise Gradient asks the upstreams of the caches the project subscribes to for each output.

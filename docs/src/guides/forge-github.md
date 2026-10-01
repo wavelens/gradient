@@ -29,7 +29,7 @@ services.gradient.githubApp = {
 
 ## 3. Install the App
 
-Install the App from its GitHub page on the account that owns the repositories.
+Install the App from its GitHub page on the account that owns the repositories. A project's **Integrations** page links that page for as long as no installation is linked.
 
 Gradient matches the granted repositories against task repository URLs (`https://`, SSH and `github:owner/repo` all match) and creates a `github-<account>` integration pair in each matching project.
 
@@ -77,7 +77,7 @@ The approval gate is a task setting: **Require maintainer approval for PRs from 
 | `404 Pending credentials` after creating the App | The credentials were already shown or the server restarted; start step 1 again |
 | `403 superuser required` | The account lacks the superuser flag |
 | An approving review does not release a fork pull request | The App predates the `pull_request_review` event; enable **Pull request review** under the App's **Permissions & events** |
-| Push arrives, no evaluation runs | No task repository URL matches the pushed repository |
+| Push arrives, no evaluation starts | No task repository URL matches the pushed repository |
 | `403 forbidden_source_ip` | The integration's allowed source IPs miss GitHub's `hooks` ranges from `https://api.github.com/meta` |
 
 ## Next Steps

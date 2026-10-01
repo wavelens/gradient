@@ -55,7 +55,7 @@ sequenceDiagram
 
 A build job carries exactly one `BuildSpec`: one shared build (anchor).
 
-| `kind` | When | Runs |
+| `kind` | When | Executes |
 |---|---|---|
 | `Build` | Default | Prefetch inputs, then the Nix daemon builds the derivation |
 | `Substitute` | The outputs exist in an upstream cache | Fetches the outputs without a Nix store |
@@ -99,7 +99,7 @@ A build job carries exactly one `BuildSpec`: one shared build (anchor).
 
 - **InputsUnavailable:** an input the cache listed is gone (uncached, `404`/`410` on the URL, or `NarUnavailable`). The server deletes the stale cache row and object, resets the producing build, and retries; after `build.inputsUnavailableMaxLoops` (3) loops the build fails permanently.
 - **DependencyFailed** spreads upward over the dependency graph from `Permanent` and `Timeout` failures, across evaluations.
-- **Eval job outage:** an eval job that failed `Transient` (the server connection dropped, an object PUT or a `CacheQuery` stopped answering) re-queues its evaluation, up to `build.maxAttempts` (3) runs.
+- **Eval job outage:** an eval job that failed `Transient` (the server connection dropped, an object PUT or a `CacheQuery` stopped answering) re-queues its evaluation, up to `build.maxAttempts` (3) attempts.
 - An evaluation ends `Completed`, or `Failed` when any build failed, was aborted or dependency-failed, or an error message exists.
 
 ## Cluster Members
@@ -109,7 +109,7 @@ A [cluster member](../scheduler/clusters.md) arrives as `AssignJob` with `cluste
 | Event | Worker |
 |---|---|
 | `AssignJob` with `cluster` | Holds the slot without running the job and accepts; a second member of the same attempt is rejected |
-| `StartCluster { attempt, roster }` | Runs the held member; its signal route opens with the roster |
+| `StartCluster { attempt, roster }` | Starts the held member; its signal route opens with the roster |
 | `ClusterSignal` from the server | Delivered to the running member of that attempt; dropped once the member finished |
 | `ClusterSignal` to the server | Sent by the member; `to = None` reaches every other member |
 | `AbortCluster { attempt }` | Drops a held member unreported and aborts a running one (`JobFailed { Aborted }`) |

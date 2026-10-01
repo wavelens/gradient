@@ -1,6 +1,6 @@
 # Workers
 
-A **worker** is a machine running `gradient-worker`. The worker connects to the server, takes the jobs the projects that enable the worker have queued, and sends the results back. The server itself runs no Nix; every clone, evaluation and build happens on a worker.
+A **worker** is a machine running `gradient-worker`. The worker connects to the server, takes the jobs the projects that enable the worker have queued, and sends the results back. The server itself executes no Nix; every clone, evaluation and build happens on a worker.
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ One machine can take all three, or the kinds can be split, e.g. a large-memory m
 
 A build only goes to a worker that supports the derivation's system (e.g. `aarch64-linux`) and every required system feature (e.g. `kvm`, `big-parallel`). Systems come from `worker.system.architectures` (default: the host platform); features are detected from the local Nix unless `worker.system.features` sets them.
 
-Among the matching workers, the scheduler scores each queued job and steers heavy builds and evaluations away from workers without enough free memory for the predicted peak, learned from earlier runs. `services.gradient.worker.build.metrics` records the per-build measurements this prediction needs.
+Among the matching workers, the scheduler scores each queued job and steers heavy builds and evaluations away from workers without enough free memory for the predicted peak, learned from earlier builds. `services.gradient.worker.build.metrics` records the per-build measurements this prediction needs.
 
 ## Zones
 

@@ -44,7 +44,7 @@ logs/<last 2 chars>/<attempt>.log                  # live log
 logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 ```
 
-- **Live:** appended to `${baseDir}/logs/...` while the attempt runs, also with S3 (S3 has no append).
+- **Live:** appended to `${baseDir}/logs/...` while the attempt is active, also with S3 (S3 has no append).
 - **Finalized:** `finalize_build_log` appends the live file as zstd chunks after any earlier chunks, indexes them in `build_log_chunk` and drops the live file. With S3 the chunks go to `<prefix>logs/...` only.
 - **Finalize Triggers:** the anchor turning terminal, a new attempt replacing the latest one (abort, lost worker, retry) and an upstream log arriving after the build (log substitution). Every trigger queues a `LogFinalize` outbox row for the attempt.
 - **Missing Chunks:** a chunk whose object is gone renders as one `[log chunk unavailable]` line per indexed line, and a re-finalize keeps one such line in its place.
@@ -54,7 +54,7 @@ logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 
 Layout changes of NAR, log and blob storage come as storage migrations, the storage counterpart of the database migrations (`gradient-cache/src/cacher/storage_migrations/`).
 
-- **Units:** a migration lists its units in ascending order; each unit is idempotent and runs again in full when a restart cuts it short.
+- **Units:** a migration lists its units in ascending order; each unit is idempotent and executes again in full when a restart cuts it short.
 - **Ledger:** `storage_migration` holds one row per migration: `checkpoint` names the last finished unit, `applied_at` marks it done.
 - **Order:** pending migrations run in registry order, one unit per `gc.deepPaceMs`, and before any [deep GC](#deep-gc) unit: the deep GC reads only the current layout.
 - **Readers:** a migration that moves live objects keeps the old location readable until it is applied.
@@ -75,8 +75,8 @@ The deep GC reconciles every storage backend against the database, one unit at a
 | `partials` | Unfinished uploads under `nar-partial`, `nar-upload-partial` and `source-upload-partial` older than `nar.partialTtlSecs`, and directories left empty by the older nested layout. No other sweep walks these roots: a walk on a session or request path stalls it behind the filesystem |
 
 - **Rounds:** an `admin_task` row, `kind = deep_gc`, `pending` -> `running` -> `completed`. The partial unique index `admin_task_one_active_per_kind` allows one active round.
-- **Background:** a round starts `gc.deepIntervalSecs` after the last one finished (`0` disables background rounds) and runs one unit per `gc.deepPaceMs`.
-- **Requested:** `POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) starts a round, or sends the active one back to its first unit. A requested round runs its units back to back.
+- **Background:** a round starts `gc.deepIntervalSecs` after the last one finished (`0` disables background rounds) and executes one unit per `gc.deepPaceMs`.
+- **Requested:** `POST /api/v1/admin/maintenance/deep-gc` (superuser, `202`) starts a round, or sends the active one back to its first unit. A requested round executes its units back to back.
 - **Checkpoint:** `admin_task.checkpoint` names the last finished unit and `progress` the running report, read at `GET /api/v1/admin/tasks[/{task_id}]`. A server restart resumes the round after its checkpoint.
 - **Restart Race:** a checkpoint is saved only while `started_at` still matches the run that took the unit; a `POST` in between resets `started_at` and wins.
 - **Failure** of a unit leaves the checkpoint in place; the next tick retries the same unit.
