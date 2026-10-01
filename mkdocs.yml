@@ -35,6 +35,9 @@ theme:
 
 docs_dir: docs/src
 
+extra_css:
+  - stylesheets/roadmap.css
+
 nav:
   - Home: index.md
   - Get Started:
@@ -79,6 +82,7 @@ nav:
       - API: reference/api.md
       - Events and Webhooks: reference/events.md
       - Scheduler Policies: reference/scheduler-policies.md
+  - Roadmap: roadmap.md
   - Contributors:
       - contributors/index.md
       - Architecture: contributors/architecture.md
