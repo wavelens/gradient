@@ -46,11 +46,12 @@ const HEALTH: BoardHealth = {
 const TASK: AdminTask = {
   id: 't1',
   kind: 'deep_gc',
-  status: 'completed',
+  status: 'running',
   created_at: '2026-06-01T10:00:00',
   started_at: '2026-06-01T10:00:01',
   finished_at: '2026-06-01T10:05:00',
   progress: null,
+  checkpoint: 'nars/0a',
   error: null,
   created_by: null,
 };
@@ -94,6 +95,10 @@ describe('BoardHealthComponent', () => {
 
     it('renders the deep_gc task row', () => {
       expect(fixture.nativeElement.textContent).toContain('deep_gc');
+    });
+
+    it('shows where a running round resumes', () => {
+      expect(fixture.nativeElement.textContent).toContain('nars/0a');
     });
 
     it('hides the "Set up GitHub App" link', () => {

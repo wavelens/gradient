@@ -5568,15 +5568,15 @@ paths:
   /admin/maintenance/deep-gc:
     post:
       tags: [admin]
-      summary: Start a deep GC sweep
+      summary: Request a deep GC round
       description: |
-        Starts an asynchronous reconciliation between the database and every
-        storage backend (NAR files, build-request blobs, build logs). Returns
-        `202` immediately with the task id; poll
-        `GET /admin/tasks/{task_id}` for progress and final state.
+        Requests a reconciliation between the database and every storage
+        backend (NAR files, build-request blobs, build logs, upload partials),
+        run without pausing between units. Returns `202` immediately with the
+        task id; poll `GET /admin/tasks/{task_id}` for progress and final state.
 
-        Returns `409 Conflict` if a `deep_gc` task is already `pending` or
-        `running`.
+        When a `deep_gc` round is already `pending` or `running`, that round
+        starts over from its first unit and its id is returned.
 
         Requires `superuser`.
       operationId: startDeepGc
@@ -5584,7 +5584,7 @@ paths:
         - bearerAuth: []
       responses:
         '202':
-          description: Sweep accepted
+          description: Round requested
           content:
             application/json:
               schema:
@@ -5606,8 +5606,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          description: A deep_gc task is already active.
 
   /admin/draining:
     post:
@@ -9888,8 +9886,8 @@ components:
       type: string
       enum: [pending, running, completed, failed]
       description: |
-        Lifecycle status for an admin task. `failed` includes the case where
-        the server was restarted while the task was running.
+        Lifecycle status for an admin task. A `deep_gc` round interrupted by a
+        server restart stays `running` and resumes after its checkpoint.
 
     AdminTask:
       type: object
@@ -9919,7 +9917,13 @@ components:
           nullable: true
           description: |
             Free-form JSON object emitted by the sweep. For `deep_gc` this
-            mirrors `DeepGcReport` (counts per pass).
+            mirrors `DeepGcReport` (counts per pass, summed over finished units).
+        checkpoint:
+          type: string
+          nullable: true
+          description: |
+            The last finished unit of the round, `<pass>` or `<pass>/<shard>`
+            (e.g. `nars/0a`). A restart resumes after it.
         error:
           type: string
           nullable: true

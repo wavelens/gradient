@@ -63,8 +63,9 @@ pub fn make_ctx() -> crate::CiContext {
         ) -> BoxFuture<'a, anyhow::Result<()>> {
             Box::pin(async { Ok(()) })
         }
-        fn list_logs<'a>(
+        fn list_shard<'a>(
             &'a self,
+            _shard: &'a str,
         ) -> BoxFuture<'a, anyhow::Result<Vec<gradient_entity::ids::BuildAttemptId>>> {
             Box::pin(async { Ok(Vec::new()) })
         }

@@ -735,40 +735,33 @@ impl NarStore {
         self.delete_object(&self.blob_path(project, hash)).await
     }
 
-    /// Lists all NAR hashes currently present in the store (both local and S3).
-    /// Returns the full hash strings as stored (e.g. `"ab12cd34..."`).
-    pub async fn list_hashes(&self) -> Result<Vec<String>> {
-        Ok(self
-            .list_hashes_with_modified()
-            .await?
-            .into_iter()
-            .map(|(hash, _)| hash)
-            .collect())
+    /// Every two-character key shard below `nars/`, in ascending key order.
+    pub fn shards() -> Vec<String> {
+        let chars = gradient_util::nix_hash::NIX32_CHARS;
+        chars
+            .iter()
+            .flat_map(|&a| chars.iter().map(move |&b| format!("{}{}", a as char, b as char)))
+            .collect()
     }
 
-    /// Like [`Self::list_hashes`] but pairs each hash with its object's
-    /// last-modified time as a unix timestamp (seconds). The orphan-file sweep
-    /// uses this to spare freshly-written NARs: an upload lands on disk before
-    /// the eval commits its `derivation`/`cached_path` rows, so for a brief
-    /// window the keep-set does not yet reference it - reclaiming it then strands
-    /// a zombie `cached_path` the dispatch gate trusts.
-    pub async fn list_hashes_with_modified(&self) -> Result<Vec<(String, i64)>> {
-        let prefix = Path::from(format!("{}nars", self.prefix));
+    /// The NAR hashes stored in one shard, each with its object's last-modified
+    /// time as a unix timestamp (seconds). The orphan-file sweep uses the time to
+    /// spare freshly-written NARs: an upload lands before the eval commits its
+    /// `derivation`/`cached_path` rows, so for a brief window the keep-set does
+    /// not yet reference it - reclaiming it then strands a zombie `cached_path`
+    /// the dispatch gate trusts.
+    pub async fn list_shard(&self, shard: &str) -> Result<Vec<(String, i64)>> {
+        let prefix = Path::from(format!("{}nars/{shard}", self.prefix));
         let mut stream = self.inner.list(Some(&prefix));
         let mut hashes = Vec::new();
         while let Some(item) = stream.next().await {
             let meta = item.context("Failed to list NAR store")?;
-            // Path format: `{prefix}nars/{first2}/{rest}.nar.zst`
-            let p = meta.location.to_string();
-            if let Some(name) = p.split('/').next_back()
-                && let Some(stem) = name.strip_suffix(".nar.zst")
+            if let Some(stem) = meta
+                .location
+                .filename()
+                .and_then(|name| name.strip_suffix(".nar.zst"))
             {
-                // Reconstruct full hash from parent dir + stem.
-                let parts: Vec<&str> = p.split('/').collect();
-                if parts.len() >= 2 {
-                    let dir = parts[parts.len() - 2];
-                    hashes.push((format!("{}{}", dir, stem), meta.last_modified.timestamp()));
-                }
+                hashes.push((format!("{shard}{stem}"), meta.last_modified.timestamp()));
             }
         }
         Ok(hashes)
@@ -964,6 +957,26 @@ mod tests {
     use super::*;
     use futures::TryStreamExt as _;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn a_shard_lists_only_its_own_nars_by_full_hash() {
+        let dir = TempDir::new().unwrap();
+        let store = NarStore::local(dir.path().to_str().unwrap()).unwrap();
+        let mine = format!("0a{}", "b".repeat(30));
+        let other = format!("0b{}", "a".repeat(30));
+        store.put(&mine, b"x".to_vec()).await.unwrap();
+        store.put(&other, b"y".to_vec()).await.unwrap();
+
+        let listed: Vec<String> = store
+            .list_shard("0a")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(hash, _)| hash)
+            .collect();
+        assert_eq!(listed, vec![mine]);
+        assert!(store.list_shard("zz").await.unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn a_local_store_relays_every_upload() {

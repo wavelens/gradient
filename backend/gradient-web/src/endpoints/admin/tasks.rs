@@ -28,6 +28,7 @@ pub struct AdminTaskDto {
     pub started_at: Option<chrono::NaiveDateTime>,
     pub finished_at: Option<chrono::NaiveDateTime>,
     pub progress: Option<serde_json::Value>,
+    pub checkpoint: Option<String>,
     pub error: Option<String>,
     pub created_by: Option<UserId>,
 }
@@ -42,6 +43,7 @@ impl From<MAdminTask> for AdminTaskDto {
             started_at: m.started_at,
             finished_at: m.finished_at,
             progress: m.progress,
+            checkpoint: m.checkpoint,
             error: m.error,
             created_by: m.created_by,
         }

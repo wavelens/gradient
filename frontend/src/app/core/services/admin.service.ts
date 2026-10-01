@@ -32,6 +32,7 @@ export interface AdminTask {
   started_at: string | null;
   finished_at: string | null;
   progress: unknown | null;
+  checkpoint: string | null;
   error: string | null;
   created_by: string | null;
 }

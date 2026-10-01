@@ -60,6 +60,24 @@ pub struct GcArgs {
         default_value_t = 24
     )]
     pub wedged_eval_hours: i64,
+
+    /// Seconds from the end of one background deep GC round to the start of the
+    /// next. `0` runs a round only when one is requested.
+    #[arg(
+        long = "gc-deep-interval-secs",
+        env = "GRADIENT_GC_DEEP_INTERVAL_SECS",
+        default_value_t = 3600
+    )]
+    pub deep_interval_secs: u64,
+
+    /// Milliseconds between two units of a storage migration or a background
+    /// deep GC round. A requested round runs its units without a pause.
+    #[arg(
+        long = "gc-deep-pace-ms",
+        env = "GRADIENT_GC_DEEP_PACE_MS",
+        default_value_t = 1000
+    )]
+    pub deep_pace_ms: u64,
 }
 
 impl Default for GcArgs {
@@ -70,6 +88,8 @@ impl Default for GcArgs {
             nar_upload_grace_hours: 24,
             orphan_derivation_hours: 24,
             wedged_eval_hours: 24,
+            deep_interval_secs: 3600,
+            deep_pace_ms: 1000,
         }
     }
 }

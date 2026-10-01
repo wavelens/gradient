@@ -2840,7 +2840,6 @@ dependencies = [
  "futures",
  "git-url-parse",
  "governor",
- "gradient-cache",
  "gradient-ci",
  "gradient-core",
  "gradient-db",
