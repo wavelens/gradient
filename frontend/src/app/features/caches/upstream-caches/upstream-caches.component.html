@@ -8,7 +8,7 @@
   <button slot="actions"
       *appWritable="access()"
       grButton
-      label="Add Upstream"
+      label="Add Upstream Cache"
       icon="add"
       (click)="openAddDialog()"
       [appManagedDisable]="access()"
@@ -16,12 +16,12 @@
   @if (loading()) {
     <gr-loading-spinner message="Loading upstream caches..." />
   } @else {
-    @if (upstreams().length === 0) {
-      <gr-empty-state icon="cloud_download" title="No upstream caches" message="Add an upstream to enable pull-through caching from another cache.">
+    @if (upstreamCaches().length === 0) {
+      <gr-empty-state icon="cloud_download" title="No upstream caches" message="Add an upstream cache to enable pull-through caching from another cache.">
         <button slot="action"
           *appWritable="access()"
           grButton
-          label="Add Upstream"
+          label="Add Upstream Cache"
           icon="add"
           (click)="openAddDialog()"
           [appManagedDisable]="access()"
@@ -29,7 +29,7 @@
       </gr-empty-state>
     } @else {
       <gr-row-list>
-        @for (u of upstreams(); track u.id) {
+        @for (u of upstreamCaches(); track u.id) {
           <gr-row icon="cloud_download">
             {{ u.display_name }}
             <gr-badge [severity]="u.upstream_cache_id ? 'info' : 'neutral'">
@@ -63,7 +63,7 @@
   }
 </gr-page-layout>
 
-<!-- Edit Upstream Dialog -->
+<!-- Edit Upstream Cache Dialog -->
 <gr-dialog
   header="Edit Upstream Cache"
   [(visible)]="showEditDialog"
@@ -108,7 +108,7 @@
   </div>
 </gr-dialog>
 
-<!-- Add Upstream Dialog -->
+<!-- Add Upstream Cache Dialog -->
 <gr-dialog
   header="Add Upstream Cache"
   [(visible)]="showAddDialog"

@@ -84,7 +84,7 @@ describe('TaskTriggersComponent - access gating', () => {
         id: '019e16b2-e958-7652-ad97-67cd7b0fea61',
         name: 'github',
         display_name: 'GitHub',
-        forge_type: 'github',
+        git_host_type: 'github',
       },
     };
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [reporterTrigger]);

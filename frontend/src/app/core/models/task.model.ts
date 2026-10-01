@@ -184,7 +184,7 @@ export interface DrainingWaitingReason {
 
 export interface GraphStuckWaitingReason {
   kind: 'graph_stuck';
-  pending_anchors: number;
+  pending_shared_builds: number;
 }
 
 export interface UnmetRequirement {

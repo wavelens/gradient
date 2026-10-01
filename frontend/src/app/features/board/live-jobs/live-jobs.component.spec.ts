@@ -10,7 +10,7 @@ import { of, EMPTY } from 'rxjs';
 import { BoardLiveJobsComponent } from './live-jobs.component';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { DispatchDecisionView, DispatchedJobSummary, PendingJobSummary } from '@core/services/board.service';
+import { AssignmentDecisionView, AssignedJobSummary, PendingJobSummary } from '@core/services/board.service';
 
 const PENDING: PendingJobSummary = {
   kind: 1,
@@ -30,7 +30,7 @@ function setup(): ComponentFixture<BoardLiveJobsComponent> {
       {
         provide: BoardService,
         useValue: {
-          getDispatchedJobs: () => of({ jobs: [], other_running: 0 }),
+          getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
           getPendingJobs: () => of({ jobs: [PENDING], other_pending: 2 }),
         },
       },
@@ -45,7 +45,7 @@ function setup(): ComponentFixture<BoardLiveJobsComponent> {
   return fixture;
 }
 
-const DISPATCHED: DispatchedJobSummary = {
+const ASSIGNED: AssignedJobSummary = {
   id: 'd1abc123-0000-0000-0000-000000000001',
   kind: 1,
   project: 'o1',
@@ -57,7 +57,7 @@ const DISPATCHED: DispatchedJobSummary = {
   subject: 'hello-2.12.1',
 };
 
-function setupWithDispatched(dispatched: DispatchedJobSummary[]): ComponentFixture<BoardLiveJobsComponent> {
+function setupWithAssigned(assigned: AssignedJobSummary[]): ComponentFixture<BoardLiveJobsComponent> {
   TestBed.configureTestingModule({
     imports: [BoardLiveJobsComponent],
     providers: [
@@ -65,7 +65,7 @@ function setupWithDispatched(dispatched: DispatchedJobSummary[]): ComponentFixtu
       {
         provide: BoardService,
         useValue: {
-          getDispatchedJobs: () => of({ jobs: dispatched, other_running: 0 }),
+          getAssignedJobs: () => of({ jobs: assigned, other_running: 0 }),
           getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
         },
       },
@@ -80,40 +80,40 @@ function setupWithDispatched(dispatched: DispatchedJobSummary[]): ComponentFixtu
   return fixture;
 }
 
-describe('BoardLiveJobsComponent - dispatched subject column', () => {
+describe('BoardLiveJobsComponent - assigned subject column', () => {
   beforeEach(() => sessionStorage.clear());
 
   const subjectCell = (fixture: ComponentFixture<BoardLiveJobsComponent>) =>
     (fixture.nativeElement as HTMLElement).querySelector('tbody td.subject')?.textContent?.trim();
 
   it('names the derivation of a build job', () => {
-    const fixture = setupWithDispatched([DISPATCHED]);
+    const fixture = setupWithAssigned([ASSIGNED]);
     fixture.detectChanges();
     expect(subjectCell(fixture)).toBe('hello-2.12.1');
   });
 
   it('names the repository of an eval job', () => {
-    const fixture = setupWithDispatched([{ ...DISPATCHED, kind: 0, build_id: null, subject: 'https://git.example/acme.git' }]);
+    const fixture = setupWithAssigned([{ ...ASSIGNED, kind: 0, build_id: null, subject: 'https://git.example/acme.git' }]);
     fixture.detectChanges();
     expect(subjectCell(fixture)).toBe('https://git.example/acme.git');
   });
 
   it('heads the column for both kinds', () => {
-    const fixture = setupWithDispatched([DISPATCHED]);
+    const fixture = setupWithAssigned([ASSIGNED]);
     fixture.detectChanges();
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Derivation / Evaluation');
   });
 
   it('renders - when the subject is unknown', () => {
-    const fixture = setupWithDispatched([{ ...DISPATCHED, subject: null }]);
+    const fixture = setupWithAssigned([{ ...ASSIGNED, subject: null }]);
     fixture.detectChanges();
     expect(subjectCell(fixture)).toBe('-');
   });
 });
 
-// Shaped by DispatchDecisionView so the compiler catches drift: the server
+// Shaped by AssignmentDecisionView so the compiler catches drift: the server
 // sends a per-candidate `id` and `won`, not just a decision-level `winner`.
-const DECISIONS: DispatchDecisionView[] = [
+const DECISIONS: AssignmentDecisionView[] = [
   {
     at: '2026-06-08T00:00:00Z',
     worker_id: 'w1',
@@ -137,9 +137,9 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
         {
           provide: BoardService,
           useValue: {
-            getDispatchedJobs: () => of({ jobs: [], other_running: 0 }),
+            getAssignedJobs: () => of({ jobs: [], other_running: 0 }),
             getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
-            getDispatchDecisions: () => of(DECISIONS),
+            getAssignmentDecisions: () => of(DECISIONS),
           },
         },
         { provide: BoardLiveService, useValue: { connect: () => EMPTY } },
@@ -170,9 +170,9 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
 describe('BoardLiveJobsComponent - pending view toggle', () => {
   beforeEach(() => sessionStorage.clear());
 
-  it('defaults to dispatched view', () => {
+  it('defaults to assigned view', () => {
     const fixture = setup();
-    expect(fixture.componentInstance.view()).toBe('dispatched');
+    expect(fixture.componentInstance.view()).toBe('assigned');
   });
 
   it('restores the persisted view and filters from sessionStorage', () => {

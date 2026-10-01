@@ -30,7 +30,7 @@ import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
 
 @Component({
-  selector: 'app-cache-upstreams',
+  selector: 'app-upstream-caches',
   standalone: true,
   imports: [
     LabelHelpComponent,
@@ -52,11 +52,11 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
     RowListComponent,
     RowComponent,
   ],
-  templateUrl: './cache-upstreams.component.html',
+  templateUrl: './upstream-caches.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './cache-upstreams.component.scss',
+  styleUrl: './upstream-caches.component.scss',
 })
-export class CacheUpstreamsComponent implements OnInit {
+export class UpstreamCachesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
   private accessSvc = inject(AccessService);
@@ -75,7 +75,7 @@ export class CacheUpstreamsComponent implements OnInit {
   removingUpstreamId = signal<string | null>(null);
   probeSuggestsProto = signal(false);
 
-  upstreams = signal<UpstreamCache[]>([]);
+  upstreamCaches = signal<UpstreamCache[]>([]);
   showAddDialog = signal(false);
   showEditDialog = signal(false);
   editingUpstream = signal<UpstreamCache | null>(null);
@@ -112,7 +112,7 @@ export class CacheUpstreamsComponent implements OnInit {
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
     this.loadCache();
-    this.loadUpstreams();
+    this.loadUpstreamCaches();
   }
 
   private loadCache(): void {
@@ -122,11 +122,11 @@ export class CacheUpstreamsComponent implements OnInit {
     });
   }
 
-  loadUpstreams(): void {
+  loadUpstreamCaches(): void {
     this.loading.set(true);
-    this.cachesService.getCacheUpstreams(this.cacheName).subscribe({
+    this.cachesService.getUpstreamCaches(this.cacheName).subscribe({
       next: (list) => {
-        this.upstreams.set(list);
+        this.upstreamCaches.set(list);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
@@ -206,7 +206,7 @@ export class CacheUpstreamsComponent implements OnInit {
       next: () => {
         this.savingUpstream.set(false);
         this.showEditDialog.set(false);
-        this.loadUpstreams();
+        this.loadUpstreamCaches();
       },
       error: () => this.savingUpstream.set(false),
     });
@@ -248,10 +248,10 @@ export class CacheUpstreamsComponent implements OnInit {
       next: () => {
         this.addingUpstream.set(false);
         this.showAddDialog.set(false);
-        this.loadUpstreams();
+        this.loadUpstreamCaches();
       },
       error: (err) => {
-        this.addError.set(err?.error?.message || err?.message || 'Failed to add upstream.');
+        this.addError.set(err?.error?.message || err?.message || 'Failed to add upstream cache.');
         this.addingUpstream.set(false);
       },
     });
@@ -277,7 +277,7 @@ export class CacheUpstreamsComponent implements OnInit {
     this.cachesService.removeUpstream(this.cacheName, id).subscribe({
       next: () => {
         this.removingUpstreamId.set(null);
-        this.loadUpstreams();
+        this.loadUpstreamCaches();
       },
       error: () => this.removingUpstreamId.set(null),
     });

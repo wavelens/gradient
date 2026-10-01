@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ForgeType } from './integration.model';
+import { GitHostType } from './integration.model';
 
 export type TriggerType = 'polling' | 'reporter_push' | 'reporter_pull_request' | 'time';
 export type ConcurrencyPolicy = 'hard_abort' | 'soft_abort' | 'all' | 'skip';
@@ -16,7 +16,7 @@ export interface TriggerIntegrationRef {
   id: string;
   name: string;
   display_name: string;
-  forge_type: ForgeType;
+  git_host_type: GitHostType;
 }
 
 export interface PollingTriggerConfig {
@@ -40,7 +40,7 @@ export interface ReporterPullRequestTriggerConfig {
   branches?: string[];
   actions?: string[];
   /** When true (default), PRs from non-writer contributors are parked until
-   *  a maintainer approves them via the forge's check-run action (GitHub)
+   *  a maintainer approves them via the Git host's check-run action (GitHub)
    *  or a `/gradient approve` (or `/gradient run`) comment. */
   require_approval?: boolean;
 }

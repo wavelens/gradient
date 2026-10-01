@@ -153,7 +153,7 @@ export class TaskTriggersComponent implements OnInit {
   integrationOptions = computed<Option<string>[]>(() => {
     const opts: Option<string>[] = [{ label: '- select integration -', value: '' }];
     for (const i of this.inboundIntegrations()) {
-      opts.push({ label: `${i.display_name || i.name} (${i.forge_type})`, value: i.id });
+      opts.push({ label: `${i.display_name || i.name} (${i.git_host_type})`, value: i.id });
     }
     return opts;
   });

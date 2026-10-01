@@ -14,8 +14,8 @@ import { ProjectAccessService } from '@core/services/project-access.service';
 import {
   AccessState,
   CreateIntegrationRequest,
-  ForgeType,
-  InboundForge,
+  GitHostType,
+  InboundGitHost,
   Integration,
   IntegrationKind,
   Project,
@@ -104,7 +104,7 @@ export class IntegrationsComponent implements OnInit {
   editingIntegration = signal<Integration | null>(null);
   errorMessage = signal<string | null>(null);
 
-  selectedForgeByIntegration = signal<Record<string, InboundForge>>({});
+  selectedGitHostByIntegration = signal<Record<string, InboundGitHost>>({});
   copiedUrlId = signal<string | null>(null);
 
   kindOptions: Option<IntegrationKind>[] = [
@@ -112,7 +112,7 @@ export class IntegrationsComponent implements OnInit {
     { label: 'Outbound (status reporter)', value: 'outbound' },
   ];
 
-  inboundForgeOptions: Option<InboundForge>[] = [
+  inboundGitHostOptions: Option<InboundGitHost>[] = [
     { label: 'Gitea', value: 'gitea' },
     { label: 'Forgejo', value: 'forgejo' },
     { label: 'GitLab', value: 'gitlab' },
@@ -122,7 +122,7 @@ export class IntegrationsComponent implements OnInit {
     name: string;
     display_name: string;
     kind: IntegrationKind;
-    forge_type: ForgeType;
+    git_host_type: GitHostType;
     endpoint_url: string;
     secret: string;
     access_token: string;
@@ -132,7 +132,7 @@ export class IntegrationsComponent implements OnInit {
     name: '',
     display_name: '',
     kind: 'inbound',
-    forge_type: 'gitea',
+    git_host_type: 'gitea',
     endpoint_url: '',
     secret: '',
     access_token: '',
@@ -142,19 +142,19 @@ export class IntegrationsComponent implements OnInit {
 
   githubAppAvailable = computed(() => this.project()?.github_app_available === true);
   githubInstallations = computed(() =>
-    this.integrations().filter((i) => i.forge_type === 'github' && i.kind === 'outbound'),
+    this.integrations().filter((i) => i.git_host_type === 'github' && i.kind === 'outbound'),
   );
   githubAppInstalled = computed(() => this.githubInstallations().length > 0);
   githubAppInstallUrl = computed(() => this.project()?.github_app_install_url ?? null);
 
-  outboundForgeOptions = computed<Option<ForgeType>[]>(() => [
+  outboundGitHostOptions = computed<Option<GitHostType>[]>(() => [
     { label: 'Gitea', value: 'gitea' },
     { label: 'Forgejo', value: 'forgejo' },
     { label: 'GitLab', value: 'gitlab' },
     { label: 'GitHub', value: 'github' },
   ]);
 
-  allForgeOptions = computed<Option<ForgeType>[]>(() => [
+  allGitHostOptions = computed<Option<GitHostType>[]>(() => [
     { label: 'Gitea', value: 'gitea' },
     { label: 'Forgejo', value: 'forgejo' },
     { label: 'GitLab', value: 'gitlab' },
@@ -183,16 +183,16 @@ export class IntegrationsComponent implements OnInit {
     this.integrationsService.listProjectIntegrations(this.projectName).subscribe({
       next: (list) => {
         this.integrations.set(list);
-        const map: Record<string, InboundForge> = {};
+        const map: Record<string, InboundGitHost> = {};
         for (const i of list) {
           if (i.kind === 'inbound') {
             map[i.id] =
-              i.forge_type === 'gitea' || i.forge_type === 'forgejo' || i.forge_type === 'gitlab'
-                ? i.forge_type
+              i.git_host_type === 'gitea' || i.git_host_type === 'forgejo' || i.git_host_type === 'gitlab'
+                ? i.git_host_type
                 : 'gitea';
           }
         }
-        this.selectedForgeByIntegration.set(map);
+        this.selectedGitHostByIntegration.set(map);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),
@@ -204,7 +204,7 @@ export class IntegrationsComponent implements OnInit {
       name: '',
       display_name: '',
       kind: 'inbound',
-      forge_type: 'gitea',
+      git_host_type: 'gitea',
       endpoint_url: '',
       secret: '',
       access_token: '',
@@ -233,7 +233,7 @@ export class IntegrationsComponent implements OnInit {
   createIntegration(): void {
     if (!this.formData.name.trim() || this.nameInvalid) return;
 
-    if (this.formData.forge_type === 'github') {
+    if (this.formData.git_host_type === 'github') {
       const installationId = Number(this.formData.installation_id.trim());
       if (!Number.isInteger(installationId) || installationId <= 0) {
         this.errorMessage.set('App installation ID must be a positive integer.');
@@ -244,7 +244,7 @@ export class IntegrationsComponent implements OnInit {
       const body: CreateIntegrationRequest = {
         name: this.formData.name.trim(),
         kind: this.formData.kind,
-        forge_type: 'github',
+        git_host_type: 'github',
         installation_id: installationId,
         ...(this.formData.display_name.trim() ? { display_name: this.formData.display_name.trim() } : {}),
       };
@@ -267,7 +267,7 @@ export class IntegrationsComponent implements OnInit {
     const body: any = {
       name: this.formData.name.trim(),
       kind: this.formData.kind,
-      forge_type: this.formData.forge_type,
+      git_host_type: this.formData.git_host_type,
     };
     if (this.formData.display_name.trim()) {
       body.display_name = this.formData.display_name.trim();
@@ -298,7 +298,7 @@ export class IntegrationsComponent implements OnInit {
       name: integration.name,
       display_name: integration.display_name,
       kind: integration.kind,
-      forge_type: integration.forge_type,
+      git_host_type: integration.git_host_type,
       endpoint_url: integration.endpoint_url ?? '',
       secret: '',
       access_token: '',
@@ -321,8 +321,8 @@ export class IntegrationsComponent implements OnInit {
     if (this.formData.display_name.trim() && this.formData.display_name !== target.display_name) {
       body.display_name = this.formData.display_name.trim();
     }
-    if (this.formData.forge_type !== target.forge_type) {
-      body.forge_type = this.formData.forge_type;
+    if (this.formData.git_host_type !== target.git_host_type) {
+      body.git_host_type = this.formData.git_host_type;
     }
     if (target.kind === 'outbound') {
       if (this.formData.endpoint_url !== (target.endpoint_url ?? '')) {
@@ -408,21 +408,21 @@ export class IntegrationsComponent implements OnInit {
     });
   }
 
-  inboundForge(id: string): InboundForge {
-    return this.selectedForgeByIntegration()[id] ?? 'gitea';
+  inboundGitHost(id: string): InboundGitHost {
+    return this.selectedGitHostByIntegration()[id] ?? 'gitea';
   }
 
-  setInboundForge(id: string, forge: InboundForge): void {
-    this.selectedForgeByIntegration.update((m) => ({ ...m, [id]: forge }));
+  setInboundGitHost(id: string, gitHost: InboundGitHost): void {
+    this.selectedGitHostByIntegration.update((m) => ({ ...m, [id]: gitHost }));
   }
 
   inboundUrl(integration: Integration): string {
-    const forge = this.inboundForge(integration.id);
-    return `${window.location.origin}/api/v1/hooks/${forge}/${this.projectName}/${integration.name}`;
+    const gitHost = this.inboundGitHost(integration.id);
+    return `${window.location.origin}/api/v1/hooks/${gitHost}/${this.projectName}/${integration.name}`;
   }
 
   requiredWebhookEvents(id: string): string {
-    return this.inboundForge(id) === 'gitlab'
+    return this.inboundGitHost(id) === 'gitlab'
       ? 'Push, Tag push, Merge request, Comments (note), and Releases events'
       : 'Push, Pull Request, Issue Comment, Pull Request Comment, Pull Request Review, and Release';
   }
@@ -437,8 +437,8 @@ export class IntegrationsComponent implements OnInit {
     });
   }
 
-  forgeLabel(forge: ForgeType): string {
-    switch (forge) {
+  gitHostLabel(gitHost: GitHostType): string {
+    switch (gitHost) {
       case 'gitea': return 'Gitea';
       case 'forgejo': return 'Forgejo';
       case 'gitlab': return 'GitLab';

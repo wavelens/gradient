@@ -45,8 +45,8 @@ import { formatBytes, formatDuration } from '@shared/text';
         <div class="cell"><span class="label">Latest bucket</span><span>{{ h.latest_rollup_bucket ? (h.latest_rollup_bucket | date: 'short') : '-' }}</span></div>
         <div class="cell"><span class="label">Cache size</span><span>{{ bytes(h.cache_bytes) }}</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
-        <div class="cell"><span class="label">Effects pending</span><span>{{ h.outbox_pending }}</span></div>
-        <div class="cell"><span class="label">Effects dead-lettered</span><span [class.bad]="h.outbox_failed > 0">{{ h.outbox_failed }}</span></div>
+        <div class="cell"><span class="label">Pending deliveries</span><span>{{ h.pending_deliveries }}</span></div>
+        <div class="cell"><span class="label">Failed deliveries</span><span [class.bad]="h.failed_deliveries > 0">{{ h.failed_deliveries }}</span></div>
       </div>
 
       <h2>Supervision</h2>

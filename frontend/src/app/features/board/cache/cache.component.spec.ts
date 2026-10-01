@@ -10,13 +10,13 @@ import { BoardCacheComponent } from './cache.component';
 import { BoardService } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
 
-describe('BoardCacheComponent upstreams', () => {
-  it('renders an upstream row from getUpstreams', () => {
+describe('BoardCacheComponent upstream caches', () => {
+  it('renders an upstream cache row from getUpstreamCacheStats', () => {
     const board = {
       getCache: () => of({ totals: {}, traffic: [], storage: [] }),
-      getUpstreams: () =>
+      getUpstreamCacheStats: () =>
         of({
-          upstreams: [
+          upstream_caches: [
             {
               upstream_id: 'u1',
               display_name: 'cache.nixos.org',

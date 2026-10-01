@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-export type ActionType = 'send_mail' | 'send_web_request' | 'forge_status_report' | 'open_pr';
+export type ActionType = 'send_mail' | 'send_web_request' | 'git_host_status_report' | 'open_pr';
 
 export type PrGenerator = 'flake_lock';
 export type PrGranularity = 'per_run' | 'per_input';
@@ -13,7 +13,7 @@ export type PrVerifyGate = 'none' | 'eval' | 'build';
 export type ActionConfig =
   | { type: 'send_mail'; recipients: string[]; subject_template?: string }
   | { type: 'send_web_request'; url: string; token?: string }
-  | { type: 'forge_status_report'; integration_id: string }
+  | { type: 'git_host_status_report'; integration_id: string }
   | {
       type: 'open_pr';
       integration_id: string;
@@ -73,4 +73,4 @@ export interface ActionDeliveryDetail extends ActionDelivery {
   response_body: string | null;
 }
 
-export const FORGE_STATUS_EVENTS = ['build.started', 'build.completed', 'build.failed'];
+export const GIT_HOST_STATUS_EVENTS = ['build.started', 'build.completed', 'build.failed'];

@@ -61,7 +61,7 @@ describe('ActionFormComponent', () => {
     expect(c.url()).toBe('');
     c.url.set('https://x');
     c.tokenValue.set('t');
-    c.onTypeChange('forge_status_report');
+    c.onTypeChange('git_host_status_report');
     expect(c.url()).toBe('');
     expect(c.tokenValue()).toBe('');
     expect(c.events().length).toBeGreaterThan(0);
@@ -73,7 +73,7 @@ describe('ActionFormComponent', () => {
     const opts = fixture.componentInstance.typeOptions().map((o) => o.value);
     expect(opts).not.toContain('send_mail');
     expect(opts).toContain('send_web_request');
-    expect(opts).toContain('forge_status_report');
+    expect(opts).toContain('git_host_status_report');
   });
 
   it('generateToken populates a gat_-prefixed string of reasonable length', () => {
@@ -85,11 +85,11 @@ describe('ActionFormComponent', () => {
     expect(v.length).toBeGreaterThan(20);
   });
 
-  it('sends empty events for forge_status_report', () => {
+  it('sends empty events for git_host_status_report', () => {
     const fixture = createFixture(true);
     fixture.detectChanges();
     const c = fixture.componentInstance;
-    c.type.set('forge_status_report');
+    c.type.set('git_host_status_report');
     c.integrationId.set('int-1');
     c.name.set('report');
     let emitted: any;

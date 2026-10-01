@@ -24,7 +24,7 @@ import { firstLoad } from '../first-load';
         <div class="kpi"><span class="label">Connected workers</span><span class="value">{{ workers() }}</span></div>
         <div class="kpi"><span class="label">Jobs pending</span><span class="value">{{ pending() }}</span></div>
         <div class="kpi"><span class="label">Jobs active</span><span class="value">{{ active() }}</span></div>
-        <div class="kpi"><span class="label">Dispatched (live)</span><span class="value">{{ dispatchedCount() }}</span></div>
+        <div class="kpi"><span class="label">Assigned (live)</span><span class="value">{{ assignedCount() }}</span></div>
       </div>
 
       <gr-metric-chart
@@ -48,16 +48,16 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
   workers = signal(0);
   pending = signal(0);
   active = signal(0);
-  dispatchedCount = signal(0);
+  assignedCount = signal(0);
   completedSeries = signal<{ name: string; data: number[] }[]>([]);
   categories = signal<string[]>([]);
 
   ngOnInit(): void {
     this.board.getWorkers().pipe(this.first.track()).subscribe((w) => this.workers.set(w.length));
     this.board
-      .getDispatchedJobs()
+      .getAssignedJobs()
       .pipe(this.first.track())
-      .subscribe((r) => this.dispatchedCount.set(r.jobs.length + r.other_running));
+      .subscribe((r) => this.assignedCount.set(r.jobs.length + r.other_running));
     this.board
       .query('builds.completed', 'hour')
       .pipe(this.first.track())
@@ -69,7 +69,7 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
           this.pending.set(ev.content.pending ?? this.pending());
           this.active.set(ev.content.active ?? this.active());
         } else if (ev.event === 'worker.job_dispatched') {
-          this.dispatchedCount.update((n) => n + 1);
+          this.assignedCount.update((n) => n + 1);
         }
       },
       error: () => {},

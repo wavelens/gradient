@@ -13,7 +13,7 @@ import {
   ActionConfig,
   ActionType,
   CreateActionRequest,
-  FORGE_STATUS_EVENTS,
+  GIT_HOST_STATUS_EVENTS,
   PrGenerator,
   PrGranularity,
   PrVerifyGate,
@@ -113,7 +113,7 @@ export class ActionFormComponent implements OnChanges {
     const opts: { label: string; value: ActionType }[] = [];
     if (this.smtpEnabled()) opts.push({ label: 'Send Mail', value: 'send_mail' });
     opts.push({ label: 'Send Web Request', value: 'send_web_request' });
-    opts.push({ label: 'Forge Status Report', value: 'forge_status_report' });
+    opts.push({ label: 'Git Host Status Report', value: 'git_host_status_report' });
     opts.push({ label: 'Open PR', value: 'open_pr' });
     return opts;
   });
@@ -123,14 +123,14 @@ export class ActionFormComponent implements OnChanges {
   );
 
   readonly displayedEvents = computed(() =>
-    this.type() === 'forge_status_report' ? FORGE_STATUS_EVENTS : this.events(),
+    this.type() === 'git_host_status_report' ? GIT_HOST_STATUS_EVENTS : this.events(),
   );
 
-  // `forge_status_report` and `open_pr` fire on an internal gate, not
+  // `git_host_status_report` and `open_pr` fire on an internal gate, not
   // user-selected events: the status reporter tracks the whole lifecycle, and
   // Open PR fires when an input_update evaluation passes its verify gate.
   readonly eventsHardwired = computed(
-    () => this.type() === 'forge_status_report' || this.type() === 'open_pr',
+    () => this.type() === 'git_host_status_report' || this.type() === 'open_pr',
   );
 
   readonly typeRadioDisabled = computed(() => this.mode() === 'edit');
@@ -182,7 +182,7 @@ export class ActionFormComponent implements OnChanges {
       case 'send_web_request':
         this.url.set(cfg.url);
         break;
-      case 'forge_status_report':
+      case 'git_host_status_report':
         this.integrationId.set(cfg.integration_id);
         break;
       case 'open_pr':
@@ -206,7 +206,7 @@ export class ActionFormComponent implements OnChanges {
     this.tokenValue.set('');
     this.integrationId.set('');
     this.resetPrFields();
-    if (newType === 'forge_status_report') this.events.set([...FORGE_STATUS_EVENTS]);
+    if (newType === 'git_host_status_report') this.events.set([...GIT_HOST_STATUS_EVENTS]);
   }
 
   generateToken(): void {
@@ -240,8 +240,8 @@ export class ActionFormComponent implements OnChanges {
         if (token) cfg.token = token;
         return cfg;
       }
-      case 'forge_status_report':
-        return { type: 'forge_status_report', integration_id: this.integrationId() };
+      case 'git_host_status_report':
+        return { type: 'git_host_status_report', integration_id: this.integrationId() };
       case 'open_pr': {
         const cfg: Extract<ActionConfig, { type: 'open_pr' }> = {
           type: 'open_pr',

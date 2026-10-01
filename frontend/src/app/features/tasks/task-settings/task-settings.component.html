@@ -105,11 +105,11 @@
     <gr-row-list>
       <gr-row icon="schedule" linkLabel="Triggers" [link]="['/project', projectName, 'task', taskName, 'triggers']">
         Triggers
-        <span slot="meta">Polling intervals, forge push and pull-request events, and cron schedules</span>
+        <span slot="meta">Polling intervals, Git host push and pull-request events, and cron schedules</span>
       </gr-row>
       <gr-row icon="bolt" linkLabel="Actions" [link]="['/project', projectName, 'task', taskName, 'actions']">
         Actions
-        <span slot="meta">Send mail, post webhooks, or report status back to your forge</span>
+        <span slot="meta">Send mail, post webhooks, or report status back to the Git host</span>
       </gr-row>
       <gr-row icon="share" linkLabel="Flake inputs" [link]="['/project', projectName, 'task', taskName, 'flake-inputs']">
         Flake Inputs

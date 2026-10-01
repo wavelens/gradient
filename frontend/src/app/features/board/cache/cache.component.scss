@@ -10,4 +10,4 @@
 .kpi .label { color: var(--gr-text-secondary); font-size: $font-size-xs; }
 .kpi .value { color: var(--gr-text-primary); font-size: $font-size-xl; font-weight: 600; }
 gr-metric-chart { margin-bottom: $spacing-md; }
-.upstreams-title { color: var(--gr-text-primary); margin: 1.5rem 0 0.75rem; }
+.upstream-caches-title { color: var(--gr-text-primary); margin: 1.5rem 0 0.75rem; }

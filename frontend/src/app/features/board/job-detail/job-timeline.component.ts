@@ -72,7 +72,7 @@ const PHASE_LABELS: Record<string, string> = {
   known_derivations_wait: 'Known-derivations wait',
   drv_closure_push: 'Drv-closure push',
   prefetch: 'Prefetch',
-  substitute_relay: 'Substitute relay',
+  substitute_passthrough: 'Substitute passthrough',
   substitute_fetch: 'Substitute fetch',
   build: 'Build',
   compress: 'Compress',

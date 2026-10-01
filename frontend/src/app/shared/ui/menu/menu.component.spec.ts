@@ -61,7 +61,7 @@ describe('MenuComponent', () => {
     expect(document.querySelectorAll('.gr-menu__separator')).toHaveLength(1);
   });
 
-  it('runs the item command and closes', () => {
+  it('executes the item command and closes', () => {
     const { fixture, anchor } = render();
     anchor().click();
     fixture.detectChanges();

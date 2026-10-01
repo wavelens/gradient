@@ -216,7 +216,7 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(spy).toHaveBeenCalledWith('acme', 'demo');
   });
 
-  it('offers no restart while the evaluation still runs', () => {
+  it('offers no restart while the evaluation is still active', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Building', primary: failedBuilds });
     expect(menuLabels(fixture)).not.toContain('Restart failed builds');
   });
@@ -243,7 +243,7 @@ describe('TaskDetailComponent evaluation menu', () => {
     expect(spy).toHaveBeenCalledWith('acme', 'demo', 'full');
   });
 
-  it('holds the full rewalk while an evaluation runs', () => {
+  it('holds the full rewalk while an evaluation is in progress', () => {
     const { fixture } = setup(trigger, { primaryStatus: 'Building' });
     expect(fixture.componentInstance.panelMenuModel().find(i => i.label === 'Full rewalk')?.disabled).toBe(true);
   });
@@ -630,7 +630,7 @@ describe('TaskDetailComponent diagnostic report', () => {
     expect(c.reportDialogOpen()).toBe(true);
   });
 
-  /// The shipped default hands over a report that names which package broke
+  /// The bundled default hands over a report that names which package broke
   /// but not whose repository it is. Build logs carry whatever a build printed,
   /// so they are opted into rather than out of.
   it('defaults to hidden identities, real package names and no build logs', () => {
@@ -699,7 +699,7 @@ describe('TaskDetailComponent - #636 eval page', () => {
     raf.mockRestore();
   });
 
-  it('shows a waiting state instead of "No packages" while the evaluation runs', () => {
+  it('shows a waiting state instead of "No packages" while the evaluation is in progress', () => {
     const { fixture } = setup(access, { primaryStatus: 'EvaluatingDerivation' });
     expect(fixture.nativeElement.textContent).not.toContain('No packages');
     expect(fixture.nativeElement.querySelector('.panel gr-loading-spinner')).toBeTruthy();

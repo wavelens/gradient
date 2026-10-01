@@ -8,7 +8,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, shareReplay } from 'rxjs';
 import { ApiService } from './api.service';
 
-export interface DispatchedJobSummary {
+export interface AssignedJobSummary {
   id: string;
   kind: number;
   project: string;
@@ -21,8 +21,8 @@ export interface DispatchedJobSummary {
   subject: string | null;
 }
 
-export interface DispatchedJobsResponse {
-  jobs: DispatchedJobSummary[];
+export interface AssignedJobsResponse {
+  jobs: AssignedJobSummary[];
   other_running: number;
 }
 
@@ -53,7 +53,7 @@ export interface DecisionCandidateView {
   won: boolean;
 }
 
-export interface DispatchDecisionView {
+export interface AssignmentDecisionView {
   at: string;
   worker_id: string;
   kind: number;
@@ -129,7 +129,7 @@ export interface InstanceContextView {
 }
 
 /// One derivation the job builds, carrying both identities: `build` is what
-/// `GET /builds/{build}` takes, `derivation_build` is the scheduler anchor.
+/// `GET /builds/{build}` takes, `derivation_build` is the shared build the scheduler assigns.
 export interface JobDerivationView {
   build: string | null;
   derivation_build: string;
@@ -156,7 +156,7 @@ export interface JobEvaluationView {
   task: string | null;
 }
 
-export interface DispatchedJobDetail extends Omit<DispatchedJobSummary, 'subject'> {
+export interface AssignedJobDetail extends Omit<AssignedJobSummary, 'subject'> {
   pname: string | null;
   evaluation: JobEvaluationView | null;
   project_name: string;
@@ -281,7 +281,7 @@ export interface BoardCacheStats {
   storage: SeriesPoint[];
 }
 
-export interface BoardUpstream {
+export interface BoardUpstreamCache {
   upstream_id: string;
   display_name: string;
   url: string;
@@ -292,8 +292,8 @@ export interface BoardUpstream {
   hit_rate_series: SeriesPoint[];
 }
 
-export interface BoardUpstreamStats {
-  upstreams: BoardUpstream[];
+export interface BoardUpstreamCacheStats {
+  upstream_caches: BoardUpstreamCache[];
 }
 
 export interface HttpRouteStat {
@@ -359,8 +359,8 @@ export interface BoardHealth {
   supervised: SupervisedLoop[];
   proto_sessions: number;
   unconfirmed_nars: number;
-  outbox_pending: number;
-  outbox_failed: number;
+  pending_deliveries: number;
+  failed_deliveries: number;
   hot_nar_cache: HotNarCacheHealth;
 }
 
@@ -439,22 +439,22 @@ export class BoardService {
   private api = inject(ApiService);
   private scoringRules$?: Observable<RuleDescription[]>;
 
-  getDispatchedJobs(): Observable<DispatchedJobsResponse> {
-    return this.api.get<DispatchedJobsResponse>('board/jobs/dispatched');
+  getAssignedJobs(): Observable<AssignedJobsResponse> {
+    return this.api.get<AssignedJobsResponse>('board/jobs/dispatched');
   }
 
   getPendingJobs(): Observable<PendingJobsResponse> {
     return this.api.get<PendingJobsResponse>('board/jobs/pending');
   }
 
-  /// Recent dispatch decisions with every candidate's score, including the
-  /// rejected/negative ones the dispatcher passed over (superuser-only).
-  getDispatchDecisions(): Observable<DispatchDecisionView[]> {
-    return this.api.get<DispatchDecisionView[]>('board/jobs/decisions');
+  /// Recent assignment decisions with every candidate's score, including the
+  /// rejected/negative ones the scheduler passed over (superuser-only).
+  getAssignmentDecisions(): Observable<AssignmentDecisionView[]> {
+    return this.api.get<AssignmentDecisionView[]>('board/jobs/decisions');
   }
 
-  getJob(id: string): Observable<DispatchedJobDetail> {
-    return this.api.get<DispatchedJobDetail>(`board/jobs/${id}`);
+  getJob(id: string): Observable<AssignedJobDetail> {
+    return this.api.get<AssignedJobDetail>(`board/jobs/${id}`);
   }
 
   getWorkers(): Observable<BoardWorker[]> {
@@ -489,8 +489,8 @@ export class BoardService {
     return this.api.get<BoardCacheStats>(`board/cache?window_hours=${windowHours}`);
   }
 
-  getUpstreams(windowHours = 24): Observable<BoardUpstreamStats> {
-    return this.api.get<BoardUpstreamStats>(`board/cache/upstreams?window_hours=${windowHours}`);
+  getUpstreamCacheStats(windowHours = 24): Observable<BoardUpstreamCacheStats> {
+    return this.api.get<BoardUpstreamCacheStats>(`board/cache/upstream-caches?window_hours=${windowHours}`);
   }
 
   getNetwork(windowHours = 24): Observable<BoardNetworkStats> {
