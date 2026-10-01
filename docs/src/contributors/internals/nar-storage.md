@@ -48,7 +48,6 @@ logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 - **Finalized:** `finalize_build_log` appends the live file as zstd chunks after any earlier chunks, indexes them in `build_log_chunk` and drops the live file. With S3 the chunks go to `<prefix>logs/...` only.
 - **Finalize Triggers:** the anchor turning terminal, a new attempt replacing the latest one (abort, lost worker, retry) and an upstream log arriving after the build (log substitution). Every trigger queues a `LogFinalize` outbox row for the attempt.
 - **Missing Chunks:** a chunk whose object is gone renders as one `[log chunk unavailable]` line per indexed line, and a re-finalize keeps one such line in its place.
-- **Legacy Layout:** flat `logs/<attempt>.log` and `logs/<attempt>/` entries from before sharding are retired by the [storage migration](#storage-migrations) `m20261001_000000_shard_build_logs`: moved into their shard on local disk, deleted with their `build_log_chunk` rows on S3.
 - **Reclaimed:** with their derivation by the orphan-derivation GC; logs without a `build_attempt` row by the [deep GC](#deep-gc) log pass.
 
 ## Storage Migrations
@@ -62,7 +61,7 @@ Layout changes of NAR, log and blob storage ship as storage migrations, the stor
 
 | Migration | Units | Change |
 |---|---|---|
-| `m20261001_000000_shard_build_logs` | `logs` | Flat pre-shard logs move into their shard (local) or are deleted with their `build_log_chunk` rows (S3) |
+| `m20261001_000000_shard_build_logs` | `local`, `s3` | Flat pre-shard `logs/<attempt>.log` and `logs/<attempt>/` entries move into their shard on local disk, and are deleted with their `build_log_chunk` rows on S3 |
 
 ## Deep GC
 
