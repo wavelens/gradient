@@ -1,6 +1,8 @@
 use crate::ConnectorError;
 use crate::auth::CliPollOutcome;
+use futures::stream::{Stream, StreamExt};
 use reqwest::{Method, RequestBuilder, Response};
+use reqwest_streams::JsonStreamResponse;
 use serde::de::DeserializeOwned;
 
 #[derive(serde::Deserialize)]
@@ -41,6 +43,21 @@ pub(crate) async fn decode<T: DeserializeOwned>(res: Response) -> Result<T, Conn
         status,
         message: String::from_utf8_lossy(&bytes).into_owned(),
     })
+}
+
+pub(crate) async fn json_lines<T: DeserializeOwned + Send + 'static>(
+    res: Response,
+) -> Result<impl Stream<Item = Result<T, ConnectorError>> + use<T>, ConnectorError> {
+    let status = res.status();
+    if !status.is_success() {
+        return Err(ConnectorError::Api {
+            status,
+            message: res.text().await?,
+        });
+    }
+    Ok(res
+        .json_nl_stream::<T>(1_024_000)
+        .map(|r| r.map_err(|e| ConnectorError::Io(std::io::Error::other(e)))))
 }
 
 /// Send an upload, waiting out a busy server: a `503` with `Retry-After`

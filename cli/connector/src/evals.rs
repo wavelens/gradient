@@ -1,7 +1,6 @@
 use crate::{Client, ConnectorError, http};
-use futures::stream::{Stream, StreamExt};
+use futures::stream::Stream;
 use reqwest::Method;
-use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -139,27 +138,14 @@ impl EvalsApi<'_> {
         id: &str,
     ) -> Result<impl Stream<Item = Result<String, ConnectorError>>, ConnectorError> {
         let req = http::request(
-            self.0.http(),
+            self.0.stream_http(),
             self.0.base_url(),
             self.0.token(),
             Method::POST,
             &format!("evals/{id}/builds"),
             true,
         )?;
-        let res = req.send().await?;
-        let status = res.status();
-        if !status.is_success() {
-            return Err(ConnectorError::Api {
-                status,
-                message: res.text().await?,
-            });
-        }
-        Ok(res.json_nl_stream::<String>(1_024_000).map(|r| {
-            r.map_err(|e| ConnectorError::Api {
-                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })
-        }))
+        http::json_lines(req.send().await?).await
     }
 
     pub async fn messages(&self, id: &str) -> Result<Vec<EvalMessage>, ConnectorError> {
