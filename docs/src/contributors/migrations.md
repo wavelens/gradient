@@ -43,7 +43,7 @@ A column added in one release and dropped in a later one leaves an `add_X` / `dr
 
 **Removable when both hold:**
 
-- The release with `drop_X` has shipped, and at least one later minor release on top of it: live installs get a window to run the drop.
+- The release with `drop_X` is out, and at least one later minor release on top of it: live installs get a window to run the drop.
 - No migration between the two touches `X` in a way the removal changes. Check with `rg -n "<ColumnName>|<column_name>" backend/gradient-migration/`.
 
 **Removal must not** edit the original `create_table_*` migration of the table: that changes the schema of every install path. Intermediate migrations may change only mechanically, e.g. dropping a column declaration the `drop_X` would remove anyway.
