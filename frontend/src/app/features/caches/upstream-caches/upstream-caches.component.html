@@ -64,7 +64,7 @@
                 [icon]="u.active ? 'pause' : 'play_arrow'"
                 [severity]="u.active ? 'warn' : 'success'"
                 [loading]="togglingUpstreamId() === u.id"
-                [disabled]="rowDisabled()"
+                [disabled]="rowBusy()"
                 (click)="toggleUpstream(u)"
               ></button>
               <button

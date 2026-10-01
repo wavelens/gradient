@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, load_cache};
+use crate::access::{CacheAccess, Caller, load_cache, reject_managed_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
@@ -66,6 +66,15 @@ pub struct PatchUpstreamRequest {
     pub url: Option<String>,
     pub public_key: Option<String>,
     pub active: Option<bool>,
+}
+
+/// State re-applies a managed cache's upstream caches on startup, so toggling
+/// `active` is the only edit worth allowing there.
+fn patch_edits_managed_fields(body: &PatchUpstreamRequest) -> bool {
+    body.display_name.is_some()
+        || body.mode.is_some()
+        || body.url.is_some()
+        || body.public_key.is_some()
 }
 
 fn validate_url(url: &str) -> Result<(), WebError> {
@@ -285,10 +294,13 @@ pub async fn patch_cache_upstream(
         cache,
         CacheAccess::Require {
             permission: CachePermission::ManageUpstreamCaches,
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;
+    if patch_edits_managed_fields(&body) {
+        reject_managed_cache(&cache)?;
+    }
     let record = load_upstream(&state, cache.id, upstream_id).await?;
 
     let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
@@ -402,6 +414,22 @@ pub async fn delete_cache_upstream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_active_is_editable_on_a_managed_cache() {
+        let patch = |json| serde_json::from_value::<PatchUpstreamRequest>(json).unwrap();
+        assert!(!patch_edits_managed_fields(&patch(
+            serde_json::json!({ "active": false })
+        )));
+        for edit in [
+            serde_json::json!({ "display_name": "x" }),
+            serde_json::json!({ "mode": "ReadOnly" }),
+            serde_json::json!({ "url": "https://x" }),
+            serde_json::json!({ "public_key": "k:1" }),
+        ] {
+            assert!(patch_edits_managed_fields(&patch(edit)));
+        }
+    }
 
     #[test]
     fn validate_http_requires_url_and_key() {

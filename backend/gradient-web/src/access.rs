@@ -656,7 +656,7 @@ async fn admin_emails(state: &Arc<ServerState>, ids: Vec<UserId>) -> WebResult<V
         .collect())
 }
 
-fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
+pub(crate) fn reject_managed_cache(cache: &MCache) -> WebResult<()> {
     if cache.managed {
         return Err(WebError::forbidden(
             "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.",

@@ -6726,6 +6726,7 @@ paths:
         Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;
         `url` and `public_key` may be updated. For internal upstream caches only `mode` and `display_name` apply.
         `active` toggles any upstream cache. An inactive upstream cache is kept but never queried.
+        A state-managed cache accepts only `active`, and the next server start restores the declared value.
         Requires `manageUpstreamCaches`.
       operationId: patchUpstreamCache
       security:
