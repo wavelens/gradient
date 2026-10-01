@@ -22,6 +22,7 @@
   </gr-form-field>
 
   <gr-form-field label="Type">
+    <gr-label-help slot="label" doc="guides/actions/" title="Notify with actions" />
     <gr-select-button
       [options]="typeOptions()"
       [ngModel]="type()"
@@ -111,6 +112,7 @@
       />
     </gr-form-field>
     <gr-form-field label="Generator" for="pr-generator">
+      <gr-label-help slot="label" doc="guides/flake-updates/#2-add-the-open-pr-action" title="Update flake inputs" />
       <gr-select
         inputId="pr-generator"
         [ngModel]="prGenerator()"
@@ -178,6 +180,7 @@
 
   @if (type() !== 'open_pr') {
     <gr-form-field label="Events">
+      <gr-label-help slot="label" doc="reference/events/#event-families" title="Event families" />
       @if (type() === 'forge_status_report') {
         <app-action-events [selected]="displayedEvents()" [disabled]="true" [families]="taskFamilies" />
         <small class="text-secondary">Events are fixed for forge status reports.</small>
@@ -191,6 +194,7 @@
     </gr-form-field>
   } @else {
     <gr-form-field label="Events" hint="Open PR runs automatically when an input_update evaluation passes its verify gate; it has no event triggers.">
+      <gr-label-help slot="label" doc="reference/events/#event-families" title="Event families" />
 
     </gr-form-field>
   }

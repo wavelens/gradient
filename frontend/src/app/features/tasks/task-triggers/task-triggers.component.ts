@@ -13,6 +13,7 @@ import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
   BadgeComponent,
+  BadgeSeverity,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -20,10 +21,10 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   SelectComponent,
-  BadgeSeverity,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -75,6 +76,7 @@ const DEFAULT_FORM: TriggerFormState = {
   selector: 'app-task-triggers',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     RouterModule,
     FormsModule,

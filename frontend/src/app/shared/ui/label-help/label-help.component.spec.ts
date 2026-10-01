@@ -16,19 +16,19 @@ describe('gr-label-help', () => {
     return (fixture.nativeElement as HTMLElement).querySelector('a')!;
   }
 
-  it('links out safely in a new tab', async () => {
-    const a = await render({ href: 'https://docs.example/x' });
-    expect(a.getAttribute('href')).toBe('https://docs.example/x');
+  it('links the docs page safely in a new tab', async () => {
+    const a = await render({ doc: 'reference/wildcards/' });
+    expect(a.getAttribute('href')).toBe('https://wavelens.github.io/gradient/reference/wildcards/');
     expect(a.getAttribute('target')).toBe('_blank');
     expect(a.getAttribute('rel')).toContain('noopener');
   });
 
   it('defaults its accessible name', async () => {
-    expect((await render({ href: 'https://x.test' })).getAttribute('aria-label')).toBe('Learn more');
+    expect((await render({ doc: 'reference/wildcards/' })).getAttribute('aria-label')).toBe('Learn more');
   });
 
   it('uses a custom title as the accessible name', async () => {
-    const a = await render({ href: 'https://x.test', title: 'Naming rules' });
+    const a = await render({ doc: 'reference/wildcards/', title: 'Naming rules' });
     expect(a.getAttribute('aria-label')).toBe('Naming rules');
   });
 });

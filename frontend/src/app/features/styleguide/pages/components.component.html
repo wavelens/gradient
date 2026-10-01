@@ -22,7 +22,7 @@
   [invalid]="nameInvalid()"
   [required]="true"
 >
-  <gr-label-help slot="label" href="https://wavelens.github.io/gradient/" title="Naming rules" />
+  <gr-label-help slot="label" doc="concepts/projects-and-tasks/#project" title="Naming rules" />
   <input grInput id="sg-name" [(ngModel)]="name" />
 </gr-form-field>
 <button grButton label="Toggle error" severity="secondary" (click)="nameInvalid.set(!nameInvalid())"></button>

@@ -18,6 +18,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -32,6 +33,7 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
   selector: 'app-cache-upstreams',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     RouterModule,
     FormsModule,

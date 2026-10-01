@@ -198,6 +198,7 @@
     />
   </gr-form-field>
   <gr-form-field label="Worker ID" for="worker-id">
+    <gr-label-help slot="label" doc="guides/remote-worker/#1-pick-a-worker-id" title="Pick a worker ID" />
     <span slot="hint">Must be a UUID v4 - run <code>uuidgen</code> or use the worker's auto-generated ID from <code>/var/lib/gradient-worker/worker-id</code>.</span>
     <input
       grInput
@@ -217,6 +218,7 @@
     />
   </gr-form-field>
   <gr-form-field label="Token" for="worker-token" hint="Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration).">
+    <gr-label-help slot="label" doc="guides/remote-worker/#2-register-the-worker" title="Register a worker" />
     <span slot="label" class="text-secondary">(optional)</span>
     <input
       grInput
@@ -226,6 +228,7 @@
     />
   </gr-form-field>
   <gr-form-field label="Server-side capability gates" hint="Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.">
+    <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
     <div class="cap-tag-group">
       <button
         type="button"
@@ -312,10 +315,12 @@
 
     @if (reg.token) {
       <gr-form-field label="Token" hint="Shown once. Copy it before closing this dialog.">
+        <gr-label-help slot="label" doc="guides/remote-worker/#2-register-the-worker" title="Register a worker" />
         <gr-copy-field [value]="reg.token" />
       </gr-form-field>
 
       <gr-form-field label="Peers file entry">
+        <gr-label-help slot="label" doc="guides/remote-worker/#peers-file" title="Peers file format" />
         <span slot="hint">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</span>
         <gr-copy-field multiline [rows]="1" [value]="reg.peer_id + ':' + reg.token" />
       </gr-form-field>
@@ -346,6 +351,7 @@
       />
     </gr-form-field>
     <gr-form-field label="Server-side capability gates" hint="Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).">
+      <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
       <div class="cap-tag-group">
         <button
           type="button"

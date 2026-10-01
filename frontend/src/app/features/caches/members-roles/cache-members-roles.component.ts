@@ -20,6 +20,7 @@ import {
   EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
@@ -42,6 +43,7 @@ interface RoleFormState {
   selector: 'app-cache-members-roles',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     RouterModule,
     FormsModule,

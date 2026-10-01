@@ -19,6 +19,7 @@ import {
   EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   RowComponent,
@@ -32,6 +33,7 @@ import { AccessState, CacheSubscription } from '@core/models';
   selector: 'app-cache-subscriptions',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     RouterModule,
     FormsModule,

@@ -27,6 +27,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LabelHelpComponent,
   SelectButtonComponent,
   SelectComponent,
 } from '@shared/ui';
@@ -42,6 +43,7 @@ interface IntegrationOption {
   selector: 'app-action-form',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     FormsModule,
     DialogComponent,

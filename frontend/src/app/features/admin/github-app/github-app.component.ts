@@ -14,13 +14,15 @@ import {
   CopyFieldComponent,
   FormFieldComponent,
   InputDirective,
+  LabelHelpComponent,
   PageLayoutComponent,
 } from '@shared/ui';
 
 @Component({
   selector: 'app-admin-github-app',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
+  imports: [
+    LabelHelpComponent,CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
   templateUrl: './github-app.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './github-app.component.scss',

@@ -17,6 +17,7 @@ import {
   DialogComponent,
   FormFieldComponent,
   InputDirective,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
@@ -32,6 +33,7 @@ import { Project, AccessState } from '@core/models';
   selector: 'app-project-settings',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     RouterModule,
     FormsModule,
