@@ -105,7 +105,10 @@ async fn relocate_flat_entry(logs: &Path, attempt_id: BuildAttemptId, name: &str
 
 /// Delete every flat object and prefix directly below `root`, leaving the
 /// shards, and return the attempts whose logs went.
-async fn delete_flat_objects(store: &dyn ObjectStore, root: &ObjectPath) -> Result<Vec<BuildAttemptId>> {
+async fn delete_flat_objects(
+    store: &dyn ObjectStore,
+    root: &ObjectPath,
+) -> Result<Vec<BuildAttemptId>> {
     let top = store.list_with_delimiter(Some(root)).await?;
     let flat_objects = top.objects.into_iter().map(|meta| meta.location);
     let mut deleted = BTreeSet::new();
@@ -210,6 +213,9 @@ mod tests {
             .try_collect()
             .await
             .unwrap();
-        assert_eq!(left, vec![format!("pre/logs/fe/{SAMPLE}/chunk_00000000.zst")]);
+        assert_eq!(
+            left,
+            vec![format!("pre/logs/fe/{SAMPLE}/chunk_00000000.zst")]
+        );
     }
 }

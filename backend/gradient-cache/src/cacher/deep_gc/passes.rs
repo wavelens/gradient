@@ -334,7 +334,9 @@ mod tests {
         let state = make_state(nar, Arc::clone(&log), db);
 
         let mut report = DeepGcReport::default();
-        pass_logs(Arc::clone(&state), "00", &mut report).await.unwrap();
+        pass_logs(Arc::clone(&state), "00", &mut report)
+            .await
+            .unwrap();
         assert_eq!(report.logs_scanned, 2);
         assert_eq!(report.orphan_logs_removed, 1);
         assert_eq!(log.list_shard("00").await.unwrap(), vec![kept]);

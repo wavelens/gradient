@@ -32,11 +32,11 @@ pub use self::cleanup::{
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::sign_sweep::sign_missing_signatures;
 
+use self::units::Step;
 use futures::future::BoxFuture;
 use gradient_core::ServerState;
 use gradient_util::supervision::ChildSpec;
 use std::sync::Arc;
-use self::units::Step;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
@@ -112,15 +112,10 @@ pub fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
         .map(|sweep| {
             let state = Arc::clone(state);
             let run = sweep.run;
-            ChildSpec::periodic(
-                sweep.name,
-                sweep.interval,
-                sweep.budget,
-                move || {
-                    let fut = run(Arc::clone(&state));
-                    async move { fut.await.map_err(Into::into) }
-                },
-            )
+            ChildSpec::periodic(sweep.name, sweep.interval, sweep.budget, move || {
+                let fut = run(Arc::clone(&state));
+                async move { fut.await.map_err(Into::into) }
+            })
         })
         .collect()
 }

@@ -346,7 +346,9 @@ impl LogStorage for S3LogStorage {
             let mut stream = self.object_store.list(Some(&root));
             while let Some(item) = stream.next().await {
                 let location = item?.location;
-                let entry = location.prefix_match(&root).and_then(|mut parts| parts.next());
+                let entry = location
+                    .prefix_match(&root)
+                    .and_then(|mut parts| parts.next());
                 if let Some(id) = entry.and_then(|p| layout::attempt_of(p.as_ref())) {
                     out.insert(id);
                 }

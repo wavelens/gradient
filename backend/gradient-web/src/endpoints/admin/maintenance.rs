@@ -32,19 +32,19 @@ pub async fn start_deep_gc(
 ) -> WebResult<(StatusCode, Json<BaseResponse<StartDeepGcResponse>>)> {
     require_superuser(&user)?;
     let db = &state.worker_db;
-    let task_id =
-        match admin_tasks::insert_pending(db, AdminTaskKind::DeepGc, Some(user.id)).await {
-            Ok(task) => task.id,
-            Err(InsertPendingError::AlreadyActive(id)) => {
-                admin_tasks::restart(db, id, Some(user.id))
-                    .await
-                    .map_err(|e| WebError::internal(format!("admin_task restart failed: {e}")))?;
-                id
-            }
-            Err(InsertPendingError::Db(e)) => {
-                return Err(WebError::internal(format!("admin_task insert failed: {e}")));
-            }
-        };
+    let task_id = match admin_tasks::insert_pending(db, AdminTaskKind::DeepGc, Some(user.id)).await
+    {
+        Ok(task) => task.id,
+        Err(InsertPendingError::AlreadyActive(id)) => {
+            admin_tasks::restart(db, id, Some(user.id))
+                .await
+                .map_err(|e| WebError::internal(format!("admin_task restart failed: {e}")))?;
+            id
+        }
+        Err(InsertPendingError::Db(e)) => {
+            return Err(WebError::internal(format!("admin_task insert failed: {e}")));
+        }
+    };
 
     info!(%task_id, "deep_gc: round requested");
     Ok((

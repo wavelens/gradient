@@ -740,7 +740,11 @@ impl NarStore {
         let chars = gradient_util::nix_hash::NIX32_CHARS;
         chars
             .iter()
-            .flat_map(|&a| chars.iter().map(move |&b| format!("{}{}", a as char, b as char)))
+            .flat_map(|&a| {
+                chars
+                    .iter()
+                    .map(move |&b| format!("{}{}", a as char, b as char))
+            })
             .collect()
     }
 
