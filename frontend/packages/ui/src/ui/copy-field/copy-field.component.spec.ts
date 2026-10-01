@@ -44,6 +44,13 @@ describe('CopyFieldComponent', () => {
     expect(getComputedStyle(ta).height).not.toBe('34px');
   });
 
+  it('names the copy button in the caller language', async () => {
+    const { root } = await render({ value, copyLabel: 'In die Zwischenablage kopieren' });
+    expect(root.querySelector('.copy-field__button')?.getAttribute('aria-label')).toBe(
+      'In die Zwischenablage kopieren',
+    );
+  });
+
   it('places the copy button inside the field', async () => {
     const { root } = await render({ value });
     expect(root.querySelector('.copy-field__button')).not.toBeNull();

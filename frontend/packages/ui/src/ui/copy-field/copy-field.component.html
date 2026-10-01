@@ -32,7 +32,7 @@
     [text]="true"
     [icon]="copied() ? 'check' : 'content_copy'"
     [severity]="copied() ? 'success' : 'secondary'"
-    [attr.aria-label]="copied() ? 'Copied' : 'Copy to clipboard'"
+    [attr.aria-label]="copied() ? copiedLabel() : copyLabel()"
     (click)="copy()"
   ></button>
 </div>
