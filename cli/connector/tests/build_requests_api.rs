@@ -33,7 +33,7 @@ async fn upload_blobs_decodes_counts() {
 }
 
 #[tokio::test]
-async fn upload_source_nar_returns_dispatch() {
+async fn upload_source_nar_returns_started_build() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/build-requests/source"))

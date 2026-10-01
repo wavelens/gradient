@@ -23,11 +23,11 @@ impl NarBrowser {
             selected: 0,
             filter: String::new(),
         };
-        b.recompute();
+        b.apply_filter();
         b
     }
 
-    fn recompute(&mut self) {
+    fn apply_filter(&mut self) {
         let f = self.filter.to_lowercase();
         self.filtered_idx = self
             .all
@@ -47,11 +47,11 @@ impl NarBrowser {
 
     pub fn push_filter(&mut self, c: char) {
         self.filter.push(c);
-        self.recompute();
+        self.apply_filter();
     }
     pub fn pop_filter(&mut self) {
         self.filter.pop();
-        self.recompute();
+        self.apply_filter();
     }
 
     pub fn move_down(&mut self) {

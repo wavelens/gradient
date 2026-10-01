@@ -9,7 +9,7 @@ use crate::config::*;
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
 use connector::ConnectorError;
-use connector::build_requests::DispatchResponse;
+use connector::build_requests::BuildStartResponse;
 use connector::evals::{ArtefactTree, EntryPointArtefacts, EvaluationResponse};
 #[cfg(not(feature = "nix"))]
 use std::io::{BufReader, Read};
@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 /// What to build and how to resolve its flake inputs: the target attr-path, the
-/// target system, and the per-run `--override-input` pairs. Threaded as one unit
-/// through dispatch so the request functions stay under the arg-count limit.
+/// target system, and the per-build `--override-input` pairs. Threaded as one unit
+/// through the build start so the request functions stay under the arg-count limit.
 pub(crate) struct BuildParams {
     pub target: Option<String>,
     pub system: Option<String>,
@@ -34,7 +34,7 @@ pub async fn handle_build(
     out: Output,
 ) {
     // Surface a missing server / session before the project check so an unconfigured
-    // first run points at `gradient login` rather than project selection (#498).
+    // first invocation points at `gradient login` rather than project selection (#498).
     let client = client_from_config(out);
     if let Err(ConnectorError::Unauthorized) = client.user().get().await {
         out.err(
@@ -57,7 +57,7 @@ pub async fn handle_build(
         });
 
     // Accept `nix build`-style installables (`.#uxc`) and translate them into
-    // gradient's attr-path wildcard language before dispatch and result linking.
+    // gradient's attr-path wildcard language before the build start and result linking.
     params.target = params.target.take().map(|raw| {
         let system = params
             .system
@@ -118,34 +118,34 @@ pub async fn handle_build(
         exit(1);
     }
 
-    let dispatch = upload_and_dispatch(&client, &project, &entries, &params, quiet, out).await;
+    let started = upload_and_start(&client, &project, &entries, &params, quiet, out).await;
 
     if background {
-        out.ok(&dispatch);
-        out.human(dispatch.evaluation.clone());
+        out.ok(&started);
+        out.human(started.evaluation.clone());
         return;
     }
 
     if quiet {
-        out.human(dispatch.evaluation.clone());
+        out.human(started.evaluation.clone());
     } else {
-        out.ok(&dispatch);
-        out.human(format!("Evaluation: {}", dispatch.evaluation));
-        out.human(format!("Task:    {}", dispatch.task));
-        out.human(format!("Commit:     {}", dispatch.commit));
+        out.ok(&started);
+        out.human(format!("Evaluation: {}", started.evaluation));
+        out.human(format!("Task:    {}", started.task));
+        out.human(format!("Commit:     {}", started.commit));
     }
 
     if !quiet {
         out.human("Streaming evaluation logs...");
     }
 
-    crate::commands::logstream::stream_eval_logs(&client, &dispatch.evaluation, out).await;
+    crate::commands::logstream::stream_eval_logs(&client, &started.evaluation, out).await;
 
     if no_link {
         return;
     }
 
-    let eval = wait_for_terminal(&client, &dispatch.evaluation, out).await;
+    let eval = wait_for_terminal(&client, &started.evaluation, out).await;
     let status = eval.as_ref().map(|e| e.status.clone()).unwrap_or_default();
     if status != "Completed" {
         if !quiet {
@@ -164,7 +164,7 @@ pub async fn handle_build(
         return;
     }
 
-    let tree = match client.evals().artefacts(&dispatch.evaluation).await {
+    let tree = match client.evals().artefacts(&started.evaluation).await {
         Ok(t) => t,
         Err(e) => {
             if !quiet {
@@ -177,7 +177,7 @@ pub async fn handle_build(
     #[cfg(feature = "nix")]
     crate::commands::build_nix::link_result(
         &client,
-        &dispatch,
+        &started,
         &tree,
         params.target.as_deref(),
         out,
@@ -187,36 +187,36 @@ pub async fn handle_build(
     download_result_dir(&client, &tree, params.target.as_deref(), out).await;
 }
 
-async fn upload_and_dispatch(
+async fn upload_and_start(
     client: &connector::Client,
     project: &str,
     entries: &[TrackedFile],
     params: &BuildParams,
     quiet: bool,
     out: Output,
-) -> DispatchResponse {
+) -> BuildStartResponse {
     #[cfg(feature = "nix")]
     {
-        crate::commands::build_nix::dispatch_via_nar(client, project, entries, params, quiet, out)
+        crate::commands::build_nix::start_via_nar(client, project, entries, params, quiet, out)
             .await
     }
     #[cfg(not(feature = "nix"))]
     {
-        dispatch_via_manifest(client, project, entries, params, quiet, out).await
+        start_via_manifest(client, project, entries, params, quiet, out).await
     }
 }
 
 #[cfg(not(feature = "nix"))]
-async fn dispatch_via_manifest(
+async fn start_via_manifest(
     client: &connector::Client,
     project: &str,
     entries: &[TrackedFile],
     params: &BuildParams,
     quiet: bool,
     out: Output,
-) -> DispatchResponse {
+) -> BuildStartResponse {
     use connector::build_requests::{
-        BuildManifestRequest, DispatchRequest, InputOverride, ManifestFile,
+        BuildManifestRequest, BuildStartRequest, InputOverride, ManifestFile,
     };
 
     if !quiet {
@@ -324,9 +324,9 @@ async fn dispatch_via_manifest(
 
     match client
         .build_requests()
-        .dispatch(
+        .start(
             &manifest.session,
-            DispatchRequest {
+            BuildStartRequest {
                 target: params.target.clone(),
                 system: params.system.clone(),
                 input_overrides,
@@ -337,7 +337,7 @@ async fn dispatch_via_manifest(
         Ok(d) => d,
         Err(e) => {
             if !quiet {
-                out.progress(format!("Failed to dispatch build request: {}", e));
+                out.progress(format!("Failed to start build request: {}", e));
             }
             exit(1);
         }

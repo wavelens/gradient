@@ -49,7 +49,7 @@ pub struct BlobsResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct DispatchRequest {
+pub struct BuildStartRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -59,7 +59,7 @@ pub struct DispatchRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct DispatchResponse {
+pub struct BuildStartResponse {
     pub evaluation: String,
     pub task: String,
     pub commit: String,
@@ -108,7 +108,7 @@ impl BuildRequestsApi<'_> {
         target: Option<&str>,
         system: Option<&str>,
         nar_bytes: Vec<u8>,
-    ) -> Result<DispatchResponse, ConnectorError> {
+    ) -> Result<BuildStartResponse, ConnectorError> {
         let mut form = reqwest::multipart::Form::new().part(
             "nar",
             reqwest::multipart::Part::bytes(nar_bytes).file_name("source.nar"),
@@ -160,7 +160,7 @@ impl BuildRequestsApi<'_> {
         target: Option<&str>,
         system: Option<&str>,
         overrides: &[(String, String)],
-    ) -> Result<DispatchResponse, ConnectorError> {
+    ) -> Result<BuildStartResponse, ConnectorError> {
         let body = SourceFinalizeBody {
             target: target.map(str::to_owned),
             system: system.map(str::to_owned),
@@ -184,11 +184,11 @@ impl BuildRequestsApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn dispatch(
+    pub async fn start(
         &self,
         session: &str,
-        body: DispatchRequest,
-    ) -> Result<DispatchResponse, ConnectorError> {
+        body: BuildStartRequest,
+    ) -> Result<BuildStartResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

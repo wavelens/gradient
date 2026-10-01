@@ -13,7 +13,7 @@ use crate::config::{ConfigKey, load_config};
 use crate::input::server_base;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use connector::ConnectorError;
-use connector::build_requests::DispatchResponse;
+use connector::build_requests::BuildStartResponse;
 use connector::evals::ArtefactTree;
 use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
@@ -25,14 +25,14 @@ const SOURCE_UPLOAD_CHUNK_SIZE: usize = 32 * 1024 * 1024;
 
 /// Stage the git-tracked files into a temp dir, NAR-pack them with the same
 /// serialiser the server uses (so the store path matches), and upload the NAR.
-pub async fn dispatch_via_nar(
+pub async fn start_via_nar(
     client: &connector::Client,
     project: &str,
     entries: &[TrackedFile],
     params: &BuildParams,
     quiet: bool,
     out: Output,
-) -> DispatchResponse {
+) -> BuildStartResponse {
     let staging = tempfile::tempdir()
         .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Failed to create temp dir: {}", e)));
 
@@ -176,7 +176,7 @@ fn upload_error_message(
 /// errors, with the raw nix diagnostic instead of a bare warning.
 pub async fn link_result(
     client: &connector::Client,
-    dispatch: &DispatchResponse,
+    started: &BuildStartResponse,
     tree: &ArtefactTree,
     target: Option<&str>,
     out: Output,
@@ -196,7 +196,7 @@ pub async fn link_result(
     };
     let realise_path = out_path.full_store_path();
 
-    let (cache_opts, _netrc) = cache_substituter_opts(client, dispatch, out).await;
+    let (cache_opts, _netrc) = cache_substituter_opts(client, started, out).await;
 
     let mut cmd = tokio::process::Command::new("nix-store");
     cmd.args([
@@ -229,10 +229,10 @@ pub async fn link_result(
 /// or a failed key fetch simply yields fewer flags.
 async fn cache_substituter_opts(
     client: &connector::Client,
-    dispatch: &DispatchResponse,
+    started: &BuildStartResponse,
     out: Output,
 ) -> (Vec<String>, Option<tempfile::NamedTempFile>) {
-    let Some(cache) = dispatch.cache.as_deref() else {
+    let Some(cache) = started.cache.as_deref() else {
         out.human("Project has no cache; using local substituters only.");
         return (Vec::new(), None);
     };

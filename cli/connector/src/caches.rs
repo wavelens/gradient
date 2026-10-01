@@ -43,7 +43,7 @@ pub struct CacheStats {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Upstream {
+pub struct UpstreamCache {
     pub id: String,
     pub display_name: String,
     pub mode: String,
@@ -291,19 +291,19 @@ impl CachesApi<'_> {
         http::decode(req.send().await?).await
     }
 
-    pub async fn upstreams(&self, cache: &str) -> Result<Vec<Upstream>, ConnectorError> {
+    pub async fn upstream_caches(&self, cache: &str) -> Result<Vec<UpstreamCache>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("caches/{cache}/upstreams"),
+            &format!("caches/{cache}/upstream-caches"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn add_upstream(
+    pub async fn add_upstream_cache(
         &self,
         cache: &str,
         body: serde_json::Value,
@@ -312,27 +312,15 @@ impl CachesApi<'_> {
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
-            Method::POST,
-            &format!("caches/{cache}/upstreams"),
+            Method::PUT,
+            &format!("caches/{cache}/upstream-caches"),
             true,
         )?
         .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn get_upstream(&self, cache: &str, id: &str) -> Result<Upstream, ConnectorError> {
-        let req = http::request(
-            self.0.http(),
-            self.0.base_url(),
-            self.0.token(),
-            Method::GET,
-            &format!("caches/{cache}/upstreams/{id}"),
-            true,
-        )?;
-        http::decode(req.send().await?).await
-    }
-
-    pub async fn update_upstream(
+    pub async fn update_upstream_cache(
         &self,
         cache: &str,
         id: &str,
@@ -343,20 +331,24 @@ impl CachesApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("caches/{cache}/upstreams/{id}"),
+            &format!("caches/{cache}/upstream-caches/{id}"),
             true,
         )?
         .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn delete_upstream(&self, cache: &str, id: &str) -> Result<String, ConnectorError> {
+    pub async fn delete_upstream_cache(
+        &self,
+        cache: &str,
+        id: &str,
+    ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("caches/{cache}/upstreams/{id}"),
+            &format!("caches/{cache}/upstream-caches/{id}"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -471,7 +463,7 @@ impl CachesApi<'_> {
         Ok(())
     }
 
-    /// Append one slice of a NAR to the server's staging file, keyed by
+    /// Append one slice of a NAR to the server's staging file, per
     /// `(cache, store_hash)`. Returns the authoritative number of bytes staged;
     /// the caller sets its next offset to it and resends if it did not advance.
     pub async fn nar_upload_chunk(
@@ -500,7 +492,7 @@ impl CachesApi<'_> {
     }
 
     /// Finalize a chunked upload: the server validates the staged NAR against
-    /// `narinfo` and ingests it.
+    /// `narinfo` and imports it.
     pub async fn nar_upload_finalize(
         &self,
         cache: &str,

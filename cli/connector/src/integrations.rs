@@ -9,7 +9,7 @@ pub struct Integration {
     pub name: String,
     pub display_name: String,
     pub kind: String,
-    pub forge_type: String,
+    pub git_host_type: String,
     pub endpoint_url: Option<String>,
     pub has_secret: bool,
     pub has_access_token: bool,
@@ -23,7 +23,7 @@ pub struct IntegrationSummary {
     pub name: String,
     pub display_name: String,
     pub kind: String,
-    pub forge_type: String,
+    pub git_host_type: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -31,7 +31,7 @@ pub struct MakeIntegrationRequest {
     pub name: String,
     pub display_name: Option<String>,
     pub kind: String,
-    pub forge_type: String,
+    pub git_host_type: String,
     pub secret: Option<String>,
     pub endpoint_url: Option<String>,
     pub access_token: Option<String>,
