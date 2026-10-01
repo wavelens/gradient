@@ -32,9 +32,9 @@ a long log with `search_build_log`. Arguments named `project`, `task`, `evaluati
 take the name or UUID as shown by the listing tools; `project` defaults to the project selected in \
 the user's Gradient CLI configuration.";
 
-const CONTROL_INSTRUCTIONS: &str = " Control tools are enabled: `start_evaluation` queues a \
-run and returns its UUID, `watch_evaluation` blocks until the run finishes or times out and \
-returns each entry point's build status, `abort_evaluation` cancels a run.";
+const CONTROL_INSTRUCTIONS: &str = " Control tools are enabled: `start_evaluation` queues an \
+evaluation and returns its UUID, `watch_evaluation` blocks until the evaluation finishes or \
+times out and returns each entry point's build status, `abort_evaluation` cancels one.";
 
 const INLINE_LOG_LINES: usize = 10;
 const WATCH_POLL: Duration = Duration::from_secs(5);

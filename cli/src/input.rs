@@ -49,7 +49,7 @@ pub fn server_base(out: Output) -> String {
         })
 }
 
-/// The fields a command asked for, keyed by prompt label. `handle_input` hands
+/// The fields a command asked for, per prompt label. `handle_input` hands
 /// one out only once every declared field carries a value, so lookups cannot miss.
 pub struct Inputs {
     values: HashMap<String, String>,

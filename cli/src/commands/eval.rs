@@ -23,11 +23,11 @@ pub struct EvalArgs {
 /// Evaluate a flake's outputs to derivations, like nix-eval-jobs, using the
 /// gradient worker evaluator. Streams one JSON line per attribute to stdout.
 ///
-/// Runs synchronously without a Tokio runtime: the Nix C API uses Boehm GC,
-/// which must run isolated from Tokio's thread pool (see the worker's eval
+/// Executes synchronously without a Tokio runtime: the Nix C API uses Boehm GC,
+/// which must stay isolated from Tokio's thread pool (see the worker's eval
 /// subprocess). Per-attribute failures are reported in their JSON line and do
-/// not abort the run; only a top-level failure (e.g. locking the flake) exits
-/// non-zero.
+/// not abort the evaluation; only a top-level failure (e.g. locking the flake)
+/// exits non-zero.
 pub fn run(args: EvalArgs) -> std::io::Result<()> {
     let system = attr_spec::default_nix_system();
     let (flake_ref, wildcards) = split_installables(&args.patterns, &system);

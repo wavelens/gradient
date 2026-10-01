@@ -29,7 +29,7 @@ impl ExitKind {
 }
 
 /// Status colours for human output. Escapes reach the terminal only, so a piped
-/// or `--json` run stays plain text.
+/// or `--json` invocation stays plain text.
 #[derive(Clone, Copy)]
 pub enum Color {
     Green,

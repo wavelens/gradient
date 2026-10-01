@@ -98,7 +98,7 @@ enum MainCommands {
         system: Option<String>,
         #[arg(short, long, add = ArgValueCompleter::new(completion::complete_projects))]
         project: Option<String>,
-        /// Dispatch and return the evaluation UUID without streaming logs
+        /// Start the build and return the evaluation UUID without streaming logs
         #[arg(short, long)]
         background: bool,
         #[arg(short, long)]
@@ -168,9 +168,10 @@ pub fn complete_env() {
     CompleteEnv::with_factory(Cli::command).complete();
 }
 
-/// Entry point: parse, then dispatch. `eval` runs synchronously before any
-/// runtime starts (the embedded Nix evaluator uses Boehm GC, which must run
-/// isolated from Tokio's thread pool); everything else runs on the runtime.
+/// Entry point: parse, then hand off to the command. `eval` executes
+/// synchronously before any runtime starts (the embedded Nix evaluator uses
+/// Boehm GC, which must stay isolated from Tokio's thread pool); every other
+/// command executes on the runtime.
 pub fn run() -> std::io::Result<()> {
     complete_env();
     let cli = Cli::parse();
@@ -377,7 +378,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,
         #[cfg(feature = "eval")]
-        MainCommands::Eval(_) => unreachable!("eval is dispatched before the runtime starts"),
+        MainCommands::Eval(_) => unreachable!("eval is handled before the runtime starts"),
         MainCommands::Mcp { control } => {
             if let Err(e) = mcp::run(control).await {
                 out.err(ExitKind::Api, format!("mcp server failed: {e}"));

@@ -47,7 +47,7 @@ pub fn strip_ansi(s: &str) -> String {
     out
 }
 
-/// A streamed build-log chunk ready for stdout: decode double-escaped control
+/// A streamed build-log chunk prepared for stdout: decode double-escaped control
 /// bytes so nix's colours render on a TTY, or strip them when piped.
 pub fn render_log(chunk: &str) -> String {
     let decoded = decode_escapes(chunk);
