@@ -15,7 +15,7 @@ mod eval_finalize;
 mod evaluation_status;
 pub mod logging;
 
-pub use abort::abort_eval_anchors;
+pub use abort::abort_eval_shared_builds;
 pub use derivation_build_status::{
     announce_entry_point_statuses, notify_build_status_for_derivations,
     update_derivation_build_status,

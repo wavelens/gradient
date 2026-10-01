@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Global build-once anchor: one durable build-state row per derivation
+//! Global build-once shared build: one durable build-state row per derivation
 //! (UNIQUE on `derivation`). Per-eval scoring and logs live in `build_job` /
 //! `build_attempt`; this row is the single source of truth for whether a
 //! derivation has been built.
@@ -25,29 +25,29 @@ pub struct Model {
     #[sea_orm(unique)]
     pub derivation: DerivationId,
     pub status: BuildStatus,
-    pub substitutable: bool,
-    /// The upstream probe has answered for this anchor, hit or miss. Until it
-    /// has, demand stops here: descending into the build inputs of an output an
-    /// upstream serves dispatches a closure the relay then makes pointless, and
+    pub cache_available: bool,
+    /// The upstream probe has answered for this shared build, hit or miss. Until it
+    /// has, the need stops here: descending into the build inputs of an output an
+    /// upstream serves dispatches a closure the passthrough then makes pointless, and
     /// a job already handed to a worker cannot be recalled.
     pub probed: bool,
     pub substituted: bool,
-    /// Dependents can get this anchor's outputs: substitutable, or terminal
-    /// success with every output whole in our cache. Flipped by the event that
-    /// changes it, with the dependents' `unready_deps` moved from that flip.
+    /// Builds wanting it can get this shared build's outputs: available in a cache, or terminal
+    /// success with every output complete in our cache. Flipped by the event that
+    /// changes it, with the parents' `blocking_deps` moved from that flip.
     pub fetchable: bool,
-    /// Direct dependencies that are not fetchable. Zero is the readiness gate.
-    pub unready_deps: i32,
-    /// Runtime edges whose dependency is not whole. Zero, with every output
-    /// present, is whole.
+    /// Direct dependencies that are not fetchable. Zero is the can-start gate.
+    pub blocking_deps: i32,
+    /// Runtime dependencies that are not complete. Zero, with every output
+    /// present, is complete.
     pub missing_runtime_deps: i32,
-    /// Something still wants this anchor's outputs in our cache: an entry point
-    /// names it, or a demanded, named builder depends on it. Recomputed by
-    /// `readiness::recompute_demand` on the events that change it; every arm of
+    /// Something still wants this shared build's outputs in our cache: an entry point
+    /// names it, or a wanted, named builder depends on it. Updated by
+    /// `can_start::update_need` on the events that change it; every arm of
     /// the promotion gate reads it.
-    pub demanded: bool,
+    pub wanted: bool,
     /// Dispatches ahead of unprioritized work. Cleared by the database when the
-    /// anchor fails permanently, dependency-fails, times out, is aborted or is skipped.
+    /// shared build fails permanently, dependency-fails, times out, is aborted or is skipped.
     pub prioritized: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,

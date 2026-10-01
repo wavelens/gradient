@@ -6,8 +6,8 @@
 
 //! The one push every job kind ends in: the outputs it produced, and only those,
 //! hashed, compressed and uploaded. Nothing below an output is looked at; the gate
-//! that dispatched the job made its build closure whole in our cache first, and a
-//! substitute's runtime references are the server's to demand.
+//! that dispatched the job made its build closure complete in our cache first, and a
+//! substitute's runtime references are for the server to request.
 
 use std::collections::HashMap;
 
@@ -86,7 +86,9 @@ mod tests {
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
     use crate::proto::job::JobUpdater;
     use gradient_worker_client::connection::{ProtoConnection, ProtoReader};
-    use gradient_worker_client::correlation::{CacheWaiters, DispatchHandle, deliver_cache_reply};
+    use gradient_worker_client::correlation::{
+        AssignmentHandle, CacheWaiters, deliver_cache_reply,
+    };
     use gradient_worker_client::nar::NarSource;
     use gradient_worker_client::nar_recv::NarReceiver;
     use gradient_worker_client::upload::UploadClient;
@@ -141,7 +143,7 @@ mod tests {
     ) -> JobUpdater {
         JobUpdater::new(
             job.to_owned(),
-            DispatchHandle::new("dispatch-1".to_owned()),
+            AssignmentHandle::new("dispatch-1".to_owned()),
             writer,
             cache_waiters,
             Arc::new(Mutex::new(HashMap::new())),
@@ -170,7 +172,7 @@ mod tests {
                     ClientMessage::UploadRequest { request_id, .. } => sc
                         .send(ServerMessage::UploadGrant {
                             request_id,
-                            target: GrantTarget::Relay { resume_offset: 0 },
+                            target: GrantTarget::Passthrough { resume_offset: 0 },
                         })
                         .await
                         .unwrap(),
@@ -278,7 +280,7 @@ mod tests {
                         opened.push(store_path);
                         sc.send(ServerMessage::UploadGrant {
                             request_id,
-                            target: GrantTarget::Relay { resume_offset: 0 },
+                            target: GrantTarget::Passthrough { resume_offset: 0 },
                         })
                         .await
                         .unwrap();

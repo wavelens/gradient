@@ -30,7 +30,7 @@ pub async fn post_build_prioritize(
     }
 
     scheduler
-        .prioritize_build(ctx.anchor.id)
+        .prioritize_build(ctx.shared_build.id)
         .await
         .map_err(|e| WebError::internal(e.to_string()))?;
 

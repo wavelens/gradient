@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub use gradient_entity::task_action::ActionType;
 
-/// Which [`crate::actions`] patch generator an `OpenPr` action runs.
+/// Which [`crate::actions`] patch generator an `OpenPr` action executes.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PatchGeneratorKind {
@@ -49,7 +49,7 @@ pub enum ActionConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         token: Option<String>,
     },
-    ForgeStatusReport {
+    GitHostStatusReport {
         integration_id: IntegrationId,
     },
     OpenPr {
@@ -84,7 +84,7 @@ impl ActionConfig {
         match self {
             ActionConfig::SendMail { .. } => ActionType::SendMail,
             ActionConfig::SendWebRequest { .. } => ActionType::SendWebRequest,
-            ActionConfig::ForgeStatusReport { .. } => ActionType::ForgeStatusReport,
+            ActionConfig::GitHostStatusReport { .. } => ActionType::GitHostStatusReport,
             ActionConfig::OpenPr { .. } => ActionType::OpenPr,
         }
     }

@@ -126,7 +126,7 @@ impl PartialWriter {
         })
     }
 
-    /// Fold a resumed prefix into the hash. Runs at most once, before the first
+    /// Fold a resumed prefix into the hash. Executes at most once, before the first
     /// byte is written, so the file holds exactly the prefix and reading it to
     /// end reads all of it.
     async fn hash_prefix(&mut self) -> Result<()> {

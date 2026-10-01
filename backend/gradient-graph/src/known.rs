@@ -5,7 +5,7 @@
  */
 
 //! Which derivations an evaluation walk may prune, read from the pool beside the
-//! graph actor.
+//! graph writer.
 
 use gradient_db::WorkerDb;
 use gradient_types::*;
@@ -19,7 +19,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 /// batches; [`gradient_db::walk_completeness`] keeps it true, and both are cleared
 /// where a record is lost ([`gradient_db::unwalk_derivations`], the GC's orphan
 /// reclaim). Build and cache state say nothing about whether the graph is recorded,
-/// so keying on them re-walked a complete record for as long as its anchor had not
+/// so keying on them re-walked a complete record for as long as its shared build had not
 /// succeeded.
 pub(crate) async fn prunable(
     db: &WorkerDb,

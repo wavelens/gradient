@@ -35,11 +35,11 @@ impl Scheduler {
             .state
             .graph
             .transition(Transition::BuildStarted {
-                anchor: derivation_build,
+                shared_build: derivation_build,
             })
             .await
         {
-            // Backstop for the dispatch/abort race: an anchor dispatched by an
+            // Backstop for the dispatch/abort race: a shared build dispatched by an
             // in-flight pass just before its evaluation was aborted reports
             // started here, so tell the worker to stop rather than build on.
             Ok(report) if report.already_aborted => {
@@ -50,7 +50,7 @@ impl Scheduler {
             }
             Ok(_) => {}
             Err(e) => {
-                warn!(error = %e, %derivation_build, "Building update did not reach the graph actor")
+                warn!(error = %e, %derivation_build, "Building update did not reach the graph writer")
             }
         }
     }
@@ -79,7 +79,7 @@ impl Scheduler {
         self.state
             .graph
             .transition(Transition::BuildOutput {
-                anchor: derivation_build,
+                shared_build: derivation_build,
                 outputs,
                 metrics,
                 substituted,
@@ -153,8 +153,8 @@ impl Scheduler {
                 }
 
                 // The stream is done, so every endpoint derivation now has a
-                // row: the actor settles the still-pending dependency edges and
-                // reconciles the closure before the eval moves to Building.
+                // row: the graph writer settles the still-pending dependency edges and
+                // repairs the closure before the eval moves to Building.
                 let r = self
                     .state
                     .graph
@@ -164,7 +164,7 @@ impl Scheduler {
                     .await
                     .map(|_| ());
                 if worker_idle {
-                    self.kick_dispatch();
+                    self.kick_assigner();
                 }
 
                 r
@@ -174,7 +174,7 @@ impl Scheduler {
                     .state
                     .graph
                     .transition(Transition::BuildCompleted {
-                        anchor: j.derivation_build,
+                        shared_build: j.derivation_build,
                     })
                     .await?;
                 if let Some(log) = report.substitute_log {
@@ -182,18 +182,18 @@ impl Scheduler {
                     self.state.shutdown.spawn(async move {
                         if let Err(e) = crate::log_substitution::substitute_log(
                             state,
-                            log.anchor,
+                            log.shared_build,
                             log.derivation,
                             log.drv_path,
                         )
                         .await
                         {
-                            warn!(error = %e, anchor = %log.anchor, "substitute log fetch failed");
+                            warn!(error = %e, shared_build = %log.shared_build, "substitute log fetch failed");
                         }
                     });
                 }
                 if worker_idle {
-                    self.kick_dispatch();
+                    self.kick_assigner();
                 }
 
                 Ok(())
@@ -250,15 +250,15 @@ impl Scheduler {
                     .await
                     .map(|_| ());
                 // A corrupt-eval-cache heal re-queues the eval; kick dispatch so
-                // it re-runs promptly instead of waiting for the next tick.
-                self.kick_dispatch();
+                // it repeats promptly instead of waiting for the next tick.
+                self.kick_assigner();
                 r
             }
             PendingJob::Build(j) => self
                 .state
                 .graph
                 .transition(Transition::BuildFailed {
-                    anchor: j.derivation_build,
+                    shared_build: j.derivation_build,
                     error: failure.error.clone(),
                     log_banner: gradient_sources::strip_nix_log_tail(&failure.error),
                     kind: failure.kind,

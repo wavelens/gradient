@@ -4,21 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pure retry and terminal-status policy for a build anchor.
+//! Pure retry and terminal-status policy for a shared build.
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_wire::types::BuildFailureKind;
 
-/// How the anchor was being fulfilled when it failed, and how much of its
-/// substitute-miss budget is already spent. `misses` counts the anchor's prior
+/// How the shared build was being fulfilled when it failed, and how much of its
+/// substitute-miss budget is already spent. `misses` counts the shared build's prior
 /// `SubstituteUnavailable` attempts within the driving evaluation, so a new
 /// evaluation retries substitution from zero. Every penalty-free re-queue is
 /// recorded under that reason, whatever kind produced it, so one budget bounds
-/// the whole relay loop - see [`attempt_reason_for`].
+/// the whole passthrough loop - see [`attempt_reason_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Substitution {
-    pub substitutable: bool,
+    pub cache_available: bool,
     pub misses: i64,
     pub threshold: i64,
 }
@@ -29,13 +29,13 @@ pub(crate) enum FailureOutcome {
     Permanent,
     Timeout,
     /// Penalty-free re-queue (substitute miss): back to `Queued` without
-    /// bumping `attempt`, to be relayed again once something still demands it.
+    /// bumping `attempt`, to be passed through again once something still needs it.
     Requeue,
-    /// The miss budget is spent: the anchor stops being a relay, forgets its
+    /// The miss budget is spent: the shared build stops being a passthrough, forgets its
     /// upstream, and is built through the ordinary gates.
     Exhausted,
     /// The server ordered the job stopped. Terminal for this evaluation but not
-    /// a verdict on the derivation, so the anchor lands on the requeueable
+    /// a verdict on the derivation, so the shared build lands on the requeueable
     /// `Aborted` rather than `FailedPermanent`.
     Aborted,
 }
@@ -49,7 +49,7 @@ pub(crate) fn decide_failure_outcome(
     max_attempts: u32,
     substitution: Substitution,
 ) -> FailureOutcome {
-    let substitutable = substitution.substitutable;
+    let cache_available = substitution.cache_available;
     match kind {
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
@@ -60,10 +60,10 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::InputsUnavailable | BuildFailureKind::Transient => {
             if (attempt + 1) < max_attempts as i32 {
                 FailureOutcome::Retry
-            } else if substitutable {
-                // Nothing ever tried to build this: the relay out of an upstream
+            } else if cache_available {
+                // Nothing ever tried to build this: the passthrough out of an upstream
                 // is what kept failing, so a permanent mark is a verdict on the
-                // wrong thing. It poisons a global build-once anchor for a path
+                // wrong thing. It poisons a global build-once shared build for a path
                 // that builds fine and is sitting on an upstream, and cascades
                 // `DependencyFailed` over everything above it. Fall into the
                 // substitute-miss loop instead, which escalates to a real build
@@ -78,11 +78,11 @@ pub(crate) fn decide_failure_outcome(
     }
 }
 
-/// One penalty-free re-queue per unspent miss, then the anchor is built.
+/// One penalty-free re-queue per unspent miss, then the shared build is built.
 ///
 /// Both arms that can re-queue go through this, because both record the same
 /// reason and are therefore counted by the same budget. Reading it on only one
-/// of them is what let a persistently failing relay loop forever: the attempt
+/// of them is what let a persistently failing passthrough loop forever: the attempt
 /// counter a re-queue deliberately does not bump was the only other bound, and a
 /// re-queue is exactly the path that does not bump it.
 const fn requeue_or_exhaust(substitution: Substitution) -> FailureOutcome {
@@ -111,8 +111,8 @@ pub(crate) const fn spends_substitute_budget(kind: BuildFailureKind) -> bool {
 /// the daemon found the outputs already valid and ran no build (recorded on
 /// `build.substituted`), else `Completed`. Decided at `JobCompleted`, once the
 /// output NARs the worker pushed are committed to the index, so a build never
-/// reaches a dispatch-ready terminal state while its bytes are still absent from
-/// the cache - the #399 regression where a dependent dispatched into that window
+/// reaches a terminal state its parents can start on while its bytes are still absent from
+/// the cache - the #399 regression where a parent dispatched into that window
 /// and failed `InputsUnavailable`. The worker having sent them is not that
 /// guarantee and never was: the completion used to overtake its own frames on the
 /// control lane and the commits ran detached behind it (#654).
@@ -173,7 +173,7 @@ pub(crate) fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureRea
 /// How the attempt row is closed out. An abort is recorded as `Aborted`, so the
 /// `deterministic_build_failure` predicate (`outcome = Failed AND reason =
 /// BuilderNonzero`) cannot match it: stamping a user abort as a reproducible
-/// builder exit excluded the anchor from `requeue_failed_anchors` forever, so no
+/// builder exit excluded the shared build from `requeue_failed_shared_builds` forever, so no
 /// later evaluation could ever rebuild it (#572).
 pub(crate) fn attempt_outcome(kind: BuildFailureKind) -> AttemptOutcome {
     match kind {
@@ -183,11 +183,11 @@ pub(crate) fn attempt_outcome(kind: BuildFailureKind) -> AttemptOutcome {
 }
 
 /// Circuit breaker for the `InputsUnavailable` self-heal. Each failed eval
-/// reconciles the cache (purges the stale input) so the next eval rebuilds it; a
+/// repairs the cache (purges the stale input) so the next eval rebuilds it; a
 /// genuinely unrecoverable input turns that into a hot loop that churns the cache
-/// forever. `prior_failures` is how many `InputsUnavailable` attempts this anchor
-/// already has, so the self-heal runs for the first `max_loops` and the circuit
-/// opens after - the build then fails fast without reconciling.
+/// forever. `prior_failures` is how many `InputsUnavailable` attempts this shared build
+/// already has, so the self-heal is active for the first `max_loops` and the circuit
+/// opens after - the build then fails fast without repairing.
 pub(crate) fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u32) -> bool {
     prior_failures >= max_loops as i64
 }
@@ -230,9 +230,9 @@ pub(crate) fn truncate_failure_message(error: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    fn sub(substitutable: bool, misses: i64) -> Substitution {
+    fn sub(cache_available: bool, misses: i64) -> Substitution {
         Substitution {
-            substitutable,
+            cache_available,
             misses,
             threshold: 2,
         }
@@ -248,7 +248,7 @@ mod tests {
     use gradient_wire::types::BuildFailureKind;
 
     /// The user pressed Abort: the worker stopped nix, nothing about the
-    /// derivation failed. Reporting it as `Permanent` landed the anchor on
+    /// derivation failed. Reporting it as `Permanent` landed the shared build on
     /// `FailedPermanent` with `reason = BuilderNonzero`, which
     /// `deterministic_build_failure` reads as a reproducible builder exit and
     /// excludes from every requeue - the derivation could never be built again
@@ -293,7 +293,7 @@ mod tests {
             assert_ne!(
                 attempt_reason(kind),
                 Some(AttemptFailureReason::BuilderNonzero),
-                "{kind:?} must not poison the anchor as a deterministic failure"
+                "{kind:?} must not poison the shared build as a deterministic failure"
             );
         }
     }
@@ -345,9 +345,9 @@ mod tests {
         }
     }
 
-    /// The budget, not the attempt counter, ends the relay loop: a miss re-queues
+    /// The budget, not the attempt counter, ends the passthrough loop: a miss re-queues
     /// below the threshold and exhausts the substitution at it, whatever the
-    /// anchor's attempt count (a relay never bumps one).
+    /// shared build's attempt count (a passthrough never bumps one).
     #[test]
     fn a_substitute_miss_requeues_below_the_threshold_and_exhausts_at_it() {
         assert_eq!(
@@ -365,14 +365,14 @@ mod tests {
     }
 
     /// Every penalty-free re-queue spends the same budget, whatever produced it.
-    /// A transient failure of a relay used to re-queue unconditionally once the
+    /// A transient failure of a passthrough used to re-queue unconditionally once the
     /// attempt budget was spent, on the reasoning that our own cache write
     /// breaking is not a verdict on the upstream - but nothing then bounded it:
-    /// one anchor took 788 identical `CacheQuery Push (substitute)` failures, one
+    /// one shared build took 788 identical `CacheQuery Push (substitute)` failures, one
     /// every 25 s for five and a half hours, until the co-located worker was
-    /// OOM-killed. A relay that cannot be written is one that has to be built.
+    /// OOM-killed. A passthrough that cannot be written is one that has to be built.
     #[test]
-    fn a_transient_relay_requeue_is_bounded_by_the_same_budget() {
+    fn a_transient_passthrough_requeue_is_bounded_by_the_same_budget() {
         for kind in [
             BuildFailureKind::Transient,
             BuildFailureKind::InputsUnavailable,
@@ -498,9 +498,9 @@ mod tests {
         assert!(std::str::from_utf8(out.as_bytes()).is_ok());
     }
 
-    /// A relay out of an upstream that keeps failing is our cache write breaking,
+    /// A passthrough out of an upstream that keeps failing is our cache write breaking,
     /// not a verdict on the derivation. Marking it `FailedPermanent` poisoned a
-    /// global anchor for a path that builds fine: an object-store wobble took out
+    /// global shared build for a path that builds fine: an object-store wobble took out
     /// mesa, thunderbird and clang at once and cascaded `DependencyFailed` over
     /// everything above them.
     #[test]
@@ -515,10 +515,10 @@ mod tests {
         );
     }
 
-    /// Below the budget nothing changes: one blip must not turn a substitutable
+    /// Below the budget nothing changes: one blip must not turn a cache-available
     /// build into a from-scratch one.
     #[test]
-    fn a_substitutable_anchor_still_retries_before_its_budget_is_spent() {
+    fn a_cache_available_shared_build_still_retries_before_its_budget_is_spent() {
         assert_eq!(
             decide_failure_outcome(BuildFailureKind::Transient, 0, 3, sub(true, 0)),
             FailureOutcome::Retry

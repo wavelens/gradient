@@ -2197,7 +2197,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
- "gradient-forge",
+ "gradient-git-host",
  "gradient-graph",
  "gradient-notify",
  "gradient-sources",
@@ -2234,7 +2234,7 @@ dependencies = [
  "futures",
  "gradient-db",
  "gradient-entity",
- "gradient-forge",
+ "gradient-git-host",
  "gradient-notify",
  "gradient-storage",
  "gradient-types",
@@ -2277,7 +2277,7 @@ dependencies = [
  "gradient-ci",
  "gradient-db",
  "gradient-entity",
- "gradient-forge",
+ "gradient-git-host",
  "gradient-graph",
  "gradient-migration",
  "gradient-notify",
@@ -2441,7 +2441,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gradient-forge"
+name = "gradient-git-host"
 version = "1.4.1"
 dependencies = [
  "anyhow",
@@ -2749,7 +2749,7 @@ dependencies = [
  "gradient-db",
  "gradient-derivation",
  "gradient-entity",
- "gradient-forge",
+ "gradient-git-host",
  "gradient-graph",
  "gradient-notify",
  "gradient-proto",
@@ -2844,7 +2844,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
- "gradient-forge",
+ "gradient-git-host",
  "gradient-graph",
  "gradient-notify",
  "gradient-pool",

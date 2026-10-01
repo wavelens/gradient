@@ -76,7 +76,7 @@ async fn append_to_storage(state: &ServerState, build: DerivationBuildId, data: 
         .await
         .unwrap_or(None)
     else {
-        debug!(%build, bytes = data.len(), "log chunk dropped: no open attempt for anchor");
+        debug!(%build, bytes = data.len(), "log chunk dropped: no open attempt for the shared build");
         return;
     };
 

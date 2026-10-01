@@ -54,10 +54,23 @@ pub struct ServerArgs {
         default_value = "false"
     )]
     pub public_stats: bool,
+    /// Days to keep job assignment records, completed deliveries, worker
+    /// connection history, webhook and task action deliveries, expired sessions
+    /// and CLI logins, finished admin tasks, the audit log, per-build resource
+    /// samples and finished cluster jobs. Pruned resource samples no longer feed
+    /// build predictions. A finished cluster job whose members are gone goes
+    /// right away. Open worker connections, the newest finished admin task of
+    /// each kind and active cluster jobs are kept. `0` keeps them forever.
+    #[arg(
+        long = "retention-days",
+        env = "GRADIENT_RETENTION_DAYS",
+        default_value_t = 90
+    )]
+    pub retention_days: i64,
 }
 
 impl ServerArgs {
-    /// Where relayed `/proto` uploads stage their `*.partial` files.
+    /// Where granted worker uploads over `/proto` stage their `*.partial` files.
     pub fn nar_partial_dir(&self) -> std::path::PathBuf {
         std::path::Path::new(&self.base_dir).join("nar-partial")
     }
@@ -85,6 +98,7 @@ impl Default for ServerArgs {
             base_dir: ".".into(),
             store_path: None,
             public_stats: false,
+            retention_days: 90,
         }
     }
 }

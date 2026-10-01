@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Where a ready job goes: single dispatch, its waiting cluster, or nowhere
+//! Where a startable job goes: single dispatch, its waiting cluster, or nowhere
 //! while its cluster is past `Queued`.
 
 use std::collections::HashMap;
@@ -31,9 +31,9 @@ impl Membership {
     pub(crate) async fn load<C: ConnectionTrait>(
         db: &C,
         evaluations: &[EvaluationId],
-        anchors: &[DerivationBuildId],
+        shared_builds: &[DerivationBuildId],
     ) -> Result<Self, DbErr> {
-        let by_key = gradient_db::cluster_membership(db, evaluations, anchors)
+        let by_key = gradient_db::cluster_membership(db, evaluations, shared_builds)
             .await?
             .into_iter()
             .filter_map(|of| {

@@ -14,16 +14,18 @@ use rusqlite::Connection;
 /// Bumped whenever an exported table's shape or scope changes, so an inspector
 /// can refuse a file it does not understand rather than print wrong answers.
 ///
-/// The inspector ships separately and pins the one version it reads, so a bump
+/// The inspector is shipping separately and pins the one version it reads, so a bump
 /// that does not reach it makes it refuse every report this writes - which it
 /// did, sitting on 10 against an exporter writing 11. `report-inspector`'s
 /// derivation reads both constants and fails evaluation when they disagree.
 ///
 /// 16 carries derivation_build.probed: without it a bundle cannot say whether
-/// demand stopped at an anchor because the upstream probe had not answered yet.
+/// the need stopped at a shared build because the upstream probe had not answered yet.
 /// 17 drops `project` from worker_connection / worker_sample and
 /// `display_name` from worker_connection: telemetry describes the worker.
-pub const SCHEMA_VERSION: i64 = 17;
+/// 18 renames derivation_build's `substitutable`, `unready_deps` and `demanded`
+/// to `cache_available`, `blocking_deps` and `wanted`.
+pub const SCHEMA_VERSION: i64 = 18;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
@@ -38,7 +40,7 @@ pub struct ManifestRow {
     pub rows_included: i64,
     pub rows_available: i64,
     /// What the table's `$1` selected. Not always the evaluation: several tables
-    /// hang off anchors it shares with other evaluations.
+    /// hang off shared builds it shares with other evaluations.
     pub scope: String,
     /// What was dropped from that scope, or `none`.
     pub filter: String,
@@ -156,7 +158,7 @@ mod tests {
                 table: "build_log".into(),
                 rows_included: 3,
                 rows_available: 8805,
-                scope: "the evaluation's build anchors".into(),
+                scope: "the evaluation's shared builds".into(),
                 filter: "failed attempts only".into(),
                 redactions: "none".into(),
             }],

@@ -7,7 +7,7 @@
 //! WebSocket listener for incoming server connections.
 //!
 //! When `discoverable = true`, the worker starts a TCP listener and accepts
-//! incoming WebSocket upgrades.  Each accepted connection runs the same
+//! incoming WebSocket upgrades.  Each accepted connection is running the same
 //! handshake and dispatch loop as an outbound connection - the protocol is
 //! identical regardless of who initiated the transport.
 

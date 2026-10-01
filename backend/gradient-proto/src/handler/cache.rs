@@ -10,7 +10,7 @@ use gradient_core::ServerState;
 use gradient_types::ids::{CacheId, CachedPathId, ProjectId};
 use gradient_types::*;
 use gradient_wire::transport::{
-    Transport, external_arity_ok, may_consult_upstreams, pull_transport,
+    Transport, external_arity_ok, may_consult_upstream_caches, pull_transport,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::warn;
@@ -297,7 +297,7 @@ async fn build_cached_entry(
                 state.nar_storage.presigner_available(),
             );
             let url = match transport {
-                Transport::Relay => None,
+                Transport::Passthrough => None,
                 Transport::Presigned => {
                     match state.nar_storage.presigned_get_url(hash, expire).await {
                         Ok(u) => u,
@@ -467,26 +467,24 @@ async fn extend_with_upstream_results(
 }
 
 /// Pull availability for any still-uncached paths from the project's configured
-/// gradient_proto upstreams, extending `result` with hits.
+/// gradient_proto upstream caches, extending `result` with hits.
 async fn extend_with_gradient_proto_results(
     state: &ServerState,
     project_id: ProjectId,
     uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
-    let upstreams = match gradient_db::gradient_proto_upstreams_for_project(
-        &state.cache_db,
-        project_id,
-    )
-    .await
-    {
-        Ok(u) => u,
-        Err(e) => {
-            warn!(%project_id, error = %e, "gradient_proto upstream lookup failed");
-            return;
-        }
-    };
-    if upstreams.is_empty() {
+    let upstream_caches =
+        match gradient_db::gradient_proto_upstream_caches_for_project(&state.cache_db, project_id)
+            .await
+        {
+            Ok(u) => u,
+            Err(e) => {
+                warn!(%project_id, error = %e, "gradient_proto upstream lookup failed");
+                return;
+            }
+        };
+    if upstream_caches.is_empty() {
         return;
     }
 
@@ -500,7 +498,7 @@ async fn extend_with_gradient_proto_results(
         return;
     }
 
-    for up in upstreams {
+    for up in upstream_caches {
         let api_key = up.api_key_enc.as_deref().and_then(|enc| {
             gradient_sources::decrypt_secret(&state.config.secrets.crypt_file, enc).ok()
         });
@@ -524,7 +522,7 @@ async fn extend_with_gradient_proto_results(
 ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
 ///
 /// `external` is what lets the answer leave our cache at all; see
-/// [`may_consult_upstreams`].
+/// [`may_consult_upstream_caches`].
 async fn query(
     state: &ServerState,
     project_id: Option<ProjectId>,
@@ -574,7 +572,7 @@ async fn query(
     let cached_path_rows = load_cached_path_rows(state, &hashes).await?;
     let mut cached_map = build_local_cache_map(state, &hashes, &cached_path_rows).await?;
 
-    // Merge source-path cache hits into the map (keyed by hash string).
+    // Merge source-path cache hits into the map (per hash string).
     for cp in &cached_path_rows {
         if cp.is_fully_cached() {
             cached_map
@@ -624,7 +622,7 @@ async fn query(
 
     // Everything below leaves our cache, and the answer is complete without it: the
     // caller reads any path this reply does not serve as one we do not have.
-    if !may_consult_upstreams(mode, external) {
+    if !may_consult_upstream_caches(mode, external) {
         return Ok(result);
     }
 
@@ -847,7 +845,7 @@ mod tests {
 
     fn make_state() -> ServerState {
         // Seed empty (not errored) result sets: an unseeded MockDatabase errors
-        // with "query_results buffer is empty" once a query runs, which `query`
+        // with "query_results buffer is empty" once a query executes, which `query`
         // now correctly propagates as a CacheError instead of swallowing it into
         // an empty cache map. Eight covers the deepest uncached path's lookups.
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
@@ -1065,7 +1063,7 @@ mod tests {
     #[tokio::test]
     async fn cache_query_rejects_overlong_hash() {
         // Hash component of 33 chars must be rejected - nix-base32 hashes are
-        // exactly 32 chars. Guards against an `== 32` → `>= 32` length-check
+        // exactly 32 chars. Guards against an `== 32` -> `>= 32` length-check
         // relaxation.
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
@@ -1131,7 +1129,7 @@ mod tests {
 
     #[test]
     fn expand_references_collapses_multiple_whitespace() {
-        // split_whitespace collapses runs of spaces/tabs.
+        // split_whitespace collapses sequences of spaces/tabs.
         let out = expand_references(Some("aaaa-a   \t bbbb-b")).unwrap();
         assert_eq!(out.len(), 2);
     }

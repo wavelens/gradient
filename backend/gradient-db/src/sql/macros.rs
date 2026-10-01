@@ -66,7 +66,7 @@ macro_rules! sql_fn {
 }
 
 /// The `sql!` of a statement held in a `LazyLock<String>`. The closure borrows
-/// it, so nothing is rebuilt or cloned on the path that runs it.
+/// it, so nothing is rebuilt or cloned on the path running it.
 #[macro_export]
 macro_rules! sql_lazy {
     ($(

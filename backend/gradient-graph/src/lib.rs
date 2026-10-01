@@ -4,18 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The graph module: one actor owns every write to the dependency graph and
+//! The graph module: one graph writer owns every write to the dependency graph and
 //! the cache index. [`Graph`] is the handle the rest of the server calls.
 
-pub mod actor;
 pub mod messages;
+pub mod writer;
 
 mod demote;
 mod gc;
-mod ingest;
 mod known;
 mod nar;
 pub mod policy;
+mod record;
 mod requeue;
 mod self_heal;
 mod transition;
@@ -30,14 +30,14 @@ use ractor::rpc::CallResult;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 use tokio::sync::watch;
 
-use actor::{CALL_TIMEOUT, GraphActor, GraphArgs, GraphMsg, HEALTH_NAME};
 pub use messages::*;
 pub use policy::retry_backoff_elapsed;
+use writer::{CALL_TIMEOUT, GraphArgs, GraphMsg, GraphWriter, HEALTH_NAME};
 
-/// The live actor, republished on every (re)spawn; a caller waits on the
+/// The live graph writer, republished on every (re)spawn; a caller waits on the
 /// watch so a restart looks like latency.
 pub struct Graph {
-    actor: watch::Sender<Option<ActorRef<GraphMsg>>>,
+    writer: watch::Sender<Option<ActorRef<GraphMsg>>>,
     events: OnceLock<EventBus>,
     reads: OnceLock<gradient_db::WorkerDb>,
     #[cfg(feature = "stub")]
@@ -53,7 +53,7 @@ impl std::fmt::Debug for Graph {
 impl Graph {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            actor: watch::channel(None).0,
+            writer: watch::channel(None).0,
             events: OnceLock::new(),
             reads: OnceLock::new(),
             #[cfg(feature = "stub")]
@@ -61,19 +61,19 @@ impl Graph {
         })
     }
 
-    /// A handle that answers every call itself, reaching no actor and no
+    /// A handle that answers every call itself, reaching no graph writer and no
     /// database. For harnesses whose subject is a caller of the graph.
     #[cfg(feature = "stub")]
     pub fn stub() -> Arc<Self> {
         Arc::new(Self {
-            actor: watch::channel(None).0,
+            writer: watch::channel(None).0,
             events: OnceLock::new(),
             reads: OnceLock::new(),
             stub: true,
         })
     }
 
-    /// The root child that runs the actor; stopped after every sibling.
+    /// The root child running the graph writer; stopped after every sibling.
     pub fn child_spec(self: &Arc<Self>, ctx: DbContext) -> ChildSpec {
         let graph = Arc::clone(self);
         ChildSpec::Custom {
@@ -83,10 +83,10 @@ impl Graph {
                 let graph = Arc::clone(&graph);
                 let ctx = ctx.clone();
                 Box::pin(async move {
-                    let actor = graph
+                    let writer = graph
                         .spawn(ctx, Some(child.health), Some(child.parent))
                         .await?;
-                    Ok(actor.get_cell())
+                    Ok(writer.get_cell())
                 })
             }),
         }
@@ -101,12 +101,12 @@ impl Graph {
         let _ = self.events.set(ctx.events.clone());
         let _ = self.reads.set(ctx.worker_db.clone());
         let args = GraphArgs { ctx, health };
-        let (actor, _) = match parent {
-            Some(parent) => Actor::spawn_linked(None, GraphActor, args, parent).await?,
-            None => Actor::spawn(None, GraphActor, args).await?,
+        let (writer, _) = match parent {
+            Some(parent) => Actor::spawn_linked(None, GraphWriter, args, parent).await?,
+            None => Actor::spawn(None, GraphWriter, args).await?,
         };
-        self.actor.send_replace(Some(actor.clone()));
-        Ok(actor)
+        self.writer.send_replace(Some(writer.clone()));
+        Ok(writer)
     }
 
     fn announce<E: Into<Event>>(&self, event: impl FnOnce() -> E) {
@@ -116,11 +116,11 @@ impl Graph {
     }
 
     async fn live(&self) -> anyhow::Result<ActorRef<GraphMsg>> {
-        let mut rx = self.actor.subscribe();
+        let mut rx = self.writer.subscribe();
         let live = tokio::time::timeout(CALL_TIMEOUT, rx.wait_for(|a| a.is_some()))
             .await
-            .map_err(|_| anyhow::anyhow!("graph actor unavailable"))?
-            .map_err(|_| anyhow::anyhow!("graph actor closed"))?;
+            .map_err(|_| anyhow::anyhow!("graph writer unavailable"))?
+            .map_err(|_| anyhow::anyhow!("graph writer closed"))?;
         Ok(live.clone().expect("wait_for guarantees Some"))
     }
 
@@ -131,20 +131,20 @@ impl Graph {
         match self.live().await?.call(msg, None).await {
             Ok(CallResult::Success(result)) => result,
             Ok(CallResult::SenderError | CallResult::Timeout) => {
-                Err(anyhow::anyhow!("graph actor dropped the reply"))
+                Err(anyhow::anyhow!("graph writer dropped the reply"))
             }
-            Err(e) => Err(anyhow::anyhow!("graph actor unreachable: {e}")),
+            Err(e) => Err(anyhow::anyhow!("graph writer unreachable: {e}")),
         }
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(eval_id = %batch.evaluation, derivations = batch.derivations.len()))]
-    pub async fn ingest(&self, batch: IngestBatch) -> anyhow::Result<IngestReport> {
+    pub async fn record(&self, batch: RecordBatch) -> anyhow::Result<RecordReport> {
         #[cfg(feature = "stub")]
         if self.stub {
-            return Ok(IngestReport::default());
+            return Ok(RecordReport::default());
         }
-        let report = self.call(|reply| GraphMsg::Ingest(batch, reply)).await?;
-        self.announce(|| graph::Ingested {
+        let report = self.call(|reply| GraphMsg::Record(batch, reply)).await?;
+        self.announce(|| graph::Recorded {
             evaluation_id: report.evaluation,
             task: report.task,
             walked: report.walked,
@@ -155,7 +155,7 @@ impl Graph {
     }
 
     /// Store paths of `drv_hashes` the worker may prune, read from the pool, not
-    /// behind the actor: a walk waited out its own previous batch's ingest on
+    /// behind the graph writer: a walk waited out its own previous batch's record on
     /// every wave. A committed subtree only ever gains its record, so a read that
     /// misses a queued write prunes less, never wrongly.
     #[tracing::instrument(level = "debug", skip_all, fields(paths = drv_hashes.len()))]
@@ -167,12 +167,12 @@ impl Graph {
         let db = self
             .reads
             .get()
-            .ok_or_else(|| anyhow::anyhow!("graph actor never started"))?;
+            .ok_or_else(|| anyhow::anyhow!("graph writer never started"))?;
         Ok(known::prunable(db, drv_hashes).await?)
     }
 
     /// Apply what the upstream probe found for a batch of outputs: the narinfo,
-    /// the runtime edges it names, the relay flag and the demand all of it moves.
+    /// the runtime dependencies it names, the passthrough flag and the need all of it moves.
     pub async fn upstream_hits(
         &self,
         hits: std::collections::HashMap<String, UpstreamHit>,
@@ -184,16 +184,16 @@ impl Graph {
         self.call(|reply| GraphMsg::UpstreamHits(hits, reply)).await
     }
 
-    /// Record that the probe has answered for these anchors, hit or miss, and move
-    /// the demand the answer opens. Sent once the round's hits are applied: an
-    /// anchor an upstream serves must be a relay before it is answered, or the gap
-    /// between the two demands the build closure the relay makes pointless.
-    pub async fn upstream_probed(&self, anchors: Vec<DerivationId>) -> anyhow::Result<()> {
+    /// Record that the probe has answered for these shared builds, hit or miss, and move
+    /// the need the answer opens. Sent once the round's hits are applied: a
+    /// shared build an upstream serves must be a passthrough before it is answered, or the gap
+    /// between the two needs the build closure the passthrough makes pointless.
+    pub async fn upstream_probed(&self, shared_builds: Vec<DerivationId>) -> anyhow::Result<()> {
         #[cfg(feature = "stub")]
         if self.stub {
             return Ok(());
         }
-        self.call(|reply| GraphMsg::UpstreamProbed(anchors, reply))
+        self.call(|reply| GraphMsg::UpstreamProbed(shared_builds, reply))
             .await
     }
 
@@ -229,13 +229,13 @@ impl Graph {
             .call(|reply| GraphMsg::Transition(transition, reply))
             .await?;
         self.announce(|| graph::Transitioned {
-            aborted: report.aborted_anchors.len(),
-            prioritized: report.prioritized_anchors.len(),
+            aborted: report.aborted_shared_builds.len(),
+            prioritized: report.prioritized_shared_builds.len(),
         });
         Ok(report)
     }
 
-    /// Move anchors back to `Queued`; returns how many moved.
+    /// Move shared builds back to `Queued`; returns how many moved.
     pub async fn requeue(&self, scope: RequeueScope) -> anyhow::Result<u64> {
         #[cfg(feature = "stub")]
         if self.stub {
@@ -336,15 +336,15 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_caller_behind_a_backlog_gets_the_answer_the_actor_still_gives() {
         let graph = Graph::new();
-        let (actor, _) = Actor::spawn(None, Backlogged, ()).await.unwrap();
-        graph.actor.send_replace(Some(actor.clone()));
+        let (writer, _) = Actor::spawn(None, Backlogged, ()).await.unwrap();
+        graph.writer.send_replace(Some(writer.clone()));
 
         graph
             .upstream_probed(vec![gradient_types::DerivationId::now_v7()])
             .await
             .unwrap();
 
-        actor.stop(None);
+        writer.stop(None);
     }
 }
 
@@ -360,7 +360,7 @@ pub(crate) mod test_ctx {
     use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 
     /// [`ctx`] with the probe channel's receiving end, for a test whose subject is
-    /// what ingest hands the upstream probe.
+    /// what recording hands the upstream probe.
     pub(crate) async fn ctx_with_probes(
         db: DatabaseConnection,
     ) -> (
@@ -418,9 +418,9 @@ pub(crate) mod test_ctx {
             },
             shutdown: Shutdown::new(),
             events: gradient_types::EventBus::new(16),
-            outbox_wake: Default::default(),
+            delivery_wake: Default::default(),
             probe_requests: Default::default(),
-            ready_set: Default::default(),
+            startable_set: Default::default(),
         };
         (ctx, worker_db)
     }

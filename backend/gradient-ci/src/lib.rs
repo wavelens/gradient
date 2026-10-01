@@ -32,8 +32,8 @@ pub use self::unpark::{
     unpark_approval_with_wildcard, unpark_no_cache_for_project, unpark_no_workers_for_project,
     unpark_storage_full_all, unpark_storage_full_for_project,
 };
-pub use gradient_forge::github_app::*;
-pub use gradient_forge::reporter::*;
+pub use gradient_git_host::github_app::*;
+pub use gradient_git_host::reporter::*;
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so
 /// the statements it declares with `gradient_db::sql!` reach the plan gate's

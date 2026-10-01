@@ -8,7 +8,7 @@
 //!
 //! Exercises `/auth/cli/start`, `/auth/cli/poll`, `/auth/cli/authorize`, and
 //! `/auth/cli/deny` through the real router with mocked Postgres - enough to
-//! pin down the state machine (pending → authorized/denied/expired) and the
+//! pin down the state machine (pending -> authorized/denied/expired) and the
 //! "device_code is single-use" guarantee.
 
 #![expect(
@@ -124,7 +124,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -133,10 +133,10 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
                 bytes: u64::MAX,
             },
         ),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
     TestServer::new(create_router(state).expect("router"))

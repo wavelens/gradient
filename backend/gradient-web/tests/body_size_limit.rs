@@ -60,7 +60,7 @@ fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -69,16 +69,16 @@ fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
                 bytes: u64::MAX,
             },
         ),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     })
 }
 
 /// A POST whose body exceeds `max_request_size` is rejected with 413
-/// before the webhook handler ever runs (so signature verification is
+/// before the webhook handler ever starts (so signature verification is
 /// never attempted, which is exactly the OOM-prevention property we want).
 #[test]
 fn webhook_body_over_limit_returns_413() {
@@ -174,7 +174,7 @@ fn blob_upload_route_uses_higher_limit() {
     });
 }
 
-/// Auth queries the `authorize` middleware runs before any handler on the
+/// Auth queries the `authorize` middleware executes before any handler on the
 /// authenticated tier: the session (looked up twice) then the user.
 fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);

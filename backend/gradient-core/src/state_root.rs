@@ -20,8 +20,8 @@ use uuid::Uuid;
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::cache_metric::CacheTraffic;
-use gradient_db::{CacheDb, DbContext, ProbeRequests, ReadySet, WebDb, WorkerDb};
-use gradient_forge::ForgeRegistry;
+use gradient_db::{CacheDb, DbContext, ProbeRequests, StartableSet, WebDb, WorkerDb};
+use gradient_git_host::GitHostRegistry;
 use gradient_graph::Graph;
 use gradient_notify::EmailSender;
 use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
@@ -57,9 +57,9 @@ pub struct AppState {
     pub upstream_query: Arc<Semaphore>,
     /// Server-wide upload budget shared by worker sessions and REST uploads.
     pub upload_admission: Arc<gradient_storage::admission::UploadAdmission>,
-    /// Resolved-once registry of forge providers (reporters, webhook parsing,
+    /// Resolved-once registry of Git host providers (reporters, webhook parsing,
     /// signature verification) shared into every [`CiContext`].
-    pub forge: ForgeRegistry,
+    pub git_host: GitHostRegistry,
     /// GitHub's install page for the configured App, looked up on first use.
     pub github_app_install_url: Arc<tokio::sync::OnceCell<String>>,
     /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.
@@ -90,19 +90,19 @@ pub struct AppState {
     pub download_progress: Arc<Latest<DerivationBuildId, DownloadProgress>>,
     /// Nudged after every committed write that owes an effect; the effects
     /// actor waits on it so a delivery does not sit out the 30 s tick.
-    pub outbox_wake: Arc<Notify>,
-    /// Nudged when an evaluation is created, so eval dispatch runs now instead
+    pub delivery_wake: Arc<Notify>,
+    /// Nudged when an evaluation is created, so eval dispatch starts now instead
     /// of on its next tick.
-    pub eval_dispatch_wake: Arc<Notify>,
-    /// The graph actor's handle: every write to the dependency graph and the
+    pub eval_assign_wake: Arc<Notify>,
+    /// The graph writer's handle: every write to the dependency graph and the
     /// cache index goes through it.
     pub graph: Arc<Graph>,
-    /// Where a demand recompute reports what it turned on, so the upstream probe
+    /// Where a need update reports what it turned on, so the upstream probe
     /// asks only for what something wants.
     pub probe_requests: ProbeRequests,
-    /// Where an anchor entering or leaving `Queued` is reported, so dispatch
-    /// reads what moved instead of every queued anchor.
-    pub ready_set: ReadySet,
+    /// Where a shared build entering or leaving `Queued` is reported, so dispatch
+    /// reads what moved instead of every queued shared build.
+    pub startable_set: StartableSet,
 }
 
 /// Kept as an alias so handler signatures and `Arc<ServerState>` call sites in
@@ -141,9 +141,9 @@ impl AppState {
             storage: self.storage(),
             shutdown: self.shutdown.clone(),
             events: self.events.clone(),
-            outbox_wake: self.outbox_wake.clone(),
+            delivery_wake: self.delivery_wake.clone(),
             probe_requests: self.probe_requests.clone(),
-            ready_set: self.ready_set.clone(),
+            startable_set: self.startable_set.clone(),
         }
     }
 
@@ -152,23 +152,23 @@ impl AppState {
         CiContext {
             db: self.db(),
             http: self.http.clone(),
-            forge: self.forge.clone(),
+            git_host: self.git_host.clone(),
             email: self.email.clone(),
         }
     }
 
-    /// Record a durable event and wake the outbox; a failed write is logged, never propagated.
+    /// Record a durable event and wake the pending deliveries; a failed write is logged, never propagated.
     pub async fn record(&self, event: impl Into<gradient_types::Event>) {
         let event = event.into();
         let name = event.name();
         if let Err(e) = gradient_db::events::record(&self.worker_db, &self.events, event).await {
             tracing::error!(error = %e, event = %name, "failed to record an event");
         }
-        self.outbox_wake.notify_one();
+        self.delivery_wake.notify_one();
     }
 
     pub async fn record_evaluation_created(&self, eval: &gradient_types::MEvaluation) {
-        self.eval_dispatch_wake.notify_one();
+        self.eval_assign_wake.notify_one();
         if let Some(event) = gradient_db::events::evaluation_created(eval) {
             self.record(event).await;
         }

@@ -7,7 +7,7 @@
 //! Creates `input_update` evaluations when a trigger fires on a task that
 //! has an `OpenPr` action and tracked flake inputs. The cheap server-side
 //! condition gates creation; the worker decides whether there is actually
-//! anything to bump and short-circuits empty runs.
+//! anything to bump and short-circuits empty passes.
 
 use super::TriggerError;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};

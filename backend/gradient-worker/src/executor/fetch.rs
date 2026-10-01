@@ -38,7 +38,7 @@ pub struct FetchOutcome {
     pub archived_paths: Vec<String>,
 }
 
-/// The `nix` and `ssh` binaries a fetch runs, and the store it checks.
+/// The `nix` and `ssh` binaries a fetch is running, and the store it checks.
 #[derive(Clone, Copy)]
 struct NixTools<'a> {
     nix: &'a str,
@@ -100,7 +100,7 @@ pub async fn fetch_repository(
             };
 
             // `input_update` evals bump tracked flake inputs natively, writing the
-            // candidate lock into the checkout so the rest of eval/build runs against
+            // candidate lock into the checkout so the rest of eval/build is running against
             // exactly the lock that will be committed. An empty patch is left as a
             // no-op so no PR is opened. Build requests never carry an input_update.
             if let Some(spec) = &job.input_update {
@@ -320,7 +320,7 @@ fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<St
 /// Every store path of the flake at `source_path`: the source and all transitive
 /// inputs, verified present.
 ///
-/// When every locked input is already in the local store nothing runs: `nix
+/// When every locked input is already in the local store nothing is running: `nix
 /// flake archive` re-hashes each `path:` and `git+file:` input to verify it, which
 /// on a nixpkgs checkout is a walk of every file. Otherwise `nix flake archive
 /// --json` fetches them.

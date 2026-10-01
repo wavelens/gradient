@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for `POST /api/v1/build-requests/{session}/dispatch`
+//! Integration tests for `POST /api/v1/build-requests/{session}/assignment_id`
 //! (issue #234, task 11). Covers the conflict/gone surfaces and the happy
 //! path, which exercises the materialise, task, commit and evaluation steps
-//! against a mock DB. The source NAR's cache-index row is the graph actor's
+//! against a mock DB. The source NAR's cache-index row is the graph writer's
 //! write, so it is not in this transaction.
 
 #![expect(
@@ -248,9 +248,9 @@ fn happy_path_creates_task_commit_and_evaluation() {
             .append_query_results([vec![upload_session(upload, vec![], false, false)]])
             .append_query_results([vec![membership()]])
             .append_query_results([vec![write_role_row()]])
-            // ensure_build_request_task → SELECT existing (None)
+            // ensure_build_request_task -> SELECT existing (None)
             .append_query_results([Vec::<gradient_entity::task::Model>::new()])
-            // ensure_build_request_task → INSERT task (returns row)
+            // ensure_build_request_task -> INSERT task (returns row)
             .append_query_results([vec![task_model.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -268,7 +268,7 @@ fn happy_path_creates_task_commit_and_evaluation() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // resolve_project_cache_name → project-cache link lookup (none → cache=null)
+            // resolve_project_cache_name -> project-cache link lookup (none -> cache=null)
             .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             // After tx commit: UPDATE upload_session
             .append_query_results([vec![updated]])
@@ -353,7 +353,7 @@ fn happy_path_reuses_existing_build_request_task() {
             .append_query_results([vec![upload_session(upload, vec![], false, false)]])
             .append_query_results([vec![membership()]])
             .append_query_results([vec![write_role_row()]])
-            // ensure_build_request_task → SELECT existing returns the row
+            // ensure_build_request_task -> SELECT existing returns the row
             .append_query_results([vec![task_model.clone()]])
             .append_query_results([vec![commit_model.clone()]])
             .append_exec_results([MockExecResult {
@@ -365,7 +365,7 @@ fn happy_path_reuses_existing_build_request_task() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // resolve_project_cache_name → project-cache link lookup (none → cache=null)
+            // resolve_project_cache_name -> project-cache link lookup (none -> cache=null)
             .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             .append_query_results([vec![updated]])
             .append_exec_results([MockExecResult {

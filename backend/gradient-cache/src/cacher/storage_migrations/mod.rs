@@ -5,7 +5,7 @@
  */
 
 //! Storage migrations: what database migrations are to the schema, for the
-//! layout of NAR, log and blob storage. Each one runs in the background, one
+//! layout of NAR, log and blob storage. Each one is running in the background, one
 //! unit per step, and records the last finished unit in `storage_migration` so
 //! a restart resumes it. They apply in order, and before any deep GC unit,
 //! since the deep GC reads only the layout they leave behind.
@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tracing::info;
 
 /// One storage layout change. Every unit is idempotent: a unit cut short by a
-/// restart runs again in full.
+/// restart starts again in full.
 pub(crate) trait StorageMigration: Send + Sync {
     fn name(&self) -> &'static str;
 

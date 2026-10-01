@@ -252,7 +252,7 @@ mod tests {
         assert!(
             reject_reason(&ClientMessage::JobFailed {
                 job_id: "job".into(),
-                dispatch: "d".into(),
+                assignment_id: "d".into(),
                 error: "x".into(),
                 kind: gradient_wire::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],

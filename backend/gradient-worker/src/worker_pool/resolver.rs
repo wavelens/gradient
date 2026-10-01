@@ -45,7 +45,7 @@ pub struct WorkerPoolResolver {
     resolve_warnings: Arc<Mutex<Vec<String>>>,
 }
 
-/// One resolved attr keyed by its index in the original request.
+/// One resolved attr per index in the original request.
 type IndexedDerivation = (usize, ResolvedDerivation);
 
 /// Crashes tolerated for a single work item (a shard, or one attr) before it
@@ -384,7 +384,7 @@ impl WorkerPoolResolver {
     }
 
     /// Fold the eval-cache WAL into the main `.sqlite` once, after all shards
-    /// have committed, so the fleet-share push ships a complete cache. Best-effort
+    /// have committed, so the fleet-share push is shipping a complete cache. Best-effort
     /// in spirit (the caller ignores failures), but a crashed worker is marked
     /// dead so it is not reused.
     pub async fn checkpoint_cache(

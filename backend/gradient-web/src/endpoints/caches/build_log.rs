@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// for.
 ///
 /// Serves our own log when this cache holds the derivation, and otherwise asks
-/// the upstreams the cache substitutes from: a pull-through cache substitutes
+/// the upstream caches the cache substitutes from: a pull-through cache substitutes
 /// paths it never built (#547). `X-Cache` reports which of the two happened.
 pub async fn log(
     state: State<Arc<ServerState>>,
@@ -36,11 +36,11 @@ pub async fn log(
         return log_response(body, "HIT");
     }
 
-    let upstreams = ECacheUpstream::find()
+    let upstream_caches = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
         .all(&state.web_db)
         .await?;
-    match fetch_upstream_log(&substitution_sources(&upstreams), &drv).await {
+    match fetch_upstream_log(&substitution_sources(&upstream_caches), &drv).await {
         Some(body) => log_response(body, "MISS"),
         None => Err(WebError::not_found("Log")),
     }
@@ -65,7 +65,7 @@ async fn local_log(
         return Ok(None);
     };
 
-    let Some(anchor) = EDerivationBuild::find()
+    let Some(shared_build) = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.eq(derivation))
         .one(&state.web_db)
         .await?
@@ -73,7 +73,7 @@ async fn local_log(
         return Ok(None);
     };
 
-    let Some(key) = gradient_db::latest_attempt_id(&state.web_db, anchor.id).await? else {
+    let Some(key) = gradient_db::latest_attempt_id(&state.web_db, shared_build.id).await? else {
         return Ok(None);
     };
 

@@ -84,7 +84,7 @@ fn grants_for_groups(
     out
 }
 
-/// Apply OIDC group → role grants additively: insert the membership when
+/// Apply OIDC group -> role grants additively: insert the membership when
 /// missing, upgrade the role when it differs. Never removes a membership.
 async fn apply_oidc_group_grants<C: sea_orm::ConnectionTrait>(
     tx: &C,

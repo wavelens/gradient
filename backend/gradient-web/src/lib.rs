@@ -215,7 +215,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         )
         // Superuser-only: needs MUser, so it lives on the authenticated tier
         // (the optional-auth tier only provides MaybeUser).
-        .route("/board/jobs/decisions", get(board::get_dispatch_decisions))
+        .route("/board/jobs/decisions", get(board::get_assign_decisions))
         .route(
             "/projects/{project}",
             patch(projects::patch_project).delete(projects::delete_project),
@@ -412,9 +412,12 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             post(caches::post_cache_public).delete(caches::delete_cache_public),
         )
         .route("/caches/{cache}/key", get(caches::get_cache_key))
-        .route("/caches/{cache}/upstreams", put(caches::put_cache_upstream))
         .route(
-            "/caches/{cache}/upstreams/{id}",
+            "/caches/{cache}/upstream-caches",
+            put(caches::put_cache_upstream),
+        )
+        .route(
+            "/caches/{cache}/upstream-caches/{id}",
             patch(caches::patch_cache_upstream).delete(caches::delete_cache_upstream),
         )
         .route(
@@ -606,8 +609,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(caches::get_cache_public_key),
         )
         .route(
-            "/caches/{cache}/upstreams",
-            get(caches::get_cache_upstreams),
+            "/caches/{cache}/upstream-caches",
+            get(caches::get_upstream_caches),
         )
         .route("/caches/{cache}/stats", get(stats::get_cache_stats))
         .route("/caches/{cache}/nars", get(caches::nars_list))
@@ -643,8 +646,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/board/scoring/rules", get(board::get_scoring_rules))
         .route("/board/cache", get(board_metrics::get_board_cache))
         .route(
-            "/board/cache/upstreams",
-            get(board_metrics::get_board_upstreams),
+            "/board/cache/upstream-caches",
+            get(board_metrics::get_board_upstream_caches),
         )
         .route("/board/network", get(board_metrics::get_board_network))
         .route("/board/fleet", get(board_metrics::get_board_fleet))
@@ -686,12 +689,12 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/auth/cli/poll", post(auth::post_cli_device_poll))
         .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(6), 5)?));
 
-    // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
+    // ── Incoming Git host webhooks (unauthenticated, HMAC-verified) ─────────
     let webhook_routes = Router::new()
-        .route("/hooks/github", post(forge_hooks::github_app_webhook))
+        .route("/hooks/github", post(git_host_hooks::github_app_webhook))
         .route(
-            "/hooks/{forge}/{project}/{integration_name}",
-            post(forge_hooks::forge_webhook),
+            "/hooks/{git_host}/{project}/{integration_name}",
+            post(git_host_hooks::git_host_webhook),
         )
         .route_layer(GovernorLayer::new(rate_limit(Duration::from_secs(1), 30)?));
 
@@ -815,8 +818,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         )?));
 
     // Cache-scoped read-only proto WebSocket. `authorize_optional` populates
-    // MaybeUser/MaybeApiKey/ClientIp so the handler can authorize anon→public
-    // and key→private (respecting cache_pin). Per-IP fan-out is bounded by the
+    // MaybeUser/MaybeApiKey/ClientIp so the handler can authorize anon->public
+    // and key->private (respecting cache_pin). Per-IP fan-out is bounded by the
     // concurrent-connection cap below; the upgrade shares the NAR-download tier.
     let cache_per_ip = Arc::new(PerIpLimiter::new(
         state.config.proto.anonymous_cache_max_connections_per_ip,
@@ -868,7 +871,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         app = app.nest("/scim/v2", scim_routes);
     }
 
-    // Layer order (outer → inner, i.e. last `.layer()` is outermost):
+    // Layer order (outer -> inner, i.e. last `.layer()` is outermost):
     //   SetRequestIdLayer    - assigns x-request-id on inbound requests
     //   TraceLayer           - opens the span (reads the id from headers)
     //   PropagateRequestIdLayer - copies the id onto the response
@@ -886,7 +889,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
 /// listener alongside the REST API, and Nagle holds a small control frame back
 /// until the peer's delayed ACK, costing the RPCs a worker blocks on tens of
 /// milliseconds. The return type stays concrete because
-/// `ConnectInfo<SocketAddr>` resolves through an impl keyed on `TapIo<L, F>`,
+/// `ConnectInfo<SocketAddr>` resolves through an impl for `TapIo<L, F>`,
 /// which an `impl Listener` would hide.
 fn tuned_listener(
     listener: tokio::net::TcpListener,
@@ -907,7 +910,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     match gradient_db::recover_interrupted_work(&state.worker_db).await {
         Ok(r)
-            if r.dispatches_closed > 0
+            if r.assignments_closed > 0
                 || r.attempts_aborted > 0
                 || r.builds_requeued > 0
                 || r.builds_unpromoted > 0
@@ -917,7 +920,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
                 || r.cluster_attempts_closed > 0 =>
         {
             tracing::warn!(
-                dispatches_closed = r.dispatches_closed,
+                dispatches_closed = r.assignments_closed,
                 attempts_aborted = r.attempts_aborted,
                 builds_requeued = r.builds_requeued,
                 builds_unpromoted = r.builds_unpromoted,

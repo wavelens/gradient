@@ -18,15 +18,15 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 
-/// Creates a new evaluation that re-runs the previous evaluation's entry points.
+/// Creates a new evaluation that evaluates the previous evaluation's entry points again.
 ///
-/// The global `derivation_build` anchors carry build state, and a restart never
+/// The global `derivation_build` shared builds carry build state, and a restart never
 /// walks, so the new evaluation takes the previous one's names over as its own:
 /// that is what the graph heal seeds its thaw from and what every reader of "does
 /// some evaluation still want this" reads. The initial status is derived from the
-/// previous entry-point anchors: if every one is already terminal-success
+/// previous entry-point shared builds: if every one is already terminal-success
 /// (`Completed`/`Substituted`) there is nothing to rebuild and the eval starts
-/// `Completed`; otherwise it starts `Building`, named, and the caller runs the
+/// `Completed`; otherwise it starts `Building`, named, and the caller starts the
 /// `Eval` heal over it, which thaws the failed closure and promotes it.
 pub async fn trigger_restart_builds<C: ConnectionTrait>(
     db: &C,
@@ -72,8 +72,8 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     Ok(new_eval)
 }
 
-/// `Completed` when every entry-point anchor is already terminal-success,
-/// otherwise `Building`. An anchor missing entirely counts as pending: the new
+/// `Completed` when every entry-point shared build is already terminal-success,
+/// otherwise `Building`. A shared build missing entirely counts as pending: the new
 /// eval must run to (re)build it.
 async fn restart_initial_status<C: ConnectionTrait>(
     db: &C,
@@ -89,13 +89,13 @@ async fn restart_initial_status<C: ConnectionTrait>(
         return Ok(EvaluationStatus::Completed);
     }
 
-    let anchors = EDerivationBuild::find()
+    let shared_builds = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.is_in(derivation_ids.clone()))
         .all(db)
         .await?;
 
-    let all_cached = anchors.len() == derivation_ids.len()
-        && anchors
+    let all_cached = shared_builds.len() == derivation_ids.len()
+        && shared_builds
             .iter()
             .all(|a| matches!(a.status, BuildStatus::Completed | BuildStatus::Substituted));
 

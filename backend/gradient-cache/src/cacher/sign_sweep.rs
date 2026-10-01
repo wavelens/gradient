@@ -36,7 +36,7 @@ gradient_db::sql! {
     /// to every gate flag yet 404s from the narinfo endpoint forever. Bounded the
     /// same way as the signing pass, and driven off the "no rows at all" anti-join
     /// so a healthy instance pays one indexed probe.
-    RECONCILE_ORPHAN_CLAIMS = r#"
+    REPAIR_ORPHAN_CLAIMS = r#"
 WITH orphan AS (
     SELECT cp.id
     FROM cached_path cp
@@ -63,11 +63,11 @@ ON CONFLICT (cached_path, cache) DO NOTHING
         tier = Sweep;
 }
 
-async fn reconcile_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()> {
+async fn repair_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()> {
     let res = state
         .worker_db
         .execute_raw(
-            RECONCILE_ORPHAN_CLAIMS.bind([sea_orm::Value::BigInt(Some(SIGN_SWEEP_BATCH as i64))]),
+            REPAIR_ORPHAN_CLAIMS.bind([sea_orm::Value::BigInt(Some(SIGN_SWEEP_BATCH as i64))]),
         )
         .await?;
     if res.rows_affected() > 0 {
@@ -84,8 +84,8 @@ async fn reconcile_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()>
 pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<()> {
     // Before signing, give back a claim to any path that lost one, so this same
     // pass signs it rather than leaving it unservable for another interval.
-    if let Err(e) = reconcile_orphan_claims(&state).await {
-        warn!(error = %e, "sign sweep: orphan claim reconcile failed");
+    if let Err(e) = repair_orphan_claims(&state).await {
+        warn!(error = %e, "sign sweep: orphan claim repair failed");
     }
 
     let pending = ECachedPathSignature::find()
@@ -215,13 +215,13 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
 #[cfg(test)]
 mod orphan_claim_tests {
-    use super::RECONCILE_ORPHAN_CLAIMS;
+    use super::REPAIR_ORPHAN_CLAIMS;
 
     /// An unbounded fixpoint over `cached_path` has starved this scheduler
-    /// before, and the pass runs on a timer.
+    /// before, and the pass is running on a timer.
     #[test]
-    fn the_reconcile_is_bounded_and_respects_the_sign_cache_opt_out() {
-        let sql = RECONCILE_ORPHAN_CLAIMS.text();
+    fn the_repair_is_bounded_and_respects_the_sign_cache_opt_out() {
+        let sql = REPAIR_ORPHAN_CLAIMS.text();
         assert!(sql.contains("LIMIT $1"), "{sql}");
         assert!(
             sql.contains("t.sign_cache"),

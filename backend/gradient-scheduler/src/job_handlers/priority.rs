@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! User-requested prioritization (#530): the graph actor flags the rows, then
+//! User-requested prioritization (#530): the graph writer flags the rows, then
 //! the jobs already tracked are lifted in place.
 
 use gradient_graph::Transition;
@@ -22,8 +22,8 @@ impl Scheduler {
         .await
     }
 
-    pub async fn prioritize_build(&self, anchor: DerivationBuildId) -> anyhow::Result<()> {
-        self.prioritize(None, Transition::PrioritizeBuild { anchor })
+    pub async fn prioritize_build(&self, shared_build: DerivationBuildId) -> anyhow::Result<()> {
+        self.prioritize(None, Transition::PrioritizeBuild { shared_build })
             .await
     }
 
@@ -32,15 +32,15 @@ impl Scheduler {
         evaluation: Option<EvaluationId>,
         transition: Transition,
     ) -> anyhow::Result<()> {
-        let anchors = self
+        let shared_builds = self
             .state
             .graph
             .transition(transition)
             .await?
-            .prioritized_anchors;
+            .prioritized_shared_builds;
         self.call(|reply| SchedulerMsg::Prioritize {
             evaluation,
-            anchors,
+            shared_builds,
             reply,
         })
         .await?;

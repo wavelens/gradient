@@ -36,7 +36,7 @@ pub enum ActionType {
     #[sea_orm(num_value = 1)]
     SendWebRequest = 1,
     #[sea_orm(num_value = 2)]
-    ForgeStatusReport = 2,
+    GitHostStatusReport = 2,
     #[sea_orm(num_value = 3)]
     OpenPr = 3,
 }

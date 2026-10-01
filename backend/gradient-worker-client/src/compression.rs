@@ -21,7 +21,7 @@ pub enum Compression {
 }
 
 /// Infer a NAR's compression format from the URL extension. Unknown or
-/// missing extension → `Zstd`, since our own cache always produces zstd;
+/// missing extension -> `Zstd`, since our own cache always produces zstd;
 /// this keeps the `NarRequest` / S3 path correct while letting upstream
 /// URLs like `.nar.xz` dispatch accordingly.
 pub fn detect_compression(url: &str) -> Compression {

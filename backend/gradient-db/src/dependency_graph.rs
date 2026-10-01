@@ -64,7 +64,7 @@ pub async fn eval_dependency_edges<C: ConnectionTrait>(
 ///
 /// Layer 0 is a node nothing in the set depends on - an entry point, or the
 /// root of a closure-scoped view. Every other node sits one layer below its
-/// deepest dependent, so a derivation always ranks strictly above every
+/// deepest parent, so a derivation always ranks strictly above every
 /// derivation it needs, and nodes sharing a layer are genuine siblings that a
 /// caller can order however it likes. Edges to or from outside `nodes` are
 /// ignored, so a scoped subgraph layers relative to its own root.
@@ -73,7 +73,7 @@ pub fn dependency_layers(
     edges: &[(DerivationId, DerivationId)],
 ) -> HashMap<DerivationId, u32> {
     let mut dependencies: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
-    let mut pending_dependents: HashMap<DerivationId, usize> = HashMap::new();
+    let mut pending_parents: HashMap<DerivationId, usize> = HashMap::new();
     for (derivation, dependency) in edges {
         if !nodes.contains(derivation) || !nodes.contains(dependency) {
             continue;
@@ -82,13 +82,13 @@ pub fn dependency_layers(
             .entry(*derivation)
             .or_default()
             .push(*dependency);
-        *pending_dependents.entry(*dependency).or_default() += 1;
+        *pending_parents.entry(*dependency).or_default() += 1;
     }
 
     let mut layers: HashMap<DerivationId, u32> = nodes.iter().map(|n| (*n, 0)).collect();
     let mut frontier: VecDeque<DerivationId> = nodes
         .iter()
-        .filter(|n| !pending_dependents.contains_key(n))
+        .filter(|n| !pending_parents.contains_key(n))
         .copied()
         .collect();
 
@@ -97,7 +97,7 @@ pub fn dependency_layers(
         for dependency in dependencies.get(&derivation).into_iter().flatten() {
             let deepest = layers.entry(*dependency).or_default();
             *deepest = (*deepest).max(layer + 1);
-            let remaining = pending_dependents.entry(*dependency).or_default();
+            let remaining = pending_parents.entry(*dependency).or_default();
             *remaining = remaining.saturating_sub(1);
             if *remaining == 0 {
                 frontier.push_back(*dependency);
@@ -137,7 +137,7 @@ mod tests {
     }
 
     /// A diamond shares its sink between two paths of different length. The
-    /// longest one wins, so the sink never ranks above the dependent that needs
+    /// longest one wins, so the sink never ranks above the parent that needs
     /// it - the whole point of layering rather than a shortest-path BFS.
     #[test]
     fn diamond_takes_the_longest_path() {

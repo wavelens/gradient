@@ -21,8 +21,8 @@
 //!   [`reconnect`](Worker::reconnect) to obtain a fresh `Worker<Connected>`.
 
 mod cluster;
-mod dispatch;
 mod id;
+mod message_loop;
 mod scoring;
 
 use std::marker::PhantomData;
@@ -77,7 +77,7 @@ impl<S> Worker<S> {
     }
 }
 
-// ── Constructors (→ Worker<Connected>) ───────────────────────────────────────
+// ── Constructors (-> Worker<Connected>) ───────────────────────────────────────
 
 impl Worker<Connected> {
     /// Connect to the server at `config.server_url`, complete the handshake,
@@ -119,7 +119,7 @@ impl Worker<Connected> {
     }
 }
 
-// ── Reconnect (Worker<Disconnected> → Worker<Connected>) ─────────────────────
+// ── Reconnect (Worker<Disconnected> -> Worker<Connected>) ─────────────────────
 
 impl Worker<Disconnected> {
     /// Re-open the connection to the server, re-running the same handshake,
@@ -152,7 +152,7 @@ impl Worker<Disconnected> {
     }
 }
 
-// ── Dispatch loop (Worker<Connected> → Worker<Disconnected>) ─────────────────
+// ── Dispatch loop (Worker<Connected> -> Worker<Disconnected>) ─────────────────
 
 impl Worker<Connected> {
     /// Main dispatch loop.
@@ -176,14 +176,14 @@ impl Worker<Connected> {
         } = self;
 
         let (writer, reader, flush) = conn.split();
-        let state = dispatch::DispatchState::new(
+        let state = message_loop::MessageLoopState::new(
             writer,
             config.clone(),
             executor.clone(),
             scorer,
             credentials.clone(),
         );
-        let outcome = dispatch::run_dispatch_loop(state, reader, shutdown.clone()).await;
+        let outcome = message_loop::run_message_loop(state, reader, shutdown.clone()).await;
 
         // The loop owned the writer, so by now only background tasks can still
         // hold a clone. A worker on its way out has to see its last reports

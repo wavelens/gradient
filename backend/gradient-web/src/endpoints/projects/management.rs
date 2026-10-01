@@ -102,7 +102,7 @@ pub async fn get_project_name_available(
 
 /// Count in-progress evaluations per project for `project_ids`.
 ///
-/// Returns a map of project_id → count of evaluations in any active status
+/// Returns a map of project_id -> count of evaluations in any active status
 /// (Queued, Fetching, EvaluatingFlake, EvaluatingDerivation, Building, Waiting).
 async fn count_running_evaluations(
     state: &Arc<ServerState>,
@@ -377,7 +377,7 @@ async fn github_app_install_url(state: &ServerState) -> Option<String> {
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
             .context("read GitHub App private key")?;
-        gradient_forge::github_app::get_install_url(&state.http, app.app_id, &pem).await
+        gradient_git_host::github_app::get_install_url(&state.http, app.app_id, &pem).await
     };
     state
         .github_app_install_url

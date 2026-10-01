@@ -208,7 +208,7 @@ impl HotNarCache {
 
     /// A hit, or one run of `load` shared by every caller that misses on `hash`
     /// meanwhile; the result is admitted on success and never on failure. The
-    /// load runs on its own task, so a caller that gives up never strands it
+    /// load executes on its own task, so a caller that gives up never strands it
     /// half-read in `loads`.
     pub async fn get_or_load<F>(self: &Arc<Self>, hash: &str, load: F) -> anyhow::Result<Bytes>
     where

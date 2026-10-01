@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Routing layer for incoming NAR transfers (server → worker) and the
-//! push-resume gate (worker → server).
+//! Routing layer for incoming NAR transfers (server -> worker) and the
+//! push-resume gate (worker -> server).
 //!
 //! When a job task sends `NarRequest`/`NarRequestResume` it then calls
 //! [`NarReceiver::await_pending`] to await the assembled compressed NAR for
@@ -15,9 +15,9 @@
 //! `ServerMessage::NarPush` frame to [`NarReceiver::accept_chunk`].
 //!
 //! A transfer is drained by its own staging task: the dispatch loop only moves
-//! the frame onto a bounded channel, so no disk write ever runs on the loop.
+//! the frame onto a bounded channel, so no disk write ever executes on the loop.
 //! When a [`gradient_storage::PartialStore`] is configured the task holds one
-//! open [`gradient_storage::PartialWriter`] for the whole stream (keyed by job
+//! open [`gradient_storage::PartialWriter`] for the whole stream (per job
 //! and NAR hash) so an interrupted download can resume (issue #225) and the
 //! compressed NAR is delivered as a file; otherwise it accumulates in memory
 //! (used by tests). On `is_final` the [`NarPayload`] is delivered to the
@@ -182,7 +182,7 @@ struct Inner {
 #[derive(Clone, Default)]
 pub struct NarReceiver {
     inner: Arc<Mutex<Inner>>,
-    /// When set, pull chunks are staged to disk (keyed by job and NAR hash) so
+    /// When set, pull chunks are staged to disk (per job and NAR hash) so
     /// an interrupted download survives a reconnect. `None` keeps everything in
     /// memory (tests).
     partial: Option<PartialStore>,
@@ -225,7 +225,7 @@ fn store_hash(store_path: &str) -> Option<&str> {
 /// Partial-store key for a pull, namespaced by `job_id` so two concurrent jobs
 /// on one worker transferring the *same* store path never share a `.partial`
 /// file. Mirrors the server-push `{peer_id}/{hash}` namespacing; without it the
-/// interleaved appends to a shared hash-keyed partial fail "non-contiguous" and
+/// interleaved appends to a shared per-hash partial fail "non-contiguous" and
 /// corrupt the staged NAR (only on the WS pull path - S3 pulls bypass staging).
 fn partial_key(job_id: &str, store_path: &str) -> Option<String> {
     store_hash(store_path).map(|hash| format!("{job_id}/{hash}"))
@@ -645,7 +645,7 @@ impl NarReceiver {
     }
 
     /// Drop in-memory state for a job, ending its staging tasks. On-disk
-    /// partials (keyed by job and hash) are left for the GC sweep so a later
+    /// partials (per job and hash) are left for the GC sweep so a later
     /// attempt can still resume.
     pub fn forget_job(&self, job_id: &str) {
         let mut g = self.inner.lock();
@@ -1074,7 +1074,7 @@ mod tests {
         );
     }
 
-    /// A dropped connection takes the whole `DispatchState` with it, and every
+    /// A dropped connection takes the whole `MessageLoopState` with it, and every
     /// staging task must observe its channel close rather than sit on an open
     /// `.partial` for the life of the process. The staged prefix itself stays,
     /// which is what lets the reconnect resume it (#225).

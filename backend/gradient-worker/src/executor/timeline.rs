@@ -16,7 +16,7 @@ use gradient_wire::types::{JobPhase, JobPhaseSpan};
 /// Ceiling on the spans one job records. A large eval pushes a NAR per closure
 /// member, so an uncapped timeline would put tens of thousands of spans in the
 /// terminal message and a row each in the database. Past the cap the phase
-/// still runs, it just stops being timed individually.
+/// is still running, it just stops being timed individually.
 const MAX_SPANS: usize = 2_000;
 
 /// Records how one job spent its time. Cloned into every phase guard, so all

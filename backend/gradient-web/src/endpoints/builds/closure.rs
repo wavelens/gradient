@@ -201,11 +201,11 @@ where
 
     let kept_hashes: Vec<String> = kept.iter().cloned().collect();
     let mut edges: Vec<ClosureEdge> = Vec::new();
-    for (referrer, dep) in gradient_db::reference_edges(db, &kept_hashes).await? {
-        if dep != referrer && kept.contains(&dep) {
+    for (parent, dep) in gradient_db::reference_edges(db, &kept_hashes).await? {
+        if dep != parent && kept.contains(&dep) {
             edges.push(ClosureEdge {
                 source: dep,
-                target: referrer,
+                target: parent,
             });
         }
     }
@@ -353,6 +353,6 @@ mod tests {
         );
     }
 
-    // The runtime closure graph walks the graph's runtime edges in one recursive
+    // The runtime closure graph walks the graph's runtime dependencies in one recursive
     // statement; it is covered end to end by the cache integration test.
 }

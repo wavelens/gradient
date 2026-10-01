@@ -5,7 +5,7 @@
  */
 
 //! NAR upload: [`upload_nar`] asks the server for a grant through the
-//! [`UploadClient`] and moves the bytes the way the grant says - relayed
+//! [`UploadClient`] and moves the bytes the way the grant says - passed through
 //! [`ClientMessage::UploadChunk`] frames, one presigned PUT, or presigned
 //! multipart parts.
 
@@ -62,7 +62,7 @@ fn compression_threads(size_hint: Option<u64>) -> u32 {
 }
 
 /// The one zstd encoder every NAR upload goes through, so level and thread
-/// count cannot drift between the relay, presigned and substitute-relay paths.
+/// count cannot drift between the passthrough, presigned and substitute-passthrough paths.
 /// One worker still builds a ZSTDMT context, so a `threads` of 1 stays on the
 /// plain single-threaded encoder.
 pub fn nar_encoder<W: std::io::Write>(
@@ -225,12 +225,13 @@ async fn send_path(
     target: GrantTarget,
 ) -> Result<(CompressedNarMeta, Option<CompletedMultipart>)> {
     match target {
-        GrantTarget::Relay { resume_offset } => {
-            debug!(store_path, resume_offset, "relayed NAR upload");
+        GrantTarget::Passthrough { resume_offset } => {
+            debug!(store_path, resume_offset, "passthrough NAR upload");
             let started = std::time::Instant::now();
-            let mut relay = RelayStream::new(request_id, writer, resume_offset);
-            let meta = pack_path_in_parts(store_path, threads, BULK_CHUNK_SIZE, &mut relay).await?;
-            let sent = relay.finish().await?;
+            let mut passthrough = PassthroughStream::new(request_id, writer, resume_offset);
+            let meta =
+                pack_path_in_parts(store_path, threads, BULK_CHUNK_SIZE, &mut passthrough).await?;
+            let sent = passthrough.finish().await?;
             crate::throughput::NETWORK.observe_transfer(sent, started.elapsed());
             Ok((meta, None))
         }
@@ -262,12 +263,12 @@ async fn send_compressed(
     target: GrantTarget,
 ) -> Result<Option<CompletedMultipart>> {
     match target {
-        GrantTarget::Relay { resume_offset } => {
-            let mut relay = RelayStream::new(request_id, writer, resume_offset);
+        GrantTarget::Passthrough { resume_offset } => {
+            let mut passthrough = PassthroughStream::new(request_id, writer, resume_offset);
             for part in compressed.chunks(BULK_CHUNK_SIZE) {
-                relay.send_part(part.to_vec()).await?;
+                passthrough.send_part(part.to_vec()).await?;
             }
-            relay.finish().await?;
+            passthrough.finish().await?;
             Ok(None)
         }
         GrantTarget::Put { url } => {
@@ -313,18 +314,18 @@ async fn measure_nar(store_path: &str) -> Result<u64> {
     Ok(size)
 }
 
-// ── Relay transport ───────────────────────────────────────────────────────────
+// ── Passthrough transport ─────────────────────────────────────────────────────
 
-/// One granted relay stream: parts trimmed against the server's resume offset,
+/// One granted passthrough stream: parts trimmed against the server's resume offset,
 /// closed with the empty final chunk.
-struct RelayStream<'a> {
+struct PassthroughStream<'a> {
     request_id: u64,
     writer: &'a ProtoWriter,
     resume_from: u64,
     produced: u64,
 }
 
-impl<'a> RelayStream<'a> {
+impl<'a> PassthroughStream<'a> {
     fn new(request_id: u64, writer: &'a ProtoWriter, resume_from: u64) -> Self {
         Self {
             request_id,
@@ -349,7 +350,7 @@ impl<'a> RelayStream<'a> {
     }
 }
 
-impl PartSink for RelayStream<'_> {
+impl PartSink for PassthroughStream<'_> {
     async fn send_part(&mut self, part: Vec<u8>) -> Result<()> {
         let part_len = part.len() as u64;
         if let Some((offset, data)) = part_to_send(part, self.produced, self.resume_from) {
@@ -370,8 +371,8 @@ impl PartSink for RelayStream<'_> {
 /// Pack + compress `store_path` on `threads` zstd workers into `part_size`
 /// pieces for `sink`, hashing as they go so nothing is buffered beyond one
 /// part. The encoder's final flush is split the same way: a multithreaded
-/// encoder holds whole jobs back until `finish`, so that tail runs to tens of
-/// MiB on a large source, and one relay frame over `MAX_PROTO_MESSAGE_SIZE`
+/// encoder holds whole jobs back until `finish`, so that tail grows to tens of
+/// MiB on a large source, and one passthrough frame over `MAX_PROTO_MESSAGE_SIZE`
 /// closes the session and fails the job.
 async fn pack_path_in_parts(
     store_path: &str,
@@ -455,11 +456,11 @@ async fn http_put(url: &str, body: Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-// ── Compression helper for the relay path ─────────────────────────────────────
+// ── Compression helper for the passthrough path ───────────────────────────────
 
 /// Zstd-compress a raw in-memory NAR at [`NAR_ZSTD_LEVEL`] and return the
 /// compressed bytes plus their [`CompressedNarMeta`]. Used by the substitute
-/// relay to build a [`NarSource::Compressed`] when the upstream's encoding
+/// passthrough to build a [`NarSource::Compressed`] when the upstream's encoding
 /// cannot be stored verbatim.
 pub fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
     let nar_size = raw_nar.len() as u64;
@@ -619,7 +620,7 @@ mod tests {
     /// The references and deriver a push confirms with come from the path's
     /// metadata source, not from anything the NAR bytes could tell us.
     #[tokio::test]
-    async fn path_relay_carries_the_sources_references() {
+    async fn path_passthrough_carries_the_sources_references() {
         let dir = make_temp_store_path();
         let path = dir.to_str().unwrap().to_owned();
         let deriver = store_path("x.drv");
@@ -629,15 +630,18 @@ mod tests {
             ..Default::default()
         });
 
-        let served = served(GrantTarget::Relay { resume_offset: 0 }, async |uploads| {
-            upload_nar(
-                uploads,
-                "job-123",
-                &path,
-                NarSource::Path { meta: Some(&meta) },
-            )
-            .await
-        })
+        let served = served(
+            GrantTarget::Passthrough { resume_offset: 0 },
+            async |uploads| {
+                upload_nar(
+                    uploads,
+                    "job-123",
+                    &path,
+                    NarSource::Path { meta: Some(&meta) },
+                )
+                .await
+            },
+        )
         .await;
 
         assert_eq!(served.job_id, "job-123");
@@ -652,13 +656,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn path_relay_sends_contiguous_zstd_chunks_and_an_empty_final() {
+    async fn path_passthrough_sends_contiguous_zstd_chunks_and_an_empty_final() {
         let dir = make_temp_store_path();
         let path = dir.to_str().unwrap().to_owned();
 
-        let served = served(GrantTarget::Relay { resume_offset: 0 }, async |uploads| {
-            upload_nar(uploads, "job-123", &path, NarSource::Path { meta: None }).await
-        })
+        let served = served(
+            GrantTarget::Passthrough { resume_offset: 0 },
+            async |uploads| {
+                upload_nar(uploads, "job-123", &path, NarSource::Path { meta: None }).await
+            },
+        )
         .await;
 
         let mut expected = 0u64;
@@ -671,10 +678,10 @@ mod tests {
             *is_final && last.is_empty(),
             "the stream closes with an empty final chunk"
         );
-        let relayed = served.relayed();
-        assert_eq!(relayed.len() as u64, served.nar().file_size);
-        assert_eq!(sha256_nix32(&relayed), served.nar().file_hash);
-        let decoded = zstd::decode_all(relayed.as_slice()).unwrap();
+        let passed_through = served.passed_through();
+        assert_eq!(passed_through.len() as u64, served.nar().file_size);
+        assert_eq!(sha256_nix32(&passed_through), served.nar().file_hash);
+        let decoded = zstd::decode_all(passed_through.as_slice()).unwrap();
         assert_eq!(decoded.len() as u64, served.nar().nar_size);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -698,9 +705,12 @@ mod tests {
         std::fs::write(dir.join("noise"), &noise).unwrap();
         let path = dir.to_str().unwrap().to_owned();
 
-        let served = served(GrantTarget::Relay { resume_offset: 0 }, async |uploads| {
-            upload_nar(uploads, "job-tail", &path, NarSource::Path { meta: None }).await
-        })
+        let served = served(
+            GrantTarget::Passthrough { resume_offset: 0 },
+            async |uploads| {
+                upload_nar(uploads, "job-tail", &path, NarSource::Path { meta: None }).await
+            },
+        )
         .await;
 
         for (data, offset, _) in &served.chunks {
@@ -724,23 +734,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_resumed_relay_sends_only_the_tail() {
+    async fn a_resumed_passthrough_sends_only_the_tail() {
         let raw = b"a raw nar long enough to resume part of it".to_vec();
         let (compressed, _) = compress_nar(&raw).unwrap();
 
-        let served = served(GrantTarget::Relay { resume_offset: 3 }, async |uploads| {
-            let source = NarSource::Raw {
-                nar: raw.clone(),
-                references: vec![],
-                deriver: None,
-                ca: None,
-            };
-            upload_nar(uploads, "job-resume", &store_path("r"), source).await
-        })
+        let served = served(
+            GrantTarget::Passthrough { resume_offset: 3 },
+            async |uploads| {
+                let source = NarSource::Raw {
+                    nar: raw.clone(),
+                    references: vec![],
+                    deriver: None,
+                    ca: None,
+                };
+                upload_nar(uploads, "job-resume", &store_path("r"), source).await
+            },
+        )
         .await;
 
         assert_eq!(served.chunks.first().unwrap().1, 3);
-        assert_eq!(served.relayed(), compressed[3..]);
+        assert_eq!(served.passed_through(), compressed[3..]);
     }
 
     #[test]
@@ -832,7 +845,7 @@ mod tests {
 
         assert!(
             served.chunks.is_empty(),
-            "a presigned upload relays nothing"
+            "a presigned upload passes nothing through"
         );
         let meta = served.nar();
         assert!(meta.file_size > 0 && meta.nar_size > 0);
@@ -930,21 +943,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_relay_compresses_streams_and_confirms() {
+    async fn raw_passthrough_compresses_streams_and_confirms() {
         let raw = b"verbatim upstream nar payload".to_vec();
 
-        let served = served(GrantTarget::Relay { resume_offset: 0 }, async |uploads| {
-            let source = NarSource::Raw {
-                nar: raw.clone(),
-                references: vec![],
-                deriver: None,
-                ca: None,
-            };
-            upload_nar(uploads, "job-raw", &store_path("raw"), source).await
-        })
+        let served = served(
+            GrantTarget::Passthrough { resume_offset: 0 },
+            async |uploads| {
+                let source = NarSource::Raw {
+                    nar: raw.clone(),
+                    references: vec![],
+                    deriver: None,
+                    ca: None,
+                };
+                upload_nar(uploads, "job-raw", &store_path("raw"), source).await
+            },
+        )
         .await;
 
-        assert_eq!(zstd::decode_all(served.relayed().as_slice()).unwrap(), raw);
+        assert_eq!(
+            zstd::decode_all(served.passed_through().as_slice()).unwrap(),
+            raw
+        );
         assert_eq!(served.nar().nar_hash, sha256_nix32(&raw));
         assert_eq!(served.size, raw.len() as u64);
     }

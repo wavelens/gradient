@@ -37,7 +37,7 @@ pub struct S3Args {
     /// when a custom endpoint is set. Defaults to `false` so the URL is
     /// path-style (`https://<endpoint>/<bucket>/key`) - required by MinIO,
     /// Garage, and most self-hosted S3-compatible backends. Set to `true`
-    /// for providers that demand virtual-hosted addressing (Cloudflare R2
+    /// for providers that need virtual-hosted addressing (Cloudflare R2
     /// with a custom domain, some Backblaze B2 setups). Has no effect on
     /// AWS direct (no endpoint set).
     #[arg(

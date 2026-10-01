@@ -14,7 +14,7 @@ use gradient_types::*;
 
 /// Evaluations the scheduler re-drives on its own after a restart, so recovery
 /// must leave them alone: `Queued` is re-offered by the eval dispatcher and a
-/// `Waiting` park is resolved by the waiting-state reconciler or the hook that
+/// `Waiting` park is resolved by the waiting-state repair pass or the hook that
 /// owns its reason.
 /// Every other active status was running on a now-disconnected worker and is
 /// genuinely lost.
@@ -36,7 +36,7 @@ fn lost_eval_statuses() -> Vec<EvaluationStatus> {
 pub struct RecoveryReport {
     /// Open `dispatched_job` rows closed as `Abandoned`, each one a dispatch
     /// gate reopened without waiting for its worker to come back.
-    pub dispatches_closed: u64,
+    pub assignments_closed: u64,
     pub attempts_aborted: u64,
     pub builds_requeued: u64,
     /// How many of `builds_requeued` the gate pulled straight back to `Created`.
@@ -72,9 +72,9 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     // 1. Nothing the previous process handed out is still out: close its
     // dispatch rows before the requeue below, or both dispatch selections
     // refuse the work they re-queue until each worker reconnects - which a
-    // scaled-down or crashed one never does - or the 1800 s sweep runs.
+    // scaled-down or crashed one never does - or the 1800 s sweep starts.
     let mut report = RecoveryReport {
-        dispatches_closed: crate::dispatch_record::abandon_all_open_dispatches(conn).await?,
+        assignments_closed: crate::assignment_record::abandon_all_open_assignments(conn).await?,
         ..Default::default()
     };
 
@@ -94,9 +94,9 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await?;
     report.attempts_aborted = res.rows_affected;
 
-    // 3. Re-queue anchors that were mid-flight (Building back to Queued). The
+    // 3. Re-queue shared builds that were mid-flight (Building back to Queued). The
     // requeue evaluates no gate and since #591 nothing downstream re-checks a
-    // `Queued` row, so it settles what it wrote: a mid-flight anchor's dependencies
+    // `Queued` row, so it settles what it wrote: a mid-flight shared build's dependencies
     // can have regressed while the server was down, and on the first start after
     // `m20260908_000000` every derivation is unwalked. `RETURNING` names exactly the
     // rows this statement moved, so the settle cannot miss one that arrived late.
@@ -104,12 +104,12 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         conn.query_all_raw(REQUEUE_MID_FLIGHT.stmt()).await?,
     );
     report.builds_requeued = requeued.len() as u64;
-    report.builds_unpromoted = crate::readiness::unpromote_ungated(conn, &requeued)
+    report.builds_unpromoted = crate::can_start::unpromote_ungated(conn, &requeued)
         .await?
         .len() as u64;
     crate::dep_counts::bump_graph_version_for_derivations(conn, &requeued).await?;
 
-    // 4a. Collect the evals a restart lost, `Building` included: their anchors
+    // 4a. Collect the evals a restart lost, `Building` included: their shared builds
     // and their terminal transition are this sweep's to finish.
     let inflight_evals = EEvaluation::find()
         .filter(CEvaluation::Status.is_in(lost_eval_statuses()))
@@ -119,7 +119,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     // 4b. Abort those evaluations as a complete terminal transition. `finished_at`
     // belongs with the status: a reader that sees Aborted with no end time reads
     // it as still running, and retention keys off the column. The live path
-    // (`update_evaluation_status`) also runs the reactor effects; startup has no
+    // (`update_evaluation_status`) also starts the reactor effects; startup has no
     // context for those, so the row is at least consistent on its own.
     let eval_ids: Vec<EvaluationId> = inflight_evals.iter().map(|e| e.id).collect();
     if !eval_ids.is_empty() {
@@ -147,16 +147,16 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await;
     }
 
-    // 4c. Abort the anchors those evals drove. When the server dies mid-eval the
+    // 4c. Abort the shared builds those evals drove. When the server dies mid-eval the
     // builder aborts the eval's builds, so reflect it: Created/Queued/Building
-    // anchors referenced only by the now-aborted evals go to Aborted. Anchors a
-    // still-live eval also needs are left running (shared-anchor safety). The
+    // shared builds referenced only by the now-aborted evals go to Aborted. Shared builds a
+    // still-live eval also needs are left running (shared build safety). The
     // force-eval below re-drives them - `requeue_failed_closure` resets
-    // Aborted -> Created on the next evaluation. The anchors are shared, and an
+    // Aborted -> Created on the next evaluation. The shared builds are shared, and an
     // evaluation that was already terminal when the server died still shows them,
-    // so the histogram bump is keyed on the derivations rather than on 3b's set.
+    // so the histogram bump is per the derivations rather than on 3b's set.
     if !eval_ids.is_empty() {
-        let aborted = abort_anchors_for_evals(conn, &eval_ids).await?;
+        let aborted = abort_shared_builds_for_evals(conn, &eval_ids).await?;
         report.builds_aborted = aborted.len() as u64;
         crate::dep_counts::bump_graph_version_for_derivations(conn, &aborted).await?;
     }
@@ -190,12 +190,12 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     Ok(report)
 }
 
-/// Abort the non-terminal anchors (`Created`/`Queued`/`Building`) driven by
+/// Abort the non-terminal shared builds (`Created`/`Queued`/`Building`) driven by
 /// `eval_ids`, skipping any a still-live (non-terminal) evaluation also needs.
-/// Mirrors the explicit-abort path (`status::abort`): a global build-once anchor
+/// Mirrors the explicit-abort path (`status::abort`): a global build-once shared build
 /// is only aborted when no surviving evaluation depends on it. Returns the
 /// derivations it aborted, which name every evaluation whose histogram moved.
-fn abort_anchors_for_evals_sql() -> String {
+fn abort_shared_builds_for_evals_sql() -> String {
     format!(
         r#"
         UPDATE derivation_build db
@@ -222,18 +222,18 @@ fn abort_anchors_for_evals_sql() -> String {
 }
 
 crate::sql_fn! {
-    ABORT_ANCHORS_FOR_EVALS = abort_anchors_for_evals_sql,
+    ABORT_SHARED_BUILDS_FOR_EVALS = abort_shared_builds_for_evals_sql,
         params = [EvaluationIds(64)],
         tier = Sweep;
 }
 
-async fn abort_anchors_for_evals<C: ConnectionTrait>(
+async fn abort_shared_builds_for_evals<C: ConnectionTrait>(
     conn: &C,
     eval_ids: &[EvaluationId],
 ) -> Result<Vec<DerivationId>, DbErr> {
     let ids: Vec<uuid::Uuid> = eval_ids.iter().map(|e| e.into_inner()).collect();
     let rows = conn
-        .query_all_raw(ABORT_ANCHORS_FOR_EVALS.bind([ids.into()]))
+        .query_all_raw(ABORT_SHARED_BUILDS_FOR_EVALS.bind([ids.into()]))
         .await?;
 
     Ok(crate::promotion::returned_derivations(rows))
@@ -244,8 +244,8 @@ mod tests {
     use super::*;
 
     /// `Building` is the status this sweep used to miss. Startup aborted such an
-    /// evaluation before recovery looked for it, so `abort_anchors_for_evals`
-    /// found nothing and every anchor it drove stayed Created/Queued forever.
+    /// evaluation before recovery looked for it, so `abort_shared_builds_for_evals`
+    /// found nothing and every shared build it drove stayed Created/Queued forever.
     #[test]
     fn recovery_owns_every_active_status_a_restart_loses() {
         let lost = lost_eval_statuses();
@@ -318,7 +318,7 @@ mod tests {
     }
 
     /// The mid-flight requeue evaluates no gate, so the settle after it is part of
-    /// the step and not an optimisation: an anchor whose dependencies regressed while
+    /// the step and not an optimisation: a shared build whose dependencies regressed while
     /// the server was down must leave the queue again before the first dispatch pass
     /// reads it. It settles the requeue's own `RETURNING` rows, so `builds_requeued`
     /// and the settle's scope cannot disagree, and the count is reported separately.
@@ -359,14 +359,14 @@ mod tests {
             // 4b. the phase-event insert returns its rows on Postgres, so it draws
             // a query; empty is `RecordNotInserted`, which the recorder ignores
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // 4c. abort their anchors, naming the derivations they moved
+            // 4c. abort their shared builds, naming the derivations they moved
             .append_query_results([vec![
                 derivation_row(DerivationId::now_v7()),
                 derivation_row(DerivationId::now_v7()),
                 derivation_row(DerivationId::now_v7()),
                 derivation_row(DerivationId::now_v7()),
             ]])
-            // 4c. bump the evaluations still showing those anchors
+            // 4c. bump the evaluations still showing those shared builds
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 2,
@@ -386,7 +386,7 @@ mod tests {
 
         let report = recover_interrupted_work(&db).await.unwrap();
 
-        assert_eq!(report.dispatches_closed, 5);
+        assert_eq!(report.assignments_closed, 5);
         assert_eq!(report.attempts_aborted, 3);
         assert_eq!(report.builds_requeued, 2);
         assert_eq!(report.builds_unpromoted, 1);
@@ -399,11 +399,11 @@ mod tests {
     }
 
     /// Recovery asserts that nothing the previous process handed out is still
-    /// out, so it owns the dispatch rows too: an anchor requeued while its row
-    /// is still open is refused by `find_ready_anchors` until that worker
+    /// out, so it owns the dispatch rows too: a shared build requeued while its row
+    /// is still open is refused by `find_startable_shared_builds` until that worker
     /// reconnects, which a scaled-down or crashed one never does.
     #[tokio::test]
-    async fn the_dispatch_rows_close_before_the_anchor_requeue() {
+    async fn the_assignment_rows_close_before_the_shared_build_requeue() {
         let none = MockExecResult {
             last_insert_id: 0,
             rows_affected: 0,
@@ -435,7 +435,7 @@ mod tests {
         let requeue = sql
             .iter()
             .position(|s| s.contains("UPDATE derivation_build SET status"))
-            .expect("recovery requeues the mid-flight anchors");
+            .expect("recovery requeues the mid-flight shared builds");
         assert!(close < requeue, "{sql:?}");
     }
 
@@ -501,7 +501,7 @@ mod tests {
 
         let report = recover_interrupted_work(&db).await.unwrap();
 
-        assert_eq!(report.dispatches_closed, 0);
+        assert_eq!(report.assignments_closed, 0);
         assert_eq!(report.attempts_aborted, 0);
         assert_eq!(report.builds_requeued, 0);
         assert_eq!(report.builds_unpromoted, 0);

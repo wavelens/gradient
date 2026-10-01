@@ -14,23 +14,23 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::collections::HashSet;
 
-/// Abort every anchor only `evaluation` still needs, returning the ids it moved.
-pub async fn abort_eval_anchors(
+/// Abort every shared build only `evaluation` still needs, returning the ids it moved.
+pub async fn abort_eval_shared_builds(
     ctx: &DbContext,
     evaluation: &MEvaluation,
 ) -> Result<Vec<DerivationBuildId>, sea_orm::DbErr> {
-    let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
+    let shared_build_ids: Vec<DerivationBuildId> = EBuildJob::find()
         .select_only()
         .column(CBuildJob::DerivationBuild)
         .filter(CBuildJob::Evaluation.eq(evaluation.id))
         .into_tuple::<DerivationBuildId>()
         .all(&ctx.worker_db)
         .await?;
-    if anchor_ids.is_empty() {
+    if shared_build_ids.is_empty() {
         return Ok(Vec::new());
     }
 
-    let active = fetch_in_chunks(&anchor_ids, |chunk| async move {
+    let active = fetch_in_chunks(&shared_build_ids, |chunk| async move {
         EDerivationBuild::find()
             .filter(CDerivationBuild::Id.is_in(chunk))
             .filter(CDerivationBuild::Status.is_in([
@@ -47,7 +47,7 @@ pub async fn abort_eval_anchors(
     }
 
     let active_ids: Vec<DerivationBuildId> = active.iter().map(|a| a.id).collect();
-    let shared = shared_anchor_ids(ctx, evaluation.id, &active_ids).await?;
+    let shared = ids_shared_with_other_evaluations(ctx, evaluation.id, &active_ids).await?;
 
     let to_abort: Vec<&MDerivationBuild> =
         active.iter().filter(|a| !shared.contains(&a.id)).collect();
@@ -117,14 +117,14 @@ pub async fn abort_eval_anchors(
     Ok(abort_ids)
 }
 
-/// Of `anchor_ids`, those a non-terminal evaluation other than `this_eval` still
-/// needs (via its own `build_job`). Those anchors must keep running.
-async fn shared_anchor_ids(
+/// Of `shared_build_ids`, those a non-terminal evaluation other than `this_eval` still
+/// needs (via its own `build_job`). Those shared builds must keep running.
+async fn ids_shared_with_other_evaluations(
     ctx: &DbContext,
     this_eval: EvaluationId,
-    anchor_ids: &[DerivationBuildId],
+    shared_build_ids: &[DerivationBuildId],
 ) -> Result<HashSet<DerivationBuildId>, sea_orm::DbErr> {
-    let other_jobs = fetch_in_chunks(anchor_ids, |chunk| async move {
+    let other_jobs = fetch_in_chunks(shared_build_ids, |chunk| async move {
         EBuildJob::find()
             .filter(CBuildJob::DerivationBuild.is_in(chunk))
             .filter(CBuildJob::Evaluation.ne(this_eval))
@@ -179,7 +179,7 @@ mod tests {
         }
     }
 
-    fn anchor_row(id: DerivationBuildId, derivation: DerivationId) -> MDerivationBuild {
+    fn shared_build_row(id: DerivationBuildId, derivation: DerivationId) -> MDerivationBuild {
         MDerivationBuild {
             id,
             derivation,
@@ -190,38 +190,38 @@ mod tests {
 
     /// The opening select projects a single column, and a mock row is read by
     /// position, so only its shape matters here.
-    fn anchor_id_row(id: DerivationBuildId) -> BTreeMap<String, Value> {
+    fn shared_build_id_row(id: DerivationBuildId) -> BTreeMap<String, Value> {
         BTreeMap::from([("derivation_build".to_owned(), Value::from(id.into_inner()))])
     }
 
     fn job_row(
         evaluation: EvaluationId,
-        anchor: DerivationBuildId,
+        shared_build: DerivationBuildId,
         derivation: DerivationId,
     ) -> MBuildJob {
         MBuildJob {
             id: BuildJobId::now_v7(),
             evaluation,
             derivation,
-            derivation_build: anchor,
+            derivation_build: shared_build,
             ..Default::default()
         }
     }
 
-    /// The query script `abort_eval_anchors` replays, in order: the aborting
-    /// evaluation's anchors, which of them are still active, the `build_job`
-    /// rows other evaluations hold on those anchors, and those evaluations.
+    /// The query script `abort_eval_shared_builds` replays, in order: the aborting
+    /// evaluation's shared builds, which of them are still active, the `build_job`
+    /// rows other evaluations hold on those shared builds, and those evaluations.
     /// Everything past the abort write (the graph version, board events, phase
     /// events, the attempts whose logs the abort owes) is answered empty: the
     /// decision is made by then and each of those paths is a no-op on empty input.
     fn scripted_db(
-        anchors: Vec<BTreeMap<String, Value>>,
+        shared_builds: Vec<BTreeMap<String, Value>>,
         active: Vec<MDerivationBuild>,
         other_jobs: Vec<MBuildJob>,
         other_evals: Vec<MEvaluation>,
     ) -> DatabaseConnection {
         MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([anchors])
+            .append_query_results([shared_builds])
             .append_query_results([active])
             .append_query_results([other_jobs])
             .append_query_results([other_evals])
@@ -245,65 +245,71 @@ mod tests {
             .expect("the abort writes derivation_build")
     }
 
-    /// Two live evaluations building the same derivation share its anchor, so
-    /// aborting one may only stop the anchors it alone still wants. The shared
+    /// Two live evaluations building the same derivation share its shared build, so
+    /// aborting one may only stop the shared builds it alone still wants. The shared
     /// one stays Building and is never written, which is what keeps the other
     /// evaluation's build running instead of restarting it later.
     #[tokio::test]
-    async fn an_abort_spares_an_anchor_another_live_evaluation_needs() {
+    async fn an_abort_spares_a_shared_build_another_live_evaluation_needs() {
         let aborting = eval_row(EvaluationStatus::Building);
         let other = eval_row(EvaluationStatus::Building);
         let (shared, shared_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
         let (mine, mine_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
 
         let (ctx, pool) = ctx(scripted_db(
-            vec![anchor_id_row(shared), anchor_id_row(mine)],
-            vec![anchor_row(shared, shared_drv), anchor_row(mine, mine_drv)],
+            vec![shared_build_id_row(shared), shared_build_id_row(mine)],
+            vec![
+                shared_build_row(shared, shared_drv),
+                shared_build_row(mine, mine_drv),
+            ],
             vec![job_row(other.id, shared, shared_drv)],
             vec![other],
         ))
         .await;
 
-        let aborted = abort_eval_anchors(&ctx, &aborting)
+        let aborted = abort_eval_shared_builds(&ctx, &aborting)
             .await
             .expect("the abort runs");
 
         assert_eq!(
             aborted,
             vec![mine],
-            "only the anchor no other evaluation wants is aborted"
+            "only the shared build no other evaluation wants is aborted"
         );
 
         drop(ctx);
         let update = abort_update(pool);
         assert!(
             update.contains(&mine.to_string()),
-            "the exclusive anchor is aborted: {update}"
+            "the exclusive shared build is aborted: {update}"
         );
         assert!(
             !update.contains(&shared.to_string()),
-            "the shared anchor must keep building for the other evaluation: {update}"
+            "the build both evaluations share must keep building for the other evaluation: {update}"
         );
     }
 
     /// Same graph, but the other evaluation has already finished: nothing live
-    /// needs the shared anchor any more, so the abort takes both.
+    /// needs the shared build any more, so the abort takes both.
     #[tokio::test]
-    async fn an_abort_stops_a_shared_anchor_once_the_other_evaluation_is_terminal() {
+    async fn an_abort_stops_a_shared_build_once_the_other_evaluation_is_terminal() {
         let aborting = eval_row(EvaluationStatus::Building);
         let other = eval_row(EvaluationStatus::Completed);
         let (shared, shared_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
         let (mine, mine_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
 
         let (ctx, _pool) = ctx(scripted_db(
-            vec![anchor_id_row(shared), anchor_id_row(mine)],
-            vec![anchor_row(shared, shared_drv), anchor_row(mine, mine_drv)],
+            vec![shared_build_id_row(shared), shared_build_id_row(mine)],
+            vec![
+                shared_build_row(shared, shared_drv),
+                shared_build_row(mine, mine_drv),
+            ],
             vec![job_row(other.id, shared, shared_drv)],
             vec![other],
         ))
         .await;
 
-        let mut aborted = abort_eval_anchors(&ctx, &aborting)
+        let mut aborted = abort_eval_shared_builds(&ctx, &aborting)
             .await
             .expect("the abort runs");
         aborted.sort();

@@ -34,7 +34,7 @@ fn other_build_job_id() -> BuildJobId {
 fn derivation_id() -> DerivationId {
     DerivationId::new(Uuid::from_u128(0xd1))
 }
-fn anchor_id() -> DerivationBuildId {
+fn shared_build_id() -> DerivationBuildId {
     DerivationBuildId::new(Uuid::from_u128(0xa1))
 }
 fn eval_id() -> EvaluationId {
@@ -63,14 +63,14 @@ fn build_job(id: BuildJobId, evaluation: EvaluationId) -> gradient_entity::build
         id,
         evaluation,
         derivation: derivation_id(),
-        derivation_build: anchor_id(),
+        derivation_build: shared_build_id(),
         ..Default::default()
     }
 }
 
-fn anchor() -> gradient_entity::derivation_build::Model {
+fn shared_build() -> gradient_entity::derivation_build::Model {
     gradient_entity::derivation_build::Model {
-        id: anchor_id(),
+        id: shared_build_id(),
         derivation: derivation_id(),
         ..Default::default()
     }
@@ -84,11 +84,11 @@ fn task(id: TaskId, project: ProjectId) -> gradient_entity::task::Model {
     }
 }
 
-/// The private project owning [`build_job_id`]: build_job, anchor, evaluation,
+/// The private project owning [`build_job_id`]: build_job, shared build, evaluation,
 /// task, project, in `BuildAccessContext::load_unguarded` order.
 fn with_private_build(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![build_job(build_job_id(), eval_id())]])
-        .append_query_results([vec![anchor()]])
+        .append_query_results([vec![shared_build()]])
         .append_query_results([vec![eval_at(eval_id(), 0)]])
         .append_query_results([vec![task(task_id(), project_id())]])
         .append_query_results([vec![project()]])

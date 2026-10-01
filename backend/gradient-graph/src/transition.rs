@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! One handler per [`Transition`], each run inside the actor's transaction.
+//! One handler per [`Transition`], each run inside the graph writer's transaction.
 
 use anyhow::{Context, Result};
 use gradient_db::{
@@ -42,12 +42,12 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             eval_failed(ctx, evaluation, &error, kind, &missing_paths).await?;
             Ok(TransitionReport::default())
         }
-        Transition::BuildStarted { anchor } => {
-            let Some(row) = EDerivationBuild::find_by_id(anchor)
+        Transition::BuildStarted { shared_build } => {
+            let Some(row) = EDerivationBuild::find_by_id(shared_build)
                 .one(&ctx.worker_db)
                 .await?
             else {
-                warn!(derivation_build = %anchor, "anchor not found for Building status update");
+                warn!(derivation_build = %shared_build, "shared build not found for Building status update");
                 return Ok(TransitionReport::default());
             };
 
@@ -62,39 +62,39 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             Ok(TransitionReport::default())
         }
         Transition::BuildOutput {
-            anchor,
+            shared_build,
             outputs,
             metrics,
             substituted,
         } => {
-            build_output(ctx, anchor, outputs, metrics, substituted).await?;
+            build_output(ctx, shared_build, outputs, metrics, substituted).await?;
             Ok(TransitionReport::default())
         }
-        Transition::BuildCompleted { anchor } => Ok(TransitionReport {
-            substitute_log: build_completed(ctx, anchor).await?,
+        Transition::BuildCompleted { shared_build } => Ok(TransitionReport {
+            substitute_log: build_completed(ctx, shared_build).await?,
             ..Default::default()
         }),
         Transition::BuildFailed {
-            anchor,
+            shared_build,
             error,
             log_banner,
             kind,
             missing_paths,
         } => {
-            build_failed(ctx, anchor, &error, &log_banner, kind, &missing_paths).await?;
+            build_failed(ctx, shared_build, &error, &log_banner, kind, &missing_paths).await?;
             Ok(TransitionReport::default())
         }
-        Transition::Dispatched {
+        Transition::Assigned {
             evaluation,
-            anchor,
+            shared_build,
             dispatched_job,
             substitute,
             build_context,
         } => {
-            dispatched(
+            assigned(
                 ctx,
                 evaluation,
-                anchor,
+                shared_build,
                 dispatched_job,
                 substitute,
                 build_context,
@@ -102,11 +102,11 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             .await;
             Ok(TransitionReport::default())
         }
-        Transition::OrphanedBuilds { anchors } => {
-            // One read for every anchor the worker held; the status writes stay
+        Transition::OrphanedBuilds { shared_builds } => {
+            // One read for every shared build the worker held; the status writes stay
             // per row because each carries its own transition side effects.
             let rows = match EDerivationBuild::find()
-                .filter(gradient_entity::derivation_build::Column::Id.is_in(anchors))
+                .filter(gradient_entity::derivation_build::Column::Id.is_in(shared_builds))
                 .all(&ctx.worker_db)
                 .await
             {
@@ -128,8 +128,8 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             }
 
             // The move evaluates no gate, and `Building` is outside
-            // `BuildStatus::PENDING`, so nothing recounted `unready_deps` while the
-            // anchor was building and the value the gate reads can be stale either
+            // `BuildStatus::PENDING`, so nothing recounted `blocking_deps` while the
+            // shared build was building and the value the gate reads can be stale either
             // way. The dispatcher is live here, unlike at startup, so the settle has
             // to run before it can pick the row up.
             let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
@@ -138,17 +138,17 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             Ok(TransitionReport::default())
         }
         Transition::Ready {
-            anchors,
+            shared_builds,
             closure_sizes,
         } => {
-            ready(ctx, &anchors, &closure_sizes).await?;
+            ready(ctx, &shared_builds, &closure_sizes).await?;
             Ok(TransitionReport::default())
         }
-        Transition::Reconcile { scope } => {
-            gradient_db::reconcile_build_graph(ctx, scope).await?;
+        Transition::Repair { scope } => {
+            gradient_db::repair_build_graph(ctx, scope).await?;
             Ok(TransitionReport::default())
         }
-        Transition::AbortEvaluationAnchors { evaluation } => {
+        Transition::AbortEvaluationSharedBuilds { evaluation } => {
             let Some(eval) = EEvaluation::find_by_id(evaluation)
                 .one(&ctx.worker_db)
                 .await?
@@ -156,18 +156,18 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 return Ok(TransitionReport::default());
             };
 
-            let aborted_anchors = gradient_db::abort_eval_anchors(ctx, &eval).await?;
+            let aborted_shared_builds = gradient_db::abort_eval_shared_builds(ctx, &eval).await?;
             Ok(TransitionReport {
-                aborted_anchors,
+                aborted_shared_builds,
                 ..Default::default()
             })
         }
         Transition::PrioritizeEvaluation { evaluation } => Ok(TransitionReport {
-            prioritized_anchors: gradient_db::prioritize_evaluation(ctx, evaluation).await?,
+            prioritized_shared_builds: gradient_db::prioritize_evaluation(ctx, evaluation).await?,
             ..Default::default()
         }),
-        Transition::PrioritizeBuild { anchor } => {
-            let Some(row) = EDerivationBuild::find_by_id(anchor)
+        Transition::PrioritizeBuild { shared_build } => {
+            let Some(row) = EDerivationBuild::find_by_id(shared_build)
                 .one(&ctx.worker_db)
                 .await?
             else {
@@ -175,7 +175,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             };
 
             Ok(TransitionReport {
-                prioritized_anchors: gradient_db::prioritize_build_closure(ctx, &row).await?,
+                prioritized_shared_builds: gradient_db::prioritize_build_closure(ctx, &row).await?,
                 ..Default::default()
             })
         }
@@ -186,11 +186,10 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
 async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> Result<()> {
     // Every edge landed with its batch, so the graph is complete here: run the
     // healing pipeline scoped to this eval, which thaws its closure, settles the
-    // anchors whose outputs are already whole and advances their dependents, fails
+    // shared builds whose outputs are already complete and advances their parents, fails
     // the closure's dependency-failed victims, and promotes the closure (see
-    // `gradient_db::reconcile`).
-    gradient_db::reconcile_build_graph(ctx, gradient_db::ReconcileScope::Eval(evaluation_id))
-        .await?;
+    // `gradient_db::repair`).
+    gradient_db::repair_build_graph(ctx, gradient_db::RepairScope::Eval(evaluation_id)).await?;
 
     // Promotion is graph-driven (gradient_db::promotion), independent of eval
     // completion, so finishing the stream just advances the eval to Building.
@@ -320,16 +319,16 @@ async fn build_output(
     metrics: Option<BuildMetrics>,
     substituted: bool,
 ) -> Result<()> {
-    let anchor = EDerivationBuild::find_by_id(derivation_build)
+    let shared_build = EDerivationBuild::find_by_id(derivation_build)
         .one(&ctx.worker_db)
         .await
         .context("fetch derivation_build")?
         .with_context(|| format!("derivation_build {derivation_build} not found"))?;
 
-    let build_id = anchor.id;
-    let derivation_id = anchor.derivation;
+    let build_id = shared_build.id;
+    let derivation_id = shared_build.derivation;
     if let Some(metrics) = metrics {
-        record_metrics(ctx, &anchor, derivation_id, &metrics).await;
+        record_metrics(ctx, &shared_build, derivation_id, &metrics).await;
     }
 
     let mut missing: Vec<&BuildProduct> = Vec::new();
@@ -400,11 +399,11 @@ async fn build_output(
     // their NARs yet: record the flag and let `build_completed` turn it into the
     // terminal status, after the push (#399, #303).
     if substituted {
-        let mut active = anchor.into_active_model();
+        let mut active = shared_build.into_active_model();
         active.substituted = Set(true);
         active.updated_at = Set(now());
         if let Err(e) = active.update(&ctx.worker_db).await {
-            warn!(%build_id, error = %e, "failed to record anchor as substituted");
+            warn!(%build_id, error = %e, "failed to record shared build as substituted");
         }
     }
 
@@ -457,31 +456,31 @@ async fn build_completed(
     ctx: &DbContext,
     derivation_build: DerivationBuildId,
 ) -> Result<Option<SubstituteLog>> {
-    let Some(anchor) = EDerivationBuild::find_by_id(derivation_build)
+    let Some(shared_build) = EDerivationBuild::find_by_id(derivation_build)
         .one(&ctx.worker_db)
         .await?
     else {
-        warn!(%derivation_build, "anchor not found on job_completed");
+        warn!(%derivation_build, "shared build not found on job_completed");
         return Ok(None);
     };
 
-    let derivation_id = anchor.derivation;
-    let was_external_cached = anchor.substitutable;
+    let derivation_id = shared_build.derivation;
+    let was_external_cached = shared_build.cache_available;
 
-    // The output NARs are in the index by the time this runs: the worker sends
+    // The output NARs are in the index by the time this is running: the worker sends
     // the completion only after the server acknowledged every upload commit. So
-    // the anchor may now become dispatch-ready.
-    let terminal = policy::terminal_success_status(anchor.substituted);
+    // the shared build may now become startable.
+    let terminal = policy::terminal_success_status(shared_build.substituted);
     if let Err(e) = succeed_latest_attempt(
         &ctx.worker_db,
         derivation_build,
-        policy::terminal_success_outcome(anchor.substituted),
+        policy::terminal_success_outcome(shared_build.substituted),
     )
     .await
     {
         warn!(%derivation_build, error = %e, "failed to record attempt success");
     }
-    update_derivation_build_status(ctx, anchor, terminal).await;
+    update_derivation_build_status(ctx, shared_build, terminal).await;
     check_referencing_evals_done(ctx, derivation_id).await?;
 
     if !was_external_cached {
@@ -493,7 +492,7 @@ async fn build_completed(
         .await
     {
         Ok(Some(d)) => Ok(Some(SubstituteLog {
-            anchor: derivation_build,
+            shared_build: derivation_build,
             derivation: derivation_id,
             drv_path: d.drv_path(),
         })),
@@ -516,17 +515,17 @@ async fn build_failed(
     kind: BuildFailureKind,
     missing_paths: &[String],
 ) -> Result<()> {
-    let Some(anchor) = EDerivationBuild::find_by_id(derivation_build)
+    let Some(shared_build) = EDerivationBuild::find_by_id(derivation_build)
         .one(&ctx.worker_db)
         .await?
     else {
-        warn!(%derivation_build, "anchor not found on job_failed");
+        warn!(%derivation_build, "shared build not found on job_failed");
         return Ok(());
     };
 
     // Without this banner a pre-`nix build` abort renders as a Failed badge over
     // an empty log.
-    if let Some(attempt_id) = gradient_db::latest_attempt_id(&ctx.worker_db, anchor.id)
+    if let Some(attempt_id) = gradient_db::latest_attempt_id(&ctx.worker_db, shared_build.id)
         .await
         .ok()
         .flatten()
@@ -542,8 +541,8 @@ async fn build_failed(
         warn!(%derivation_build, error = %e, "failed to append worker error to build log");
     }
 
-    let derivation_id = anchor.derivation;
-    let attempt = anchor.attempt;
+    let derivation_id = shared_build.derivation;
+    let attempt = shared_build.attempt;
     let max_attempts = ctx.config.build.max_attempts;
 
     // Counted before this failure is recorded, so the breaker decision excludes
@@ -565,20 +564,20 @@ async fn build_failed(
                 %derivation_build,
                 prior_failures = prior_inputs_unavailable,
                 max_loops,
-                "InputsUnavailable self-heal circuit open; failing without reconcile to break the hot loop"
+                "InputsUnavailable self-heal circuit open; failing without repair to break the hot loop"
             );
         } else if let Err(e) =
-            crate::self_heal::reconcile_missing_inputs(ctx, derivation_id, missing_paths).await
+            crate::self_heal::repair_missing_inputs(ctx, derivation_id, missing_paths).await
         {
-            warn!(%derivation_build, error = %e, "failed to reconcile missing inputs");
+            warn!(%derivation_build, error = %e, "failed to repair missing inputs");
         }
     }
 
     // `InputsUnavailable` retries in-eval (the self-heal re-queues its input),
     // but once the breaker trips the input is unrecoverable - stop retrying.
     let substitution = policy::Substitution {
-        substitutable: anchor.substitutable,
-        misses: substitute_misses(ctx, derivation_build, kind, anchor.substitutable).await,
+        cache_available: shared_build.cache_available,
+        misses: substitute_misses(ctx, derivation_build, kind, shared_build.cache_available).await,
         threshold: i64::from(ctx.config.build.substitute_miss_escalation_threshold),
     };
     let outcome = match policy::decide_failure_outcome(kind, attempt, max_attempts, substitution) {
@@ -602,16 +601,16 @@ async fn build_failed(
 
     match outcome {
         FailureOutcome::Retry => {
-            let mut active: ADerivationBuild = anchor.clone().into_active_model();
+            let mut active: ADerivationBuild = shared_build.clone().into_active_model();
             active.attempt = Set(attempt + 1);
             if let Err(e) = active.update(&ctx.worker_db).await {
-                error!(%derivation_build, error = %e, "failed to bump anchor attempt");
+                error!(%derivation_build, error = %e, "failed to bump shared build attempt");
             }
 
             let reloaded = EDerivationBuild::find_by_id(derivation_build)
                 .one(&ctx.worker_db)
                 .await?
-                .unwrap_or(anchor);
+                .unwrap_or(shared_build);
             update_derivation_build_status(ctx, reloaded, BuildStatus::FailedTransient).await;
             info!(%derivation_build, attempt = attempt + 1, "transient build failure; scheduled for retry");
             return Ok(());
@@ -619,11 +618,11 @@ async fn build_failed(
         FailureOutcome::Requeue => {
             // Substitute miss: back to the queue without an `attempt` bump or a
             // permanent mark, and no dependency cascade - nothing failed. Nothing
-            // failed is not nothing changed: `reconcile_missing_inputs` above purges
+            // failed is not nothing changed: `repair_missing_inputs` above purges
             // stale cached inputs in this same call, which drops a dependency out of
-            // `fetchable` and raises this anchor's `unready_deps`, so the settle is
+            // `fetchable` and raises this shared build's `blocking_deps`, so the settle is
             // what makes the write legal. There is no backoff on this path.
-            update_derivation_build_status(ctx, anchor, BuildStatus::Queued).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await;
             let settled = unpromote_ungated(&ctx.worker_db, &[derivation_id]).await?;
             emit_transition_effects(ctx, &settled).await;
             info!(%derivation_build, "substitute unavailable; re-queued for re-dispatch/escalation");
@@ -631,20 +630,20 @@ async fn build_failed(
         }
         FailureOutcome::Exhausted => {
             let misses = substitution.misses + 1;
-            exhaust_substitution(ctx, &anchor, misses).await?;
-            info!(%derivation_build, misses, "substitute misses exhausted; the anchor will be built");
+            exhaust_substitution(ctx, &shared_build, misses).await?;
+            info!(%derivation_build, misses, "substitute misses exhausted; the shared build will be built");
             return Ok(());
         }
         FailureOutcome::Aborted => {
-            update_derivation_build_status(ctx, anchor, BuildStatus::Aborted).await;
-            info!(%derivation_build, "build aborted by server; anchor left requeueable");
+            update_derivation_build_status(ctx, shared_build, BuildStatus::Aborted).await;
+            info!(%derivation_build, "build aborted by server; shared build left requeueable");
             return check_referencing_evals_done(ctx, derivation_id).await;
         }
         FailureOutcome::Permanent => {
-            update_derivation_build_status(ctx, anchor, BuildStatus::FailedPermanent).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await;
         }
         FailureOutcome::Timeout => {
-            update_derivation_build_status(ctx, anchor, BuildStatus::FailedTimeout).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::FailedTimeout).await;
         }
     }
 
@@ -652,16 +651,16 @@ async fn build_failed(
     check_referencing_evals_done(ctx, derivation_id).await
 }
 
-/// The anchor's prior `SubstituteUnavailable` attempts within the evaluation that
+/// The shared build's prior `SubstituteUnavailable` attempts within the evaluation that
 /// drove this one. Zero where no re-queue is reachable: a kind that cannot produce
-/// one never reads the budget, and neither does an anchor that is not a relay.
+/// one never reads the budget, and neither does a shared build that is not a passthrough.
 async fn substitute_misses(
     ctx: &DbContext,
     derivation_build: DerivationBuildId,
     kind: BuildFailureKind,
-    substitutable: bool,
+    cache_available: bool,
 ) -> i64 {
-    if !substitutable || !policy::spends_substitute_budget(kind) {
+    if !cache_available || !policy::spends_substitute_budget(kind) {
         return 0;
     }
 
@@ -680,9 +679,9 @@ async fn substitute_misses(
 }
 
 gradient_db::sql! {
-    CLEAR_ANCHOR_SUBSTITUTION = "UPDATE derivation_build SET substitutable = false, status = $2, attempt = 0, \
+    CLEAR_SHARED_BUILD_SUBSTITUTION = "UPDATE derivation_build SET cache_available = false, status = $2, attempt = 0, \
          updated_at = (now() AT TIME ZONE 'UTC') WHERE id = $1",
-        params = [AnchorId, Int(0)];
+        params = [SharedBuildId, Int(0)];
 
     CLEAR_OUTPUTS_UPSTREAM_RECORD = "UPDATE derivation_output SET external_url = NULL, nar_hash = NULL, file_hash = NULL, \
          file_size = NULL, nar_size = NULL, references_list = NULL, deriver = NULL \
@@ -690,50 +689,55 @@ gradient_db::sql! {
         params = [DerivationId];
 }
 
-/// The anchor stops being a relay: it forgets the upstream its outputs were
+/// The shared build stops being a passthrough: it forgets the upstream its outputs were
 /// recorded on and goes back to `Created`, where the ordinary build gates apply.
 ///
-/// Clearing the output columns drops the upstream offer the relay was built from,
-/// so nothing relays or serves from a record the upstream failed to honour.
-/// `probed` stays set: the anchor is a builder now and demands its inputs at once
+/// Clearing the output columns drops the upstream offer the passthrough was built from,
+/// so nothing passes through or serves from a record the upstream failed to honour.
+/// `probed` stays set: the shared build is a builder now and needs its inputs at once
 /// rather than after another probe round.
 ///
-/// Both the anchor and its direct inputs are re-gated here rather than left to the
+/// Both the shared build and its direct inputs are re-gated here rather than left to the
 /// emitter. `Building` to `Created` stays inside the builder statuses, so the
-/// transition carries no demand move, and what changed is that this anchor is now a
-/// builder at all: its own gate swapped arms, and its inputs gained a demander.
+/// transition carries no need move, and what changed is that this shared build is now a
+/// builder at all: its own gate swapped arms, and its inputs gained a parent that wants them.
 async fn exhaust_substitution(
     ctx: &DbContext,
-    anchor: &MDerivationBuild,
+    shared_build: &MDerivationBuild,
     misses: i64,
 ) -> Result<()> {
     let db = &ctx.worker_db;
-    db.execute_raw(CLEAR_ANCHOR_SUBSTITUTION.bind([
-        anchor.id.into_inner().into(),
+    db.execute_raw(CLEAR_SHARED_BUILD_SUBSTITUTION.bind([
+        shared_build.id.into_inner().into(),
         i32::from(BuildStatus::Created).into(),
     ]))
     .await
-    .context("clear the anchor's substitution")?;
-    db.execute_raw(CLEAR_OUTPUTS_UPSTREAM_RECORD.bind([anchor.derivation.into_inner().into()]))
-        .await
-        .context("clear the outputs' upstream record")?;
+    .context("clear the shared build's substitution")?;
+    db.execute_raw(
+        CLEAR_OUTPUTS_UPSTREAM_RECORD.bind([shared_build.derivation.into_inner().into()]),
+    )
+    .await
+    .context("clear the outputs' upstream record")?;
 
     let mut changes = vec![gradient_db::TransitionChange {
-        derivation: anchor.derivation,
-        from: anchor.status,
+        derivation: shared_build.derivation,
+        from: shared_build.status,
         to: BuildStatus::Created,
     }];
-    // The anchor is a builder again, so demand reaches its whole pending closure.
+    // The shared build is a builder again, so need reaches its whole pending closure.
     changes.extend(
-        gradient_db::recompute_and_settle_demand(db, &[anchor.derivation])
+        gradient_db::update_and_settle_need(db, &[shared_build.derivation])
             .await?
             .changes,
     );
-    changes.extend(gradient_db::promote(db, &[anchor.derivation]).await?);
+    changes.extend(gradient_db::promote(db, &[shared_build.derivation]).await?);
     emit_transition_effects(ctx, &changes).await;
 
-    if let Ok(Some(drv)) = EDerivation::find_by_id(anchor.derivation).one(db).await {
-        let jobs = gradient_db::build_jobs_for_derivations(db, &[anchor.derivation]).await?;
+    if let Ok(Some(drv)) = EDerivation::find_by_id(shared_build.derivation)
+        .one(db)
+        .await
+    {
+        let jobs = gradient_db::build_jobs_for_derivations(db, &[shared_build.derivation]).await?;
         for job in jobs.values().flatten() {
             gradient_db::insert_evaluation_message(
                 db,
@@ -752,7 +756,7 @@ async fn exhaust_substitution(
     Ok(())
 }
 
-/// After an anchor reaches a terminal status, sweep every evaluation that
+/// After a shared build reaches a terminal status, sweep every evaluation that
 /// references the derivation and finalize the settled ones. Idempotent
 /// belt-and-braces around the emitter's own finalize (which is skipped when
 /// the state machine rejects a racing transition).
@@ -764,7 +768,7 @@ async fn check_referencing_evals_done(ctx: &DbContext, derivation: DerivationId)
 /// Insert a `derivation_metric` history row from a build's worker metrics.
 async fn record_metrics(
     ctx: &DbContext,
-    anchor: &MDerivationBuild,
+    shared_build: &MDerivationBuild,
     derivation_id: DerivationId,
     metrics: &BuildMetrics,
 ) {
@@ -797,7 +801,7 @@ async fn record_metrics(
         peak_network_mbps: metrics.peak_network_mbps.map(|v| v as f64),
         oom_killed: metrics.oom_killed,
         build_time_ms: metrics.build_time_ms.map(|v| v as i64),
-        worker_id: gradient_db::latest_attempt_worker(&ctx.worker_db, anchor.id)
+        worker_id: gradient_db::latest_attempt_worker(&ctx.worker_db, shared_build.id)
             .await
             .ok()
             .flatten()
@@ -812,9 +816,9 @@ async fn record_metrics(
 }
 
 /// Open the `build_attempt` for a job that just left for a worker and stamp the
-/// anchor's `dispatched_at`. Best-effort: failures are logged so instrumentation
+/// shared build's `dispatched_at`. Best-effort: failures are logged so instrumentation
 /// can't break dispatch.
-async fn dispatched(
+async fn assigned(
     ctx: &DbContext,
     evaluation: EvaluationId,
     derivation_build: DerivationBuildId,
@@ -846,11 +850,11 @@ async fn dispatched(
         .exec(&ctx.worker_db)
         .await
     {
-        warn!(error = %e, %derivation_build, "failed to stamp anchor dispatched_at");
+        warn!(error = %e, %derivation_build, "failed to stamp shared build dispatched_at");
     }
 }
 
-/// Only a terminal anchor finalizes its latest attempt, so the attempt a new
+/// Only a terminal shared build finalizes its latest attempt, so the attempt a new
 /// one replaces (aborted, lost with its worker, retried) is finalized here.
 async fn finalize_superseded_log(
     ctx: &DbContext,
@@ -865,32 +869,32 @@ async fn finalize_superseded_log(
     }
 }
 
-/// The `build_job` for `(evaluation, anchor.derivation)`. Ingest normally
-/// pre-creates it, so this upserts then selects to stay correct for any anchor
+/// The `build_job` for `(evaluation, shared_build.derivation)`. Recording normally
+/// pre-creates it, so this upserts then selects to stay correct for any shared build
 /// whose build_job is missing.
 async fn find_or_create_build_job(
     ctx: &DbContext,
     evaluation: EvaluationId,
     derivation_build: DerivationBuildId,
 ) -> Option<BuildJobId> {
-    let anchor = match EDerivationBuild::find_by_id(derivation_build)
+    let shared_build = match EDerivationBuild::find_by_id(derivation_build)
         .one(&ctx.worker_db)
         .await
     {
         Ok(Some(a)) => a,
         Ok(None) => {
-            warn!(%derivation_build, "anchor missing while opening build_attempt");
+            warn!(%derivation_build, "shared build missing while opening build_attempt");
             return None;
         }
         Err(e) => {
-            warn!(error = %e, %derivation_build, "anchor lookup failed while opening build_attempt");
+            warn!(error = %e, %derivation_build, "shared build lookup failed while opening build_attempt");
             return None;
         }
     };
 
     let existing = EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(evaluation))
-        .filter(CBuildJob::Derivation.eq(anchor.derivation))
+        .filter(CBuildJob::Derivation.eq(shared_build.derivation))
         .one(&ctx.worker_db)
         .await;
     match existing {
@@ -902,7 +906,7 @@ async fn find_or_create_build_job(
     let row = MBuildJob {
         id: BuildJobId::now_v7(),
         evaluation,
-        derivation: anchor.derivation,
+        derivation: shared_build.derivation,
         derivation_build,
         score: 0.0,
         score_breakdown: serde_json::Value::Null,
@@ -923,7 +927,7 @@ async fn find_or_create_build_job(
 
     match EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(evaluation))
-        .filter(CBuildJob::Derivation.eq(anchor.derivation))
+        .filter(CBuildJob::Derivation.eq(shared_build.derivation))
         .one(&ctx.worker_db)
         .await
     {
@@ -942,15 +946,15 @@ gradient_db::sql! {
         params = [DerivationIds(64), Ints(1200, 64)];
 }
 
-/// Stamp `ready_at` the first time an anchor became dispatchable, and persist
+/// Stamp `ready_at` the first time a shared build became dispatchable, and persist
 /// the closure sizes the dispatch pass computed on the way.
 async fn ready(
     ctx: &DbContext,
-    anchors: &[DerivationBuildId],
+    shared_builds: &[DerivationBuildId],
     closure_sizes: &[(DerivationId, i64)],
 ) -> Result<()> {
     let db = &ctx.worker_db;
-    gradient_db::for_each_chunk(anchors, |chunk| async move {
+    gradient_db::for_each_chunk(shared_builds, |chunk| async move {
         EDerivationBuild::update_many()
             .col_expr(CDerivationBuild::ReadyAt, Expr::value(now()))
             .filter(CDerivationBuild::Id.is_in(chunk))

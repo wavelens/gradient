@@ -20,7 +20,7 @@ struct Request {
     args: Value,
 }
 
-pub fn dispatch<B: Backend>(backend: &B, line: &str) -> String {
+pub fn handle_command<B: Backend>(backend: &B, line: &str) -> String {
     let reply = match serde_json::from_str::<Request>(line) {
         Err(e) => Err(anyhow::anyhow!("bad request: {e}")),
         Ok(req) => generic(backend, &req).unwrap_or_else(|| {
@@ -72,7 +72,7 @@ async fn answer<B: Backend>(backend: Arc<B>, stream: UnixStream) {
     let (read, mut write) = stream.into_split();
     let mut lines = BufReader::new(read).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        let reply = dispatch(backend.as_ref(), &line);
+        let reply = handle_command(backend.as_ref(), &line);
         if write
             .write_all(format!("{reply}\n").as_bytes())
             .await
@@ -121,7 +121,7 @@ mod tests {
     }
 
     fn call(backend: &Echo, line: &str) -> Value {
-        serde_json::from_str(&dispatch(backend, line)).expect("json reply")
+        serde_json::from_str(&handle_command(backend, line)).expect("json reply")
     }
 
     #[test]

@@ -131,7 +131,7 @@ async fn skip_concurrency_with_running_eval() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // in_flight lookup returns the running eval
         .append_query_results([vec![running_eval.clone()]])
-        // dedup against running's commit: row missing → fall through
+        // dedup against running's commit: row missing -> fall through
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
         // No last_evaluation, so no further dedup queries.
         // Concurrency policy reuses the in-flight eval - Skip => SkippedConcurrency.
@@ -196,7 +196,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
     let new_hash = vec![9u8; 20];
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // in_flight lookup runs unconditionally - return empty for this test
+        // in_flight lookup executes unconditionally - return empty for this test
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         // all policy skips the in-flight concurrency action
         // trigger_evaluation: concurrent=true skips the in-progress guard - no guard query
@@ -405,7 +405,7 @@ async fn hard_abort_populates_aborted_fields() {
     };
     assert_eq!(evaluation.id, new_eval_id);
     assert_eq!(aborted_evaluation, Some(running_eval_id));
-    assert!(hard_abort, "the caller must abort the eval's anchors");
+    assert!(hard_abort, "the caller must abort the eval's shared builds");
 }
 
 /// When the PR webhook layer flags a freshly-created evaluation as needing
@@ -503,7 +503,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
 
 /// When the task's project has no writable cache subscription, a
 /// freshly-created evaluation is parked in `Waiting` with the `NoCache`
-/// reason - no jobs are spawned and the scheduler's reconciler must leave
+/// reason - no jobs are spawned and the scheduler's repair pass must leave
 /// the row alone until the cache-create endpoint re-queues it.
 #[tokio::test]
 async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
@@ -552,7 +552,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // project_has_writable_cache: no project_cache rows → returns false
+        // project_has_writable_cache: no project_cache rows -> returns false
         .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         // Park: update eval read-back + exec, returns the parked row
         .append_query_results([vec![parked_eval.clone()]])
@@ -586,7 +586,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
 /// worker registration with `enable_eval`, `apply_trigger` parks the
 /// freshly-created evaluation in `Waiting + Workers { connected_workers: 0 }`.
 /// Without this gate the eval would sit `Queued` forever - the
-/// build-dispatch reconciler only stalls Queued evals when zero workers
+/// build-dispatch repair pass only stalls Queued evals when zero workers
 /// are connected, not when connected workers lack `eval`.
 #[tokio::test]
 async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
@@ -635,12 +635,12 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
-    // park_if_no_cache: writable cache exists → returns unchanged.
+    // park_if_no_cache: writable cache exists -> returns unchanged.
     let db = with_writable_cache(db);
-    // park_if_storage_full: no writable cache rows → not full.
+    // park_if_storage_full: no writable cache rows -> not full.
     let db = with_storage_not_full(db)
         // park_if_no_workers: no eval-capable registration and no base worker
-        // enabled for this project → park.
+        // enabled for this project -> park.
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
         .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
         // Park: update eval read-back + exec, returns the parked row.

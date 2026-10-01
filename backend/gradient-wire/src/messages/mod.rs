@@ -41,7 +41,7 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 /// v12: rkyv archives are unaligned and read in place; `QueryKnownDerivations`
 ///      carries a `query_id` that `KnownDerivations` echoes; bulk chunks are
 ///      512 KiB and a bulk write batch is byte-capped.
-/// v13: `CacheQuery` carries `nar_sizes` in Push mode; the server relays NARs at
+/// v13: `CacheQuery` carries `nar_sizes` in Push mode; the server passes NARs through at
 ///      or under `smallNarBytes` and pulls small or unconfirmed ones over the stream.
 /// v14: BuildSpec.kind (BuildSpecKind) replaces external_cached; CacheQuery.external;
 ///      QueryMode::PullClosure removed.
@@ -59,7 +59,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 /// v20: removed `RevokeJob`, `RequestAllScores` and `RequestAllCandidates`.
 /// v21: cluster jobs: `AssignJob.cluster`, `StartCluster`, `ClusterSignal`
 ///      (both directions), `AbortCluster`; `WorkerCapabilities.zone` and `endpoint`.
-pub const PROTO_VERSION: u16 = 21;
+/// v22: plain names: `AssignJob.dispatch` and its echoes are `assignment_id`,
+///      the passthrough grant target is `GrantTarget::Passthrough`.
+pub const PROTO_VERSION: u16 = 22;
 
 /// How often a worker reports a running download's progress, skipping an
 /// interval in which no bytes arrived.

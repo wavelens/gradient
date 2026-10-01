@@ -6,7 +6,7 @@
 
 //! Job scoring - determines how suitable this worker is for each job candidate.
 //!
-//! For each candidate the scheduler ships the set of direct input store
+//! For each candidate the scheduler sends the set of direct input store
 //! paths in `required_paths`. The worker checks each path against its local
 //! Nix store and reports `(missing_count, missing_nar_size)`. A lower
 //! `missing` count means fewer paths need downloading, so the worker is a

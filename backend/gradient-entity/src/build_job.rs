@@ -7,7 +7,7 @@
 //! Per-evaluation, per-derivation scored dispatch unit. One row per derivation
 //! an evaluation needs (UNIQUE on `(evaluation, derivation)`), created when the
 //! eval stream resolves its derivations. The actual build state is shared
-//! globally on the linked `derivation_build` anchor; this row only attributes
+//! globally on the linked `derivation_build` shared build; this row only attributes
 //! an eval's interest and carries its dispatch score.
 
 use chrono::NaiveDateTime;

@@ -15,7 +15,7 @@ use tracing::{error, warn};
 /// Compress an attempt's inline log into zstd chunks, appended to the chunks an
 /// earlier pass wrote, persist the chunk index, and drop the inline copy.
 ///
-/// Fallible on purpose: this runs as an outbox delivery, so a storage or index
+/// Fallible on purpose: this executes as a pending delivery, so a storage or index
 /// failure is retried with the inline copy still in place rather than losing the
 /// log. Dropping the inline copy afterwards is the one best-effort step, because
 /// the index it duplicates is already written.
@@ -57,7 +57,7 @@ pub async fn finalize_build_log(
     Ok(())
 }
 
-/// Queue [`finalize_build_log`] for each attempt. The outbox folds a duplicate
+/// Queue [`finalize_build_log`] for each attempt. The pending deliveries fold a duplicate
 /// of a row still waiting, and an attempt without an inline log is a no-op.
 pub async fn enqueue_log_finalize(
     db: &impl ConnectionTrait,
@@ -67,7 +67,12 @@ pub async fn enqueue_log_finalize(
         .into_iter()
         .map(|a| (a.to_string(), serde_json::json!({ "attempt": a })))
         .collect();
-    crate::outbox::enqueue_many(db, crate::outbox::OutboxKind::LogFinalize, rows).await
+    crate::pending_deliveries::enqueue_many(
+        db,
+        crate::pending_deliveries::PendingDeliveryKind::LogFinalize,
+        rows,
+    )
+    .await
 }
 
 async fn indexed_chunk_count(

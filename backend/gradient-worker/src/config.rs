@@ -49,7 +49,7 @@ pub struct WorkerConfig {
     /// Override the worker's persistent UUID. When set, this value is used as
     /// the worker identity instead of the UUID stored in `{base_dir}/worker-id`.
     /// Useful for declarative deployments where the ID must be known before the
-    /// worker first runs. Must be a valid UUID.
+    /// worker first starts. Must be a valid UUID.
     #[arg(long = "id", env = "GRADIENT_WORKER_ID")]
     pub id: Option<String>,
 
@@ -83,7 +83,7 @@ pub struct WorkerConfig {
 
     /// Directory under which worker-held indirect GC roots are written.
     /// One symlink per active build (drv + outputs) pins inputs and
-    /// outputs through the daemon while the build runs. Empty string
+    /// outputs through the daemon while the build is running. Empty string
     /// disables GC root pinning (build still works, but a concurrent
     /// `nix-collect-garbage` may race the build).
     #[arg(
@@ -187,7 +187,7 @@ impl Default for WorkerConfig {
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct CapabilitiesArgs {
-    /// Relay work and NAR traffic between workers and servers (federation).
+    /// Forward work and NAR traffic between workers and servers (federation).
     /// Requires `--discoverable`.
     #[arg(
         long = "capabilities-federate",
@@ -248,7 +248,7 @@ pub struct SystemArgs {
     pub features: Option<Vec<String>>,
 
     /// Override the single-core speed score advertised to the scheduler.
-    /// When unset, the worker runs a deterministic micro-benchmark at startup.
+    /// When unset, the worker executes a deterministic micro-benchmark at startup.
     #[arg(
         long = "system-cpu-core-score",
         env = "GRADIENT_WORKER_SYSTEM_CPU_CORE_SCORE"
@@ -439,7 +439,7 @@ pub struct LogArgs {
 
     /// Burst bucket: max log bytes forwarded to the server per build in any
     /// 1-minute window. Defaults to 8 MiB. On trip the worker stops forwarding
-    /// log output for that build (the build still runs).
+    /// log output for that build (the build keeps running).
     #[arg(
         long = "log-burst-bytes-per-min",
         env = "GRADIENT_WORKER_LOG_BURST_BYTES_PER_MIN",
@@ -671,9 +671,9 @@ mod tests {
 
     #[test]
     fn peer_tokens_skips_empty_peer_or_token() {
-        // ":token" → peer_id is empty
-        // "peer:" → token is empty
-        // "nocolon" → no separator → skipped
+        // ":token" -> peer_id is empty
+        // "peer:" -> token is empty
+        // "nocolon" -> no separator -> skipped
         let input = format!(":tok64ok\npeer:\nnocolon\npeer-valid:{TOK64}");
         let cfg = config_with_peers(&input);
         let tokens = cfg.peer_tokens();

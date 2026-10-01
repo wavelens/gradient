@@ -4,16 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Best-effort wiring of a freshly created task to the project's forge
+//! Best-effort wiring of a freshly created task to the project's Git host
 //! integrations. When the repository URL unambiguously belongs to one inbound
 //! and/or one outbound integration, a push trigger and a status-report action
-//! are attached so the task works with the forge without extra setup.
+//! are attached so the task works with the Git host without extra setup.
 
 use gradient_ci::IntegrationKind;
 use gradient_types::actions::ActionConfig;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::{
-    ForgeType, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId, TaskTriggerId,
+    GitHostType, MIntegration, MTask, MTaskAction, MTaskTrigger, TaskActionId, TaskTriggerId,
 };
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 
@@ -23,7 +23,7 @@ pub(super) struct AutoAttach {
     pub outbound: Option<MIntegration>,
 }
 
-/// Lowercased host of a git repository or forge endpoint URL. Handles
+/// Lowercased host of a git repository or Git host endpoint URL. Handles
 /// `https://`, `http://`, `ssh://`, `git://`, a `git+<scheme>` prefix and the
 /// SCP form `git@host:owner/repo`.
 fn url_host(url: &str) -> Option<String> {
@@ -43,33 +43,33 @@ fn url_host(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
-fn public_forge_for_host(host: &str) -> Option<ForgeType> {
+fn public_git_host_for(host: &str) -> Option<GitHostType> {
     match host {
-        "github.com" => Some(ForgeType::GitHub),
-        "gitlab.com" => Some(ForgeType::GitLab),
+        "github.com" => Some(GitHostType::GitHub),
+        "gitlab.com" => Some(GitHostType::GitLab),
         _ => None,
     }
 }
 
-/// Forge identity behind `host`: a well-known public host, otherwise the forge
+/// Git host identity behind `host`: a well-known public host, otherwise the Git host
 /// type of any integration whose endpoint URL points at the same host.
-fn infer_forge(host: &str, integrations: &[MIntegration]) -> Option<ForgeType> {
-    public_forge_for_host(host).or_else(|| {
+fn infer_git_host(host: &str, integrations: &[MIntegration]) -> Option<GitHostType> {
+    public_git_host_for(host).or_else(|| {
         integrations.iter().find_map(|i| {
             let endpoint = i.endpoint_url.as_deref()?;
-            (url_host(endpoint).as_deref() == Some(host)).then_some(i.forge_type)
+            (url_host(endpoint).as_deref() == Some(host)).then_some(i.git_host_type)
         })
     })
 }
 
 /// An integration with a custom endpoint matches strictly by host; one without
-/// (public forges, inbound rows) matches by the inferred forge type.
-fn integration_matches(i: &MIntegration, host: &str, inferred: Option<ForgeType>) -> bool {
+/// (public Git hosts, inbound rows) matches by the inferred Git host type.
+fn integration_matches(i: &MIntegration, host: &str, inferred: Option<GitHostType>) -> bool {
     if let Some(endpoint) = &i.endpoint_url {
         return url_host(endpoint).as_deref() == Some(host);
     }
 
-    inferred.is_some_and(|f| f == i.forge_type)
+    inferred.is_some_and(|f| f == i.git_host_type)
 }
 
 /// The single integration of `kind` matching the repo, or `None` when zero or
@@ -78,7 +78,7 @@ fn pick_one(
     integrations: &[MIntegration],
     kind: IntegrationKind,
     host: &str,
-    inferred: Option<ForgeType>,
+    inferred: Option<GitHostType>,
 ) -> Option<MIntegration> {
     let mut matched = integrations
         .iter()
@@ -91,7 +91,7 @@ pub(super) fn match_integrations_for_repo(repo: &str, integrations: &[MIntegrati
     let Some(host) = url_host(repo) else {
         return AutoAttach::default();
     };
-    let inferred = infer_forge(&host, integrations);
+    let inferred = infer_git_host(&host, integrations);
 
     AutoAttach {
         inbound: pick_one(integrations, IntegrationKind::Inbound, &host, inferred),
@@ -132,13 +132,13 @@ pub(super) async fn apply<C: ConnectionTrait>(
     }
 
     if let Some(outbound) = attach.outbound {
-        let cfg = ActionConfig::ForgeStatusReport {
+        let cfg = ActionConfig::GitHostStatusReport {
             integration_id: outbound.id,
         };
         MTaskAction {
             id: TaskActionId::now_v7(),
             task: task.id,
-            name: "Report status to forge".into(),
+            name: "Report status to Git host".into(),
             action_type: cfg.action_type(),
             config: serde_json::to_value(&cfg).unwrap_or_default(),
             events: serde_json::json!([]),
@@ -160,10 +160,10 @@ pub(super) async fn apply<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    fn integ(kind: IntegrationKind, forge: ForgeType, endpoint: Option<&str>) -> MIntegration {
+    fn integ(kind: IntegrationKind, git_host: GitHostType, endpoint: Option<&str>) -> MIntegration {
         MIntegration {
             kind,
-            forge_type: forge,
+            git_host_type: git_host,
             endpoint_url: endpoint.map(str::to_string),
             ..Default::default()
         }
@@ -193,23 +193,23 @@ mod tests {
     #[test]
     fn self_hosted_pairs_inbound_and_outbound() {
         let integrations = vec![
-            integ(IntegrationKind::Inbound, ForgeType::Gitea, None),
+            integ(IntegrationKind::Inbound, GitHostType::Gitea, None),
             integ(
                 IntegrationKind::Outbound,
-                ForgeType::Gitea,
+                GitHostType::Gitea,
                 Some("https://gitea.example.com"),
             ),
         ];
         let m = match_integrations_for_repo("git@gitea.example.com:foo/bar.git", &integrations);
-        assert!(m.inbound.is_some(), "inbound matched via inferred forge");
+        assert!(m.inbound.is_some(), "inbound matched via inferred Git host");
         assert!(m.outbound.is_some(), "outbound matched via endpoint host");
     }
 
     #[test]
-    fn public_github_matches_by_forge_type() {
+    fn public_github_matches_by_git_host_type() {
         let integrations = vec![
-            integ(IntegrationKind::Inbound, ForgeType::GitHub, None),
-            integ(IntegrationKind::Outbound, ForgeType::GitHub, None),
+            integ(IntegrationKind::Inbound, GitHostType::GitHub, None),
+            integ(IntegrationKind::Outbound, GitHostType::GitHub, None),
         ];
         let m = match_integrations_for_repo("https://github.com/foo/bar", &integrations);
         assert!(m.inbound.is_some());
@@ -219,18 +219,18 @@ mod tests {
     #[test]
     fn ambiguous_inbound_is_skipped() {
         let integrations = vec![
-            integ(IntegrationKind::Inbound, ForgeType::GitHub, None),
-            integ(IntegrationKind::Inbound, ForgeType::GitHub, None),
+            integ(IntegrationKind::Inbound, GitHostType::GitHub, None),
+            integ(IntegrationKind::Inbound, GitHostType::GitHub, None),
         ];
         let m = match_integrations_for_repo("https://github.com/foo/bar", &integrations);
         assert!(m.inbound.is_none(), "two inbound matches is ambiguous");
     }
 
     #[test]
-    fn unrelated_forge_does_not_match() {
+    fn unrelated_git_host_does_not_match() {
         let integrations = vec![integ(
             IntegrationKind::Outbound,
-            ForgeType::Gitea,
+            GitHostType::Gitea,
             Some("https://other-gitea.example.com"),
         )];
         let m = match_integrations_for_repo("https://github.com/foo/bar", &integrations);

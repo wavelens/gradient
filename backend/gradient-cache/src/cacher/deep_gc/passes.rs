@@ -87,7 +87,7 @@ pub(super) async fn run(
 }
 
 async fn pass_nars(state: Arc<ServerState>, shard: &str, report: &mut DeepGcReport) -> Result<()> {
-    let r = crate::cacher::reconcile_nar_shard(state, shard).await?;
+    let r = crate::cacher::repair_nar_shard(state, shard).await?;
     report.nars_scanned += r.orphan_nars_scanned;
     report.orphan_nars_removed += r.orphan_nars_removed;
     report.zombie_cached_paths_purged += r.zombie_cached_paths_purged;

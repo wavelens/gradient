@@ -25,7 +25,7 @@ use crate::waiting_state::persist_waiting_reason;
 /// Without this ceiling an eval whose worker keeps dying mid-evaluation is
 /// re-dispatched forever, taking the fleet's eval capacity with it every
 /// round.
-pub(crate) const MAX_EVAL_DISPATCH_ATTEMPTS: u64 = 10;
+pub(crate) const MAX_EVAL_ASSIGN_ATTEMPTS: u64 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OrphanedEval {
@@ -38,8 +38,8 @@ pub(crate) enum OrphanedEval {
 /// Decide what to do with an evaluation orphaned by a worker disconnect,
 /// given how many times it has already been dispatched (this dispatch
 /// included).
-pub(crate) fn orphaned_eval_outcome(dispatches: u64, budget: u64) -> OrphanedEval {
-    if dispatches >= budget {
+pub(crate) fn orphaned_eval_outcome(assignments: u64, budget: u64) -> OrphanedEval {
+    if assignments >= budget {
         OrphanedEval::Exhausted
     } else {
         OrphanedEval::Requeue
@@ -49,7 +49,7 @@ pub(crate) fn orphaned_eval_outcome(dispatches: u64, budget: u64) -> OrphanedEva
 /// How many times this evaluation has been handed to a worker, from the
 /// dispatch telemetry. A load failure counts as zero so a DB hiccup can never
 /// fail an otherwise healthy evaluation.
-async fn eval_dispatch_count(state: &Arc<ServerState>, evaluation_id: EvaluationId) -> u64 {
+async fn eval_assign_count(state: &Arc<ServerState>, evaluation_id: EvaluationId) -> u64 {
     use gradient_entity::dispatched_job::{
         Column as CDispatchedJob, DispatchedJobKind, Entity as EDispatchedJob,
     };
@@ -72,7 +72,7 @@ async fn eval_dispatch_count(state: &Arc<ServerState>, evaluation_id: Evaluation
 async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
     let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
 
-    match gradient_db::abandon_open_dispatches_for_jobs(&state.worker_db, &keys).await {
+    match gradient_db::abandon_open_assignments_for_jobs(&state.worker_db, &keys).await {
         Ok(rows) if rows > 0 => {
             info!(rows, "closed dispatch telemetry for orphaned jobs");
         }
@@ -82,24 +82,24 @@ async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJo
 }
 
 /// Re-queue the in-flight jobs orphaned by a worker disconnect so they
-/// re-dispatch instead of lingering in a non-terminal DB status. Anchors move
+/// re-dispatch instead of lingering in a non-terminal DB status. Shared builds move
 /// `Building -> Queued`; evaluations (which the state machine only lets reach
-/// `Queued` via `Waiting`) park to `Waiting` so the reconciler that runs right
+/// `Queued` via `Waiting`) park to `Waiting` so the repair pass running right
 /// after recovers them to `Queued` once an eval-capable worker is free.
 pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
     abandon_dispatched_jobs(state, orphaned).await;
 
-    let anchors: Vec<DerivationBuildId> = orphaned
+    let shared_builds: Vec<DerivationBuildId> = orphaned
         .iter()
         .filter_map(|j| j.derivation_build())
         .collect();
-    if !anchors.is_empty()
+    if !shared_builds.is_empty()
         && let Err(e) = state
             .graph
-            .transition(Transition::OrphanedBuilds { anchors })
+            .transition(Transition::OrphanedBuilds { shared_builds })
             .await
     {
-        warn!(error = %e, "requeue orphaned builds did not reach the graph actor");
+        warn!(error = %e, "requeue orphaned builds did not reach the graph writer");
     }
 
     for job in orphaned.iter().filter(|j| j.derivation_build().is_none()) {
@@ -116,13 +116,13 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
                         | EvaluationStatus::EvaluatingDerivation
                 ) =>
             {
-                let dispatches = eval_dispatch_count(state, eval.id).await;
-                match orphaned_eval_outcome(dispatches, MAX_EVAL_DISPATCH_ATTEMPTS) {
+                let assignments = eval_assign_count(state, eval.id).await;
+                match orphaned_eval_outcome(assignments, MAX_EVAL_ASSIGN_ATTEMPTS) {
                     OrphanedEval::Requeue => park_orphaned_eval(state, eval).await,
                     OrphanedEval::Exhausted => {
                         warn!(
                             evaluation_id = %eval.id,
-                            dispatches,
+                            dispatches = assignments,
                             "evaluation orphaned on every dispatch; failing instead of re-queuing"
                         );
                         update_evaluation_status_with_error(
@@ -130,7 +130,7 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
                             eval,
                             EvaluationStatus::Failed,
                             format!(
-                                "evaluation was dispatched {dispatches} times and each worker \
+                                "evaluation was dispatched {assignments} times and each worker \
                                  disconnected before reporting a result; giving up"
                             ),
                             Some("scheduler".to_string()),
@@ -156,27 +156,29 @@ pub(crate) async fn park_orphaned_eval(state: &Arc<ServerState>, eval: MEvaluati
     update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await;
 }
 
-/// Put a retried cluster's members back where the ready feed finds them. The
-/// cluster is `Queued` again before this runs, so each member is folded back into
+/// Put a retried cluster's members back where the startable feed finds them. The
+/// cluster is `Queued` again before this executes, so each member is folded back into
 /// it rather than dispatched alone; its retry budget bounds the loop, not the
 /// per-evaluation dispatch budget.
 pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[PendingJob]) {
-    let anchors: Vec<DerivationBuildId> = jobs
+    let shared_builds: Vec<DerivationBuildId> = jobs
         .iter()
         .filter_map(PendingJob::derivation_build)
         .collect();
-    if !anchors.is_empty()
+    if !shared_builds.is_empty()
         && let Err(e) = state
             .graph
-            .transition(Transition::OrphanedBuilds { anchors })
+            .transition(Transition::OrphanedBuilds { shared_builds })
             .await
     {
-        warn!(error = %e, "requeue of cluster member builds did not reach the graph actor");
+        warn!(error = %e, "requeue of cluster member builds did not reach the graph writer");
     }
-    state.ready_set.enter(jobs.iter().filter_map(|j| match j {
-        PendingJob::Build(b) => Some(b.derivation),
-        PendingJob::Eval(_) => None,
-    }));
+    state
+        .startable_set
+        .enter(jobs.iter().filter_map(|j| match j {
+            PendingJob::Build(b) => Some(b.derivation),
+            PendingJob::Eval(_) => None,
+        }));
 
     for job in jobs.iter().filter(|j| j.derivation_build().is_none()) {
         match EEvaluation::find_by_id(job.evaluation_id())
@@ -203,31 +205,31 @@ pub(crate) async fn requeue_cluster_members(state: &Arc<ServerState>, jobs: &[Pe
 
 #[cfg(test)]
 mod orphaned_eval_tests {
-    use super::{MAX_EVAL_DISPATCH_ATTEMPTS, OrphanedEval, orphaned_eval_outcome};
+    use super::{MAX_EVAL_ASSIGN_ATTEMPTS, OrphanedEval, orphaned_eval_outcome};
 
     /// The common case: a worker drops once, the eval goes back on the queue.
     #[test]
     fn an_eval_under_budget_is_requeued() {
-        for dispatches in 1..MAX_EVAL_DISPATCH_ATTEMPTS {
+        for assignments in 1..MAX_EVAL_ASSIGN_ATTEMPTS {
             assert_eq!(
-                orphaned_eval_outcome(dispatches, MAX_EVAL_DISPATCH_ATTEMPTS),
+                orphaned_eval_outcome(assignments, MAX_EVAL_ASSIGN_ATTEMPTS),
                 OrphanedEval::Requeue,
-                "dispatch {dispatches} of {MAX_EVAL_DISPATCH_ATTEMPTS}"
+                "dispatch {assignments} of {MAX_EVAL_ASSIGN_ATTEMPTS}"
             );
         }
     }
 
     /// An eval that wedges every worker it touches must terminate: without
     /// this it is re-dispatched forever, parking to `Waiting` between rounds
-    /// and starving the fleet each time it runs.
+    /// and starving the fleet on every attempt.
     #[test]
     fn an_eval_that_spends_its_budget_stops_being_requeued() {
         assert_eq!(
-            orphaned_eval_outcome(MAX_EVAL_DISPATCH_ATTEMPTS, MAX_EVAL_DISPATCH_ATTEMPTS),
+            orphaned_eval_outcome(MAX_EVAL_ASSIGN_ATTEMPTS, MAX_EVAL_ASSIGN_ATTEMPTS),
             OrphanedEval::Exhausted
         );
         assert_eq!(
-            orphaned_eval_outcome(MAX_EVAL_DISPATCH_ATTEMPTS + 20, MAX_EVAL_DISPATCH_ATTEMPTS),
+            orphaned_eval_outcome(MAX_EVAL_ASSIGN_ATTEMPTS + 20, MAX_EVAL_ASSIGN_ATTEMPTS),
             OrphanedEval::Exhausted
         );
     }

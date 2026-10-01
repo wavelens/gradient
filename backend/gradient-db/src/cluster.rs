@@ -6,7 +6,7 @@
 
 //! Cluster attempts: all members of an attempt are claimed, or none is.
 
-use crate::dispatch_record::{ClaimGate, abandon_open, claim_statement};
+use crate::assignment_record::{ClaimGate, abandon_open, claim_statement};
 use chrono::NaiveDateTime;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cluster_attempt::{
@@ -284,7 +284,7 @@ SELECT m.id AS member_id, m.cluster_job, m.evaluation, m.derivation_build, m.rol
 FROM cluster_member m
 JOIN cluster_job c ON c.id = m.cluster_job
 WHERE m."evaluation" = ANY($1::uuid[]) OR m."derivation_build" = ANY($2::uuid[])"#,
-        params = [EvaluationIds(8), AnchorIds(8)];
+        params = [EvaluationIds(8), SharedBuildIds(8)];
 }
 
 #[derive(Debug, Clone)]
@@ -343,16 +343,16 @@ impl From<MemberRow> for MemberOf {
 pub async fn cluster_membership<C: ConnectionTrait>(
     db: &C,
     evaluations: &[EvaluationId],
-    anchors: &[DerivationBuildId],
+    shared_builds: &[DerivationBuildId],
 ) -> Result<Vec<MemberOf>, DbErr> {
-    if evaluations.is_empty() && anchors.is_empty() {
+    if evaluations.is_empty() && shared_builds.is_empty() {
         return Ok(Vec::new());
     }
 
     let evaluations: Vec<uuid::Uuid> = evaluations.iter().map(|e| e.into_inner()).collect();
-    let anchors: Vec<uuid::Uuid> = anchors.iter().map(|a| a.into_inner()).collect();
+    let shared_builds: Vec<uuid::Uuid> = shared_builds.iter().map(|a| a.into_inner()).collect();
     let rows = MemberRow::find_by_statement(
-        MEMBERSHIP.bind([Value::from(evaluations), Value::from(anchors)]),
+        MEMBERSHIP.bind([Value::from(evaluations), Value::from(shared_builds)]),
     )
     .all(db)
     .await?;
@@ -361,7 +361,7 @@ pub async fn cluster_membership<C: ConnectionTrait>(
 }
 
 /// A member of the correlated `cluster_job` whose job can no longer run: a
-/// terminal evaluation, or an anchor that is done or failed for good.
+/// terminal evaluation, or a shared build that is done or failed for good.
 pub(crate) fn dead_member_of_cluster() -> SelectStatement {
     let dead_evaluation = Query::select()
         .expr(Expr::val(1))
@@ -375,7 +375,7 @@ pub(crate) fn dead_member_of_cluster() -> SelectStatement {
                 .is_in(EvaluationStatus::TERMINAL.map(|s| s.into_value())),
         )
         .to_owned();
-    let dead_anchor = Query::select()
+    let dead_shared_build = Query::select()
         .expr(Expr::val(1))
         .from(EDerivationBuild)
         .and_where(
@@ -402,7 +402,7 @@ pub(crate) fn dead_member_of_cluster() -> SelectStatement {
         .cond_where(
             Cond::any()
                 .add(Expr::exists(dead_evaluation))
-                .add(Expr::exists(dead_anchor)),
+                .add(Expr::exists(dead_shared_build)),
         )
         .to_owned()
 }
@@ -556,7 +556,7 @@ mod tests {
                 member(
                     "build:a",
                     ClaimGate::Build {
-                        anchor: DerivationBuildId::now_v7(),
+                        shared_build: DerivationBuildId::now_v7(),
                         substitute: false,
                     },
                 ),

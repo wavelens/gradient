@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! State-machine-guarded transitions of the global `derivation_build` anchor.
-//! One anchor transition fans out to every evaluation that references the
-//! derivation (its `build_job`s): board events, per-eval outbox rows, and one
+//! State-machine-guarded transitions of the global `derivation_build` shared build.
+//! One shared build transition fans out to every evaluation that references the
+//! derivation (its `build_job`s): board events, per-eval pending deliveries, and one
 //! bump of every referencing evaluation's graph version. Graph-driven promotion
-//! runs on terminal-success; dependency-failure cascades on terminal-failure.
+//! executes on terminal-success; dependency-failure cascades on terminal-failure.
 
 use super::effects::{TransitionChange, emit_transition_effects};
 use super::logging::{PhaseSubjectKind, record_phase_event};
@@ -23,52 +23,54 @@ use tracing::{error, info};
 
 pub async fn update_derivation_build_status(
     ctx: &DbContext,
-    anchor: MDerivationBuild,
+    shared_build: MDerivationBuild,
     status: BuildStatus,
 ) -> MDerivationBuild {
-    if anchor.status == status {
-        return anchor;
+    if shared_build.status == status {
+        return shared_build;
     }
 
-    if let Err(e) = BuildStateMachine::validate(anchor.status, status) {
+    if let Err(e) = BuildStateMachine::validate(shared_build.status, status) {
         error!(
-            derivation_build = %anchor.id,
-            from = ?anchor.status,
+            derivation_build = %shared_build.id,
+            from = ?shared_build.status,
             to = ?status,
             error = %e,
-            "Skipping invalid anchor status transition - status update lost or out of order"
+            "Skipping invalid shared build status transition - status update lost or out of order"
         );
-        return anchor;
+        return shared_build;
     }
 
-    info!(derivation_build = %anchor.id, derivation = %anchor.derivation, from = ?anchor.status, to = ?status, "anchor status transition");
+    info!(derivation_build = %shared_build.id, derivation = %shared_build.derivation, from = ?shared_build.status, to = ?status, "shared build status transition");
 
     let now = gradient_types::now();
-    let prev_status = anchor.status;
-    let mut active: ADerivationBuild = anchor.clone().into_active_model();
+    let prev_status = shared_build.status;
+    let mut active: ADerivationBuild = shared_build.clone().into_active_model();
     active.status = Set(status);
     active.updated_at = Set(now);
-    if status == BuildStatus::Queued && anchor.queued_at.is_none() {
+    if status == BuildStatus::Queued && shared_build.queued_at.is_none() {
         active.queued_at = Set(Some(now));
     }
 
     if status == BuildStatus::Building {
-        let _ = crate::build_attempt::stamp_attempt_started(&ctx.worker_db, anchor.id, now).await;
+        let _ =
+            crate::build_attempt::stamp_attempt_started(&ctx.worker_db, shared_build.id, now).await;
     }
 
     if BuildStateMachine::is_terminal(&status) {
-        let _ = crate::build_attempt::stamp_attempt_finished(&ctx.worker_db, anchor.id, now).await;
+        let _ = crate::build_attempt::stamp_attempt_finished(&ctx.worker_db, shared_build.id, now)
+            .await;
     }
 
     let updated = match active.update(&ctx.worker_db).await {
         Ok(u) => u,
         Err(e) => {
-            error!(error = %e, derivation_build = %anchor.id, "Failed to update anchor status");
-            return anchor;
+            error!(error = %e, derivation_build = %shared_build.id, "Failed to update shared build status");
+            return shared_build;
         }
     };
 
-    // All fan-out (graph version, board events, outbox rows, cache-changed) goes
+    // All fan-out (graph version, board events, pending deliveries, cache-changed) goes
     // through the one effects emitter - the same path the bulk sweeps feed - so
     // the reactive and proactive models can never drift apart.
     emit_transition_effects(
@@ -81,16 +83,16 @@ pub async fn update_derivation_build_status(
     )
     .await;
 
-    // A build-once success is the moment this anchor can serve its outputs: one
-    // locked flip drops its dependents' counters and queues the ones at zero. The
-    // failure half of the per-completion dependent sweep this replaces is not lost:
-    // a dependent of a terminal-failed dependency is failed by
+    // A build-once success is the moment this shared build can serve its outputs: one
+    // locked flip drops its parents' counters and queues the ones at zero. The
+    // failure half of the per-completion parent sweep this replaces is not lost:
+    // a parent of a terminal-failed dependency is failed by
     // `cascade_dependency_failed` on that failure's own transition, and by the
-    // eval-scoped `reconcile_dependency_failed` for the ones it could not reach.
+    // eval-scoped `repair_dependency_failed` for the ones it could not reach.
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
-        match crate::readiness::advance_fetchable(&ctx.worker_db, &[updated.derivation]).await {
+        match crate::can_start::advance_fetchable(&ctx.worker_db, &[updated.derivation]).await {
             Ok(changes) => emit_transition_effects(ctx, &changes).await,
-            Err(e) => error!(error = %e, "failed to advance the dependents"),
+            Err(e) => error!(error = %e, "failed to advance the parents"),
         }
     }
 
@@ -106,7 +108,7 @@ pub async fn update_derivation_build_status(
     }
 
     // Awaited, not spawned: the emitter above already wrote this transition's
-    // outbox rows in this transaction, and a detached writer racing it was how a
+    // pending deliveries in this transaction, and a detached writer racing it was how a
     // phase timeline went missing for a build the reader had already seen.
     let worker = crate::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id)
         .await
@@ -126,7 +128,7 @@ pub async fn update_derivation_build_status(
 }
 
 /// Re-announce the current status of `derivations` through the effects emitter
-/// (board events + per-entry-point forge checks). For callers that only know
+/// (board events + per-entry-point Git host checks). For callers that only know
 /// the affected derivation set, not the transitions that produced it - e.g.
 /// state import; paths with the actual changes in hand should call
 /// [`emit_transition_effects`] directly.
@@ -156,10 +158,10 @@ pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &
     emit_transition_effects(ctx, &changes).await;
 }
 
-/// Write the outbox row for each entry point's current anchor status as its
-/// `entry_point` row is recorded, so a forge check exists the moment the entry
+/// Write the pending-delivery row for each entry point's current shared build status as its
+/// `entry_point` row is recorded, so a Git host check exists the moment the entry
 /// point evaluates: pending for `Created`, immediate green/red for an
-/// already-terminal anchor that never transitions in this eval. Unlike
+/// already-terminal shared build that never transitions in this eval. Unlike
 /// [`emit_transition_effects`] this reports `Created` too; callers pass one
 /// streamed batch, and every query is scoped to `evaluation`.
 pub async fn announce_entry_point_statuses(
@@ -236,5 +238,5 @@ pub async fn announce_entry_point_statuses(
             error!(error = %e, build_job = %job.id, "failed to enqueue an entry point's first report");
         }
     }
-    ctx.outbox_wake.notify_one();
+    ctx.delivery_wake.notify_one();
 }

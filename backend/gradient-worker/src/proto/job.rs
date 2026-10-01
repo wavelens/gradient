@@ -19,7 +19,7 @@ use gradient_wire::messages::{
 };
 use gradient_wire::session::frame::BULK_CHUNK_SIZE;
 use gradient_worker_client::correlation::{
-    CacheWaiters, DispatchHandle, KnownDerivationWaiters, cache_query_with_timeout,
+    AssignmentHandle, CacheWaiters, KnownDerivationWaiters, cache_query_with_timeout,
     known_derivations_with_timeout,
 };
 use tracing::debug;
@@ -43,7 +43,7 @@ use gradient_worker_client::upload::UploadClient;
 pub struct JobUpdater {
     pub(crate) job_id: String,
     /// Echoed on every report so the server can drop a stale worker's messages.
-    pub(crate) dispatch: DispatchHandle,
+    pub(crate) assignment_id: AssignmentHandle,
     pub(crate) writer: ProtoWriter,
     /// Shared with the dispatch loop: when a `CacheQuery` is sent, a oneshot
     /// sender is registered here; the dispatch loop routes the `CacheStatus`
@@ -65,11 +65,11 @@ pub struct JobUpdater {
     /// The job's phase timeline. Shared with the dispatch loop so the terminal
     /// message can carry it after the job task is gone.
     pub(crate) timeline: Arc<JobTimeline>,
-    /// The connection's upload handshake, shared by every job it runs.
+    /// The connection's upload handshake, shared by every job it is running.
     pub(crate) uploads: UploadClient,
 }
 
-async fn relay_blob(
+async fn passthrough_blob(
     writer: &ProtoWriter,
     request_id: u64,
     bytes: &[u8],
@@ -105,7 +105,7 @@ impl JobUpdater {
     )]
     pub fn new(
         job_id: String,
-        dispatch: DispatchHandle,
+        assignment_id: AssignmentHandle,
         writer: ProtoWriter,
         cache_waiters: CacheWaiters,
         known_derivation_waiters: KnownDerivationWaiters,
@@ -117,7 +117,7 @@ impl JobUpdater {
     ) -> Self {
         Self {
             job_id,
-            dispatch,
+            assignment_id,
             writer,
             cache_waiters,
             known_derivation_waiters,
@@ -199,8 +199,8 @@ impl JobUpdater {
         target: GrantTarget,
     ) -> Result<()> {
         match target {
-            GrantTarget::Relay { resume_offset } => {
-                relay_blob(self.uploads.writer(), request_id, bytes, resume_offset).await
+            GrantTarget::Passthrough { resume_offset } => {
+                passthrough_blob(self.uploads.writer(), request_id, bytes, resume_offset).await
             }
             GrantTarget::Put { url } => {
                 gradient_worker_client::object_put::put_object(&url, bytes.to_vec().into(), None)
@@ -376,7 +376,7 @@ impl JobUpdater {
         // failure: reported as one, the server demotes it and re-queues its
         // producer, where a transient error only spends another attempt against
         // a NAR no retry can produce. The whole batch is reported, so one round
-        // trip heals every hole it found.
+        // trip heals every missing input it found.
         if !unavailable.is_empty() {
             return Err(anyhow::Error::new(MissingInputs(unavailable)));
         }
@@ -424,7 +424,7 @@ impl JobUpdater {
         Progress::new(BuildProgressSink {
             writer: self.writer.clone(),
             job_id: self.job_id.clone(),
-            dispatch: self.dispatch.clone(),
+            assignment_id: self.assignment_id.clone(),
             build_id,
         })
     }
@@ -468,7 +468,7 @@ impl JobUpdater {
         self.writer
             .send(ClientMessage::JobUpdate {
                 job_id: self.job_id.clone(),
-                dispatch: self.dispatch.get(),
+                assignment_id: self.assignment_id.get(),
                 update,
             })
             .await
@@ -665,7 +665,7 @@ mod tests {
         let eval_cache_recv = EvalCacheReceiver::new();
         let updater = JobUpdater::new(
             job_id,
-            DispatchHandle::new("dispatch-1".to_owned()),
+            AssignmentHandle::new("dispatch-1".to_owned()),
             writer,
             cache_waiters,
             known_derivation_waiters,

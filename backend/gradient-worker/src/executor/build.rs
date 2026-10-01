@@ -12,8 +12,8 @@
 //! The build pipeline is encoded as a type-state chain:
 //!
 //! ```text
-//! ParsedDerivation::load(drv_path)   →  ParsedDerivation
-//!                     .realize(…)    →  Vec<BuildOutput>
+//! ParsedDerivation::load(drv_path)   ->  ParsedDerivation
+//!                     .realize(…)    ->  Vec<BuildOutput>
 //! ```
 //!
 //! `build_derivation` is a thin orchestrator that threads these stages
@@ -384,7 +384,7 @@ pub async fn build_derivation(
         };
 
     // Assemble metrics (wall-clock + sampled peak RAM/disk + daemon CPU) and
-    // ship them inline with the `BuildOutput`. On failure they are dropped with
+    // send them inline with the `BuildOutput`. On failure they are dropped with
     // the error; the scheduler records metrics only for completed builds.
     let build_time_ms = started.elapsed().as_millis() as u64;
     let peak_network_mbps = match net_sampler {

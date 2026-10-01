@@ -18,7 +18,7 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait};
 /// registration exists.
 ///
 /// Without this gate the eval row would sit in `Queued` indefinitely: the
-/// build-dispatch reconciler only stalls Queued evaluations when **zero**
+/// build-dispatch repair pass only stalls Queued evaluations when **zero**
 /// workers are connected, not when connected workers all lack `eval`. The
 /// row is unparked by `unpark_no_workers_for_project` whenever a worker
 /// registration is created or its `enable_eval` / `active` flags flip on.

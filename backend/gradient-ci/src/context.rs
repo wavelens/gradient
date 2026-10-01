@@ -7,18 +7,18 @@
 use std::sync::Arc;
 
 use gradient_db::DbContext;
-use gradient_forge::ForgeRegistry;
+use gradient_git_host::GitHostRegistry;
 use gradient_notify::EmailSender;
 
 /// CI-layer slice: the full [`DbContext`], the shared outbound HTTP client used
-/// to deliver task Actions and post forge status checks, the resolved
-/// [`ForgeRegistry`], and the outbound email sender for `send_mail` actions.
+/// to deliver task Actions and post Git host status checks, the resolved
+/// [`GitHostRegistry`], and the outbound email sender for `send_mail` actions.
 /// Every `ci` function takes `&CiContext`, so `ci` never names the composed
 /// `AppState`.
 #[derive(Clone, Debug)]
 pub struct CiContext {
     pub db: DbContext,
     pub http: reqwest::Client,
-    pub forge: ForgeRegistry,
+    pub git_host: GitHostRegistry,
     pub email: Arc<dyn EmailSender>,
 }

@@ -1,0 +1,185 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use crate::actions::ExecutorOk;
+use crate::actions::crypto::decrypt_secret_with_file;
+use crate::actions::matchers::git_host_status_for_event;
+use crate::actions::report::{build_ci_report_from_payload, persist_evaluation_check_id};
+use crate::context::CiContext;
+use crate::integration_lookup::IntegrationKind;
+use anyhow::{Context, Result, anyhow};
+use gradient_git_host::reporter::{CiReporter, GithubAppReporter};
+use gradient_types::{
+    ActionConfig, ActionType, CIntegration, CTaskAction, EIntegration, ETaskAction, EvaluationId,
+    IntegrationId, TaskId,
+};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde_json::Value as JsonValue;
+use std::sync::Arc;
+
+pub(crate) async fn execute_git_host_status_report(
+    ctx: &CiContext,
+    event: &str,
+    payload: &JsonValue,
+    integration_id: IntegrationId,
+) -> Result<ExecutorOk> {
+    let ci_status = git_host_status_for_event(event)
+        .ok_or_else(|| anyhow!("event '{}' has no Git host status mapping", event))?;
+
+    let Some(report) = build_ci_report_from_payload(ctx, event, payload, ci_status).await? else {
+        // Build event for an intermediate dependency (no entry_point row).
+        // Nothing to post - the entry-point check covers the user-visible
+        // status.
+        return Ok(ExecutorOk {
+            status_code: Some(204),
+            response_body: None,
+        });
+    };
+    let context_key = report.context.clone();
+    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
+    let new_id = reporter
+        .report(&report)
+        .await
+        .context("Git host status report failed")?;
+    if let (Some(new_id), Some(eid)) = (
+        new_id,
+        payload.get("evaluation_id").and_then(|v| v.as_str()),
+    ) && let Ok(evaluation_id) = eid.parse::<EvaluationId>()
+    {
+        persist_evaluation_check_id(ctx, evaluation_id, &context_key, new_id).await;
+    }
+    let body = new_id.map(|id| format!("{{\"check_run_id\":{}}}", id));
+    Ok(ExecutorOk {
+        status_code: Some(200),
+        response_body: body,
+    })
+}
+
+/// Non-mutating "Test" probe for the Git-host-integration actions
+/// (`GitHostStatusReport`, `OpenPr`): builds the reporter from the action's
+/// integration and confirms it can reach the task's repository. The regular
+/// synthetic test-fire posts a status/PR against placeholder owner/repo/sha,
+/// which every Git host rejects, so connectivity-verify is the only test these
+/// actions can meaningfully pass.
+pub async fn verify_git_host_action(
+    ctx: &CiContext,
+    action: &gradient_types::MTaskAction,
+    repository: &str,
+) -> Result<()> {
+    let integration_id = match serde_json::from_value::<ActionConfig>(action.config.clone())
+        .context("decoding action config")?
+    {
+        ActionConfig::GitHostStatusReport { integration_id }
+        | ActionConfig::OpenPr { integration_id, .. } => integration_id,
+        _ => anyhow::bail!("action does not use a Git host integration"),
+    };
+
+    let (owner, repo) = crate::parse_owner_repo(repository)
+        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", repository))?;
+    let reporter = build_reporter_for_integration(ctx, integration_id).await?;
+
+    reporter
+        .verify(&owner, &repo)
+        .await
+        .context("Git host connectivity check failed")
+}
+
+/// Find the task's first active `GitHostStatusReport` action and build a
+/// `CiReporter` from its integration. Used by the PR-approval trust probe to
+/// reuse the same Git host credentials Actions already use for status reporting.
+pub async fn reporter_for_task(
+    ctx: &CiContext,
+    task_id: TaskId,
+) -> Result<Option<Arc<dyn CiReporter>>> {
+    let action = ETaskAction::find()
+        .filter(CTaskAction::Task.eq(task_id))
+        .filter(CTaskAction::Active.eq(true))
+        .filter(CTaskAction::ActionType.eq(ActionType::GitHostStatusReport))
+        .one(&ctx.db.worker_db)
+        .await
+        .context("loading git_host_status_report action")?;
+    let Some(action) = action else {
+        return Ok(None);
+    };
+    let cfg: ActionConfig =
+        serde_json::from_value(action.config.clone()).context("decoding action config")?;
+    let ActionConfig::GitHostStatusReport { integration_id } = cfg else {
+        return Ok(None);
+    };
+    Ok(Some(
+        build_reporter_for_integration(ctx, integration_id).await?,
+    ))
+}
+
+pub(crate) async fn build_reporter_for_integration(
+    ctx: &CiContext,
+    integration_id: IntegrationId,
+) -> Result<Arc<dyn CiReporter>> {
+    let integration = EIntegration::find_by_id(integration_id)
+        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
+        .one(&ctx.db.worker_db)
+        .await
+        .context("loading integration")?
+        .ok_or_else(|| anyhow!("outbound integration {} not found", integration_id))?;
+
+    let git_host = integration.git_host_type;
+    let provider = ctx
+        .git_host
+        .get(git_host)
+        .ok_or_else(|| anyhow!("no Git host provider registered for {:?}", git_host))?;
+
+    let token = match integration.access_token.as_deref() {
+        Some(enc) => Some(
+            decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, enc)
+                .map_err(|e| anyhow!("decrypt integration token: {}", e))?,
+        ),
+        None => None,
+    };
+
+    if provider.supports_app_auth()
+        && let Some(reporter) = build_github_app_reporter(ctx, &integration).await?
+    {
+        return Ok(reporter);
+    }
+
+    provider.build_reporter(
+        ctx.http.clone(),
+        integration.endpoint_url.as_deref(),
+        token.as_ref().map(|t| t.expose()),
+    )
+}
+
+/// GitHub-App installation reporter, used when the App is configured and the
+/// integration's project has an installation. Returns `None` to fall back to the
+/// provider's token reporter.
+async fn build_github_app_reporter(
+    ctx: &CiContext,
+    integration: &gradient_entity::integration::Model,
+) -> Result<Option<Arc<dyn CiReporter>>> {
+    let Some(github_app) = ctx.db.config.github_app.clone() else {
+        return Ok(None);
+    };
+    let Some(install_fk) = integration.github_installation else {
+        return Ok(None);
+    };
+    let install = gradient_entity::github_installation::Entity::find_by_id(install_fk)
+        .one(&ctx.db.worker_db)
+        .await
+        .context("loading github installation")?
+        .ok_or_else(|| anyhow!("github installation {} not found", install_fk))?;
+    let installation_id = install.installation_id;
+    let pem = tokio::fs::read_to_string(&github_app.private_key_file)
+        .await
+        .context("reading github app private key")?;
+    let r = GithubAppReporter::new(
+        ctx.http.clone(),
+        "",
+        github_app.app_id,
+        pem,
+        installation_id,
+    )?;
+    Ok(Some(Arc::new(r)))
+}

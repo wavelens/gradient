@@ -105,7 +105,7 @@ fn list_returns_builtins_and_available_permissions() {
         let custom_id = RoleId::now_v7();
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_cache Member: cache → cache_user membership
+            // load_cache Member: cache -> cache_user membership
             .append_query_results([vec![cache_row()]])
             .append_query_results([vec![admin_member()]])
             // role listing (built-ins + custom)

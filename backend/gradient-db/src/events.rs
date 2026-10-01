@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The one write path for durable events: the outbox row in the caller's
+//! The one write path for durable events: the pending-delivery row in the caller's
 //! connection, so the event commits or rolls back with the change it reports.
 
-use crate::outbox::{OutboxKind, enqueue};
+use crate::pending_deliveries::{PendingDeliveryKind, enqueue};
 use gradient_types::events::{Event, EventBus, evaluation};
 use gradient_types::{MEvaluation, WaitingReason};
 use sea_orm::{ConnectionTrait, DbErr};
@@ -23,13 +23,13 @@ pub async fn record<C: ConnectionTrait>(
         .key()
         .unwrap_or_else(|| format!("{}:{}", event.name(), uuid::Uuid::now_v7()));
     let payload = serde_json::to_value(&event).map_err(|e| DbErr::Custom(e.to_string()))?;
-    enqueue(db, OutboxKind::Event, key, payload).await?;
+    enqueue(db, PendingDeliveryKind::Event, key, payload).await?;
     bus.publish(event);
     Ok(())
 }
 
 /// The first report of a freshly inserted evaluation, which never transitions
-/// through `update_evaluation_status` and so owes its forge check here.
+/// through `update_evaluation_status` and so owes its Git host check here.
 pub fn evaluation_created(eval: &MEvaluation) -> Option<evaluation::Reported> {
     let task = eval.task?;
     let reason = eval

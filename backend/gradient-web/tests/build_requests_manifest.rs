@@ -248,8 +248,8 @@ fn happy_path_returns_session_and_missing() {
             ..Default::default()
         };
 
-        // After auth+project access, the handler runs:
-        //   SELECT build_request_blob WHERE project=... AND hash IN (...) → empty
+        // After auth+project access, the handler executes:
+        //   SELECT build_request_blob WHERE project=... AND hash IN (...) -> empty
         //   INSERT upload_session  (RETURNING + rows_affected)
         let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),

@@ -79,8 +79,8 @@ fn lock_table_warning(max_locks_per_transaction: i32) -> Option<String> {
     (max_locks_per_transaction < MIN_MAX_LOCKS_PER_TRANSACTION).then(|| {
         format!(
             "PostgreSQL runs with max_locks_per_transaction = {max_locks_per_transaction}; \
-             graph writes hold one advisory lock per anchor and dependency they count, and an \
-             ingest batch can exhaust the lock table (\"out of shared memory\"). Set it to at \
+             graph writes hold one advisory lock per shared build and dependency they count, and a \
+             record batch can exhaust the lock table (\"out of shared memory\"). Set it to at \
              least {MIN_MAX_LOCKS_PER_TRANSACTION} (the NixOS module sets 1024)."
         )
     })
@@ -243,9 +243,9 @@ pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
 }
 
 /// Schema-time setup only. Restart recovery belongs to
-/// [`crate::recover_interrupted_work`], which runs once at server startup: this
-/// ran first and aborted the evaluations out from under it, so its anchor
-/// cleanup found nothing to do and every anchor those evaluations drove was
+/// [`crate::recover_interrupted_work`], which starts once at server startup: this
+/// ran first and aborted the evaluations out from under it, so its shared build
+/// cleanup found nothing to do and every shared build those evaluations drove was
 /// left `Created`/`Queued` forever.
 async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
     seed_builtin_role(db, BASE_ROLE_ADMIN_ID, "Admin", admin_mask()).await?;

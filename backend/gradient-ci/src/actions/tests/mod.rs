@@ -6,56 +6,56 @@
 
 mod fixtures;
 
-use super::matchers::{forge_status_for_event, matches_event};
+use super::matchers::{git_host_status_for_event, matches_event};
 use super::matching_actions;
-use super::payload::{forge_status_payload, render_default_body, render_subject};
+use super::payload::{git_host_status_payload, render_default_body, render_subject};
 use super::report::build_ci_report_from_payload;
 use super::truncate;
 use fixtures::{action_with, make_ctx, run};
-use gradient_forge::reporter::CiStatus;
+use gradient_git_host::reporter::CiStatus;
 use gradient_types::ActionType;
 use serde_json::json;
 
 #[test]
-fn forge_status_mapping() {
+fn git_host_status_mapping() {
     // A just-recorded entry point posts a pending check, same as evaluation.queued.
     assert!(matches!(
-        forge_status_for_event("build.created"),
+        git_host_status_for_event("build.created"),
         Some(CiStatus::Pending)
     ));
     assert!(matches!(
-        forge_status_for_event("build.started"),
+        git_host_status_for_event("build.started"),
         Some(CiStatus::Running)
     ));
     assert!(matches!(
-        forge_status_for_event("build.completed"),
+        git_host_status_for_event("build.completed"),
         Some(CiStatus::Success)
     ));
     assert!(matches!(
-        forge_status_for_event("build.failed"),
+        git_host_status_for_event("build.failed"),
         Some(CiStatus::Failure)
     ));
     assert!(matches!(
-        forge_status_for_event("evaluation.queued"),
+        git_host_status_for_event("evaluation.queued"),
         Some(CiStatus::Pending)
     ));
     assert!(matches!(
-        forge_status_for_event("evaluation.building"),
+        git_host_status_for_event("evaluation.building"),
         Some(CiStatus::Success)
     ));
     assert!(matches!(
-        forge_status_for_event("evaluation.completed"),
+        git_host_status_for_event("evaluation.completed"),
         Some(CiStatus::Success)
     ));
     assert!(matches!(
-        forge_status_for_event("evaluation.failed"),
+        git_host_status_for_event("evaluation.failed"),
         Some(CiStatus::Failure)
     ));
     assert!(matches!(
-        forge_status_for_event("evaluation.action_required"),
+        git_host_status_for_event("evaluation.action_required"),
         Some(CiStatus::ActionRequired)
     ));
-    assert!(forge_status_for_event("evaluation.waiting").is_none());
+    assert!(git_host_status_for_event("evaluation.waiting").is_none());
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn matches_event_open_pr_fires_only_on_gate_event() {
     use gradient_types::VerifyGate;
 
     // The gate keys off the eval's own terminal transition, not a per-build
-    // event: a candidate whose closure is already built/substitutable fires no
+    // event: a candidate whose closure is already built/available in a cache fires no
     // `build.completed`, but the eval still reaches Building/Completed.
     let build_gate = open_pr(VerifyGate::Build);
     assert!(matches_event(&build_gate, "evaluation.completed"));
@@ -106,12 +106,12 @@ fn matches_event_open_pr_fires_only_on_gate_event() {
 }
 
 #[test]
-fn matches_event_forge_status_ignores_stored_events() {
-    // The stored `events` list is irrelevant for ForgeStatusReport - the
-    // hardcoded FORGE_STATUS_EVENTS set drives matching. Seed the row
+fn matches_event_git_host_status_ignores_stored_events() {
+    // The stored `events` list is irrelevant for GitHostStatusReport - the
+    // hardcoded GIT_HOST_STATUS_EVENTS set drives matching. Seed the row
     // with an event that is NOT in that set so we can verify the action
     // still fires for every event that IS, regardless of what's stored.
-    let a = action_with(ActionType::ForgeStatusReport, vec!["evaluation.waiting"]);
+    let a = action_with(ActionType::GitHostStatusReport, vec!["evaluation.waiting"]);
     assert!(matches_event(&a, "build.created"));
     assert!(matches_event(&a, "build.queued"));
     assert!(matches_event(&a, "build.started"));
@@ -123,7 +123,7 @@ fn matches_event_forge_status_ignores_stored_events() {
     assert!(matches_event(&a, "evaluation.completed"));
     assert!(matches_event(&a, "evaluation.action_required"));
     assert!(matches_event(&a, "evaluation.approval_granted"));
-    // Not a forge-status event - must not match even though it IS the
+    // Not a Git-host-status event - must not match even though it IS the
     // event we stored on the row.
     assert!(!matches_event(&a, "evaluation.waiting"));
 }
@@ -163,8 +163,8 @@ fn truncate_respects_max() {
 }
 
 #[test]
-fn forge_status_payload_includes_required_fields() {
-    let p = forge_status_payload("acme", "widgets", "deadbeef", "ctx", None, None, None);
+fn git_host_status_payload_includes_required_fields() {
+    let p = git_host_status_payload("acme", "widgets", "deadbeef", "ctx", None, None, None);
     assert_eq!(p["owner"], "acme");
     assert_eq!(p["repo"], "widgets");
     assert_eq!(p["sha"], "deadbeef");
@@ -173,8 +173,8 @@ fn forge_status_payload_includes_required_fields() {
 }
 
 #[test]
-fn forge_status_payload_includes_optional_fields() {
-    let p = forge_status_payload(
+fn git_host_status_payload_includes_optional_fields() {
+    let p = git_host_status_payload(
         "o",
         "r",
         "s",
@@ -240,12 +240,12 @@ fn build_ci_report_errors_on_invalid_build_id() {
 }
 
 /// An input-update evaluation is an internal bump: its `OpenPr` acts, and the
-/// forge report it would post against a still-blank commit does not.
+/// Git host report it would post against a still-blank commit does not.
 #[test]
-fn an_input_update_reaches_open_pr_and_never_the_forge_report() {
+fn an_input_update_reaches_open_pr_and_never_the_git_host_report() {
     let actions = vec![
         open_pr(gradient_types::VerifyGate::Build),
-        action_with(ActionType::ForgeStatusReport, vec![]),
+        action_with(ActionType::GitHostStatusReport, vec![]),
         action_with(ActionType::SendMail, vec!["evaluation.completed"]),
     ];
     let payload = json!({"evaluation_kind": "input_update"});
@@ -258,13 +258,13 @@ fn an_input_update_reaches_open_pr_and_never_the_forge_report() {
     );
 }
 
-/// A regular CI run is the mirror image: the forge check is posted and the
+/// A regular CI run is the mirror image: the Git host check is posted and the
 /// `OpenPr` that would raise a pull request against it is not.
 #[test]
-fn a_normal_run_reaches_the_forge_report_and_never_open_pr() {
+fn a_normal_run_reaches_the_git_host_report_and_never_open_pr() {
     let actions = vec![
         open_pr(gradient_types::VerifyGate::Build),
-        action_with(ActionType::ForgeStatusReport, vec![]),
+        action_with(ActionType::GitHostStatusReport, vec![]),
     ];
     let payload = json!({"evaluation_kind": "normal"});
 
@@ -272,7 +272,7 @@ fn a_normal_run_reaches_the_forge_report_and_never_open_pr() {
 
     assert_eq!(
         matched.iter().map(|a| a.action_type).collect::<Vec<_>>(),
-        vec![ActionType::ForgeStatusReport],
+        vec![ActionType::GitHostStatusReport],
     );
 }
 

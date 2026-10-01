@@ -18,7 +18,7 @@ pub mod commits;
 pub mod dashboard;
 pub mod evals;
 pub mod events;
-pub mod forge_hooks;
+pub mod git_host_hooks;
 pub mod invites;
 pub mod live;
 pub mod metrics;

@@ -64,7 +64,7 @@ pub async fn get_evaluation(
             .join("\n")
     });
 
-    // Load entry points with their anchor build statuses (keyed by derivation).
+    // Load entry points with their shared build statuses (per derivation).
     let ep_rows = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
@@ -193,7 +193,7 @@ pub async fn get_evaluation_builds(
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let evaluation = ctx.evaluation;
 
-    // One build_job per (eval, derivation); the shared anchor carries the status.
+    // One build_job per (eval, derivation); the shared build carries the status.
     let jobs = EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
@@ -218,20 +218,20 @@ pub async fn get_evaluation_builds(
         jobs
     };
 
-    let anchor_ids: Vec<DerivationBuildId> = jobs
+    let shared_build_ids: Vec<DerivationBuildId> = jobs
         .iter()
         .map(|j| j.derivation_build)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let mut anchors: HashMap<DerivationBuildId, MDerivationBuild> = HashMap::new();
-    for chunk in anchor_ids.chunks(IS_IN_CHUNK) {
+    let mut shared_builds: HashMap<DerivationBuildId, MDerivationBuild> = HashMap::new();
+    for chunk in shared_build_ids.chunks(IS_IN_CHUNK) {
         for row in EDerivationBuild::find()
             .filter(CDerivationBuild::Id.is_in(chunk.to_vec()))
             .all(&state.web_db)
             .await?
         {
-            anchors.insert(row.id, row);
+            shared_builds.insert(row.id, row);
         }
     }
 
@@ -266,7 +266,7 @@ pub async fn get_evaluation_builds(
         .iter()
         .filter_map(|j| {
             let drv = derivations.get(&j.derivation)?;
-            let status = anchors.get(&j.derivation_build)?.status.for_api();
+            let status = shared_builds.get(&j.derivation_build)?.status.for_api();
             let layer = layers.get(&j.derivation).copied().unwrap_or(0);
             Some((status_rank(status), layer, drv.name.as_str(), j, status))
         })
@@ -318,22 +318,22 @@ pub async fn get_evaluation_builds(
         }
     }
 
-    // Batch the latest-attempt lookup for the whole page (keyed by anchor); a
+    // Batch the latest-attempt lookup for the whole page (per shared build); a
     // per-build query here is an N+1 that made large build lists take ~10s (#391).
-    let page_anchor_ids: Vec<DerivationBuildId> = page_slice
+    let page_shared_build_ids: Vec<DerivationBuildId> = page_slice
         .iter()
         .map(|(_, _, _, j, _)| j.derivation_build)
         .collect();
-    let attempts = gradient_db::latest_attempts(&state.web_db, &page_anchor_ids).await?;
+    let attempts = gradient_db::latest_attempts(&state.web_db, &page_shared_build_ids).await?;
 
     let mut page = Vec::with_capacity(page_slice.len());
     for (_, layer, _, j, status) in &page_slice {
         let drv = derivations
             .get(&j.derivation)
             .expect("derivation hydrated above");
-        let anchor = anchors
+        let shared_build = shared_builds
             .get(&j.derivation_build)
-            .expect("anchor hydrated above");
+            .expect("shared build hydrated above");
         let attempt = attempts.get(&j.derivation_build);
         let build_time_ms = attempt.and_then(|a| a.duration_ms());
 
@@ -342,12 +342,12 @@ pub async fn get_evaluation_builds(
             name: drv.drv_path(),
             status: format!("{:?}", status),
             has_artefacts: has_artefacts.contains(&j.derivation),
-            updated_at: anchor.updated_at,
+            updated_at: shared_build.updated_at,
             build_time_ms,
             build_started_at: attempt.and_then(|a| a.build_started_at),
             dispatched_job: attempt.map(|a| a.dispatched_job),
             depth: *layer,
-            prioritized: anchor.prioritized,
+            prioritized: shared_build.prioritized,
         });
     }
 
@@ -394,7 +394,7 @@ pub async fn get_evaluation_messages(
             .await?
     };
 
-    // Build a map: message_id → [entry_point_id]
+    // Build a map: message_id -> [entry_point_id]
     let mut ep_map: std::collections::HashMap<EvaluationMessageId, Vec<EntryPointId>> =
         std::collections::HashMap::new();
     for row in ep_rows {

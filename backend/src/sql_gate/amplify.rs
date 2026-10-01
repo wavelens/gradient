@@ -31,7 +31,7 @@ pub enum Rewrite {
     Rehash,
     /// A space-separated list of store paths: each path's hash is rehashed, so
     /// a copy references the copies of what its original referenced and a path
-    /// keeps the VM's fan-in instead of gaining one referrer per copy.
+    /// keeps the VM's fan-in instead of gaining one parent per copy.
     References,
     /// A column a unique index covers: the copy index keeps it unique and the
     /// `amp` prefix says the row is synthetic.
@@ -265,7 +265,7 @@ pub fn clone_sql(table: &str, columns: &[String], rewrite: &[(&str, Rewrite)]) -
     )
 }
 
-/// Every amplification statement runs through here, so a failure carries the
+/// Every amplification statement passes through here, so a failure carries the
 /// statement itself: a table or column the schema no longer has is otherwise a
 /// bare `relation "x" does not exist` with nothing to point at.
 async fn execute(db: &DatabaseConnection, sql: &str, copies: i32) -> Result<()> {

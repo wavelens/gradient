@@ -44,15 +44,15 @@ pub struct BuildWithOutputs {
     pub download_progress: Option<DownloadProgress>,
 }
 
-/// A finished anchor's last report outlives it by up to the TTL; it is not shown.
+/// A finished shared build's last report outlives it by up to the TTL; it is not shown.
 fn running_download(
     progress: &Latest<DerivationBuildId, DownloadProgress>,
-    anchor: DerivationBuildId,
+    shared_build: DerivationBuildId,
     status: gradient_entity::build::BuildStatus,
     now: Instant,
 ) -> Option<DownloadProgress> {
     (status == gradient_entity::build::BuildStatus::Building)
-        .then(|| progress.get(&anchor, now))
+        .then(|| progress.get(&shared_build, now))
         .flatten()
 }
 
@@ -64,7 +64,7 @@ pub async fn get_build(
 ) -> WebResult<Json<BaseResponse<BuildWithOutputs>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let build_job = ctx.build_job;
-    let anchor = ctx.anchor;
+    let shared_build = ctx.shared_build;
 
     let derivation = EDerivation::find_by_id(build_job.derivation)
         .one(&state.web_db)
@@ -89,7 +89,7 @@ pub async fn get_build(
         outputs.insert(output.name, path);
     }
 
-    let attempt = latest_attempt(&state.web_db, anchor.id)
+    let attempt = latest_attempt(&state.web_db, shared_build.id)
         .await
         .ok()
         .flatten();
@@ -104,19 +104,19 @@ pub async fn get_build(
     let build_with_outputs = BuildWithOutputs {
         id: build_job.id,
         evaluation: build_job.evaluation,
-        status: anchor.status.for_api(),
+        status: shared_build.status.for_api(),
         derivation_path: derivation.drv_path(),
         architecture: derivation.architecture,
         worker,
         dispatched_job: attempt.map(|a| a.dispatched_job),
         output: outputs,
-        prioritized: anchor.prioritized,
+        prioritized: shared_build.prioritized,
         created_at: build_job.created_at,
-        updated_at: anchor.updated_at,
+        updated_at: shared_build.updated_at,
         download_progress: running_download(
             &state.download_progress,
-            anchor.id,
-            anchor.status,
+            shared_build.id,
+            shared_build.status,
             Instant::now(),
         ),
     };
@@ -130,22 +130,22 @@ mod tests {
     use gradient_entity::build::BuildStatus;
 
     #[test]
-    fn only_a_building_anchor_shows_its_download() {
+    fn only_a_building_shared_build_shows_its_download() {
         let latest = Latest::new(std::time::Duration::from_secs(10));
-        let anchor = DerivationBuildId::now_v7();
+        let shared_build = DerivationBuildId::now_v7();
         let now = Instant::now();
         let progress = DownloadProgress {
             downloaded: 1,
             total: Some(2),
         };
-        latest.set(anchor, progress, now);
+        latest.set(shared_build, progress, now);
 
         assert_eq!(
-            running_download(&latest, anchor, BuildStatus::Building, now),
+            running_download(&latest, shared_build, BuildStatus::Building, now),
             Some(progress)
         );
         assert_eq!(
-            running_download(&latest, anchor, BuildStatus::Substituted, now),
+            running_download(&latest, shared_build, BuildStatus::Substituted, now),
             None
         );
     }

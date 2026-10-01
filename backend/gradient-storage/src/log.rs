@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 
 /// Abstraction for build log storage.
 ///
-/// Logs are appended to an inline copy while a build runs; once the build is
+/// Logs are appended to an inline copy while a build is running; once the build is
 /// terminal the log is split into compressed chunks and the inline copy dropped.
 pub trait LogStorage: Send + Sync + std::fmt::Debug {
     /// Append `text` to the log for `attempt_id`.
@@ -277,7 +277,7 @@ impl LogStorage for FileLogStorage {
 /// Log storage that appends the live log to a local file (S3 has no efficient
 /// append) and writes the finalized chunks only to S3-compatible object
 /// storage, so an S3 backend keeps no build logs on local disk at rest. Reads
-/// serve the live local file while a build runs, then the S3 chunks.
+/// serve the live local file while a build is running, then the S3 chunks.
 pub struct S3LogStorage {
     local: FileLogStorage,
     object_store: Arc<dyn ObjectStore>,

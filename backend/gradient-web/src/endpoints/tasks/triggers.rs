@@ -45,7 +45,7 @@ pub struct TriggerIntegrationSummary {
     pub id: IntegrationId,
     pub name: String,
     pub display_name: String,
-    pub forge_type: String,
+    pub git_host_type: String,
 }
 
 impl TriggerIntegrationSummary {
@@ -54,7 +54,7 @@ impl TriggerIntegrationSummary {
             id: m.id,
             name: m.name.clone(),
             display_name: m.display_name.clone(),
-            forge_type: m.forge_type.as_path_segment().to_string(),
+            git_host_type: m.git_host_type.as_path_segment().to_string(),
         }
     }
 }
@@ -437,13 +437,15 @@ pub async fn fire_now(
             hard_abort,
         } => {
             if let Some(aborted_id) = aborted_evaluation {
-                let anchors = if hard_abort {
-                    abort_eval_anchors(&state, aborted_id).await
+                let shared_builds = if hard_abort {
+                    abort_eval_shared_builds(&state, aborted_id).await
                 } else {
                     Vec::new()
                 };
 
-                scheduler.cancel_evaluation_jobs(aborted_id, &anchors).await;
+                scheduler
+                    .cancel_evaluation_jobs(aborted_id, &shared_builds)
+                    .await;
             }
 
             state.record_evaluation_created(&eval).await;
@@ -461,20 +463,20 @@ pub async fn fire_now(
     Ok(ok_json(body))
 }
 
-/// Abort the anchors a hard-aborted evaluation alone still needed; the graph
+/// Abort the shared builds a hard-aborted evaluation alone still needed; the graph
 /// actor owns that write, and the caller cancels the in-memory jobs.
-async fn abort_eval_anchors(
+async fn abort_eval_shared_builds(
     state: &Arc<ServerState>,
     evaluation: EvaluationId,
 ) -> Vec<DerivationBuildId> {
     match state
         .graph
-        .transition(Transition::AbortEvaluationAnchors { evaluation })
+        .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
         .await
     {
-        Ok(report) => report.aborted_anchors,
+        Ok(report) => report.aborted_shared_builds,
         Err(e) => {
-            tracing::warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's anchors did not reach the graph actor");
+            tracing::warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's shared builds did not reach the graph writer");
             Vec::new()
         }
     }

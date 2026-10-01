@@ -29,7 +29,11 @@ fn node<'a>(state: &MockState, args: &'a Value) -> anyhow::Result<&'a str> {
     Ok(id)
 }
 
-pub fn dispatch(state: &Arc<MockState>, cmd: &str, args: &Value) -> Option<anyhow::Result<Value>> {
+pub fn handle_command(
+    state: &Arc<MockState>,
+    cmd: &str,
+    args: &Value,
+) -> Option<anyhow::Result<Value>> {
     COMMANDS.contains(&cmd).then(|| run(state, cmd, args))
 }
 
@@ -103,7 +107,7 @@ mod tests {
     }
 
     fn call(backend: &MockBackend, cmd: &str, args: Value) -> anyhow::Result<Value> {
-        dispatch(&backend.0, cmd, &args).expect("known command")
+        handle_command(&backend.0, cmd, &args).expect("known command")
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -148,6 +152,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("tmp");
         let backend = backend(&dir).await;
         assert!(call(&backend, "release", json!({ "node": "t/nope" })).is_err());
-        assert!(dispatch(&backend.0, "journal", &json!({})).is_none());
+        assert!(handle_command(&backend.0, "journal", &json!({})).is_none());
     }
 }

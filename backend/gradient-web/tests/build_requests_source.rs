@@ -131,7 +131,7 @@ fn source_upload_creates_queued_eval() {
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        // ensure_build_request_task → SELECT (None) then INSERT
+        // ensure_build_request_task -> SELECT (None) then INSERT
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
         .append_exec_results([MockExecResult {
@@ -150,7 +150,7 @@ fn source_upload_creates_queued_eval() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // resolve_project_cache_name → project-cache link lookup (none → cache=null)
+        // resolve_project_cache_name -> project-cache link lookup (none -> cache=null)
         .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
 
         let server = make_test_server(db.into_connection());

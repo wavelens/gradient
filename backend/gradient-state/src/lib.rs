@@ -6,7 +6,7 @@
 
 //! Declarative state management: the on-disk DTOs ([`config`]), pre-apply
 //! [`validation`], database [`provisioning`], and [`export`]. This root keeps
-//! the load entry point and the OIDC/SCIM group → role resolution.
+//! the load entry point and the OIDC/SCIM group -> role resolution.
 
 mod config;
 pub mod export;
@@ -25,11 +25,11 @@ use gradient_types::{ProjectId, RoleId};
 use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 
-/// Resolved at startup from [`StateRole::oidc_group`]: OIDC group name → the
+/// Resolved at startup from [`StateRole::oidc_group`]: OIDC group name -> the
 /// `(project, role)` grants a user presenting that group receives on login.
 pub type OidcGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
 
-/// Build the OIDC group → grants map from declared roles. `role_ids` maps
+/// Build the OIDC group -> grants map from declared roles. `role_ids` maps
 /// `(project_name, role_name)` to the provisioned `(ProjectId, RoleId)`.
 pub fn resolve_oidc_group_roles(
     config: &StateConfiguration,
@@ -56,11 +56,11 @@ pub fn resolve_oidc_group_roles(
     map
 }
 
-/// Resolved at startup from [`StateRole::scim_group`]: SCIM group name → the
+/// Resolved at startup from [`StateRole::scim_group`]: SCIM group name -> the
 /// `(project, role)` grants a member of that SCIM group receives.
 pub type ScimGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
 
-/// Build the SCIM group → grants map from declared roles. Mirrors
+/// Build the SCIM group -> grants map from declared roles. Mirrors
 /// [`resolve_oidc_group_roles`].
 pub fn resolve_scim_group_roles(
     config: &StateConfiguration,

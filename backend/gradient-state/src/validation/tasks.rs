@@ -43,19 +43,19 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
         for action in &task.actions {
             if !matches!(
                 action.action_type.as_str(),
-                "send_mail" | "send_web_request" | "forge_status_report" | "open_pr"
+                "send_mail" | "send_web_request" | "git_host_status_report" | "open_pr"
             ) {
                 errors.push(
                     format!("tasks.{}.actions.{}.type", task.name, action.name),
                     format!(
-                        "Invalid action type '{}': expected send_mail/send_web_request/forge_status_report/open_pr",
+                        "Invalid action type '{}': expected send_mail/send_web_request/git_host_status_report/open_pr",
                         action.action_type
                     ),
                 );
             }
             if matches!(
                 action.action_type.as_str(),
-                "forge_status_report" | "open_pr"
+                "git_host_status_report" | "open_pr"
             ) && !action.events.is_empty()
             {
                 errors.push(

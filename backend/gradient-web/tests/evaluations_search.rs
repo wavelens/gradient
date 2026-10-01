@@ -100,7 +100,7 @@ fn with_task(db: MockDatabase) -> MockDatabase {
 }
 
 /// The two grouped rollups and the eval-job lookup `evaluations_to_summaries`
-/// runs after loading commits. Empty is a valid result set for all three.
+/// takes place after loading commits. Empty is a valid result set for all three.
 fn with_summary_rollups(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<commit::Model>::new()])
         .append_query_results([Vec::<commit::Model>::new()])

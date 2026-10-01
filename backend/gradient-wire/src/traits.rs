@@ -64,7 +64,7 @@ pub trait JobReporter: Send + Sync {
     async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode)
     -> Result<Vec<CachedPath>>;
 
-    /// One path, and the server may ask its upstreams for it: the only query that
+    /// One path, and the server may ask its upstream caches for it: the only query that
     /// ever leaves our cache. `None` when nothing serves it.
     async fn query_upstream(&mut self, path: String) -> Result<Option<CachedPath>>;
 
@@ -166,7 +166,7 @@ pub trait CapabilitiesProvider: Send + Sync {
 // ── Inbound-session-driver callbacks ─────────────────────────────────────────
 
 /// Outcome of authorizing a peer's `AuthResponse`. `Reject` carries the wire
-/// code the handshake driver relays before closing the socket.
+/// code the handshake driver forwards before closing the socket.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuthOutcome {
     Accept {

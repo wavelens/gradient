@@ -5,7 +5,7 @@
  */
 
 //! Every event Gradient produces. A payload struct per event implements
-//! [`EventKind`]; [`Event`] is the closed set, stored in the outbox by its
+//! [`EventKind`]; [`Event`] is the closed set, stored in the pending deliveries by its
 //! Rust variant name and published as an [`Envelope`] by its dotted name.
 
 pub mod audit;
@@ -133,7 +133,7 @@ events! {
     BuildProgress(build::Progress),
     EvaluationReported(evaluation::Reported),
     EvaluationProgress(evaluation::Progress),
-    GraphIngested(graph::Ingested),
+    GraphRecorded(graph::Recorded),
     GraphNarCommitted(graph::NarCommitted),
     GraphTransitioned(graph::Transitioned),
     GraphRequeued(graph::Requeued),

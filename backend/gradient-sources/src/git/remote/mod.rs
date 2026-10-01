@@ -65,8 +65,8 @@ pub(in crate::git) fn ls_remote_head(
 
 /// Resolves the target ref from a libgit2 remote ref list.
 ///
-/// `branch = None` → look for `HEAD`, fall back to first ref.
-/// `branch = Some("main")` → look for `refs/heads/main` exactly; returns
+/// `branch = None` -> look for `HEAD`, fall back to first ref.
+/// `branch = Some("main")` -> look for `refs/heads/main` exactly; returns
 /// `SourceError::GitHashExtraction` if not found (no HEAD fallback).
 fn find_ref_in_list(
     list: &[git2::RemoteHead<'_>],

@@ -13,7 +13,7 @@ use crate::ids::CachedPathId;
 /// A cached Nix store path.
 ///
 /// Represents any store path whose NAR is stored in the cache - sources,
-/// build outputs, or anything else. The NAR data is stored once (keyed by
+/// build outputs, or anything else. The NAR data is stored once (per
 /// `hash`). Association with specific caches and their signatures is via
 /// `cached_path_signature`. This row is the AUTHORITATIVE narinfo source for
 /// anything in our cache; `derivation_output`'s narinfo fields are only an

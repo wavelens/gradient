@@ -6,9 +6,9 @@
 
 //! CRUD for per-project named integrations.
 //!
-//! An integration stores credentials + metadata for a forge (Gitea/Forgejo/
-//! GitLab/GitHub). Each row is either **inbound** (the forge calls us;
-//! `secret` holds the HMAC secret) or **outbound** (we call the forge;
+//! An integration stores credentials + metadata for a Git host (Gitea/Forgejo/
+//! GitLab/GitHub). Each row is either **inbound** (the Git host calls us;
+//! `secret` holds the HMAC secret) or **outbound** (we call the Git host;
 //! `endpoint_url` + `access_token` hold API credentials).
 //!
 //! Secrets and access tokens are stored encrypted with the server's crypt key
@@ -26,7 +26,7 @@ use axum::{Extension, Json};
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_core::ServerState;
-use gradient_types::ForgeType;
+use gradient_types::GitHostType;
 use gradient_types::input::check_index_name;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -45,7 +45,7 @@ pub struct IntegrationResponse {
     pub name: String,
     pub display_name: String,
     pub kind: String,
-    pub forge_type: String,
+    pub git_host_type: String,
     pub endpoint_url: Option<String>,
     pub has_secret: bool,
     pub has_access_token: bool,
@@ -63,7 +63,7 @@ fn base_from(m: MIntegration) -> IntegrationResponse {
         name: m.name,
         display_name: m.display_name,
         kind: kind_to_str(m.kind).to_string(),
-        forge_type: m.forge_type.as_path_segment().to_string(),
+        git_host_type: m.git_host_type.as_path_segment().to_string(),
         endpoint_url: m.endpoint_url,
         has_secret: m.secret.is_some(),
         has_access_token: m.access_token.is_some(),
@@ -121,7 +121,7 @@ pub struct CreateIntegrationRequest {
     /// `"inbound"` or `"outbound"`.
     pub kind: String,
     /// `"gitea"`, `"forgejo"`, `"gitlab"`, or `"github"`.
-    pub forge_type: String,
+    pub git_host_type: String,
     /// Plaintext HMAC secret for inbound integrations.
     pub secret: Option<String>,
     /// Base URL (e.g. `https://gitea.example.com`) for outbound integrations.
@@ -131,7 +131,7 @@ pub struct CreateIntegrationRequest {
     /// CIDR strings; only inbound webhooks from these sources are accepted.
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
-    /// Required for `forge_type=github`: the App installation id to bind.
+    /// Required for `git_host_type=github`: the App installation id to bind.
     pub installation_id: Option<i64>,
 }
 
@@ -145,7 +145,7 @@ pub struct IntegrationSummaryResponse {
     pub name: String,
     pub display_name: String,
     pub kind: String,
-    pub forge_type: String,
+    pub git_host_type: String,
 }
 
 impl From<MIntegration> for IntegrationSummaryResponse {
@@ -155,7 +155,7 @@ impl From<MIntegration> for IntegrationSummaryResponse {
             name: m.name,
             display_name: m.display_name,
             kind: kind_to_str(m.kind).to_string(),
-            forge_type: m.forge_type.as_path_segment().to_string(),
+            git_host_type: m.git_host_type.as_path_segment().to_string(),
         }
     }
 }
@@ -164,7 +164,7 @@ impl From<MIntegration> for IntegrationSummaryResponse {
 pub struct PatchIntegrationRequest {
     pub name: Option<String>,
     pub display_name: Option<String>,
-    pub forge_type: Option<String>,
+    pub git_host_type: Option<String>,
     pub endpoint_url: Option<String>,
     /// When present, replaces the stored secret. Empty string clears it.
     pub secret: Option<String>,
@@ -187,10 +187,10 @@ fn parse_kind(s: &str) -> Result<IntegrationKind, WebError> {
     }
 }
 
-fn parse_forge(s: &str) -> Result<ForgeType, WebError> {
-    ForgeType::from_path_segment(s).ok_or_else(|| {
+fn parse_git_host(s: &str) -> Result<GitHostType, WebError> {
+    GitHostType::from_path_segment(s).ok_or_else(|| {
         WebError::bad_request(format!(
-            "Invalid forge type '{}': expected 'gitea', 'forgejo', 'gitlab', or 'github'.",
+            "Invalid Git host type '{}': expected 'gitea', 'forgejo', 'gitlab', or 'github'.",
             s
         ))
     })
@@ -296,11 +296,11 @@ pub async fn put_integration(
         return Err(WebError::invalid_name("Integration Name"));
     }
 
-    let forge = parse_forge(&body.forge_type)?;
+    let git_host = parse_git_host(&body.git_host_type)?;
 
-    if matches!(forge, ForgeType::GitHub) {
+    if matches!(git_host, GitHostType::GitHub) {
         let installation_id = body.installation_id.ok_or_else(|| {
-            WebError::bad_request("forge_type 'github' requires an installation_id")
+            WebError::bad_request("git_host_type 'github' requires an installation_id")
         })?;
         let Some(app) = state.config.github_app.clone() else {
             return Err(WebError::bad_request(
@@ -310,7 +310,7 @@ pub async fn put_integration(
         let pem = tokio::fs::read_to_string(&app.private_key_file)
             .await
             .map_err(|e| WebError::internal(format!("reading github app key: {e}")))?;
-        let account = gradient_forge::github_app::get_installation(
+        let account = gradient_git_host::github_app::get_installation(
             &state.http,
             app.app_id,
             &pem,
@@ -400,7 +400,7 @@ pub async fn put_integration(
         name: body.name,
         display_name,
         kind,
-        forge_type: forge,
+        git_host_type: git_host,
         secret: encrypted_secret,
         endpoint_url,
         access_token: encrypted_token,
@@ -462,7 +462,7 @@ pub async fn patch_integration(
     )
     .await?;
     let integration = load_integration_in_project(&state, project.id, integration_id).await?;
-    if integration.forge_type == ForgeType::GitHub {
+    if integration.git_host_type == GitHostType::GitHub {
         return Err(WebError::bad_request(
             "GitHub App integrations are managed automatically and cannot be edited.",
         ));
@@ -498,15 +498,15 @@ pub async fn patch_integration(
         active.display_name = Set(trimmed);
     }
 
-    if let Some(forge) = body.forge_type {
-        let parsed = parse_forge(&forge)?;
-        if matches!(parsed, ForgeType::GitHub) {
+    if let Some(git_host) = body.git_host_type {
+        let parsed = parse_git_host(&git_host)?;
+        if matches!(parsed, GitHostType::GitHub) {
             return Err(WebError::bad_request(
                 "GitHub integrations are managed through the server-wide GitHub App; \
-                 enable the App on the project instead of switching forge_type to github.",
+                 enable the App on the project instead of switching git_host_type to github.",
             ));
         }
-        active.forge_type = Set(parsed);
+        active.git_host_type = Set(parsed);
     }
 
     if let Some(url) = body.endpoint_url {
@@ -568,7 +568,7 @@ pub async fn delete_integration(
     )
     .await?;
     let integration = load_integration_in_project(&state, project.id, integration_id).await?;
-    if integration.forge_type == ForgeType::GitHub {
+    if integration.git_host_type == GitHostType::GitHub {
         let txn = state.web_db.inner().begin().await?;
         match integration.github_installation {
             Some(fk) => {

@@ -241,12 +241,12 @@ pub struct UpstreamNarinfo {
 /// that upstream's configured key are dropped, never served on.
 pub async fn fetch_narinfo_body(
     http: &reqwest::Client,
-    upstreams: &[UpstreamProbe],
+    upstream_caches: &[UpstreamProbe],
     path_hash: &str,
 ) -> Option<UpstreamNarinfo> {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
-    let mut futs: FuturesUnordered<_> = upstreams
+    let mut futs: FuturesUnordered<_> = upstream_caches
         .iter()
         .filter(|u| breakers().allows(u.id))
         .map(|u| async move {
@@ -416,7 +416,7 @@ pub async fn probe_batch(
 
 /// `body` as a hit for `store_path`, but only when it names that path and a
 /// `Sig` verifies against the key `ep` is configured with. Anything else is a
-/// miss: an unsigned or foreign answer must never become substitutable.
+/// miss: an unsigned or foreign answer must never become available in a cache.
 pub fn verified_narinfo(
     ep: &UpstreamEndpoint,
     path_hash: &str,
@@ -799,7 +799,7 @@ mod tests {
         (body, format!("upstream-1:{}", STANDARD.encode(*keypair.pk)))
     }
 
-    fn keyed_ep(public_key: Option<String>) -> UpstreamEndpoint {
+    fn ep_with_key(public_key: Option<String>) -> UpstreamEndpoint {
         UpstreamEndpoint {
             public_key,
             ..ep(None, None)
@@ -809,7 +809,7 @@ mod tests {
     #[test]
     fn a_narinfo_signed_by_the_upstream_key_is_a_hit() {
         let (body, key) = signed_narinfo(SIGNED_PATH);
-        let cp = verified_narinfo(&keyed_ep(Some(key)), SIGNED_HASH, SIGNED_PATH, &body)
+        let cp = verified_narinfo(&ep_with_key(Some(key)), SIGNED_HASH, SIGNED_PATH, &body)
             .expect("verified");
         assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar.xz"));
     }
@@ -823,7 +823,8 @@ mod tests {
             .map(|l| format!("{l}\n"))
             .collect();
         assert!(
-            verified_narinfo(&keyed_ep(Some(key)), SIGNED_HASH, SIGNED_PATH, &unsigned).is_none()
+            verified_narinfo(&ep_with_key(Some(key)), SIGNED_HASH, SIGNED_PATH, &unsigned)
+                .is_none()
         );
     }
 
@@ -832,7 +833,13 @@ mod tests {
         let (body, _) = signed_narinfo(SIGNED_PATH);
         let (_, other_key) = signed_narinfo(SIGNED_PATH);
         assert!(
-            verified_narinfo(&keyed_ep(Some(other_key)), SIGNED_HASH, SIGNED_PATH, &body).is_none()
+            verified_narinfo(
+                &ep_with_key(Some(other_key)),
+                SIGNED_HASH,
+                SIGNED_PATH,
+                &body
+            )
+            .is_none()
         );
     }
 
@@ -840,13 +847,15 @@ mod tests {
     fn a_signed_narinfo_for_another_path_is_a_miss() {
         let other = "/nix/store/0c7kxbq0fdq6pnxpzhg5yvbbrylx4v3f-evil-1.0";
         let (body, key) = signed_narinfo(other);
-        assert!(verified_narinfo(&keyed_ep(Some(key)), SIGNED_HASH, SIGNED_PATH, &body).is_none());
+        assert!(
+            verified_narinfo(&ep_with_key(Some(key)), SIGNED_HASH, SIGNED_PATH, &body).is_none()
+        );
     }
 
     #[test]
     fn an_upstream_without_a_key_serves_nothing() {
         let (body, _) = signed_narinfo(SIGNED_PATH);
-        assert!(verified_narinfo(&keyed_ep(None), SIGNED_HASH, SIGNED_PATH, &body).is_none());
+        assert!(verified_narinfo(&ep_with_key(None), SIGNED_HASH, SIGNED_PATH, &body).is_none());
     }
 
     fn ep(latency: Option<f64>, hit: Option<f64>) -> UpstreamEndpoint {

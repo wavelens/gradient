@@ -20,7 +20,7 @@ pub struct JobContext<'a> {
     /// Owning project's work share of currently-active builds (0.0..=1.0), computed
     /// by the scheduler at request time only when the policy consumes it.
     pub project_work_share: Option<f32>,
-    /// A user asked for this job's evaluation or dependent build to go first.
+    /// A user asked for this job's evaluation or a build wanting it to go first.
     pub prioritized: bool,
     pub rescore_count: u32,
     /// Scoring-time clock, threaded in so rules are deterministic functions of

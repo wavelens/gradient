@@ -26,7 +26,7 @@ pub struct TableSpec {
     /// that describe more than it.
     pub sql: &'static str,
     /// What `$1` actually selects, for the manifest to declare. Several tables
-    /// hang off the evaluation's *anchors*, which are shared between
+    /// hang off the evaluation's *shared builds*, which are shared between
     /// evaluations, so their rows are not the evaluation's alone.
     pub scope: &'static str,
     pub columns: &'static [&'static str],
@@ -97,8 +97,8 @@ macro_rules! own_derivations {
     };
 }
 
-/// The anchors behind those derivations.
-macro_rules! own_anchors {
+/// The shared builds behind those derivations.
+macro_rules! own_shared_builds {
     () => {
         "SELECT derivation_build FROM build_job WHERE evaluation = $1"
     };
@@ -106,14 +106,14 @@ macro_rules! own_anchors {
 
 /// Those derivations plus every direct dependency of one.
 ///
-/// `unready_deps` is one count per EDGE over exactly this set, and the readiness it
-/// counts is a property of the dependency's own anchor, outputs and cached paths.
+/// `blocking_deps` is one count per EDGE over exactly this set, and the can-start state it
+/// counts is a property of the dependency's own shared build, outputs and cached paths.
 /// Export the edges without their far end and neither counter can be checked: the
-/// `LEFT JOIN ... IS NULL` rule that makes a missing dependency count as unready
+/// `LEFT JOIN ... IS NULL` rule that makes a missing dependency count as blocking
 /// fires on every dependency the file merely left out, which turned a correct
-/// stored `1` into a recomputed `24` on a real report. One hop is the whole
+/// stored `1` into an updated `24` on a real report. One hop is the whole
 /// requirement - a dependency's own dependencies are already summarised in its
-/// stored `unready_deps`, which is why this is a boundary and not a closure.
+/// stored `blocking_deps`, which is why this is a boundary and not a closure.
 macro_rules! derivation_scope {
     () => {
         concat!(
@@ -141,7 +141,7 @@ macro_rules! output_hashes {
 /// producer of every path an exported output references, and `output_hashes`
 /// carries its paths. That is what makes an absent row mean the instance never had
 /// the path rather than the export never asking for it, which is the whole
-/// diagnosis on an unwhole closure.
+/// diagnosis on an incomplete closure.
 macro_rules! cached_path_scope {
     () => {
         output_hashes!()
@@ -245,7 +245,7 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
             "CREATE TABLE build_job (id TEXT, evaluation TEXT, derivation TEXT, derivation_build TEXT, score REAL, score_breakdown TEXT, created_at TEXT)",
             concat!(
                 "SELECT id::text, evaluation::text, derivation::text, derivation_build::text, score::text, score_breakdown::text, created_at::text FROM build_job WHERE evaluation = $1 OR id IN (SELECT a.build_job FROM build_attempt a WHERE a.derivation_build IN (",
-                own_anchors!(),
+                own_shared_builds!(),
                 "))"
             ),
             "the evaluation, plus every job an exported attempt was made under",
@@ -261,9 +261,9 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_build",
-            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, probed INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER, demanded INTEGER, missing_runtime_deps INTEGER)",
+            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, cache_available INTEGER, probed INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, blocking_deps INTEGER, wanted INTEGER, missing_runtime_deps INTEGER)",
             concat!(
-                "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.probed::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text, db.demanded::int::text, db.missing_runtime_deps::text FROM derivation_build db WHERE db.derivation IN (",
+                "SELECT db.id::text, db.derivation::text, db.status::text, db.cache_available::int::text, db.probed::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.blocking_deps::text, db.wanted::int::text, db.missing_runtime_deps::text FROM derivation_build db WHERE db.derivation IN (",
                 derivation_scope!(),
                 ")"
             ),
@@ -272,7 +272,7 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "id",
                 "derivation",
                 "status",
-                "substitutable",
+                "cache_available",
                 "probed",
                 "substituted",
                 "attempt",
@@ -284,8 +284,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "ready_at",
                 "dispatched_at",
                 "fetchable",
-                "unready_deps",
-                "demanded",
+                "blocking_deps",
+                "wanted",
                 "missing_runtime_deps"
             ]
         ),
@@ -346,10 +346,10 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
             "CREATE TABLE build_attempt (id TEXT, build_job TEXT, derivation_build TEXT, dispatched_job TEXT, substitute INTEGER, outcome INTEGER, reason INTEGER, failure_message TEXT, build_context TEXT, build_started_at TEXT, build_finished_at TEXT, created_at TEXT)",
             concat!(
                 "SELECT a.id::text, a.build_job::text, a.derivation_build::text, a.dispatched_job::text, a.substitute::int::text, a.outcome::text, a.reason::text, a.failure_message::text, a.build_context::text, a.build_started_at::text, a.build_finished_at::text, a.created_at::text FROM build_attempt a WHERE a.derivation_build IN (",
-                own_anchors!(),
+                own_shared_builds!(),
                 ")"
             ),
-            "the evaluation's build anchors, so attempts made for other evaluations are included",
+            "the evaluation's shared builds, so attempts made for other evaluations are included",
             [
                 "id",
                 "build_job",
@@ -414,10 +414,10 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
             "CREATE TABLE phase_event (id TEXT, subject_kind INTEGER, subject_id TEXT, phase INTEGER, event INTEGER, at TEXT, worker_id TEXT, detail TEXT)",
             concat!(
                 "SELECT p.id::text, p.subject_kind::text, p.subject_id::text, p.phase::text, p.event::text, p.at::text, p.worker_id::text, p.detail::text FROM phase_event p WHERE p.subject_id = $1 OR p.subject_id IN (",
-                own_anchors!(),
+                own_shared_builds!(),
                 ")"
             ),
-            "the evaluation and its build anchors, so events from other evaluations are included",
+            "the evaluation and its shared builds, so events from other evaluations are included",
             [
                 "id",
                 "subject_kind",
@@ -661,14 +661,14 @@ mod tests {
         }
     }
 
-    /// Every table an offline reader re-derives `unready_deps` from is scoped to
+    /// Every table an offline reader re-derives `blocking_deps` from is scoped to
     /// the evaluation's derivations AND their direct dependencies. Without the
     /// boundary the `LEFT JOIN ... IS NULL` rule that makes an absent dependency
-    /// count as unready fires on every dependency the export merely left out, so
-    /// a correct stored counter recomputes as a wildly larger number and the file
+    /// count as blocking fires on every dependency the export merely left out, so
+    /// a correct stored counter updates to a wildly larger number and the file
     /// accuses the instance of a dead zone it does not have.
     #[test]
-    fn the_readiness_tables_carry_the_dependency_boundary() {
+    fn the_start_tables_carry_the_dependency_boundary() {
         for name in ["derivation", "derivation_build", "derivation_output"] {
             let sql = spec_named(name).sql;
             assert!(
@@ -680,17 +680,17 @@ mod tests {
         }
     }
 
-    /// One fragment behind all of them, for the reason `readiness.rs` keeps one
+    /// One fragment behind all of them, for the reason `can_start.rs` keeps one
     /// behind its seed and its recount: two spellings of the same scope drift,
     /// and a reader cannot see that they have.
     #[test]
-    fn every_derivation_keyed_scope_is_the_same_fragment() {
-        let anchor = spec_named("derivation_build").sql;
-        let scope = anchor
+    fn every_per_derivation_scope_is_the_same_fragment() {
+        let shared_build = spec_named("derivation_build").sql;
+        let scope = shared_build
             .split_once("WHERE db.derivation IN (")
             .and_then(|(_, rest)| rest.rsplit_once(')'))
             .map(|(scope, _)| scope)
-            .expect("the anchor spec is scoped by a derivation set");
+            .expect("the shared build spec is scoped by a derivation set");
 
         for name in ["derivation", "derivation_output"] {
             assert!(
@@ -700,7 +700,7 @@ mod tests {
         }
     }
 
-    /// An attempt's substitute-miss budget is scoped per `(anchor, evaluation)`
+    /// An attempt's substitute-miss budget is scoped per `(shared_build, evaluation)`
     /// through its `build_job`. Export the attempts without those rows and the
     /// budget cannot be bucketed at all, which is how a loop that ran 788 misses
     /// against a threshold of 2 read as an ordinary retry history.
@@ -749,10 +749,10 @@ mod tests {
     }
 
     /// A build's phase events are recorded against its `derivation_build`
-    /// anchor, never the per-eval `build_job` row, so joining on `build_job.id`
+    /// shared build, never the per-eval `build_job` row, so joining on `build_job.id`
     /// silently exported an evaluation with no build timing at all.
     #[test]
-    fn build_phase_events_hang_off_the_anchor_not_the_build_job() {
+    fn build_phase_events_hang_off_the_shared_build_not_the_build_job() {
         let sql = spec_named("phase_event").sql;
         assert!(
             sql.contains("SELECT derivation_build FROM build_job"),

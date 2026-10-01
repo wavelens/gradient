@@ -7,11 +7,11 @@
 //! The one place a build-graph transition's consequences fan out. Both mutation
 //! models feed it: the single-row state-machine path
 //! ([`super::update_derivation_build_status`]) and the bulk SQL sweeps
-//! (promotion, cascades, reconciles, abort), which return the
+//! (promotion, cascades, repairs, abort), which return the
 //! [`TransitionChange`]s they made. Routing every mover through one emitter is
-//! what makes it structurally impossible to move an anchor without its
+//! what makes it structurally impossible to move a shared build without its
 //! consequences (the evaluation graph version, board events, CI checks, the
-//! demand its direct inputs gain or lose) firing - the root cause of the
+//! need its direct inputs gain or lose) firing - the root cause of the
 //! historical dead-zone class.
 
 use crate::DbContext;
@@ -21,7 +21,7 @@ use gradient_types::*;
 use std::collections::{HashMap, HashSet};
 use tracing::error;
 
-/// One anchor status move, as reported by the path that made it.
+/// One shared build status move, as reported by the path that made it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransitionChange {
     pub derivation: DerivationId,
@@ -45,7 +45,7 @@ impl TransitionChange {
 /// One entry per derivation, first `from` to last `to`, in first-seen order, with
 /// the derivations that ended where they started dropped entirely.
 ///
-/// For a caller that moves the same anchor twice inside ONE transaction: only the
+/// For a caller that moves the same shared build twice inside ONE transaction: only the
 /// net move committed, so only the net move may fan out. Emitting the steps instead
 /// would announce a status to the board and the CI reactor that no reader can ever
 /// observe, and would invalidate the histogram cache for a move no reader can see.
@@ -77,55 +77,55 @@ fn ci_reports(status: BuildStatus) -> bool {
 }
 
 /// Fan out the consequences of `changes`: everything [`announce`] does, then the
-/// demand its direct inputs gained or lost, whose own moves are announced in turn,
+/// need its direct inputs gained or lost, whose own moves are announced in turn,
 /// and the probe request for what gained it.
 ///
 /// That second round cannot need a third. It only ever moves rows between
 /// `Created` and `Queued`, both of which are in [`BUILDER_STATUSES`], so no row it
-/// touches crosses the boundary [`demand_moves`] keys on.
+/// touches crosses the boundary [`need_moves`] keys on.
 ///
-/// Losing demand settles work without moving a status, and `announce`'s finalize
-/// runs before the recompute that takes it away, so the evaluations naming what
-/// lost it are asked again here. Nothing else would ask: no anchor of theirs need
+/// Losing need settles work without moving a status, and `announce`'s finalize
+/// executes before the update that takes it away, so the evaluations naming what
+/// lost it are asked again here. Nothing else would ask: no shared build of theirs need
 /// have transitioned at all (#666).
 pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChange]) {
     if changes.is_empty() {
         return;
     }
 
-    ctx.ready_set.record(changes);
+    ctx.startable_set.record(changes);
     announce(ctx, changes).await;
     let Moved {
         regated,
-        undemanded,
+        unwanted,
         gained,
-    } = move_demand(ctx, changes).await;
+    } = move_need(ctx, changes).await;
     ctx.probe_requests.send(gained);
     if !regated.is_empty() {
-        ctx.ready_set.record(&regated);
+        ctx.startable_set.record(&regated);
         announce(ctx, &regated).await;
     }
-    if !undemanded.is_empty()
-        && let Err(e) = super::eval_finalize::finalize_evals_for_derivations(ctx, &undemanded).await
+    if !unwanted.is_empty()
+        && let Err(e) = super::eval_finalize::finalize_evals_for_derivations(ctx, &unwanted).await
     {
-        error!(error = %e, "eval finalize after a demand loss failed");
+        error!(error = %e, "eval finalize after a need loss failed");
     }
 }
 
-/// Whether anchor `{status}` is one an evaluation will still have built, and so
+/// Whether shared build `{status}` is one an evaluation will still have built, and so
 /// one that still needs its inputs in our cache.
 fn is_builder(status: BuildStatus) -> bool {
     BUILDER_STATUSES.contains(&status)
 }
 
-/// Every anchor whose transition carried it across the builder statuses, in either
+/// Every shared build whose transition carried it across the builder statuses, in either
 /// direction: into them its inputs are wanted again, out of them they are not, and
-/// its own stored demand is stale either way.
+/// its own stored need is stale either way.
 ///
-/// A substitutable anchor is a relay rather than a builder and demands nothing, but
-/// the flag is not on a [`TransitionChange`]; the recompute reads it, so naming one
+/// A shared build available in a cache is a passthrough rather than a builder and needs nothing, but
+/// the flag is not on a [`TransitionChange`]; the update reads it, so naming one
 /// is a wasted row and never a wrong move.
-fn demand_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
+fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
     changes
         .iter()
         .filter(|c| is_builder(c.from) != is_builder(c.to))
@@ -133,53 +133,53 @@ fn demand_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
         .collect()
 }
 
-/// Recompute demand below every anchor that just became, or stopped being, something
+/// Update need below every shared build that just became, or stopped being, something
 /// this fleet will build, and settle the queue against what moved. The two statements
 /// embed [`crate::graph_sql::gates_predicate`], so the candidate list is a bound and
 /// never a claim.
 ///
-/// An anchor already `Building` keeps building: [`crate::readiness::unpromote_ungated`]
+/// A shared build already `Building` keeps building: [`crate::can_start::unpromote_ungated`]
 /// moves only `Queued` rows. The bytes a running build produces are cached and useful,
 /// while an abort throws the work away and complicates attempt attribution.
-async fn move_demand(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
+async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
     let db = &ctx.worker_db;
     let mut moved_out = Moved::default();
-    for chunk in demand_moves(changes).chunks(crate::IN_CHUNK_SIZE) {
-        let moved = match crate::readiness::recompute_demand(db, chunk).await {
+    for chunk in need_moves(changes).chunks(crate::IN_CHUNK_SIZE) {
+        let moved = match crate::can_start::update_need(db, chunk).await {
             Ok(moved) => moved,
             Err(e) => {
-                error!(error = %e, "failed to recompute what an anchor demands");
+                error!(error = %e, "failed to update what a shared build needs");
                 continue;
             }
         };
 
-        match crate::readiness::settle_demand(db, &moved).await {
+        match crate::can_start::settle_need(db, &moved).await {
             Ok(changes) => moved_out.regated.extend(changes),
-            Err(e) => error!(error = %e, "failed to settle the queue against a demand move"),
+            Err(e) => error!(error = %e, "failed to settle the queue against a need move"),
         }
         moved_out.gained.extend(moved.gained);
-        moved_out.undemanded.extend(moved.lost);
+        moved_out.unwanted.extend(moved.lost);
     }
 
     moved_out
 }
 
-/// What a demand move owes its caller: the regated anchors to announce, the ones
-/// that lost demand for the evaluation finalize, and the ones that gained it for
+/// What a need move owes its caller: the regated shared builds to announce, the ones
+/// that lost need for the evaluation finalize, and the ones that gained it for
 /// the upstream probe.
 #[derive(Debug, Default)]
 struct Moved {
     regated: Vec<TransitionChange>,
-    undemanded: Vec<DerivationId>,
+    unwanted: Vec<DerivationId>,
     gained: Vec<DerivationId>,
 }
 
 /// The graph version that invalidates the per-entry-point histogram cache, board
 /// `BuildStatusChanged` events for every referencing `build_job`, one
-/// `CacheChanged` on any terminal success, and an outbox row per entry point
-/// whose status the forges report. Every one of them is awaited and written
+/// `CacheChanged` on any terminal success, and an pending-delivery row per entry point
+/// whose status the Git hosts report. Every one of them is awaited and written
 /// here; what leaves the process is the effects actor's, reading the rows this
-/// wrote in the transaction that moved the anchors.
+/// wrote in the transaction that moved the shared builds.
 async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
     if changes.is_empty() {
         return;
@@ -218,8 +218,8 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
         .map(|ep| (ep.evaluation, ep.derivation))
         .collect();
 
-    // One bump per emit covers every evaluation a moved anchor belongs to; their
-    // cached histograms recompute on the next read. A failed bump is logged rather
+    // One bump per emit covers every evaluation a moved shared build belongs to; their
+    // cached histograms update on the next read. A failed bump is logged rather
     // than propagated, because the board events and CI checks below must fan out
     // regardless; `dep_counts::DEP_COUNTS_MAX_AGE_SECS` is what heals a lost one.
     let moved: Vec<EvaluationId> = changes
@@ -258,7 +258,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
                     status: i32::from(c.to) as i16,
                 });
 
-            // Only declared entry points get a forge check; an intermediate
+            // Only declared entry points get a Git host check; an intermediate
             // build owes no row rather than a row every consumer drops.
             if ci_reports(c.to)
                 && entry_keys.contains(&(job.evaluation, job.derivation))
@@ -336,9 +336,9 @@ mod tests {
     use super::*;
 
     /// CI checks track Queued (pending), Building (running), and terminals;
-    /// internal states (Created, FailedTransient) must not post to forges.
+    /// internal states (Created, FailedTransient) must not post to Git hosts.
     #[test]
-    fn ci_reports_matches_the_forge_check_lifecycle() {
+    fn ci_reports_matches_the_git_host_check_lifecycle() {
         assert!(ci_reports(BuildStatus::Queued));
         assert!(ci_reports(BuildStatus::Building));
         assert!(ci_reports(BuildStatus::Completed));
@@ -348,14 +348,14 @@ mod tests {
         assert!(!ci_reports(BuildStatus::FailedTransient));
     }
 
-    /// Demand follows the builder boundary, not "terminal": an anchor thawed back
+    /// Need follows the builder boundary, not "terminal": a shared build thawed back
     /// into the queue makes its inputs wanted again, and one that leaves for ANY
     /// non-builder status (a success and an abort alike) stops wanting them. Which
-    /// way it crossed does not matter here, because the recompute is absolute over
+    /// way it crossed does not matter here, because the update is absolute over
     /// the region either way and a thaw needs its own stale value rewritten just as
     /// much as a finish does.
     #[test]
-    fn demand_moves_are_every_crossing_of_the_builder_boundary() {
+    fn need_moves_are_every_crossing_of_the_builder_boundary() {
         let thawed = DerivationId::now_v7();
         let finished = DerivationId::now_v7();
         let aborted = DerivationId::now_v7();
@@ -367,7 +367,7 @@ mod tests {
         };
 
         assert_eq!(
-            demand_moves(&[
+            need_moves(&[
                 change(thawed, BuildStatus::FailedPermanent, BuildStatus::Created),
                 change(finished, BuildStatus::Building, BuildStatus::Completed),
                 change(aborted, BuildStatus::Queued, BuildStatus::Aborted),
@@ -381,13 +381,13 @@ mod tests {
     /// the boundary again: promotion and un-promotion both stay inside the builder
     /// statuses, so one round of re-gating is the whole fixpoint.
     #[test]
-    fn re_gating_can_never_demand_a_third_round() {
+    fn re_gating_can_never_need_a_third_round() {
         let d = DerivationId::now_v7();
         for (from, to) in [
             (BuildStatus::Created, BuildStatus::Queued),
             (BuildStatus::Queued, BuildStatus::Created),
         ] {
-            let moved = demand_moves(&[TransitionChange {
+            let moved = need_moves(&[TransitionChange {
                 derivation: d,
                 from,
                 to,
@@ -398,9 +398,9 @@ mod tests {
 
     /// A re-announce carries no move, so it must re-gate nothing.
     #[test]
-    fn an_unchanged_announcement_moves_no_demand() {
+    fn an_unchanged_announcement_moves_no_need() {
         assert!(
-            demand_moves(&[TransitionChange::unchanged(
+            need_moves(&[TransitionChange::unchanged(
                 DerivationId::now_v7(),
                 BuildStatus::Completed,
             )])
@@ -408,10 +408,10 @@ mod tests {
         );
     }
 
-    /// An anchor promoted and then pulled back inside one transaction committed
+    /// A shared build promoted and then pulled back inside one transaction committed
     /// nothing, so it must fan out nothing: emitting the two steps announces a
     /// `Queued` no reader can observe and bumps the graph version for it. An
-    /// anchor that genuinely moved keeps its move, and the order of first sight is
+    /// shared build that genuinely moved keeps its move, and the order of first sight is
     /// preserved.
     #[test]
     fn a_move_and_its_undo_collapse_away_while_a_real_move_survives() {
@@ -462,7 +462,7 @@ mod tests {
         );
     }
 
-    /// One report per entry-point `build_job` of a status the forges track, and a
+    /// One report per entry-point `build_job` of a status the Git hosts track, and a
     /// log finalization asked for once the build is finished. Both are rows in
     /// this transaction, not calls: what leaves the process is the effects
     /// actor's, reading what this wrote.
@@ -500,7 +500,7 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         let reports: Vec<&String> = log
             .iter()
-            .filter(|s| s.contains("INSERT INTO outbox"))
+            .filter(|s| s.contains("INSERT INTO pending_delivery"))
             .collect();
         assert_eq!(
             reports.len(),
@@ -541,12 +541,12 @@ mod tests {
         );
     }
 
-    /// An anchor gains demand exactly when something starts wanting its outputs in
+    /// A shared build gains need exactly when something starts wanting its outputs in
     /// our cache, which is also exactly when it is worth asking an upstream for
-    /// them. The probe runs off the graph's path, so the gained set is handed to it
-    /// here; without that nothing probes at all once ingest stops doing it.
+    /// them. The probe is running off the graph's path, so the gained set is handed to it
+    /// here; without that nothing probes at all once record stops doing it.
     #[tokio::test]
-    async fn what_gains_demand_is_handed_to_the_upstream_probe() {
+    async fn what_gains_need_is_handed_to_the_upstream_probe() {
         let crossed = DerivationId::now_v7();
         let gained = DerivationId::now_v7();
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
@@ -566,7 +566,7 @@ mod tests {
                         "derivation".to_owned(),
                         sea_orm::Value::from(gained.into_inner()),
                     ),
-                    ("demanded".to_owned(), sea_orm::Value::from(true)),
+                    ("wanted".to_owned(), sea_orm::Value::from(true)),
                 ])],
                 2,
             ))
@@ -577,7 +577,7 @@ mod tests {
             .into_connection();
         let (ctx, _pool, mut probes) = crate::test_ctx::ctx_with_probes(db).await;
 
-        let moved = move_demand(
+        let moved = move_need(
             &ctx,
             &[TransitionChange {
                 derivation: crossed,
@@ -595,11 +595,11 @@ mod tests {
         );
     }
 
-    /// An anchor crossing the boundary recomputes its whole pending closure, not one
-    /// hop: the source FODs under a relayed anchor were built because a one-hop
+    /// A shared build crossing the boundary updates its whole pending closure, not one
+    /// hop: the source FODs under a passed through shared build were built because a one-hop
     /// re-gate never reached them (#666).
     #[tokio::test]
-    async fn a_boundary_crossing_recomputes_the_closure_and_settles_the_queue() {
+    async fn a_boundary_crossing_updates_the_closure_and_settles_the_queue() {
         let crossed = DerivationId::now_v7();
         let lost = DerivationId::now_v7();
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
@@ -619,7 +619,7 @@ mod tests {
                         "derivation".to_owned(),
                         sea_orm::Value::from(lost.into_inner()),
                     ),
-                    ("demanded".to_owned(), sea_orm::Value::from(false)),
+                    ("wanted".to_owned(), sea_orm::Value::from(false)),
                 ])],
                 2,
             ))
@@ -630,7 +630,7 @@ mod tests {
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
 
-        let moved = move_demand(
+        let moved = move_need(
             &ctx,
             &[TransitionChange {
                 derivation: crossed,
@@ -642,14 +642,14 @@ mod tests {
         drop(ctx);
 
         assert_eq!(
-            moved.undemanded,
+            moved.unwanted,
             vec![lost],
-            "what lost its demand is reported, so the evaluations waiting on it can settle"
+            "what lost its need is reported, so the evaluations waiting on it can settle"
         );
 
         let log = crate::pool::statements(pool.into_transaction_log()).join(" ");
         assert!(log.contains("SET LOCAL work_mem"), "{log}");
-        assert!(log.contains("SET demanded ="), "{log}");
+        assert!(log.contains("SET wanted ="), "{log}");
         assert!(
             !log.contains("SELECT DISTINCT e.dependency FROM derivation_dependency"),
             "the one-hop re-gate must be gone: {log}"

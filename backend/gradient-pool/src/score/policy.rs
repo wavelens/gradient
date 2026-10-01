@@ -116,7 +116,7 @@ impl ScoringPolicy for RulePolicy {
 }
 
 /// One row of the declarative policy table: the rule and whether the policy
-/// ships it enabled. Disabled rules stay compiled, tested, and visible here so
+/// comes with it enabled. Disabled rules stay compiled, tested, and visible here so
 /// their status is an explicit decision instead of a commented-out line.
 struct RuleSpec {
     enabled: bool,
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(breakdown.rules["RescoreWaitRule"], 0.0);
     }
 
-    /// Only FairShareRule consumes project_work_share, and it ships disabled, so
+    /// Only FairShareRule consumes project_work_share, and it is shipping disabled, so
     /// the live policies must not ask the scheduler to compute the share.
     #[test]
     fn project_work_share_is_unconsumed_while_fair_share_is_disabled() {

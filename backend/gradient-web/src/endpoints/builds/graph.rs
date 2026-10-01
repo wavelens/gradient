@@ -33,13 +33,13 @@ pub(super) async fn authorize_build_opt(
         .map(|_| ())
 }
 
-/// A build_job paired with its anchor's status, for one node in the graph.
+/// A build_job paired with its shared build's status, for one node in the graph.
 struct JobNode {
     job: MBuildJob,
     status: BuildStatus,
 }
 
-/// Load the eval's build_jobs for `derivations`, each paired with its anchor's
+/// Load the eval's build_jobs for `derivations`, each paired with its shared build's
 /// status. Drives the node + edge mapping (a dep derivation resolves to the
 /// build_job the same eval holds for it).
 async fn job_nodes_for_derivations(
@@ -56,9 +56,10 @@ async fn job_nodes_for_derivations(
         .filter(CBuildJob::Derivation.is_in(derivations.to_vec()))
         .all(&state.web_db)
         .await?;
-    let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
-    let status_by_anchor: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(anchor_ids))
+    let shared_build_ids: Vec<DerivationBuildId> =
+        jobs.iter().map(|j| j.derivation_build).collect();
+    let status_by_shared_build: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.is_in(shared_build_ids))
         .all(&state.web_db)
         .await?
         .into_iter()
@@ -68,7 +69,7 @@ async fn job_nodes_for_derivations(
     Ok(jobs
         .into_iter()
         .map(|job| {
-            let status = status_by_anchor
+            let status = status_by_shared_build
                 .get(&job.derivation_build)
                 .copied()
                 .unwrap_or(BuildStatus::Queued);
@@ -111,7 +112,7 @@ struct GraphWaveResult {
 }
 
 /// Process one BFS wave: fetch build_jobs + derivations for `batch`, resolve
-/// dependency edges, and collect unvisited dependents for the next wave.
+/// dependency edges, and collect unvisited parents for the next wave.
 async fn process_graph_wave(
     state: &Arc<ServerState>,
     batch: &[BuildJobId],
@@ -123,9 +124,10 @@ async fn process_graph_wave(
         .all(&state.web_db)
         .await?;
 
-    let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
-    let status_by_anchor: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(anchor_ids))
+    let shared_build_ids: Vec<DerivationBuildId> =
+        jobs.iter().map(|j| j.derivation_build).collect();
+    let status_by_shared_build: HashMap<DerivationBuildId, BuildStatus> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.is_in(shared_build_ids))
         .all(&state.web_db)
         .await?
         .into_iter()
@@ -144,7 +146,7 @@ async fn process_graph_wave(
     let mut nodes: Vec<DependencyNode> = Vec::new();
     for job in &jobs {
         if let Some(drv) = drv_by_id.get(&job.derivation) {
-            let status = status_by_anchor
+            let status = status_by_shared_build
                 .get(&job.derivation_build)
                 .copied()
                 .unwrap_or(BuildStatus::Queued);

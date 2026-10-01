@@ -22,7 +22,7 @@ use super::{Budget, Param};
 pub enum Sql {
     Static(&'static str),
     /// A statement assembled once into a `LazyLock<String>`: borrowed, so the
-    /// hot path that runs it does not rebuild or clone it per call.
+    /// hot path running it does not rebuild or clone it per call.
     Lazy(fn() -> &'static str),
     /// A statement assembled per call. The closure is the exemplar the gate
     /// plans, so a fence is checked in generated SQL and not in a copy of it.
@@ -78,7 +78,7 @@ impl Query {
         }
     }
 
-    /// `readiness.rs:348`, the form a failure message can be clicked from.
+    /// `can_start.rs:348`, the form a failure message can be clicked from.
     pub fn location(&self) -> String {
         let file = self.file.rsplit('/').next().unwrap_or(self.file);
         format!("{file}:{}", self.line)
@@ -103,7 +103,7 @@ impl Query {
     /// Builds a statement whose text this call assembled, anchored to the
     /// exemplar that stands for its shape. A few statements bake a value into
     /// their text or grow a placeholder list per call: the exemplar is what the
-    /// gate plans, and this is what runs.
+    /// gate plans, and this is what executes.
     pub fn bind_built<S, I>(&self, sql: S, values: I) -> Statement
     where
         S: Into<String>,

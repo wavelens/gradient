@@ -66,7 +66,7 @@ pub struct GradientProtoUpstream {
     pub api_key_enc: Option<String>,
 }
 
-pub async fn gradient_proto_upstreams_for_project<C: ConnectionTrait>(
+pub async fn gradient_proto_upstream_caches_for_project<C: ConnectionTrait>(
     db: &C,
     project_id: ProjectId,
 ) -> Result<Vec<GradientProtoUpstream>> {
@@ -198,7 +198,7 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
 }
 
 /// Distinct upstream URLs reachable by any of `project_ids` (their subscribed
-/// caches' HTTP upstreams). Scopes the by-URL board metrics to the caller.
+/// caches' HTTP upstream caches). Scopes the by-URL board metrics to the caller.
 fn upstream_urls_for_projects_sql(project_list: &str) -> String {
     format!(
         "SELECT DISTINCT cu.url AS url FROM cache_upstream cu \

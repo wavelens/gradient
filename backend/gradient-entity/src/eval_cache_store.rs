@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::EvalCacheStoreId;
 
-/// A fleet-shared Nix eval-cache blob, keyed by flake fingerprint.
+/// A fleet-shared Nix eval-cache blob, per flake fingerprint.
 ///
 /// `storage_path` is the object-store key for the serialized eval-cache blob.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

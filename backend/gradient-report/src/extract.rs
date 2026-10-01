@@ -246,16 +246,16 @@ mod tests {
     }
 
     /// The manifest used to claim every table was "scoped to the evaluation",
-    /// including the anchor-scoped ones that carry other evaluations' rows.
+    /// including the shared-build-scoped ones that carry other evaluations' rows.
     #[test]
     fn the_manifest_declares_each_table_s_own_scope() {
-        let anchored = eval_scope_tables()
+        let shared_build_scoped = eval_scope_tables()
             .iter()
             .find(|s| s.name == "build_attempt")
             .expect("spec");
-        let row = manifest_row(anchored, &redactor(false, false), 7);
+        let row = manifest_row(shared_build_scoped, &redactor(false, false), 7);
 
-        assert_eq!(row.scope, anchored.scope);
+        assert_eq!(row.scope, shared_build_scoped.scope);
         assert!(row.scope.contains("other evaluations"), "{}", row.scope);
         assert_eq!(row.filter, "none", "nothing is dropped from the scope");
     }

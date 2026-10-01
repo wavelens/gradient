@@ -12,7 +12,9 @@ use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
-use gradient_core::upstream_source::{UpstreamSource, fetch_from_upstreams, substitution_sources};
+use gradient_core::upstream_source::{
+    UpstreamSource, fetch_from_upstream_caches, substitution_sources,
+};
 use gradient_sources::get_hash_from_url;
 use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
@@ -67,18 +69,19 @@ pub async fn upstream_nar(
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache_name).await?;
 
-    let upstreams = ECacheUpstream::find()
+    let upstream_caches = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
         .all(&state.web_db)
         .await?;
 
-    let sources = named_first(substitution_sources(&upstreams), upstream_id);
+    let sources = named_first(substitution_sources(&upstream_caches), upstream_id);
     if sources.is_empty() {
         return Err(WebError::not_found("Upstream"));
     }
 
     let Some(resp) =
-        fetch_from_upstreams(&sources, &upstream_nar_path(&path, query.as_deref()), None).await
+        fetch_from_upstream_caches(&sources, &upstream_nar_path(&path, query.as_deref()), None)
+            .await
     else {
         return Err(WebError::not_found("NAR in upstream"));
     };
@@ -95,7 +98,7 @@ pub async fn upstream_nar(
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
-/// Which upstreams to try for a proxied NAR, best first.
+/// Which upstream caches to try for a proxied NAR, best first.
 ///
 /// The URL names an upstream by row id, but that row is configuration: removing
 /// an upstream would otherwise permanently 404 every narinfo already handed out
@@ -231,7 +234,7 @@ mod tests {
     /// The case that broke a real substitution: the upstream row named in an
     /// already-issued narinfo was deleted. A client caches narinfo and never
     /// refetches, so 404ing here strands that path forever - the remaining
-    /// upstreams have to be tried.
+    /// upstream caches have to be tried.
     #[test]
     fn a_deleted_upstream_falls_back_to_the_rest() {
         let rows = vec![
@@ -246,9 +249,9 @@ mod tests {
 
     /// An upstream that is another Gradient cache rather than an external URL
     /// has nothing to proxy to; it must be skipped, not turned into an error
-    /// that hides the upstreams which would have served the path.
+    /// that hides the upstream caches which would have served the path.
     #[test]
-    fn upstreams_without_a_url_are_skipped() {
+    fn upstream_caches_without_a_url_are_skipped() {
         let rows = vec![
             upstream_row(1, None),
             upstream_row(2, Some("https://b.example")),
@@ -302,7 +305,7 @@ mod tests {
     }
 
     /// `cached_path.file_hash` is the only authoritative source for the URL
-    /// → store-hash mapping. The resolver returns the cached_path's store
+    /// -> store-hash mapping. The resolver returns the cached_path's store
     /// hash, which is the key the NAR blob was written under.
     #[test]
     fn resolve_returns_store_hash_from_cached_path() {

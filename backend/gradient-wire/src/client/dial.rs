@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use crate::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
 
 /// Open a WebSocket connection to `url` and wrap it in the unified
-/// `ProtoSocket` type. The caller then runs the handshake of their choice
+/// `ProtoSocket` type. The caller then starts the handshake of their choice
 /// (`session::handshake::as_peer` or `as_authority`) on the returned socket.
 pub async fn dial(url: &str) -> Result<ProtoSocket> {
     let request = url

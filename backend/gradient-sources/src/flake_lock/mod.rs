@@ -7,7 +7,7 @@
 //! Native, zero-nix `flake.lock` model and updater.
 //!
 //! Parses a `flake.lock`, bumps tracked inputs to their newest revisions with a
-//! natively recomputed `narHash`, and emits a [`Patch`] behind the
+//! natively calculated `narHash`, and emits a [`Patch`] behind the
 //! [`PatchGenerator`] trait so a future `updateScript` generator drops in
 //! without reworking consumers.
 

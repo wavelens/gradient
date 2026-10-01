@@ -85,14 +85,14 @@ pub async fn get_pending_jobs(
         .partition(|j| scope.allows(&Uuid::from(j.project)));
     let other_pending = hidden.len() as u64;
 
-    let anchors: Vec<DerivationBuildId> =
+    let shared_builds: Vec<DerivationBuildId> =
         snapshot.iter().filter_map(|j| j.derivation_build).collect();
     let evaluations: Vec<EvaluationId> = snapshot
         .iter()
         .filter(|j| j.derivation_build.is_none())
         .map(|j| j.evaluation_id)
         .collect();
-    let subjects = JobSubjects::load(&state.web_db, &anchors, &evaluations).await?;
+    let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
 
     let jobs = snapshot
         .into_iter()
@@ -141,13 +141,14 @@ pub async fn get_dispatched_jobs(
         .map(|a| (a.dispatched_job, a))
         .collect();
 
-    let anchors: Vec<DerivationBuildId> = attempts.values().map(|a| a.derivation_build).collect();
+    let shared_builds: Vec<DerivationBuildId> =
+        attempts.values().map(|a| a.derivation_build).collect();
     let evaluations: Vec<EvaluationId> = visible
         .iter()
         .filter(|j| j.kind == DispatchedJobKind::Eval)
         .map(|j| j.evaluation_id)
         .collect();
-    let subjects = JobSubjects::load(&state.web_db, &anchors, &evaluations).await?;
+    let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
 
     let mut jobs = Vec::with_capacity(visible.len());
     for j in visible {
@@ -189,7 +190,7 @@ pub struct DecisionCandidateView {
 }
 
 #[derive(Serialize)]
-pub struct DispatchDecisionView {
+pub struct AssignDecisionView {
     pub at: String,
     pub worker_id: String,
     pub kind: i16,
@@ -200,16 +201,16 @@ pub struct DispatchDecisionView {
 /// Recent dispatch decisions with every scored candidate, including rejected and
 /// negative ones the dispatcher passed over. Superuser-only: candidates span all
 /// projects, and the view exists to tune cross-project scoring rules (#419).
-pub async fn get_dispatch_decisions(
+pub async fn get_assign_decisions(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-) -> WebResult<Json<BaseResponse<Vec<DispatchDecisionView>>>> {
+) -> WebResult<Json<BaseResponse<Vec<AssignDecisionView>>>> {
     require_superuser(&user)?;
 
     let decisions = scheduler.recent_decisions().await;
     let candidates = decisions.iter().flat_map(|d| &d.candidates);
-    let anchors: Vec<DerivationBuildId> = candidates
+    let shared_builds: Vec<DerivationBuildId> = candidates
         .clone()
         .filter_map(|c| c.derivation_build)
         .collect();
@@ -217,11 +218,11 @@ pub async fn get_dispatch_decisions(
         .filter(|c| c.derivation_build.is_none())
         .map(|c| c.evaluation_id)
         .collect();
-    let subjects = JobSubjects::load(&state.web_db, &anchors, &evaluations).await?;
+    let subjects = JobSubjects::load(&state.web_db, &shared_builds, &evaluations).await?;
 
     let views = decisions
         .into_iter()
-        .map(|d| DispatchDecisionView {
+        .map(|d| AssignDecisionView {
             at: d.at.and_utc().to_rfc3339(),
             worker_id: d.worker_id,
             kind: d.kind,
@@ -298,13 +299,13 @@ pub struct JobDerivationView {
     /// Per-eval build identity: the id `GET /builds/{build}` takes. `None` once
     /// the evaluation's `build_job` row is gone.
     pub build: Option<Uuid>,
-    /// Scheduler anchor, handed to the worker as `BuildSpec.build_id`.
+    /// Scheduler shared build, handed to the worker as `BuildSpec.build_id`.
     pub derivation_build: Uuid,
     pub drv_path: String,
     pub pname: Option<String>,
 }
 
-/// The derivations the scheduler recorded on the job, keyed by anchor.
+/// The derivations the scheduler recorded on the job, per shared build.
 fn snapshot_derivations(
     job_context: &serde_json::Value,
 ) -> Vec<(DerivationBuildId, String, Option<String>)> {
@@ -326,21 +327,21 @@ fn snapshot_derivations(
         .unwrap_or_default()
 }
 
-/// The scheduler scores and dispatches anchors (`derivation_build`), but the API
-/// navigates builds by their per-eval `build_job` id, so every anchor leaving
+/// The scheduler scores and dispatches shared builds (`derivation_build`), but the API
+/// navigates builds by their per-eval `build_job` id, so every shared build leaving
 /// this endpoint is resolved against the job's evaluation first.
 async fn resolve_build_jobs<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-    anchors: &[DerivationBuildId],
+    shared_builds: &[DerivationBuildId],
 ) -> HashMap<DerivationBuildId, BuildJobId> {
-    if anchors.is_empty() {
+    if shared_builds.is_empty() {
         return HashMap::new();
     }
 
     EBuildJob::find()
         .filter(CBuildJob::Evaluation.eq(evaluation))
-        .filter(CBuildJob::DerivationBuild.is_in(anchors.to_vec()))
+        .filter(CBuildJob::DerivationBuild.is_in(shared_builds.to_vec()))
         .all(db)
         .await
         .unwrap_or_default()
@@ -355,14 +356,14 @@ async fn job_derivations<C: ConnectionTrait>(
     job_context: &serde_json::Value,
 ) -> Vec<JobDerivationView> {
     let entries = snapshot_derivations(job_context);
-    let anchors: Vec<DerivationBuildId> = entries.iter().map(|(a, _, _)| *a).collect();
-    let builds = resolve_build_jobs(db, evaluation, &anchors).await;
+    let shared_builds: Vec<DerivationBuildId> = entries.iter().map(|(a, _, _)| *a).collect();
+    let builds = resolve_build_jobs(db, evaluation, &shared_builds).await;
 
     entries
         .into_iter()
-        .map(|(anchor, drv_path, pname)| JobDerivationView {
-            build: builds.get(&anchor).copied().map(Into::into),
-            derivation_build: anchor.into(),
+        .map(|(shared_build, drv_path, pname)| JobDerivationView {
+            build: builds.get(&shared_build).copied().map(Into::into),
+            derivation_build: shared_build.into(),
             drv_path,
             pname,
         })
@@ -389,7 +390,7 @@ pub struct DispatchedJobDetail {
     /// Per-eval build identity, usable with `GET /builds/{build}`. `None` for
     /// eval jobs and for builds whose evaluation has been collected.
     pub build_id: Option<Uuid>,
-    /// The scheduler anchor this job was dispatched for.
+    /// The scheduler shared build this job was dispatched for.
     pub derivation_build_id: Option<Uuid>,
     pub derivations: Vec<JobDerivationView>,
     pub evaluation_id: Uuid,
@@ -432,11 +433,13 @@ pub async fn get_dispatched_job(
 
         let derivations = job_derivations(&state.web_db, c.evaluation_id, &c.job_context).await;
         let build_id = match c.derivation_build {
-            Some(anchor) => resolve_build_jobs(&state.web_db, c.evaluation_id, &[anchor])
-                .await
-                .get(&anchor)
-                .copied()
-                .map(Into::into),
+            Some(shared_build) => {
+                resolve_build_jobs(&state.web_db, c.evaluation_id, &[shared_build])
+                    .await
+                    .get(&shared_build)
+                    .copied()
+                    .map(Into::into)
+            }
             None => None,
         };
 
@@ -491,11 +494,12 @@ pub async fn get_dispatched_job(
         .ok()
         .flatten();
 
-    let anchor_id: Option<DerivationBuildId> = this_attempt.as_ref().map(|a| a.derivation_build);
-    let build_id: Option<Uuid> = match anchor_id {
-        Some(anchor) => resolve_build_jobs(&state.web_db, j.evaluation_id, &[anchor])
+    let shared_build_id: Option<DerivationBuildId> =
+        this_attempt.as_ref().map(|a| a.derivation_build);
+    let build_id: Option<Uuid> = match shared_build_id {
+        Some(shared_build) => resolve_build_jobs(&state.web_db, j.evaluation_id, &[shared_build])
             .await
-            .get(&anchor)
+            .get(&shared_build)
             .copied()
             .map(Into::into),
         None => None,
@@ -503,27 +507,29 @@ pub async fn get_dispatched_job(
     let derivations = job_derivations(&state.web_db, j.evaluation_id, &j.job_context).await;
     let phases = job_phases(&state.web_db, j.id).await;
 
-    let pname = match anchor_id {
+    let pname = match shared_build_id {
         Some(aid) => {
-            let anchor = EDerivationBuild::find_by_id(aid)
+            let shared_build = EDerivationBuild::find_by_id(aid)
                 .one(&state.web_db)
                 .await
                 .ok()
                 .flatten();
-            match anchor {
-                Some(anchor) => gradient_entity::derivation::Entity::find_by_id(anchor.derivation)
-                    .one(&state.web_db)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|d| d.pname),
+            match shared_build {
+                Some(shared_build) => {
+                    gradient_entity::derivation::Entity::find_by_id(shared_build.derivation)
+                        .one(&state.web_db)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|d| d.pname)
+                }
                 None => None,
             }
         }
         None => None,
     };
 
-    let previous_attempts = match anchor_id {
+    let previous_attempts = match shared_build_id {
         Some(aid) => build_attempt::Entity::find()
             .filter(build_attempt::Column::DerivationBuild.eq(aid))
             .order_by_asc(build_attempt::Column::CreatedAt)
@@ -561,7 +567,7 @@ pub async fn get_dispatched_job(
         }),
         phases,
         build_id,
-        derivation_build_id: anchor_id.map(Into::into),
+        derivation_build_id: shared_build_id.map(Into::into),
         derivations,
         evaluation_id: j.evaluation_id.into(),
         evaluation: eval_job_evaluation(&state.web_db, i16::from(j.kind), j.evaluation_id).await?,
@@ -840,13 +846,13 @@ const BUILD_TIME_MS: &str = "coalesce(m.build_time_ms, \
 const BUILD_IS_TIMED: &str = "(m.derivation IS NOT NULL \
      OR (ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL))";
 
-fn build_time_joins(anchor: &str) -> String {
+fn build_time_joins(shared_build: &str) -> String {
     format!(
-        "LEFT JOIN metric m ON m.derivation = {anchor}.derivation \
+        "LEFT JOIN metric m ON m.derivation = {shared_build}.derivation \
          LEFT JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
            FROM build_attempt ba2 \
-           WHERE ba2.derivation_build = {anchor}.derivation_build AND m.derivation IS NULL \
+           WHERE ba2.derivation_build = {shared_build}.derivation_build AND m.derivation IS NULL \
            ORDER BY ba2.created_at DESC LIMIT 1 \
          ) ba ON true"
     )
@@ -869,7 +875,7 @@ fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String 
     }
 
     format!(
-        "WITH {metric}, anchor AS ( \
+        "WITH {metric}, shared_build AS ( \
            SELECT DISTINCT ON (b.id) bj.id, pr.project, d.name, b.id AS derivation_build, b.derivation \
            FROM build_job bj \
            JOIN derivation_build b ON b.id = bj.derivation_build \
@@ -881,7 +887,7 @@ fn expensive_jobs_sql(window_days: i64, project_filter: Option<&str>) -> String 
          ), ranked AS ( \
            SELECT a.id, a.project, a.name, {BUILD_TIME_MS} AS build_time_ms, \
            coalesce(m.worker_id, dj.worker_id) AS worker \
-           FROM anchor a {timing} \
+           FROM shared_build a {timing} \
            LEFT JOIN dispatched_job dj ON dj.id = ba.dispatched_job \
            WHERE {BUILD_IS_TIMED} \
            ORDER BY build_time_ms DESC LIMIT 20 \
@@ -1129,11 +1135,11 @@ pub struct TopProjectBuildTime {
 }
 
 /// A build shared by several projects counts once toward each of them. The
-/// projects are looked up per completed anchor, so the window's anchors drive
-/// the plan rather than a scan of every anchor joined to every job naming it.
+/// projects are looked up per completed shared build, so the window's shared builds drive
+/// the plan rather than a scan of every shared build joined to every job naming it.
 fn top_projects_by_buildtime_sql(window_days: i64) -> String {
     format!(
-        "WITH {metric}, anchor AS ( \
+        "WITH {metric}, shared_build AS ( \
            SELECT b.id AS derivation_build, b.derivation, named.project \
            FROM derivation_build b \
            CROSS JOIN LATERAL ( \
@@ -1146,7 +1152,7 @@ fn top_projects_by_buildtime_sql(window_days: i64) -> String {
          ) \
          SELECT a.project, p.name AS project_name, \
          sum({BUILD_TIME_MS})::bigint AS total, count(*)::bigint AS cnt \
-         FROM anchor a \
+         FROM shared_build a \
          JOIN project p ON p.id = a.project {timing} \
          WHERE {BUILD_IS_TIMED} \
          GROUP BY a.project, p.name ORDER BY total DESC LIMIT 15",
@@ -1752,18 +1758,22 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_derivations_reads_the_scheduler_anchor_ids() {
-        let anchor = DerivationBuildId::now_v7();
+    fn snapshot_derivations_reads_the_scheduler_shared_build_ids() {
+        let shared_build = DerivationBuildId::now_v7();
         let ctx = serde_json::json!({
             "derivations": [
-                { "build_id": anchor.to_string(), "drv_path": "aaa-curl.drv", "pname": "curl" },
+                { "build_id": shared_build.to_string(), "drv_path": "aaa-curl.drv", "pname": "curl" },
                 { "build_id": "not-a-uuid", "drv_path": "bbb-nope.drv", "pname": null },
             ]
         });
 
         assert_eq!(
             snapshot_derivations(&ctx),
-            vec![(anchor, "aaa-curl.drv".to_string(), Some("curl".to_string()))]
+            vec![(
+                shared_build,
+                "aaa-curl.drv".to_string(),
+                Some("curl".to_string())
+            )]
         );
     }
 
@@ -1866,7 +1876,7 @@ mod tests {
                 && sql.contains("WHERE bj.derivation_build = b.id"),
             "sql = {sql}"
         );
-        assert!(sql.contains("FROM anchor a"), "sql = {sql}");
+        assert!(sql.contains("FROM shared_build a"), "sql = {sql}");
         assert!(!sql.contains("count(*) FROM build_job"), "sql = {sql}");
     }
 

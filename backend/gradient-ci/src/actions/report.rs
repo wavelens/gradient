@@ -8,7 +8,7 @@ use super::matchers::requested_actions_for;
 use crate::context::CiContext;
 use crate::{parse_owner_repo, reporting};
 use anyhow::{Context, Result, anyhow};
-use gradient_forge::reporter::{CiReport, CiStatus};
+use gradient_git_host::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
     BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EProject, ETask,
@@ -70,7 +70,7 @@ fn check_run_id_for_context(eval: &gradient_types::MEvaluation, context: &str) -
 
 /// Returns `Ok(None)` when the event is a per-build status update for a
 /// build that has no `entry_point` row - those are intermediate dependency
-/// builds, not user-visible CI targets, so we skip the forge POST.
+/// builds, not user-visible CI targets, so we skip the Git host POST.
 pub(super) async fn build_ci_report_from_payload(
     ctx: &CiContext,
     event: &str,
@@ -100,7 +100,7 @@ pub(super) async fn build_ci_report_from_payload(
     // `build_id` takes precedence over `evaluation_id` even when both are
     // present: the build-status dispatch (CiStatusReactor::on_build_status_changed)
     // emits a payload carrying BOTH so downstream actions can correlate the
-    // build_job to its eval, but the forge reporter must load the build_job so
+    // build_job to its eval, but the Git host reporter must load the build_job so
     // it can pick the per-build check context. Falling back to the
     // evaluation-only path here would land every build event on the
     // Evaluation check.
@@ -166,7 +166,7 @@ pub(super) async fn build_ci_report_from_payload(
         None => Vec::new(),
     };
 
-    // Only builds linked to a declared entry point get their own forge check.
+    // Only builds linked to a declared entry point get their own Git host check.
     // Intermediate dependency builds (e.g. `__assert_fail-builder`) share the
     // entry-point check's status implicitly via the eval roll-up; emitting
     // one check per derivation would spam the PR with per-dependency noise.

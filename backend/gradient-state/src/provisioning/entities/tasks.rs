@@ -407,9 +407,9 @@ pub(crate) fn build_trigger_config(
                 Some(id) => *id,
                 None if outbound.contains_key(name) => anyhow::bail!(
                     "integration '{name}' is configured as `outbound`, but reporter triggers \
-                     require an `inbound` integration to receive forge webhooks. Declare an \
+                     require an `inbound` integration to receive Git host webhooks. Declare an \
                      `inbound` integration and reference outbound integrations via the task's \
-                     `outbound_integration` or a `forge_status_report` action."
+                     `outbound_integration` or a `git_host_status_report` action."
                 ),
                 None => anyhow::bail!("unknown integration: {name}"),
             };
@@ -541,10 +541,10 @@ pub(crate) fn build_action_config(
             };
             Ok(ActionConfig::SendWebRequest { url, token })
         }
-        "forge_status_report" => {
+        "git_host_status_report" => {
             if !a.events.is_empty() {
                 return Err(format!(
-                    "action '{}': forge_status_report cannot carry custom events",
+                    "action '{}': git_host_status_report cannot carry custom events",
                     a.name
                 )
                 .into());
@@ -558,7 +558,7 @@ pub(crate) fn build_action_config(
                     a.name, int_name
                 )
             })?;
-            Ok(ActionConfig::ForgeStatusReport { integration_id })
+            Ok(ActionConfig::GitHostStatusReport { integration_id })
         }
         "open_pr" => {
             let int_name = want("integration")?
@@ -606,7 +606,7 @@ pub(crate) fn build_action_config(
             })
         }
         other => Err(format!(
-            "action '{}' has invalid type '{}': expected send_mail/send_web_request/forge_status_report/open_pr",
+            "action '{}' has invalid type '{}': expected send_mail/send_web_request/git_host_status_report/open_pr",
             a.name, other
         )
         .into()),
@@ -893,13 +893,13 @@ mod action_helper_tests {
     }
 
     #[test]
-    fn build_forge_status_report_resolves_integration() {
+    fn build_git_host_status_report_resolves_integration() {
         let int_id = IntegrationId::new(Uuid::nil());
         let mut outbound = HashMap::new();
         outbound.insert("gitea-prod".to_string(), int_id);
         let a = StateAction {
             name: "status".into(),
-            action_type: "forge_status_report".into(),
+            action_type: "git_host_status_report".into(),
             active: true,
             events: vec![],
             config: serde_json::json!({ "integration": "gitea-prod" }),
@@ -907,17 +907,17 @@ mod action_helper_tests {
         let cfg = build_action_config(&a, "web", &outbound, true, &key()).unwrap();
         assert_eq!(
             cfg,
-            ActionConfig::ForgeStatusReport {
+            ActionConfig::GitHostStatusReport {
                 integration_id: int_id
             }
         );
     }
 
     #[test]
-    fn build_forge_status_report_errors_on_unknown_integration() {
+    fn build_git_host_status_report_errors_on_unknown_integration() {
         let a = StateAction {
             name: "status".into(),
-            action_type: "forge_status_report".into(),
+            action_type: "git_host_status_report".into(),
             active: true,
             events: vec![],
             config: serde_json::json!({ "integration": "missing" }),
@@ -927,13 +927,13 @@ mod action_helper_tests {
     }
 
     #[test]
-    fn build_forge_status_report_rejects_events() {
+    fn build_git_host_status_report_rejects_events() {
         let int_id = IntegrationId::new(Uuid::nil());
         let mut outbound = HashMap::new();
         outbound.insert("gh".to_string(), int_id);
         let a = StateAction {
             name: "status".into(),
-            action_type: "forge_status_report".into(),
+            action_type: "git_host_status_report".into(),
             active: true,
             events: vec!["build.completed".into()],
             config: serde_json::json!({ "integration": "gh" }),

@@ -24,7 +24,7 @@ pub(crate) fn lookup_id<T: Copy>(
         .ok_or_else(|| format!("{} '{}' not found", kind, name).into())
 }
 
-/// Loads the project's inbound integrations keyed by name.
+/// Loads the project's inbound integrations per name.
 ///
 /// `reporter_push` and `reporter_pull_request` triggers reference an inbound
 /// integration by name. Auto-managed GitHub App rows are seeded once per project as

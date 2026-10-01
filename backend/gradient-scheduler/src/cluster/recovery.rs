@@ -97,7 +97,7 @@ impl Scheduler {
             ));
         }
         self.apply(dispositions).await;
-        self.kick_dispatch();
+        self.kick_assigner();
 
         Ok(())
     }

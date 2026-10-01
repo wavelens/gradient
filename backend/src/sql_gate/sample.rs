@@ -24,7 +24,7 @@ use uuid::Uuid;
 /// spell out on its own. Array kinds take the declared width as `$1`. Every draw
 /// is ordered: heap order moves with each update, and an unordered draw measured a
 /// different evaluation, 100x apart in size, from one run to the next. A single
-/// evaluation is the one naming the most anchors, the worst case a statement
+/// evaluation is the one naming the most shared builds, the worst case a statement
 /// scoped to one must fit.
 pub fn draw_sql(param: &Param) -> Option<&'static str> {
     Some(match param {
@@ -48,8 +48,8 @@ pub fn draw_sql(param: &Param) -> Option<&'static str> {
         Param::CachedPathHashes(_) => {
             "SELECT array_agg(hash) AS v FROM (SELECT hash FROM cached_path ORDER BY id LIMIT $1) s"
         }
-        Param::AnchorId => "SELECT id AS v FROM derivation_build ORDER BY id LIMIT 1",
-        Param::AnchorIds(_) => {
+        Param::SharedBuildId => "SELECT id AS v FROM derivation_build ORDER BY id LIMIT 1",
+        Param::SharedBuildIds(_) => {
             "SELECT array_agg(id) AS v FROM (SELECT id FROM derivation_build ORDER BY id LIMIT $1) s"
         }
         Param::EvaluationId => {
@@ -103,7 +103,7 @@ fn shape(param: &Param) -> Option<Shape> {
     Some(match param {
         Param::DerivationId
         | Param::CachedPathId
-        | Param::AnchorId
+        | Param::SharedBuildId
         | Param::EvaluationId
         | Param::EntryPointId
         | Param::ProjectId
@@ -114,7 +114,7 @@ fn shape(param: &Param) -> Option<Shape> {
         | Param::IntegrationId => Shape::Uuid,
         Param::DerivationIds(n)
         | Param::OrphanDerivationIds(n)
-        | Param::AnchorIds(n)
+        | Param::SharedBuildIds(n)
         | Param::EvaluationIds(n)
         | Param::EntryPointIds(n)
         | Param::CacheIds(n) => Shape::Uuids(*n),
@@ -228,8 +228,8 @@ mod tests {
             Param::CachedPathId,
             Param::CachedPathHash,
             Param::CachedPathHashes(4),
-            Param::AnchorId,
-            Param::AnchorIds(4),
+            Param::SharedBuildId,
+            Param::SharedBuildIds(4),
             Param::EvaluationId,
             Param::EvaluationIds(4),
             Param::EntryPointId,

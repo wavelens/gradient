@@ -5,7 +5,7 @@
  */
 
 //! Thread-safe EWMA accumulators for passively-measured worker throughput.
-//! `NETWORK` (Mbps, from relayed and presigned NAR transfers) and `DISK` (MB/s, from per-build cgroup
+//! `NETWORK` (Mbps, from passed-through and presigned NAR transfers) and `DISK` (MB/s, from per-build cgroup
 //! io.stat) are read by the heartbeat and reported via `WorkerMetrics`.
 
 use std::sync::atomic::{AtomicU64, Ordering};

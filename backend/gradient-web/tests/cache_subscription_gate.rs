@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the permission gate on project→cache subscription.
+//! Integration tests for the permission gate on project->cache subscription.
 //!
 //! POST /projects/{project}/subscribe/{cache} requires ManageSubscriptions on
 //! the project and that the cache be visible to the caller. Holding
@@ -172,7 +172,7 @@ fn subscribe_requires_project_manage_subscriptions() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // User has ViewProject-only on the project (no ManageSubscriptions) → 403.
+        // User has ViewProject-only on the project (no ManageSubscriptions) -> 403.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![project()]])
             .append_query_results([vec![view_only_project_membership()]])
@@ -209,14 +209,14 @@ fn subscribe_without_cache_permission_records_a_request() {
             .append_query_results([vec![project()]])
             .append_query_results([vec![admin_project_membership()]])
             .append_query_results([vec![admin_project_role()]])
-            // load_cache Readable: cache → membership (visible as a member)
+            // load_cache Readable: cache -> membership (visible as a member)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![view_cache_member()]])
-            // already-subscribed check → empty
+            // already-subscribed check -> empty
             .append_query_results([Vec::<project_cache::Model>::new()])
-            // pending-request check → empty
+            // pending-request check -> empty
             .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-            // has_cache_permission: membership → role (View, so no approval right)
+            // has_cache_permission: membership -> role (View, so no approval right)
             .append_query_results([vec![view_cache_member()]])
             .append_query_results([vec![view_cache_role()]])
             // INSERT cache_subscription_request
@@ -225,7 +225,7 @@ fn subscribe_without_cache_permission_records_a_request() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // notify_cache_admins: admin lookup → empty
+            // notify_cache_admins: admin lookup -> empty
             .append_query_results([Vec::<cache_user::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
@@ -261,14 +261,14 @@ fn subscribe_succeeds_when_both_granted() {
             .append_query_results([vec![project()]])
             .append_query_results([vec![admin_project_membership()]])
             .append_query_results([vec![admin_project_role()]])
-            // load_cache Readable: cache → membership
+            // load_cache Readable: cache -> membership
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_cache_member()]])
-            // already-subscribed check → empty
+            // already-subscribed check -> empty
             .append_query_results([Vec::<project_cache::Model>::new()])
-            // pending-request check → empty
+            // pending-request check -> empty
             .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-            // has_cache_permission: membership → role (Admin, so subscribe directly)
+            // has_cache_permission: membership -> role (Admin, so subscribe directly)
             .append_query_results([vec![admin_cache_member()]])
             .append_query_results([vec![admin_cache_role()]])
             // insert project_cache row
@@ -277,9 +277,9 @@ fn subscribe_succeeds_when_both_granted() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // unpark_no_cache_for_project: tasks query → empty (short-circuits)
+            // unpark_no_cache_for_project: tasks query -> empty (short-circuits)
             .append_query_results([Vec::<gradient_entity::task::Model>::new()])
-            // enqueue_backfill_signatures: derivations query → empty (short-circuits)
+            // enqueue_backfill_signatures: derivations query -> empty (short-circuits)
             .append_query_results([Vec::<gradient_entity::derivation::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
@@ -317,11 +317,11 @@ fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
             .append_query_results([vec![admin_project_role()]])
             // load_cache Readable: public, so no membership lookup
             .append_query_results([vec![cache_row(true)]])
-            // already-subscribed check → empty
+            // already-subscribed check -> empty
             .append_query_results([Vec::<project_cache::Model>::new()])
-            // pending-request check → empty
+            // pending-request check -> empty
             .append_query_results([Vec::<cache_subscription_request::Model>::new()])
-            // has_cache_permission: no cache_user row → false
+            // has_cache_permission: no cache_user row -> false
             .append_query_results([Vec::<cache_user::Model>::new()])
             // INSERT cache_subscription_request
             .append_query_results([vec![pending]])
@@ -329,7 +329,7 @@ fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // notify_cache_admins: admin lookup → empty
+            // notify_cache_admins: admin lookup -> empty
             .append_query_results([Vec::<cache_user::Model>::new()]);
 
         let server = make_test_server(db.into_connection());

@@ -112,7 +112,7 @@ impl EvalWorker {
             command.env(k, v);
         }
 
-        // SAFETY: `pre_exec` runs in the forked child before `exec`, so its body
+        // SAFETY: `pre_exec` executes in the forked child before `exec`, so its body
         // must be async-signal-safe; it only builds an `rlimit` and calls
         // `setrlimit`, both of which are signal-safe.
         #[cfg(unix)]

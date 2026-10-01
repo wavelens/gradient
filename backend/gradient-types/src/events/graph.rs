@@ -9,14 +9,14 @@ use crate::ids::{CachedPathId, EvaluationId, TaskId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Ingested {
+pub struct Recorded {
     pub evaluation_id: EvaluationId,
     pub task: Option<TaskId>,
     pub walked: usize,
     pub entry_points: usize,
     pub skipped: bool,
 }
-firehose!(Ingested, "graph.ingested");
+firehose!(Recorded, "graph.recorded");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NarCommitted {

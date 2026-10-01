@@ -65,7 +65,7 @@ const FIXTURE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 #[test]
 fn narinfo_served_from_db_without_daemon_probe() {
     // Build the runtime first so `create_router` (which spawns scheduler tasks)
-    // runs inside a live Tokio context.
+    // executes inside a live Tokio context.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -136,10 +136,10 @@ async fn narinfo_served_from_db_inner() {
     // Query order driven by CacheContext::load + get_nar_by_hash. Derivations
     // are global, so access is gated on the cached_path_signature row for this
     // cache, not a derivation->project subscription check:
-    //   0. ECache::find (by name)              → cache_row
-    //   1. EDerivationOutput::find (by hash)   → drv_output_row
-    //   2. ECachedPath::find (by hash)         → cached_path_row
-    //   3. ECachedPathSignature::find          → cached_path_sig_row
+    //   0. ECache::find (by name)              -> cache_row
+    //   1. EDerivationOutput::find (by hash)   -> drv_output_row
+    //   2. ECachedPath::find (by hash)         -> cached_path_row
+    //   3. ECachedPathSignature::find          -> cached_path_sig_row
     //   4. references_for_hash (cached_path.references) -> no references
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
@@ -176,7 +176,7 @@ async fn narinfo_served_from_db_inner() {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -185,10 +185,10 @@ async fn narinfo_served_from_db_inner() {
                 bytes: u64::MAX,
             },
         ),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
 
@@ -333,7 +333,7 @@ async fn narinfo_unsigned_inner() {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -342,10 +342,10 @@ async fn narinfo_unsigned_inner() {
                 bytes: u64::MAX,
             },
         ),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
 

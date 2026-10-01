@@ -4,22 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Anchor transitions that are not the readiness promotion: the substitution of
-//! anchors an evaluation found whole in our cache, the failure cascade and its
+//! Shared build transitions that are not the can-start state promotion: the substitution of
+//! shared builds an evaluation found complete in our cache, the failure cascade and its
 //! eval-scoped sweep, the requeue thaws, and the dispatch gate. Promotion itself
-//! lives in [`crate::readiness`], which owns the `fetchable` / `unready_deps`
+//! lives in [`crate::can_start`], which owns the `fetchable` / `blocking_deps`
 //! counters every gate is built from.
 //!
-//! The dispatch gate reads the queue invariant instead of re-deriving readiness:
-//! `Queued` means [`crate::graph_sql::gates_predicate`] held when the anchor was
+//! The dispatch gate reads the queue invariant instead of re-deriving can-start state:
+//! `Queued` means [`crate::graph_sql::gates_predicate`] held when the shared build was
 //! promoted, and the event that breaks one of those gates un-promotes the row.
 //! Re-evaluating the gates per dispatch candidate is the per-row work #591 removed.
 
 use crate::graph_sql::{
     ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte_body,
-    eval_closure_cte, eval_closure_cte_body, unrelayed_predicate,
+    eval_closure_cte, eval_closure_cte_body, non_passthrough_predicate,
 };
-use crate::reconcile::ReconcileScope;
+use crate::repair::RepairScope;
 use crate::status::TransitionChange;
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
@@ -34,7 +34,7 @@ const CASCADE_TARGET: [BuildStatus; 3] = [
 ];
 
 /// Collect the `derivation` column of a `RETURNING derivation` result set. The
-/// bulk transitions return the anchors they actually moved so the caller can fan
+/// bulk transitions return the shared builds they actually moved so the caller can fan
 /// the CI status reactor out over exactly those (and only those) builds.
 pub(crate) fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> {
     rows.into_iter()
@@ -46,7 +46,7 @@ pub(crate) fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> 
 /// Collect `RETURNING db.derivation, old.status AS from_status, db.status AS
 /// to_status` rows into the typed changes the effects emitter consumes. `old` is
 /// Postgres 18's pre-update row, which a self-join used to fetch at the price of
-/// a sequential scan once a statement moved many anchors.
+/// a sequential scan once a statement moved many shared builds.
 pub(crate) fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
     rows.into_iter()
         .filter_map(|r| {
@@ -79,23 +79,23 @@ pub(crate) fn transitions_from(
         .collect()
 }
 
-/// Anchors an evaluation found whole in our cache move from `Created` to
-/// `Substituted`; a new anchor is inserted that way, this catches the ones a
+/// Shared builds an evaluation found complete in our cache move from `Created` to
+/// `Substituted`; a new shared build is inserted that way, this catches the ones a
 /// prior evaluation left pending. Returns the transitions for the effects
 /// emitter.
-pub async fn substitute_created_anchors<C: ConnectionTrait>(
+pub async fn substitute_created_shared_builds<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
     let rows = db
-        .query_all_raw(SUBSTITUTE_CREATED_ANCHORS.bind([ids.into()]))
+        .query_all_raw(SUBSTITUTE_CREATED_SHARED_BUILDS.bind([ids.into()]))
         .await?;
 
     Ok(returned_transitions(rows))
 }
 
-fn substitute_created_anchors_sql() -> String {
+fn substitute_created_shared_builds_sql() -> String {
     format!(
         r#"
         UPDATE derivation_build AS db
@@ -110,7 +110,7 @@ fn substitute_created_anchors_sql() -> String {
 }
 
 crate::sql_fn! {
-    SUBSTITUTE_CREATED_ANCHORS = substitute_created_anchors_sql,
+    SUBSTITUTE_CREATED_SHARED_BUILDS = substitute_created_shared_builds_sql,
         params = [DerivationIds(64)];
 }
 
@@ -118,10 +118,10 @@ fn cascade_dependency_failed_sql() -> String {
     let cte = format!(
         "WITH RECURSIVE {}",
         bounded_dependency_closure_cte_body(
-            "dependents",
+            "wanted_by",
             "SELECT $1::uuid",
-            ClosureDirection::Dependents,
-            &unrelayed_predicate("e.derivation"),
+            ClosureDirection::WantedBy,
+            &non_passthrough_predicate("e.derivation"),
             None,
         )
     );
@@ -131,7 +131,7 @@ fn cascade_dependency_failed_sql() -> String {
     UPDATE derivation_build AS db
     SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
     WHERE db.status IN ({cascade_target})
-      AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
+      AND db.derivation IN (SELECT derivation FROM wanted_by WHERE derivation <> $1)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#,
         dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
@@ -146,9 +146,9 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
+/// Recursively mark every parent of `failed_derivation` `DependencyFailed`.
 /// Walks the global `derivation_dependency` graph upward: any non-terminal
-/// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
+/// shared build (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
 /// never build, so it is failed in one recursive statement. Returns the changes
 /// it made so the caller can feed [`crate::status::emit_transition_effects`].
 pub async fn cascade_dependency_failed<C>(
@@ -173,19 +173,19 @@ where
 
 /// Proactive mirror of [`cascade_dependency_failed`], bounded to one evaluation's
 /// dependency closure. The reactive cascade fires only on a fresh terminal-failure
-/// *transition*, so it cannot reach an anchor that becomes non-terminal **after**
-/// its dependency already failed: [`requeue_failed_anchors`] /
-/// [`requeue_failed_closure`] thaw a dependent back to `Created` without
+/// *transition*, so it cannot reach a shared build that becomes non-terminal **after**
+/// its dependency already failed: [`requeue_failed_shared_builds`] /
+/// [`requeue_failed_closure`] thaw a parent back to `Created` without
 /// re-checking its (still-failed) dependency, and a concurrent eval can re-fail a
-/// dependency after the dependent was thawed. Such a dependent can never build, yet
+/// dependency after the parent was thawed. Such a parent can never build, yet
 /// sits `Created`/`Queued`/`FailedTransient` forever - its dependency's failure keeps
-/// `unready_deps` above zero, so it is never promoted (or is un-promoted again if it
+/// `blocking_deps` above zero, so it is never promoted (or is un-promoted again if it
 /// was), and `check_evaluation_done` never finalizes its evaluation. This walks
-/// `derivation_dependency` upward from every terminal-failed anchor in the closure and fails each reachable non-terminal anchor in one
+/// `derivation_dependency` upward from every terminal-failed shared build in the closure and fails each reachable non-terminal shared build in one
 /// statement (the recursive term traverses the graph structurally, so a whole
 /// poisoned subtree converges per pass). Returns the changes it made so the caller
 /// can fan out the effects and finalize the now-settled evaluations.
-pub async fn reconcile_dependency_failed<C>(
+pub async fn repair_dependency_failed<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
 ) -> Result<Vec<TransitionChange>, DbErr>
@@ -194,39 +194,37 @@ where
 {
     let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
-        .query_all_raw(
-            DEPENDENCY_FAILED_RECONCILE.bind([Value::Uuid(Some(evaluation.into_inner()))]),
-        )
+        .query_all_raw(DEPENDENCY_FAILED_REPAIR.bind([Value::Uuid(Some(evaluation.into_inner()))]))
         .await?;
     walk.commit().await?;
 
     Ok(returned_transitions(rows))
 }
 
-/// Recursive upward walk from every terminal-failed anchor in the evaluation's
-/// closure that fails each reachable non-terminal anchor. Mirrors the reactive
+/// Recursive upward walk from every terminal-failed shared build in the evaluation's
+/// closure that fails each reachable non-terminal shared build. Mirrors the reactive
 /// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted`, which
 /// is retried, not permanent). The failed roots are excluded from the UPDATE by the
 /// cascade-target predicate, so the sweep is idempotent. The seed, the walk and the
-/// UPDATE are all bounded to the eval closure ($1): this runs right after the
+/// UPDATE are all bounded to the eval closure ($1): this executes right after the
 /// requeue thaw, on an event, and re-fails that eval's own thawed victims without
 /// ever scanning the whole table.
-fn dependency_failed_reconcile_sql() -> String {
+fn dependency_failed_repair_sql() -> String {
     let dependency_failed = status_sql::build(BuildStatus::DependencyFailed);
     let cascade_target = status_sql::build_in(&CASCADE_TARGET);
     let terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE);
     let prelude = format!(
-        "WITH RECURSIVE {closure},\n    {dependents}",
+        "WITH RECURSIVE {closure},\n    {wanted_by}",
         closure = eval_closure_cte_body(),
-        dependents = bounded_dependency_closure_cte_body(
-            "dependents",
+        wanted_by = bounded_dependency_closure_cte_body(
+            "wanted_by",
             &format!(
                 "SELECT derivation FROM derivation_build \
                  WHERE status IN ({terminal_failure}) \
                    AND derivation IN (SELECT derivation FROM closure)"
             ),
-            ClosureDirection::Dependents,
-            &unrelayed_predicate("e.derivation"),
+            ClosureDirection::WantedBy,
+            &non_passthrough_predicate("e.derivation"),
             Some("closure"),
         ),
     );
@@ -237,7 +235,7 @@ fn dependency_failed_reconcile_sql() -> String {
     UPDATE derivation_build AS db
     SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
     WHERE db.status IN ({cascade_target})
-      AND db.derivation IN (SELECT derivation FROM dependents)
+      AND db.derivation IN (SELECT derivation FROM wanted_by)
       AND db.derivation IN (SELECT derivation FROM closure)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#
@@ -245,34 +243,34 @@ fn dependency_failed_reconcile_sql() -> String {
 }
 
 crate::sql_fn! {
-    DEPENDENCY_FAILED_RECONCILE = dependency_failed_reconcile_sql,
+    DEPENDENCY_FAILED_REPAIR = dependency_failed_repair_sql,
         params = [EvaluationId],
         tier = Walk,
         flags = [Walk];
 }
 
 /// The dispatch gate reads the invariant: `Queued` means the gates held when the
-/// anchor was promoted, and a regression un-promotes. Reachability still filters
-/// anchors left queued after their last referencing evaluation was torn down.
+/// shared build was promoted, and a regression un-promotes. Reachability still filters
+/// shared builds left queued after their last referencing evaluation was torn down.
 ///
-/// The open-`dispatched_job` arm is a dispatch gate, not a readiness one, so it
-/// lives here and not in `readiness::promote`: an anchor that is already out is
+/// The open-`dispatched_job` arm is a dispatch gate, not a can-start state one, so it
+/// lives here and not in `can_start::promote`: a shared build that is already out is
 /// still perfectly promotable and must stay `Queued` for the report that closes
-/// it. The whole ready set is read only by the dispatcher's startup and periodic
-/// resync; between them it reads what moved, through [`find_ready_anchors_among`].
-pub async fn find_ready_anchors<C: ConnectionTrait>(
+/// it. The whole startable set is read only by the dispatcher's startup and periodic
+/// resync; between them it reads what moved, through [`find_startable_shared_builds_among`].
+pub async fn find_startable_shared_builds<C: ConnectionTrait>(
     db: &C,
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
     use sea_orm::EntityTrait;
     gradient_types::EDerivationBuild::find()
-        .from_raw_sql(FIND_READY_ANCHORS.stmt())
+        .from_raw_sql(FIND_STARTABLE_SHARED_BUILDS.stmt())
         .all(db)
         .await
 }
 
-/// The same gate over the anchors of `derivations` alone: the ready-set moves
+/// The same gate over the shared builds of `derivations` alone: the startable-set moves
 /// one pass admits, so its cost follows what moved, not what is queued.
-pub async fn find_ready_anchors_among<C: ConnectionTrait>(
+pub async fn find_startable_shared_builds_among<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
@@ -283,14 +281,14 @@ pub async fn find_ready_anchors_among<C: ConnectionTrait>(
 
     let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
     gradient_types::EDerivationBuild::find()
-        .from_raw_sql(FIND_READY_ANCHORS_AMONG.bind([ids.into()]))
+        .from_raw_sql(FIND_STARTABLE_SHARED_BUILDS_AMONG.bind([ids.into()]))
         .all(db)
         .await
 }
 
-fn ready_anchors_sql(scope: &str) -> String {
-    let not_in_flight = crate::dispatch_record::no_open_dispatch_predicate(
-        &crate::dispatch_record::build_job_key_sql("db.id"),
+fn startable_shared_builds_sql(scope: &str) -> String {
+    let not_in_flight = crate::assignment_record::no_open_assignment_predicate(
+        &crate::assignment_record::build_job_key_sql("db.id"),
     );
 
     format!(
@@ -312,20 +310,20 @@ fn ready_anchors_sql(scope: &str) -> String {
     )
 }
 
-fn find_ready_anchors_sql() -> String {
-    ready_anchors_sql("")
+fn find_startable_shared_builds_sql() -> String {
+    startable_shared_builds_sql("")
 }
 
-fn find_ready_anchors_among_sql() -> String {
-    ready_anchors_sql("AND db.derivation = ANY($1::uuid[])")
+fn find_startable_shared_builds_among_sql() -> String {
+    startable_shared_builds_sql("AND db.derivation = ANY($1::uuid[])")
 }
 
 crate::sql_fn! {
-    FIND_READY_ANCHORS = find_ready_anchors_sql,
+    FIND_STARTABLE_SHARED_BUILDS = find_startable_shared_builds_sql,
         params = [],
         tier = Bulk;
 
-    FIND_READY_ANCHORS_AMONG = find_ready_anchors_among_sql,
+    FIND_STARTABLE_SHARED_BUILDS_AMONG = find_startable_shared_builds_among_sql,
         params = [DerivationIds(64)];
 }
 
@@ -333,7 +331,7 @@ crate::sql_fn! {
 /// deterministic build failure - the builder ran and exited non-zero. Rebuilding
 /// the identical derivation reproduces it, so a fresh evaluation must not thaw it
 /// (else it loops: re-queue -> rebuild -> same non-zero exit -> re-queue). Only a
-/// changed drv (a new anchor) or a newly-substitutable output can recover it.
+/// changed drv (a new shared build) or a output newly available in a cache can recover it.
 fn deterministic_build_failure(alias: &str) -> String {
     format!(
         "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = {alias}.id \
@@ -343,12 +341,12 @@ fn deterministic_build_failure(alias: &str) -> String {
     )
 }
 
-/// Re-queue anchors a previous evaluation left in a terminal-failure state
+/// Re-queue shared builds a previous evaluation left in a terminal-failure state
 /// (`FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`) back to
 /// `Created`, for the derivations a new evaluation needs. A new evaluation is a
 /// fresh build intent - the upstream cache, network, or a transient cause may
-/// have changed since the global anchor failed - so it retries rather than
-/// inheriting the stale failure. Anchors with a [`deterministic_build_failure`]
+/// have changed since the global shared build failed - so it retries rather than
+/// inheriting the stale failure. Shared builds with a [`deterministic_build_failure`]
 /// are excluded: their non-zero builder exit is reproducible, so re-queueing only
 /// loops the fleet. Build-once success states (`Completed`/`Substituted`) are
 /// never touched. Returns the thaws it made, so the caller can feed
@@ -357,9 +355,9 @@ fn deterministic_build_failure(alias: &str) -> String {
 /// Like its neighbours here it is a `Walk`: the plan gate proves it with the
 /// `work_mem` [`crate::graph_sql::begin_walk`] sets, so it has to run inside
 /// one. On a plain connection it plans against the default instead, and a thaw
-/// that then exceeds its budget heals nothing and says nothing - reconcile logs
-/// the error and goes on to finalize over anchors it never re-queued.
-pub async fn requeue_failed_anchors<C>(
+/// that then exceeds its budget heals nothing and says nothing - the repair pass logs
+/// the error and goes on to finalize over shared builds it never re-queued.
+pub async fn requeue_failed_shared_builds<C>(
     db: &C,
     derivations: &[DerivationId],
 ) -> Result<Vec<TransitionChange>, DbErr>
@@ -371,7 +369,7 @@ where
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
         let walk = crate::graph_sql::begin_walk(db).await?;
         let rows = walk
-            .query_all_raw(REQUEUE_FAILED_ANCHORS.bind([ids.into()]))
+            .query_all_raw(REQUEUE_FAILED_SHARED_BUILDS.bind([ids.into()]))
             .await?;
         walk.commit().await?;
         changes.extend(returned_transitions(rows));
@@ -383,12 +381,12 @@ where
 /// `WITH RECURSIVE` prelude binding a requeue candidate `closure` (the downward
 /// build closure of the candidates) and the `deterministic_blocked` subset a
 /// reproducible build failure permanently poisons. `deterministic_blocked` seeds
-/// from every anchor in the closure with a [`deterministic_build_failure`] and
+/// from every shared build in the closure with a [`deterministic_build_failure`] and
 /// closes upward over `derivation_dependency` (bounded to the closure), so a
-/// `DependencyFailed` dependent of such a failure is caught even though it never
+/// `DependencyFailed` parent of such a failure is caught even though it never
 /// ran a build of its own. A thaw must exclude this whole set: its members can
 /// never build, and thawing one back to `Created` only re-enters the demote<->
-/// thaw oscillation with [`reconcile_dependency_failed`] that hangs the eval in
+/// thaw oscillation with [`repair_dependency_failed`] that hangs the eval in
 /// `graph_stuck` forever.
 fn requeue_ctes(closure_seed: &str) -> String {
     let deterministic = deterministic_build_failure("dbf");
@@ -402,14 +400,14 @@ fn requeue_ctes(closure_seed: &str) -> String {
                 "SELECT dbf.derivation FROM derivation_build dbf \
                  WHERE dbf.derivation IN (SELECT derivation FROM closure) AND {deterministic}"
             ),
-            ClosureDirection::Dependents,
-            &unrelayed_predicate("e.derivation"),
+            ClosureDirection::WantedBy,
+            &non_passthrough_predicate("e.derivation"),
             Some("closure"),
         ),
     )
 }
 
-fn requeue_failed_anchors_sql() -> String {
+fn requeue_failed_shared_builds_sql() -> String {
     let ctes = requeue_ctes("SELECT unnest($1::uuid[])");
     format!(
         r#"
@@ -427,39 +425,39 @@ fn requeue_failed_anchors_sql() -> String {
 }
 
 crate::sql_fn! {
-    REQUEUE_FAILED_ANCHORS = requeue_failed_anchors_sql,
+    REQUEUE_FAILED_SHARED_BUILDS = requeue_failed_shared_builds_sql,
         params = [DerivationIds(64)],
         tier = Walk,
         flags = [Walk];
 }
 
-/// Re-queue terminal-failed anchors across the full dependency **closure** of an
+/// Re-queue terminal-failed shared builds across the full dependency **closure** of an
 /// evaluation's names, not just the derivations its walk re-reported: a transitive
 /// dependency a prior evaluation left terminal-failed, which this one pruned or
-/// never re-walked, would otherwise stay failed forever and block its dependents
+/// never re-walked, would otherwise stay failed forever and block its parents
 /// with no dispatch to trigger any reactive heal. Walks `derivation_dependency`
-/// down from the names over every edge kind and resets each `REQUEUEABLE` anchor
-/// to `Created`; the reconciler then names the thawed closure and promotes it so
+/// down from the names over every edge kind and resets each `REQUEUEABLE` shared build
+/// to `Created`; the repair pass then names the thawed closure and promotes it so
 /// the failed subtree rebuilds bottom-up.
 ///
 /// A failure is valid for the evaluation that recorded it. A fresh evaluation
-/// ([`ReconcileScope::Eval`]) is a new intent and thaws every failure in its
+/// ([`RepairScope::Eval`]) is a new intent and thaws every failure in its
 /// closure, a reproducible builder exit included: one rebuild per evaluation, and
 /// same-commit polling is deduplicated before an evaluation exists. An evaluation
-/// healing itself ([`ReconcileScope::Unstick`]) is the same intent again, so there
+/// healing itself ([`RepairScope::Unstick`]) is the same intent again, so there
 /// the [`deterministic_build_failure`] subtree stays out, or the unstick would
 /// rebuild a permanent failure every sweep. Returns the thaws it made, so the
 /// caller can feed [`crate::status::emit_transition_effects`].
 pub async fn requeue_failed_closure<C>(
     db: &C,
-    scope: ReconcileScope,
+    scope: RepairScope,
 ) -> Result<Vec<TransitionChange>, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
     let query = match scope {
-        ReconcileScope::Eval(_) => &REQUEUE_FAILED_CLOSURE_FRESH,
-        ReconcileScope::Unstick(_) => &REQUEUE_FAILED_CLOSURE_BLOCKED,
+        RepairScope::Eval(_) => &REQUEUE_FAILED_CLOSURE_FRESH,
+        RepairScope::Unstick(_) => &REQUEUE_FAILED_CLOSURE_BLOCKED,
     };
     let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
@@ -511,20 +509,20 @@ crate::sql_fn! {
         flags = [Walk];
 }
 
-/// Reconcile anchor state from cache state across an evaluation's dependency
-/// closure: any anchor whose outputs are **all** present in our cache
+/// Repair shared build state from cache state across an evaluation's dependency
+/// closure: any shared build whose outputs are **all** present in our cache
 /// (`cached_path.file_hash`) is marked `Completed`, even if a
 /// requeue / dependency-failed cascade / demote previously reset it. The dispatch
-/// gate keys on the build-graph anchor state, which repeatedly desyncs from the
+/// gate keys on the build-graph shared build state, which repeatedly desyncs from the
 /// durable cache state - a derivation whose artifacts exist sits `Created` and
-/// blocks its dependents with nothing to build. Cache presence is the ground truth
+/// blocks its parents with nothing to build. Cache presence is the ground truth
 /// for "is this built", so trust it here; the reactive heals
-/// ([`crate::demote_referrers_of`] / [`crate::demote_output_only_cached_deps`])
+/// ([`crate::demote_parents_of`] / [`crate::demote_output_only_cached_deps`])
 /// remain the backstop for the rare case where a cached output's runtime closure is
 /// itself incomplete. Returns the changes it made, so the caller can advance the
-/// dependents of what it just settled; an anchor already terminal-success is left
+/// parents of what it just settled; a shared build already terminal-success is left
 /// alone, since it has nothing left for this statement to write.
-pub async fn reconcile_cached_anchors_for_eval<C>(
+pub async fn repair_cached_shared_builds_for_eval<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
 ) -> Result<Vec<TransitionChange>, DbErr>
@@ -534,7 +532,7 @@ where
     let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = walk
         .query_all_raw(
-            RECONCILE_CACHED_ANCHORS_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),
+            REPAIR_CACHED_SHARED_BUILDS_FOR_EVAL.bind([Value::Uuid(Some(evaluation.into_inner()))]),
         )
         .await?;
     walk.commit().await?;
@@ -542,10 +540,10 @@ where
     Ok(returned_transitions(rows))
 }
 
-fn reconcile_cached_anchors_for_eval_sql() -> String {
+fn repair_cached_shared_builds_for_eval_sql() -> String {
     let cte = eval_closure_cte();
-    let not_in_flight = crate::dispatch_record::no_open_dispatch_predicate(
-        &crate::dispatch_record::build_job_key_sql("db.id"),
+    let not_in_flight = crate::assignment_record::no_open_assignment_predicate(
+        &crate::assignment_record::build_job_key_sql("db.id"),
     );
     format!(
         r#"
@@ -569,12 +567,12 @@ fn reconcile_cached_anchors_for_eval_sql() -> String {
 }
 
 crate::sql_fn! {
-    RECONCILE_CACHED_ANCHORS_FOR_EVAL = reconcile_cached_anchors_for_eval_sql,
+    REPAIR_CACHED_SHARED_BUILDS_FOR_EVAL = repair_cached_shared_builds_for_eval_sql,
         params = [EvaluationId],
         tier = Walk,
         budget = crate::sql::Budget::walk().buffers(500_000)
             .because("the same whole-closure walk PROMOTE_CLOSURE_QUERY pays for, plus \
-                      one output-and-path anti-join per anchor the closure names"),
+                      one output-and-path anti-join per shared build the closure names"),
         flags = [Walk];
 }
 
@@ -602,7 +600,7 @@ mod tests {
         );
     }
 
-    /// A fresh evaluation is a new intent: its thaw takes every requeueable anchor
+    /// A fresh evaluation is a new intent: its thaw takes every requeueable shared build
     /// in its closure, a reproducible builder exit included, because a failure is
     /// valid for the evaluation that recorded it and nothing else. Blocked, a
     /// restarted evaluation re-failed on the spot without a single build.
@@ -629,8 +627,8 @@ mod tests {
 
     /// The other two thaws are the same intent again, and must exclude not just a
     /// derivation's own reproducible failure but the whole subtree a deterministic
-    /// failure poisons: a `DependencyFailed` dependent never ran a build of its own,
-    /// so keying the exclusion on the anchor's own attempts alone re-thaws it
+    /// failure poisons: a `DependencyFailed` parent never ran a build of its own,
+    /// so keying the exclusion on the shared build's own attempts alone re-thaws it
     /// forever (the demote<->thaw oscillation that hangs the eval). Pin that both
     /// build the closure + `deterministic_blocked` walk and exclude that set.
     #[test]
@@ -638,7 +636,7 @@ mod tests {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let deterministic = norm(deterministic_build_failure("dbf"));
         for sql in [
-            norm(requeue_failed_anchors_sql()),
+            norm(requeue_failed_shared_builds_sql()),
             norm(requeue_failed_closure_blocked_sql()),
         ] {
             assert!(
@@ -653,7 +651,7 @@ mod tests {
                 sql.contains(
                 "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
             ),
-                "must close upward over dependents so DependencyFailed victims are caught: {sql}"
+                "must close upward over parents so DependencyFailed victims are caught: {sql}"
             );
             assert!(
                 sql.contains("db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)"),
@@ -669,40 +667,43 @@ mod tests {
         }
     }
 
-    /// A failure must not cross a relay. A substitutable anchor takes finished
+    /// A failure must not cross a passthrough. A shared build available in a cache takes finished
     /// bytes off an upstream, so an input that can never build neither dooms it
     /// nor reaches anything above it; measured in the e2e VM's phase 10g, where
     /// busybox's unbuildable source FODs cascaded `DependencyFailed` onto the
-    /// relayed anchor itself (#666). Every upward walk that carries a failure
+    /// passed through shared build itself (#666). Every upward walk that carries a failure
     /// fences on the same predicate, so the cascade, its sweep and the thaw's
     /// blocked set can never disagree about who a failure reaches.
     #[test]
-    fn a_failure_walk_never_enters_a_relay() {
+    fn a_failure_walk_never_enters_a_passthrough() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let fence = norm(unrelayed_predicate("e.derivation"));
+        let fence = norm(non_passthrough_predicate("e.derivation"));
         assert!(
-            fence.contains("rb.substitutable"),
-            "the fence must read the relay flag: {fence}"
+            fence.contains("rb.cache_available"),
+            "the fence must read the passthrough flag: {fence}"
         );
         for sql in [
             norm(cascade_dependency_failed_sql()),
-            norm(dependency_failed_reconcile_sql()),
-            norm(requeue_failed_anchors_sql()),
+            norm(dependency_failed_repair_sql()),
+            norm(requeue_failed_shared_builds_sql()),
             norm(requeue_failed_closure_blocked_sql()),
         ] {
-            assert!(sql.contains(&fence), "upward walk crosses a relay: {sql}");
+            assert!(
+                sql.contains(&fence),
+                "upward walk crosses a passthrough: {sql}"
+            );
         }
     }
 
     /// The proactive dependency-failed sweep must mirror the reactive cascade:
     /// seed the recursive walk from the terminal-failed set the cascade reacts
-    /// to (NOT `Aborted`), fail only non-terminal anchors to `DependencyFailed`,
-    /// and walk dependents upward via the dependency edge. Getting the seed or
+    /// to (NOT `Aborted`), fail only non-terminal shared builds to `DependencyFailed`,
+    /// and walk parents upward via the dependency edge. Getting the seed or
     /// target set wrong either misses the dead zone or clobbers terminal-success
-    /// anchors, so pin the SQL shape (no live DB in unit tests).
+    /// shared builds, so pin the SQL shape (no live DB in unit tests).
     #[test]
-    fn dependency_failed_reconcile_sql_mirrors_the_cascade() {
-        let sql = dependency_failed_reconcile_sql()
+    fn dependency_failed_repair_sql_mirrors_the_cascade() {
+        let sql = dependency_failed_repair_sql()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -724,11 +725,11 @@ mod tests {
                 "SET status = {}",
                 status_sql::build(BuildStatus::DependencyFailed)
             )),
-            "must fail dependents to DependencyFailed: {sql}"
+            "must fail parents to DependencyFailed: {sql}"
         );
         assert!(
             sql.contains(&format!("db.status IN ({cascade_target})")),
-            "must only touch non-terminal anchors (never terminal-success): {sql}"
+            "must only touch non-terminal shared builds (never terminal-success): {sql}"
         );
         assert!(
             sql.contains("old.status AS from_status"),
@@ -738,7 +739,7 @@ mod tests {
             sql.contains(
                 "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
             ),
-            "must walk dependents upward via the dependency edge: {sql}"
+            "must walk parents upward via the dependency edge: {sql}"
         );
         assert!(
             sql.contains("RETURNING db.derivation"),
@@ -751,9 +752,9 @@ mod tests {
     /// membership filter, so an event-driven heal re-fails its own thawed victims
     /// without ever scanning the table.
     #[test]
-    fn dependency_failed_reconcile_sql_bounds_to_eval_closure() {
+    fn dependency_failed_repair_sql_bounds_to_eval_closure() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let scoped = norm(dependency_failed_reconcile_sql());
+        let scoped = norm(dependency_failed_repair_sql());
         assert!(
             scoped.contains("WITH RECURSIVE closure(derivation) AS"),
             "the sweep must walk the eval closure: {scoped}"
@@ -763,7 +764,7 @@ mod tests {
                 "WHERE status IN ({terminal_failure}) AND derivation IN (SELECT derivation FROM closure)",
                 terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE),
             )),
-            "the seed must be the closure's terminal-failed anchors: {scoped}"
+            "the seed must be the closure's terminal-failed shared builds: {scoped}"
         );
         assert!(
             scoped.contains("WHERE EXISTS (SELECT 1 FROM closure x WHERE x.derivation = t.next)"),
@@ -778,11 +779,11 @@ mod tests {
         );
     }
 
-    /// Dispatch trusts the queue invariant: no readiness term is re-evaluated
+    /// Dispatch trusts the queue invariant: no can-start state term is re-evaluated
     /// per row here, only the status and the reachability check.
     #[test]
-    fn dispatch_reads_the_queued_invariant_only() {
-        let sql = find_ready_anchors_sql()
+    fn assign_reads_the_queued_invariant_only() {
+        let sql = find_startable_shared_builds_sql()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -792,20 +793,20 @@ mod tests {
         )));
         assert!(sql.contains("FROM build_job bj WHERE bj.derivation = db.derivation"));
         assert!(
-            !sql.contains("unready_deps")
+            !sql.contains("blocking_deps")
                 && !sql.contains("fetchable")
                 && !sql.contains("cached_path"),
             "{sql}"
         );
     }
 
-    /// Cache presence is the ground truth for "built": a pending anchor whose
-    /// outputs are whole in our cache is settled `Substituted` without a
-    /// dispatch. Only `Created` moves, so a `Queued` anchor already in the
+    /// Cache presence is the ground truth for "built": a pending shared build whose
+    /// outputs are complete in our cache is settled `Substituted` without a
+    /// dispatch. Only `Created` moves, so a `Queued` shared build already in the
     /// tracker is not pulled out from under the dispatcher.
     #[test]
-    fn substitute_created_anchors_moves_only_created_rows() {
-        let sql = substitute_created_anchors_sql()
+    fn substitute_created_shared_builds_moves_only_created_rows() {
+        let sql = substitute_created_shared_builds_sql()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -826,46 +827,51 @@ mod tests {
     /// respawn; the row is what survives, so the dispatch select carries the
     /// open-row gate itself.
     #[test]
-    fn dispatch_refuses_an_anchor_whose_dispatch_row_is_open() {
+    fn assign_refuses_a_shared_build_whose_assignment_row_is_open() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let gate = norm(crate::dispatch_record::no_open_dispatch_predicate(
-            &crate::dispatch_record::build_job_key_sql("db.id"),
+        let gate = norm(crate::assignment_record::no_open_assignment_predicate(
+            &crate::assignment_record::build_job_key_sql("db.id"),
         ));
 
-        assert!(norm(find_ready_anchors_sql()).contains(&gate));
+        assert!(norm(find_startable_shared_builds_sql()).contains(&gate));
     }
 
-    /// A relay out on a worker settles its own anchor `Substituted`; the reconcile
+    /// A passthrough out on a worker settles its own shared build `Substituted`; the repair
     /// finding its outputs first called it built.
     #[test]
-    fn the_cached_reconcile_leaves_an_anchor_whose_dispatch_row_is_open() {
+    fn the_cached_repair_leaves_a_shared_build_whose_assignment_row_is_open() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let gate = norm(crate::dispatch_record::no_open_dispatch_predicate(
-            &crate::dispatch_record::build_job_key_sql("db.id"),
+        let gate = norm(crate::assignment_record::no_open_assignment_predicate(
+            &crate::assignment_record::build_job_key_sql("db.id"),
         ));
 
-        assert!(norm(reconcile_cached_anchors_for_eval_sql()).contains(&gate));
+        assert!(norm(repair_cached_shared_builds_for_eval_sql()).contains(&gate));
     }
 
     /// The delta is the resync's gate narrowed to what moved: a copy that
-    /// drifted would admit an anchor the resync then prunes, or the reverse.
+    /// drifted would admit a shared build the resync then prunes, or the reverse.
     #[test]
-    fn the_delta_is_the_ready_set_narrowed_to_what_moved() {
+    fn the_delta_is_the_startable_set_narrowed_to_what_moved() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let among = norm(find_ready_anchors_among_sql());
+        let among = norm(find_startable_shared_builds_among_sql());
         let scope = "AND db.derivation = ANY($1::uuid[]) ";
 
         assert!(among.contains(scope), "{among}");
-        assert_eq!(among.replacen(scope, "", 1), norm(find_ready_anchors_sql()));
+        assert_eq!(
+            among.replacen(scope, "", 1),
+            norm(find_startable_shared_builds_sql())
+        );
     }
 
     #[tokio::test]
     async fn no_moves_means_no_statement() {
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
 
-        let anchors = find_ready_anchors_among(&db, &[]).await.expect("no-op");
+        let shared_builds = find_startable_shared_builds_among(&db, &[])
+            .await
+            .expect("no-op");
 
-        assert!(anchors.is_empty());
+        assert!(shared_builds.is_empty());
         assert!(db.into_transaction_log().is_empty());
     }
 }

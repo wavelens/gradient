@@ -10,7 +10,7 @@
 //! `gradient-wire`.
 
 pub mod handler;
-pub mod ingest;
+pub mod import;
 pub mod outbound;
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so

@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_forge::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
+use gradient_git_host::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
 use gradient_types::{ActionConfig, ActionType, MTaskAction, VerifyGate};
 
-pub const FORGE_STATUS_EVENTS: &[&str] = &[
+pub const GIT_HOST_STATUS_EVENTS: &[&str] = &[
     "build.created",
     "build.queued",
     "build.started",
@@ -25,8 +25,8 @@ pub const FORGE_STATUS_EVENTS: &[&str] = &[
 ];
 
 pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
-    if action.action_type == ActionType::ForgeStatusReport {
-        return FORGE_STATUS_EVENTS.contains(&event);
+    if action.action_type == ActionType::GitHostStatusReport {
+        return GIT_HOST_STATUS_EVENTS.contains(&event);
     }
     if action.action_type == ActionType::OpenPr {
         return open_pr_gate_events(action).is_some_and(|evs| evs.contains(&event));
@@ -40,7 +40,7 @@ pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
 /// The verify-gate events an `OpenPr` action fires on. The dispatcher
 /// additionally restricts firing to `input_update` evaluations. The gate keys
 /// off the evaluation's own terminal transition, not a per-build event: an
-/// `input_update` candidate whose closure is already built or substitutable runs
+/// `input_update` candidate whose closure is already built or available in a cache is running
 /// no fresh build, so no `build.completed` ever fires, yet the eval still reaches
 /// `Building`/`Completed`. `Build` waits for `evaluation.completed` (every build
 /// succeeded, else the eval is `Failed` and emits nothing); `Eval`/`None` open at
@@ -60,7 +60,7 @@ pub fn open_pr_gate_events(action: &MTaskAction) -> Option<&'static [&'static st
     })
 }
 
-pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {
+pub fn git_host_status_for_event(event: &str) -> Option<CiStatus> {
     match event {
         "build.created" => Some(CiStatus::Pending),
         "build.queued" => Some(CiStatus::Pending),

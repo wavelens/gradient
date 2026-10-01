@@ -116,7 +116,7 @@ fn dispatched_job_query(worker_id: &str, job_id: &str) -> Select<EDispatchedJob>
 /// claims: the narinfo gate 404s it forever, and the sign sweep cannot repair it
 /// because it only fills rows that already exist.
 ///
-/// Keyed on the worker as well as the job so a concurrent dispatch of the same
+/// Per worker as well as per job so a concurrent dispatch of the same
 /// job key elsewhere cannot answer for this connection's upload.
 pub(super) async fn project_for_dispatched_job<C: ConnectionTrait>(
     db: &C,
@@ -160,7 +160,7 @@ mod tests {
     /// The whole point of the fallback: the scheduler has already evicted the
     /// job, and the dispatch row is what keeps the NAR's cache claim.
     #[tokio::test]
-    async fn a_late_nar_still_resolves_its_project_from_the_dispatch_row() {
+    async fn a_late_nar_still_resolves_its_project_from_the_assignment_row() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row()]])
             .into_connection();
@@ -174,7 +174,7 @@ mod tests {
     /// No dispatch row is the one case that legitimately has no project. It must
     /// return `None` rather than panic, so the caller can log and carry on.
     #[tokio::test]
-    async fn no_dispatch_row_yields_no_project() {
+    async fn no_assignment_row_yields_no_project() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::dispatched_job::Model>::new()])
             .into_connection();
@@ -182,12 +182,12 @@ mod tests {
         assert_eq!(project_for_dispatched_job(&db, WORKER, JOB).await, None);
     }
 
-    /// A job key is unique only among in-flight jobs, so the same `build:<anchor>`
+    /// A job key is unique only among in-flight jobs, so the same `build:<shared_build>`
     /// recurs across evaluations - and those may belong to different projects.
     /// Without the worker filter and the newest-first order, a late NAR could be
     /// signed into a stranger's caches.
     #[test]
-    fn the_lookup_is_pinned_to_this_worker_and_the_newest_dispatch() {
+    fn the_lookup_is_pinned_to_this_worker_and_the_newest_assignment() {
         let sql = dispatched_job_query(WORKER, JOB)
             .build(DatabaseBackend::Postgres)
             .to_string();

@@ -12,7 +12,7 @@ use gradient_storage::admission::UploadPermit;
 use gradient_wire::types::{UploadMetadata, UploadObject};
 
 pub(in crate::handler) enum Transfer {
-    Relay(Box<PartialWriter>),
+    Passthrough(Box<PartialWriter>),
     Put,
     Multipart { upload_id: String },
 }
@@ -50,7 +50,7 @@ pub(in crate::handler) struct Granted {
     pub permit: UploadPermit,
     pub transfer: Transfer,
     pub lease: Lease,
-    /// Metadata of an `UploadFinished` that overtook the final relayed chunk.
+    /// Metadata of an `UploadFinished` that overtook the final passed-through chunk.
     pub finished: Option<UploadMetadata>,
     pub final_seen: bool,
 }
@@ -213,7 +213,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_idle_relay_lease_expires_into_retry() {
+    async fn an_idle_passthrough_lease_expires_into_retry() {
         let admission = UploadAdmission::new(Limits {
             concurrency: 4,
             bytes: u64::MAX,
@@ -232,7 +232,7 @@ mod tests {
                 object: nar(0),
                 size: 10,
                 permit,
-                transfer: Transfer::Relay(Box::new(writer)),
+                transfer: Transfer::Passthrough(Box::new(writer)),
                 lease: Lease::Idle {
                     last: start,
                     idle: Duration::from_secs(300),
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_touched_relay_lease_stays_alive() {
+    async fn a_touched_passthrough_lease_stays_alive() {
         let admission = UploadAdmission::new(Limits {
             concurrency: 4,
             bytes: u64::MAX,

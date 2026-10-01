@@ -16,7 +16,7 @@ mod multipart;
 pub mod nar;
 pub mod nar_extract;
 pub mod partial;
-pub mod relay;
+pub mod passthrough;
 pub mod sgr;
 pub mod source_nar;
 mod timed;

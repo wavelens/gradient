@@ -13,7 +13,7 @@
 //! graph call can time out or lose its mailbox on an actor restart, so that
 //! one message is droppable. Nothing else re-drives it: the waiting-state
 //! sweep leaves a pre-build eval alone whenever an eval-capable worker is
-//! connected, and `recover_interrupted_work` runs only at startup.
+//! connected, and `recover_interrupted_work` executes only at startup.
 //!
 //! This query names the survivors: the job's telemetry row is closed, so the
 //! worker did report, yet the evaluation never left the evaluating pair.
@@ -38,7 +38,7 @@ pub struct LostCompletion {
 ///
 /// The grace is measured on `evaluation.updated_at`, which any status write
 /// refreshes, so an evaluation that is merely slow to be promoted ages out of
-/// the result the moment it moves. It must stay above the graph actor's RPC
+/// the result the moment it moves. It must stay above the graph writer's RPC
 /// timeout, or a transition still legitimately in flight looks lost.
 fn lost_eval_completions_sql(grace_secs: i64) -> String {
     format!(

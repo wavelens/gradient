@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Orchestrates trigger fire → evaluation creation. Encapsulates commit-level
+//! Orchestrates trigger fire -> evaluation creation. Encapsulates commit-level
 //! deduplication ([`dedup`]), concurrency policy ([`concurrency`]), and the
-//! post-creation parking [`gates`]. Callers: scheduler dispatch loop, forge
+//! post-creation parking [`gates`]. Callers: scheduler dispatch loop, Git host
 //! webhooks, manual API endpoints.
 
 mod concurrency;
@@ -34,8 +34,8 @@ pub enum ApplyOutcome {
         /// The caller is responsible for calling `Scheduler::cancel_evaluation_jobs`
         /// for that eval to purge its in-memory `JobTracker` entries.
         aborted_evaluation: Option<EvaluationId>,
-        /// `hard_abort` asks the caller to abort the evaluation's anchors
-        /// through the graph actor before cancelling its jobs.
+        /// `hard_abort` asks the caller to abort the evaluation's shared builds
+        /// through the graph writer before cancelling its jobs.
         hard_abort: bool,
     },
     SkippedSameCommit,
@@ -56,7 +56,7 @@ pub struct ApplyInput {
     pub commit_hash: Vec<u8>,
     pub commit_message: Option<String>,
     pub author_name: Option<String>,
-    /// Set true for manual UI re-runs and `/triggers/{id}/test` calls.
+    /// Set true for manual UI restarts and `/triggers/{id}/test` calls.
     /// Bypasses the same-commit dedup check.
     pub manual: bool,
     /// Set by the PR webhook layer when the caller has determined the PR
@@ -84,7 +84,7 @@ pub struct ApplyInput {
 }
 
 /// Identification of the pull request a maintainer must approve before the
-/// evaluation runs. Persisted on `evaluation.waiting_reason`.
+/// evaluation starts. Persisted on `evaluation.waiting_reason`.
 #[derive(Debug, Clone)]
 pub struct ApprovalInfo {
     pub pr_number: u64,

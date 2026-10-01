@@ -47,7 +47,7 @@ pub struct ReportContext<'a> {
 
 /// Write one evaluation's report to `out`.
 ///
-/// Fetching runs async and writing runs on a blocking thread: a `rusqlite`
+/// Fetching is async and writing executes on a blocking thread: a `rusqlite`
 /// connection is not `Send`, so holding one across an await would make the whole
 /// handler future non-`Send`. Splitting the phases is what the pure `write_rows`
 /// half was for.

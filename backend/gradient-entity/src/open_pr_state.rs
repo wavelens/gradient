@@ -22,7 +22,7 @@ pub struct Model {
     pub task: TaskId,
     pub action: TaskActionId,
     pub branch: String,
-    pub forge_pr_number: Option<i64>,
+    pub git_host_pr_number: Option<i64>,
     pub head_commit: Option<String>,
     /// PR lifecycle: `open` | `merged` | `closed`.
     pub status: String,

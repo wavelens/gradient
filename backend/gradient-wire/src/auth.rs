@@ -163,13 +163,13 @@ mod tests {
     }
 
     #[test]
-    fn verify_token_dispatches_on_format() {
+    fn verify_token_branches_on_format() {
         let token = "tok";
-        // PHC string → argon2 path
+        // PHC string -> argon2 path
         let phc = argon2(token);
         assert!(phc.starts_with('$'), "argon2 hash must start with $");
         assert!(verify_token(token, &phc));
-        // Hex SHA-256 → legacy path
+        // Hex SHA-256 -> legacy path
         assert!(verify_token(token, &sha256_hex(token)));
         // Wrong inputs both reject
         assert!(!verify_token("bad", &phc));

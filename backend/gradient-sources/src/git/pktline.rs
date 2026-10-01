@@ -11,10 +11,10 @@ const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
 /// Reads pkt-lines from `reader` and returns the SHA-1 hash for the wanted ref.
 ///
-/// `target = None` → return `HEAD`, falling back to the first non-zero ref
+/// `target = None` -> return `HEAD`, falling back to the first non-zero ref
 /// (matches libgit2's `list.first()` behaviour for repos advertising only
 /// `capabilities^{}`).
-/// `target = Some("refs/heads/main")` → return that exact ref with no fallback;
+/// `target = Some("refs/heads/main")` -> return that exact ref with no fallback;
 /// `GitHashExtraction` if it is not advertised.
 ///
 /// Reads incrementally - one pkt-line at a time - so it works correctly even

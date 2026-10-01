@@ -17,13 +17,13 @@ pub struct UploadArgs {
     )]
     pub concurrency: usize,
 
-    /// Sum of admitted upload sizes; a request that does not fit waits, and one
-    /// larger than the whole budget runs alone once nothing else is in flight.
+    /// Total size in bytes of admitted uploads. An upload that does not fit waits;
+    /// one larger than the budget proceeds alone once nothing else is in flight.
     #[arg(long = "upload-bytes-budget", env = "GRADIENT_UPLOAD_BYTES_BUDGET", default_value_t = 8 * 1024 * 1024 * 1024)]
     pub bytes_budget: u64,
 
-    /// Seconds a granted relay upload may go without a chunk before its permit
-    /// is reclaimed and the worker is told to retry.
+    /// Seconds a granted worker upload may go without data before its permit is
+    /// reclaimed and the worker is told to retry.
     #[arg(
         long = "upload-lease-idle-secs",
         env = "GRADIENT_UPLOAD_LEASE_IDLE_SECS",

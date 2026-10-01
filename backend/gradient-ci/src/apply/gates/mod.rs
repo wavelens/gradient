@@ -23,8 +23,8 @@ pub use cache::park_if_no_cache;
 pub use storage::park_if_storage_full;
 pub use workers::park_if_no_workers;
 
-/// Runs the freshly-created evaluation through every parking gate in order:
-/// approval → cache → storage → workers. Each gate is a no-op once the eval has
+/// Passes the freshly-created evaluation through every parking gate in order:
+/// approval -> cache -> storage -> workers. Each gate is a no-op once the eval has
 /// left `Queued`, so the first gate that parks short-circuits the rest.
 pub(super) async fn run_gates<C: ConnectionTrait>(
     db: &C,

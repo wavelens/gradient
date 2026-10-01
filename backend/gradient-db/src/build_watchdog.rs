@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Detection for anchors stranded in `Building` behind a dispatch that will
+//! Detection for shared builds stranded in `Building` behind a dispatch that will
 //! never report. The orphan re-queue moves them back once, through the graph
-//! actor; a transaction that rolls back, or a `Dispatched` transition that lands
-//! after its claim already gave up, leaves the anchor `Building` with nobody
+//! writer; a transaction that rolls back, or a `Assigned` transition that lands
+//! after its claim already gave up, leaves the shared build `Building` with nobody
 //! building it and nothing that would ever move it again.
 
 use gradient_entity::build::BuildStatus;
@@ -17,12 +17,12 @@ use sea_orm::{ConnectionTrait, DbErr};
 
 use crate::status_sql;
 
-/// `Building` anchors whose newest attempt's dispatch closed as `Abandoned`,
+/// `Building` shared builds whose newest attempt's dispatch closed as `Abandoned`,
 /// untouched for at least `grace_secs`. The grace keeps an orphan re-queue that
-/// is merely queued behind a slow graph actor from being sent twice.
-fn stranded_building_anchors_sql(grace_secs: i64) -> String {
+/// is merely queued behind a slow graph writer from being sent twice.
+fn stranded_building_shared_builds_sql(grace_secs: i64) -> String {
     format!(
-        "SELECT db.id AS anchor \
+        "SELECT db.id AS shared_build \
          FROM derivation_build db \
          JOIN LATERAL ( \
            SELECT dj.outcome FROM build_attempt ba \
@@ -39,24 +39,25 @@ fn stranded_building_anchors_sql(grace_secs: i64) -> String {
 }
 
 crate::sql_fn! {
-    STRANDED_BUILDING_ANCHORS = || stranded_building_anchors_sql(900),
+    STRANDED_BUILDING_SHARED_BUILDS = || stranded_building_shared_builds_sql(900),
         params = [],
         tier = Sweep;
 }
 
-pub async fn stranded_building_anchors<C: ConnectionTrait>(
+pub async fn stranded_building_shared_builds<C: ConnectionTrait>(
     db: &C,
     grace_secs: i64,
 ) -> Result<Vec<DerivationBuildId>, DbErr> {
     let rows = db
         .query_all_raw(
-            STRANDED_BUILDING_ANCHORS.bind_built(stranded_building_anchors_sql(grace_secs), []),
+            STRANDED_BUILDING_SHARED_BUILDS
+                .bind_built(stranded_building_shared_builds_sql(grace_secs), []),
         )
         .await?;
 
     Ok(rows
         .into_iter()
-        .filter_map(|r| r.try_get::<uuid::Uuid>("", "anchor").ok())
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "shared_build").ok())
         .map(DerivationBuildId::new)
         .collect())
 }

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CachedPathId, DebugInfoId};
 
-/// One DWARF debug-info file, keyed by its ELF build id.
+/// One DWARF debug-info file, per ELF build id.
 ///
 /// Written by the build-id indexer for any cached NAR that carries
 /// `lib/debug/.build-id/<xx>/<yy>.debug` members (nixpkgs `separateDebugInfo`

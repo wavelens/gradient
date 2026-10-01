@@ -68,7 +68,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const SCORE_MIN: u32 = 1;
 const SCORE_MAX: u32 = 100_000;
 
-/// Deterministic single-core micro-benchmark. Runs a fixed-iteration FNV-style
+/// Deterministic single-core micro-benchmark. Executes a fixed-iteration FNV-style
 /// integer hash loop and converts elapsed time into ops-per-ms, scaled and
 /// clamped to `1..=100_000`. Higher = faster core. The result is purely a
 /// relative speed indicator for cross-worker comparison.

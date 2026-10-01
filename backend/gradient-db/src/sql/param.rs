@@ -23,9 +23,9 @@ pub enum Param {
     CachedPathId,
     CachedPathHash,
     CachedPathHashes(usize),
-    /// A `derivation_build` id: the global build-once anchor.
-    AnchorId,
-    AnchorIds(usize),
+    /// A `derivation_build` id: the global build-once shared build.
+    SharedBuildId,
+    SharedBuildIds(usize),
     EvaluationId,
     EvaluationIds(usize),
     EntryPointId,

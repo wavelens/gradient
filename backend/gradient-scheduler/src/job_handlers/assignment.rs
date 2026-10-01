@@ -21,7 +21,7 @@ use gradient_wire::types::{CandidateScore, JobKind};
 
 use crate::Scheduler;
 use crate::actor::{AssignOutcome, SchedulerMsg};
-use crate::jobs::{Assignment, DispatchRecord};
+use crate::jobs::{Assignment, AssignmentRecord};
 
 /// How many claims one `RequestJob` makes before it answers with no job: each
 /// lost claim drops its job from the tracker, so the next attempt scores what is
@@ -34,7 +34,7 @@ impl Scheduler {
     /// Pick the best pending job of `kind` for the worker in the tracker and
     /// claim it in Postgres. The tracker only proposes: a claim another instance
     /// won, or one whose subject moved since the job was assembled, is dropped and
-    /// the next best is tried. Nothing here reads the ready set.
+    /// the next best is tried. Nothing here reads the startable set.
     #[tracing::instrument(level = "debug", skip_all, fields(?kind))]
     pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
         let instance = self.instance.load_full();
@@ -48,12 +48,12 @@ impl Scheduler {
                 }
             };
 
-            match claim(&self.state, worker_id, &a.dispatch_record)
+            match claim(&self.state, worker_id, &a.assignment_record)
                 .instrument(tracing::debug_span!("claim_dispatch"))
                 .await
             {
                 Ok(true) => {
-                    self.announce_dispatch(worker_id, &a.dispatch_record);
+                    self.announce_assignment(worker_id, &a.assignment_record);
                     info!(%worker_id, job_id = %a.job_id(), ?kind, attempt, "job assigned via RequestJob");
                     return Some(a);
                 }
@@ -69,14 +69,14 @@ impl Scheduler {
         None
     }
 
-    /// A lost claim leaves the tracker. A build's anchor is handed back to the
-    /// ready set to be read again: if it only changed relay mode it comes back
+    /// A lost claim leaves the tracker. A build's shared build is handed back to the
+    /// startable set to be read again: if it only changed passthrough mode it comes back
     /// assembled for the new one, and if it is out elsewhere the read skips it.
     async fn claim_lost(&self, worker_id: &str, a: &Assignment) {
         info!(%worker_id, job_id = %a.job_id(), "claim lost; dropped from the tracker");
         self.drop_assignment(worker_id, a.job_id()).await;
         if let crate::jobs::PendingJob::Build(b) = &a.pending {
-            self.state.ready_set.enter([b.derivation]);
+            self.state.startable_set.enter([b.derivation]);
         }
     }
 
@@ -121,7 +121,7 @@ impl Scheduler {
     }
 
     /// The tracker's pick, reserved in this instance only. The `dispatched_job`
-    /// row is [`claim`]'s job and the board event [`Self::announce_dispatch`]'s,
+    /// row is [`claim`]'s job and the board event [`Self::announce_assignment`]'s,
     /// both run by the caller, so a lost claim leaves no trace of a hand-out that
     /// never happened.
     async fn try_assign(
@@ -152,7 +152,7 @@ impl Scheduler {
 
     /// Announce the hand-out to the job board. Fired only once the record is
     /// durable, so the board never shows a job that was withdrawn.
-    pub(crate) fn announce_dispatch(&self, worker_id: &str, record: &DispatchRecord) {
+    pub(crate) fn announce_assignment(&self, worker_id: &str, record: &AssignmentRecord) {
         self.state.events.publish(worker::JobDispatched {
             project: record.project,
             worker_id: worker_id.to_owned(),
@@ -172,15 +172,15 @@ const TRANSITION_CEILING_MS: u64 = 60_000;
 /// strictly inside even the tightest configurable deadline.
 const TRANSITION_FLOOR_MS: u64 = 500;
 
-/// How long `claim` waits on the `Dispatched` transition.
+/// How long `claim` waits on the `Assigned` transition.
 ///
-/// The graph actor answers only once the queue ahead of the message drained,
+/// The graph writer answers only once the queue ahead of the message drained,
 /// which can be far longer than the session may spend on one frame: the worker's
 /// heartbeats queue behind it, and a heartbeat the liveness pass never sees costs
-/// the worker its registration, its anchor and every other build it is running.
+/// the worker its registration, its shared build and every other build it is running.
 /// Half the deadline keeps the wait well inside it even when the watchdog is
 /// configured tighter than the default; with the watchdog disabled the ceiling
-/// still applies, because the graph actor sets no bound on a caller at all.
+/// still applies, because the graph writer sets no bound on a caller at all.
 fn transition_budget(heartbeat_timeout_secs: u64) -> Duration {
     let ms = match heartbeat_timeout_secs {
         0 => TRANSITION_CEILING_MS,
@@ -202,13 +202,13 @@ fn window_count(job_context: &serde_json::Value, key: &str) -> Option<i32> {
 }
 
 /// The claim row of `rec` for `worker_id`.
-pub(crate) fn dispatch_row(
-    rec: &DispatchRecord,
+pub(crate) fn assignment_row(
+    rec: &AssignmentRecord,
     worker_id: &str,
     now: chrono::NaiveDateTime,
 ) -> gradient_entity::dispatched_job::Model {
     gradient_entity::dispatched_job::Model {
-        id: rec.dispatch,
+        id: rec.assignment_id,
         kind: rec.kind,
         evaluation_id: rec.evaluation_id,
         project: rec.project,
@@ -234,22 +234,22 @@ pub(crate) fn dispatch_row(
     }
 }
 
-/// For a build, open the `build_attempt` and stamp the anchor's `dispatched_at`
-/// through the graph actor, bounded by the transition budget; an eval moves nothing.
-pub(crate) async fn dispatched_transition(
+/// For a build, open the `build_attempt` and stamp the shared build's `dispatched_at`
+/// through the graph writer, bounded by the transition budget; an eval moves nothing.
+pub(crate) async fn assigned_transition(
     state: &Arc<ServerState>,
-    rec: &DispatchRecord,
+    rec: &AssignmentRecord,
 ) -> anyhow::Result<()> {
-    let Some(anchor) = rec.derivation_build else {
+    let Some(shared_build) = rec.derivation_build else {
         return Ok(());
     };
     let budget = transition_budget(state.config.proto.worker_heartbeat_timeout_secs);
     match tokio::time::timeout(
         budget,
-        state.graph.transition(Transition::Dispatched {
+        state.graph.transition(Transition::Assigned {
             evaluation: rec.evaluation_id,
-            anchor,
-            dispatched_job: rec.dispatch,
+            shared_build,
+            dispatched_job: rec.assignment_id,
             substitute: rec.substitute,
             build_context: rec.build_context.clone(),
         }),
@@ -265,23 +265,23 @@ pub(crate) async fn dispatched_transition(
 }
 
 /// Claim the job by writing its `dispatched_job` row, then run its
-/// `Dispatched` transition; `Ok(false)` when the claim was lost. Awaited before
+/// `Assigned` transition; `Ok(false)` when the claim was lost. Awaited before
 /// the assignment goes back to the session: the row is the only proof the job is
 /// out, so a worker's first report can never precede it, and an error here
 /// withdraws the claim instead of letting the job run unrecorded. The mirror
 /// holds too: a failed transition closes the row it just wrote, so a withdrawn
 /// claim never leaves an open row parking the job. What the withdrawal cannot
-/// undo is a transition that merely ran late: `Dispatched` stamps
+/// undo is a transition that merely ran late: `Assigned` stamps
 /// `dispatched_at` once and only once, so a claim dropped on the budget can
-/// still spend it and leave the anchor's real dispatch untimestamped.
+/// still spend it and leave the shared build's real dispatch untimestamped.
 async fn claim(
     state: &Arc<ServerState>,
     worker_id: &str,
-    rec: &DispatchRecord,
+    rec: &AssignmentRecord,
 ) -> anyhow::Result<bool> {
-    let won = gradient_db::claim_dispatch(
+    let won = gradient_db::claim_assignment(
         &state.worker_db,
-        dispatch_row(rec, worker_id, now()),
+        assignment_row(rec, worker_id, now()),
         claim_gate(rec),
     )
     .await
@@ -290,24 +290,25 @@ async fn claim(
         return Ok(won);
     }
 
-    let moved = dispatched_transition(state, rec).await;
+    let moved = assigned_transition(state, rec).await;
     if moved.is_err()
-        && let Err(e) = gradient_db::abandon_open_dispatch(&state.worker_db, rec.dispatch).await
+        && let Err(e) =
+            gradient_db::abandon_open_assignment(&state.worker_db, rec.assignment_id).await
     {
-        warn!(error = %e, dispatch = %rec.dispatch, "dispatch row left open after a failed transition");
+        warn!(error = %e, dispatch = %rec.assignment_id, "dispatch row left open after a failed transition");
     }
 
     moved.map(|_| true)
 }
 
-/// What the claim re-reads: a build goes out only while its anchor is `Queued`
-/// in the relay mode it was assembled for, because an upstream probe that lands
-/// in between turns a build into a relay and the stale build would rebuild bytes
+/// What the claim re-reads: a build goes out only while its shared build is `Queued`
+/// in the passthrough mode it was assembled for, because an upstream probe that lands
+/// in between turns a build into a passthrough and the stale build would rebuild bytes
 /// the upstream already has (#593).
-pub(crate) fn claim_gate(rec: &DispatchRecord) -> ClaimGate {
+pub(crate) fn claim_gate(rec: &AssignmentRecord) -> ClaimGate {
     match rec.derivation_build {
-        Some(anchor) => ClaimGate::Build {
-            anchor,
+        Some(shared_build) => ClaimGate::Build {
+            shared_build,
             substitute: rec.substitute,
         },
         None => ClaimGate::Eval {
@@ -320,10 +321,10 @@ pub(crate) fn claim_gate(rec: &DispatchRecord) -> ClaimGate {
 mod tests {
     use super::*;
 
-    /// The session handles one frame at a time, so the wait on the graph actor
+    /// The session handles one frame at a time, so the wait on the graph writer
     /// is also how long the worker's next heartbeat goes unread. Every
     /// configurable deadline must therefore outlast the budget, or a slow graph
-    /// actor unregisters a healthy worker mid-assignment.
+    /// writer unregisters a healthy worker mid-assignment.
     #[test]
     fn the_budget_expires_before_the_liveness_deadline() {
         for timeout in [1_u64, 2, 10, 30, 60, 120, 600, 3600] {
@@ -336,7 +337,7 @@ mod tests {
     }
 
     /// A disabled watchdog is not a licence to hold the session for the graph
-    /// actor's ten minutes, and a budget of zero would withdraw every claim.
+    /// writer's ten minutes, and a budget of zero would withdraw every claim.
     #[test]
     fn the_budget_is_bounded_at_both_ends() {
         assert_eq!(

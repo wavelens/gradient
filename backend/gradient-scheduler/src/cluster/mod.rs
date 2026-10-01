@@ -5,7 +5,7 @@
  */
 
 //! Cluster jobs on the scheduler side: members wait in the book until their
-//! cluster is whole, and idle slots are the planner's only capacity view.
+//! cluster is complete, and idle slots are the planner's only capacity view.
 
 pub(crate) mod book;
 mod coordinator;
@@ -31,7 +31,7 @@ pub struct CommittedSeat {
     pub worker: String,
     pub key: String,
     pub job: crate::jobs::PendingJob,
-    pub record: crate::jobs::DispatchRecord,
+    pub record: crate::jobs::AssignmentRecord,
     pub role: String,
     pub index: u32,
     pub primary: bool,

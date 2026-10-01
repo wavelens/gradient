@@ -215,7 +215,7 @@ impl ScoreRule for DependencyCountRule {
 
         let base = self.k * instance.dependency_cnt.w1h_or(self.fallback_avg);
         if base <= 0.0 {
-            // Fleet average is a measured zero: any dependent is above average.
+            // Fleet average is a measured zero: any job with dependencies is above average.
             return if job.dependency_count > 0 {
                 self.cap
             } else {
@@ -647,7 +647,7 @@ mod tests {
         let archs = vec!["x86_64-linux".to_string()];
         let w = worker(&archs, false);
         let now = gradient_types::now();
-        // w1h=10 → base=20; dep=1 → 2.5, dep=15 → 37.5 (both below saturation)
+        // w1h=10 -> base=20; dep=1 -> 2.5, dep=15 -> 37.5 (both below saturation)
         let inst = crate::score::context::InstanceContext {
             dependency_cnt: crate::score::context::Windowed {
                 w1h: Some(10.0),

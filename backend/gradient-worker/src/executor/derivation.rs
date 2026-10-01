@@ -20,8 +20,8 @@ use tracing::warn;
 /// Construct a harmonia [`BasicDerivation`] from a parsed drv file.
 ///
 /// Output paths are taken directly from the `.drv` file:
-/// - non-empty `path` → `InputAddressed` (concrete store path)
-/// - empty `path` → `Deferred` (floating CA derivation)
+/// - non-empty `path` -> `InputAddressed` (concrete store path)
+/// - empty `path` -> `Deferred` (floating CA derivation)
 ///
 /// This avoids calling `query_derivation_output_map`, which fails on some
 /// daemon versions that return full `/nix/store/...` paths where harmonia
@@ -44,9 +44,9 @@ pub(super) async fn get_basic_derivation(
     //    sandboxes it without DNS, so curl fails with
     //    `Could not resolve host: …` and the build dies.
     // 2. Floating CA derivation: `path` is empty AND `hash_algo` is empty.
-    //    Daemon will compute the path from the build output → `Deferred`.
+    //    Daemon will compute the path from the build output -> `Deferred`.
     // 3. Plain input-addressed derivation: `path` is set, no `hash_algo`.
-    //    → `InputAddressed(StorePath)`.
+    //    -> `InputAddressed(StorePath)`.
     let mut outputs: BTreeMap<_, _> = BTreeMap::new();
     for o in &drv.outputs {
         let output_name = o
@@ -164,9 +164,9 @@ fn derivation_name(full_drv_path: &str) -> String {
 /// every fetch (curl, git clone, …) would fail with DNS errors.
 ///
 /// The `.drv` `hash_algo` field follows Nix's wire format:
-///   `"sha256"`        → flat sha256
-///   `"r:sha256"`      → recursive (NAR-hashed) sha256
-///   `"text:sha256"`   → text-hashed (rare, used by `builtins.toFile`)
+///   `"sha256"`        -> flat sha256
+///   `"r:sha256"`      -> recursive (NAR-hashed) sha256
+///   `"text:sha256"`   -> text-hashed (rare, used by `builtins.toFile`)
 ///
 /// The `hash` field is hex-encoded (base16) raw digest bytes.
 fn ca_fixed_output(hash_algo: &str, hash_hex: &str) -> Result<DerivationOutput> {

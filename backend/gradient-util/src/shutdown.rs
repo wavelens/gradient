@@ -116,7 +116,7 @@ impl Shutdown {
         self.tree.get().map(Supervisor::health)
     }
 
-    /// Add `spec` to the tree and wait until its first instance runs.
+    /// Add `spec` to the tree and wait until its first instance is running.
     pub async fn supervise_now(&self, spec: ChildSpec) -> Result<(), String> {
         self.supervisor().await?.add(spec).await
     }

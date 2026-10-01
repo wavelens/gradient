@@ -188,7 +188,7 @@ pub async fn build_live_ws(
 ) -> WebResult<Response> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let eval_id = ctx.build_job.evaluation;
-    let anchor = ctx.anchor.id;
+    let shared_build = ctx.shared_build.id;
     let rx = state.events.subscribe();
     let cancel = state.shutdown.token();
     let shutdown = state.shutdown.clone();
@@ -197,7 +197,7 @@ pub async fn build_live_ws(
             .spawn(live_stream(
                 socket,
                 rx,
-                move |env| build_frame(env, eval_id, anchor),
+                move |env| build_frame(env, eval_id, shared_build),
                 skip_lag,
                 cancel,
             ))
@@ -205,9 +205,13 @@ pub async fn build_live_ws(
     }))
 }
 
-fn build_frame(env: &Envelope, eval_id: EvaluationId, anchor: DerivationBuildId) -> Option<String> {
+fn build_frame(
+    env: &Envelope,
+    eval_id: EvaluationId,
+    shared_build: DerivationBuildId,
+) -> Option<String> {
     match &env.event {
-        Event::BuildProgress(p) if p.derivation_build == anchor => frame(env),
+        Event::BuildProgress(p) if p.derivation_build == shared_build => frame(env),
         _ => eval_frame(env, eval_id),
     }
 }
@@ -343,7 +347,7 @@ mod tests {
 
     #[test]
     fn build_channel_adds_only_its_own_download_progress() {
-        let anchor = DerivationBuildId::new(Uuid::from_u128(2));
+        let shared_build = DerivationBuildId::new(Uuid::from_u128(2));
         let download = |derivation_build| {
             env(build::Progress {
                 derivation_build,
@@ -354,17 +358,17 @@ mod tests {
             })
         };
 
-        assert!(build_frame(&download(anchor), eid(1), anchor).is_some());
+        assert!(build_frame(&download(shared_build), eid(1), shared_build).is_some());
         assert!(
             build_frame(
                 &download(DerivationBuildId::new(Uuid::from_u128(3))),
                 eid(1),
-                anchor
+                shared_build
             )
             .is_none()
         );
-        assert!(build_frame(&build_changed(Uuid::from_u128(1)), eid(1), anchor).is_some());
-        assert!(eval_frame(&download(anchor), eid(1)).is_none());
+        assert!(build_frame(&build_changed(Uuid::from_u128(1)), eid(1), shared_build).is_some());
+        assert!(eval_frame(&download(shared_build), eid(1)).is_none());
     }
 
     #[test]

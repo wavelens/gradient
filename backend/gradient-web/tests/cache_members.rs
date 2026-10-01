@@ -50,7 +50,7 @@ fn cache_row(managed: bool) -> cache::Model {
 }
 
 /// Build a one-row mock result that satisfies sea-orm's `count()` parser
-/// (`SELECT COUNT(*) AS num_items` → `try_get::<i64>("", "num_items")`).
+/// (`SELECT COUNT(*) AS num_items` -> `try_get::<i64>("", "num_items")`).
 fn count_row(num: i64) -> BTreeMap<&'static str, sea_orm::Value> {
     let mut row = BTreeMap::new();
     row.insert("num_items", sea_orm::Value::BigInt(Some(num)));
@@ -151,7 +151,7 @@ fn list_members_requires_view_cache() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // Admin caller: cache found → member lookup (admin) → role lookup → member+user join
+        // Admin caller: cache found -> member lookup (admin) -> role lookup -> member+user join
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
@@ -183,7 +183,7 @@ fn list_members_non_member_gets_not_found() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // load_cache with ViewCache: cache found → member lookup returns empty
+        // load_cache with ViewCache: cache found -> member lookup returns empty
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([Vec::<cache_user::Model>::new()]);
@@ -206,7 +206,7 @@ fn add_member_requires_manage_cache_members() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // View-role caller: cache → member (View) → role lookup → blocked by ManageCacheMembers
+        // View-role caller: cache -> member (View) -> role lookup -> blocked by ManageCacheMembers
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![view_member()]])
@@ -230,15 +230,15 @@ fn add_member_admin_creates_a_pending_invitation() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_cache Require(ManageCacheMembers): cache → member → role
+            // load_cache Require(ManageCacheMembers): cache -> member -> role
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
             // find_user_by_username
             .append_query_results([vec![other_user_row()]])
-            // find_cache_membership (check not already a member) → empty
+            // find_cache_membership (check not already a member) -> empty
             .append_query_results([Vec::<cache_user::Model>::new()])
-            // find_cache_invitation (check not already invited) → empty
+            // find_cache_invitation (check not already invited) -> empty
             .append_query_results([Vec::<cache_invitation::Model>::new()])
             // role lookup by name
             .append_query_results([vec![view_role_row()]])
@@ -361,7 +361,7 @@ fn remove_member_blocks_last_admin() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // self is the only Admin → delete should be 409
+        // self is the only Admin -> delete should be 409
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
@@ -370,7 +370,7 @@ fn remove_member_blocks_last_admin() {
             .append_query_results([vec![user()]])
             // find_cache_membership
             .append_query_results([vec![admin_member()]])
-            // COUNT admin members → 1 (sea-orm count parses `num_items: i64`)
+            // COUNT admin members -> 1 (sea-orm count parses `num_items: i64`)
             .append_query_results([vec![count_row(1)]]);
 
         let server = make_test_server(db.into_connection());
@@ -405,7 +405,7 @@ fn remove_member_view_role_succeeds() {
             .append_query_results([vec![other_user_row()]])
             // find_cache_membership
             .append_query_results([vec![target_member]])
-            // role is View → no Admin-count check; straight DELETE
+            // role is View -> no Admin-count check; straight DELETE
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -428,7 +428,7 @@ fn managed_cache_blocks_member_mutations() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // cache is managed → reject_managed triggers 403
+        // cache is managed -> reject_managed triggers 403
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(true)]])
             .append_query_results([vec![admin_member()]])

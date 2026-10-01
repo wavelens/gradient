@@ -333,7 +333,7 @@ pub async fn evaluate_derivations(
     let eval_overrides = eval_input_overrides(job, local_flake_path);
 
     // Best-effort fingerprint + pull of the flake's shared eval-cache blob so
-    // the eval runs warm. A fingerprint/pull failure never fails the eval. The
+    // the eval starts warm. A fingerprint/pull failure never fails the eval. The
     // fingerprint is computed WITH the overrides so distinct override sets never
     // share (and pollute) one eval-cache blob.
     let fingerprint = if evaluator.eval_cache_share {
@@ -405,7 +405,7 @@ pub async fn evaluate_derivations(
         }
     };
 
-    // Drain the per-eval stats and ship one report; skip if nothing was
+    // Drain the per-eval stats and send one report; skip if nothing was
     // observed (metrics gated off or an empty eval).
     let totals = evaluator.resolver.take_eval_stats();
     if totals.total_thunks > 0 || !totals.per_entry_point.is_empty() {
@@ -643,7 +643,7 @@ struct Flush {
 /// Pushes each batch's paths and reports it once they are cached, in walk order,
 /// beside the walk so a slow link never stalls it. Every push starts as its batch
 /// arrives: a push waits for the server to commit its paths behind whatever the
-/// graph actor is flushing, so pushes that took turns each cost a flush of the
+/// graph writer is flushing, so pushes that took turns each cost a flush of the
 /// batch before. A path an earlier batch pushed is not pushed again.
 async fn publish(reporter: &dyn JobReporter, mut flushes: mpsc::Receiver<Flush>) -> Result<()> {
     let mut pushed = HashSet::new();

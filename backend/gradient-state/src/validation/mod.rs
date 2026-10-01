@@ -5,7 +5,7 @@
  */
 
 //! Pre-apply validation of a [`StateConfiguration`]. Each `State*` entity has
-//! its own validator; [`StateConfiguration::validate`] runs them in order over a
+//! its own validator; [`StateConfiguration::validate`] executes them in order over a
 //! shared [`EntityLookup`] / [`ErrorCollector`].
 
 mod api_keys;

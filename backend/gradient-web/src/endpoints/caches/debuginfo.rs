@@ -15,7 +15,7 @@
 //! written by `nix copy`); both spellings resolve here.
 //!
 //! A path this cache substituted rather than built has its debug info upstream,
-//! so a miss falls through to the cache's upstreams and rewrites their `archive`
+//! so a miss falls through to the cache's upstream caches and rewrites their `archive`
 //! link through our NAR proxy - the same pull-through behaviour `/log` has. An
 //! unknown build id is a `404`, never another error status: debuginfod clients
 //! abandon the whole lookup on anything else.
@@ -65,10 +65,10 @@ pub async fn debuginfo(
         ));
     }
 
-    let upstreams = upstreams_for(&state, ctx.cache.id).await;
-    match fetch_from_upstreams(
+    let upstream_caches = upstream_caches_for(&state, ctx.cache.id).await;
+    match fetch_from_upstream_caches(
         gradient_util::http::download_client(),
-        &upstreams,
+        &upstream_caches,
         &build_id,
     )
     .await
@@ -89,7 +89,10 @@ fn redirect_response(doc: DebugInfoRedirect, cache_status: &'static str) -> Resp
     response
 }
 
-async fn upstreams_for(state: &Arc<ServerState>, cache: CacheId) -> Vec<(CacheUpstreamId, String)> {
+async fn upstream_caches_for(
+    state: &Arc<ServerState>,
+    cache: CacheId,
+) -> Vec<(CacheUpstreamId, String)> {
     ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache))
         .all(&state.web_db)
@@ -106,12 +109,12 @@ async fn upstreams_for(state: &Arc<ServerState>, cache: CacheId) -> Vec<(CacheUp
 /// Unlike a narinfo there is nothing to verify - nix signs store paths, not the
 /// debug index - so an upstream that 404s, errors, or answers something we
 /// cannot rewrite is skipped.
-async fn fetch_from_upstreams(
+async fn fetch_from_upstream_caches(
     client: &reqwest::Client,
-    upstreams: &[(CacheUpstreamId, String)],
+    upstream_caches: &[(CacheUpstreamId, String)],
     build_id: &str,
 ) -> Option<DebugInfoRedirect> {
-    for (upstream_id, base_url) in upstreams {
+    for (upstream_id, base_url) in upstream_caches {
         for key in [build_id.to_owned(), format!("{build_id}.debug")] {
             let url = format!("{}/debuginfo/{}", base_url.trim_end_matches('/'), key);
             let Ok(response) = client.get(&url).send().await else {

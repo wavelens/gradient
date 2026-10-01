@@ -141,7 +141,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http client"),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
@@ -153,10 +153,10 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -207,7 +207,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http client"),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
@@ -219,10 +219,10 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -292,7 +292,7 @@ async fn public_cache_storing_nar(served: bool) -> Arc<ServerState> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http client"),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
@@ -304,10 +304,10 @@ async fn public_cache_storing_nar(served: bool) -> Arc<ServerState> {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -333,7 +333,7 @@ fn served_gate(served: bool) -> Vec<std::collections::BTreeMap<&'static str, sea
     if served { vec![row] } else { Vec::new() }
 }
 
-fn anchor_id() -> DerivationBuildId {
+fn shared_build_id() -> DerivationBuildId {
     DerivationBuildId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000008").unwrap())
 }
 
@@ -372,11 +372,11 @@ fn derivation_row() -> gradient_entity::derivation::Model {
     }
 }
 
-fn anchor_row(
+fn shared_build_row(
     status: gradient_entity::build::BuildStatus,
 ) -> gradient_entity::derivation_build::Model {
     gradient_entity::derivation_build::Model {
-        id: anchor_id(),
+        id: shared_build_id(),
         derivation: deriv_id(),
         status,
         created_at: test_date(),
@@ -388,7 +388,7 @@ fn anchor_row(
 fn attempt_row() -> gradient_entity::build_attempt::Model {
     gradient_entity::build_attempt::Model {
         id: attempt_id(),
-        derivation_build: anchor_id(),
+        derivation_build: shared_build_id(),
         created_at: test_date(),
         ..Default::default()
     }
@@ -414,7 +414,7 @@ fn make_state(
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http client"),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
@@ -426,10 +426,10 @@ fn make_state(
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -452,7 +452,7 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
-        .append_query_results([vec![anchor_row(
+        .append_query_results([vec![shared_build_row(
             gradient_entity::build::BuildStatus::Completed,
         )]])
         .append_query_results([vec![attempt_row()]])
@@ -472,7 +472,7 @@ pub async fn cache_with_completed_build_not_in_cache() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache serving an output of the derivation but no build anchor -
+/// Public cache serving an output of the derivation but no shared build -
 /// `/log` must 404.
 pub async fn cache_with_failed_build_only() -> Arc<ServerState> {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -510,7 +510,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http client"),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
@@ -522,10 +522,10 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -548,7 +548,7 @@ pub async fn cache_with_unknown_derivation() -> Arc<ServerState> {
     make_state(db, Arc::new(NoopLogStorage))
 }
 
-/// Public cache + a completed anchor whose latest attempt's log is seeded; the
+/// Public cache + a completed shared build whose latest attempt's log is seeded; the
 /// endpoint serves that attempt via `latest_attempt_id`. Returns
 /// `(state, expected_log)`.
 pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
@@ -559,7 +559,7 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
-        .append_query_results([vec![anchor_row(
+        .append_query_results([vec![shared_build_row(
             gradient_entity::build::BuildStatus::Completed,
         )]])
         .append_query_results([vec![attempt_row()]])
@@ -592,7 +592,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_util::http::build_client().expect("http client"),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
@@ -604,10 +604,10 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(

@@ -12,7 +12,7 @@ use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 
-/// Auto-recover an evaluation wedged in `graph_stuck` because an anchor's own
+/// Auto-recover an evaluation wedged in `graph_stuck` because a shared build's own
 /// `.drv` NAR is missing from our cache and has no producer: only evaluation
 /// emits a `.drv`, and the daemon-free server cannot reproduce one. Aborts the
 /// stuck run (freeing the single-active-per-task slot) and queues a fresh

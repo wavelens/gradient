@@ -16,7 +16,7 @@ use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::IntoResponse;
 use gradient_core::ServerState;
-use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar_reader};
+use gradient_proto::import::{ImportInput, SignTargets, import_nar_reader};
 use gradient_storage::PartialStore;
 use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
@@ -145,12 +145,12 @@ pub async fn nars_upload(
         .open_read(&stage_key)
         .await
         .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
-    let outcome = ingest_nar_reader(
+    let outcome = import_nar_reader(
         &state.web_db,
         &state.nar_storage,
         &state.graph,
         nar_reader,
-        IngestInput {
+        ImportInput {
             store_path: &narinfo.store_path,
             file_hash: &narinfo.file_hash,
             file_size: narinfo.file_size,
@@ -326,7 +326,7 @@ pub async fn nar_chunk(
 }
 
 /// `POST /caches/{cache}/nars/{store_hash}/finalize` - validate the fully staged
-/// NAR against its narinfo and ingest it, then drop the partial.
+/// NAR against its narinfo and import it, then drop the partial.
 pub async fn nar_finalize(
     state: State<Arc<ServerState>>,
     info: RequestInfo,
@@ -382,12 +382,12 @@ pub async fn nar_finalize(
         .open_read(&key)
         .await
         .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
-    let outcome = ingest_nar_reader(
+    let outcome = import_nar_reader(
         &state.web_db,
         &state.nar_storage,
         &state.graph,
         nar_reader,
-        IngestInput {
+        ImportInput {
             store_path: &narinfo.store_path,
             file_hash: &narinfo.file_hash,
             file_size: narinfo.file_size,

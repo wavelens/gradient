@@ -104,7 +104,7 @@ impl Scheduler {
                 Vec::new(),
             )
             .await?;
-        self.close_unclaimed_dispatches(worker_id).await;
+        self.close_unclaimed_assignments(worker_id).await;
         self.record_worker_connection(worker_id, caps_json).await;
         self.state.events.publish(worker::Connected {
             worker_id: worker_id.to_owned(),
@@ -124,8 +124,8 @@ impl Scheduler {
     /// dispatch as `Abandoned` and drop its eval phase totals. Rows an earlier
     /// process handed out have no live closer at all, and startup recovery has
     /// already closed those - this is the backstop for the rows it missed.
-    async fn close_unclaimed_dispatches(&self, worker_id: &str) {
-        match gradient_db::abandon_open_dispatches_for_worker(
+    async fn close_unclaimed_assignments(&self, worker_id: &str) {
+        match gradient_db::abandon_open_assignments_for_worker(
             &self.state.worker_db,
             worker_id,
             self.state.started_at.naive_utc(),
@@ -257,7 +257,7 @@ impl Scheduler {
             })
             .await;
         debug!(%worker_id, "worker capabilities updated");
-        self.kick_dispatch();
+        self.kick_assigner();
     }
 
     pub async fn update_worker_metrics(&self, worker_id: &str, metrics: WorkerMetrics) {
@@ -288,11 +288,11 @@ impl Scheduler {
         self.state.events.publish(worker::Disconnected {
             worker_id: worker_id.to_owned(),
         });
-        self.kick_dispatch();
+        self.kick_assigner();
     }
 
-    /// Reconcile each in-flight evaluation's status against the connected pool.
-    pub async fn reconcile_waiting_state(&self) -> Result<()> {
+    /// Refresh each in-flight evaluation's status against the connected pool.
+    pub async fn refresh_waiting_state(&self) -> Result<()> {
         let workers = self.board_workers().await;
         let eval_capable = workers.iter().filter(|w| w.capabilities.eval).count();
         let fetch_capable = workers.iter().filter(|w| w.capabilities.fetch).count();
@@ -301,7 +301,7 @@ impl Scheduler {
             .map(|w| (w.architectures, w.system_features))
             .collect();
         let draining = self.draining.load(std::sync::atomic::Ordering::Relaxed);
-        let unbuildables = build::reconcile_waiting_state(
+        let unbuildables = build::refresh_waiting_state(
             &self.state,
             &self.assessments,
             &caps,

@@ -14,7 +14,7 @@ use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 /// registration with the `eval` capability gate enabled.
 ///
 /// A `Queued` evaluation can only progress once an `eval`-capable worker
-/// picks up its `FlakeJob`. Until then the build dispatch reconciler has
+/// picks up its `FlakeJob`. Until then the build dispatch repair pass has
 /// nothing to do - there are no builds yet - so a project without any
 /// eval-capable registration would otherwise sit in `Queued` forever.
 pub async fn project_has_eval_capable_worker_registration<C: ConnectionTrait>(

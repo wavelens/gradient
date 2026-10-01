@@ -28,7 +28,7 @@ pub async fn get_build_log(
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log = match super::effective_log_id(&state, &ctx.anchor).await {
+    let log = match super::effective_log_id(&state, &ctx.shared_build).await {
         Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
         None => String::new(),
     };
@@ -43,11 +43,11 @@ pub async fn post_build_log(
     Path(build_id): Path<BuildJobId>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &Some(user), api_key.as_ref()).await?;
-    let anchor_id = ctx.anchor.id;
+    let shared_build_id = ctx.shared_build.id;
 
     // Capture current log length so the stream only delivers new content,
     // avoiding duplication of what the client already received via GET.
-    let initial_log_key = gradient_db::latest_attempt_id(&state.web_db, anchor_id).await?;
+    let initial_log_key = gradient_db::latest_attempt_id(&state.web_db, shared_build_id).await?;
     let initial_offset = match initial_log_key {
         Some(key) => state.log_storage.read(key).await.unwrap_or_default().len(),
         None => 0,
@@ -62,13 +62,13 @@ pub async fn post_build_log(
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
 
-            let anchor = match EDerivationBuild::find_by_id(anchor_id).one(&state.web_db).await {
+            let shared_build = match EDerivationBuild::find_by_id(shared_build_id).one(&state.web_db).await {
                 Ok(Some(a)) => a,
                 Ok(None) => break,
                 Err(_) => break,
             };
-            let Some(log_key) = gradient_db::latest_attempt_id(&state.web_db, anchor_id).await.unwrap_or(None) else {
-                if matches!(anchor.status, BuildStatus::Created | BuildStatus::Queued) {
+            let Some(log_key) = gradient_db::latest_attempt_id(&state.web_db, shared_build_id).await.unwrap_or(None) else {
+                if matches!(shared_build.status, BuildStatus::Created | BuildStatus::Queued) {
                     continue;
                 }
                 if !sent_any {
@@ -82,7 +82,7 @@ pub async fn post_build_log(
             // the connection either, otherwise a UI that opened the stream
             // before the worker picked the build up would see an empty
             // response and never get the live output. Keep polling.
-            if matches!(anchor.status, BuildStatus::Created | BuildStatus::Queued) {
+            if matches!(shared_build.status, BuildStatus::Created | BuildStatus::Queued) {
                 continue;
             }
 
@@ -102,7 +102,7 @@ pub async fn post_build_log(
             // read (catches the race where lines were appended between our
             // read above and the daemon-side status transition committing)
             // and close the stream.
-            if anchor.status != BuildStatus::Building {
+            if shared_build.status != BuildStatus::Building {
                 let final_log = state.log_storage.read(log_key).await.unwrap_or_default();
                 if final_log.len() > last_offset {
                     let final_chunk = final_log[last_offset..].to_string();

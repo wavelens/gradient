@@ -73,7 +73,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let project_caches = gradient_entity::project_cache::Entity::find()
         .all(db)
         .await?;
-    let upstreams = gradient_entity::cache_upstream::Entity::find()
+    let all_upstream_caches = gradient_entity::cache_upstream::Entity::find()
         .all(db)
         .await?;
     let triggers = gradient_entity::task_trigger::Entity::find()
@@ -202,7 +202,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             .filter(|oc| oc.cache == c.id)
             .filter_map(|oc| project_name.get(&oc.project).cloned())
             .collect();
-        let cache_upstreams = upstreams
+        let upstream_caches = all_upstream_caches
             .iter()
             .filter(|u| u.cache == c.id)
             .filter_map(|u| export_upstream(u, &cache_name))
@@ -240,7 +240,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 max_storage_gb: c.max_storage_gb,
                 signing_key_file: String::new(),
                 projects,
-                upstreams: cache_upstreams,
+                upstream_caches,
                 public: c.public,
                 created_by: name_or_blank(&username, c.created_by),
                 roles,
@@ -351,7 +351,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                     IntegrationKind::Outbound => "outbound",
                 }
                 .to_string(),
-                forge_type: i.forge_type.as_path_segment().to_string(),
+                git_host_type: i.git_host_type.as_path_segment().to_string(),
                 secret_file: None,
                 endpoint_url: i.endpoint_url.clone(),
                 access_token_file: None,
@@ -493,13 +493,13 @@ fn export_action(
             c.insert("url".into(), url.into());
             (ActionType::SendWebRequest, c)
         }
-        ActionConfig::ForgeStatusReport { integration_id } => {
+        ActionConfig::GitHostStatusReport { integration_id } => {
             let mut c = serde_json::Map::new();
             c.insert(
                 "integration".into(),
                 integration_name.get(&integration_id).cloned()?.into(),
             );
-            (ActionType::ForgeStatusReport, c)
+            (ActionType::GitHostStatusReport, c)
         }
         ActionConfig::OpenPr {
             integration_id,
@@ -541,7 +541,7 @@ fn export_action(
         action_type: match action_type {
             ActionType::SendMail => "send_mail",
             ActionType::SendWebRequest => "send_web_request",
-            ActionType::ForgeStatusReport => "forge_status_report",
+            ActionType::GitHostStatusReport => "git_host_status_report",
             ActionType::OpenPr => "open_pr",
         }
         .to_string(),
@@ -566,7 +566,7 @@ fn export_upstream(
             url: u.url.clone()?,
             public_key: u.public_key.clone()?,
         }),
-        // GradientProto upstreams have no `state` representation yet.
+        // GradientProto upstream caches have no `state` representation yet.
         CacheUpstreamKind::GradientProto => None,
     }
 }

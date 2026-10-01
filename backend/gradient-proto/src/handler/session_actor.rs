@@ -26,7 +26,7 @@ use tokio::sync::{Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
-use super::dispatch::{ActiveJobs, DispatchContext, RpcContext};
+use super::inbound::{ActiveJobs, InboundContext, RpcContext};
 use super::job_events::{JobEvents, SchedulerJobEvents};
 use super::log_lane::LogLane;
 use super::session::on_reauth_notify;
@@ -193,7 +193,7 @@ impl Actor for SessionActor {
         match msg {
             SessionMsg::Frame(inbound, reply) => {
                 let keep = {
-                    let mut ctx = DispatchContext {
+                    let mut ctx = InboundContext {
                         writer: &st.writer,
                         state: &st.state,
                         scheduler: &st.scheduler,
@@ -204,7 +204,7 @@ impl Actor for SessionActor {
                         logs: &st.logs,
                     };
 
-                    ctx.dispatch(inbound, &mut st.uploads).await
+                    ctx.handle(inbound, &mut st.uploads).await
                 };
                 let _ = reply.send(keep);
 
@@ -476,9 +476,9 @@ fn open_uploads(
     Ok(uploads)
 }
 
-fn split_uploads(st: &mut SessionState) -> (DispatchContext<'_>, &mut UploadSession) {
+fn split_uploads(st: &mut SessionState) -> (InboundContext<'_>, &mut UploadSession) {
     (
-        DispatchContext {
+        InboundContext {
             writer: &st.writer,
             state: &st.state,
             scheduler: &st.scheduler,
@@ -728,7 +728,7 @@ mod tests {
     }
 
     // Regression: a gluon worker building a VM test was unregistered as dead
-    // while its session waited on a saturated graph actor, heartbeats unread.
+    // while its session waited on a saturated graph writer, heartbeats unread.
     #[tokio::test]
     async fn the_reader_keeps_stamping_while_a_frame_is_in_flight() {
         let (socket, mut client) = connected_pair().await;

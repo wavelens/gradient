@@ -5,16 +5,16 @@
  */
 
 //! Per-entry-point dependency histograms for the task page. A page's stale
-//! entry points are recomputed by the fenced walk in
+//! entry points are updated by the fenced walk in
 //! [`crate::task_board::entry_point_dep_counts`] and cached in
 //! `entry_point_dep_count` under the evaluation's `graph_version`, which every
-//! anchor move, every ingest batch and the startup recovery bump.
+//! shared build move, every record batch and the startup recovery bump.
 //!
 //! The version alone is not a usable cache key while an evaluation builds: every
-//! anchor move bumps it, so a version-only test is always stale and the page
+//! shared build move bumps it, so a version-only test is always stale and the page
 //! walks page-size-times-closure on every poll. Staleness is therefore damped by
 //! time as well ([`DEP_COUNTS_REFRESH_SECS`]), and an age ceiling
-//! ([`DEP_COUNTS_MAX_AGE_SECS`]) recomputes regardless of the stamp so a bump
+//! ([`DEP_COUNTS_MAX_AGE_SECS`]) updates regardless of the stamp so a bump
 //! that never landed cannot freeze a histogram.
 
 use crate::fetch_in_chunks;
@@ -32,28 +32,28 @@ pub type DepCounts = HashMap<EntryPointId, HashMap<BuildStatus, i64>>;
 
 /// How long a histogram the graph has outgrown may still be served. The task page
 /// polls every 4 s per viewer and a building evaluation bumps its version on every
-/// anchor move, so without this the walk runs on every poll of every viewer, and
+/// shared build move, so without this the walk is running on every poll of every viewer, and
 /// concurrent viewers of one evaluation collapse onto one walk.
 ///
-/// It has to stay well ABOVE what the walk costs, or the recomputes overlap and
+/// It has to stay well ABOVE what the walk costs, or the updates overlap and
 /// the queue never drains: at 15 s against a walk measured at 93 s on a
 /// 74-entry-point NixOS flake, this was 80% of the database's time on its own.
 /// The bar advancing every other minute is invisible against builds that take
 /// minutes; a walk that cannot finish before the next one starts is not.
 pub const DEP_COUNTS_REFRESH_SECS: i64 = 120;
 
-/// Age at which rows recompute whatever their stamp says. The emitter logs and
+/// Age at which rows update whatever their stamp says. The emitter logs and
 /// swallows a failed bump (it fans out board events and CI checks that must not be
 /// held up by it), so a deadlock or statement timeout would otherwise freeze a
-/// histogram for good now that the reconcile hooks are gone. One walk per opened
+/// histogram for good now that the repair hooks are gone. One walk per opened
 /// page per ten minutes is the whole price, and it is paid only for pages someone
 /// is actually looking at.
 pub const DEP_COUNTS_MAX_AGE_SECS: i64 = 600;
 
-/// Whether `ep`'s cached rows must be recomputed at `now`. Never-computed rows
-/// always recompute; past that, a moved graph is damped by
+/// Whether `ep`'s cached rows must be updated at `now`. Never-computed rows
+/// always update; past that, a moved graph is damped by
 /// [`DEP_COUNTS_REFRESH_SECS`] and [`DEP_COUNTS_MAX_AGE_SECS`] is the backstop.
-fn needs_recompute(ep: &MEntryPoint, version: i64, now: NaiveDateTime) -> bool {
+fn needs_update(ep: &MEntryPoint, version: i64, now: NaiveDateTime) -> bool {
     let Some(computed_at) = ep.dep_counts_computed_at else {
         return true;
     };
@@ -121,7 +121,7 @@ pub async fn bump_graph_version_for_derivations<C: ConnectionTrait>(
 }
 
 /// The histogram of every entry point on a page: served from the cache unless
-/// [`needs_recompute`] says otherwise, in which case one fenced walk recomputes
+/// [`needs_update`] says otherwise, in which case one fenced walk updates
 /// the stale entry points and stores them under the current version. An entry
 /// point with no dependencies is absent from the map.
 pub async fn cached_entry_point_dep_counts<C>(
@@ -136,7 +136,7 @@ where
     let now = gradient_types::now();
     let (stale, fresh): (Vec<&MEntryPoint>, Vec<&MEntryPoint>) = entry_points
         .iter()
-        .partition(|ep| needs_recompute(ep, version, now));
+        .partition(|ep| needs_update(ep, version, now));
 
     let fresh_ids: Vec<EntryPointId> = fresh.iter().map(|ep| ep.id).collect();
     let mut out = if fresh_ids.is_empty() {
@@ -428,7 +428,7 @@ mod tests {
         );
     }
 
-    /// While an evaluation builds, every anchor move bumps its version, so a
+    /// While an evaluation builds, every shared build move bumps its version, so a
     /// version-only test would walk the graph on every 4 s poll of the page. Rows
     /// the graph has outgrown but that are seconds old are served as they are.
     #[tokio::test]
@@ -448,10 +448,10 @@ mod tests {
     }
 
     /// The emitter logs and swallows a failed bump, so a matching stamp is not
-    /// proof the rows are current; past the age ceiling they are recomputed
+    /// proof the rows are current; past the age ceiling they are updated
     /// anyway, which is the only thing that heals a bump that never landed.
     #[tokio::test]
-    async fn rows_past_the_age_ceiling_recompute_even_with_a_matching_stamp() {
+    async fn rows_past_the_age_ceiling_update_even_with_a_matching_stamp() {
         let eval = evaluation(5);
         let ep = entry_point(eval.id, Some(5), DEP_COUNTS_MAX_AGE_SECS + 1);
         let db = MockDatabase::new(DatabaseBackend::Postgres)

@@ -11,30 +11,30 @@
 //! The `Scheduler` impl is split across submodules by concern:
 //! - [`worker_lifecycle`] - connect / disconnect / capability updates
 //! - [`job_handlers`] - queue, assignment, status, completion, log, abort
-//! - [`dispatch`] - background loops that poll the DB and enqueue jobs
+//! - [`loops`] - background loops that poll the DB and enqueue jobs
 //! - [`build`] - `BuildOutput`/completion/failure handling and self-heal
-//! - [`waiting_state`] - reconciles evaluation status against the worker pool
-//! - [`buildability`] - whether the connected pool can build a pending anchor
+//! - [`waiting_state`] - refreshes evaluation status against the worker pool
+//! - [`buildability`] - whether the connected pool can build a pending shared build
 
 pub mod actor;
 mod assessment_memo;
 pub mod build;
 pub mod buildability;
 pub mod cluster;
-pub mod dispatch;
 pub mod eval;
 pub mod history;
 pub mod instance;
 pub mod jobs;
 pub mod log_substitution;
+pub mod loops;
 pub mod probe;
 pub mod views;
 pub mod waiting_state;
 
-mod dispatch_mode;
+mod assign_mode;
 mod eval_metrics;
 mod job_handlers;
-pub(crate) mod trigger_dispatch;
+pub(crate) mod trigger_firing;
 mod unbuildable;
 mod worker_lifecycle;
 
@@ -47,7 +47,7 @@ use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 
 use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
 
-pub use jobs::{BoardActiveJob, DecisionCandidate, DispatchDecision, PendingJobInfo};
+pub use jobs::{AssignDecision, BoardActiveJob, DecisionCandidate, PendingJobInfo};
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so
 /// the statements it declares with `gradient_db::sql!` reach the plan gate's
@@ -55,7 +55,7 @@ pub use jobs::{BoardActiveJob, DecisionCandidate, DispatchDecision, PendingJobIn
 pub const fn link() {}
 
 #[cfg(test)]
-mod dispatch_tests;
+mod assign_tests;
 #[cfg(test)]
 mod scheduler_tests;
 
@@ -68,15 +68,15 @@ pub struct Scheduler {
     /// the watch so a restart looks like latency, not an error.
     core: Arc<tokio::sync::watch::Sender<Option<ActorRef<SchedulerMsg>>>>,
     /// The live build-dispatch actor, re-published by its factory on every
-    /// (re)spawn, so `kick_dispatch` always reaches the current instance.
-    pub(crate) build_dispatch: Arc<arc_swap::ArcSwapOption<ractor::ActorRef<dispatch::BuildMsg>>>,
-    /// Edge-trigger generation for `kick_dispatch`: the dispatcher services a
+    /// (re)spawn, so `kick_assigner` always reaches the current instance.
+    pub(crate) build_assigner: Arc<arc_swap::ArcSwapOption<ractor::ActorRef<loops::BuildMsg>>>,
+    /// Edge-trigger generation for `kick_assigner`: the dispatcher services a
     /// burst of kicks with one pass by comparing against the generation it saw.
     pub(crate) kick_gen: Arc<AtomicU64>,
     /// Scoring policy used when selecting which pending job to assign to a
     /// requesting worker.  Shared via `Arc` so it can be read lock-free.
     pub(crate) policy: Arc<dyn gradient_pool::score::ScoringPolicy>,
-    /// Windowed instance metrics snapshot, recomputed periodically by
+    /// Windowed instance metrics snapshot, updated periodically by
     /// `instance_metrics_loop` and read lock-free during scoring.
     pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_pool::score::InstanceContext>>,
     /// Per-task eval-RAM prediction (p95 peak RSS), refreshed by
@@ -114,7 +114,7 @@ impl Scheduler {
         Self {
             state,
             core: Arc::new(tokio::sync::watch::channel(None).0),
-            build_dispatch: Arc::new(arc_swap::ArcSwapOption::empty()),
+            build_assigner: Arc::new(arc_swap::ArcSwapOption::empty()),
             kick_gen: Arc::new(AtomicU64::new(0)),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(
@@ -186,10 +186,14 @@ impl Scheduler {
     pub async fn cancel_evaluation_jobs(
         &self,
         eval_id: EvaluationId,
-        anchor_ids: &[DerivationBuildId],
+        shared_build_ids: &[DerivationBuildId],
     ) {
         let mut job_ids = vec![crate::jobs::eval_job_key(eval_id)];
-        job_ids.extend(anchor_ids.iter().map(|id| crate::jobs::build_job_key(*id)));
+        job_ids.extend(
+            shared_build_ids
+                .iter()
+                .map(|id| crate::jobs::build_job_key(*id)),
+        );
         if let Err(e) = self
             .call(|reply| SchedulerMsg::RemoveJobs { job_ids, reply })
             .await
@@ -203,12 +207,12 @@ impl Scheduler {
     /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {
         let scheduler = Arc::downgrade(self);
-        self.state.ready_set.on_move(move || {
+        self.state.startable_set.on_move(move || {
             if let Some(scheduler) = scheduler.upgrade() {
-                scheduler.kick_dispatch();
+                scheduler.kick_assigner();
             }
         });
-        dispatch::start_dispatch_loops(Arc::clone(self));
+        loops::start_assign_loops(Arc::clone(self));
     }
 
     /// Per-loop supervision health (restarts, pass errors, timeouts, last ok).
@@ -245,7 +249,7 @@ impl Scheduler {
             .unwrap_or_default()
     }
 
-    pub async fn recent_decisions(&self) -> Vec<jobs::DispatchDecision> {
+    pub async fn recent_decisions(&self) -> Vec<jobs::AssignDecision> {
         self.call(|reply| SchedulerMsg::RecentDecisions { reply })
             .await
             .unwrap_or_default()

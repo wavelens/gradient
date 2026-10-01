@@ -6,7 +6,7 @@
 
 //! A Substitute spec: each output's NAR straight from an upstream cache into ours,
 //! repacked on the way. Nothing enters the local store and nothing below an output
-//! is fetched; the server demands the producers of what the NAR references.
+//! is fetched; the server needs the producers of what the NAR references.
 
 use std::collections::HashSet;
 
@@ -107,8 +107,8 @@ async fn locate_missing(
 }
 
 /// The compressed bytes to move, known only when every upstream declared its size.
-fn download_size<'a>(upstreams: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
-    upstreams.map(|u| u.file_size).sum()
+fn download_size<'a>(upstream_caches: impl Iterator<Item = &'a CachedPath>) -> Option<u64> {
+    upstream_caches.map(|u| u.file_size).sum()
 }
 
 async fn fetch_one(

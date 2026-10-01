@@ -84,10 +84,10 @@ pub struct EvaluationResponse {
     /// evaluations that fired from a task trigger (polling, schedule,
     /// reporter push/PR). Mirrors `EvaluationSummary::trigger` on the task
     /// list endpoint so the eval-log "Via" badge can render the same labels
-    /// without falling back to "Manual" for trigger-fired runs.
+    /// without falling back to "Manual" for trigger-fired evaluations.
     pub trigger: Option<EvaluationTriggerSummary>,
     /// Display name of the user who manually started this evaluation; `null`
-    /// for trigger-driven and pre-migration runs.
+    /// for trigger-driven and pre-migration evaluations.
     pub triggered_by: Option<String>,
     /// Populated only when `status == Waiting`. Explains which
     /// `(architecture, required_features)` combos no connected worker can

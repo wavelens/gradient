@@ -184,7 +184,7 @@ fn main() -> Result<()> {
         // alive until the last clone is dropped.
         let executor_handle = worker.executor_handle();
 
-        // Run → reconnect loop.
+        // Run -> reconnect loop.
         loop {
             let (disconnected, outcome) = worker.run(shutdown.clone()).await;
 

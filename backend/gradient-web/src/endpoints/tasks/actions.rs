@@ -95,7 +95,7 @@ fn action_type_to_str(t: ActionType) -> &'static str {
     match t {
         ActionType::SendMail => "send_mail",
         ActionType::SendWebRequest => "send_web_request",
-        ActionType::ForgeStatusReport => "forge_status_report",
+        ActionType::GitHostStatusReport => "git_host_status_report",
         ActionType::OpenPr => "open_pr",
     }
 }
@@ -192,10 +192,10 @@ pub async fn create_action(
                 ));
             }
         }
-        ActionConfig::ForgeStatusReport { .. } => {
+        ActionConfig::GitHostStatusReport { .. } => {
             if !body.events.is_empty() {
                 return Err(WebError::unprocessable_entity(
-                    "forge_status_report actions cannot carry custom events",
+                    "git_host_status_report actions cannot carry custom events",
                 ));
             }
         }
@@ -216,7 +216,7 @@ pub async fn create_action(
     }
 
     let integration_id = match &body.config {
-        ActionConfig::ForgeStatusReport { integration_id }
+        ActionConfig::GitHostStatusReport { integration_id }
         | ActionConfig::OpenPr { integration_id, .. } => Some(*integration_id),
         _ => None,
     };
@@ -393,7 +393,7 @@ pub async fn update_action(
                     return Err(WebError::unprocessable_entity(e.to_string()));
                 }
             }
-            ActionConfig::ForgeStatusReport { integration_id }
+            ActionConfig::GitHostStatusReport { integration_id }
             | ActionConfig::OpenPr { integration_id, .. } => {
                 let integration = EIntegration::find()
                     .filter(CIntegration::Id.eq(*integration_id))
@@ -421,12 +421,12 @@ pub async fn update_action(
     if let Some(ref evs) = body.events
         && matches!(
             existing_type,
-            ActionType::ForgeStatusReport | ActionType::OpenPr
+            ActionType::GitHostStatusReport | ActionType::OpenPr
         )
         && !evs.is_empty()
     {
         return Err(WebError::unprocessable_entity(
-            "forge_status_report and open_pr actions cannot carry custom events",
+            "git_host_status_report and open_pr actions cannot carry custom events",
         ));
     }
 
@@ -596,14 +596,14 @@ pub async fn test_action(
 
     let action_type = action.action_type;
 
-    // Forge-integration actions can't be test-fired against a synthetic commit
-    // (the forge rejects the placeholder owner/repo/sha); probe the
+    // Git-host-integration actions can't be test-fired against a synthetic commit
+    // (the Git host rejects the placeholder owner/repo/sha); probe the
     // integration's connectivity to the task repo instead.
     if matches!(
         action_type,
-        ActionType::ForgeStatusReport | ActionType::OpenPr
+        ActionType::GitHostStatusReport | ActionType::OpenPr
     ) {
-        gradient_ci::actions::verify_forge_action(&state.ci(), &action, &proj.repository)
+        gradient_ci::actions::verify_git_host_action(&state.ci(), &action, &proj.repository)
             .await
             .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;
 

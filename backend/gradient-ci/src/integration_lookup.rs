@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Resolve named forge integrations for projects.
+//! Resolve named Git host integrations for projects.
 
 use gradient_entity::github_installation;
 use gradient_entity::ids::GithubInstallationId;
@@ -80,7 +80,7 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
         let existing = EIntegration::find()
             .filter(CIntegration::Project.eq(project_id))
             .filter(CIntegration::Kind.eq(kind))
-            .filter(CIntegration::ForgeType.eq(ForgeType::GitHub))
+            .filter(CIntegration::GitHostType.eq(GitHostType::GitHub))
             .filter(CIntegration::GithubInstallation.eq(installation))
             .one(db)
             .await?;
@@ -105,7 +105,7 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
             name: name.to_string(),
             display_name: display_name.to_string(),
             kind,
-            forge_type: ForgeType::GitHub,
+            git_host_type: GitHostType::GitHub,
             github_installation: Some(installation),
             created_by: creator,
             created_at: chrono::Utc::now().naive_utc(),
@@ -160,7 +160,7 @@ mod ensure_tests {
             name: "github-acme-corp".into(),
             display_name: GITHUB_APP_INTEGRATION_DISPLAY_NAME.into(),
             kind,
-            forge_type: ForgeType::GitHub,
+            git_host_type: GitHostType::GitHub,
             github_installation: Some(installation()),
             created_by: user(),
             ..Default::default()
@@ -169,17 +169,17 @@ mod ensure_tests {
 
     #[tokio::test]
     async fn creates_both_rows_when_none_exist() {
-        // Per kind: (1) installation filter → empty, (2) name clash → empty, (3) insert result
+        // Per kind: (1) installation filter -> empty, (2) name clash -> empty, (3) insert result
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Inbound: installation filter → none
+            // Inbound: installation filter -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
-            // Inbound: name clash → none
+            // Inbound: name clash -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
             // Inbound: insert result
             .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
-            // Outbound: installation filter → none
+            // Outbound: installation filter -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
-            // Outbound: name clash → none
+            // Outbound: name clash -> none
             .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
             // Outbound: insert result
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
@@ -199,11 +199,11 @@ mod ensure_tests {
 
     #[tokio::test]
     async fn skips_kinds_that_already_exist() {
-        // Per kind: (1) installation filter → found → skip
+        // Per kind: (1) installation filter -> found -> skip
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Inbound: installation filter → found
+            // Inbound: installation filter -> found
             .append_query_results([vec![github_row(IntegrationKind::Inbound)]])
-            // Outbound: installation filter → found
+            // Outbound: installation filter -> found
             .append_query_results([vec![github_row(IntegrationKind::Outbound)]])
             .into_connection();
 

@@ -11,10 +11,10 @@ use clap::Args;
 pub struct BuildArgs {
     #[arg(long = "build-max-attempts", env = "GRADIENT_BUILD_MAX_ATTEMPTS", value_parser = greater_than_zero::<u32>, default_value = "3")]
     pub max_attempts: u32,
-    /// Penalty-free re-queues of a relay within one evaluation (attempts recorded
-    /// `SubstituteUnavailable`, whichever failure produced them) after which the
-    /// anchor stops being substitutable and is built like any other. This is the
-    /// only bound on that loop: a re-queue deliberately does not spend an attempt.
+    /// Free re-queues of a derivation available in a cache within one evaluation
+    /// (attempts recorded `SubstituteUnavailable`, whichever failure produced them)
+    /// before it is built like any other. A re-queue does not count as a build
+    /// attempt: this is the only bound on that loop.
     #[arg(long = "build-substitute-miss-escalation-threshold", env = "GRADIENT_BUILD_SUBSTITUTE_MISS_ESCALATION_THRESHOLD", value_parser = greater_than_zero::<u32>, default_value = "2")]
     pub substitute_miss_escalation_threshold: u32,
     /// Max `InputsUnavailable` self-heal loops per build before the circuit

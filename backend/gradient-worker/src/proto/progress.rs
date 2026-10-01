@@ -14,7 +14,7 @@ use tokio::time::Instant;
 use tracing::debug;
 
 use gradient_worker_client::connection::ProtoWriter;
-use gradient_worker_client::correlation::DispatchHandle;
+use gradient_worker_client::correlation::AssignmentHandle;
 
 pub(crate) trait ProgressSink {
     async fn report(&mut self, downloaded: u64, total: Option<u64>);
@@ -27,7 +27,7 @@ impl ProgressSink for () {
 pub(crate) struct BuildProgressSink {
     pub(crate) writer: ProtoWriter,
     pub(crate) job_id: String,
-    pub(crate) dispatch: DispatchHandle,
+    pub(crate) assignment_id: AssignmentHandle,
     pub(crate) build_id: String,
 }
 
@@ -37,7 +37,7 @@ impl ProgressSink for BuildProgressSink {
             .writer
             .send(ClientMessage::BuildProgress {
                 job_id: self.job_id.clone(),
-                dispatch: self.dispatch.get(),
+                assignment_id: self.assignment_id.get(),
                 build_id: self.build_id.clone(),
                 downloaded,
                 total,

@@ -43,7 +43,7 @@ pub struct Model {
     /// NAR hash from the upstream narinfo, needed to import the path.
     pub nar_hash: Option<String>,
     /// Compressed-NAR hash from the upstream narinfo, in `sha256:<nix32>` form.
-    /// Lets the worker relay a verbatim NAR without recomputing the file hash.
+    /// Lets the worker pass a verbatim NAR through without recalculating the file hash.
     pub file_hash: Option<String>,
     /// Compressed NAR size from the upstream narinfo.
     pub file_size: Option<i64>,
@@ -101,7 +101,7 @@ impl Model {
 
     /// Whether this output is available anywhere: in the gradient cache
     /// (`is_cached`) or resolved at a project upstream (`external_url`). A
-    /// derivation is only substitutable when every output is cached somewhere.
+    /// derivation is only available in a cache when every output is cached somewhere.
     pub fn is_cached_anywhere(&self) -> bool {
         self.is_cached || self.external_url.is_some()
     }

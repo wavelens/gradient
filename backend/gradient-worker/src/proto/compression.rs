@@ -6,7 +6,7 @@
 
 //! NAR compression handling: format detection, decompression, `.drv`
 //! closure-seed extraction, and `ValidPathInfo` construction shared by the
-//! prefetch, substitute-relay, and daemon-import paths.
+//! prefetch, substitute-passthrough, and daemon-import paths.
 
 use std::collections::BTreeSet;
 

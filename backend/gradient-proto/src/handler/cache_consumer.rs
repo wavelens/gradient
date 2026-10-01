@@ -6,7 +6,7 @@
 
 //! Outbound client that pulls cached paths from a remote gradient_proto
 //! upstream's read-only `/cache/{cache}/proto` endpoint. Used to satisfy
-//! local cache misses from configured gradient_proto upstreams.
+//! local cache misses from configured gradient_proto upstream caches.
 
 use std::time::Duration;
 

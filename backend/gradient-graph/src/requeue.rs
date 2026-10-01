@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Moving anchors back onto the queue.
+//! Moving shared builds back onto the queue.
 
 use gradient_db::{
     DbContext, emit_transition_effects, unpromote_ungated, update_derivation_build_status,
@@ -22,12 +22,12 @@ pub(crate) async fn apply(ctx: &DbContext, scope: RequeueScope) -> anyhow::Resul
     }
 }
 
-/// `FailedTransient` anchors whose exponential backoff window has elapsed go back
-/// to `Queued` so the ready-builds pass can dispatch them again. The settle that
+/// `FailedTransient` shared builds whose exponential backoff window has elapsed go back
+/// to `Queued` so the startable-builds pass can dispatch them again. The settle that
 /// follows is what makes the requeue legal, not the backoff: an elapsed window says
-/// the retry is due, never that the anchor's gates still hold. A dependency a demote
-/// or a retire reset to `Created` leaves `unready_deps` above zero, and the dispatch
-/// gate trusts `Queued` without re-deriving readiness, so an unsettled requeue
+/// the retry is due, never that the shared build's gates still hold. A dependency a demote
+/// or a retire reset to `Created` leaves `blocking_deps` above zero, and the dispatch
+/// gate trusts `Queued` without re-deriving can-start state, so an unsettled requeue
 /// dispatches a build against an input nothing can provide.
 async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
     let base = ctx.config.build.retry_backoff_secs;
@@ -37,10 +37,15 @@ async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
         .all(&ctx.worker_db)
         .await?;
     let mut requeued = Vec::new();
-    for anchor in transient {
-        if crate::policy::retry_backoff_elapsed(anchor.attempt, anchor.updated_at, now, base) {
-            let derivation = anchor.derivation;
-            update_derivation_build_status(ctx, anchor, BuildStatus::Queued).await;
+    for shared_build in transient {
+        if crate::policy::retry_backoff_elapsed(
+            shared_build.attempt,
+            shared_build.updated_at,
+            now,
+            base,
+        ) {
+            let derivation = shared_build.derivation;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await;
             requeued.push(derivation);
         }
     }
@@ -50,7 +55,7 @@ async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
         debug!(
             unpromoted = settled.len(),
             requeued = requeued.len(),
-            "retried anchors whose gates no longer hold left the queue again"
+            "retried shared builds whose gates no longer hold left the queue again"
         );
     }
 

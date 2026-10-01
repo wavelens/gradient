@@ -40,7 +40,7 @@ pub struct Reported {
 }
 
 impl Reported {
-    /// `FailedTransient` names an event no forge action consumes, so a retrying build's check stays put.
+    /// `FailedTransient` names an event no Git host action consumes, so a retrying build's check stays put.
     pub fn reports(status: BuildStatus) -> Option<&'static str> {
         Some(match status {
             BuildStatus::Created => "build.created",

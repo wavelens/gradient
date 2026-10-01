@@ -7,7 +7,7 @@
 //! Pure handshake state machine.
 //!
 //! Models the four states of an inbound proto handshake:
-//! `Opening → Greeted → Authenticated → Registered`. The FSM has no I/O
+//! `Opening -> Greeted -> Authenticated -> Registered`. The FSM has no I/O
 //! dependency - it only sequences which `ClientMessage`/`ServerMessage`
 //! pairs are valid at each step. Drivers (e.g. `crate::server::accept` or
 //! gradient-server's existing session handler) feed it observed messages
@@ -51,7 +51,7 @@ pub enum Intent {
     Send(Box<ServerMessage>),
     /// Advance state silently (no message emitted).
     Advance,
-    /// Reject the peer with a wire code and reason; the driver relays the
+    /// Reject the peer with a wire code and reason; the driver forwards the
     /// `Reject` and closes the socket.
     Reject { code: u16, reason: String },
 }
@@ -111,7 +111,7 @@ pub fn on_auth_response(
     })
 }
 
-/// Pure transition: `Authenticated → Registered` after the driver has sent
+/// Pure transition: `Authenticated -> Registered` after the driver has sent
 /// `InitAck` and recorded the peer in any session registry it maintains.
 pub fn to_registered(auth: Authenticated) -> Registered {
     Registered {
@@ -135,8 +135,8 @@ pub struct HandshakeResult {
 /// with tokens for the challenged peers, receives `InitAck`.
 ///
 /// Used by:
-/// - gradient-worker dialing gradient-server (worker→server, standard).
-/// - gradient-worker accepting from gradient-server (server→worker, discoverable mode).
+/// - gradient-worker dialing gradient-server (worker->server, standard).
+/// - gradient-worker accepting from gradient-server (server->worker, discoverable mode).
 /// - gradient-proxy dialing its upstream gradient-server (proxy -> server).
 pub async fn as_peer<I, C>(
     socket: &mut ProtoSocket,

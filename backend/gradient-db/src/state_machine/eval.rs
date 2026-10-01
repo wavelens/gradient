@@ -30,13 +30,13 @@ impl std::error::Error for InvalidEvalTransition {}
 ///
 /// The valid transition graph is:
 /// ```text
-/// Queued → Fetching → EvaluatingFlake → EvaluatingDerivation
-///        → Building ⇄ Waiting
-///        → Completed | Failed | Aborted
-/// {Queued,Fetching,EvaluatingFlake,EvaluatingDerivation} → Waiting
-/// Waiting → Queued (recovery once a worker becomes available)
-/// * → Aborted (from any non-terminal state)
-/// * → Failed  (from any non-terminal state)
+/// Queued -> Fetching -> EvaluatingFlake -> EvaluatingDerivation
+///        -> Building <-> Waiting
+///        -> Completed | Failed | Aborted
+/// {Queued,Fetching,EvaluatingFlake,EvaluatingDerivation} -> Waiting
+/// Waiting -> Queued (recovery once a worker becomes available)
+/// * -> Aborted (from any non-terminal state)
+/// * -> Failed  (from any non-terminal state)
 /// ```
 /// Terminal states (`Completed`, `Failed`, `Aborted`) cannot be
 /// transitioned away from.
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn eval_sm_skip_fetching_ok() {
-        // Queued → EvaluatingFlake is explicitly allowed (line 65)
+        // Queued -> EvaluatingFlake is explicitly allowed (line 65)
         assert!(
             EvalStateMachine::validate(EvaluationStatus::Queued, EvaluationStatus::EvaluatingFlake)
                 .is_ok()

@@ -12,7 +12,7 @@ use gradient_util::logging::{LogSetup, LogWriter, NOISY_DEPS, TraceSetup};
 use std::sync::Arc;
 use tracing::info;
 
-/// Per-component overrides of the server's log level, keyed by the crates
+/// Per-component overrides of the server's log level, per crate, by the crates
 /// each component lives in.
 fn log_overrides(log: &LogArgs) -> [(&'static str, Option<&str>); 7] {
     [
@@ -20,7 +20,7 @@ fn log_overrides(log: &LogArgs) -> [(&'static str, Option<&str>); 7] {
         ("gradient_cache", log.level_cache.as_deref()),
         ("gradient_proto", log.level_proto.as_deref()),
         ("gradient_wire", log.level_proto.as_deref()),
-        ("gradient_storage::relay", log.level_proto.as_deref()),
+        ("gradient_storage::passthrough", log.level_proto.as_deref()),
         ("gradient_scheduler", log.level_scheduler.as_deref()),
         ("gradient_pool", log.level_scheduler.as_deref()),
     ]
@@ -172,13 +172,13 @@ mod tests {
     }
 
     #[test]
-    fn the_proto_level_reaches_the_relayed_nar_sender() {
+    fn the_proto_level_reaches_the_passed_through_nar_sender() {
         let logging = LogArgs {
             level_proto: Some("trace".into()),
             ..Default::default()
         };
         let d = server_directive(&logging);
-        assert!(d.contains("gradient_storage::relay=trace"), "{d}");
+        assert!(d.contains("gradient_storage::passthrough=trace"), "{d}");
     }
 
     #[test]

@@ -134,19 +134,19 @@ pub fn forget_known_derivation_waiters_for_job(waiters: &KnownDerivationWaiters,
 /// dispatch loop, which replaces it when the server hands the same job out
 /// again while it is still running here.
 #[derive(Clone, Debug)]
-pub struct DispatchHandle(Arc<Mutex<String>>);
+pub struct AssignmentHandle(Arc<Mutex<String>>);
 
-impl DispatchHandle {
-    pub fn new(dispatch: String) -> Self {
-        Self(Arc::new(Mutex::new(dispatch)))
+impl AssignmentHandle {
+    pub fn new(assignment_id: String) -> Self {
+        Self(Arc::new(Mutex::new(assignment_id)))
     }
 
     pub fn get(&self) -> String {
         self.0.lock().clone()
     }
 
-    pub fn set(&self, dispatch: String) {
-        *self.0.lock() = dispatch;
+    pub fn set(&self, assignment_id: String) {
+        *self.0.lock() = assignment_id;
     }
 }
 

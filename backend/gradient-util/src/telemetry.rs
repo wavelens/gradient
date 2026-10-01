@@ -5,7 +5,7 @@
  */
 
 //! Process-wide minute aggregates of infrastructure health. Recording is sync
-//! and never touches the database, so storage, wire and relay hot paths can
+//! and never touches the database, so storage, wire and passthrough hot paths can
 //! call it; `gradient-db` flushes it into `metric_rollup`.
 
 use std::collections::HashMap;

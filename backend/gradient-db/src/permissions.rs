@@ -38,7 +38,7 @@ pub enum Permission {
     ManageMembers,
     /// Create, edit, or delete custom roles in the project.
     ManageRoles,
-    /// CRUD on project integrations (forge credentials).
+    /// CRUD on project integrations (Git host credentials).
     ManageIntegrations,
     /// CRUD on task actions.
     ManageActions,
@@ -234,7 +234,7 @@ pub enum CachePermission {
     WriteStore,
     ManageCacheSettings,
     ManageCacheKeys,
-    ManageCacheUpstreams,
+    ManageUpstreamCaches,
     ManageCacheMembers,
     ManageCacheRoles,
     ManageCacheSubscriptions,
@@ -249,7 +249,7 @@ impl CachePermission {
         CachePermission::WriteStore,
         CachePermission::ManageCacheSettings,
         CachePermission::ManageCacheKeys,
-        CachePermission::ManageCacheUpstreams,
+        CachePermission::ManageUpstreamCaches,
         CachePermission::ManageCacheMembers,
         CachePermission::ManageCacheRoles,
         CachePermission::ManageCacheSubscriptions,
@@ -264,7 +264,7 @@ impl CachePermission {
             CachePermission::WriteStore => 2,
             CachePermission::ManageCacheSettings => 3,
             CachePermission::ManageCacheKeys => 4,
-            CachePermission::ManageCacheUpstreams => 5,
+            CachePermission::ManageUpstreamCaches => 5,
             CachePermission::ManageCacheMembers => 6,
             CachePermission::ManageCacheRoles => 7,
             CachePermission::ManageCacheSubscriptions => 8,
@@ -281,7 +281,7 @@ impl CachePermission {
             CachePermission::WriteStore => "writeStore",
             CachePermission::ManageCacheSettings => "manageCacheSettings",
             CachePermission::ManageCacheKeys => "manageCacheKeys",
-            CachePermission::ManageCacheUpstreams => "manageCacheUpstreams",
+            CachePermission::ManageUpstreamCaches => "manageUpstreamCaches",
             CachePermission::ManageCacheMembers => "manageCacheMembers",
             CachePermission::ManageCacheRoles => "manageCacheRoles",
             CachePermission::ManageCacheSubscriptions => "manageCacheSubscriptions",
