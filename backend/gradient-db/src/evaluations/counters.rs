@@ -65,9 +65,9 @@ crate::sql! {
         params = [Int(640)],
         tier = Hot;
 
-    // SKIP LOCKED: the fold never waits on an evaluation row, so it cannot close a
-    // deadlock with a writer that holds one; a skipped evaluation's deltas stay
-    // in the ledger for the next fold.
+    // SKIP LOCKED keeps the fold and the recount from ever waiting on an evaluation
+    // row, and neither is able to close a deadlock with a writer holding one. A
+    // skipped evaluation is staying in the ledger for the next pass.
     FOLD_SHARED_BUILD_DELTAS = "WITH locked AS (SELECT id FROM evaluation \
         WHERE id IN (SELECT evaluation FROM evaluation_shared_build_delta) \
         ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), \
@@ -86,15 +86,17 @@ crate::sql! {
         params = [],
         tier = Bulk;
 
-    RECOUNT_EVAL_COUNTERS = "WITH gone AS (DELETE FROM evaluation_shared_build_delta \
-        WHERE evaluation = ANY($1::uuid[]) RETURNING evaluation), \
+    RECOUNT_EVAL_COUNTERS = "WITH locked AS (SELECT id FROM evaluation \
+        WHERE id = ANY($1::uuid[]) ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), \
+        gone AS (DELETE FROM evaluation_shared_build_delta d USING locked \
+        WHERE d.evaluation = locked.id RETURNING d.evaluation), \
         c AS (SELECT e.id, count(bj.id)::int AS named, coalesce(sum(x.active), 0)::int AS active, \
               coalesce(sum(x.failed), 0)::int AS failed, coalesce(sum(x.queued), 0)::int AS queued, \
               coalesce(sum(x.building), 0)::int AS building \
-              FROM evaluation e LEFT JOIN build_job bj ON bj.evaluation = e.id \
+              FROM locked e LEFT JOIN build_job bj ON bj.evaluation = e.id \
               LEFT JOIN derivation_build db ON db.id = bj.derivation_build \
               LEFT JOIN LATERAL evaluation_shared_build_counts(db.status, db.wanted) x ON db.id IS NOT NULL \
-              WHERE e.id = ANY($1::uuid[]) GROUP BY e.id) \
+              GROUP BY e.id) \
         UPDATE evaluation e SET named_shared_builds = c.named, active_shared_builds = c.active, \
         failed_shared_builds = c.failed, queued_shared_builds = c.queued, building_shared_builds = c.building \
         FROM c WHERE e.id = c.id AND (e.named_shared_builds, e.active_shared_builds, e.failed_shared_builds, \
@@ -197,7 +199,8 @@ where
 
 /// Recount `evaluations` from their `build_job` rows and clear their ledger in
 /// the same snapshot, under the fold's lock. What an exact read found the
-/// counters wrong about is repaired here, not left for the sweep.
+/// counters wrong about is repaired here; an evaluation another transaction
+/// holds is skipped and repaired by the next read that contradicts it.
 pub async fn recount_evaluations<C>(db: &C, evaluations: &[EvaluationId]) -> Result<u64, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
@@ -280,8 +283,8 @@ mod tests {
     fn the_recount_clears_the_ledger_it_counted_past() {
         let sql = RECOUNT_EVAL_COUNTERS.text();
         assert!(
-            sql.starts_with(
-                "WITH gone AS (DELETE FROM evaluation_shared_build_delta WHERE evaluation = ANY($1"
+            sql.contains(
+                "ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), gone AS (DELETE FROM evaluation_shared_build_delta d USING locked"
             ),
             "{sql}"
         );

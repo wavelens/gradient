@@ -112,9 +112,9 @@ Five columns on `evaluation`, over the shared builds its `build_job` rows name:
 - **Triggers** (current bodies in `m20261001_000001_plain_concept_names.rs`): `evaluation_shared_build_moved` (per row, `AFTER UPDATE OF status, wanted`), `evaluation_shared_build_named` / `evaluation_shared_build_unnamed` (per statement on `build_job` insert/delete). Raw SQL and ORM writes are covered alike.
 - Triggers append signed rows to `evaluation_shared_build_delta`, for live evaluations only, and take no lock.
 - **Membership:** the SQL function `evaluation_shared_build_counts(status, wanted)`. A unit test in `evaluations/counters.rs` holds its body to `graph/predicates.rs`; a predicate change needs a migration.
-- **Fold:** `fold_shared_build_deltas` is running at the start of every waiting-state pass, one `DELETE ... RETURNING` under advisory lock `640`; an instance that finds the lock taken skips. The fold is skipping every evaluation row another transaction holds (`SKIP LOCKED`), and those deltas wait for the next pass. The fold never waits on an evaluation row and cannot deadlock with the graph writer.
+- **Fold:** `fold_shared_build_deltas` is running at the start of every waiting-state pass, one `DELETE ... RETURNING` under advisory lock `640`. An instance finding the lock taken is skipping the fold. The fold is also skipping every evaluation row another transaction holds (`SKIP LOCKED`), and those deltas wait for the next pass. The fold never waits on an evaluation row and cannot deadlock with the graph writer.
 - **Read:** `eval_counters` returns folded columns plus unfolded deltas.
-- **Counters answer only "not yet":** a naming and a transition in flight together can miss each other. A zero is confirmed by `reachability::eval_blocked`; a contradicted value is recounted (`recount_evaluations`, under the fold lock).
+- **Counters answer only "not yet":** a naming and a transition in flight together can miss each other. A zero is confirmed by `reachability::eval_blocked`. A contradicted value is recounted (`recount_evaluations`, under the fold lock). The recount is skipping an evaluation another transaction holds, like the fold, and the next contradicting read is recounting it.
 - The consistency check recounts every in-flight evaluation and reports `eval_counter_drift`.
 
 ## Naming and Adoption
