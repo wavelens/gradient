@@ -131,3 +131,13 @@ describe('CheckboxComponent', () => {
     expect(input().disabled).toBe(true);
   });
 });
+
+describe('gr-checkbox required', () => {
+  it('marks the inner box required so assistive tech announces it', async () => {
+    const fixture = TestBed.createComponent(CheckboxComponent);
+    fixture.componentRef.setInput('required', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect((fixture.nativeElement as HTMLElement).querySelector('input')?.required).toBe(true);
+  });
+});
