@@ -24,6 +24,8 @@ export class CopyFieldComponent {
   inline = input(false, { transform: booleanAttribute });
   multiline = input(false, { transform: booleanAttribute });
   rows = input<number>(4);
+  copyLabel = input('Copy to clipboard');
+  copiedLabel = input('Copied');
 
   copied = signal(false);
 
