@@ -103,17 +103,20 @@
       banner("Assert wildcard parity")
       hello = "packages.x86_64-linux.hello"
       cowsay = "packages.x86_64-linux.cowsay"
-      inner = "packages.x86_64-linux.nested.inner"
+
+      nested = [{"pattern": "packages.x86_64-linux.nested.#", "only": ["inner"]}]
 
       assert responses[0]["kind"] == "list_ok", responses[0]
       star = set(responses[0]["attrs"])
-      assert star == {hello, cowsay, inner}, f"trailing-* mismatch: {star}"
+      assert star == {hello, cowsay}, f"trailing-* mismatch: {star}"
+      assert responses[0]["deferred"] == nested, f"nested set not deferred: {responses[0]}"
 
       hash_ = set(responses[1]["attrs"])
       assert hash_ == {hello, cowsay}, f"# should be non-recursive: {hash_}"
 
       excluded = set(responses[2]["attrs"])
-      assert excluded == {hello, inner}, f"exclusion mismatch: {excluded}"
+      assert excluded == {hello}, f"exclusion mismatch: {excluded}"
+      assert responses[2]["deferred"] == nested, f"nested set not deferred: {responses[2]}"
 
       # ── Resolve + per-attribute isolation (#139) ───────────────────────────
       banner("Assert resolve + per-attr isolation")
