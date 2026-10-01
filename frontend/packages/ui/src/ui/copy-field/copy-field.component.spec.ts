@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { CopyFieldComponent } from './copy-field.component';
 
@@ -61,6 +62,20 @@ describe('CopyFieldComponent', () => {
     const { root } = await render({ value, inline: true });
     expect(root.querySelector('code')?.textContent).toContain(value);
     expect(root.querySelector('input')).toBeNull();
+  });
+
+  it('gives the id only to the inner control so a label names it', async () => {
+    @Component({
+      imports: [CopyFieldComponent],
+      template: `<label for="token">Token</label><gr-copy-field inputId="token" value="secret" />`,
+    })
+    class Labelled {}
+    const fixture = TestBed.createComponent(Labelled);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelectorAll('#token')).toHaveLength(1);
+    expect(root.querySelector('label')?.control).toBe(root.querySelector('input'));
   });
 
   it('copies the value and flags copied state', async () => {
