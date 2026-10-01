@@ -27,7 +27,7 @@ use crate::config::WorkerConfig;
 use crate::executor::JobExecutor;
 use crate::executor::abort_true;
 use crate::executor::failure::JobAborted;
-use crate::executor::timeline::JobTimeline;
+use crate::executor::timeline::{JobTimeline, TimelineSnapshot};
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::JobUpdater;
 use crate::proto::scorer::JobScorer;
@@ -466,7 +466,7 @@ impl MessageLoopState {
         let completed_kind = job.kind;
         let assignment_id = job.assignment_id.get();
         let dropped_spans = job.timeline.dropped();
-        let spans = job.timeline.snapshot();
+        let TimelineSnapshot { spans, elapsed_ms } = job.timeline.snapshot();
         if dropped_spans > 0 {
             debug!(%job_id, dropped_spans, "phase timeline hit its span cap");
         }
@@ -479,6 +479,7 @@ impl MessageLoopState {
                         job_id,
                         assignment_id,
                         spans,
+                        elapsed_ms,
                     })
                     .await?;
             }
@@ -494,6 +495,7 @@ impl MessageLoopState {
                         kind,
                         missing_paths,
                         spans,
+                        elapsed_ms,
                     })
                     .await?;
             }
@@ -799,6 +801,7 @@ impl MessageLoopState {
                     kind: BuildFailureKind::Aborted,
                     missing_paths: Vec::new(),
                     spans: Vec::new(),
+                    elapsed_ms: 0,
                 })
                 .await?;
         }

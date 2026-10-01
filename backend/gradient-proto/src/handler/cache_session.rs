@@ -257,6 +257,7 @@ mod tests {
                 kind: gradient_wire::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],
                 spans: vec![],
+                elapsed_ms: 0,
             })
             .is_some()
         );

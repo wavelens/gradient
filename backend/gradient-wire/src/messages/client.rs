@@ -115,6 +115,8 @@ pub enum ClientMessage {
         assignment_id: String,
         /// The worker's phase timeline; empty when the job recorded no phase.
         spans: Vec<JobPhaseSpan>,
+        /// The timeline's own clock when the worker took `spans`, in ms.
+        elapsed_ms: u64,
     },
 
     /// A step in the job failed; remaining steps are skipped.
@@ -129,6 +131,8 @@ pub enum ClientMessage {
         missing_paths: Vec<String>,
         /// The partial phase timeline recorded up to the failure.
         spans: Vec<JobPhaseSpan>,
+        /// The timeline's own clock when the worker took `spans`, in ms.
+        elapsed_ms: u64,
     },
 
     /// Worker is draining - it will finish in-flight jobs then disconnect.

@@ -554,6 +554,7 @@ mod tests {
             kind: gradient_wire::messages::BuildFailureKind::Transient,
             missing_paths: Vec::new(),
             spans: Vec::new(),
+            elapsed_ms: 0,
         };
         ctx.handle(
             gradient_wire::session::frame::Inbound::Control(failed),

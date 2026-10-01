@@ -1031,6 +1031,7 @@ mod tests {
                 job_id: "build:1".into(),
                 assignment_id: "dispatch-1".into(),
                 spans: Vec::new(),
+                elapsed_ms: 0,
             }
             .is_bulk()
         );

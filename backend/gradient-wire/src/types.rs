@@ -593,10 +593,12 @@ pub enum JobPhase {
     Compress,
     NarPush,
     CacheQueryWait,
+    NarFetch,
+    NarImport,
 }
 
 impl JobPhase {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 17] = [
         Self::Fetch,
         Self::PushInputs,
         Self::EvalFlake,
@@ -612,6 +614,8 @@ impl JobPhase {
         Self::Compress,
         Self::NarPush,
         Self::CacheQueryWait,
+        Self::NarFetch,
+        Self::NarImport,
     ];
 
     /// Stable identifier for the API, the rollup metric key and the DB column.
@@ -632,6 +636,8 @@ impl JobPhase {
             Self::Compress => "compress",
             Self::NarPush => "nar_push",
             Self::CacheQueryWait => "cache_query_wait",
+            Self::NarFetch => "nar_fetch",
+            Self::NarImport => "nar_import",
         }
     }
 
@@ -655,6 +661,8 @@ impl JobPhase {
             Self::CacheQueryWait => 13,
             Self::SubstituteFetch => 14,
             Self::Download => 15,
+            Self::NarFetch => 16,
+            Self::NarImport => 17,
         }
     }
 
@@ -675,6 +683,8 @@ impl JobPhase {
             13 => Self::CacheQueryWait,
             14 => Self::SubstituteFetch,
             15 => Self::Download,
+            16 => Self::NarFetch,
+            17 => Self::NarImport,
             _ => return None,
         })
     }
