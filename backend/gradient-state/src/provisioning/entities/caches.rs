@@ -239,6 +239,7 @@ impl<'a> StateApplicator<'a> {
                     cache_name: upstream_cache_name,
                     display_name,
                     mode,
+                    active,
                 } => {
                     let upstream_id = *cache_lookup.get(upstream_cache_name).ok_or_else(|| {
                         format!(
@@ -256,6 +257,7 @@ impl<'a> StateApplicator<'a> {
                         mode: mode.clone(),
                         kind: cache_upstream::CacheUpstreamKind::Internal,
                         upstream_cache: Some(upstream_id),
+                        active: *active,
                         ..Default::default()
                     }
                     .into_active_model()
@@ -264,6 +266,7 @@ impl<'a> StateApplicator<'a> {
                     display_name,
                     url,
                     public_key,
+                    active,
                 } => MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
                     cache: cache_id,
@@ -272,6 +275,7 @@ impl<'a> StateApplicator<'a> {
                     kind: cache_upstream::CacheUpstreamKind::Http,
                     url: Some(url.clone()),
                     public_key: Some(public_key.clone()),
+                    active: *active,
                     ..Default::default()
                 }
                 .into_active_model(),

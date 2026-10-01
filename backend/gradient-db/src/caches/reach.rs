@@ -49,6 +49,7 @@ pub async fn writer_projects_reachable_from<C: ConnectionTrait>(
 
     let upstream_rows = ECacheUpstream::find()
         .filter(CCacheUpstream::UpstreamCache.is_not_null())
+        .filter(CCacheUpstream::Active.eq(true))
         .all(db)
         .await?;
 
@@ -182,6 +183,7 @@ mod tests {
                     remote_cache_name: None,
                     api_key: None,
                     http1_only: false,
+                    active: true,
                 },
                 MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
@@ -195,6 +197,7 @@ mod tests {
                     remote_cache_name: None,
                     api_key: None,
                     http1_only: false,
+                    active: true,
                 },
             ];
             let writer_rows = vec![project_cache(
@@ -242,6 +245,7 @@ mod tests {
                     remote_cache_name: None,
                     api_key: None,
                     http1_only: false,
+                    active: true,
                 },
                 MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
@@ -255,6 +259,7 @@ mod tests {
                     remote_cache_name: None,
                     api_key: None,
                     http1_only: false,
+                    active: true,
                 },
             ];
             let writer_rows = vec![

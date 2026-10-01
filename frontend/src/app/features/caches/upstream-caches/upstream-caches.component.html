@@ -40,6 +40,9 @@
             @if (u.http1_only) {
               <gr-badge severity="neutral">HTTP/1.1</gr-badge>
             }
+            @if (!u.active) {
+              <gr-badge severity="danger">Inactive</gr-badge>
+            }
             <span slot="meta">{{ u.url ?? u.upstream_cache_id }}</span>
             <div slot="actions">
               @if (u.kind === 'http') {
@@ -54,6 +57,16 @@
                   (click)="testUpstream(u.id)"
                 ></button>
               }
+              <button
+                *appWritable="access()"
+                grButton
+                [label]="u.active ? 'Deactivate' : 'Activate'"
+                [icon]="u.active ? 'pause' : 'play_arrow'"
+                [severity]="u.active ? 'warn' : 'success'"
+                [loading]="togglingUpstreamId() === u.id"
+                [disabled]="rowDisabled()"
+                (click)="toggleUpstream(u)"
+              ></button>
               <button
                 *appWritable="access()"
                 grButton

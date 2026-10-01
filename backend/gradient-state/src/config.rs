@@ -237,11 +237,15 @@ pub enum StateUpstream {
         display_name: Option<String>,
         #[serde(default = "default_upstream_mode")]
         mode: CacheSubscriptionMode,
+        #[serde(default = "default_true")]
+        active: bool,
     },
     External {
         display_name: String,
         url: String,
         public_key: String,
+        #[serde(default = "default_true")]
+        active: bool,
     },
 }
 

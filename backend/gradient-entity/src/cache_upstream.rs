@@ -24,7 +24,7 @@ pub enum CacheUpstreamKind {
 }
 
 /// An upstream cache entry attached to a Gradient cache. Discriminated by `kind`.
-#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cache_upstream")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -39,6 +39,26 @@ pub struct Model {
     pub remote_cache_name: Option<String>,
     pub api_key: Option<String>,
     pub http1_only: bool,
+    pub active: bool,
+}
+
+impl Default for Model {
+    fn default() -> Self {
+        Self {
+            id: Default::default(),
+            cache: Default::default(),
+            display_name: Default::default(),
+            mode: Default::default(),
+            kind: Default::default(),
+            upstream_cache: None,
+            url: None,
+            public_key: None,
+            remote_cache_name: None,
+            api_key: None,
+            http1_only: false,
+            active: true,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
@@ -112,6 +132,7 @@ mod tests {
             remote_cache_name: None,
             api_key: None,
             http1_only: false,
+            active: true,
         }
     }
 

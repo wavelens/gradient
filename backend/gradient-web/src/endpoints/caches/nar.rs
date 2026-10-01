@@ -15,6 +15,7 @@ use gradient_core::ServerState;
 use gradient_core::upstream_source::{
     UpstreamSource, fetch_from_upstream_caches, substitution_sources,
 };
+use gradient_db::caches::upstream::active_upstream_caches;
 use gradient_sources::get_hash_from_url;
 use gradient_types::events::cache::NarFetched;
 use gradient_types::*;
@@ -69,10 +70,7 @@ pub async fn upstream_nar(
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache_name).await?;
 
-    let upstream_caches = ECacheUpstream::find()
-        .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
-        .all(&state.web_db)
-        .await?;
+    let upstream_caches = active_upstream_caches(&state.web_db, ctx.cache.id).await?;
 
     let sources = named_first(substitution_sources(&upstream_caches), upstream_id);
     if sources.is_empty() {

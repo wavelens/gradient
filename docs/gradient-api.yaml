@@ -6725,6 +6725,7 @@ paths:
       description: |-
         Updates an upstream entry. For external upstream caches the mode is always forced to ReadOnly;
         `url` and `public_key` may be updated. For internal upstream caches only `mode` and `display_name` apply.
+        `active` toggles any upstream cache. An inactive upstream cache is kept but never queried.
         Requires `manageUpstreamCaches`.
       operationId: patchUpstreamCache
       security:
@@ -12653,7 +12654,7 @@ components:
 
     UpstreamCache:
       type: object
-      required: [id, display_name, mode, kind, http1_only]
+      required: [id, display_name, mode, kind, http1_only, active]
       properties:
         id:
           type: string
@@ -12690,6 +12691,9 @@ components:
           type: boolean
           readOnly: true
           description: Set once the upstream cache reset an HTTP/2 stream; it is asked over HTTP/1.1 from then on
+        active:
+          type: boolean
+          description: Whether the cache queries this upstream cache. An inactive upstream cache is stored but skipped
 
     UpstreamProtocolProbe:
       type: object
@@ -12812,6 +12816,10 @@ components:
           type: string
           nullable: true
           description: Only applies to external upstream caches
+        active:
+          type: boolean
+          nullable: true
+          description: Enables or disables the upstream cache for every kind
 
     # ── Commits ───────────────────────────────────────────────────────────────
 
