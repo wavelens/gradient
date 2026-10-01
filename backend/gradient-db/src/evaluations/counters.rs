@@ -65,8 +65,15 @@ crate::sql! {
         params = [Int(640)],
         tier = Hot;
 
-    FOLD_SHARED_BUILD_DELTAS = "WITH gone AS (DELETE FROM evaluation_shared_build_delta RETURNING \
-        evaluation, named, active, failed, queued, building), \
+    // SKIP LOCKED: the fold never waits on an evaluation row, so it cannot close a
+    // deadlock with a writer that holds one; a skipped evaluation's deltas stay
+    // in the ledger for the next fold.
+    FOLD_SHARED_BUILD_DELTAS = "WITH locked AS (SELECT id FROM evaluation \
+        WHERE id IN (SELECT evaluation FROM evaluation_shared_build_delta) \
+        ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), \
+        gone AS (DELETE FROM evaluation_shared_build_delta d USING locked \
+        WHERE d.evaluation = locked.id RETURNING \
+        d.evaluation, d.named, d.active, d.failed, d.queued, d.building), \
         s AS (SELECT evaluation, sum(named)::int AS named, sum(active)::int AS active, \
               sum(failed)::int AS failed, sum(queued)::int AS queued, \
               sum(building)::int AS building FROM gone GROUP BY evaluation) \
@@ -250,12 +257,13 @@ mod tests {
     }
 
     /// The fold deletes what it adds in one statement, so a delta is either
-    /// folded or still in the ledger, never both and never neither.
+    /// folded or still in the ledger, never both and never neither. It takes
+    /// only the evaluation rows nobody holds.
     #[test]
     fn the_fold_deletes_what_it_adds_in_one_statement() {
         let sql = FOLD_SHARED_BUILD_DELTAS.text();
         assert!(
-            sql.starts_with("WITH gone AS (DELETE FROM evaluation_shared_build_delta RETURNING"),
+            sql.contains("ORDER BY id FOR NO KEY UPDATE SKIP LOCKED), gone AS (DELETE FROM evaluation_shared_build_delta d USING locked"),
             "{sql}"
         );
         assert!(
