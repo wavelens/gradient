@@ -19,7 +19,7 @@ import { InputDirective } from '../input/input.directive';
 })
 export class CopyFieldComponent {
   value = input.required<string | number>();
-  id = input<string>();
+  inputId = input<string>();
   mono = input(true, { transform: booleanAttribute });
   inline = input(false, { transform: booleanAttribute });
   multiline = input(false, { transform: booleanAttribute });
