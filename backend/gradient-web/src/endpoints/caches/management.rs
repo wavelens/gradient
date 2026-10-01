@@ -482,7 +482,7 @@ pub async fn post_cache_active(
         cache,
         CacheAccess::Require {
             permission: CachePermission::ManageCacheSettings,
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;
@@ -506,7 +506,7 @@ pub async fn delete_cache_active(
         cache,
         CacheAccess::Require {
             permission: CachePermission::ManageCacheSettings,
-            reject_managed: true,
+            reject_managed: false,
         },
     )
     .await?;

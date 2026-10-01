@@ -66,7 +66,7 @@
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the upstream cache is active. Inactive upstream caches are stored but never queried.";
+        description = "Whether the upstream cache is active. Inactive upstream caches are stored but never queried. The UI can toggle it until the next server start restores this value.";
       };
     };
   };
@@ -705,7 +705,7 @@
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the cache is active.";
+        description = "Whether the cache is active. The UI can toggle it until the next server start restores this value.";
       };
 
       priority = mkOption {
@@ -905,7 +905,7 @@
       enabled = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the base worker is available at all. Ignored for other workers.";
+        description = "Whether the worker is active. The UI can toggle it until the next server start restores this value.";
       };
     };
   });

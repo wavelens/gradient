@@ -75,6 +75,7 @@ impl<'a> StateApplicator<'a> {
                     reg.managed = Set(true);
                     reg.url = Set(url.clone());
                     reg.display_name = Set(state_worker.display_name.clone());
+                    reg.active = Set(state_worker.enabled);
                     reg.enable_fetch = Set(state_worker.enable_fetch);
                     reg.enable_eval = Set(state_worker.enable_eval);
                     reg.enable_build = Set(state_worker.enable_build);
@@ -94,7 +95,7 @@ impl<'a> StateApplicator<'a> {
                         managed: true,
                         url: url.clone(),
                         display_name: state_worker.display_name.clone(),
-                        active: true,
+                        active: state_worker.enabled,
                         enable_fetch: state_worker.enable_fetch,
                         enable_eval: state_worker.enable_eval,
                         enable_build: state_worker.enable_build,

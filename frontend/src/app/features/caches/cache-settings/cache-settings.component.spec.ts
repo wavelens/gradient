@@ -77,6 +77,13 @@ describe('CacheSettingsComponent - access gating', () => {
     expect(del!.disabled).toBe(true);
   });
 
+  it('keeps Deactivate usable under state-managed access, since state restores it on restart', () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
+    const toggle = findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement | null;
+    expect(toggle).not.toBeNull();
+    expect(toggle!.disabled).toBe(false);
+  });
+
   it('always reaches upstream caches and members, even when state-managed', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const hrefs = (Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[]).map(
