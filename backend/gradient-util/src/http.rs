@@ -73,7 +73,8 @@ pub enum HttpVersion {
 
 /// The shared user agent and TLS roots, with no total request timeout: for a
 /// caller whose transfers legitimately outlive one and that polices progress
-/// another way (the S3 client, whose read timeout is an inactivity timer).
+/// another way (the S3 and download clients, whose read timeout is an
+/// inactivity timer).
 /// HTTP/2 multiplexes every request to a host over one connection, so its flow
 /// control window adapts to the link instead of capping a NAR stream at 64 KiB
 /// in flight.
@@ -111,7 +112,16 @@ pub fn build_download_client() -> reqwest::Result<reqwest::Client> {
 }
 
 pub(crate) fn download_client_builder() -> reqwest::ClientBuilder {
-    client_builder().redirect(reqwest::redirect::Policy::limited(DOWNLOAD_MAX_REDIRECTS))
+    idle_timed_download_builder(DEFAULT_TIMEOUT)
+}
+
+/// A NAR legitimately streams for longer than any total timeout, so a download
+/// fails only when the connection goes `idle` without delivering a byte.
+fn idle_timed_download_builder(idle: Duration) -> reqwest::ClientBuilder {
+    untimed_client_builder()
+        .connect_timeout(idle)
+        .read_timeout(idle)
+        .redirect(reqwest::redirect::Policy::limited(DOWNLOAD_MAX_REDIRECTS))
 }
 
 /// A download client that speaks only `version`, offering nothing else in ALPN:
@@ -173,5 +183,59 @@ mod tests {
             roots.len() >= webpki_roots::TLS_SERVER_ROOTS.len(),
             "root store missing webpki baseline",
         );
+    }
+
+    fn trickling_server(bytes: usize, gap: Duration) -> String {
+        use std::io::{Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let _ = stream.read(&mut [0u8; 4096]);
+            let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {bytes}\r\n\r\n");
+            for _ in 0..bytes {
+                std::thread::sleep(gap);
+                if stream.write_all(b"x").is_err() {
+                    return;
+                }
+            }
+        });
+
+        format!("http://{addr}/")
+    }
+
+    #[tokio::test]
+    async fn download_outlasting_its_idle_timeout_completes_while_bytes_keep_arriving() {
+        let url = trickling_server(5, Duration::from_millis(300));
+        let client = idle_timed_download_builder(Duration::from_millis(800))
+            .build()
+            .expect("client");
+
+        let body = client
+            .get(url)
+            .send()
+            .await
+            .expect("response")
+            .bytes()
+            .await
+            .expect("body");
+
+        assert_eq!(body.as_ref(), b"xxxxx");
+    }
+
+    #[tokio::test]
+    async fn download_stalled_past_its_idle_timeout_fails() {
+        let url = trickling_server(1, Duration::from_secs(3));
+        let client = idle_timed_download_builder(Duration::from_millis(300))
+            .build()
+            .expect("client");
+
+        let err = match client.get(url).send().await {
+            Ok(response) => response.bytes().await.expect_err("stalled body"),
+            Err(err) => err,
+        };
+
+        assert!(err.is_timeout(), "{err:?}");
     }
 }

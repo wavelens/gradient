@@ -35,7 +35,7 @@ sequenceDiagram
 The worker prefetches every input the local store lacks before the build starts.
 
 1. `CacheQuery { mode: Pull }` for the missing paths. An uncached path fails the build as `InputsUnavailable`.
-2. Paths with a presigned `url` download directly: 8 in parallel, 4 attempts, 600 s timeout.
+2. Paths with a presigned `url` download directly: 8 in parallel, 4 attempts. A download fails after 30 s without a byte, never on total length.
 3. The rest go through `NarRequest`: the server answers each path with `NarStreamHeader`, then 512 KiB `NarPush` frames, or `NarUnavailable` / `NarAbort`.
 4. A broken stream resumes with `NarRequestResume { received_bytes, stream_token }` from `<baseDir>/nar-partial`.
 5. The worker imports the NARs into the Nix store in dependency order.
