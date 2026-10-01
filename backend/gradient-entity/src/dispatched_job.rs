@@ -107,6 +107,9 @@ pub struct Model {
     pub missing_count: Option<i32>,
     pub dependency_count: Option<i32>,
     pub cluster_attempt: Option<ClusterAttemptId>,
+    /// The worker's job clock when it sent its terminal report. `None` when the
+    /// server closed the row itself (abandoned, requeued, re-registered).
+    pub worker_elapsed_ms: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -47,6 +47,7 @@ use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 
 use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
 
+pub use job_handlers::timeline::ReportedTimeline;
 pub use jobs::{AssignDecision, BoardActiveJob, DecisionCandidate, PendingJobInfo};
 
 /// Pulls this crate into a binary that otherwise references nothing from it, so

@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use chrono::NaiveDateTime;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{debug, warn};
 
@@ -71,6 +72,25 @@ pub(crate) fn phase_rows(
         .collect()
 }
 
+/// A worker's terminal report as it arrived: the spans, the job clock the
+/// worker took them at, and the server's receipt time, which is the finish mark.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportedTimeline {
+    pub spans: Vec<JobPhaseSpan>,
+    pub worker_elapsed_ms: u64,
+    pub received_at: NaiveDateTime,
+}
+
+impl ReportedTimeline {
+    pub fn received(spans: Vec<JobPhaseSpan>, worker_elapsed_ms: u64) -> Self {
+        Self {
+            spans,
+            worker_elapsed_ms,
+            received_at: now(),
+        }
+    }
+}
+
 /// What a terminal report found when it went to close out its dispatch row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimelineLanding {
@@ -100,12 +120,12 @@ impl Scheduler {
         self: &Arc<Self>,
         assignment_id: DispatchedJobId,
         outcome: DispatchedJobOutcome,
-        spans: Vec<JobPhaseSpan>,
+        report: ReportedTimeline,
     ) {
         let scheduler = Arc::clone(self);
         self.state.shutdown.spawn(async move {
             let _ = scheduler
-                .persist_job_timeline(assignment_id, outcome, spans)
+                .persist_job_timeline(assignment_id, outcome, report)
                 .await;
         });
     }
@@ -117,10 +137,10 @@ impl Scheduler {
         &self,
         assignment_id: DispatchedJobId,
         outcome: DispatchedJobOutcome,
-        spans: Vec<JobPhaseSpan>,
+        report: ReportedTimeline,
     ) {
         let _ = self
-            .persist_job_timeline(assignment_id, outcome, spans)
+            .persist_job_timeline(assignment_id, outcome, report)
             .await;
     }
 
@@ -137,7 +157,7 @@ impl Scheduler {
         &self,
         assignment_id: DispatchedJobId,
         outcome: DispatchedJobOutcome,
-        spans: Vec<JobPhaseSpan>,
+        report: ReportedTimeline,
     ) -> TimelineLanding {
         let row = match EDispatchedJob::find_by_id(assignment_id)
             .one(&self.state.worker_db)
@@ -160,8 +180,9 @@ impl Scheduler {
             TimelineLanding::AlreadyClosed
         } else {
             let mut active = row.into_active_model();
-            active.finished_at = Set(Some(now()));
+            active.finished_at = Set(Some(report.received_at));
             active.outcome = Set(Some(outcome));
+            active.worker_elapsed_ms = Set(Some(report.worker_elapsed_ms as i64));
             match active.update(&self.state.worker_db).await {
                 Ok(_) => TimelineLanding::Closed,
                 Err(e) => {
@@ -171,6 +192,7 @@ impl Scheduler {
             }
         };
 
+        let spans = report.spans;
         let rows = phase_rows(assignment_id, &spans);
         if !rows.is_empty()
             && let Err(e) = gradient_entity::dispatched_job_phase::Entity::insert_many(
