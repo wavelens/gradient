@@ -28,6 +28,10 @@ The first release with a stability pledge.
 
     Deep garbage collection runs slowly in the background at all times. Checkpoints let each pass resume where the last one stopped.
 
+-   :material-server-network: **Cluster Jobs**
+
+    Jobs that run on several workers at once. Gradient allocates all members together, in one [zone](concepts/workers.md#zones) when the job needs a fast interconnect.
+
 -   :material-palette: **Corporate Design**
 
     Own logo, name and colors for the web interface.
@@ -63,6 +67,26 @@ Jobs beyond the Nix sandbox.
 -   :material-play-network: **Runner Workers**
 
     Workers that execute jobs outside the sandbox. Integration tests with network access, real hardware or deployment credentials.
+
+</div>
+
+</div>
+
+<div class="timeline-item later" markdown>
+
+## v3.0.0
+
+Gradient without a single point of failure.
+
+<div class="grid cards" markdown>
+
+-   :material-server-plus: **High Availability**
+
+    Several Gradient servers run one instance. Builds, caches and the web interface stay up while a server fails or updates.
+
+-   :material-earth: **Federation**
+
+    Gradient instances connect to each other. Builds and caches flow between instances; a path built on one is never built again on another.
 
 </div>
 
