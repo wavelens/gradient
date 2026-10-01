@@ -61,7 +61,9 @@ pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 ///      (both directions), `AbortCluster`; `WorkerCapabilities.zone` and `endpoint`.
 /// v22: plain names: `AssignJob.dispatch` and its echoes are `assignment_id`,
 ///      the passthrough grant target is `GrantTarget::Passthrough`.
-pub const PROTO_VERSION: u16 = 22;
+/// v23: `JobPhase::NarFetch` and `NarImport`, `elapsed_ms` on `JobCompleted`
+///      and `JobFailed`.
+pub const PROTO_VERSION: u16 = 23;
 
 /// How often a worker reports a running download's progress, skipping an
 /// interval in which no bytes arrived.

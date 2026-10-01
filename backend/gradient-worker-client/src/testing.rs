@@ -218,6 +218,7 @@ impl ProtoPeer {
             job_id: assignment.job_id.clone(),
             assignment_id: assignment.assignment_id.clone(),
             spans: vec![],
+            elapsed_ms: 0,
         })
         .await
     }
@@ -230,6 +231,7 @@ impl ProtoPeer {
             kind,
             missing_paths: vec![],
             spans: vec![],
+            elapsed_ms: 0,
         })
         .await
     }

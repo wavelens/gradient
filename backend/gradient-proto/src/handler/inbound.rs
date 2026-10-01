@@ -320,6 +320,7 @@ impl<'a> InboundContext<'a> {
                 job_id,
                 assignment_id,
                 spans,
+                ..
             } => {
                 self.forget_uploads(&job_id, uploads).await;
                 self.logs.flush().await;
@@ -342,6 +343,7 @@ impl<'a> InboundContext<'a> {
                 kind,
                 missing_paths,
                 spans,
+                ..
             } => {
                 self.forget_uploads(&job_id, uploads).await;
                 self.logs.flush().await;

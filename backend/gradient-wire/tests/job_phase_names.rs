@@ -15,3 +15,15 @@ fn a_retired_code_keeps_its_historical_name() {
 fn a_code_never_assigned_is_unknown() {
     assert_eq!(JobPhase::name_of(99), "unknown_99");
 }
+
+#[test]
+fn every_phase_round_trips_through_its_own_code() {
+    let mut codes: Vec<i16> = JobPhase::ALL.iter().map(|p| p.as_i16()).collect();
+    for phase in JobPhase::ALL {
+        assert_eq!(JobPhase::from_i16(phase.as_i16()), Some(phase));
+    }
+
+    codes.sort_unstable();
+    codes.dedup();
+    assert_eq!(codes.len(), JobPhase::ALL.len());
+}

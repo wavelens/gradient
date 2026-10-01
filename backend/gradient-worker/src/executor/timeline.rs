@@ -79,22 +79,28 @@ impl JobTimeline {
 
     /// Every span recorded so far. Spans still open are reported closed at the
     /// current offset so a failed job still yields a usable timeline.
-    pub fn snapshot(&self) -> Vec<JobPhaseSpan> {
-        let now = self.elapsed_ms();
+    pub fn snapshot(&self) -> TimelineSnapshot {
+        let elapsed_ms = self.elapsed_ms();
         let open = self.open.lock().clone();
         let mut spans = self.spans.lock().clone();
         for index in open {
             if let Some(span) = spans.get_mut(index as usize) {
-                span.end_ms = now;
+                span.end_ms = elapsed_ms;
             }
         }
 
-        spans
+        TimelineSnapshot { spans, elapsed_ms }
     }
 
     fn elapsed_ms(&self) -> u64 {
         self.start.elapsed().as_millis() as u64
     }
+}
+
+/// The spans plus the job clock they were taken at.
+pub struct TimelineSnapshot {
+    pub spans: Vec<JobPhaseSpan>,
+    pub elapsed_ms: u64,
 }
 
 /// Closes its span on drop. `record` attaches the path and byte counters the
@@ -147,7 +153,7 @@ mod tests {
             let _inner = t.enter(JobPhase::NarPush);
         }
 
-        let spans = t.snapshot();
+        let spans = t.snapshot().spans;
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].phase, JobPhase::Compress);
         assert_eq!(spans[0].parent, None);
@@ -163,7 +169,7 @@ mod tests {
         drop(t.enter(JobPhase::NarPush));
         drop(t.enter(JobPhase::NarPush));
 
-        let spans = t.snapshot();
+        let spans = t.snapshot().spans;
         assert_eq!(spans[1].parent, Some(0));
         assert_eq!(spans[2].parent, Some(0));
     }
@@ -175,7 +181,7 @@ mod tests {
         let t = JobTimeline::new();
         let _open = t.enter(JobPhase::Build);
 
-        let spans = t.snapshot();
+        let spans = t.snapshot().spans;
         assert_eq!(spans.len(), 1);
         assert!(spans[0].end_ms >= spans[0].start_ms);
     }
@@ -187,12 +193,12 @@ mod tests {
         let t = JobTimeline::new();
         let first = {
             drop(t.enter(JobPhase::Fetch));
-            t.snapshot()[0]
+            t.snapshot().spans[0]
         };
         std::thread::sleep(std::time::Duration::from_millis(5));
         drop(t.enter(JobPhase::EvalFlake));
 
-        let spans = t.snapshot();
+        let spans = t.snapshot().spans;
         assert_eq!(spans[0].start_ms, first.start_ms);
         assert!(spans[1].start_ms >= spans[0].end_ms);
     }
@@ -208,8 +214,22 @@ mod tests {
             drop(t.enter(JobPhase::NarPush));
         }
 
-        assert_eq!(t.snapshot().len(), MAX_SPANS);
+        assert_eq!(t.snapshot().spans.len(), MAX_SPANS);
         assert_eq!(t.dropped(), 10);
+    }
+
+    /// The reported clock is the one the open spans were closed at, so the
+    /// server's tail (`elapsed_ms` minus the last span end) is never negative.
+    #[test]
+    fn the_snapshot_clock_covers_every_span() {
+        let t = JobTimeline::new();
+        drop(t.enter(JobPhase::Prefetch));
+        let _open = t.enter(JobPhase::Build);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        let snapshot = t.snapshot();
+        let last_end = snapshot.spans.iter().map(|s| s.end_ms).max().unwrap();
+        assert_eq!(snapshot.elapsed_ms, last_end);
     }
 
     /// An inert guard must not corrupt the nesting of the spans around it.
@@ -222,7 +242,7 @@ mod tests {
         }
         drop(t.enter(JobPhase::NarPush));
 
-        let spans = t.snapshot();
+        let spans = t.snapshot().spans;
         assert_eq!(spans.len(), MAX_SPANS);
         assert!(
             spans[1..].iter().all(|s| s.parent == Some(0)),
