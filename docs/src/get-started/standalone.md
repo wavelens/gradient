@@ -19,7 +19,7 @@ A complete Gradient on one machine, for trying Gradient on a personal repository
       ghcr.io/wavelens/gradient-standalone
     ```
 
-    The container hosts systemd and the Nix build sandbox, which need `--privileged`; `-t` gives systemd a console for `docker logs`. The port is bound to `127.0.0.1` only. The `gradient` volume keeps projects, builds and the cache across restarts.
+    The container is running systemd and the Nix build sandbox, which need `--privileged`; `-t` gives systemd a console for `docker logs`. The port is bound to `127.0.0.1` only. The `gradient` volume keeps projects, builds and the cache across restarts.
 
 === "Nix"
 

@@ -297,7 +297,7 @@
           - `soft_abort` marks the running evaluation aborted so the new one becomes canonical,
             but lets its builds finish; their outputs flow into the new evaluation.
           - `skip` discards the new event.
-          - `all` starts the new evaluation alongside the running one.
+          - `all` is running the new evaluation alongside the current one.
         '';
       };
 

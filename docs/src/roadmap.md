@@ -26,7 +26,7 @@ The first release with a stability pledge.
 
 -   :material-broom: **Continuous Deep GC**
 
-    Deep garbage collection proceeds slowly in the background at all times. Checkpoints let each pass resume where the last one stopped.
+    Deep garbage collection is running slowly in the background at all times. Checkpoints let each pass resume where the last one stopped.
 
 -   :material-server-network: **Cluster Jobs**
 

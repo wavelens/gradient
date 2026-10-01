@@ -29,7 +29,7 @@ Runtime dependencies live in `derivation_dependency` next to build dependencies 
 
 ## NAR Commit
 
-`commit` (`gradient-graph/src/nar.rs`) takes place inside the graph writer's transaction for every `CommitNar`; a pooled handle is rejected.
+`commit` (`gradient-graph/src/nar.rs`) is running inside the graph writer's transaction for every `CommitNar`; a pooled handle is rejected.
 
 1. Upsert the `cached_path` row under `FOR NO KEY UPDATE`. `was_backed` is read under that lock: the one endpoint no later statement can recover.
 2. Overwrite `references` with the line the worker reported, in order. The narinfo `References:` line and the signature fingerprint are rebuilt from that line verbatim (`references_for_hash`).
@@ -58,7 +58,7 @@ Runtime dependencies live in `derivation_dependency` next to build dependencies 
 | `GcRequest::Paths` (`gradient-graph/src/gc.rs`) | Stale-path eviction and zombie purge |
 
 - **One cache's claim:** `Demotion::CacheClaim` drops only that cache's `cached_path_signature` row; the retire follows once no cache signs the path.
-- **Graph writer only:** every caller acts inside the graph writer; the GC passes scan on the pool and hand the deletes to the graph writer.
+- **Graph writer only:** every caller is running inside the graph writer; the GC passes scan on the pool and hand the deletes to the graph writer.
 - **Lock order:** `cached_path` rows (by hash), then `derivation_build` rows (by `derivation`), with advisory keys ahead of rows. `demote_cached_output` writes the cache availability flag (`cache_available`) before the retire and takes both lock passes first. Details in [Shared Builds](shared-builds.md#counter-locking).
 
 ## Consistency Check
@@ -87,7 +87,7 @@ A build that fails `InputsUnavailable` names its missing paths. `repair_missing_
 
 ## Garbage Collection
 
-The `cache-maintenance` pass (`gradient-cache/src/cacher/mod.rs`) starts every `gc.intervalSecs` (3600 s). The keep-set is the closure of every `entry_point` and `build_job` derivation over `derivation_dependency` (`reachable_derivations_cte`), not the rows with a `build_job` of their own.
+The `cache-maintenance` pass (`gradient-cache/src/cacher/mod.rs`) is running every `gc.intervalSecs` (3600 s). The keep-set is the closure of every `entry_point` and `build_job` derivation over `derivation_dependency` (`reachable_derivations_cte`), not the rows with a `build_job` of their own.
 
 | Pass | Reclaims | Bound |
 |---|---|---|

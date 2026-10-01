@@ -76,7 +76,7 @@ The approval gate is a setting of the **Pull Request (reporter)** trigger: **Req
 | `404 Pending credentials` after creating the App | The credentials were already shown or the server restarted; start step 1 again |
 | `403 superuser required` | The account lacks the superuser flag |
 | An approving review does not release a fork pull request | The App predates the `pull_request_review` event; enable **Pull request review** under the App's **Permissions & events** |
-| Push arrives, no evaluation starts | No task repository URL matches the pushed repository |
+| Push arrives, no evaluation is running | No task repository URL matches the pushed repository |
 | `403 forbidden_source_ip` | The integration's allowed source IPs miss GitHub's `hooks` ranges from `https://api.github.com/meta` |
 
 ## Next Steps

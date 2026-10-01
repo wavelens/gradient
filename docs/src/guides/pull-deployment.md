@@ -54,7 +54,7 @@ sudo gradient-update
 journalctl -u gradient-deploy
 ```
 
-`gradient-update` starts the deployment at once, without waiting for the timer. The journal ends with `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or with the reason no deployment ran.
+`gradient-update` is running the deployment at once, without waiting for the timer. The journal ends with `Deployment to /nix/store/...-nixos-system-office-pc-... completed successfully`, or with the reason no deployment ran.
 
 `... without a deployment for <name>` means no system matched: the `networking.hostName` of the built configuration differs from `deployFor`.
 

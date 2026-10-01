@@ -1,6 +1,6 @@
 # Frontend Style Guide
 
-The frontend includes its own design system page at `/styleguide`: every shared primitive, colour role and layout pattern, live. A new feature reuses a primitive before building a new one.
+The frontend is shipping its own design system page at `/styleguide`: every shared primitive, colour role and layout pattern, live. A new feature reuses a primitive before building a new one.
 
 ```mermaid
 flowchart LR

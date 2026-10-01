@@ -95,8 +95,8 @@ Declarative entities under `services.gradient.state` are in the [state reference
 | `gc.narUploadGraceHours` | int | `24` | `GRADIENT_GC_NAR_UPLOAD_GRACE_HOURS` | Hours before an unreferenced NAR object is deleted, covering the window between its upload and the commit of its database rows. |
 | `gc.orphanDerivationHours` | int | `24` | `GRADIENT_GC_ORPHAN_DERIVATION_HOURS` | Hours before a derivation outside the build closure of every retained evaluation is deleted. |
 | `gc.wedgedEvalHours` | int | `24` | `GRADIENT_GC_WEDGED_EVAL_HOURS` | Hours an evaluation may stay in one phase before it is considered stuck and stops blocking evaluation garbage collection. |
-| `gc.deepIntervalSecs` | int | `3600` | `GRADIENT_GC_DEEP_INTERVAL_SECS` | Seconds from the end of one background [deep garbage collection](../contributors/internals/nar-storage.md#deep-gc) round to the start of the next. `0` starts a round only when one is requested. |
-| `gc.deepPaceMs` | int | `1000` | `GRADIENT_GC_DEEP_PACE_MS` | Milliseconds between two units of a [storage migration](../contributors/internals/nar-storage.md#storage-migrations) or a background deep garbage collection round. A requested round executes its units without a pause. |
+| `gc.deepIntervalSecs` | int | `3600` | `GRADIENT_GC_DEEP_INTERVAL_SECS` | Seconds from the end of one background [deep garbage collection](../contributors/internals/nar-storage.md#deep-gc) round to the start of the next. With `0`, a round is running only when one is requested. |
+| `gc.deepPaceMs` | int | `1000` | `GRADIENT_GC_DEEP_PACE_MS` | Milliseconds between two units of a [storage migration](../contributors/internals/nar-storage.md#storage-migrations) or a background deep garbage collection round. A requested round is running its units without a pause. |
 
 ## `githubApp`
 
@@ -364,7 +364,7 @@ Declarative entities under `services.gradient.state` are in the [state reference
 |---|---|---|---|---|
 | `worker.packages.git` | package | `config.programs.git.package` | - | Git package available to the worker for cloning repositories. |
 | `worker.packages.gradient` | package | derived | - | The gradient package to use. |
-| `worker.packages.nix` | package | derived | `GRADIENT_WORKER_NIX_BIN` (part) | Nix package whose `nix` the worker executes for evaluation and fetching. |
+| `worker.packages.nix` | package | derived | `GRADIENT_WORKER_NIX_BIN` (part) | Nix package whose `nix` the worker is running for evaluation and fetching. |
 | `worker.packages.ssh` | package | `config.programs.ssh.package` | `GRADIENT_WORKER_SSH_BIN` (part) | OpenSSH package used as `GIT_SSH_COMMAND` to fetch private flake inputs. |
 
 ## `worker.reverseProxy`

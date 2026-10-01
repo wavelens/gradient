@@ -30,7 +30,7 @@ flowchart LR
 
 ## Server
 
-The server is one process. Its long-lived work lives under a supervision tree (`gradient_util::supervision`, on ractor), started from the shared `Shutdown` coordinator; subsystems register children with `Shutdown::supervise` or `supervise_now`.
+The server is one process. Its long-lived work is running under a supervision tree (`gradient_util::supervision`, on ractor), started from the shared `Shutdown` coordinator; subsystems register children with `Shutdown::supervise` or `supervise_now`.
 
 ```text
 root
@@ -76,12 +76,12 @@ root
 - A child that panics or exits is respawned after a backoff of 1 s doubling to 60 s, reset after five healthy minutes.
 - A pass over its budget is cancelled in place and ticks again.
 - Restarts, errors, timeouts and the last good pass per child are on `/api/v1/board/health`.
-- Work that outlives a request lives in a tracked task: shutdown drains the task. Bare `tokio::spawn` is a clippy error in the backend workspace.
+- Work that outlives a request is running as a tracked task: shutdown drains the task. Bare `tokio::spawn` is a clippy error in the backend workspace.
 
 ## Worker
 
 - Connects to the server at `/proto`, or accepts connections with `discoverable`.
-- Takes flake jobs (fetch, evaluate) and build jobs, see [Jobs](proto/jobs.md). Evaluation takes place in a subprocess pool, see [Eval Worker Setup](eval-worker.md).
+- Running flake jobs (fetch, evaluate) and build jobs, see [Jobs](proto/jobs.md). Evaluation is running in a subprocess pool, see [Eval Worker Setup](eval-worker.md).
 - Talks to the local `nix-daemon` through harmonia and keeps GC roots for what the worker builds.
 - Never signs: the server signs every cached path, see [Cache Serving](internals/cache-serving.md).
 

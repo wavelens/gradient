@@ -1,6 +1,6 @@
 # Connection
 
-Workers talk to the server over one WebSocket at `/proto`, with binary [rkyv](https://rkyv.org/) frames. A session passes through **handshake -> authorization -> capabilities -> job loop**.
+Workers talk to the server over one WebSocket at `/proto`, with binary [rkyv](https://rkyv.org/) frames. A session is running **handshake -> authorization -> capabilities -> job loop**.
 
 ```mermaid
 sequenceDiagram
@@ -47,8 +47,8 @@ A capability is active only when both sides support the capability; `core` and `
 | `core` | The server side of the protocol; always on for the server, off for workers |
 | `cache` | Serves as a binary cache; always on for the server |
 | `fetch` | Clones repositories and prefetches flake inputs |
-| `eval` | Evaluates flakes |
-| `build` | Builds derivations with Nix |
+| `eval` | Running flake evaluations |
+| `build` | Running Nix builds |
 | `federate` | Reserved: negotiated in the handshake, no behavior yet |
 
 New features are gated by capability flags, not by version numbers.
@@ -124,7 +124,7 @@ sequenceDiagram
 
 ## Implementation
 
-- One pure handshake state machine in `gradient-wire/src/session/handshake.rs` drives every session: the server takes `as_authority`, the worker `as_peer`, the cache session reuses the version gate.
+- One pure handshake state machine in `gradient-wire/src/session/handshake.rs` drives every session: the server is running `as_authority`, the worker `as_peer`, the cache session reuses the version gate.
 - `session/frame.rs` splits each socket into a typed reader and a writer with a control lane and a bulk lane. Control goes first; a bulk batch holds at most 256 KiB, and a full bulk queue never blocks control replies.
 - Frames are validated where the socket put them; chunk payloads (`NarPush`, `UploadChunk`, `EvalCacheChunk`, `LogChunk`) reach the handler as slices of the frame, without a copy.
 - `client::dial` disables Nagle's algorithm on every socket: small control frames go out without waiting for a delayed ACK.

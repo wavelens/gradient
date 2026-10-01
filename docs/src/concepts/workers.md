@@ -1,6 +1,6 @@
 # Workers
 
-A **worker** is a machine running `gradient-worker`. The worker connects to the server, takes the jobs the projects that enable the worker have queued, and sends the results back. The server itself starts no Nix; every clone, evaluation and build happens on a worker.
+A **worker** is a machine running `gradient-worker`. The worker connects to the server, takes the jobs the projects that enable the worker have queued, and sends the results back. The server itself is running no Nix; every clone, evaluation and build happens on a worker.
 
 ```mermaid
 flowchart LR

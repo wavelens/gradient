@@ -39,7 +39,7 @@ flowchart LR
 
 ## Cancelling Pairs
 
-A column added in one release and dropped in a later one leaves an `add_X` / `drop_X` pair every new install applies for nothing. Such pairs are removed under these rules.
+A column added in one release and dropped in a later one leaves an `add_X` / `drop_X` pair every new install is running for nothing. Such pairs are removed under these rules.
 
 **Removable when both hold:**
 

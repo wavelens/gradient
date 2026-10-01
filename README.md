@@ -77,7 +77,7 @@ All commands: [CLI Reference](https://wavelens.github.io/gradient/reference/cli/
 
 A NixOS module sets up the server, a local worker, PostgreSQL and the reverse proxy. The [Quick Start](https://wavelens.github.io/gradient/get-started/quick-start/) walks through the setup in three steps.
 
-For a first try on a personal repository, the [Standalone](https://wavelens.github.io/gradient/get-started/standalone/) instance puts everything into one container or VM:
+For a first try on a personal repository, the [Standalone](https://wavelens.github.io/gradient/get-started/standalone/) instance is running everything in one container or VM:
 
 ```sh
 docker run -dt --name gradient --privileged --cgroupns=host -p 127.0.0.1:8080:80 -v gradient:/var/lib ghcr.io/wavelens/gradient-standalone
