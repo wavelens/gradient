@@ -523,19 +523,24 @@ async fn aborting_an_evaluation_marks_it_and_stops_its_eval_job_itself() {
         last_insert_id: 0,
         rows_affected: 1,
     };
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_exec_results(vec![ok; 16])
-        .into_connection();
-    let log_db = db.clone();
-    let scheduler = test_scheduler_with(db).await;
-    let peer = ProjectId::now_v7();
-    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
-    let job = eval_job(peer);
+    let job = eval_job(ProjectId::now_v7());
     let evaluation = gradient_types::MEvaluation {
         id: job.evaluation_id,
         status: EvaluationStatus::EvaluatingDerivation,
         ..Default::default()
     };
+    // Every query reads the marked row: its `id` also answers each insert's RETURNING.
+    let marked = gradient_types::MEvaluation {
+        status: EvaluationStatus::Aborted,
+        ..evaluation.clone()
+    };
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results(vec![ok; 16])
+        .append_query_results(vec![vec![marked]; 8])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
     scheduler.enqueue_eval_job("j1".into(), job).await.unwrap();
     assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
     scheduler

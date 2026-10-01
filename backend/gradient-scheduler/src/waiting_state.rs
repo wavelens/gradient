@@ -104,7 +104,7 @@ pub(crate) async fn refresh_waiting_state(
 
             if needs_status_change {
                 info!(evaluation_id = %eval.id, from = ?eval.status, "parking evaluation: instance draining");
-                update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await;
+                update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await?;
             }
         }
 
@@ -235,7 +235,7 @@ pub(crate) async fn refresh_waiting_state(
         persist_waiting_reason(state, eval.id, &eval.waiting_reason, new_reason.as_ref()).await;
 
         if eval.status != target {
-            update_evaluation_status(&state.db(), eval, target).await;
+            update_evaluation_status(&state.db(), eval, target).await?;
         }
     }
 
@@ -557,7 +557,7 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
 
         if eval.kind == EvaluationKind::DrvRecovery {
             warn!(evaluation_id = %eval.id, "drv-recovery re-eval still blocked on its own missing .drv; failing (unrecoverable)");
-            update_evaluation_status(&state.db(), eval, EvaluationStatus::Failed).await;
+            update_evaluation_status(&state.db(), eval, EvaluationStatus::Failed).await?;
             continue;
         }
 

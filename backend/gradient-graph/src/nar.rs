@@ -69,7 +69,7 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
 
         let settled =
             gradient_db::graph::can_start::update_and_settle_need(txn, &producers).await?;
-        gradient_db::status::emit_transition_effects(ctx, &settled.changes).await;
+        gradient_db::status::emit_transition_effects(ctx, &settled.changes).await?;
     }
 
     // Complete closure is counted on the shared build, and the seed needs the endpoint this
@@ -296,7 +296,7 @@ async fn commit_runtime_dependencies(
         }
         let settled =
             gradient_db::graph::can_start::update_and_settle_need(txn, &producers).await?;
-        gradient_db::status::emit_transition_effects(ctx, &settled.changes).await;
+        gradient_db::status::emit_transition_effects(ctx, &settled.changes).await?;
     }
 
     Ok(())
@@ -341,7 +341,7 @@ async fn advance_shared_builds(
         gradient_db::graph::can_start::lock_shared_builds(txn, &union(complete, owners)).await?;
     let mut changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
     changes.extend(gradient_db::graph::can_start::promote(txn, owners).await?);
-    gradient_db::status::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(())
 }
@@ -357,7 +357,7 @@ async fn retract_shared_builds(
 ) -> anyhow::Result<()> {
     let lock = gradient_db::graph::can_start::lock_shared_builds(txn, incomplete).await?;
     let changes = gradient_db::graph::can_start::lost_fetchability(&lock).await?;
-    gradient_db::status::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(())
 }

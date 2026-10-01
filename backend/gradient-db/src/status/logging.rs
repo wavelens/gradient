@@ -126,9 +126,8 @@ async fn replace_log_chunk_index(
 
 pub use gradient_entity::phase_event::PhaseSubjectKind;
 
-/// Append-only record of a build/evaluation phase transition. Best-effort:
-/// failures are logged, never propagated, so instrumentation can't break a
-/// status transition.
+/// Append-only record of a build/evaluation phase transition. It shares the
+/// transition's transaction, so a failed insert fails the transition with it.
 pub async fn record_phase_event(
     db: &impl ConnectionTrait,
     subject_kind: PhaseSubjectKind,
@@ -136,7 +135,7 @@ pub async fn record_phase_event(
     phase: i16,
     worker_id: Option<String>,
     at: chrono::NaiveDateTime,
-) {
+) -> Result<(), sea_orm::DbErr> {
     let ev = gradient_entity::phase_event::Model {
         id: gradient_entity::ids::PhaseEventId::now_v7(),
         subject_kind,
@@ -147,24 +146,23 @@ pub async fn record_phase_event(
         ..Default::default()
     }
     .into_active_model();
-    if let Err(e) = gradient_entity::phase_event::Entity::insert(ev)
+    gradient_entity::phase_event::Entity::insert(ev)
         .exec(db)
-        .await
-    {
-        warn!(error = %e, "failed to record phase_event");
-    }
+        .await?;
+
+    Ok(())
 }
 
 /// Batch-record the same phase transition for many subjects, one multi-row
 /// insert per chunk. Used by bulk status writes (e.g. evaluation abort) instead
-/// of one spawned [`record_phase_event`] per subject. Best-effort.
+/// of one spawned [`record_phase_event`] per subject.
 pub async fn record_phase_events(
     db: &impl ConnectionTrait,
     subject_kind: PhaseSubjectKind,
     subject_ids: &[uuid::Uuid],
     phase: i16,
     at: chrono::NaiveDateTime,
-) {
+) -> Result<(), sea_orm::DbErr> {
     // Stay well under Postgres' 65535-bind-parameter cap (6 columns per row).
     const INSERT_CHUNK: usize = 8192;
     let rows: Vec<_> = subject_ids
@@ -184,14 +182,12 @@ pub async fn record_phase_events(
         .collect();
 
     for chunk in rows.chunks(INSERT_CHUNK) {
-        if let Err(e) = gradient_entity::phase_event::Entity::insert_many(chunk.to_vec())
+        gradient_entity::phase_event::Entity::insert_many(chunk.to_vec())
             .exec(db)
-            .await
-        {
-            warn!(error = %e, "failed to record phase_events batch");
-            return;
-        }
+            .await?;
     }
+
+    Ok(())
 }
 
 /// Inserts a single `evaluation_message` row, propagating any DB error.

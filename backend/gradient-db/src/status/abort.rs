@@ -83,7 +83,7 @@ pub async fn abort_eval_shared_builds(
             to: BuildStatus::Aborted,
         })
         .collect();
-    super::emit_transition_effects(ctx, &changes).await;
+    super::emit_transition_effects(ctx, &changes).await?;
 
     if !building_ids.is_empty() {
         for_each_chunk(&building_ids, |chunk| async move {
@@ -106,7 +106,7 @@ pub async fn abort_eval_shared_builds(
         i32::from(BuildStatus::Aborted) as i16,
         now,
     )
-    .await;
+    .await?;
 
     ctx.events
         .publish(gradient_types::events::evaluation::Progress {
@@ -211,9 +211,10 @@ mod tests {
     /// The query script `abort_eval_shared_builds` replays, in order: the aborting
     /// evaluation's shared builds, which of them are still active, the `build_job`
     /// rows other evaluations hold on those shared builds, and those evaluations.
-    /// Everything past the abort write (the graph version, board events, phase
-    /// events, the attempts whose logs the abort owes) is answered empty: the
-    /// decision is made by then and each of those paths is a no-op on empty input.
+    /// Everything past the abort write (the build jobs and entry points the effects
+    /// read, the attempts whose logs the abort owes, the need walk) is answered
+    /// empty: the decision is made by then and each of those paths is a no-op on
+    /// empty input. The phase-event insert reads its row back last.
     fn scripted_db(
         shared_builds: Vec<BTreeMap<String, Value>>,
         active: Vec<MDerivationBuild>,
@@ -225,7 +226,8 @@ mod tests {
             .append_query_results([active])
             .append_query_results([other_jobs])
             .append_query_results([other_evals])
-            .append_query_results(vec![Vec::<MBuildJob>::new(); 8])
+            .append_query_results(vec![Vec::<MBuildJob>::new(); 4])
+            .append_query_results([crate::test_ctx::inserted_phase_event()])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,

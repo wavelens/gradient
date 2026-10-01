@@ -111,7 +111,7 @@ pub(crate) async fn repair_missing_inputs(
                             {
                                 Ok(changes) => {
                                     gradient_db::status::emit_transition_effects(ctx, &changes)
-                                        .await
+                                        .await?
                                 }
                                 Err(e) => {
                                     warn!(%path, error = %e, "repair: re-walk parents (orphan producer) failed")
@@ -176,7 +176,7 @@ pub(crate) async fn repair_missing_inputs(
         {
             Ok(changes) => {
                 let thawed = changes.len();
-                gradient_db::status::emit_transition_effects(ctx, &changes).await;
+                gradient_db::status::emit_transition_effects(ctx, &changes).await?;
                 thawed
             }
             Err(e) => {

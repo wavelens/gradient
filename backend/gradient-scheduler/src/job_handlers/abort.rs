@@ -20,6 +20,16 @@ use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::unbuildable::{Unbuildable, unbuildable_warning};
 
+fn aborted(evaluation_id: EvaluationId, marked: Result<MEvaluation, sea_orm::DbErr>) -> bool {
+    match marked {
+        Ok(evaluation) => evaluation.status == EvaluationStatus::Aborted,
+        Err(e) => {
+            warn!(error = %e, %evaluation_id, "failed to mark the evaluation aborted");
+            false
+        }
+    }
+}
+
 impl Scheduler {
     // ── Abort ─────────────────────────────────────────────────────────────────
 
@@ -32,7 +42,7 @@ impl Scheduler {
         let evaluation_id = evaluation.id;
         let marked =
             update_evaluation_status(&self.state.db(), evaluation, EvaluationStatus::Aborted).await;
-        if marked.status != EvaluationStatus::Aborted {
+        if !aborted(evaluation_id, marked) {
             return;
         }
 
@@ -61,7 +71,7 @@ impl Scheduler {
             EvaluationStatus::Aborted,
         )
         .await;
-        if marked.status != EvaluationStatus::Aborted {
+        if !aborted(evaluation_id, marked) {
             return;
         }
 

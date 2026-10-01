@@ -30,6 +30,14 @@ pub(crate) async fn settle(ctx: DbContext) {
     drop(ctx);
 }
 
+/// The row a Postgres `phase_event` insert reads back through `RETURNING`.
+pub(crate) fn inserted_phase_event() -> Vec<std::collections::BTreeMap<String, sea_orm::Value>> {
+    vec![std::collections::BTreeMap::from([(
+        "id".to_owned(),
+        sea_orm::Value::from(uuid::Uuid::now_v7()),
+    )])]
+}
+
 /// A context over `db`, plus the pool handle its transaction log is read from.
 /// Drop the context before draining that log: `WorkerDb::into_transaction_log`
 /// requires the handle it is called on to be the last one alive.

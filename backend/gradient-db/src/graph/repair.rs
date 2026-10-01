@@ -78,7 +78,7 @@ pub async fn repair_build_graph(
 
     let thawed = crate::graph::promotion::requeue_failed_closure(db, scope).await?;
     report.thawed = thawed.len() as u64;
-    emit_transition_effects(ctx, &thawed).await;
+    emit_transition_effects(ctx, &thawed).await?;
 
     // Cache presence is the ground truth for "is this built": shared builds whose
     // outputs all exist re-complete even after a requeue, cascade or demote, and
@@ -86,17 +86,17 @@ pub async fn repair_build_graph(
     let cached =
         crate::graph::promotion::repair_cached_shared_builds_for_eval(db, evaluation).await?;
     report.cached_repaired = cached.len();
-    emit_transition_effects(ctx, &cached).await;
+    emit_transition_effects(ctx, &cached).await?;
     let derivations: Vec<_> = cached.iter().map(|c| c.derivation).collect();
     let advanced = crate::graph::can_start::advance_fetchable(db, &derivations).await?;
-    emit_transition_effects(ctx, &advanced).await;
+    emit_transition_effects(ctx, &advanced).await?;
 
     // Failure-side backstop, paired with the thaw above: fail every non-terminal
     // shared build in the closure reachable from a terminal failure, including the
     // victims the thaw just re-created.
     report.dependency_failed =
         crate::graph::promotion::repair_dependency_failed(db, evaluation).await?;
-    emit_transition_effects(ctx, &report.dependency_failed).await;
+    emit_transition_effects(ctx, &report.dependency_failed).await?;
 
     // A pruned interior in this closure that a thaw or a reset left with no name
     // fails the gate the promote embeds; this evaluation names it first. Naming is
@@ -105,12 +105,12 @@ pub async fn repair_build_graph(
     report.adopted = adopted.pairs.len();
     for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
         let settled = crate::graph::can_start::update_and_settle_need(db, chunk).await?;
-        emit_transition_effects(ctx, &settled.changes).await;
+        emit_transition_effects(ctx, &settled.changes).await?;
     }
     crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
 
     report.promoted = crate::graph::can_start::promote_closure(db, evaluation).await?;
-    emit_transition_effects(ctx, &report.promoted).await;
+    emit_transition_effects(ctx, &report.promoted).await?;
 
     if !report.is_noop() {
         debug!(

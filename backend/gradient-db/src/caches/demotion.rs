@@ -203,7 +203,7 @@ pub async fn demote_cached_output(
     // reaches their whole pending closure again and not just one hop.
     let settled = crate::graph::can_start::update_and_settle_need(db, &producers).await?;
     retired.transitions.extend(settled.changes);
-    crate::status::emit_transition_effects(ctx, &retired.transitions).await;
+    crate::status::emit_transition_effects(ctx, &retired.transitions).await?;
 
     if let Err(e) = nar_storage.delete(hash).await {
         warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
@@ -285,7 +285,7 @@ pub async fn demote_output_only_cached_deps(
     // `unwalked_inputs = 0`, and the cache facts it used to read are exactly what a
     // demote clears.
     let changes = crate::graph::can_start::unwalk_derivations(ctx, &producers).await?;
-    crate::status::emit_transition_effects(ctx, &changes).await;
+    crate::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(producers)
 }

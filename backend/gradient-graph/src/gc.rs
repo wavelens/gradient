@@ -228,7 +228,7 @@ async fn delete_derivations(
         let changes = gradient_db::graph::can_start::unpromote_ungated(db, &survivors)
             .await
             .context("GC: failed to settle the survivors of a deleted dependency")?;
-        gradient_db::status::emit_transition_effects(ctx, &changes).await;
+        gradient_db::status::emit_transition_effects(ctx, &changes).await?;
     }
 
     info!(deleted = deleted.len(), "Orphan derivation GC done");
@@ -284,7 +284,7 @@ async fn retire_stale_paths(
         .commit()
         .await
         .context("GC: failed to release the retire savepoint")?;
-    gradient_db::status::emit_transition_effects(ctx, &retired.transitions).await;
+    gradient_db::status::emit_transition_effects(ctx, &retired.transitions).await?;
 
     Ok(GcReport {
         retired: retired.deleted,
@@ -322,7 +322,7 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
     let (adopted, changes) = gradient_db::maintenance::gc::settle_after_delete(ctx, &lost)
         .await
         .context("GC: failed to settle the queue after deleting evaluations")?;
-    gradient_db::status::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     info!(
         deleted = evaluations.len(),

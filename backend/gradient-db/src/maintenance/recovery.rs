@@ -147,7 +147,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
             i32::from(EvaluationStatus::Aborted) as i16,
             now,
         )
-        .await;
+        .await?;
     }
 
     // 4c. Abort the shared builds those evals drove. When the server dies mid-eval the
@@ -359,9 +359,8 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // 4b. the phase-event insert returns its rows on Postgres, so it draws
-            // a query; empty is `RecordNotInserted`, which the recorder ignores
-            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // 4b. the phase-event insert reads its row back through RETURNING
+            .append_query_results([crate::test_ctx::inserted_phase_event()])
             // 4c. abort their shared builds, naming the derivations they moved
             .append_query_results([vec![
                 derivation_row(DerivationId::now_v7()),

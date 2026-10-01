@@ -36,8 +36,15 @@ impl Scheduler {
             .await
         {
             Ok(Some(eval)) => {
-                gradient_db::status::update_evaluation_status(&self.state.db(), eval, new_status)
-                    .await;
+                if let Err(e) = gradient_db::status::update_evaluation_status(
+                    &self.state.db(),
+                    eval,
+                    new_status,
+                )
+                .await
+                {
+                    warn!(error = %e, %evaluation_id, "failed to update the evaluation status");
+                }
             }
             Ok(None) => warn!(%evaluation_id, "evaluation not found for status update"),
             Err(e) => {

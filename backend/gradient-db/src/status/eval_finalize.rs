@@ -76,7 +76,7 @@ pub async fn check_evaluation_done(
         "evaluation finished"
     );
 
-    update_evaluation_status(ctx, eval, target).await;
+    update_evaluation_status(ctx, eval, target).await?;
     Ok(())
 }
 
@@ -175,6 +175,7 @@ mod tests {
                 3
             ])
             .append_query_results([vec![eval.clone()]])
+            .append_query_results([crate::test_ctx::inserted_phase_event()])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
@@ -228,6 +229,7 @@ mod tests {
                 3
             ])
             .append_query_results([vec![eval.clone()]])
+            .append_query_results([crate::test_ctx::inserted_phase_event()])
             .into_connection();
 
         let (ctx, pool) = crate::test_ctx::ctx(db).await;

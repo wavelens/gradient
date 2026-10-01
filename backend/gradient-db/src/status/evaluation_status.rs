@@ -9,14 +9,14 @@ use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
-use tracing::{debug, error, warn};
+use sea_orm::{ColumnTrait, Condition, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
+use tracing::{debug, warn};
 
 pub async fn update_evaluation_status(
     ctx: &DbContext,
     evaluation: MEvaluation,
     status: EvaluationStatus,
-) -> MEvaluation {
+) -> Result<MEvaluation, DbErr> {
     // The state machine validates the transition locally. The filtered update_many
     // below also guards atomically in the DB, so concurrent aborts cannot be
     // clobbered by an in-flight evaluator.
@@ -24,7 +24,7 @@ pub async fn update_evaluation_status(
         Ok(_) => {}
         Err(e) => {
             warn!(evaluation_id = %evaluation.id, error = %e, "Skipping invalid evaluation status transition");
-            return evaluation;
+            return Ok(evaluation);
         }
     }
 
@@ -58,7 +58,7 @@ pub async fn update_evaluation_status(
         update = update.col_expr(col, sea_orm::sea_query::Expr::value(now));
     }
 
-    let update_result = update
+    let updated = update
         .filter(CEvaluation::Id.eq(evaluation.id))
         .filter(
             Condition::all()
@@ -67,31 +67,20 @@ pub async fn update_evaluation_status(
                 .add(CEvaluation::Status.ne(EvaluationStatus::Completed)),
         )
         .exec(&ctx.worker_db)
-        .await;
+        .await?;
 
-    match update_result {
-        Ok(res) if res.rows_affected == 0 => {
-            // Row was concurrently transitioned to a terminal state -
-            // honor it and return the fresh value instead of clobbering.
-            return EEvaluation::find_by_id(evaluation.id)
-                .one(&ctx.worker_db)
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or(evaluation);
-        }
-        Err(e) => {
-            error!(error = %e, evaluation_id = %evaluation.id, "Failed to update evaluation status");
-            return evaluation;
-        }
-        Ok(_) => {}
+    if updated.rows_affected == 0 {
+        // Row was concurrently transitioned to a terminal state -
+        // honor it and return the fresh value instead of clobbering.
+        return Ok(EEvaluation::find_by_id(evaluation.id)
+            .one(&ctx.worker_db)
+            .await?
+            .unwrap_or(evaluation));
     }
 
     let updated_eval = EEvaluation::find_by_id(evaluation.id)
         .one(&ctx.worker_db)
-        .await
-        .ok()
-        .flatten()
+        .await?
         .unwrap_or_else(|| {
             let mut e = evaluation.clone();
             e.status = status;
@@ -99,7 +88,7 @@ pub async fn update_evaluation_status(
             e
         });
 
-    if let Err(e) = crate::deliveries::events::record(
+    crate::deliveries::events::record(
         &ctx.worker_db,
         &ctx.events,
         gradient_types::events::evaluation::Reported {
@@ -110,10 +99,7 @@ pub async fn update_evaluation_status(
             ..Default::default()
         },
     )
-    .await
-    {
-        error!(error = %e, evaluation_id = %updated_eval.id, "failed to record an evaluation report");
-    }
+    .await?;
     ctx.delivery_wake.notify_one();
 
     record_phase_event(
@@ -124,9 +110,9 @@ pub async fn update_evaluation_status(
         None,
         now,
     )
-    .await;
+    .await?;
 
-    updated_eval
+    Ok(updated_eval)
 }
 
 /// Records an error-level `evaluation_message` row and transitions the evaluation status.
@@ -139,7 +125,7 @@ pub async fn update_evaluation_status_with_error(
     status: EvaluationStatus,
     error_message: String,
     source: Option<String>,
-) -> MEvaluation {
+) -> Result<MEvaluation, DbErr> {
     // If the evaluation is already in a terminal state (e.g. it was
     // aborted while we were running), don't record a spurious error or
     // overwrite the status - just return the current row.
@@ -147,7 +133,7 @@ pub async fn update_evaluation_status_with_error(
         evaluation.status,
         EvaluationStatus::Aborted | EvaluationStatus::Failed | EvaluationStatus::Completed
     ) {
-        return evaluation;
+        return Ok(evaluation);
     }
 
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, ?source, "Updating evaluation status with error");
@@ -162,9 +148,7 @@ pub async fn update_evaluation_status_with_error(
     }
     .into_active_model();
 
-    if let Err(e) = EEvaluationMessage::insert(msg).exec(&ctx.worker_db).await {
-        error!(error = %e, evaluation_id = %evaluation.id, "Failed to insert evaluation_message");
-    }
+    EEvaluationMessage::insert(msg).exec(&ctx.worker_db).await?;
 
     update_evaluation_status(ctx, evaluation, status).await
 }

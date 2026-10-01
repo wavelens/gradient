@@ -404,8 +404,9 @@ fn statement_timeout(budget: Duration) -> String {
     format!("SET LOCAL statement_timeout = {}", budget.as_millis())
 }
 
-/// SQLSTATE `40P01` (deadlock detected) or `40001` (serialization failure) anywhere
-/// in the chain: the transaction was aborted for its timing, not its content.
+/// SQLSTATE `40P01` (deadlock detected), `40001` (serialization failure) or `25P02`
+/// (an earlier statement failed and was only logged) anywhere in the chain. The
+/// transaction was aborted, and a fresh attempt is able to pass.
 fn is_retryable(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let Some(
@@ -419,7 +420,7 @@ fn is_retryable(err: &anyhow::Error) -> bool {
 
         e.as_database_error()
             .and_then(|d| d.code())
-            .is_some_and(|c| c == "40P01" || c == "40001")
+            .is_some_and(|c| c == "40P01" || c == "40001" || c == "25P02")
     })
 }
 
@@ -440,6 +441,13 @@ where
         Arc::try_unwrap(tx).map_err(|_| anyhow!("a transaction handle escaped its message"))?;
     match outcome {
         Ok(Ok(value)) => {
+            // Postgres is answering COMMIT of an aborted transaction with a silent
+            // ROLLBACK. The probe is surfacing that state as `25P02` instead.
+            if let Err(e) = tx.execute_unprepared("SELECT 1").await {
+                let _ = tx.rollback().await;
+                return Err(anyhow::Error::new(e).context("transaction aborted before commit"));
+            }
+
             tx.commit().await.context("commit")?;
             // The transaction may have written pending-delivery rows; the effects actor
             // claims them now rather than on its next tick.
@@ -470,8 +478,8 @@ mod tests {
     use gradient_types::*;
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
-    fn timeouts(transactions: usize) -> Vec<MockExecResult> {
-        vec![MockExecResult::default(); transactions]
+    fn transactions(n: usize) -> Vec<MockExecResult> {
+        vec![MockExecResult::default(); 2 * n]
     }
 
     fn evaluation(id: EvaluationId) -> MEvaluation {
@@ -494,7 +502,7 @@ mod tests {
         let e1 = EvaluationId::now_v7();
         let e2 = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .append_query_results([vec![evaluation(e1)], vec![evaluation(e2)]])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -569,7 +577,7 @@ mod tests {
         );
         let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([none(), none()])
             .append_query_results([Vec::<MDerivationOutput>::new()])
@@ -611,7 +619,7 @@ mod tests {
         let good = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let none = Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new;
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![cached_path(good)]])
             .append_query_results([none(), none()])
@@ -646,7 +654,7 @@ mod tests {
         let e1 = EvaluationId::now_v7();
         let e2 = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .append_query_results([vec![evaluation(e1)], Vec::<MEvaluation>::new()])
             .into_connection();
         let (ctx, _) = ctx(db).await;
@@ -670,7 +678,7 @@ mod tests {
     #[tokio::test]
     async fn a_transaction_past_its_budget_is_rolled_back() {
         let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .into_connection())
         .await;
         let err = transact(&ctx, Duration::from_millis(20), |_scoped| async {
@@ -692,13 +700,35 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn an_aborted_transaction_is_rolled_back_instead_of_committed() {
+        let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult::default()])
+            .into_connection())
+        .await;
+        let err = transact(&ctx, GRAPH_TX_BUDGET, |_scoped| async { Ok(()) })
+            .await
+            .expect_err("the probe fails");
+        assert!(err.to_string().contains("aborted before commit"), "{err}");
+        drop(ctx);
+        let log: Vec<String> = pool
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log.iter().any(|t| t.contains("ROLLBACK")) && log.iter().all(|t| !t.contains("COMMIT")),
+            "rolled back, never committed: {log:?}"
+        );
+    }
+
     /// The budget reaches Postgres before any work, so a runaway statement is
     /// cancelled there: a dropped future leaves it running, and the rollback
     /// waited 18 minutes for one while every caller queued behind the graph writer.
     #[tokio::test]
     async fn a_transaction_hands_its_budget_to_postgres_first() {
         let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .into_connection())
         .await;
         transact(&ctx, Duration::from_secs(120), |_scoped| async { Ok(()) })
@@ -761,7 +791,7 @@ mod tests {
 
     #[test]
     fn a_deadlock_and_a_serialization_failure_retry_through_context() {
-        for code in ["40P01", "40001"] {
+        for code in ["40P01", "40001", "25P02"] {
             assert!(is_retryable(&coded(code).context("seed")), "{code}");
         }
     }
@@ -775,7 +805,7 @@ mod tests {
     #[tokio::test]
     async fn a_deadlocked_transaction_is_retried_and_its_second_attempt_commits() {
         let (ctx, pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(2))
+            .append_exec_results(transactions(2))
             .into_connection())
         .await;
         let attempts = &std::sync::atomic::AtomicU32::new(0);
@@ -820,7 +850,7 @@ mod tests {
     #[tokio::test]
     async fn a_unique_violation_is_not_retried() {
         let (ctx, _pool) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .into_connection())
         .await;
         let attempts = &std::sync::atomic::AtomicU32::new(0);
@@ -836,7 +866,7 @@ mod tests {
     #[tokio::test]
     async fn a_respawned_actor_answers_the_call_that_waited_for_it() {
         let (ctx, _) = ctx(MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results(timeouts(1))
+            .append_exec_results(transactions(1))
             .into_connection())
         .await;
         let graph = crate::Graph::new();

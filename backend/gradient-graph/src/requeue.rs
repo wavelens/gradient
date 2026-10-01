@@ -47,7 +47,7 @@ async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
             base,
         ) {
             let derivation = shared_build.derivation;
-            update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await?;
             requeued.push(derivation);
         }
     }
@@ -61,7 +61,7 @@ async fn transient_retries(ctx: &DbContext) -> anyhow::Result<u64> {
         );
     }
 
-    emit_transition_effects(ctx, &settled).await;
+    emit_transition_effects(ctx, &settled).await?;
 
     Ok(requeued.len() as u64)
 }

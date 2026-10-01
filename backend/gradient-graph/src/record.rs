@@ -612,7 +612,7 @@ impl BatchWriter<'_> {
                 gradient_db::graph::promotion::substitute_created_shared_builds(db, &truly_ids)
                     .await
                     .context("substitute created shared builds")?;
-            gradient_db::status::emit_transition_effects(self.ctx, &changes).await;
+            gradient_db::status::emit_transition_effects(self.ctx, &changes).await?;
         }
 
         Ok(())
@@ -716,7 +716,7 @@ impl BatchWriter<'_> {
                 .context("settle the queue against the seeded counts")?,
         );
         let net = gradient_db::status::collapse_transitions(changes);
-        gradient_db::status::emit_transition_effects(self.ctx, &net).await;
+        gradient_db::status::emit_transition_effects(self.ctx, &net).await?;
         self.move_batch_need(&to_seed, entry_points).await
     }
 
@@ -765,7 +765,7 @@ impl BatchWriter<'_> {
                 gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.incomplete).await?;
             changes.extend(gradient_db::graph::can_start::lost_fetchability(&lock).await?);
         }
-        gradient_db::status::emit_transition_effects(self.ctx, &changes).await;
+        gradient_db::status::emit_transition_effects(self.ctx, &changes).await?;
 
         Ok(wanted_by)
     }
@@ -795,7 +795,7 @@ impl BatchWriter<'_> {
             gained_need.extend_from_slice(&settled.moved.gained);
             changes.extend(settled.changes);
         }
-        gradient_db::status::emit_transition_effects(self.ctx, &changes).await;
+        gradient_db::status::emit_transition_effects(self.ctx, &changes).await?;
 
         Ok(gained_need)
     }
@@ -1184,7 +1184,7 @@ pub(crate) async fn apply_upstream_hits(
     if !seeded.complete.is_empty() {
         let lock = gradient_db::graph::can_start::lock_shared_builds(txn, &seeded.complete).await?;
         let changes = gradient_db::graph::can_start::became_fetchable(&lock).await?;
-        gradient_db::status::emit_transition_effects(ctx, &changes).await;
+        gradient_db::status::emit_transition_effects(ctx, &changes).await?;
     }
 
     let mut roots = touched;
@@ -1201,7 +1201,7 @@ pub(crate) async fn apply_upstream_hits(
         changes.extend(settled.changes);
         gained_need.extend_from_slice(&settled.moved.gained);
     }
-    gradient_db::status::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(gained_need)
 }
@@ -1254,7 +1254,7 @@ pub(crate) async fn mark_probed(
                 .context("queue the shared builds the answer made promotable")?,
         );
     }
-    gradient_db::status::emit_transition_effects(ctx, &changes).await;
+    gradient_db::status::emit_transition_effects(ctx, &changes).await?;
 
     Ok(gained_need)
 }
@@ -1330,12 +1330,15 @@ pub(crate) async fn after_commit(
     }
 
     if let Some(task_id) = batch.task {
-        gradient_db::status::announce_entry_point_statuses(
+        if let Err(e) = gradient_db::status::announce_entry_point_statuses(
             ctx,
             report.evaluation,
             &report.entry_points,
         )
-        .await;
+        .await
+        {
+            error!(error = %e, evaluation = %report.evaluation, "failed to report the entry points");
+        }
         if let Ok(Some(task)) = ETask::find_by_id(task_id).one(&ctx.worker_db).await {
             let gc_ctx = ctx.detached();
             let keep = task.keep_evaluations as usize;
@@ -1361,15 +1364,16 @@ pub(crate) async fn fail_evaluation(ctx: &DbContext, evaluation: EvaluationId, m
     if let Ok(Some(eval)) = EEvaluation::find_by_id(evaluation)
         .one(&ctx.worker_db)
         .await
-    {
-        update_evaluation_status_with_error(
+        && let Err(e) = update_evaluation_status_with_error(
             ctx,
             eval,
             EvaluationStatus::Failed,
             message.to_owned(),
             Some("db-insert".to_string()),
         )
-        .await;
+        .await
+    {
+        error!(error = %e, %evaluation, "failed to fail the evaluation");
     }
 }
 
@@ -2222,6 +2226,8 @@ mod tests {
             .append_query_results([vec![need_row(b.id, true)], vec![need_row(b.id, true)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![drv_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<MEntryPoint>::new()])
             .append_exec_results(vec![ok(1); 6])
             .into_connection();
         let (ctx, pool) = ctx(db).await;

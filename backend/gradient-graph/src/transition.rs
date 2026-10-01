@@ -62,7 +62,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 });
             }
 
-            update_derivation_build_status(ctx, row, BuildStatus::Building).await;
+            update_derivation_build_status(ctx, row, BuildStatus::Building).await?;
             Ok(TransitionReport::default())
         }
         Transition::BuildOutput {
@@ -127,7 +127,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
                 .filter(|r| r.status == BuildStatus::Building)
             {
                 let derivation = row.derivation;
-                update_derivation_build_status(ctx, row, BuildStatus::Queued).await;
+                update_derivation_build_status(ctx, row, BuildStatus::Queued).await?;
                 requeued.push(derivation);
             }
 
@@ -137,7 +137,7 @@ pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<Tra
             // way. The dispatcher is live here, unlike at startup, so the settle has
             // to run before it can pick the row up.
             let settled = unpromote_ungated(&ctx.worker_db, &requeued).await?;
-            emit_transition_effects(ctx, &settled).await;
+            emit_transition_effects(ctx, &settled).await?;
 
             Ok(TransitionReport::default())
         }
@@ -215,7 +215,7 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
         )
     {
         info!(%evaluation_id, "eval job complete; promoting evaluation to Building");
-        update_evaluation_status(ctx, eval, EvaluationStatus::Building).await;
+        update_evaluation_status(ctx, eval, EvaluationStatus::Building).await?;
     }
 
     // If every build was already terminal (e.g. all Substituted), close the
@@ -267,7 +267,7 @@ async fn eval_failed(
         // where the abort meant to put it rather than reporting a failure the
         // user did not cause.
         if kind == BuildFailureKind::Aborted {
-            update_evaluation_status(ctx, eval, EvaluationStatus::Aborted).await;
+            update_evaluation_status(ctx, eval, EvaluationStatus::Aborted).await?;
             return Ok(());
         }
 
@@ -278,7 +278,7 @@ async fn eval_failed(
             error.to_owned(),
             Some("worker".to_string()),
         )
-        .await;
+        .await?;
     }
 
     Ok(())
@@ -323,7 +323,7 @@ async fn requeue_evaluation(ctx: &DbContext, evaluation_id: EvaluationId) -> Res
             EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
         )
     {
-        update_evaluation_status(ctx, eval, EvaluationStatus::Queued).await;
+        update_evaluation_status(ctx, eval, EvaluationStatus::Queued).await?;
     }
 
     Ok(())
@@ -500,7 +500,7 @@ async fn build_completed(
     {
         warn!(%derivation_build, error = %e, "failed to record attempt success");
     }
-    update_derivation_build_status(ctx, shared_build, terminal).await;
+    update_derivation_build_status(ctx, shared_build, terminal).await?;
     check_referencing_evals_done(ctx, derivation_id).await?;
 
     if !was_external_cached {
@@ -635,7 +635,7 @@ async fn build_failed(
                 .one(&ctx.worker_db)
                 .await?
                 .unwrap_or(shared_build);
-            update_derivation_build_status(ctx, reloaded, BuildStatus::FailedTransient).await;
+            update_derivation_build_status(ctx, reloaded, BuildStatus::FailedTransient).await?;
             info!(%derivation_build, attempt = attempt + 1, "transient build failure; scheduled for retry");
             return Ok(());
         }
@@ -646,9 +646,9 @@ async fn build_failed(
             // stale cached inputs in this same call, which drops a dependency out of
             // `fetchable` and raises this shared build's `blocking_deps`, so the settle is
             // what makes the write legal. There is no backoff on this path.
-            update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::Queued).await?;
             let settled = unpromote_ungated(&ctx.worker_db, &[derivation_id]).await?;
-            emit_transition_effects(ctx, &settled).await;
+            emit_transition_effects(ctx, &settled).await?;
             info!(%derivation_build, "substitute unavailable; re-queued for re-dispatch/escalation");
             return Ok(());
         }
@@ -659,15 +659,15 @@ async fn build_failed(
             return Ok(());
         }
         FailureOutcome::Aborted => {
-            update_derivation_build_status(ctx, shared_build, BuildStatus::Aborted).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::Aborted).await?;
             info!(%derivation_build, "build aborted by server; shared build left requeueable");
             return check_referencing_evals_done(ctx, derivation_id).await;
         }
         FailureOutcome::Permanent => {
-            update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::FailedPermanent).await?;
         }
         FailureOutcome::Timeout => {
-            update_derivation_build_status(ctx, shared_build, BuildStatus::FailedTimeout).await;
+            update_derivation_build_status(ctx, shared_build, BuildStatus::FailedTimeout).await?;
         }
     }
 
@@ -761,7 +761,7 @@ async fn exhaust_substitution(
             .changes,
     );
     changes.extend(gradient_db::graph::can_start::promote(db, &[shared_build.derivation]).await?);
-    emit_transition_effects(ctx, &changes).await;
+    emit_transition_effects(ctx, &changes).await?;
 
     if let Ok(Some(drv)) = EDerivation::find_by_id(shared_build.derivation)
         .one(db)

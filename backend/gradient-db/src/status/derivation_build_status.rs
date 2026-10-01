@@ -17,7 +17,7 @@ use crate::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
 use std::collections::{HashMap, HashSet};
 use tracing::{error, info};
 
@@ -25,9 +25,9 @@ pub async fn update_derivation_build_status(
     ctx: &DbContext,
     shared_build: MDerivationBuild,
     status: BuildStatus,
-) -> MDerivationBuild {
+) -> Result<MDerivationBuild, DbErr> {
     if shared_build.status == status {
-        return shared_build;
+        return Ok(shared_build);
     }
 
     if let Err(e) = BuildStateMachine::validate(shared_build.status, status) {
@@ -38,7 +38,7 @@ pub async fn update_derivation_build_status(
             error = %e,
             "Skipping invalid shared build status transition - status update lost or out of order"
         );
-        return shared_build;
+        return Ok(shared_build);
     }
 
     info!(derivation_build = %shared_build.id, derivation = %shared_build.derivation, from = ?shared_build.status, to = ?status, "shared build status transition");
@@ -53,30 +53,24 @@ pub async fn update_derivation_build_status(
     }
 
     if status == BuildStatus::Building {
-        let _ = crate::scheduling::build_attempt::stamp_attempt_started(
+        crate::scheduling::build_attempt::stamp_attempt_started(
             &ctx.worker_db,
             shared_build.id,
             now,
         )
-        .await;
+        .await?;
     }
 
     if BuildStateMachine::is_terminal(&status) {
-        let _ = crate::scheduling::build_attempt::stamp_attempt_finished(
+        crate::scheduling::build_attempt::stamp_attempt_finished(
             &ctx.worker_db,
             shared_build.id,
             now,
         )
-        .await;
+        .await?;
     }
 
-    let updated = match active.update(&ctx.worker_db).await {
-        Ok(u) => u,
-        Err(e) => {
-            error!(error = %e, derivation_build = %shared_build.id, "Failed to update shared build status");
-            return shared_build;
-        }
-    };
+    let updated = active.update(&ctx.worker_db).await?;
 
     // All fan-out (graph version, board events, pending deliveries, cache-changed) goes
     // through the one effects emitter - the same path the bulk sweeps feed - so
@@ -89,7 +83,7 @@ pub async fn update_derivation_build_status(
             to: status,
         }],
     )
-    .await;
+    .await?;
 
     // A build-once success is the moment this shared build can serve its outputs: one
     // locked flip drops its parents' counters and queues the ones at zero. The
@@ -98,34 +92,27 @@ pub async fn update_derivation_build_status(
     // `cascade_dependency_failed` on that failure's own transition, and by the
     // eval-scoped `repair_dependency_failed` for the ones it could not reach.
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
-        match crate::graph::can_start::advance_fetchable(&ctx.worker_db, &[updated.derivation])
-            .await
-        {
-            Ok(changes) => emit_transition_effects(ctx, &changes).await,
-            Err(e) => error!(error = %e, "failed to advance the parents"),
-        }
+        let changes =
+            crate::graph::can_start::advance_fetchable(&ctx.worker_db, &[updated.derivation])
+                .await?;
+        emit_transition_effects(ctx, &changes).await?;
     }
 
     if matches!(
         status,
         BuildStatus::FailedPermanent | BuildStatus::FailedTimeout | BuildStatus::DependencyFailed
     ) {
-        match crate::graph::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation)
-            .await
-        {
-            Ok(changes) => emit_transition_effects(ctx, &changes).await,
-            Err(e) => error!(error = %e, "failed to cascade dependency failure"),
-        }
+        let changes =
+            crate::graph::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation)
+                .await?;
+        emit_transition_effects(ctx, &changes).await?;
     }
 
     // Awaited, not spawned: the emitter above already wrote this transition's
     // pending deliveries in this transaction, and a detached writer racing it was how a
     // phase timeline went missing for a build the reader had already seen.
     let worker =
-        crate::scheduling::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id)
-            .await
-            .ok()
-            .flatten();
+        crate::scheduling::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id).await?;
     record_phase_event(
         &ctx.worker_db,
         PhaseSubjectKind::Build,
@@ -134,9 +121,9 @@ pub async fn update_derivation_build_status(
         worker,
         now,
     )
-    .await;
+    .await?;
 
-    updated
+    Ok(updated)
 }
 
 /// Re-announce the current status of `derivations` through the effects emitter
@@ -144,9 +131,12 @@ pub async fn update_derivation_build_status(
 /// the affected derivation set, not the transitions that produced it - e.g.
 /// state import; paths with the actual changes in hand should call
 /// [`emit_transition_effects`] directly.
-pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &[DerivationId]) {
+pub async fn notify_build_status_for_derivations(
+    ctx: &DbContext,
+    derivations: &[DerivationId],
+) -> Result<(), DbErr> {
     if derivations.is_empty() {
-        return;
+        return Ok(());
     }
 
     let db = &ctx.worker_db;
@@ -157,8 +147,7 @@ pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default()
+        .await?
         .into_iter()
         .map(|a| (a.derivation, a.status))
         .collect();
@@ -167,7 +156,7 @@ pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &
         .into_iter()
         .map(|(derivation, status)| TransitionChange::unchanged(derivation, status))
         .collect();
-    emit_transition_effects(ctx, &changes).await;
+    emit_transition_effects(ctx, &changes).await
 }
 
 /// Write the pending-delivery row for each entry point's current shared build status as its
@@ -180,9 +169,9 @@ pub async fn announce_entry_point_statuses(
     ctx: &DbContext,
     evaluation: EvaluationId,
     derivations: &[DerivationId],
-) {
+) -> Result<(), DbErr> {
     if derivations.is_empty() {
-        return;
+        return Ok(());
     }
 
     let db = &ctx.worker_db;
@@ -195,13 +184,12 @@ pub async fn announce_entry_point_statuses(
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default()
+        .await?
         .into_iter()
         .map(|ep| ep.derivation)
         .collect();
     if entry_point_drvs.is_empty() {
-        return;
+        return Ok(());
     }
 
     let drv_ids: Vec<DerivationId> = entry_point_drvs.iter().copied().collect();
@@ -212,8 +200,7 @@ pub async fn announce_entry_point_statuses(
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default()
+        .await?
         .into_iter()
         .map(|a| (a.derivation, a.status))
         .collect();
@@ -225,15 +212,14 @@ pub async fn announce_entry_point_statuses(
             .all(db)
             .await
     })
-    .await
-    .unwrap_or_default();
+    .await?;
 
     for job in jobs {
         let Some(&status) = status_by_drv.get(&job.derivation) else {
             continue;
         };
 
-        if let Err(e) = crate::deliveries::events::record(
+        crate::deliveries::events::record(
             db,
             &ctx.events,
             gradient_types::events::build::Reported {
@@ -245,10 +231,9 @@ pub async fn announce_entry_point_statuses(
                 ..Default::default()
             },
         )
-        .await
-        {
-            error!(error = %e, build_job = %job.id, "failed to enqueue an entry point's first report");
-        }
+        .await?;
     }
     ctx.delivery_wake.notify_one();
+
+    Ok(())
 }

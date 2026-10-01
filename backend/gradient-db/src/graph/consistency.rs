@@ -143,13 +143,13 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     // Both directions read the column the recount above just corrected: what
     // nothing wants any more settles, what something wants again wakes.
     let settled = crate::graph::can_start::settle_skipped(db).await?;
-    crate::status::emit_transition_effects(ctx, &settled).await;
+    crate::status::emit_transition_effects(ctx, &settled).await?;
 
     let repaired = crate::graph::can_start::repair_can_start(db, &scope).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
     // the board at the status the earlier statement wrote.
-    crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await;
-    crate::status::emit_transition_effects(ctx, &repaired.promoted).await;
+    crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await?;
+    crate::status::emit_transition_effects(ctx, &repaired.promoted).await?;
 
     // The one naming repair: the events that can leave a pending shared build unnamed
     // each repair it on their own path, and this is the backstop for a lost move.
@@ -172,7 +172,7 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
         }
 
         crate::task_board::dep_counts::bump_graph_version(db, &adopted.evaluations()).await?;
-        crate::status::emit_transition_effects(ctx, &queued).await;
+        crate::status::emit_transition_effects(ctx, &queued).await?;
         adopted.pairs.len() as i64
     } else {
         0

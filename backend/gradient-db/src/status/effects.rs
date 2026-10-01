@@ -18,8 +18,8 @@ use crate::DbContext;
 use crate::graph::predicates::BUILDER_STATUSES;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
+use sea_orm::DbErr;
 use std::collections::{HashMap, HashSet};
-use tracing::error;
 
 /// One shared build status move, as reported by the path that made it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -88,28 +88,31 @@ fn ci_reports(status: BuildStatus) -> bool {
 /// executes before the update that takes it away, so the evaluations naming what
 /// lost it are asked again here. Nothing else would ask: no shared build of theirs need
 /// have transitioned at all (#666).
-pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChange]) {
+pub async fn emit_transition_effects(
+    ctx: &DbContext,
+    changes: &[TransitionChange],
+) -> Result<(), DbErr> {
     if changes.is_empty() {
-        return;
+        return Ok(());
     }
 
     ctx.startable_set.record(changes);
-    announce(ctx, changes).await;
+    announce(ctx, changes).await?;
     let Moved {
         regated,
         unwanted,
         gained,
-    } = move_need(ctx, changes).await;
+    } = move_need(ctx, changes).await?;
     ctx.probe_requests.send(gained);
     if !regated.is_empty() {
         ctx.startable_set.record(&regated);
-        announce(ctx, &regated).await;
+        announce(ctx, &regated).await?;
     }
-    if !unwanted.is_empty()
-        && let Err(e) = super::eval_finalize::finalize_evals_for_derivations(ctx, &unwanted).await
-    {
-        error!(error = %e, "eval finalize after a need loss failed");
+    if !unwanted.is_empty() {
+        super::eval_finalize::finalize_evals_for_derivations(ctx, &unwanted).await?;
     }
+
+    Ok(())
 }
 
 /// Whether shared build `{status}` is one an evaluation will still have built, and so
@@ -141,27 +144,19 @@ fn need_moves(changes: &[TransitionChange]) -> Vec<DerivationId> {
 /// A shared build already `Building` keeps building: [`crate::graph::can_start::unpromote_ungated`]
 /// moves only `Queued` rows. The bytes a running build produces are cached and useful,
 /// while an abort throws the work away and complicates attempt attribution.
-async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Moved {
+async fn move_need(ctx: &DbContext, changes: &[TransitionChange]) -> Result<Moved, DbErr> {
     let db = &ctx.worker_db;
     let mut moved_out = Moved::default();
     for chunk in need_moves(changes).chunks(crate::IN_CHUNK_SIZE) {
-        let moved = match crate::graph::can_start::update_need(db, chunk).await {
-            Ok(moved) => moved,
-            Err(e) => {
-                error!(error = %e, "failed to update what a shared build needs");
-                continue;
-            }
-        };
-
-        match crate::graph::can_start::settle_need(db, &moved).await {
-            Ok(changes) => moved_out.regated.extend(changes),
-            Err(e) => error!(error = %e, "failed to settle the queue against a need move"),
-        }
+        let moved = crate::graph::can_start::update_need(db, chunk).await?;
+        moved_out
+            .regated
+            .extend(crate::graph::can_start::settle_need(db, &moved).await?);
         moved_out.gained.extend(moved.gained);
         moved_out.unwanted.extend(moved.lost);
     }
 
-    moved_out
+    Ok(moved_out)
 }
 
 /// What a need move owes its caller: the regated shared builds to announce, the ones
@@ -180,9 +175,12 @@ struct Moved {
 /// whose status the Git hosts report. Every one of them is awaited and written
 /// here; what leaves the process is the effects actor's, reading the rows this
 /// wrote in the transaction that moved the shared builds.
-async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
+///
+/// A failed statement is aborting that transaction. Every error is returned for the
+/// graph writer to roll back and retry, never committed as a silent rollback.
+async fn announce(ctx: &DbContext, changes: &[TransitionChange]) -> Result<(), DbErr> {
     if changes.is_empty() {
-        return;
+        return Ok(());
     }
 
     let db = &ctx.worker_db;
@@ -196,8 +194,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default()
+        .await?
         .into_iter()
         .fold(HashMap::new(), |mut m, j| {
             m.entry(j.derivation).or_default().push(j);
@@ -212,16 +209,11 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default()
+        .await?
         .into_iter()
         .map(|ep| (ep.evaluation, ep.derivation))
         .collect();
 
-    // One bump per emit covers every evaluation a moved shared build belongs to; their
-    // cached histograms update on the next read. A failed bump is logged rather
-    // than propagated, because the board events and CI checks below must fan out
-    // regardless; `dep_counts::DEP_COUNTS_MAX_AGE_SECS` is what heals a lost one.
     let moved: Vec<EvaluationId> = changes
         .iter()
         .filter(|c| c.from != c.to)
@@ -236,14 +228,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
         .into_iter()
         .collect();
 
-    if let Err(e) = crate::task_board::dep_counts::bump_graph_version(db, &moved).await {
-        error!(
-            error = %e,
-            evaluations = moved.len(),
-            max_age_secs = crate::task_board::dep_counts::DEP_COUNTS_MAX_AGE_SECS,
-            "failed to bump the graph version; the histograms heal on the age ceiling"
-        );
-    }
+    crate::task_board::dep_counts::bump_graph_version(db, &moved).await?;
 
     for c in changes {
         let Some(jobs) = jobs_by_drv.get(&c.derivation) else {
@@ -258,11 +243,8 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
                     status: i32::from(c.to) as i16,
                 });
 
-            // Only declared entry points get a Git host check; an intermediate
-            // build owes no row rather than a row every consumer drops.
-            if ci_reports(c.to)
-                && entry_keys.contains(&(job.evaluation, job.derivation))
-                && let Err(e) = crate::deliveries::events::record(
+            if ci_reports(c.to) && entry_keys.contains(&(job.evaluation, job.derivation)) {
+                crate::deliveries::events::record(
                     db,
                     &ctx.events,
                     gradient_types::events::build::Reported {
@@ -274,9 +256,7 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
                         ..Default::default()
                     },
                 )
-                .await
-            {
-                error!(error = %e, build_job = %job.id, "failed to enqueue a build status report");
+                .await?;
             }
         }
     }
@@ -288,10 +268,6 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
             .publish(gradient_types::events::cache::Changed {});
     }
 
-    // A terminal transition may have settled its referencing evaluations; the
-    // finalize decision is graph-derived and idempotent, so checking here (for
-    // every mover, bulk or single-row) closes the "eval hangs Building because
-    // a bulk sweep bypassed the reactive finalize hook" dead-zone class.
     let terminal_evals: HashSet<EvaluationId> = changes
         .iter()
         .filter(|c| crate::state_machine::BuildStateMachine::is_terminal(&c.to))
@@ -304,31 +280,21 @@ async fn announce(ctx: &DbContext, changes: &[TransitionChange]) {
         })
         .collect();
     for evaluation_id in terminal_evals {
-        if let Err(e) = super::eval_finalize::check_evaluation_done(ctx, evaluation_id).await {
-            error!(error = %e, %evaluation_id, "eval finalize after transition failed");
-        }
+        super::eval_finalize::check_evaluation_done(ctx, evaluation_id).await?;
     }
 
-    // A build that finished owes its log the compression pass, which is storage
-    // work and belongs to the effects actor rather than this transaction. Only a
-    // real move enqueues: a re-announce would re-chunk a log already indexed.
     let finished: Vec<DerivationId> = changes
         .iter()
         .filter(|c| c.from != c.to && crate::state_machine::BuildStateMachine::is_terminal(&c.to))
         .map(|c| c.derivation)
         .collect();
     if !finished.is_empty() {
-        match crate::scheduling::build_attempt::latest_attempts_by_derivation(db, &finished).await {
-            Ok(attempts) => {
-                if let Err(e) =
-                    super::logging::enqueue_log_finalize(db, attempts.into_values()).await
-                {
-                    error!(error = %e, "failed to enqueue the log finalizations");
-                }
-            }
-            Err(e) => error!(error = %e, "failed to look up the attempts of finished builds"),
-        }
+        let attempts =
+            crate::scheduling::build_attempt::latest_attempts_by_derivation(db, &finished).await?;
+        super::logging::enqueue_log_finalize(db, attempts.into_values()).await?;
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -483,6 +449,11 @@ mod tests {
                 derivation: d,
                 ..Default::default()
             }]])
+            .append_query_results(vec![
+                Vec::<std::collections::BTreeMap<String, sea_orm::Value>>::new();
+                3
+            ])
+            .append_exec_results(vec![sea_orm::MockExecResult::default(); 4])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx(db).await;
 
@@ -494,7 +465,8 @@ mod tests {
                 to: BuildStatus::Completed,
             }],
         )
-        .await;
+        .await
+        .expect("effects");
         crate::test_ctx::settle(ctx).await;
 
         let log = crate::pool::statements(pool.into_transaction_log());
@@ -530,7 +502,8 @@ mod tests {
             &ctx,
             &[TransitionChange::unchanged(d, BuildStatus::Completed)],
         )
-        .await;
+        .await
+        .expect("effects");
         crate::test_ctx::settle(ctx).await;
 
         let log = crate::pool::statements(pool.into_transaction_log());
@@ -585,7 +558,8 @@ mod tests {
                 to: BuildStatus::Completed,
             }],
         )
-        .await;
+        .await
+        .expect("move need");
         ctx.probe_requests.send(moved.gained);
         crate::test_ctx::settle(ctx).await;
 
@@ -638,7 +612,8 @@ mod tests {
                 to: BuildStatus::Completed,
             }],
         )
-        .await;
+        .await
+        .expect("move need");
         drop(ctx);
 
         assert_eq!(

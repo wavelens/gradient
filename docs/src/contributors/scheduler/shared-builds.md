@@ -72,10 +72,11 @@ Every other message flushes the queue first: a write after a batch or a commit s
 |---|---|---|
 | `CALL_TIMEOUT` | 30 s | Wait for the graph writer to exist after a restart |
 | `GRAPH_TX_BUDGET` | 120 s | Per transaction; past this the transaction rolls back and the caller gets `graph transaction exceeded 120s`. Also set as the transaction's `statement_timeout`: the rollback waits for the running statement, and only Postgres can end that statement |
-| `GRAPH_TX_ATTEMPTS` | 3 | Attempts of a transaction aborted with SQLSTATE `40P01` or `40001` |
+| `GRAPH_TX_ATTEMPTS` | 3 | Attempts of a transaction aborted with SQLSTATE `40P01`, `40001` or `25P02` |
 
 - A caller waits for its reply without a deadline. The graph writer still applies a message whose caller gave up; a caller-side timeout would report a write that still lands as failed. A worker session behind a backlog blocks its reader as backpressure.
 - A deadlock inside one batch fails the whole flush (`escalate_retryable`), and `transact` retries the flush.
+- Status updates and their effects return every database error to `transact`. A `SELECT 1` probe before `COMMIT` turns a transaction aborted by an error that was only logged into `25P02`. Without the probe, Postgres answers that `COMMIT` with a silent rollback.
 - Board events and probe requests an aborted attempt already sent are sent again by the retry.
 - `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`) and cache demotion take place inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) is outside and is not retried; its next pass picks the work up.
 - No state is held between messages: a restart loses only batches still queued, and their callers get an error.

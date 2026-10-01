@@ -130,7 +130,7 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
                             dispatches = assignments,
                             "evaluation orphaned on every dispatch; failing instead of re-queuing"
                         );
-                        update_evaluation_status_with_error(
+                        if let Err(e) = update_evaluation_status_with_error(
                             &state.db(),
                             eval,
                             EvaluationStatus::Failed,
@@ -140,7 +140,10 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
                             ),
                             Some("scheduler".to_string()),
                         )
-                        .await;
+                        .await
+                        {
+                            warn!(error = %e, %evaluation_id, "failed to fail the orphaned evaluation");
+                        }
                     }
                 }
             }
@@ -158,7 +161,10 @@ pub(crate) async fn park_orphaned_eval(state: &Arc<ServerState>, eval: MEvaluati
         Some(&WaitingReason::eval_workers(EvalCapability::Eval, 0)),
     )
     .await;
-    update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await;
+    let evaluation_id = eval.id;
+    if let Err(e) = update_evaluation_status(&state.db(), eval, EvaluationStatus::Waiting).await {
+        warn!(error = %e, %evaluation_id, "failed to park the orphaned evaluation");
+    }
 }
 
 /// Put a retried cluster's members back where the startable feed finds them. The
