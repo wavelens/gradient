@@ -4,11 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, InjectionToken, computed, inject, input, ChangeDetectionStrategy } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 
 export type MessageBannerType = 'error' | 'success' | 'info' | 'warning';
+
+export const MESSAGE_BANNER_ROLE = new InjectionToken<'status' | 'alert' | null>('MESSAGE_BANNER_ROLE', {
+  factory: () => 'status',
+});
 
 const DEFAULT_ICONS: Record<MessageBannerType, string> = {
   error: 'error',
@@ -28,6 +32,7 @@ const DEFAULT_ICONS: Record<MessageBannerType, string> = {
 export class MessageBannerComponent {
   type = input<MessageBannerType>('info');
   icon = input<string>();
+  protected role = inject(MESSAGE_BANNER_ROLE);
 
   resolvedIcon = computed(() => this.icon() ?? DEFAULT_ICONS[this.type()]);
 }

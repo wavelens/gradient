@@ -5,11 +5,26 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { MessageBannerComponent } from './message-banner.component';
+import { MESSAGE_BANNER_ROLE, MessageBannerComponent } from './message-banner.component';
 
 describe('MessageBannerComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({ imports: [MessageBannerComponent] }).compileComponents();
+  });
+
+  it('is a status region unless the app owns the live regions', async () => {
+    const banner = () => {
+      const fixture = TestBed.createComponent(MessageBannerComponent);
+      fixture.detectChanges();
+      return (fixture.nativeElement as HTMLElement).querySelector('.message-banner');
+    };
+    expect(banner()?.getAttribute('role')).toBe('status');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [MessageBannerComponent],
+      providers: [{ provide: MESSAGE_BANNER_ROLE, useValue: null }],
+    });
+    expect(banner()?.hasAttribute('role')).toBe(false);
   });
 
   it('applies the type modifier class', async () => {
