@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../../styles/variables' as *;
+@use '@gradient/ui/styles/variables' as *;
 
 // The status hues come from the evaluation page's :host; the tokens are the
 // fallback so the bar is legible wherever else it is dropped.

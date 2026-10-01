@@ -25,7 +25,7 @@ import {
   PageLayoutComponent,
   StatCardComponent,
   TableComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';

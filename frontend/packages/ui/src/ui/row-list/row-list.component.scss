@@ -1,0 +1,15 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../styles/variables' as *;
+
+// The list itself draws nothing: one outer box around rows that already have
+// their own edges reads as a box in a box, so each row is its own card.
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}

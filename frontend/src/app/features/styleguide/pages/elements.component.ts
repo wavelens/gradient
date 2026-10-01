@@ -15,7 +15,6 @@ import {
   CopyFieldComponent,
   DividerComponent,
   EmptyStateComponent,
-  EvalStatusBadgeComponent,
   FieldRowComponent,
   IconComponent,
   IconSize,
@@ -23,12 +22,15 @@ import {
   LogoComponent,
   MessageBannerComponent,
   MessageService,
-  MetricChartComponent,
-  StarButtonComponent,
   StatCardComponent,
-  StatusIconComponent,
   TableComponent,
   ToastComponent,
+} from '@gradient/ui/ui';
+import {
+  EvalStatusBadgeComponent,
+  MetricChartComponent,
+  StarButtonComponent,
+  StatusIconComponent,
 } from '@shared/ui';
 import type { StatusPhase } from '@shared/evaluation';
 

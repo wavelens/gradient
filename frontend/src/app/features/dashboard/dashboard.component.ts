@@ -5,7 +5,7 @@
  */
 
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { LoadingSpinnerComponent } from '@gradient/ui/ui';
 import { DashboardStatsComponent } from './stats/dashboard-stats.component';
 import { DashboardTaskTableComponent } from './task-table/dashboard-task-table.component';
 import { DashboardActivityComponent } from './activity/dashboard-activity.component';

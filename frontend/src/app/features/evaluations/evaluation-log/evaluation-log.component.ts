@@ -41,7 +41,6 @@ import {
   BadgeSeverity,
   ButtonComponent,
   DialogComponent,
-  EvalStatusBadgeComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
@@ -50,7 +49,8 @@ import {
   MessageBannerComponent,
   MessageService,
   ToastComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { EvalStatusBadgeComponent } from '@shared/ui';
 import { buildDuration, commitLabel, evaluationDuration, formatEvaluationDuration, isPendingBuildStatus, isRunningEvaluationStatus } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 

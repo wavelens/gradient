@@ -18,7 +18,7 @@ import {
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 
 @Component({
   selector: 'app-invites',

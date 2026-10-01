@@ -6,7 +6,7 @@
 
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { IconComponent } from '@shared/ui';
+import { IconComponent } from '@gradient/ui/ui';
 
 interface ErrorMeta {
   title: string;

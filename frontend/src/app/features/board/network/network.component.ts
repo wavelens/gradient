@@ -7,7 +7,8 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, BoardNetworkStats, HttpRouteStat } from '@core/services/board.service';
-import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { formatBytes, formatCount, formatDuration, formatQuantity } from '@shared/text';
 

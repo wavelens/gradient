@@ -28,7 +28,7 @@ import {
   LogoComponent,
   MessageBannerComponent,
   PasswordInputComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 
 @Component({
   selector: 'app-register',

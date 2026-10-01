@@ -8,7 +8,7 @@ import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/c
 import { toSignal } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
-import { Crumb, PageLayoutComponent } from '@shared/ui';
+import { Crumb, PageLayoutComponent } from '@gradient/ui/ui';
 import { ThemeService, ThemePreference } from '@core/services/theme.service';
 
 export interface SectionLink {

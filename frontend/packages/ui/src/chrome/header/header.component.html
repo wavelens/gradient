@@ -1,0 +1,29 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<header class="main-header">
+  <div class="header-content">
+    <div class="header-logo">
+      <a [routerLink]="brand().href" [attr.aria-label]="brand().label">
+        <gr-logo />
+        @if (brand().tagline; as tagline) {
+          <span class="header-tagline">{{ tagline }}</span>
+        }
+      </a>
+    </div>
+
+    <nav class="header-nav">
+      @for (link of nav(); track link.href) {
+        <a [routerLink]="link.href" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: link.exact ?? false }">
+          {{ link.label }}
+        </a>
+      }
+    </nav>
+
+    <ng-content select="[slot=actions]" />
+    <ng-content select="[slot=lang]" />
+  </div>
+</header>

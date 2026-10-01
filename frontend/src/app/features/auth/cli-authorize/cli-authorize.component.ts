@@ -23,7 +23,7 @@ import {
   InputDirective,
   LogoComponent,
   MessageBannerComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 
 interface CliDeviceInfo {
   user_code: string;

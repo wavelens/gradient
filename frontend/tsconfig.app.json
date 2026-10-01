@@ -10,14 +10,19 @@
       "@core/*": ["./src/app/core/*"],
       "@shared/*": ["./src/app/shared/*"],
       "@features/*": ["./src/app/features/*"],
-      "@environments/*": ["./src/environments/*"]
+      "@environments/*": ["./src/environments/*"],
+      "@gradient/ui/ui": ["./packages/ui/src/ui/index.ts"],
+      "@gradient/ui/chrome": ["./packages/ui/src/chrome/index.ts"],
+      "@gradient/ui/tokens": ["./packages/ui/src/styles/tokens.ts"]
     }
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "packages/ui/src/**/*.ts"
   ],
   "exclude": [
-    "src/**/*.spec.ts"
+    "src/**/*.spec.ts",
+    "packages/ui/src/**/*.spec.ts"
   ],
   "angularCompilerOptions": {
     "extendedDiagnostics": {

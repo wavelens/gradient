@@ -17,7 +17,7 @@ import {
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { environment } from '@environments/environment';
 import { formatBytes } from '@shared/text';
 

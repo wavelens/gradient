@@ -27,7 +27,7 @@ import {
   NavCardComponent,
   PageLayoutComponent,
   SelectComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { slugify } from '@shared/text';
 import { Project } from '@core/models';
 

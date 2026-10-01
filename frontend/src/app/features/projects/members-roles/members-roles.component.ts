@@ -25,7 +25,6 @@ import {
   EmptyStateComponent,
   FormFieldComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
@@ -33,7 +32,8 @@ import {
   RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState, PendingInvitation } from '@core/models';
 import { permissionLabel } from '@shared/text';

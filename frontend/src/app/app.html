@@ -13,5 +13,5 @@
 <router-outlet />
 
 @if (showFooter()) {
-  <app-footer />
+  <gr-footer [links]="footerLinks" [note]="version" />
 }

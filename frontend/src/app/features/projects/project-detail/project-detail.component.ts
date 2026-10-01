@@ -19,17 +19,15 @@ import {
   CardGridComponent,
   DialogComponent,
   EmptyStateComponent,
-  EvalStatusBadgeComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LabelHelpComponent,
   LoadingSpinnerComponent,
   NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
-  StarButtonComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { EvalStatusBadgeComponent, LabelHelpComponent, StarButtonComponent } from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Project, StarTarget, Task } from '@core/models';
 

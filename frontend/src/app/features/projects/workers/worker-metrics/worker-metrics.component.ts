@@ -11,11 +11,11 @@ import { WorkersService, WorkerSamplePoint, WorkerConnectionEntry } from '@core/
 import { ProjectsService } from '@core/services/projects.service';
 import {
   CardGridComponent,
-  MetricChartComponent,
   PageLayoutComponent,
   StatCardComponent,
   TableComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { formatMegabytes, formatPercent, formatQuantity } from '@shared/text';
 
 @Component({

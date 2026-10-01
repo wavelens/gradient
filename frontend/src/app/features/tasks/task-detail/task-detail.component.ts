@@ -16,7 +16,21 @@ import { StarsService } from '@core/services/stars.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { EvaluationsService } from '@core/services/evaluations.service';
-import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InViewDirective, LoadingSpinnerComponent, MenuComponent, MenuItem, MessageService, StarButtonComponent, StatusIconComponent, ToastComponent, TooltipDirective } from '@shared/ui';
+import {
+  ButtonComponent,
+  CheckboxComponent,
+  DialogComponent,
+  EmptyStateComponent,
+  IconComponent,
+  InViewDirective,
+  LoadingSpinnerComponent,
+  MenuComponent,
+  MenuItem,
+  MessageService,
+  ToastComponent,
+  TooltipDirective,
+} from '@gradient/ui/ui';
+import { EvalStatusBadgeComponent, StarButtonComponent, StatusIconComponent } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { StarTarget, TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatusCounts, WalkMode } from '@core/models';

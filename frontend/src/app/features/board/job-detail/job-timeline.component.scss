@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
+@use '@gradient/ui/styles/variables' as *;
 
 // The chart and its phase breakdown are one panel, so the timeline paints the
 // same card every other section of the page sits on.

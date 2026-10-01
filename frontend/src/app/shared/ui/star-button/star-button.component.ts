@@ -9,7 +9,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { finalize } from 'rxjs';
 import { StarsService } from '@core/services/stars.service';
 import { StarTarget } from '@core/models';
-import { ButtonComponent } from '../button/button.component';
+import { ButtonComponent } from '@gradient/ui/ui';
 
 @Component({
   selector: 'gr-star-button',

@@ -23,7 +23,7 @@ import {
   RowListComponent,
   SelectButtonComponent,
   SettingsSectionComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 

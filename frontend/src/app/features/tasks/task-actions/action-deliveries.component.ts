@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import {
-  BadgeComponent,
-  ButtonComponent,
-  DialogComponent,
-  TableComponent,
-} from '@shared/ui';
+import { BadgeComponent, ButtonComponent, DialogComponent, TableComponent } from '@gradient/ui/ui';
 import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
+@use '@gradient/ui/styles/variables' as *;
 
 .pkg-label { margin: $space-section 0 $spacing-sm; h3 { font-size: $font-size-md; } }
 .pkg-list { display: flex; flex-direction: column; gap: $space-pair; }

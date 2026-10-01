@@ -6,7 +6,7 @@
 
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { DocLink, docsUrl } from '@core/docs';
-import { IconComponent } from '../icon/icon.component';
+import { IconComponent } from '@gradient/ui/ui';
 import { CommonModule } from '@angular/common';
 
 @Component({

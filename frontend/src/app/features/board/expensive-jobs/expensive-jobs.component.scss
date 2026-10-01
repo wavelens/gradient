@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
+@use '@gradient/ui/styles/variables' as *;
 
 .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .tabs button { background: var(--gr-surface-raised); color: var(--gr-text-secondary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.35rem 0.8rem; cursor: pointer; }

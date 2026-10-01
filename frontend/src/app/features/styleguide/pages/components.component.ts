@@ -7,11 +7,25 @@
 import { Component, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
-  ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
-  AutoCompleteComponent, MenuComponent, MenuItem, PopoverComponent, TooltipDirective,
-  InputDirective, FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent,
-  NameFieldComponent, NameCheckState, TabSwitchComponent, TableComponent,
-} from '@shared/ui';
+  ButtonComponent,
+  CheckboxComponent,
+  SelectComponent,
+  SelectButtonComponent,
+  AutoCompleteComponent,
+  MenuComponent,
+  MenuItem,
+  PopoverComponent,
+  TooltipDirective,
+  InputDirective,
+  FormFieldComponent,
+  DialogComponent,
+  PasswordInputComponent,
+  NameFieldComponent,
+  NameCheckState,
+  TabSwitchComponent,
+  TableComponent,
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-sg-components',

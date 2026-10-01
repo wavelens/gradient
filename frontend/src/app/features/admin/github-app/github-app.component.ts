@@ -14,9 +14,9 @@ import {
   CopyFieldComponent,
   FormFieldComponent,
   InputDirective,
-  LabelHelpComponent,
   PageLayoutComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-admin-github-app',

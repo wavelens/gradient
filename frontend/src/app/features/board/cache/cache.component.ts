@@ -15,7 +15,8 @@ import {
   BoardUpstreamCacheStats,
 } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
-import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
+import { LoadingSpinnerComponent } from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { formatBytes, formatCount, formatDuration, formatPercent } from '@shared/text';
 import { firstLoad } from '../first-load';
 

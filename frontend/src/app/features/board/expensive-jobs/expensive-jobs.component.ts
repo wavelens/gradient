@@ -12,7 +12,8 @@ import {
   ExpensiveResource,
   TopProjectBuildTime,
 } from '@core/services/board.service';
-import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, TableComponent } from '@gradient/ui/ui';
+import { MetricChartComponent } from '@shared/ui';
 import { firstLoad } from '../first-load';
 import { formatDuration, formatQuantity } from '@shared/text';
 

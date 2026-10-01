@@ -11,7 +11,8 @@ import { CustomChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 import { JobPhase } from '@core/services/board.service';
-import { EmptyStateComponent, resolveChartTheme } from '@shared/ui';
+import { EmptyStateComponent } from '@gradient/ui/ui';
+import { resolveChartTheme } from '@shared/ui';
 import { ThemeService } from '@core/services/theme.service';
 import { formatBytes, formatCount, formatDuration } from '@shared/text';
 

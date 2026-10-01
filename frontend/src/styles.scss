@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use 'app/styles/variables' as *;
-@use 'app/styles/themes';
-@use 'app/styles/grids';
+@use '@gradient/ui/styles/variables' as *;
+@use '@gradient/ui/styles/themes';
+@use '@gradient/ui/styles/grids';
 
 // Fonts are loaded via <link> tags in index.html
 
@@ -18,7 +18,7 @@ body {
 
 // Make page components fill remaining vertical space so the footer stays at the bottom.
 // Angular's router-outlet inserts activated components as siblings of the outlet element.
-app-root > *:not(app-header):not(app-footer):not(app-command-palette):not(router-outlet) {
+app-root > *:not(app-header):not(gr-footer):not(app-command-palette):not(router-outlet) {
   flex: 1;
 }
 

@@ -7,11 +7,11 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "tokens:generate": "node scripts/generate-tokens.mts",
-    "tokens:check": "node scripts/generate-tokens.mts --check",
+    "tokens:generate": "pnpm --filter @gradient/ui tokens:generate",
+    "tokens:check": "pnpm --filter @gradient/ui tokens:check",
     "barrel:check": "node scripts/check-barrel.mts",
-    "lint:styles": "stylelint \"src/**/*.scss\" \"src/styles.scss\"",
-    "lint:ts": "eslint src",
+    "lint:styles": "stylelint \"src/**/*.scss\" \"packages/ui/src/**/*.scss\"",
+    "lint:ts": "eslint src packages/ui/src",
     "verify": "pnpm tokens:check && pnpm barrel:check && pnpm lint:styles && pnpm lint:ts"
   },
   "prettier": {
@@ -40,6 +40,7 @@
     "@angular/forms": "^22.2.0",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
+    "@gradient/ui": "workspace:*",
     "d3-sankey": "^0.12.3",
     "echarts": "^6.1.0",
     "rxjs": "~7.8.2",

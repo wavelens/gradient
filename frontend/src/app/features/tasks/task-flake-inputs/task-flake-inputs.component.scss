@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.overrides-list {
+@use '@gradient/ui/styles/variables' as *;.overrides-list {
   display: flex;
   flex-direction: column;
   gap: $spacing-md;

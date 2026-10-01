@@ -4,31 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<header class="main-header">
-  <div class="header-content">
-    <div class="header-logo">
-      <a routerLink="/">
-        <gr-logo />
-      </a>
-    </div>
-
-    <nav class="header-nav">
-      @if (authService.isAuthenticated()) {
-        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
-          Dashboard
-        </a>
-        <a routerLink="/board" routerLinkActive="active">
-          Job Board
-        </a>
-      }
-      <a routerLink="/projects" routerLinkActive="active">
-        Projects
-      </a>
-      <a routerLink="/caches" routerLinkActive="active">
-        Caches
-      </a>
-    </nav>
-
+<gr-header [brand]="brand" [nav]="nav()">
+  <div slot="actions" class="header-actions">
     @if (authService.isAuthenticated()) {
       <button type="button" class="search-trigger" aria-label="Search" (click)="palette.open()">
         <gr-icon name="search" size="sm" />
@@ -54,4 +31,4 @@
       </div>
     }
   </div>
-</header>
+</gr-header>

@@ -27,10 +27,10 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
-  LabelHelpComponent,
   SelectButtonComponent,
   SelectComponent,
-} from '@shared/ui';
+} from '@gradient/ui/ui';
+import { LabelHelpComponent } from '@shared/ui';
 
 type FormMode = 'create' | 'edit';
 
