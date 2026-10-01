@@ -99,6 +99,7 @@ mod m20260930_000003_cluster_jobs;
 mod m20261001_000000_storage_maintenance;
 pub mod m20261001_000001_plain_concept_names;
 mod m20261001_000002_retention_indexes;
+mod m20261001_000003_cache_upstream_http1_only;
 
 pub struct Migrator;
 
@@ -194,6 +195,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261001_000000_storage_maintenance::Migration),
             Box::new(m20261001_000001_plain_concept_names::Migration),
             Box::new(m20261001_000002_retention_indexes::Migration),
+            Box::new(m20261001_000003_cache_upstream_http1_only::Migration),
         ]
     }
 }

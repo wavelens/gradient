@@ -99,9 +99,11 @@ pub fn build_client() -> reqwest::Result<reqwest::Client> {
 /// credentials worth leaking, so the SSRF argument that keeps redirects off the
 /// API client does not apply here.
 pub fn build_download_client() -> reqwest::Result<reqwest::Client> {
-    client_builder()
-        .redirect(reqwest::redirect::Policy::limited(DOWNLOAD_MAX_REDIRECTS))
-        .build()
+    download_client_builder().build()
+}
+
+pub(crate) fn download_client_builder() -> reqwest::ClientBuilder {
+    client_builder().redirect(reqwest::redirect::Policy::limited(DOWNLOAD_MAX_REDIRECTS))
 }
 
 /// Process-wide [`build_download_client`], built on first use. Every binary-cache

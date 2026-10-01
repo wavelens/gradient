@@ -11,12 +11,14 @@
 
 use std::time::Duration;
 
+use bytes::Bytes;
 use futures::StreamExt as _;
+use futures::stream::BoxStream;
 use gradient_entity::cache_upstream::{CacheUpstreamKind, Model as MCacheUpstream};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::CacheUpstreamId;
 
-use crate::upstream::{SampleKind, breakers};
+use crate::upstream::{SampleKind, breakers, http1_pins};
 
 const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const LOG_FETCH_MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -26,6 +28,7 @@ const LOG_FETCH_MAX_BYTES: usize = 16 * 1024 * 1024;
 pub struct UpstreamSource {
     pub id: CacheUpstreamId,
     pub url: String,
+    pub http1_only: bool,
 }
 
 /// The same filter as `gradient_db::caches::upstream::upstream_endpoints_for_project`: an HTTP
@@ -45,9 +48,16 @@ pub fn substitution_sources(upstream_caches: &[MCacheUpstream]) -> Vec<UpstreamS
             Some(UpstreamSource {
                 id: u.id,
                 url: u.url.clone()?,
+                http1_only: u.http1_only,
             })
         })
         .collect()
+}
+
+/// An object body from an upstream, resumed over HTTP/1.1 if HTTP/2 cuts it short.
+pub struct UpstreamObject {
+    pub content_length: Option<u64>,
+    pub body: BoxStream<'static, reqwest::Result<Bytes>>,
 }
 
 /// The first 2xx answer for `path` (relative to each upstream's base URL), in
@@ -58,18 +68,22 @@ pub async fn fetch_from_upstream_caches(
     sources: &[UpstreamSource],
     path: &str,
     timeout: Option<Duration>,
-) -> Option<reqwest::Response> {
-    let client = gradient_util::http::download_client();
+) -> Option<UpstreamObject> {
     for source in sources {
         if !breakers().allows(source.id) {
             continue;
         }
         let url = format!("{}/{}", source.url.trim_end_matches('/'), path);
-        let mut request = client.get(&url);
-        if let Some(t) = timeout {
-            request = request.timeout(t);
-        }
-        let response = request.send().await;
+        let response = gradient_util::http1_fallback::get(
+            &url,
+            http1_pins().wants_http1(source.id, source.http1_only),
+            http1_pins().on_failure(source.id),
+            |request| match timeout {
+                Some(t) => request.timeout(t),
+                None => request,
+            },
+        )
+        .await;
         let kind = match &response {
             Ok(r) if r.status().is_success() => SampleKind::Hit,
             Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => SampleKind::Miss,
@@ -77,7 +91,14 @@ pub async fn fetch_from_upstream_caches(
         };
         breakers().record(source.id, kind);
         if kind == SampleKind::Hit {
-            return response.ok();
+            let response = response.ok()?;
+            return Some(UpstreamObject {
+                content_length: response.content_length(),
+                body: gradient_util::http1_fallback::resumable_body(
+                    response,
+                    http1_pins().on_failure(source.id),
+                ),
+            });
         }
     }
     None
@@ -88,7 +109,7 @@ pub async fn fetch_from_upstream_caches(
 pub async fn fetch_upstream_log(sources: &[UpstreamSource], drv: &str) -> Option<String> {
     let path = format!("log/{drv}");
     for source in sources {
-        let Some(response) = fetch_from_upstream_caches(
+        let Some(object) = fetch_from_upstream_caches(
             std::slice::from_ref(source),
             &path,
             Some(LOG_FETCH_TIMEOUT),
@@ -97,17 +118,16 @@ pub async fn fetch_upstream_log(sources: &[UpstreamSource], drv: &str) -> Option
         else {
             continue;
         };
-        if let Some(body) = read_capped(response).await {
+        if let Some(body) = read_capped(object.body).await {
             return Some(body);
         }
     }
     None
 }
 
-async fn read_capped(response: reqwest::Response) -> Option<String> {
+async fn read_capped(mut stream: BoxStream<'static, reqwest::Result<Bytes>>) -> Option<String> {
     let mut bytes: Vec<u8> = Vec::new();
     let mut truncated = false;
-    let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.ok()?;
         let room = LOG_FETCH_MAX_BYTES.saturating_sub(bytes.len());
@@ -151,6 +171,7 @@ mod tests {
         UpstreamSource {
             id: CacheUpstreamId::new(uuid::Uuid::from_u128(n)),
             url,
+            http1_only: false,
         }
     }
 

@@ -127,6 +127,7 @@ axum_typed_multipart = { version = "0.16", default-features = false, features = 
 badgelib             = { version = "0.5.0", default-features = false }
 email_address        = { version = "0.2", default-features = false }
 governor             = { version = "0.10", default-features = false, features = ["std"] }
+h2                   = { version = "0.4", default-features = false }
 http                 = { version = "1.4", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
 jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }

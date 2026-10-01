@@ -29,6 +29,7 @@ const oneUpstream = [
     upstream_cache_id: 'cache-1',
     url: null,
     public_key: null,
+    http1_only: false,
   },
 ];
 

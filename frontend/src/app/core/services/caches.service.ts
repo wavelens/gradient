@@ -19,6 +19,7 @@ export interface UpstreamCache {
   upstream_cache_id: string | null;
   url: string | null;
   public_key: string | null;
+  http1_only: boolean;
 }
 
 export interface CacheMetricPoint {

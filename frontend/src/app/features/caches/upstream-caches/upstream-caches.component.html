@@ -36,6 +36,9 @@
               {{ u.upstream_cache_id ? 'Internal' : 'External' }}
             </gr-badge>
             <gr-badge [severity]="modeSeverity(u.mode)">{{ modeLabel(u.mode) }}</gr-badge>
+            @if (u.http1_only) {
+              <gr-badge severity="neutral">HTTP/1.1</gr-badge>
+            }
             <span slot="meta">{{ u.url ?? u.upstream_cache_id }}</span>
             <div slot="actions">
               <button

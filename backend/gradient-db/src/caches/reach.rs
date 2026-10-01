@@ -181,6 +181,7 @@ mod tests {
                     public_key: None,
                     remote_cache_name: None,
                     api_key: None,
+                    http1_only: false,
                 },
                 MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
@@ -193,6 +194,7 @@ mod tests {
                     public_key: None,
                     remote_cache_name: None,
                     api_key: None,
+                    http1_only: false,
                 },
             ];
             let writer_rows = vec![project_cache(
@@ -239,6 +241,7 @@ mod tests {
                     public_key: None,
                     remote_cache_name: None,
                     api_key: None,
+                    http1_only: false,
                 },
                 MCacheUpstream {
                     id: CacheUpstreamId::now_v7(),
@@ -251,6 +254,7 @@ mod tests {
                     public_key: None,
                     remote_cache_name: None,
                     api_key: None,
+                    http1_only: false,
                 },
             ];
             let writer_rows = vec![

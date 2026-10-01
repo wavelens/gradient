@@ -38,6 +38,7 @@ pub struct Model {
     pub public_key: Option<String>,
     pub remote_cache_name: Option<String>,
     pub api_key: Option<String>,
+    pub http1_only: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
@@ -110,6 +111,7 @@ mod tests {
             public_key: None,
             remote_cache_name: None,
             api_key: None,
+            http1_only: false,
         }
     }
 
