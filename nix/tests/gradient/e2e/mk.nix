@@ -722,7 +722,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
 
     # Phase 10j's two-session claim race. It reads CL_BUILD, CL_EVAL and
     # CL_PROJECT from the environment and executes the claim of
-    # `gradient_db::claim_assignment` for one job key in two sessions at once: the
+    # `gradient_db::scheduling::assignment_record::claim_assignment` for one job key in two sessions at once: the
     # second must block on the unique open-row index and insert nothing.
     CLAIM_RACE_SH = """
     set -u
@@ -1367,7 +1367,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     assert_no_server_error(server.succeed("journalctl -u gradient-server --no-pager"))
 
     # ── Phase 5b: the graph walks stay fenced and agree with the old shape ─
-    # The recursive walks are generated in `graph_sql.rs` as a LATERAL probe
+    # The recursive walks are generated in `graph/walks.rs` as a LATERAL probe
     # behind an `OFFSET 0` fence. Without the fence Postgres believes the
     # working table is ten times the seed and merge-joins the whole edge
     # table once per iteration, which cost 5.3 s on a 44k-node production
@@ -2283,7 +2283,7 @@ pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
         f"the UNLOCKED recount stored fetchable = {unlocked!r}, so it did not write the stale "
         f"true this lock exists to prevent. The two arms now agree, which means taking the "
         f"shared build lock in its own statement is no longer what makes the recount correct: "
-        f"re-derive the discipline in gradient_db::can_start before trusting it"
+        f"re-derive the discipline in gradient_db::graph::can_start before trusting it"
     )
     assert race_drift == 0 and race_shared_build_drift == 0, (
         f"counters disagree with their recount after the lock race "

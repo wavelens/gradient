@@ -47,7 +47,7 @@ pub(super) async fn record_nar_push_metric(
         .await?
         .ok_or_else(|| anyhow::anyhow!("no cache for project {}", project_id))?;
 
-    let bucket = gradient_db::cache_metric::minute_bucket(gradient_types::now());
+    let bucket = gradient_db::metrics::cache_traffic::minute_bucket(gradient_types::now());
     state
         .cache_traffic
         .record(project_cache.cache, bucket, bytes);

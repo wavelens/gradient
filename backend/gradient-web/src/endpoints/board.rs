@@ -862,7 +862,7 @@ fn completed_build_clauses(window_days: i64) -> Vec<String> {
     vec![
         format!(
             "b.status = {}",
-            gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed)
+            gradient_db::sql::status::build(gradient_entity::build::BuildStatus::Completed)
         ),
         format!("b.created_at >= {}", window_sql(window_days)),
     ]

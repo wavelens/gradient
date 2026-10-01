@@ -12,7 +12,7 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
-use gradient_db::cache_metric;
+use gradient_db::metrics::cache_traffic;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
@@ -62,10 +62,10 @@ pub struct CacheStatsResponse {
 }
 
 /// Add bytes served for a NAR request to the current minute bucket of the
-/// per-instance accumulator. `gradient_db::cache_metric` writes it; the request
+/// per-instance accumulator. `gradient_db::metrics::cache_traffic` writes it; the request
 /// path never touches the `cache_metric` row (#644).
 pub fn record_nar_traffic(state: &ServerState, cache_id: CacheId, bytes: i64) {
-    let bucket = cache_metric::minute_bucket(gradient_types::now());
+    let bucket = cache_traffic::minute_bucket(gradient_types::now());
     state.cache_traffic.record(cache_id, bucket, bytes);
 }
 
@@ -268,7 +268,7 @@ mod tests {
     /// The serving path must only add into the accumulator: it takes no
     /// connection, so the `cache_metric` row cannot be written per NAR (#644).
     /// That the accumulated bucket becomes one additive upsert is
-    /// `gradient_db::cache_metric`'s test.
+    /// `gradient_db::metrics::cache_traffic`'s test.
     #[tokio::test]
     async fn two_serves_accumulate_instead_of_writing() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();

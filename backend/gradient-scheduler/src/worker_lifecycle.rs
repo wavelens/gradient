@@ -125,7 +125,7 @@ impl Scheduler {
     /// process handed out have no live closer at all, and startup recovery has
     /// already closed those - this is the backstop for the rows it missed.
     async fn close_unclaimed_assignments(&self, worker_id: &str) {
-        match gradient_db::abandon_open_assignments_for_worker(
+        match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_worker(
             &self.state.worker_db,
             worker_id,
             self.state.started_at.naive_utc(),

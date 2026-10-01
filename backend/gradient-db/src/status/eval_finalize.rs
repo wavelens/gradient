@@ -17,7 +17,7 @@ use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::info;
 
 /// Settle `evaluation_id` once no shared build it names blocks it
-/// ([`crate::graph_sql::blocks_evaluation`]). `Failed` when any shared build ended
+/// ([`crate::graph::predicates::blocks_evaluation`]). `Failed` when any shared build ended
 /// unbuilt or the eval logged error-level messages (nix eval errors mean a
 /// partially-successful walk), else `Completed`. A no-op unless the evaluation
 /// is in its build phase.
@@ -31,15 +31,16 @@ pub async fn check_evaluation_done(
     evaluation_id: EvaluationId,
 ) -> Result<(), DbErr> {
     let db = &ctx.worker_db;
-    let Some(counters) = crate::eval_counters::eval_counters(db, evaluation_id).await? else {
+    let Some(counters) = crate::evaluations::counters::eval_counters(db, evaluation_id).await?
+    else {
         return Ok(());
     };
     if counters.active > 0 {
         return Ok(());
     }
 
-    if crate::reachability::eval_blocked(db, evaluation_id).await? {
-        crate::eval_counters::recount_evaluations(db, &[evaluation_id]).await?;
+    if crate::graph::reachability::eval_blocked(db, evaluation_id).await? {
+        crate::evaluations::counters::recount_evaluations(db, &[evaluation_id]).await?;
         return Ok(());
     }
 
@@ -51,7 +52,8 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    let any_failed = crate::reachability::eval_any_shared_build_failed(db, evaluation_id).await?;
+    let any_failed =
+        crate::graph::reachability::eval_any_shared_build_failed(db, evaluation_id).await?;
 
     let eval_error_messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
@@ -105,7 +107,8 @@ pub async fn finalize_evals_for_derivations(
     derivations: &[DerivationId],
 ) -> Result<(), DbErr> {
     let evaluations =
-        crate::reachability::evals_referencing_derivations(&ctx.worker_db, derivations).await?;
+        crate::graph::reachability::evals_referencing_derivations(&ctx.worker_db, derivations)
+            .await?;
     for evaluation_id in evaluations {
         check_evaluation_done(ctx, evaluation_id).await?;
     }

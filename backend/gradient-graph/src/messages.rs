@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use chrono::NaiveDateTime;
-use gradient_db::RepairScope;
+use gradient_db::graph::repair::RepairScope;
 use gradient_types::MCachedPath;
 use gradient_types::ids::{
     BuildAttemptId, CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId,

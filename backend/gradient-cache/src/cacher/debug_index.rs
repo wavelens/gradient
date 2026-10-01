@@ -21,14 +21,16 @@ use tracing::{debug, warn};
 const DEBUG_INDEX_BATCH: u64 = 32;
 
 pub async fn index_pending_debug_info(state: Arc<ServerState>) -> anyhow::Result<()> {
-    let pending = gradient_db::pending_debug_index(&state.worker_db, DEBUG_INDEX_BATCH).await?;
+    let pending =
+        gradient_db::caches::debug_info::pending_debug_index(&state.worker_db, DEBUG_INDEX_BATCH)
+            .await?;
     if pending.is_empty() {
         return Ok(());
     }
 
     let mut build_ids = 0usize;
     for path in &pending {
-        match gradient_db::index_cached_path(
+        match gradient_db::caches::debug_info::index_cached_path(
             &state.worker_db,
             &state.nar_storage,
             path.id,

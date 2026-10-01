@@ -13,7 +13,7 @@ flowchart LR
 
 ## Complete Closure
 
-Runtime dependencies live in `derivation_dependency` next to build dependencies (`EdgeKind::Runtime` = 1, `Both` = 2). The predicates are in `gradient-db/src/graph_sql.rs`.
+Runtime dependencies live in `derivation_dependency` next to build dependencies (`EdgeKind::Runtime` = 1, `Both` = 2). The predicates are in `gradient-db/src/graph/predicates.rs`.
 
 | Term | Definition |
 |---|---|
@@ -34,7 +34,7 @@ Runtime dependencies live in `derivation_dependency` next to build dependencies 
 1. Upsert the `cached_path` row under `FOR NO KEY UPDATE`. `was_backed` is read under that lock: the one endpoint no later statement can recover.
 2. Overwrite `references` with the line the worker reported, in order. The narinfo `References:` line and the signature fingerprint are rebuilt from that line verbatim (`references_for_hash`).
 3. Insert the runtime dependencies the references name (add-only), then update `wanted` for the producers.
-4. `seed_runtime_deps` (`gradient-db/src/runtime_can_start.rs`): an absolute recount of the producers. A path without a NAR before is `freshly_present`; a re-push of a backed path is only recounted.
+4. `seed_runtime_deps` (`gradient-db/src/graph/runtime_can_start.rs`): an absolute recount of the producers. A path without a NAR before is `freshly_present`; a re-push of a backed path is only recounted.
 5. Shared builds whose closure became complete: `ripple_shared_builds_complete` counts down the builds that need them at runtime, level by level in one call of the SQL function `ripple_missing_runtime_deps`, then `became_fetchable` flips `fetchable` and moves `blocking_deps`.
 6. Shared builds whose closure a new dependency on a missing path left incomplete: `ripple_shared_builds_incomplete`, then `lost_fetchability`.
 7. Write a `cached_path_signature` row per target cache, signed with the cache's key (unsigned when the key is missing or every producing task keeps the path private), and mark matching `derivation_output` rows cached.
@@ -44,7 +44,7 @@ Runtime dependencies live in `derivation_dependency` next to build dependencies 
 
 ## Retire
 
-`retire_outputs` (`gradient-db/src/runtime_can_start.rs`) is the one path that deletes `cached_path` rows.
+`retire_outputs` (`gradient-db/src/graph/runtime_can_start.rs`) is the one path that deletes `cached_path` rows.
 
 1. Lock the hashes `FOR NO KEY UPDATE` in one hash-ordered statement, with the producers' advisory keys exclusive.
 2. Read which producers have a complete closure (`complete_among`) before the delete destroys that endpoint.
@@ -54,7 +54,7 @@ Runtime dependencies live in `derivation_dependency` next to build dependencies 
 
 | Caller | Trigger |
 |---|---|
-| `demote_cached_output` (`gradient-db/src/cache_storage.rs`) | Self-heal, operator invalidation, a cache dropping its last claim, a NAR missing from storage |
+| `demote_cached_output` (`gradient-db/src/caches/demotion.rs`) | Self-heal, operator invalidation, a cache dropping its last claim, a NAR missing from storage |
 | `GcRequest::Paths` (`gradient-graph/src/gc.rs`) | Stale-path eviction and zombie purge |
 
 - **One cache's claim:** `Demotion::CacheClaim` drops only that cache's `cached_path_signature` row; the retire follows once no cache signs the path.
@@ -63,7 +63,7 @@ Runtime dependencies live in `derivation_dependency` next to build dependencies 
 
 ## Consistency Check
 
-`graph_consistency_report` (`gradient-db/src/consistency.rs`) is the only backstop for a lost move.
+`graph_consistency_report` (`gradient-db/src/graph/consistency.rs`) is the only backstop for a lost move.
 
 - `recount_missing_runtime_deps`: an absolute, table-wide recount of `missing_runtime_deps` (also the column's backfill).
 - `repair_fetchable` and `repair_can_start`: rewrite `fetchable` and `blocking_deps` over the start-condition scope (pending shared builds and the rows they wait on).

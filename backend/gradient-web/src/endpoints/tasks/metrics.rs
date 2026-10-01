@@ -12,7 +12,10 @@ use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::{output_hashes_for_drvs, runtime_closure_size, transitive_closure_reachable};
+use gradient_db::graph::{
+    closure::transitive_closure_reachable,
+    runtime_closure::{output_hashes_for_drvs, runtime_closure_size},
+};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -88,7 +91,9 @@ pub async fn get_task_metrics(
 
     let all_shared_builds: Vec<DerivationBuildId> =
         shared_builds_by_eval.values().flatten().copied().collect();
-    let attempts = gradient_db::latest_attempts(&state.web_db, &all_shared_builds).await?;
+    let attempts =
+        gradient_db::scheduling::build_attempt::latest_attempts(&state.web_db, &all_shared_builds)
+            .await?;
 
     let mut entry_points_by_eval: HashMap<EvaluationId, Vec<DerivationId>> = HashMap::new();
     for ep in EEntryPoint::find()
@@ -288,9 +293,10 @@ pub async fn get_entry_point_metrics(
         .collect();
 
     let shared_build_ids: Vec<DerivationBuildId> = shared_builds.values().map(|a| a.id).collect();
-    let attempts = gradient_db::latest_attempts(&state.web_db, &shared_build_ids)
-        .await
-        .unwrap_or_default();
+    let attempts =
+        gradient_db::scheduling::build_attempt::latest_attempts(&state.web_db, &shared_build_ids)
+            .await
+            .unwrap_or_default();
 
     // Only `evaluation_id`, `build_id` and `created_at` below are per evaluation;
     // the rest, `build_status` and `build_time_ms` included, are determined by the

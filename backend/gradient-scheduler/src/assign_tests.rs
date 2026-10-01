@@ -253,9 +253,9 @@ async fn assign_queued_evals_refuses_an_evaluation_whose_assignment_row_is_open(
         .flat_map(|t| t.statements())
         .find(|s| s.sql.starts_with("SELECT \"evaluation\""))
         .expect("the queued select ran");
-    let gate = gradient_db::no_open_assignment_predicate(&gradient_db::eval_job_key_sql(
-        "\"evaluation\".\"id\"",
-    ));
+    let gate = gradient_db::scheduling::assignment_record::no_open_assignment_predicate(
+        &gradient_db::scheduling::assignment_record::eval_job_key_sql("\"evaluation\".\"id\""),
+    );
     assert!(select.sql.contains(&gate), "{}", select.sql);
 }
 

@@ -35,7 +35,7 @@ use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use gradient_core::ServerState;
-use gradient_db::latest_attempt_id;
+use gradient_db::scheduling::build_attempt::latest_attempt_id;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -165,7 +165,9 @@ async fn reachable_projects_accessible(
     api_key: Option<&ApiKeyContext>,
     derivation: DerivationId,
 ) -> WebResult<bool> {
-    let jobs = gradient_db::build_jobs_for_derivation(&state.web_db, derivation).await?;
+    let jobs =
+        gradient_db::graph::reachability::build_jobs_for_derivation(&state.web_db, derivation)
+            .await?;
     if jobs.is_empty() {
         return Ok(false);
     }

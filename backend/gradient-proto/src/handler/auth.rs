@@ -129,14 +129,16 @@ pub(super) async fn lookup_base_worker_challenge(
     state: &ServerState,
     worker_id: &str,
 ) -> Option<BaseWorkerChallenge> {
-    let bw =
-        gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id)
-            .await
-            .ok()
-            .flatten()?;
+    let bw = gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
+        &state.worker_db,
+        worker_id,
+    )
+    .await
+    .ok()
+    .flatten()?;
 
     let enabled_projects: Vec<String> =
-        gradient_db::base_workers::projects_enabling_base_worker(&state.worker_db, bw.id)
+        gradient_db::projects::base_workers::projects_enabling_base_worker(&state.worker_db, bw.id)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -222,9 +224,11 @@ pub(super) async fn aggregate_enabled_caps(
     };
 
     if rows.is_empty() {
-        if let Ok(Some(bw)) =
-            gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id)
-                .await
+        if let Ok(Some(bw)) = gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
+            &state.worker_db,
+            worker_id,
+        )
+        .await
         {
             return EnabledCapsAggregate {
                 enable_fetch: bw.enable_fetch,

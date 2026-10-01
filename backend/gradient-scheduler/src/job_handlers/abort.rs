@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_db::update_evaluation_status;
+use gradient_db::status::update_evaluation_status;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_graph::Transition;
@@ -66,7 +66,7 @@ impl Scheduler {
         }
 
         info!(%evaluation_id, unmet = ?unbuildable.unmet, "aborting evaluation: no connected worker provides its systems");
-        gradient_db::record_evaluation_message(
+        gradient_db::status::record_evaluation_message(
             &self.state.db(),
             evaluation_id,
             MessageLevel::Warning,
@@ -123,7 +123,11 @@ impl Scheduler {
         }
 
         if let Err(e) =
-            gradient_db::abandon_open_assignments_for_jobs(&self.state.worker_db, &reaped).await
+            gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(
+                &self.state.worker_db,
+                &reaped,
+            )
+            .await
         {
             warn!(error = %e, "failed to close the dispatch rows of reaped aborts");
         }

@@ -54,7 +54,7 @@ impl Tier {
 /// Session state a query needs to plan the way production plans it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Flag {
-    /// `SET LOCAL work_mem = '64MB'`, as `gradient_db::graph_sql::begin_walk` sets.
+    /// `SET LOCAL work_mem = '64MB'`, as `gradient_db::graph::walks::begin_walk` sets.
     Walk,
 }
 
@@ -78,7 +78,7 @@ impl Query {
         }
     }
 
-    /// `can_start.rs:348`, the form a failure message can be clicked from.
+    /// `fetchable.rs:348`, the form a failure message can be clicked from.
     pub fn location(&self) -> String {
         let file = self.file.rsplit('/').next().unwrap_or(self.file);
         format!("{file}:{}", self.line)

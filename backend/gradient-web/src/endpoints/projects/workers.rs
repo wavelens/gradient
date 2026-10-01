@@ -558,9 +558,11 @@ pub async fn patch_project_worker(
     )
     .await?;
 
-    if let Some(bw) =
-        gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.web_db, &worker_id)
-            .await?
+    if let Some(bw) = gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
+        &state.web_db,
+        &worker_id,
+    )
+    .await?
     {
         if patch_edits_base_worker_fields(&body) {
             return Err(WebError::conflict(
@@ -701,9 +703,12 @@ pub async fn delete_project_worker(
         .await?;
 
     if result.rows_affected == 0 {
-        if gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.web_db, &worker_id)
-            .await?
-            .is_some()
+        if gradient_db::projects::base_workers::enabled_base_worker_by_worker_id(
+            &state.web_db,
+            &worker_id,
+        )
+        .await?
+        .is_some()
         {
             return Err(WebError::conflict(
                 "base workers cannot be deleted; manage them via server state",

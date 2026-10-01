@@ -16,8 +16,8 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 /// A derivation is prunable when its subtree is recorded: `walked` says its own
 /// record is in, `unwalked_inputs = 0` says every input's is too, transitively. The
 /// second bit is what makes the first one safe against a walk abandoned between
-/// batches; [`gradient_db::walk_completeness`] keeps it true, and both are cleared
-/// where a record is lost ([`gradient_db::unwalk_derivations`], the GC's orphan
+/// batches; [`gradient_db::graph::walk_completeness`] keeps it true, and both are cleared
+/// where a record is lost ([`gradient_db::graph::can_start::unwalk_derivations`], the GC's orphan
 /// reclaim). Build and cache state say nothing about whether the graph is recorded,
 /// so keying on them re-walked a complete record for as long as its shared build had not
 /// succeeded.

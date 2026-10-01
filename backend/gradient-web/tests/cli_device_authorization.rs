@@ -117,7 +117,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
         download_progress: gradient_core::download_progress(),
-        cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
+        cache_traffic: gradient_db::metrics::cache_traffic::CacheTraffic::shared(),
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),

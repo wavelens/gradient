@@ -26,7 +26,7 @@ fn store_path_hash(store_path: &str) -> Option<&str> {
 /// must instead be revived by re-walking its cached parents.
 async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[DerivationId]) -> bool {
     for d in derivations {
-        if gradient_db::derivation_is_reachable(db, *d)
+        if gradient_db::graph::reachability::derivation_is_reachable(db, *d)
             .await
             .unwrap_or(false)
         {
@@ -73,7 +73,13 @@ pub(crate) async fn repair_missing_inputs(
 
         // Diagnostic: why the worker found this input unfetchable even though
         // dispatch treated its producer as done.
-        match gradient_db::diagnose_missing_input(db, EvaluationId::now_v7(), hash).await {
+        match gradient_db::caches::demotion::diagnose_missing_input(
+            db,
+            EvaluationId::now_v7(),
+            hash,
+        )
+        .await
+        {
             Ok(d) => warn!(
                 %path,
                 hash,
@@ -87,7 +93,7 @@ pub(crate) async fn repair_missing_inputs(
             Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
         }
 
-        match gradient_db::demote_cached_output(ctx, hash).await {
+        match gradient_db::caches::demotion::demote_cached_output(ctx, hash).await {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
                 // An orphan producer (no `build_job`) can never be queued, so the
@@ -97,12 +103,15 @@ pub(crate) async fn repair_missing_inputs(
                 let orphan = !any_reachable(db, &drvs).await;
                 demoted_producers.extend(drvs);
                 if orphan {
-                    match gradient_db::demote_parents_of(ctx, hash).await {
+                    match gradient_db::caches::demotion::demote_parents_of(ctx, hash).await {
                         Ok(refs) if !refs.is_empty() => {
                             wanted_by_demoted += refs.len();
-                            match gradient_db::unwalk_derivations(ctx, &refs).await {
+                            match gradient_db::graph::can_start::unwalk_derivations(ctx, &refs)
+                                .await
+                            {
                                 Ok(changes) => {
-                                    gradient_db::emit_transition_effects(ctx, &changes).await
+                                    gradient_db::status::emit_transition_effects(ctx, &changes)
+                                        .await
                                 }
                                 Err(e) => {
                                     warn!(%path, error = %e, "repair: re-walk parents (orphan producer) failed")
@@ -123,7 +132,7 @@ pub(crate) async fn repair_missing_inputs(
                 // No producing derivation (a source / `.drv`): it only returns to
                 // the cache as part of a parent's closure, so demote the
                 // rebuildable output parents - their rebuild re-pushes it.
-                match gradient_db::demote_parents_of(ctx, hash).await {
+                match gradient_db::caches::demotion::demote_parents_of(ctx, hash).await {
                     Ok(drvs) if !drvs.is_empty() => {
                         wanted_by_demoted += drvs.len();
                         demoted_producers.extend(drvs);
@@ -139,7 +148,9 @@ pub(crate) async fn repair_missing_inputs(
     // Absent orphan: unreachable upward, so reach it downward from the failing
     // build and demote its output-only-cached direct deps.
     if needs_dep_rewalk {
-        match gradient_db::demote_output_only_cached_deps(ctx, failed_derivation).await {
+        match gradient_db::caches::demotion::demote_output_only_cached_deps(ctx, failed_derivation)
+            .await
+        {
             Ok(drvs) => {
                 wanted_by_demoted += drvs.len();
                 demoted_producers.extend(&drvs);
@@ -160,10 +171,12 @@ pub(crate) async fn repair_missing_inputs(
     let requeued = if demoted_producers.is_empty() {
         0
     } else {
-        match gradient_db::requeue_failed_shared_builds(db, &demoted_producers).await {
+        match gradient_db::graph::promotion::requeue_failed_shared_builds(db, &demoted_producers)
+            .await
+        {
             Ok(changes) => {
                 let thawed = changes.len();
-                gradient_db::emit_transition_effects(ctx, &changes).await;
+                gradient_db::status::emit_transition_effects(ctx, &changes).await;
                 thawed
             }
             Err(e) => {

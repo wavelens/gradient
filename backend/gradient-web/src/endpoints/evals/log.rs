@@ -95,7 +95,7 @@ pub async fn post_evaluation_builds(
         };
 
         for (shared_build, name) in past {
-            let log = match gradient_db::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
+            let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
                 Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
                 None => String::new(),
             };
@@ -149,7 +149,7 @@ pub async fn post_evaluation_builds(
             }
 
             for (shared_build, name) in building {
-                let log = match gradient_db::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
+                let log = match gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
                     Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
                     None => String::new(),
                 };

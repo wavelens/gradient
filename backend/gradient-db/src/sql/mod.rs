@@ -15,6 +15,7 @@ pub mod param;
 pub mod plan;
 pub mod query;
 pub mod rules;
+pub mod status;
 
 pub use budget::{Budget, Shape, Spill, Violation};
 pub use inventory;

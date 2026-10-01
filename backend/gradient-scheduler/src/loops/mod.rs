@@ -18,7 +18,7 @@
 //! `trigger_firing::fire_once` fires polling/time triggers and creates evaluations.
 //!
 //! The tracker is a per-instance cache of candidates and scores. Nothing it holds
-//! decides a hand-out: the claim does, in Postgres (`gradient_db::claim_assignment`).
+//! decides a hand-out: the claim does, in Postgres (`gradient_db::scheduling::assignment_record::claim_assignment`).
 
 use std::future::Future;
 use std::sync::Arc;

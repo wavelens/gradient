@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use gradient_core::ServerState;
-use gradient_db::{update_evaluation_status, update_evaluation_status_with_error};
+use gradient_db::status::{update_evaluation_status, update_evaluation_status_with_error};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::Transition;
 use gradient_types::*;
@@ -72,7 +72,12 @@ async fn eval_assign_count(state: &Arc<ServerState>, evaluation_id: EvaluationId
 async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
     let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
 
-    match gradient_db::abandon_open_assignments_for_jobs(&state.worker_db, &keys).await {
+    match gradient_db::scheduling::assignment_record::abandon_open_assignments_for_jobs(
+        &state.worker_db,
+        &keys,
+    )
+    .await
+    {
         Ok(rows) if rows > 0 => {
             info!(rows, "closed dispatch telemetry for orphaned jobs");
         }

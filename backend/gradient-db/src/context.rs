@@ -10,8 +10,8 @@ use std::sync::Mutex;
 
 use tokio::sync::{Notify, mpsc};
 
-use super::pool::{WebDb, WorkerDb};
-use super::startable_set::StartableSet;
+use crate::pool::{WebDb, WorkerDb};
+use crate::scheduling::startable_set::StartableSet;
 use gradient_storage::StorageCtx;
 use gradient_types::{DerivationId, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;

@@ -13,7 +13,7 @@ use axum::{
     extract::{Path, State},
 };
 use gradient_core::ServerState;
-use gradient_db::admin_tasks;
+use gradient_db::maintenance::admin_tasks;
 use gradient_entity::ids::{AdminTaskId, UserId};
 use gradient_types::{BaseResponse, MAdminTask, MUser};
 use serde::Serialize;

@@ -1,0 +1,125 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use gradient_types::*;
+use sea_orm::{ConnectionTrait, DbErr, Value};
+use std::collections::HashSet;
+
+crate::sql! {
+    PRODUCERS_OF_HASHES = "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
+        params = [CachedPathHashes(64)];
+
+    /// A restart repeats the previous evaluation's graph without walking it, so it
+    /// takes the previous names over as its own: every reader of "does some
+    /// evaluation still want this", and the thaw's seed, is a `build_job` row.
+    INHERIT_NAMES = "INSERT INTO build_job \
+         (id, evaluation, derivation, derivation_build, score, score_breakdown, created_at) \
+         SELECT uuidv7(), $2, bj.derivation, bj.derivation_build, 0, '{}'::jsonb, \
+         (now() AT TIME ZONE 'UTC') \
+         FROM build_job bj WHERE bj.evaluation = $1 \
+         ON CONFLICT (evaluation, derivation) DO NOTHING",
+        params = [EvaluationId, EvaluationId],
+        tier = Bulk,
+        budget = crate::sql::Budget::bulk().buffers(650_000)
+            .because("copies every name of the evaluation, ~5 buffers per row across the \
+                      heap and its indexes, and the fixture's largest names ~98k");
+}
+
+/// Name for `to` everything `from` names. Returns how many names it took over.
+pub async fn inherit_names<C: ConnectionTrait>(
+    db: &C,
+    from: EvaluationId,
+    to: EvaluationId,
+) -> Result<u64, DbErr> {
+    Ok(db
+        .execute_raw(INHERIT_NAMES.bind([
+            Value::Uuid(Some(from.into_inner())),
+            Value::Uuid(Some(to.into_inner())),
+        ]))
+        .await?
+        .rows_affected())
+}
+
+/// The derivations whose outputs carry any of `hashes`: the shared builds a store
+/// path's arrival or removal can make fetchable or unfetchable.
+pub async fn producers_of_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<Vec<DerivationId>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rows = db
+        .query_all_raw(PRODUCERS_OF_HASHES.bind([hashes.to_vec().into()]))
+        .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+        .map(DerivationId::new)
+        .collect())
+}
+
+crate::sql! {
+    /// The reserved `build-request` task is always signable, whatever its
+    /// `sign_cache` flag: the client that submitted it must substitute its outputs.
+    PRIVATE_OUTPUT_HASHES = "SELECT do_.hash FROM derivation_output do_ \
+             JOIN derivation d ON d.id = do_.derivation \
+             JOIN build_job b ON b.derivation = d.id \
+             JOIN evaluation e ON e.id = b.evaluation \
+             JOIN task p ON p.id = e.task \
+             WHERE do_.hash = ANY($1) \
+             GROUP BY do_.hash HAVING NOT bool_or(p.sign_cache OR p.name = 'build-request')",
+        params = [CachedPathHashes(64)];
+}
+
+/// The hashes among `hashes` that some task produces and every producing task
+/// keeps out of its caches (`sign_cache = false`): a `.drv`, a source or a direct
+/// upload has no producing task and is signed.
+pub async fn private_output_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<HashSet<String>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let rows = db
+        .query_all_raw(PRIVATE_OUTPUT_HASHES.bind([hashes.to_vec().into()]))
+        .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "hash").ok())
+        .collect())
+}
+
+crate::sql! {
+    DERIVATIONS_WITH_HASHES = "SELECT d.id FROM derivation d WHERE d.hash = ANY($1)",
+        params = [DerivationHashes(64)];
+}
+
+/// The derivations whose own `.drv` hash is any of `hashes`: the shared builds whose
+/// own derivation file just arrived in, or left, the cache.
+pub async fn derivations_with_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<Vec<DerivationId>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rows = db
+        .query_all_raw(DERIVATIONS_WITH_HASHES.bind([hashes.to_vec().into()]))
+        .await?;
+
+    Ok(rows
+        .iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "id").ok())
+        .map(DerivationId::new)
+        .collect())
+}

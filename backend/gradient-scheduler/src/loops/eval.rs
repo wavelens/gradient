@@ -32,9 +32,9 @@ pub(crate) async fn assign_queued_evals(scheduler: &Scheduler) -> anyhow::Result
 
     // The open `dispatched_job` row is the durable proof a job is out; the
     // tracker below is only the in-memory fast path, empty after a respawn.
-    let not_in_flight = gradient_db::no_open_assignment_predicate(&gradient_db::eval_job_key_sql(
-        "\"evaluation\".\"id\"",
-    ));
+    let not_in_flight = gradient_db::scheduling::assignment_record::no_open_assignment_predicate(
+        &gradient_db::scheduling::assignment_record::eval_job_key_sql("\"evaluation\".\"id\""),
+    );
 
     let evals = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Queued))

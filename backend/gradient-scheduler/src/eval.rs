@@ -59,7 +59,7 @@ pub async fn assess_cached(
     // so the shared build can be resigned instead of rebuilt.
     let fully_cached: HashSet<String> =
         gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
-            gradient_db::complete_output_hashes(db, &chunk).await
+            gradient_db::graph::runtime_can_start::complete_output_hashes(db, &chunk).await
         })
         .await
         .unwrap_or_else(|e| {
@@ -95,10 +95,13 @@ pub async fn probe_outputs(
     let Some(project_id) = crate::loops::project_id_for_eval(state, evaluation).await else {
         return hits;
     };
-    let endpoints =
-        gradient_db::upstream_endpoints_for_project(db, project_id, UPSTREAM_WINDOW_MINUTES)
-            .await
-            .unwrap_or_default();
+    let endpoints = gradient_db::caches::upstream::upstream_endpoints_for_project(
+        db,
+        project_id,
+        UPSTREAM_WINDOW_MINUTES,
+    )
+    .await
+    .unwrap_or_default();
     if endpoints.is_empty() {
         return hits;
     }
@@ -113,7 +116,7 @@ pub async fn probe_outputs(
     .await;
 
     // Same URL under different upstream ids folds into one metric series (#417).
-    let mut by_url: HashMap<String, gradient_db::UpstreamAccum> = HashMap::new();
+    let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
     for (id, accum) in &stats {
         if let Some(url) = id_to_url.get(id) {
             by_url.entry(url.clone()).or_default().merge(accum);
@@ -127,7 +130,9 @@ pub async fn probe_outputs(
             .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
             .unwrap_or(now)
     };
-    if let Err(e) = gradient_db::upsert_upstream_metrics(db, bucket, &by_url).await {
+    if let Err(e) =
+        gradient_db::caches::upstream::upsert_upstream_metrics(db, bucket, &by_url).await
+    {
         warn!(error = %e, "failed to flush upstream metrics");
     }
 

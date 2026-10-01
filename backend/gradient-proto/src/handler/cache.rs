@@ -159,9 +159,10 @@ impl PullMetadata {
         }
 
         let hashes: Vec<String> = rows.iter().map(|r| r.hash.clone()).collect();
-        let references = gradient_db::references_for_hashes(&state.cache_db, &hashes)
-            .await
-            .unwrap_or_default();
+        let references =
+            gradient_db::graph::runtime_closure::references_for_hashes(&state.cache_db, &hashes)
+                .await
+                .unwrap_or_default();
 
         let ids: Vec<CachedPathId> = rows.iter().map(|r| r.id).collect();
         let signature_rows = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
@@ -415,7 +416,7 @@ async fn extend_with_upstream_results(
 ) {
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-    let endpoints = match gradient_db::upstream_endpoints_for_project(
+    let endpoints = match gradient_db::caches::upstream::upstream_endpoints_for_project(
         &state.cache_db,
         project_id,
         UPSTREAM_WINDOW_MINUTES,
@@ -447,7 +448,7 @@ async fn extend_with_upstream_results(
     }
 
     // Same URL under different upstream ids folds into one metric series (#417).
-    let mut by_url: HashMap<String, gradient_db::UpstreamAccum> = HashMap::new();
+    let mut by_url: HashMap<String, gradient_db::caches::upstream::UpstreamAccum> = HashMap::new();
     for (id, accum) in &stats {
         if let Some(url) = id_to_url.get(id) {
             by_url.entry(url.clone()).or_default().merge(accum);
@@ -461,7 +462,10 @@ async fn extend_with_upstream_results(
             .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
             .unwrap_or(now)
     };
-    if let Err(e) = gradient_db::upsert_upstream_metrics(&state.cache_db, bucket, &by_url).await {
+    if let Err(e) =
+        gradient_db::caches::upstream::upsert_upstream_metrics(&state.cache_db, bucket, &by_url)
+            .await
+    {
         warn!(error = %e, "failed to flush upstream metrics");
     }
 }
@@ -475,8 +479,11 @@ async fn extend_with_gradient_proto_results(
     result: &mut Vec<gradient_wire::types::CachedPath>,
 ) {
     let upstream_caches =
-        match gradient_db::gradient_proto_upstream_caches_for_project(&state.cache_db, project_id)
-            .await
+        match gradient_db::caches::upstream::gradient_proto_upstream_caches_for_project(
+            &state.cache_db,
+            project_id,
+        )
+        .await
         {
             Ok(u) => u,
             Err(e) => {

@@ -18,7 +18,7 @@ use gradient_types::events::EventOwner;
 use gradient_types::events::audit::Action;
 
 use gradient_core::ServerState;
-use gradient_db::get_any_project_by_name;
+use gradient_db::lookup::get_any_project_by_name;
 use gradient_sources::check_task_updates;
 use gradient_types::consts::*;
 use gradient_types::input::{check_task_name, validate_display_name, vec_to_hex};

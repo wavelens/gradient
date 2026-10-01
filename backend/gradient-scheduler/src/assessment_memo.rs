@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
-use gradient_db::EvalCounters;
+use gradient_db::evaluations::counters::EvalCounters;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 

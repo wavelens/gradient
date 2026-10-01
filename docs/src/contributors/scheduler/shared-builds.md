@@ -77,7 +77,7 @@ Every other message flushes the queue first: a write after a batch or a commit s
 - A caller waits for its reply without a deadline. The graph writer still applies a message whose caller gave up; a caller-side timeout would report a write that still lands as failed. A worker session behind a backlog blocks its reader as backpressure.
 - A deadlock inside one batch fails the whole flush (`escalate_retryable`), and `transact` retries the flush.
 - Board events and probe requests an aborted attempt already sent are sent again by the retry.
-- `Transition::Repair` (`gradient_db::repair_build_graph`) and cache demotion take place inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) is outside and is not retried; its next pass picks the work up.
+- `Transition::Repair` (`gradient_db::graph::repair::repair_build_graph`) and cache demotion take place inside the graph writer. The consistency check (`consistency_check_pass`, `gradient-scheduler`) is outside and is not retried; its next pass picks the work up.
 - No state is held between messages: a restart loses only batches still queued, and their callers get an error.
 
 ## Concurrent Walks
@@ -94,11 +94,11 @@ Every other message flushes the queue first: a write after a batch or a commit s
 - Set only by the `FLIP_CACHE_AVAILABLE` statement (`UpstreamHits`, `record.rs`), only on shared builds not in `TERMINAL_SUCCESS`.
 - One project's probe can add a substitution for another project's walk.
 - Cleared by `exhaust_substitution` (`transition.rs`) once substitute misses escalate: the shared build returns to `Created` as an ordinary build.
-- Cleared by `CLEAR_CACHE_AVAILABLE_TRUST` (`gradient-db/src/cache_storage.rs`) for an output proven unfetchable.
+- Cleared by `CLEAR_CACHE_AVAILABLE_TRUST` (`gradient-db/src/caches/demotion.rs`) for an output proven unfetchable.
 
 ## Counter Locking
 
-Counters stay correct without the graph writer's serialisation; a second writer can share them (`gradient-db/src/shared_build_guard.rs`).
+Counters stay correct without the graph writer's serialisation; a second writer can share them (`gradient-db/src/graph/shared_build_guard.rs`).
 
 - Advisory keys: namespace `SHARED_BUILD_LOCK_NAMESPACE` (643), key `hashtext(derivation id)`, taken sorted in one pass before any row lock.
 - A seed of `blocking_deps` or `missing_runtime_deps` holds the keys of its dependencies shared.

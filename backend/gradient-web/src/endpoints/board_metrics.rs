@@ -247,7 +247,8 @@ pub async fn get_board_upstream_caches(
             }));
         }
 
-        let allowed = gradient_db::upstream_urls_for_projects(&state.web_db, &list).await?;
+        let allowed =
+            gradient_db::caches::upstream::upstream_urls_for_projects(&state.web_db, &list).await?;
         by_upstream.retain(|url, _| allowed.contains(url));
     }
 
@@ -506,7 +507,7 @@ fn board_durations_heatmap_sql(window_hours: i64, project_filter: Option<&str>) 
                        JOIN task pr ON pr.id = ev.task \
                        WHERE bj.derivation_build = b.id{scope}) \
          GROUP BY t, band ORDER BY t",
-        completed = gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed),
+        completed = gradient_db::sql::status::build(gradient_entity::build::BuildStatus::Completed),
     )
 }
 
@@ -696,7 +697,7 @@ pub async fn get_board_health(
 
     let rollup_lag_seconds = latest.map(|t| (now() - t).num_milliseconds() as f64 / 1000.0);
     let (pending_deliveries, failed_deliveries) =
-        gradient_db::pending_deliveries::pending_counts(&state.web_db).await?;
+        gradient_db::deliveries::pending::pending_counts(&state.web_db).await?;
 
     Ok(ok_json(BoardHealth {
         version: obs.version,
@@ -715,7 +716,10 @@ pub async fn get_board_health(
             .load(std::sync::atomic::Ordering::Relaxed),
         supervised: loops_view(scheduler.loop_health(), std::time::Instant::now()),
         proto_sessions: limiter.in_use(),
-        unconfirmed_nars: gradient_db::unconfirmed_cached_path_count(&state.web_db).await?,
+        unconfirmed_nars: gradient_db::caches::capacity::unconfirmed_cached_path_count(
+            &state.web_db,
+        )
+        .await?,
         pending_deliveries,
         failed_deliveries,
         hot_nar_cache: state.nar_storage.hot().stats().into(),

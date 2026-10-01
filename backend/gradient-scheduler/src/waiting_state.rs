@@ -15,7 +15,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 
 use gradient_core::ServerState;
-use gradient_db::update_evaluation_status;
+use gradient_db::status::update_evaluation_status;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_types::*;
@@ -31,7 +31,7 @@ const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 use crate::assessment_memo::AssessmentMemo;
 use crate::buildability::BuildabilityChecker;
 use crate::unbuildable::{Unbuildable, tasks_waiting_for_workers, unbuildable};
-use gradient_db::EvalCounters;
+use gradient_db::evaluations::counters::EvalCounters;
 
 /// Sweep every in-flight evaluation and refresh its status against the
 /// current set of connected workers, per the eval's current state:
@@ -58,7 +58,7 @@ pub(crate) async fn refresh_waiting_state(
     fetch_capable_workers: usize,
     draining: bool,
 ) -> Result<Vec<Unbuildable>> {
-    gradient_db::fold_shared_build_deltas(&state.worker_db)
+    gradient_db::evaluations::counters::fold_shared_build_deltas(&state.worker_db)
         .await
         .context("fold evaluation shared build deltas")?;
 
@@ -116,7 +116,7 @@ pub(crate) async fn refresh_waiting_state(
     let mut unbuildables = Vec::new();
     let connected_workers = worker_caps.len() as u32;
     let ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
-    let counters = gradient_db::in_flight_counters(&state.worker_db, &ids)
+    let counters = gradient_db::evaluations::counters::in_flight_counters(&state.worker_db, &ids)
         .await
         .context("read evaluation shared build counters")?;
     lock(memo).retain(&ids.iter().copied().collect::<HashSet<_>>());
@@ -249,7 +249,7 @@ pub(crate) async fn refresh_waiting_state(
 ///
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
 /// every pending shared build yet none is dispatchable: typically the set is `Created`
-/// with some term of `graph_sql::gates_predicate` false (a non-zero
+/// with some term of `graph::predicates::gates_predicate` false (a non-zero
 /// `blocking_deps`, an unwalked derivation, a `.drv` that is not importable, no
 /// `build_job`, or a shared build nothing needs) and no in-flight build to drive a
 /// promotion, though a stalled
@@ -298,7 +298,7 @@ async fn build_phase_decision(
 /// finalizer decides its terminal status. Idempotent and a no-op on anything
 /// that is not in its build phase.
 async fn finalize_settled(state: &Arc<ServerState>, evaluation_id: EvaluationId) {
-    if let Err(e) = gradient_db::check_evaluation_done(&state.db(), evaluation_id).await {
+    if let Err(e) = gradient_db::status::check_evaluation_done(&state.db(), evaluation_id).await {
         error!(error = %e, %evaluation_id, "failed to finalize a settled evaluation");
     }
 }
@@ -383,7 +383,7 @@ async fn assess_buildability(
 
     let pending = eval_blocking_shared_builds(state, evaluation_id).await?;
     if pending.is_empty() {
-        gradient_db::recount_evaluations(&state.worker_db, &[evaluation_id])
+        gradient_db::evaluations::counters::recount_evaluations(&state.worker_db, &[evaluation_id])
             .await
             .context("recount counters the shared builds contradict")?;
         return Ok(BuildPhase::Settled);
@@ -432,21 +432,22 @@ async fn attempt_graph_unstick(
 
     // The healing pipeline in Unstick scope: failed-shared build thaw, cached-shared build
     // settle with its can-start advance, the closure's dependency-failed sweep,
-    // pruned-interior adoption, and promotion (see `gradient_db::repair`).
+    // pruned-interior adoption, and promotion (see `gradient_db::graph::repair`).
     if let Err(e) = state
         .graph
         .transition(gradient_graph::Transition::Repair {
-            scope: gradient_db::RepairScope::Unstick(evaluation_id),
+            scope: gradient_db::graph::repair::RepairScope::Unstick(evaluation_id),
         })
         .await
     {
         error!(error = %e, %evaluation_id, "unstick repair did not reach the graph writer");
     }
 
-    let counters = gradient_db::eval_counters(&state.worker_db, evaluation_id)
-        .await
-        .context("read evaluation shared build counters after the heal")?
-        .unwrap_or_default();
+    let counters =
+        gradient_db::evaluations::counters::eval_counters(&state.worker_db, evaluation_id)
+            .await
+            .context("read evaluation shared build counters after the heal")?
+            .unwrap_or_default();
     let blocked =
         match assess_buildability(state, None, evaluation_id, counters, worker_caps).await? {
             BuildPhase::Pending(a) if a.target == EvaluationStatus::Building => {
@@ -502,7 +503,7 @@ pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
         if let Err(e) = state
             .graph
             .transition(gradient_graph::Transition::Repair {
-                scope: gradient_db::RepairScope::Unstick(eval.id),
+                scope: gradient_db::graph::repair::RepairScope::Unstick(eval.id),
             })
             .await
         {
@@ -613,8 +614,8 @@ gradient_db::sql_fn! {
 }
 
 fn unproducible_drv_block_sql() -> String {
-    let drv_nar_absent = gradient_db::graph_sql::drv_nar_absent_predicate("db");
-    let walked = gradient_db::graph_sql::walked_predicate("db");
+    let drv_nar_absent = gradient_db::graph::predicates::drv_nar_absent_predicate("db");
+    let walked = gradient_db::graph::predicates::walked_predicate("db");
     format!(
         r#"
         SELECT EXISTS (
@@ -650,14 +651,14 @@ async fn eval_blocking_shared_builds(
         .to_owned();
     let pending = EDerivationBuild::find()
         .filter(CDerivationBuild::Id.in_subquery(named))
-        .filter(CDerivationBuild::Status.is_in(gradient_db::graph_sql::NEED_BUILD_STATUSES))
+        .filter(CDerivationBuild::Status.is_in(gradient_db::graph::predicates::NEED_BUILD_STATUSES))
         .all(&state.worker_db)
         .await
         .context("fetch pending shared builds")?;
 
     Ok(pending
         .into_iter()
-        .filter(|a| gradient_db::graph_sql::blocks_evaluation(a.status, a.wanted))
+        .filter(|a| gradient_db::graph::predicates::blocks_evaluation(a.status, a.wanted))
         .collect())
 }
 
@@ -789,9 +790,9 @@ mod tests {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
-            sql.contains(&norm(gradient_db::graph_sql::drv_nar_absent_predicate(
-                "db"
-            ))),
+            sql.contains(&norm(
+                gradient_db::graph::predicates::drv_nar_absent_predicate("db")
+            )),
             "must require the .drv's own NAR to be absent, through the shared predicate: {sql}"
         );
         assert!(
@@ -883,7 +884,7 @@ mod tests {
     /// the tick is proportional to in-flight evaluations, not to their shared builds.
     #[test]
     fn counters_decide_without_shared_builds() {
-        let c = |named, active, building| gradient_db::EvalCounters {
+        let c = |named, active, building| gradient_db::evaluations::counters::EvalCounters {
             named,
             active,
             building,

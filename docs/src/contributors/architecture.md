@@ -64,11 +64,11 @@ root
 | `SessionActor` | One worker connection; the reader hands the actor frames in order, up to 64 unanswered, then TCP backpressure holds | [Connection](proto/connection.md) |
 | `effects` | Pending deliveries (`pending_delivery`): 8 workers, 6 attempts with backoff doubling from 30 s (capped at 15 min), then dead letter | [Events and Webhooks](../reference/events.md) |
 
-- **Pull-based assignment:** a claim is a `dispatched_job` insert in Postgres (`gradient_db::claim_assignment`); the scheduler actor only caches candidates.
+- **Pull-based assignment:** a claim is a `dispatched_job` insert in Postgres (`gradient_db::scheduling::assignment_record::claim_assignment`); the scheduler actor only caches candidates.
 - **Session signals:** the scheduler reaches a session only through `SessionPort` (`Offers`, `Reauth`, `Abort`, `Drain`, `Close`); a burst of enqueues collapses into one offer per generation.
 - **Off-session RPCs:** the reader starts `CacheQuery` and `QueryKnownDerivations` as tracked tasks the moment they arrive, and the session starts `WorkerMetrics` the same way: a slow frame never holds back a lookup the worker waits on. Log chunks go through a per-session lane, flushed before a job's completion. A respawned core actor gets every live session and its jobs back from the sessions supervisor.
 - **State:** `AppState` (alias `ServerState`) holds three pools (`worker_db`, `web_db`, `cache_db`), `RuntimeConfig`, the NAR store, `UploadAdmission`, the graph handle, the event bus, `startable_set` and `probe_requests` channels for build-dispatch and the probe.
-- **Events** are typed (`gradient_types::events::Event`) and flow two ways: the in-process `EventBus` for live sockets and `/api/v1/metrics/events` (a slow subscriber skips), and durable pending deliveries (`pending_delivery` rows) written by `gradient_db::events::record` in the caller's transaction, fanned out by `effects` into action and webhook deliveries.
+- **Events** are typed (`gradient_types::events::Event`) and flow two ways: the in-process `EventBus` for live sockets and `/api/v1/metrics/events` (a slow subscriber skips), and durable pending deliveries (`pending_delivery` rows) written by `gradient_db::deliveries::events::record` in the caller's transaction, fanned out by `effects` into action and webhook deliveries.
 - **Uploads** are admitted before a byte moves: one server-wide count and byte budget, round-robin across sessions, FIFO within one, small uploads first. See [Transfer](proto/transfer.md#upload) and [NAR Storage](internals/nar-storage.md).
 
 **Supervision rules:**
@@ -125,7 +125,7 @@ Every backend crate is `backend/gradient-<name>`; the workspace root is `gradien
 
 - PostgreSQL 18 or newer is the only database. Migrations live in `backend/gradient-migration/src/` and apply at startup, see [Migrations](migrations.md).
 - Graph transactions aborted by a deadlock or serialization failure get at most three attempts; passes outside the graph writer are not retried and repeat on their next tick.
-- Advisory locks in namespace `643` (`gradient_db::shared_build_guard`) and hash-ordered row locks keep counter seeds and flips consistent, see [Shared Builds](scheduler/shared-builds.md).
+- Advisory locks in namespace `643` (`gradient_db::graph::shared_build_guard`) and hash-ordered row locks keep counter seeds and flips consistent, see [Shared Builds](scheduler/shared-builds.md).
 - Postgres needs `max_locks_per_transaction` of at least 256; the server logs an error below that.
 - Timestamps are `NaiveDateTime` in UTC; `NULL_TIME` (`1970-01-01 00:00:00`) means "never".
 - `backend/clippy.toml` forbids `reqwest::Client::new` and raw `Statement` construction: statements go through `gradient_db::sql!` for the plan gate.

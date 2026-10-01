@@ -721,21 +721,24 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     scheduler.start();
     state
         .shutdown
-        .supervise(gradient_db::retention::child_spec(state.db()));
+        .supervise(gradient_db::maintenance::retention::child_spec(state.db()));
     state
         .shutdown
-        .supervise(gradient_db::rollup::child_spec(state.db()));
+        .supervise(gradient_db::metrics::rollup::child_spec(state.db()));
     state
         .shutdown
-        .supervise(gradient_db::cache_metric::child_spec(
+        .supervise(gradient_db::metrics::cache_traffic::child_spec(
             state.db(),
             Arc::clone(&state.cache_traffic),
         ));
-    gradient_db::cache_metric::flush_on_shutdown(state.db(), Arc::clone(&state.cache_traffic));
+    gradient_db::metrics::cache_traffic::flush_on_shutdown(
+        state.db(),
+        Arc::clone(&state.cache_traffic),
+    );
     state
         .shutdown
-        .supervise(gradient_db::infra_metric::child_spec(state.db()));
-    gradient_db::infra_metric::flush_on_shutdown(state.db());
+        .supervise(gradient_db::metrics::infra::child_spec(state.db()));
+    gradient_db::metrics::infra::flush_on_shutdown(state.db());
     otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
     let sessions = gradient_proto::SessionsHandle::new();
     state
@@ -908,7 +911,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         state.config.server.port.clone()
     );
 
-    match gradient_db::recover_interrupted_work(&state.worker_db).await {
+    match gradient_db::maintenance::recovery::recover_interrupted_work(&state.worker_db).await {
         Ok(r)
             if r.assignments_closed > 0
                 || r.attempts_aborted > 0
@@ -940,7 +943,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     // Draining is in-memory and auto-clears on startup, so recover any
     // evaluations a previous process parked under it back to the queue.
-    match gradient_db::unpark_draining_evals(&state.worker_db).await {
+    match gradient_db::evaluations::draining::unpark_draining_evals(&state.worker_db).await {
         Ok(n) if n > 0 => {
             tracing::warn!(evaluations = n, "recovered evaluations parked by draining")
         }

@@ -28,7 +28,7 @@ pub struct UpstreamSource {
     pub url: String,
 }
 
-/// The same filter as `gradient_db::upstream_endpoints_for_project`: an HTTP
+/// The same filter as `gradient_db::caches::upstream::upstream_endpoints_for_project`: an HTTP
 /// binary cache with a URL that is not write-only.
 pub fn substitutes_from(upstream: &MCacheUpstream) -> bool {
     upstream.kind == CacheUpstreamKind::Http

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use gradient_db::MemberOf;
+use gradient_db::scheduling::cluster::MemberOf;
 use gradient_entity::cluster_job::ClusterJobStatus;
 use gradient_types::ids::{DerivationBuildId, EvaluationId};
 use sea_orm::{ConnectionTrait, DbErr};
@@ -33,18 +33,19 @@ impl Membership {
         evaluations: &[EvaluationId],
         shared_builds: &[DerivationBuildId],
     ) -> Result<Self, DbErr> {
-        let by_key = gradient_db::cluster_membership(db, evaluations, shared_builds)
-            .await?
-            .into_iter()
-            .filter_map(|of| {
-                let key = match (of.member.evaluation, of.member.derivation_build) {
-                    (Some(e), _) => eval_job_key(e),
-                    (None, Some(a)) => build_job_key(a),
-                    (None, None) => return None,
-                };
-                Some((key, of))
-            })
-            .collect();
+        let by_key =
+            gradient_db::scheduling::cluster::cluster_membership(db, evaluations, shared_builds)
+                .await?
+                .into_iter()
+                .filter_map(|of| {
+                    let key = match (of.member.evaluation, of.member.derivation_build) {
+                        (Some(e), _) => eval_job_key(e),
+                        (None, Some(a)) => build_job_key(a),
+                        (None, None) => return None,
+                    };
+                    Some((key, of))
+                })
+                .collect();
         Ok(Self { by_key })
     }
 

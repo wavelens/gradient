@@ -73,7 +73,10 @@ async fn local_log(
         return Ok(None);
     };
 
-    let Some(key) = gradient_db::latest_attempt_id(&state.web_db, shared_build.id).await? else {
+    let Some(key) =
+        gradient_db::scheduling::build_attempt::latest_attempt_id(&state.web_db, shared_build.id)
+            .await?
+    else {
         return Ok(None);
     };
 

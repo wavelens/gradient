@@ -102,7 +102,7 @@ async fn load_request(
     cache_id: CacheId,
     project_name: String,
 ) -> WebResult<(MProject, MCacheSubscriptionRequest)> {
-    let project = gradient_db::get_any_project_by_name(&state.db(), project_name)
+    let project = gradient_db::lookup::get_any_project_by_name(&state.db(), project_name)
         .await?
         .ok_or_else(|| WebError::not_found("Subscription request"))?;
 
