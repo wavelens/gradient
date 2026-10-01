@@ -26,9 +26,7 @@ use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_derivation::parse_drv;
 use gradient_util::store_path::nix_store_path;
 use gradient_wire::CachedPathInfo;
-use gradient_wire::messages::{
-    BuildSpec, CachedPath, EvalMessageLevel, QueryMode, TRANSFER_TIMEOUT,
-};
+use gradient_wire::messages::{BuildSpec, CachedPath, EvalMessageLevel, QueryMode};
 use gradient_wire::types::JobPhase;
 use tracing::{debug, error, warn};
 
@@ -169,7 +167,7 @@ pub(crate) async fn download_one_presigned(
 
     for attempt in 1..=PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
         let started = std::time::Instant::now();
-        let attempt_err = match http.get(&url).timeout(TRANSFER_TIMEOUT).send().await {
+        let attempt_err = match http.get(&url).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 if presigned_status_is_missing(status) {
