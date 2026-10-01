@@ -62,6 +62,12 @@
           Public key of the external Nix binary cache. Required for `external` upstream caches.
         '';
       };
+
+      active = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether the upstream cache is active. Inactive upstream caches are stored but never queried.";
+      };
     };
   };
 

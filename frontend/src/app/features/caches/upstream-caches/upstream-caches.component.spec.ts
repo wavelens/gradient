@@ -30,6 +30,7 @@ const httpUpstream = {
   url: 'https://cache.example.org',
   public_key: 'cache.example.org-1:abc',
   http1_only: false,
+  active: true,
 };
 
 const oneUpstream = [
@@ -42,6 +43,7 @@ const oneUpstream = [
     url: null,
     public_key: null,
     http1_only: false,
+    active: true,
   },
 ];
 
@@ -63,6 +65,7 @@ function findIconButton(root: HTMLElement, icon: string): HTMLButtonElement | nu
 function setup(
   access: AccessState,
   upstreamCaches: unknown[] = oneUpstream,
+  updateUpstream: (...args: unknown[]) => unknown = () => of('ok'),
 ): ComponentFixture<UpstreamCachesComponent> {
   TestBed.configureTestingModule({
     imports: [UpstreamCachesComponent],
@@ -76,6 +79,7 @@ function setup(
         useValue: {
           getCache: () => of({ display_name: 'Demo' }),
           getUpstreamCaches: () => of(upstreamCaches),
+          updateUpstream,
         },
       },
     ],
@@ -178,5 +182,21 @@ describe('UpstreamCachesComponent - protocol test', () => {
     expect(probeSummary({ ok: false, status: null, latency_ms: 3, error: 'connection reset' }))
       .toBe('failed - connection reset');
     expect(probeSummary({ ok: false, status: 404, latency_ms: 3, error: null })).toBe('failed - status 404');
+  });
+});
+
+describe('UpstreamCachesComponent - activation', () => {
+  it('deactivates an active upstream cache without touching its other settings', () => {
+    const updateUpstream = vi.fn().mockReturnValue(of('ok'));
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, oneUpstream, updateUpstream);
+    (findByText(fixture.nativeElement, 'deactivate') as HTMLButtonElement).click();
+    expect(updateUpstream).toHaveBeenCalledWith('demo', 'u1', { active: false });
+  });
+
+  it('marks an inactive upstream cache and offers Activate', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [{ ...httpUpstream, active: false }]);
+    expect(fixture.nativeElement.textContent).toContain('Inactive');
+    expect(findByText(fixture.nativeElement, 'deactivate')).toBeNull();
+    expect(findByText(fixture.nativeElement, 'activate')).not.toBeNull();
   });
 });

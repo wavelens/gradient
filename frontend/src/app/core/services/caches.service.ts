@@ -21,6 +21,7 @@ export interface UpstreamCache {
   public_key: string | null;
   kind: 'internal' | 'gradient_proto' | 'http';
   http1_only: boolean;
+  active: boolean;
 }
 
 export interface ProtocolProbe {
@@ -201,6 +202,7 @@ export class CachesService {
     mode?: CacheSubscriptionMode;
     url?: string;
     public_key?: string;
+    active?: boolean;
   }): Observable<string> {
     return this.api.patch<string>(`caches/${cache}/upstream-caches/${upstreamId}`, data);
   }

@@ -56,6 +56,7 @@ pub struct UpstreamCacheItem {
     pub kind: String,
     pub remote_cache: Option<String>,
     pub http1_only: bool,
+    pub active: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +65,7 @@ pub struct PatchUpstreamRequest {
     pub mode: Option<CacheSubscriptionMode>,
     pub url: Option<String>,
     pub public_key: Option<String>,
+    pub active: Option<bool>,
 }
 
 fn validate_url(url: &str) -> Result<(), WebError> {
@@ -162,6 +164,7 @@ pub async fn get_upstream_caches(
             kind: format!("{:?}", u.kind).to_lowercase(),
             remote_cache: u.remote_cache_name,
             http1_only: u.http1_only,
+            active: u.active,
         })
         .collect();
 
@@ -289,24 +292,27 @@ pub async fn patch_cache_upstream(
     let record = load_upstream(&state, cache.id, upstream_id).await?;
 
     let is_external = matches!(record.as_source(), Some(CacheUpstreamSource::Http { .. }));
-    let mut active = record.into_active_model();
+    let mut row = record.into_active_model();
 
     if let Some(name) = body.display_name {
-        active.display_name = Set(name);
+        row.display_name = Set(name);
+    }
+    if let Some(enabled) = body.active {
+        row.active = Set(enabled);
     }
     if is_external {
-        active.mode = Set(CacheSubscriptionMode::ReadOnly);
+        row.mode = Set(CacheSubscriptionMode::ReadOnly);
         if let Some(url) = body.url {
-            active.url = Set(Some(url));
+            row.url = Set(Some(url));
         }
         if let Some(key) = body.public_key {
-            active.public_key = Set(Some(key));
+            row.public_key = Set(Some(key));
         }
     } else if let Some(mode) = body.mode {
-        active.mode = Set(mode);
+        row.mode = Set(mode);
     }
 
-    active.update(&state.web_db).await?;
+    row.update(&state.web_db).await?;
 
     Ok(ok_json("Upstream updated".to_string()))
 }

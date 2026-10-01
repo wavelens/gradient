@@ -560,11 +560,13 @@ fn export_upstream(
             cache_name: cache_name.get(&u.upstream_cache?)?.clone(),
             display_name: Some(u.display_name.clone()),
             mode: u.mode.clone(),
+            active: u.active,
         }),
         CacheUpstreamKind::Http => Some(StateUpstream::External {
             display_name: u.display_name.clone(),
             url: u.url.clone()?,
             public_key: u.public_key.clone()?,
+            active: u.active,
         }),
         // GradientProto upstream caches have no `state` representation yet.
         CacheUpstreamKind::GradientProto => None,
@@ -751,6 +753,37 @@ mod tests {
         assert_eq!(sw.authorize_against, Some(auth.to_string()));
         assert_eq!(sw.projects, vec!["project-a".to_string()]);
         assert!(sw.token_file.is_empty());
+    }
+
+    #[test]
+    fn disabled_upstream_survives_export_round_trip() {
+        let upstream = gradient_entity::cache_upstream::Model {
+            kind: CacheUpstreamKind::Http,
+            url: Some("https://cache.nixos.org".into()),
+            public_key: Some("cache.nixos.org-1:abc".into()),
+            active: false,
+            ..Default::default()
+        };
+
+        let exported = export_upstream(&upstream, &HashMap::new()).unwrap();
+        let reread: StateUpstream =
+            serde_json::from_value(serde_json::to_value(&exported).unwrap()).unwrap();
+        assert!(matches!(
+            reread,
+            StateUpstream::External { active: false, .. }
+        ));
+
+        let declared: StateUpstream = serde_json::from_value(json!({
+            "type": "external",
+            "display_name": "nixos",
+            "url": "https://cache.nixos.org",
+            "public_key": "cache.nixos.org-1:abc",
+        }))
+        .unwrap();
+        assert!(matches!(
+            declared,
+            StateUpstream::External { active: true, .. }
+        ));
     }
 
     #[test]

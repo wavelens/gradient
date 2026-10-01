@@ -28,10 +28,9 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
 use gradient_core::upstream_source::UpstreamSource;
+use gradient_db::caches::upstream::active_upstream_caches;
 use gradient_types::ids::{CacheId, CacheUpstreamId};
-use gradient_types::*;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -86,9 +85,7 @@ fn redirect_response(doc: DebugInfoRedirect, cache_status: &'static str) -> Resp
 }
 
 async fn upstream_caches_for(state: &Arc<ServerState>, cache: CacheId) -> Vec<UpstreamSource> {
-    ECacheUpstream::find()
-        .filter(CCacheUpstream::Cache.eq(cache))
-        .all(&state.web_db)
+    active_upstream_caches(&state.web_db, cache)
         .await
         .unwrap_or_default()
         .into_iter()

@@ -6,12 +6,12 @@
 
 use anyhow::Result;
 use gradient_entity::cache_upstream::{
-    CacheUpstreamKind, Column as CCacheUpstream, Entity as ECacheUpstream,
+    CacheUpstreamKind, Column as CCacheUpstream, Entity as ECacheUpstream, Model as MCacheUpstream,
 };
 use gradient_entity::project_cache::{
     CacheSubscriptionMode, Column as CProjectCache, Entity as EProjectCache,
 };
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 
 use gradient_types::ids::{CacheId, CacheUpstreamId, ProjectId};
 
@@ -67,6 +67,17 @@ pub struct GradientProtoUpstream {
     pub api_key_enc: Option<String>,
 }
 
+pub async fn active_upstream_caches<C: ConnectionTrait>(
+    db: &C,
+    cache: CacheId,
+) -> Result<Vec<MCacheUpstream>, DbErr> {
+    ECacheUpstream::find()
+        .filter(CCacheUpstream::Cache.eq(cache))
+        .filter(CCacheUpstream::Active.eq(true))
+        .all(db)
+        .await
+}
+
 pub async fn gradient_proto_upstream_caches_for_project<C: ConnectionTrait>(
     db: &C,
     project_id: ProjectId,
@@ -90,6 +101,7 @@ pub async fn gradient_proto_upstream_caches_for_project<C: ConnectionTrait>(
             sea_orm::Condition::all()
                 .add(CCacheUpstream::Cache.is_in(cache_ids))
                 .add(CCacheUpstream::Kind.eq(CacheUpstreamKind::GradientProto))
+                .add(CCacheUpstream::Active.eq(true))
                 .add(CCacheUpstream::Mode.ne(CacheSubscriptionMode::WriteOnly)),
         )
         .all(db)
@@ -119,7 +131,7 @@ fn upstream_endpoints_sql(window_minutes: i64) -> String {
          LEFT JOIN upstream_metric um ON um.upstream_url = cu.url \
               AND um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '{window_minutes} minutes' \
          WHERE oc.project = $1 AND oc.mode <> 2 AND cu.kind = 2 \
-               AND cu.mode <> 2 AND cu.url IS NOT NULL \
+               AND cu.mode <> 2 AND cu.active AND cu.url IS NOT NULL \
          GROUP BY cu.id, cu.url, cu.public_key, cu.http1_only",
         window_minutes = window_minutes
     )

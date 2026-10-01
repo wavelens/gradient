@@ -31,6 +31,8 @@ Upstream caches are set under **Settings -> Upstream Caches** on the cache page.
 
 Declared caches in [`services.gradient.state`](../reference/state.md#cachesname) take Internal and HTTP (`external` in Nix) upstream caches; Gradient Proto upstream caches are set in the UI.
 
+**Deactivate** disables an upstream cache without removing the entry, and **Activate** turns it back on. An inactive upstream cache keeps its settings but is never queried. Paths then come from the remaining upstream caches.
+
 **Test** on an HTTP upstream fetches its `nix-cache-info` over HTTP/1.1 and over HTTP/2 and reports each result. An HTTP upstream that breaks HTTP/2 transfers is switched to HTTP/1.1 for good and shows an **HTTP/1.1** badge.
 
 ## Pull-Through

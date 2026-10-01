@@ -566,8 +566,8 @@ pub fn instance_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "cache_upstream",
-            "CREATE TABLE cache_upstream (id TEXT, cache TEXT, display_name TEXT, mode INTEGER, upstream_cache TEXT, url TEXT, public_key TEXT, kind INTEGER, remote_cache_name TEXT)",
-            "SELECT u.id::text, u.cache::text, u.display_name::text, u.mode::text, u.upstream_cache::text, u.url::text, u.public_key::text, u.kind::text, u.remote_cache_name::text FROM cache_upstream u WHERE u.cache IN (SELECT cache FROM project_cache WHERE project = $1)",
+            "CREATE TABLE cache_upstream (id TEXT, cache TEXT, display_name TEXT, mode INTEGER, upstream_cache TEXT, url TEXT, public_key TEXT, kind INTEGER, remote_cache_name TEXT, active INTEGER)",
+            "SELECT u.id::text, u.cache::text, u.display_name::text, u.mode::text, u.upstream_cache::text, u.url::text, u.public_key::text, u.kind::text, u.remote_cache_name::text, u.active::int::text FROM cache_upstream u WHERE u.cache IN (SELECT cache FROM project_cache WHERE project = $1)",
             "the caches this project subscribes to",
             [
                 "id",
@@ -578,7 +578,8 @@ pub fn instance_tables() -> &'static [TableSpec] {
                 "url",
                 "public_key",
                 "kind",
-                "remote_cache_name"
+                "remote_cache_name",
+                "active"
             ]
         ),
         spec!(

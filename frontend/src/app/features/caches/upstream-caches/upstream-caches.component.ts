@@ -71,6 +71,7 @@ export class UpstreamCachesComponent implements OnInit {
   rowDisabled = computed(
     () =>
       this.removingUpstreamId() !== null ||
+      this.togglingUpstreamId() !== null ||
       this.testingUpstreamId() !== null ||
       this.accessSvc.shouldDisableInput(this.access()),
   );
@@ -80,6 +81,7 @@ export class UpstreamCachesComponent implements OnInit {
   savingUpstream = signal(false);
   removingUpstreamId = signal<string | null>(null);
   testingUpstreamId = signal<string | null>(null);
+  togglingUpstreamId = signal<string | null>(null);
   probeSuggestsProto = signal(false);
 
   upstreamCaches = signal<UpstreamCache[]>([]);
@@ -298,6 +300,17 @@ export class UpstreamCachesComponent implements OnInit {
           detail: err?.message || 'Failed to test upstream.',
         });
       },
+    });
+  }
+
+  toggleUpstream(upstream: UpstreamCache): void {
+    this.togglingUpstreamId.set(upstream.id);
+    this.cachesService.updateUpstream(this.cacheName, upstream.id, { active: !upstream.active }).subscribe({
+      next: () => {
+        this.togglingUpstreamId.set(null);
+        this.loadUpstreamCaches();
+      },
+      error: () => this.togglingUpstreamId.set(null),
     });
   }
 
