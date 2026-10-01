@@ -52,7 +52,7 @@ in {
           giving up while the newest commit is still in CI.
 
           Waiting ends once the deployment is built, the evaluation or build fails, or the target
-          already uses the evaluated system; none of these fail the unit.
+          is already running the evaluated system; none of these fail the unit.
           {option}`system.gradient-deploy.websockets` controls how progress is observed. Waiting is
           unbounded: a run that outlives its timer makes systemd skip the next trigger.
         '';
@@ -91,7 +91,7 @@ in {
         default = "04:00";
         example = "daily";
         description = ''
-          How often or when the deployment starts, in the format described in
+          How often or when the deployment is running, in the format described in
           {manpage}`systemd.time(7)`.
         '';
       };

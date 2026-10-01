@@ -61,8 +61,8 @@ pub struct GcArgs {
     )]
     pub wedged_eval_hours: i64,
 
-    /// Seconds from the end of one background deep GC round to the start of the
-    /// next. `0` starts a round only when one is requested.
+    /// Seconds from the end of one background deep garbage collection round to the
+    /// start of the next. With `0`, a round is running only when one is requested.
     #[arg(
         long = "gc-deep-interval-secs",
         env = "GRADIENT_GC_DEEP_INTERVAL_SECS",
@@ -71,7 +71,7 @@ pub struct GcArgs {
     pub deep_interval_secs: u64,
 
     /// Milliseconds between two units of a storage migration or a background
-    /// deep GC round. A requested round executes its units without a pause.
+    /// deep garbage collection round. A requested round is running its units without a pause.
     #[arg(
         long = "gc-deep-pace-ms",
         env = "GRADIENT_GC_DEEP_PACE_MS",

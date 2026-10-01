@@ -522,7 +522,7 @@ in {
           default = 8589934592;
           description = ''
             Total size in bytes of admitted uploads. An upload that does not fit waits; one larger
-            than the budget proceeds alone once nothing else is in flight.
+            than the budget is running alone once nothing else is in flight.
           '';
         };
 
@@ -702,7 +702,7 @@ in {
           default = 3600;
           description = ''
             Seconds from the end of one background deep garbage collection round to the start of the
-            next. `0` starts a round only when one is requested.
+            next. With `0`, a round is running only when one is requested.
           '';
         };
 
@@ -711,7 +711,7 @@ in {
           default = 1000;
           description = ''
             Milliseconds between two units of a storage migration or a background deep garbage
-            collection round. A requested round executes its units without a pause.
+            collection round. A requested round is running its units without a pause.
           '';
         };
       };

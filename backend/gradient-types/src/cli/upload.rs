@@ -18,7 +18,7 @@ pub struct UploadArgs {
     pub concurrency: usize,
 
     /// Total size in bytes of admitted uploads. An upload that does not fit waits;
-    /// one larger than the budget proceeds alone once nothing else is in flight.
+    /// one larger than the budget is running alone once nothing else is in flight.
     #[arg(long = "upload-bytes-budget", env = "GRADIENT_UPLOAD_BYTES_BUDGET", default_value_t = 8 * 1024 * 1024 * 1024)]
     pub bytes_budget: u64,
 

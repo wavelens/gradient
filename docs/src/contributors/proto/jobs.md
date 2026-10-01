@@ -109,7 +109,7 @@ A [cluster member](../scheduler/clusters.md) arrives as `AssignJob` with `cluste
 | Event | Worker |
 |---|---|
 | `AssignJob` with `cluster` | Holds the slot without running the job and accepts; a second member of the same attempt is rejected |
-| `StartCluster { attempt, roster }` | Starts the held member; its signal route opens with the roster |
+| `StartCluster { attempt, roster }` | Running the held member; its signal route opens with the roster |
 | `ClusterSignal` from the server | Delivered to the running member of that attempt; dropped once the member finished |
 | `ClusterSignal` to the server | Sent by the member; `to = None` reaches every other member |
 | `AbortCluster { attempt }` | Drops a held member unreported and aborts a running one (`JobFailed { Aborted }`) |

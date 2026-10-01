@@ -20,7 +20,7 @@ flowchart LR
 | Otherwise | `[FetchFlake, EvaluateFlake, EvaluateDerivations]` in one job |
 
 - **Decision per pass:** one idle worker splits every evaluation queued in that pass.
-- **Source:** a repository evaluation carries `FlakeSource::Repository`; a `/nix/store/...` source (`gradient build` upload) carries `FlakeSource::Cached` and still takes the `FetchFlake` step to resolve inputs with the project SSH key (`flake_job_for_eval_source`).
+- **Source:** a repository evaluation carries `FlakeSource::Repository`; a `/nix/store/...` source (`gradient build` upload) carries `FlakeSource::Cached` and is still running `FetchFlake` to resolve inputs with the project SSH key (`flake_job_for_eval_source`).
 - **Routing:** `WorkerCaps::can_eval` (`gradient-pool/src/worker_caps.rs`) requires `fetch` for a `FetchFlake` step and `eval` for an evaluation step.
 - **Follow-up:** on `JobCompleted` of a fetch-only job (`is_fetch_only`), `handle_job_completed` (`job_handlers/build_status.rs`) reads `evaluation.flake_source` and enqueues `PendingEvalJob::cached_followup` under the same `eval:{id}` key: `FlakeSource::Cached` plus the source as a required path. A missing `flake_source` fails the evaluation permanently.
 - **Worker side:** the evaluating worker substitutes the source from the cache and evaluates `path:<store path>` (`gradient-worker/src/executor/eval.rs`).
@@ -28,7 +28,7 @@ flowchart LR
 
 ## Waiting Reasons
 
-The waiting pass, `refresh_waiting_state` (`gradient-scheduler/src/waiting_state.rs`), closes every build assignment pass (5 s tick or kick) and covers every in-flight evaluation. The reason lands in `evaluation.waiting_reason` only when its JSON changes.
+The waiting pass, `refresh_waiting_state` (`gradient-scheduler/src/waiting_state.rs`), is running at the end of every build assignment pass (5 s tick or kick) over every in-flight evaluation. The reason lands in `evaluation.waiting_reason` only when its JSON changes.
 
 | `WaitingReason` | Parked from | Unparked | Owner |
 |---|---|---|---|
@@ -46,7 +46,7 @@ The waiting pass, `refresh_waiting_state` (`gradient-scheduler/src/waiting_state
 
 ## Graph-Stuck Heal
 
-A `workers` verdict with an empty `unmet` set turns into the heal: `attempt_graph_unstick` sends `Transition::Repair { scope: RepairScope::Unstick }` to the [graph writer](shared-builds.md#graph-writer), then re-assesses without the memo. The [repair pass](repair-pass.md) `repair_build_graph` (`gradient-db/src/repair.rs`) takes these steps, and the first failed step fails the transition:
+A `workers` verdict with an empty `unmet` set turns into the heal: `attempt_graph_unstick` sends `Transition::Repair { scope: RepairScope::Unstick }` to the [graph writer](shared-builds.md#graph-writer), then re-assesses without the memo. The [repair pass](repair-pass.md) `repair_build_graph` (`gradient-db/src/repair.rs`) is running these steps, and the first failed step fails the transition:
 
 1. `requeue_failed_closure`: thaws failed shared builds in the closure to `Created`; `Unstick` leaves a deterministic build failure and its subtree alone.
 2. `repair_cached_shared_builds_for_eval`: completes shared builds whose outputs are all in the cache, then `advance_fetchable` for the builds that need them.
@@ -74,7 +74,7 @@ Offers are deltas: the server sends a worker only candidates missing from its `s
 
 ## Startup Recovery
 
-`recover_interrupted_work` (`gradient-db/src/recovery.rs`) takes place once at server start (`gradient-web/src/lib.rs`), before `unpark_draining_evals`.
+`recover_interrupted_work` (`gradient-db/src/recovery.rs`) is running once at server start (`gradient-web/src/lib.rs`), before `unpark_draining_evals`.
 
 1. **Assignments:** every open `dispatched_job` row closes as `Abandoned`. Both assignment selections refuse a job with an open row; without this step re-queued work waits for its worker to reconnect or the 1800 s check for abandoned assignments.
 2. **Attempts:** `Running` build attempts turn `Aborted`.
