@@ -80,6 +80,14 @@ impl NarPayload {
             )),
         }
     }
+
+    /// Compressed bytes the transfer delivered; 0 when a staged file is gone.
+    pub async fn byte_len(&self) -> u64 {
+        match self {
+            NarPayload::Bytes(bytes) => bytes.len() as u64,
+            NarPayload::File(path) => tokio::fs::metadata(path).await.map_or(0, |m| m.len()),
+        }
+    }
 }
 
 /// Where a staging task puts the bytes of one transfer.
@@ -770,6 +778,17 @@ mod tests {
             NarPayload::File(p) => tokio::fs::read(&p).await.unwrap(),
             NarPayload::Bytes(_) => panic!("disk mode yields a file"),
         }
+    }
+
+    /// A staged file counts the bytes on disk, the same as an in-memory body.
+    #[tokio::test]
+    async fn a_payload_measures_its_transferred_bytes() {
+        let dir = TempDir::new().unwrap();
+        let staged = dir.path().join("nar");
+        tokio::fs::write(&staged, b"compressed nar").await.unwrap();
+
+        assert_eq!(NarPayload::File(staged).byte_len().await, 14);
+        assert_eq!(NarPayload::Bytes(vec![0; 3]).byte_len().await, 3);
     }
 
     #[tokio::test]

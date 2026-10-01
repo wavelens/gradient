@@ -23,7 +23,7 @@ use gradient_util::store_path::nix_store_path;
 
 use crate::connection::ProtoWriter;
 use crate::nar_multipart::{PartSink, PartUploader};
-use crate::upload::UploadClient;
+use crate::upload::{Upload, UploadClient};
 use gradient_wire::types::{
     CompletedMultipart, GrantTarget, NarUploadMetadata, UploadMetadata, UploadObject,
 };
@@ -144,6 +144,20 @@ pub struct CompressedNarMeta {
 
 // ── The one uploader ──────────────────────────────────────────────────────────
 
+/// What one stored upload moved; zero when the server already had the object.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct UploadedNar {
+    pub nar_size: u64,
+    pub file_size: u64,
+}
+
+impl std::ops::AddAssign for UploadedNar {
+    fn add_assign(&mut self, other: Self) {
+        self.nar_size += other.nar_size;
+        self.file_size += other.file_size;
+    }
+}
+
 /// Upload one NAR from `source` once the server grants it, and wait for its
 /// acknowledgement.
 pub async fn upload_nar(
@@ -151,7 +165,7 @@ pub async fn upload_nar(
     job_id: &str,
     store_path: &str,
     source: NarSource<'_>,
-) -> Result<()> {
+) -> Result<UploadedNar> {
     let store_path = nix_store_path(store_path);
     let object = UploadObject::Nar {
         store_path: store_path.clone(),
@@ -166,14 +180,14 @@ pub async fn upload_nar(
             let threads = compression_threads(Some(nar_size));
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
-                let sent = send_path(uploads.writer(), request_id, &store_path, threads, target)
-                    .await
-                    .map(|(meta, multipart)| nar_metadata(meta, &path_meta, multipart));
-                if upload.settle(sent).await? {
-                    break;
+                let sent =
+                    send_path(uploads.writer(), request_id, &store_path, threads, target).await;
+                if let Some(uploaded) = settle(&mut upload, sent, &path_meta).await? {
+                    return Ok(uploaded);
                 }
             }
-            Ok(())
+
+            Ok(UploadedNar::default())
         }
         NarSource::Raw {
             nar,
@@ -191,14 +205,13 @@ pub async fn upload_nar(
             };
             let mut upload = uploads.start(job_id, object, nar_size).await?;
             while let Some((request_id, target)) = upload.next_grant().await? {
-                let sent = send_raw(uploads.writer(), request_id, &nar, target)
-                    .await
-                    .map(|(meta, multipart)| nar_metadata(meta, &path_meta, multipart));
-                if upload.settle(sent).await? {
-                    break;
+                let sent = send_raw(uploads.writer(), request_id, &nar, target).await;
+                if let Some(uploaded) = settle(&mut upload, sent, &path_meta).await? {
+                    return Ok(uploaded);
                 }
             }
-            Ok(())
+
+            Ok(UploadedNar::default())
         }
     }
 }
@@ -284,6 +297,24 @@ async fn send_compressed(
         }
         GrantTarget::Skip => bail!("a skipped upload has no transfer"),
     }
+}
+
+/// Report one transfer: its sizes once the server stored it, `None` when it
+/// asks for another attempt.
+async fn settle(
+    upload: &mut Upload<'_>,
+    sent: Result<(CompressedNarMeta, Option<CompletedMultipart>)>,
+    path: &PathMeta,
+) -> Result<Option<UploadedNar>> {
+    let uploaded = sent.as_ref().ok().map(|(meta, _)| UploadedNar {
+        nar_size: meta.nar_size,
+        file_size: meta.file_size,
+    });
+    let stored = upload
+        .settle(sent.map(|(meta, multipart)| nar_metadata(meta, path, multipart)))
+        .await?;
+
+    Ok(uploaded.filter(|_| stored))
 }
 
 fn nar_metadata(
@@ -586,9 +617,9 @@ mod tests {
     }
 
     /// Run `upload` against a mock that grants it `target` and acknowledges it.
-    async fn served(
+    async fn served<T>(
         target: GrantTarget,
-        upload: impl AsyncFnOnce(&UploadClient) -> Result<()>,
+        upload: impl AsyncFnOnce(&UploadClient) -> Result<T>,
     ) -> ServedUpload {
         let server = MockProtoServer::bind().await;
         let url = server.url().to_owned();
@@ -966,6 +997,38 @@ mod tests {
         );
         assert_eq!(served.nar().nar_hash, sha256_nix32(&raw));
         assert_eq!(served.size, raw.len() as u64);
+    }
+
+    /// The sizes the timeline records are the ones the server was told: the
+    /// uncompressed NAR and the compressed object it stored.
+    #[tokio::test]
+    async fn an_upload_reports_the_sizes_it_confirmed() {
+        let raw = b"verbatim upstream nar payload".to_vec();
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let script = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            sc.serve_upload(GrantTarget::Passthrough { resume_offset: 0 })
+                .await
+                .unwrap()
+        });
+        let (uploads, pump) = client(&url).await;
+        let source = NarSource::Raw {
+            nar: raw.clone(),
+            references: vec![],
+            deriver: None,
+            ca: None,
+        };
+
+        let uploaded = upload_nar(&uploads, "job-sizes", &store_path("sizes"), source)
+            .await
+            .unwrap();
+        pump.abort();
+        let served = script.await.unwrap();
+
+        assert_eq!(uploaded.nar_size, raw.len() as u64);
+        assert_eq!(uploaded.file_size, served.nar().file_size);
+        assert!(uploaded.file_size > 0);
     }
 
     #[tokio::test]

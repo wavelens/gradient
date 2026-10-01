@@ -77,7 +77,8 @@ pub(crate) async fn push_paths(
     guard.record(paths.len() as u32, 0);
     let (paths, sizes): (Vec<String>, Vec<Option<u64>>) = paths.iter().cloned().unzip();
     let cache_entries = query_fetched_paths(updater, paths, sizes).await?;
-    upload_all(updater, pair_with_store(cache_entries, store), None).await
+    upload_all(updater, pair_with_store(cache_entries, store), None).await?;
+    Ok(())
 }
 
 /// Every entry paired with the local store it is packed from: the shape
@@ -99,10 +100,10 @@ pub(crate) async fn upload_one_nar(
     updater: &JobUpdater,
     cp: &CachedPath,
     source: nar::NarSource<'_>,
-) -> Result<()> {
+) -> Result<nar::UploadedNar> {
     if cp.cached {
         tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
-        return Ok(());
+        return Ok(nar::UploadedNar::default());
     }
     nar::upload_nar(&updater.uploads, &updater.job_id, &cp.path, source).await
 }
@@ -115,28 +116,29 @@ pub(crate) async fn upload_all(
     updater: &JobUpdater,
     uploads: Vec<(CachedPath, nar::NarSource<'_>)>,
     abort: Option<&watch::Receiver<bool>>,
-) -> Result<()> {
+) -> Result<nar::UploadedNar> {
     use futures::stream::{FuturesUnordered, StreamExt as _};
 
     let pending = uploads.iter().filter(|(cp, _)| !cp.cached).count();
     if pending == 0 {
-        return Ok(());
+        return Ok(nar::UploadedNar::default());
     }
 
     // One span for the batch: the uploads overlap, and the timeline parents a
     // span to the innermost open one, so per-path spans would chart as nested
     // and count their durations twice.
     let mut guard = updater.phase(JobPhase::NarPush);
-    guard.record(pending as u32, 0);
-
+    let mut uploaded = nar::UploadedNar::default();
     let mut running: FuturesUnordered<_> = uploads
         .into_iter()
         .map(|(cp, source)| upload_unless_aborted(updater, cp, source, abort))
         .collect();
     while let Some(result) = running.next().await {
-        result?;
+        uploaded += result?;
     }
-    Ok(())
+
+    guard.record(pending as u32, uploaded.file_size);
+    Ok(uploaded)
 }
 
 async fn upload_unless_aborted(
@@ -144,7 +146,7 @@ async fn upload_unless_aborted(
     cp: CachedPath,
     source: nar::NarSource<'_>,
     abort: Option<&watch::Receiver<bool>>,
-) -> Result<()> {
+) -> Result<nar::UploadedNar> {
     if let Some(abort) = abort {
         check_abort(abort)?;
     }
@@ -553,10 +555,12 @@ impl JobExecutor {
             // individual NAR downloads) are logged inside `prefetch_inputs`
             // and don't reach here as `Err`.
             {
-                let _g = updater.phase(JobPhase::Prefetch);
-                crate::proto::prefetch::prefetch_inputs(&self.store, build_task, updater)
-                    .await
-                    .map_err(|e| failure::classify_prefetch_error(&build_task.build_id, e))?;
+                let mut prefetch = updater.phase(JobPhase::Prefetch);
+                let fetched =
+                    crate::proto::prefetch::prefetch_inputs(&self.store, build_task, updater)
+                        .await
+                        .map_err(|e| failure::classify_prefetch_error(&build_task.build_id, e))?;
+                prefetch.record(fetched.paths, fetched.bytes);
             }
 
             let _build = updater.phase(JobPhase::Build);
@@ -593,9 +597,10 @@ impl JobExecutor {
         {
             let mut compress = updater.phase(JobPhase::Compress);
             compress.record(outputs.len() as u32, 0);
-            compress::push_outputs(updater, outputs, &abort)
+            let packed = compress::push_outputs(updater, outputs, &abort)
                 .await
                 .map_err(failure::BuildError::transient)?;
+            compress.record(0, packed.nar_size);
         }
 
         // Release every indirect GC root for this job; symlinks are removed

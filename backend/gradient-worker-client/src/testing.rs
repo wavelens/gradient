@@ -243,7 +243,9 @@ impl ProtoPeer {
             deriver: None,
             ca: None,
         };
-        upload_nar(&self.uploads, job_id, store_path, source).await
+        upload_nar(&self.uploads, job_id, store_path, source)
+            .await
+            .map(drop)
     }
 
     pub async fn pull_nar(&self, job_id: &str, store_path: &str) -> Result<Vec<u8>> {
