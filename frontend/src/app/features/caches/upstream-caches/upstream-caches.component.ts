@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/services/caches.service';
+import { CachesService, UpstreamCache, CacheSubscriptionMode, ProtocolProbe } from '@core/services/caches.service';
 import {
   BadgeComponent,
   BadgeSeverity,
@@ -20,10 +20,12 @@ import {
   InputDirective,
   LabelHelpComponent,
   LoadingSpinnerComponent,
+  MessageService,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
   SelectComponent,
+  ToastComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -51,7 +53,9 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
     BadgeComponent,
     RowListComponent,
     RowComponent,
+    ToastComponent,
   ],
+  providers: [MessageService],
   templateUrl: './upstream-caches.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './upstream-caches.component.scss',
@@ -60,12 +64,14 @@ export class UpstreamCachesComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
   private accessSvc = inject(AccessService);
+  private messageService = inject(MessageService);
 
   access = injectCacheAccess();
 
   rowDisabled = computed(
     () =>
       this.removingUpstreamId() !== null ||
+      this.testingUpstreamId() !== null ||
       this.accessSvc.shouldDisableInput(this.access()),
   );
 
@@ -73,6 +79,7 @@ export class UpstreamCachesComponent implements OnInit {
   addingUpstream = signal(false);
   savingUpstream = signal(false);
   removingUpstreamId = signal<string | null>(null);
+  testingUpstreamId = signal<string | null>(null);
   probeSuggestsProto = signal(false);
 
   upstreamCaches = signal<UpstreamCache[]>([]);
@@ -272,6 +279,28 @@ export class UpstreamCachesComponent implements OnInit {
     this.probeSuggestsProto.set(false);
   }
 
+  testUpstream(id: string): void {
+    this.testingUpstreamId.set(id);
+    this.cachesService.testUpstream(this.cacheName, id).subscribe({
+      next: (r) => {
+        this.testingUpstreamId.set(null);
+        this.messageService.add({
+          severity: r.ok ? 'success' : 'error',
+          summary: r.message,
+          detail: `HTTP/1.1: ${probeSummary(r.http1)}; HTTP/2: ${probeSummary(r.http2)}`,
+        });
+      },
+      error: (err) => {
+        this.testingUpstreamId.set(null);
+        this.messageService.add({
+          severity: 'error',
+          summary: 'Upstream test failed',
+          detail: err?.message || 'Failed to test upstream.',
+        });
+      },
+    });
+  }
+
   removeUpstream(id: string): void {
     this.removingUpstreamId.set(id);
     this.cachesService.removeUpstream(this.cacheName, id).subscribe({
@@ -295,4 +324,9 @@ export class UpstreamCachesComponent implements OnInit {
   modeLabel(mode: CacheSubscriptionMode): string {
     return this.modes.find((m) => m.value === mode)?.label ?? mode;
   }
+}
+
+export function probeSummary(probe: ProtocolProbe): string {
+  if (probe.ok) return `ok (${probe.latency_ms} ms)`;
+  return `failed - ${probe.error ?? `status ${probe.status}`}`;
 }

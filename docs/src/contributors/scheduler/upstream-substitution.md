@@ -73,6 +73,7 @@ A shared build with `probed = false` is not yet a real build. Nothing below the 
 - The failed request is sent again over HTTP/1.1.
 - A body cut short resumes over HTTP/1.1 with `Range: bytes=<sent>-`. Only a `206` whose `Content-Range` starts at that offset is spliced in; anything else ends the body with the original error.
 - The pin applies process-wide at once and is stored in `cache_upstream.http1_only`. Every later request to that upstream, after restarts too, uses HTTP/1.1. The API returns the flag read-only, and the upstream list shows an `HTTP/1.1` badge.
+- `POST /caches/{cache}/upstreams/{id}/test` (`probe_protocol` in `gradient-core/src/upstream_source.rs`) fetches `nix-cache-info` over HTTP/1.1 only and HTTP/2 only, each with its own single-protocol ALPN. The test leaves the pin untouched: a small `nix-cache-info` passing over HTTP/2 says nothing about resets inside large NAR bodies.
 
 ## Substitute Jobs
 

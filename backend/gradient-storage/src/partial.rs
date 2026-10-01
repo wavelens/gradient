@@ -85,7 +85,10 @@ impl PartialWriter {
         self.len == 0
     }
 
-    /// Append `data` at `offset`, which must equal [`Self::len`].
+    /// Append `data` at `offset`, which must equal [`Self::len`]. Returns once
+    /// the bytes are in the file: tokio hands writes to a blocking thread, and a
+    /// writer dropped right after an unflushed append would leave
+    /// [`PartialStore::received_len`] short of what the sender saw acknowledged.
     pub async fn append(&mut self, offset: u64, data: &[u8]) -> Result<()> {
         if offset != self.len {
             bail!(
@@ -99,6 +102,7 @@ impl PartialWriter {
             .write_all(data)
             .await
             .context("write partial chunk")?;
+        self.file.flush().await.context("flush partial chunk")?;
         self.hasher.update(data);
         if let Some(buf) = self.retained.as_mut() {
             if self.len + data.len() as u64 > self.retain_up_to {

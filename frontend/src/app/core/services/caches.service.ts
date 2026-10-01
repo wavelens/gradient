@@ -19,7 +19,22 @@ export interface UpstreamCache {
   upstream_cache_id: string | null;
   url: string | null;
   public_key: string | null;
+  kind: 'internal' | 'gradient_proto' | 'http';
   http1_only: boolean;
+}
+
+export interface ProtocolProbe {
+  ok: boolean;
+  status: number | null;
+  latency_ms: number;
+  error: string | null;
+}
+
+export interface UpstreamTestResponse {
+  ok: boolean;
+  http1: ProtocolProbe;
+  http2: ProtocolProbe;
+  message: string;
 }
 
 export interface CacheMetricPoint {
@@ -188,6 +203,10 @@ export class CachesService {
     public_key?: string;
   }): Observable<string> {
     return this.api.patch<string>(`caches/${cache}/upstream-caches/${upstreamId}`, data);
+  }
+
+  testUpstream(cache: string, upstreamId: string): Observable<UpstreamTestResponse> {
+    return this.api.post<UpstreamTestResponse>(`caches/${cache}/upstream-caches/${upstreamId}/test`, {});
   }
 
   removeUpstream(cache: string, upstreamId: string): Observable<void> {

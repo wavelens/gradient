@@ -9,7 +9,7 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
-import { UpstreamCachesComponent } from './upstream-caches.component';
+import { UpstreamCachesComponent, probeSummary } from './upstream-caches.component';
 import { CachesService } from '@core/services/caches.service';
 import { AccessState } from '@core/models/access.model';
 
@@ -21,12 +21,24 @@ function activatedRouteStub(access: AccessState): ActivatedRoute {
   } as unknown as ActivatedRoute;
 }
 
+const httpUpstream = {
+  id: 'u2',
+  display_name: 'Upstream B',
+  mode: 'ReadOnly' as const,
+  upstream_cache_id: null,
+  kind: 'http' as const,
+  url: 'https://cache.example.org',
+  public_key: 'cache.example.org-1:abc',
+  http1_only: false,
+};
+
 const oneUpstream = [
   {
     id: 'u1',
     display_name: 'Upstream A',
     mode: 'ReadOnly' as const,
     upstream_cache_id: 'cache-1',
+    kind: 'internal' as const,
     url: null,
     public_key: null,
     http1_only: false,
@@ -48,7 +60,10 @@ function findIconButton(root: HTMLElement, icon: string): HTMLButtonElement | nu
   );
 }
 
-function setup(access: AccessState): ComponentFixture<UpstreamCachesComponent> {
+function setup(
+  access: AccessState,
+  upstreamCaches: unknown[] = oneUpstream,
+): ComponentFixture<UpstreamCachesComponent> {
   TestBed.configureTestingModule({
     imports: [UpstreamCachesComponent],
     providers: [
@@ -60,7 +75,7 @@ function setup(access: AccessState): ComponentFixture<UpstreamCachesComponent> {
         provide: CachesService,
         useValue: {
           getCache: () => of({ display_name: 'Demo' }),
-          getUpstreamCaches: () => of(oneUpstream),
+          getUpstreamCaches: () => of(upstreamCaches),
         },
       },
     ],
@@ -142,5 +157,26 @@ describe('UpstreamCachesComponent - access gating', () => {
     const addBtn = findByText(fixture.nativeElement, 'add upstream cache') as HTMLButtonElement | null;
     expect(addBtn).not.toBeNull();
     expect(addBtn!.disabled).toBe(false);
+  });
+});
+
+describe('UpstreamCachesComponent - protocol test', () => {
+  it('offers Test only for HTTP binary-cache upstreams', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    expect(findByText(fixture.nativeElement, 'test')).toBeNull();
+  });
+
+  it('keeps Test usable on a state-managed cache, since a test changes nothing', () => {
+    const fixture = setup({ managed: true, canEdit: true, canTrigger: true }, [httpUpstream]);
+    const testBtn = findByText(fixture.nativeElement, 'test') as HTMLButtonElement | null;
+    expect(testBtn).not.toBeNull();
+    expect(testBtn!.disabled).toBe(false);
+  });
+
+  it('summarises a failed protocol by its error, else its status', () => {
+    expect(probeSummary({ ok: true, status: 200, latency_ms: 12, error: null })).toBe('ok (12 ms)');
+    expect(probeSummary({ ok: false, status: null, latency_ms: 3, error: 'connection reset' }))
+      .toBe('failed - connection reset');
+    expect(probeSummary({ ok: false, status: 404, latency_ms: 3, error: null })).toBe('failed - status 404');
   });
 });
