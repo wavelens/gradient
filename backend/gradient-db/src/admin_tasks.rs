@@ -173,7 +173,10 @@ pub async fn restart<C: ConnectionTrait>(
 ) -> Result<bool> {
     let res = EAdminTask::update_many()
         .col_expr(CAdminTask::Status, Expr::value(AdminTaskStatus::Pending))
-        .col_expr(CAdminTask::StartedAt, Expr::value(Option::<NaiveDateTime>::None))
+        .col_expr(
+            CAdminTask::StartedAt,
+            Expr::value(Option::<NaiveDateTime>::None),
+        )
         .col_expr(CAdminTask::Checkpoint, Expr::value(Option::<String>::None))
         .col_expr(CAdminTask::Progress, Expr::value(Option::<JsonValue>::None))
         .col_expr(CAdminTask::CreatedBy, Expr::value(created_by))
