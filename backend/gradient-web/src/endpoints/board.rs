@@ -19,6 +19,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::{Extension, Json};
+use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_entity::{build_attempt, flake_output_node};
@@ -294,6 +295,37 @@ async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<Job
         .collect()
 }
 
+/// Where a finished job's time went after its last phase. `null` throughout
+/// for a row the server closed without a worker report.
+#[derive(Serialize, Debug, Default, PartialEq, Eq)]
+pub struct ReportGap {
+    /// The worker's job clock when it sent its terminal report.
+    pub worker_elapsed_ms: Option<i64>,
+    /// `worker_elapsed_ms` past the last phase end: the worker's own tail.
+    pub worker_tail_ms: Option<i64>,
+    /// Dispatch to report receipt, less `worker_elapsed_ms`: assignment and
+    /// report transit plus loop lag on both ends.
+    pub transit_ms: Option<i64>,
+}
+
+fn report_gap(
+    worker_elapsed_ms: Option<i64>,
+    phases: &[JobPhaseView],
+    dispatched_at: NaiveDateTime,
+    finished_at: Option<NaiveDateTime>,
+) -> ReportGap {
+    let Some(elapsed) = worker_elapsed_ms else {
+        return ReportGap::default();
+    };
+
+    let last_end = phases.iter().map(|p| p.end_ms).max().unwrap_or(0);
+    ReportGap {
+        worker_elapsed_ms: Some(elapsed),
+        worker_tail_ms: Some(elapsed - last_end),
+        transit_ms: finished_at.map(|f| (f - dispatched_at).num_milliseconds() - elapsed),
+    }
+}
+
 #[derive(Serialize)]
 pub struct JobDerivationView {
     /// Per-eval build identity: the id `GET /builds/{build}` takes. `None` once
@@ -387,6 +419,8 @@ pub struct DispatchedJobDetail {
     pub outcome: Option<String>,
     /// Worker phase spans in report order, nested via `parent_seq`.
     pub phases: Vec<JobPhaseView>,
+    #[serde(flatten)]
+    pub report_gap: ReportGap,
     /// Per-eval build identity, usable with `GET /builds/{build}`. `None` for
     /// eval jobs and for builds whose evaluation has been collected.
     pub build_id: Option<Uuid>,
@@ -456,6 +490,7 @@ pub async fn get_dispatched_job(
             ready_at: None,
             outcome: None,
             phases: Vec::new(),
+            report_gap: ReportGap::default(),
             build_id,
             derivation_build_id: c.derivation_build.map(Into::into),
             derivations,
@@ -565,6 +600,7 @@ pub async fn get_dispatched_job(
             DispatchedJobOutcome::Failed => "failed".to_string(),
             DispatchedJobOutcome::Abandoned => "abandoned".to_string(),
         }),
+        report_gap: report_gap(j.worker_elapsed_ms, &phases, j.dispatched_at, j.finished_at),
         phases,
         build_id,
         derivation_build_id: shared_build_id.map(Into::into),
@@ -1617,6 +1653,43 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    fn phase(seq: i32, start_ms: i64, end_ms: i64) -> JobPhaseView {
+        JobPhaseView {
+            seq,
+            parent_seq: None,
+            phase: "build".into(),
+            start_ms,
+            end_ms,
+            paths: 0,
+            bytes: 0,
+        }
+    }
+
+    /// The span after the last phase is the worker's own tail; the rest of the
+    /// wall time between dispatch and the report's arrival is transit.
+    #[test]
+    fn the_report_gap_splits_into_worker_tail_and_transit() {
+        let dispatched_at = now();
+        let finished_at = dispatched_at + chrono::Duration::milliseconds(10_000);
+        let phases = [phase(0, 0, 6_000), phase(1, 100, 8_500)];
+
+        let gap = report_gap(Some(9_000), &phases, dispatched_at, Some(finished_at));
+
+        assert_eq!(gap.worker_elapsed_ms, Some(9_000));
+        assert_eq!(gap.worker_tail_ms, Some(500));
+        assert_eq!(gap.transit_ms, Some(1_000));
+    }
+
+    /// A row the server closed itself has no worker clock, so nothing is split.
+    #[test]
+    fn a_row_without_a_worker_clock_has_no_gap() {
+        let dispatched_at = now();
+
+        let gap = report_gap(None, &[phase(0, 0, 10)], dispatched_at, Some(dispatched_at));
+
+        assert_eq!(gap, ReportGap::default());
     }
 
     fn build_job(arch: &str, features: &[&str]) -> BoardActiveJob {

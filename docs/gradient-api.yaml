@@ -13670,6 +13670,21 @@ components:
           type: array
           description: The worker's phase timeline in report order, nested via parent_seq. Empty for a job that predates the timeline or never reported one.
           items: { $ref: '#/components/schemas/JobPhase' }
+        worker_elapsed_ms:
+          type: integer
+          format: int64
+          nullable: true
+          description: The worker's job clock when it sent its terminal report. Null for a running job and for a row the server closed itself (abandoned, requeued, re-registered).
+        worker_tail_ms:
+          type: integer
+          format: int64
+          nullable: true
+          description: worker_elapsed_ms past the last phase end, the worker's own time after its last span. Null when worker_elapsed_ms is null.
+        transit_ms:
+          type: integer
+          format: int64
+          nullable: true
+          description: finished_at - dispatched_at - worker_elapsed_ms, the assignment and report transit plus loop lag on both ends. Null when worker_elapsed_ms is null.
         build_id:
           type: string
           format: uuid
@@ -13739,6 +13754,8 @@ components:
             - known_derivations_wait
             - drv_closure_push
             - prefetch
+            - nar_fetch
+            - nar_import
             - substitute_fetch
             - download
             - build
