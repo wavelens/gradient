@@ -63,6 +63,7 @@ function setup(
   access: AccessState,
   integrations: Integration[],
   githubAppAvailable = false,
+  githubAppInstallUrl: string | null = null,
 ): ComponentFixture<IntegrationsComponent> {
   TestBed.configureTestingModule({
     imports: [IntegrationsComponent],
@@ -81,7 +82,12 @@ function setup(
         provide: ProjectsService,
         useValue: {
           getProject: () =>
-            of({ id: 'o', display_name: 'Acme', github_app_available: githubAppAvailable }),
+            of({
+              id: 'o',
+              display_name: 'Acme',
+              github_app_available: githubAppAvailable,
+              github_app_install_url: githubAppInstallUrl,
+            }),
         },
       },
       { provide: ProjectAccessService, useValue: { forProject: () => Promise.resolve(access) } },
@@ -196,6 +202,26 @@ describe('IntegrationsComponent - required webhook events', () => {
     const events = comp.requiredWebhookEvents(baseIntegration.id);
     expect(events).toContain('Merge request');
     expect(events).toContain('Comments (note)');
+  });
+});
+
+describe('IntegrationsComponent - GitHub App install banner', () => {
+  const installUrl = 'https://github.com/apps/gradient-ci/installations/new';
+  const fullAccess = { managed: false, canEdit: true, canTrigger: true };
+
+  it('links the App install page while no installation is linked', async () => {
+    const fixture = setup(fullAccess, [], true, installUrl);
+    await settled(fixture);
+    const link = fixture.nativeElement.querySelector(
+      '[data-testid="no-github-app-banner"] a',
+    ) as HTMLAnchorElement | null;
+    expect(link?.getAttribute('href')).toBe(installUrl);
+  });
+
+  it('hides once an installation is linked', async () => {
+    const fixture = setup(fullAccess, [githubOutbound], true, installUrl);
+    await settled(fixture);
+    expect(fixture.nativeElement.querySelector('[data-testid="no-github-app-banner"]')).toBeNull();
   });
 });
 

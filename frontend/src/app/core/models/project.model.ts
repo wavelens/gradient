@@ -18,6 +18,7 @@ export interface Project {
   role?: 'Admin' | 'Write' | 'View';
   running_evaluations?: number;
   github_app_available?: boolean;
+  github_app_install_url?: string | null;
 }
 
 export interface ProjectMember {

@@ -177,6 +177,7 @@ async fn narinfo_served_from_db_inner() {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
+        github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {
@@ -333,6 +334,7 @@ async fn narinfo_unsigned_inner() {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
+        github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
             gradient_storage::admission::Limits {

@@ -10969,6 +10969,14 @@ components:
             True when the Gradient server has a GitHub App configured at all.
             Clients should hide GitHub-related integration UI when this is
             false.
+        github_app_install_url:
+          type: string
+          format: uri
+          nullable: true
+          description: >-
+            GitHub's page for installing the configured App on an account,
+            e.g. `https://github.com/apps/<slug>/installations/new`. Null
+            without a GitHub App or while GitHub cannot be reached.
 
     # ── Tasks ──────────────────────────────────────────────────────────────
 

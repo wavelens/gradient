@@ -10,6 +10,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::{ok_json, paginate, role_names};
 use crate::permissions::Permission;
+use anyhow::Context;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use gradient_types::events::EventOwner;
@@ -29,6 +30,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeProjectRequest {
@@ -77,6 +79,8 @@ pub struct ProjectResponse {
     pub created_at: chrono::NaiveDateTime,
     /// Whether the server has a GitHub App configured at all.
     pub github_app_available: bool,
+    /// GitHub's install page for the App; absent without an App or while GitHub is unreachable.
+    pub github_app_install_url: Option<String>,
     pub role: Option<String>,
 }
 
@@ -359,9 +363,33 @@ pub async fn get_project(
         managed: project.managed,
         created_by: project.created_by,
         created_at: project.created_at,
-        github_app_available: state.config.github_app.clone().is_some(),
+        github_app_available: state.config.github_app.is_some(),
+        github_app_install_url: github_app_install_url(&state).await,
         role,
     }))
+}
+
+const GITHUB_APP_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
+
+async fn github_app_install_url(state: &ServerState) -> Option<String> {
+    let app = state.config.github_app.as_ref()?;
+    let lookup = async {
+        let pem = tokio::fs::read_to_string(&app.private_key_file)
+            .await
+            .context("read GitHub App private key")?;
+        gradient_forge::github_app::get_install_url(&state.http, app.app_id, &pem).await
+    };
+    state
+        .github_app_install_url
+        .get_or_try_init(|| async {
+            tokio::time::timeout(GITHUB_APP_LOOKUP_TIMEOUT, lookup)
+                .await
+                .context("GitHub App lookup timed out")?
+        })
+        .await
+        .inspect_err(|e| tracing::warn!(error = %e, "GitHub App install URL lookup failed"))
+        .ok()
+        .cloned()
 }
 
 pub async fn patch_project(
