@@ -17,7 +17,7 @@ use gradient_wire::messages::CachedPath;
 use tokio::sync::watch;
 
 use crate::proto::job::JobUpdater;
-use gradient_worker_client::nar::NarSource;
+use gradient_worker_client::nar::{NarSource, UploadedNar};
 
 pub(crate) struct OutputNar<'a> {
     pub store_path: String,
@@ -28,9 +28,9 @@ pub async fn push_outputs(
     updater: &mut JobUpdater,
     outputs: Vec<OutputNar<'_>>,
     abort: &watch::Receiver<bool>,
-) -> Result<()> {
+) -> Result<UploadedNar> {
     if outputs.is_empty() {
-        return Ok(());
+        return Ok(UploadedNar::default());
     }
 
     updater.report_compressing().await?;

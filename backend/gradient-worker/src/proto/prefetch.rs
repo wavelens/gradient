@@ -29,6 +29,7 @@ use gradient_wire::CachedPathInfo;
 use gradient_wire::messages::{
     BuildSpec, CachedPath, EvalMessageLevel, QueryMode, TRANSFER_TIMEOUT,
 };
+use gradient_wire::types::JobPhase;
 use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;
@@ -52,6 +53,14 @@ const PRESIGNED_DOWNLOAD_MAX_ATTEMPTS: u32 = 4;
 
 /// Base backoff before the first presigned-download retry; doubled each attempt.
 const PRESIGNED_RETRY_BASE: Duration = Duration::from_millis(500);
+
+/// What a prefetch moved into the local store: paths imported, compressed
+/// bytes fetched for them.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Prefetched {
+    pub paths: u32,
+    pub bytes: u64,
+}
 
 /// Required input store paths the gradient cache could not serve. Carried as a
 /// typed error so the executor classifies the failure as
@@ -574,12 +583,12 @@ impl<'a> InputPrefetcher<'a> {
     ///
     /// A safety cap bounds worst-case iterations so a pathological cycle or
     /// misbehaving upstream cannot loop forever.
-    async fn run(&mut self) -> Result<()> {
+    async fn run(&mut self) -> Result<Prefetched> {
         self.ensure_self_drv_present().await?;
 
         let wanted = self.enumerate_inputs().await?;
         if wanted.is_empty() {
-            return Ok(());
+            return Ok(Prefetched::default());
         }
 
         let initial_missing = self.filter_missing(wanted).await?;
@@ -588,14 +597,14 @@ impl<'a> InputPrefetcher<'a> {
                 build_id = %self.build_id,
                 "all inputs already in local store; no prefetch needed"
             );
-            return Ok(());
+            return Ok(Prefetched::default());
         }
         self.fetch_closure(initial_missing).await
     }
 
     /// Fetch a seed set of paths plus their transitive closure into the local nix
     /// store. Used by `run` for a build's inputs and by [`ensure_path`].
-    async fn fetch_closure(&mut self, initial_missing: Vec<String>) -> Result<()> {
+    async fn fetch_closure(&mut self, initial_missing: Vec<String>) -> Result<Prefetched> {
         const MAX_ITERATIONS: usize = 1024;
 
         debug!(
@@ -605,6 +614,7 @@ impl<'a> InputPrefetcher<'a> {
         );
 
         let mut all_results: Vec<(String, NarPayload, CachedPath)> = Vec::new();
+        let mut fetched_bytes = 0u64;
         // Every path we've already asked the server about (success or not),
         // so we don't re-query the same one across iterations.
         let mut queried: HashSet<String> = initial_missing.iter().cloned().collect();
@@ -623,8 +633,8 @@ impl<'a> InputPrefetcher<'a> {
             }
 
             let (by_url, by_request) = self.query_and_split(to_query).await?;
-            let mut batch = self.fetch_by_request(by_request).await?;
-            batch.extend(self.download_by_url(by_url).await?);
+            let batch = self.fetch_round(by_url, by_request).await?;
+            fetched_bytes += payload_bytes(&batch).await;
 
             // Collect any references from this batch that we haven't yet
             // queried and that aren't already in the local store.
@@ -708,11 +718,38 @@ impl<'a> InputPrefetcher<'a> {
             "closure expansion complete"
         );
 
-        let imported = self.import_all(all_results).await?;
+        let mut import = self.updater.phase(JobPhase::NarImport);
+        let imported = self.import_all(all_results).await? as u32;
+        import.record(imported, fetched_bytes);
         debug!(build_id = %self.build_id, imported, "prefetch complete");
 
-        Ok(())
+        Ok(Prefetched {
+            paths: imported,
+            bytes: fetched_bytes,
+        })
     }
+
+    /// One closure round's transfers, timed as a single `NarFetch` span.
+    async fn fetch_round(
+        &mut self,
+        by_url: Vec<CachedPath>,
+        by_request: Vec<CachedPath>,
+    ) -> Result<Vec<(String, NarPayload, CachedPath)>> {
+        let mut fetch = self.updater.phase(JobPhase::NarFetch);
+        let mut batch = self.fetch_by_request(by_request).await?;
+        batch.extend(self.download_by_url(by_url).await?);
+        fetch.record(batch.len() as u32, payload_bytes(&batch).await);
+        Ok(batch)
+    }
+}
+
+async fn payload_bytes(batch: &[(String, NarPayload, CachedPath)]) -> u64 {
+    let mut bytes = 0;
+    for (_, nar, _) in batch {
+        bytes += nar.byte_len().await;
+    }
+
+    bytes
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -737,7 +774,7 @@ pub async fn prefetch_inputs(
     store: &LocalNixStore,
     task: &BuildSpec,
     updater: &mut JobUpdater,
-) -> Result<()> {
+) -> Result<Prefetched> {
     let drv = task.drv_path.clone();
     let result = InputPrefetcher::new(store, task, updater).run().await;
     if let Err(e) = &result {
@@ -771,7 +808,8 @@ pub async fn ensure_path(
     }
     InputPrefetcher::for_path(store, path.to_owned(), updater)
         .fetch_closure(vec![path.to_owned()])
-        .await
+        .await?;
+    Ok(())
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
