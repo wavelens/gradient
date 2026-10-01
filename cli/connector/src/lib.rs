@@ -29,6 +29,7 @@ pub struct Client {
 
 struct ClientInner {
     http: reqwest::Client,
+    stream_http: reqwest::Client,
     base_url: String,
     token: Option<String>,
 }
@@ -40,6 +41,9 @@ impl Client {
 
     pub(crate) fn http(&self) -> &reqwest::Client {
         &self.inner.http
+    }
+    pub(crate) fn stream_http(&self) -> &reqwest::Client {
+        &self.inner.stream_http
     }
     pub(crate) fn base_url(&self) -> &str {
         &self.inner.base_url
@@ -131,21 +135,28 @@ impl ClientBuilder {
         let base_url = self
             .base_url
             .ok_or_else(|| "base_url is required".to_string())?;
-        let http = reqwest::Client::builder()
-            .timeout(self.timeout.unwrap_or(Duration::from_secs(30)))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("gradient-cli/", env!("CARGO_PKG_VERSION")))
-            .use_preconfigured_tls(rustls_config())
-            .build()
-            .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+        let timeout = self.timeout.unwrap_or(Duration::from_secs(30));
+        let http = http_client(reqwest::Client::builder().timeout(timeout))?;
+        // A total timeout would also bound the body, cutting off long-lived log streams.
+        let stream_http = http_client(reqwest::Client::builder().connect_timeout(timeout))?;
         Ok(Client {
             inner: Arc::new(ClientInner {
                 http,
+                stream_http,
                 base_url,
                 token: self.token,
             }),
         })
     }
+}
+
+fn http_client(builder: reqwest::ClientBuilder) -> Result<reqwest::Client, String> {
+    builder
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(concat!("gradient-cli/", env!("CARGO_PKG_VERSION")))
+        .use_preconfigured_tls(rustls_config())
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))
 }
 
 fn init_crypto_provider() {

@@ -1,7 +1,6 @@
 use crate::{Client, ConnectorError, http};
-use futures::stream::{Stream, StreamExt};
+use futures::stream::Stream;
 use reqwest::Method;
-use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -64,27 +63,14 @@ impl BuildsApi<'_> {
         id: &str,
     ) -> Result<impl Stream<Item = Result<String, ConnectorError>> + use<>, ConnectorError> {
         let req = http::request(
-            self.0.http(),
+            self.0.stream_http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
             &format!("builds/{id}/log"),
             true,
         )?;
-        let res = req.send().await?;
-        let status = res.status();
-        if !status.is_success() {
-            return Err(ConnectorError::Api {
-                status,
-                message: res.text().await?,
-            });
-        }
-        Ok(res.json_nl_stream::<String>(1_024_000).map(|r| {
-            r.map_err(|e| ConnectorError::Api {
-                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })
-        }))
+        http::json_lines(req.send().await?).await
     }
 
     /// Fetch a 1-based inclusive line range of a completed build's log.
@@ -128,7 +114,7 @@ impl BuildsApi<'_> {
     ) -> Result<impl Stream<Item = Result<serde_json::Value, ConnectorError>> + use<>, ConnectorError>
     {
         let req = http::request(
-            self.0.http(),
+            self.0.stream_http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
@@ -136,20 +122,7 @@ impl BuildsApi<'_> {
             true,
         )?
         .query(&[("q", q), ("case", if case { "true" } else { "false" })]);
-        let res = req.send().await?;
-        let status = res.status();
-        if !status.is_success() {
-            return Err(ConnectorError::Api {
-                status,
-                message: res.text().await?,
-            });
-        }
-        Ok(res.json_nl_stream::<serde_json::Value>(1_024_000).map(|r| {
-            r.map_err(|e| ConnectorError::Api {
-                status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                message: e.to_string(),
-            })
-        }))
+        http::json_lines(req.send().await?).await
     }
 
     pub async fn graph(&self, id: &str) -> Result<BuildGraph, ConnectorError> {

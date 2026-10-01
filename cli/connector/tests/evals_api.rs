@@ -49,3 +49,39 @@ async fn abort_posts_the_abort_method() {
         .unwrap();
     assert_eq!(client.evals().abort("eval-1").await.unwrap(), "Success");
 }
+
+#[tokio::test]
+async fn stream_builds_outlives_the_request_timeout() {
+    use futures::StreamExt;
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let _ = conn.read(&mut [0u8; 4096]).unwrap();
+        let chunk = |s: &str| format!("{:x}\r\n{s}\r\n", s.len());
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n";
+        conn.write_all(format!("{head}{}", chunk("\"first\"\n")).as_bytes())
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        conn.write_all(format!("{}0\r\n\r\n", chunk("\"second\"\n")).as_bytes())
+            .unwrap();
+    });
+
+    let client = Client::builder()
+        .base_url(format!("http://{addr}"))
+        .token("t")
+        .timeout(std::time::Duration::from_millis(200))
+        .build()
+        .unwrap();
+    let lines: Vec<String> = client
+        .evals()
+        .stream_builds("eval-1")
+        .await
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+        .await;
+    assert_eq!(lines, ["first", "second"]);
+}
