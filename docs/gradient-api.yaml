@@ -6764,6 +6764,46 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /caches/{cache}/upstream-caches/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Upstream entry UUID
+    post:
+      tags: [caches]
+      summary: Test an HTTP upstream cache over HTTP/1.1 and HTTP/2
+      description: |-
+        Fetches the upstream cache's `nix-cache-info` twice in parallel, once over HTTP/1.1 only and once
+        over HTTP/2 only, and reports each result. A probe passes on a 2xx body with a `StoreDir:` line.
+        Does not change the upstream cache's `http1_only` pin. Only `http` upstream caches can be tested.
+        Requires `manageUpstreamCaches`; state-managed caches may be tested.
+      operationId: testUpstreamCache
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/UpstreamTestResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /caches/{cache}/members:
     parameters:
       - $ref: '#/components/parameters/CacheSlug'
@@ -12650,6 +12690,40 @@ components:
           type: boolean
           readOnly: true
           description: Set once the upstream cache reset an HTTP/2 stream; it is asked over HTTP/1.1 from then on
+
+    UpstreamProtocolProbe:
+      type: object
+      required: [ok, latency_ms]
+      properties:
+        ok:
+          type: boolean
+          description: Whether `nix-cache-info` was served over this protocol
+        status:
+          type: integer
+          nullable: true
+          description: HTTP status, when a response arrived
+        latency_ms:
+          type: integer
+          description: Time until the probe finished
+        error:
+          type: string
+          nullable: true
+          description: Failure reason, when the probe failed
+
+    UpstreamTestResponse:
+      type: object
+      required: [ok, http1, http2, message]
+      properties:
+        ok:
+          type: boolean
+          description: Whether the upstream cache is reachable over at least one protocol
+        http1:
+          $ref: '#/components/schemas/UpstreamProtocolProbe'
+        http2:
+          $ref: '#/components/schemas/UpstreamProtocolProbe'
+        message:
+          type: string
+          description: Human-readable summary of the test result
 
     AddUpstreamCacheRequest:
       oneOf:

@@ -13,9 +13,11 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::ServerState;
+use gradient_core::upstream_source::{ProtocolProbe, probe_protocol};
 use gradient_entity::cache_upstream::{CacheUpstreamKind, CacheUpstreamSource};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::*;
+use gradient_util::http::HttpVersion;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -307,6 +309,63 @@ pub async fn patch_cache_upstream(
     active.update(&state.web_db).await?;
 
     Ok(ok_json("Upstream updated".to_string()))
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpstreamTestResponse {
+    pub ok: bool,
+    pub http1: ProtocolProbe,
+    pub http2: ProtocolProbe,
+    pub message: String,
+}
+
+impl UpstreamTestResponse {
+    fn new(http1: ProtocolProbe, http2: ProtocolProbe) -> Self {
+        let message = match (http1.ok, http2.ok) {
+            (true, true) => "Reachable over HTTP/1.1 and HTTP/2.",
+            (true, false) => "Reachable over HTTP/1.1 only.",
+            (false, true) => "Reachable over HTTP/2 only.",
+            (false, false) => "Unreachable over HTTP/1.1 and HTTP/2.",
+        };
+        Self {
+            ok: http1.ok || http2.ok,
+            http1,
+            http2,
+            message: message.to_string(),
+        }
+    }
+}
+
+pub async fn post_cache_upstream_test(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Extension(api_key): Extension<MaybeApiKey>,
+    Path((cache, upstream_id)): Path<(String, CacheUpstreamId)>,
+) -> WebResult<Json<BaseResponse<UpstreamTestResponse>>> {
+    let cache = load_cache(
+        &state,
+        Caller::User(&user),
+        api_key.as_ref(),
+        cache,
+        CacheAccess::Require {
+            permission: CachePermission::ManageUpstreamCaches,
+            reject_managed: false,
+        },
+    )
+    .await?;
+    let record = load_upstream(&state, cache.id, upstream_id).await?;
+    let Some(CacheUpstreamSource::Http { url, .. }) = record.as_source() else {
+        return Err(WebError::bad_request(
+            "Only HTTP binary-cache upstreams can be tested.",
+        ));
+    };
+
+    let (http1, http2) = tokio::join!(
+        probe_protocol(url, HttpVersion::Http1),
+        probe_protocol(url, HttpVersion::Http2),
+    );
+
+    Ok(ok_json(UpstreamTestResponse::new(http1, http2)))
 }
 
 pub async fn delete_cache_upstream(

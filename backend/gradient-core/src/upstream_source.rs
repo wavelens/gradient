@@ -17,10 +17,12 @@ use futures::stream::BoxStream;
 use gradient_entity::cache_upstream::{CacheUpstreamKind, Model as MCacheUpstream};
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::CacheUpstreamId;
+use gradient_util::http::{HttpVersion, build_version_download_client};
 
 use crate::upstream::{SampleKind, breakers, http1_pins};
 
 const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+const PROTOCOL_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const LOG_FETCH_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 /// One upstream an object is fetched from.
@@ -146,6 +148,80 @@ async fn read_capped(mut stream: BoxStream<'static, reqwest::Result<Bytes>>) -> 
         body.push_str("\n[truncated]\n");
     }
     Some(body)
+}
+
+/// One request to an upstream's `nix-cache-info` over a single HTTP version.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ProtocolProbe {
+    pub ok: bool,
+    pub status: Option<u16>,
+    pub latency_ms: u64,
+    pub error: Option<String>,
+}
+
+pub async fn probe_protocol(base_url: &str, version: HttpVersion) -> ProtocolProbe {
+    let started = std::time::Instant::now();
+    let outcome = fetch_cache_info(base_url, version).await;
+    let latency_ms = started.elapsed().as_millis() as u64;
+    match outcome {
+        Ok(()) => ProtocolProbe {
+            ok: true,
+            status: Some(200),
+            latency_ms,
+            error: None,
+        },
+        Err((status, error)) => ProtocolProbe {
+            ok: false,
+            status,
+            latency_ms,
+            error: Some(error),
+        },
+    }
+}
+
+async fn fetch_cache_info(
+    base_url: &str,
+    version: HttpVersion,
+) -> Result<(), (Option<u16>, String)> {
+    let client = build_version_download_client(version).map_err(|e| (None, error_chain(&e)))?;
+    let url = format!("{}/nix-cache-info", base_url.trim_end_matches('/'));
+    let response = client
+        .get(&url)
+        .timeout(PROTOCOL_PROBE_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| (None, error_chain(&e)))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err((
+            Some(status.as_u16()),
+            format!("nix-cache-info answered {status}"),
+        ));
+    }
+    let body = response
+        .text()
+        .await
+        .map_err(|e| (Some(status.as_u16()), error_chain(&e)))?;
+    if !body.lines().any(|l| l.starts_with("StoreDir:")) {
+        return Err((
+            Some(status.as_u16()),
+            "nix-cache-info has no StoreDir; not a binary cache".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut cause = err.source();
+    while let Some(e) = cause {
+        let part = e.to_string();
+        if !parts.iter().any(|p| p.contains(&part)) {
+            parts.push(part);
+        }
+        cause = e.source();
+    }
+    parts.join(": ")
 }
 
 #[cfg(test)]
@@ -289,5 +365,45 @@ mod tests {
         let log = fetch_upstream_log(&[source(27, format!("{}/", server.uri()))], DRV).await;
 
         assert_eq!(log.as_deref(), Some("log body"));
+    }
+
+    async fn cache_info_upstream(body: &str) -> MockServer {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/nix-cache-info"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn a_binary_cache_passes_the_http1_probe() {
+        let server = cache_info_upstream("StoreDir: /nix/store\nPriority: 40\n").await;
+
+        let probe = probe_protocol(&server.uri(), HttpVersion::Http1).await;
+
+        assert!(probe.ok, "{probe:?}");
+        assert_eq!(probe.error, None);
+    }
+
+    #[tokio::test]
+    async fn a_page_that_is_no_binary_cache_fails_the_probe() {
+        let server = cache_info_upstream("<html>login</html>").await;
+
+        let probe = probe_protocol(&server.uri(), HttpVersion::Http1).await;
+
+        assert!(!probe.ok);
+        assert_eq!(probe.status, Some(200));
+    }
+
+    #[tokio::test]
+    async fn a_missing_nix_cache_info_reports_its_status() {
+        let server = MockServer::start().await;
+
+        let probe = probe_protocol(&server.uri(), HttpVersion::Http1).await;
+
+        assert!(!probe.ok);
+        assert_eq!(probe.status, Some(404));
     }
 }

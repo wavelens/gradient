@@ -42,5 +42,6 @@ pub use self::proto::cache_proto;
 pub use self::serve::serve;
 pub use self::upload::{nar_chunk, nar_finalize, nars_upload};
 pub use self::upstream_caches::{
-    delete_cache_upstream, get_upstream_caches, patch_cache_upstream, put_cache_upstream,
+    delete_cache_upstream, get_upstream_caches, patch_cache_upstream, post_cache_upstream_test,
+    put_cache_upstream,
 };

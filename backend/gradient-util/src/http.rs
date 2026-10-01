@@ -53,14 +53,22 @@ fn rustls_root_store() -> rustls::RootCertStore {
 
 /// reqwest writes ALPN only into a TLS config it builds itself, so a preconfigured
 /// one without it pins every connection, S3 included, to HTTP/1.1.
-fn rustls_config() -> rustls::ClientConfig {
+fn rustls_config(alpn: &[&[u8]]) -> rustls::ClientConfig {
     init_crypto_provider();
     let mut config = rustls::ClientConfig::builder()
         .with_root_certificates(rustls_root_store())
         .with_no_client_auth();
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
 
     config
+}
+
+const NEGOTIATED: &[&[u8]] = &[b"h2", b"http/1.1"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpVersion {
+    Http1,
+    Http2,
 }
 
 /// The shared user agent and TLS roots, with no total request timeout: for a
@@ -72,7 +80,7 @@ fn rustls_config() -> rustls::ClientConfig {
 pub fn untimed_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .user_agent(user_agent())
-        .use_preconfigured_tls(rustls_config())
+        .use_preconfigured_tls(rustls_config(NEGOTIATED))
         .http2_adaptive_window(true)
 }
 
@@ -104,6 +112,21 @@ pub fn build_download_client() -> reqwest::Result<reqwest::Client> {
 
 pub(crate) fn download_client_builder() -> reqwest::ClientBuilder {
     client_builder().redirect(reqwest::redirect::Policy::limited(DOWNLOAD_MAX_REDIRECTS))
+}
+
+/// A download client that speaks only `version`, offering nothing else in ALPN:
+/// a server without it fails the request instead of downgrading.
+pub fn build_version_download_client(version: HttpVersion) -> reqwest::Result<reqwest::Client> {
+    let builder = download_client_builder();
+    match version {
+        HttpVersion::Http1 => builder
+            .use_preconfigured_tls(rustls_config(&[b"http/1.1"]))
+            .http1_only(),
+        HttpVersion::Http2 => builder
+            .use_preconfigured_tls(rustls_config(&[b"h2"]))
+            .http2_prior_knowledge(),
+    }
+    .build()
 }
 
 /// Process-wide [`build_download_client`], built on first use. Every binary-cache

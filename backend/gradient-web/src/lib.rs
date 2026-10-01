@@ -421,6 +421,10 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             patch(caches::patch_cache_upstream).delete(caches::delete_cache_upstream),
         )
         .route(
+            "/caches/{cache}/upstream-caches/{id}/test",
+            post(caches::post_cache_upstream_test),
+        )
+        .route(
             "/caches/{cache}/roles",
             get(caches::roles::get_cache_roles).post(caches::roles::post_cache_role),
         )
