@@ -107,7 +107,7 @@ sequenceDiagram
 
 ## Versioning
 
-`PROTO_VERSION` is `22` and rises with every breaking wire change; both sides must match exactly. The check lives once, in `session::handshake::on_init_connection`, for every session kind.
+`PROTO_VERSION` is `23` and rises with every breaking wire change; both sides must match exactly. The check lives once, in `session::handshake::on_init_connection`, for every session kind.
 
 ## Cache Sessions
 

@@ -59,6 +59,8 @@ The **Storage** tab reads these metric keys. Counts are summed per bucket; an em
 A job from **Live Jobs** opens with:
 
 - The server's marks: **Queued**, **Ready**, **Assigned**, **Finished**.
+- **Worker tail** of a finished job: the worker's time after its last phase.
+- **Transit** of a finished job: the rest of the time between **Assigned** and **Finished**, spent on the network and in queues on both ends.
 - The worker timeline: nested phases (fetch, evaluate, build, compress, NAR push) with duration, share and bytes moved.
 - The score breakdown: each scoring rule's contribution to the winning worker.
 
@@ -74,12 +76,14 @@ The timeline shows where a slow job spent its time, the score shows why the job 
     | `eval_cache_pull`, `eval_cache_push` | Waiting for and returning the shared evaluation cache |
     | `known_derivations_wait` | Waiting for the server to name the `.drv` files the server already knows |
     | `drv_closure_push` | Pushing a batch of `.drv` closures |
-    | `prefetch` | Importing a build's inputs from the cache |
+    | `prefetch` | Bringing a build's inputs from the cache into the local store |
+    | `nar_fetch` | One round of input downloads, nested under `prefetch` |
+    | `nar_import` | Importing the downloaded inputs into the local store, nested under `prefetch` |
     | `substitute_fetch` | Fetching one output from an upstream cache |
     | `download` | One `builtin:fetchurl`, fetched by the worker without Nix |
     | `build` | One derivation build |
     | `compress` | Packing the job's outputs for upload |
-    | `nar_push` | One output upload, nested under `compress` |
+    | `nar_push` | Uploading a batch of NARs, nested under `compress` for outputs |
     | `cache_query_wait` | Waiting for a cache status reply |
 
     A job records at most 2000 phases; past that, phases still run but are no longer timed one by one.
