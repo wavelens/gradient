@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
-use gradient_scheduler::Scheduler;
+use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_types::ids::DispatchedJobId;
 use gradient_util::shutdown::Shutdown;
 use gradient_wire::types::BuildFailureKind;
@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, debug, debug_span, error, info, warn};
 
-use gradient_wire::messages::{JobPhaseSpan, JobUpdateKind};
+use gradient_wire::messages::JobUpdateKind;
 
 use super::socket::{ProtoWriter, push_pending_candidates};
 
@@ -36,7 +36,7 @@ pub(super) enum JobEvent {
     Completed {
         job_id: String,
         assignment_id: DispatchedJobId,
-        spans: Vec<JobPhaseSpan>,
+        report: ReportedTimeline,
     },
     Failed {
         job_id: String,
@@ -148,8 +148,8 @@ impl ApplyJobEvent for SchedulerJobEvents {
             JobEvent::Completed {
                 job_id,
                 assignment_id,
-                spans,
-            } => self.completed(job_id, assignment_id, spans).await,
+                report,
+            } => self.completed(job_id, assignment_id, report).await,
             JobEvent::Failed {
                 job_id,
                 error,
@@ -242,12 +242,12 @@ impl SchedulerJobEvents {
         &self,
         job_id: String,
         assignment_id: DispatchedJobId,
-        spans: Vec<JobPhaseSpan>,
+        report: ReportedTimeline,
     ) {
         let peer_id = self.peer_id.as_str();
-        info!(%peer_id, %job_id, phases = spans.len(), "job completed");
+        info!(%peer_id, %job_id, phases = report.spans.len(), "job completed");
         self.scheduler
-            .close_job_timeline(assignment_id, DispatchedJobOutcome::Completed, spans)
+            .close_job_timeline(assignment_id, DispatchedJobOutcome::Completed, report)
             .await;
         if let Err(e) = self.scheduler.handle_job_completed(peer_id, &job_id).await {
             error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");

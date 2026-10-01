@@ -19,9 +19,9 @@ use gradient_util::store_path::strip_nix_store_prefix;
 use tokio::sync::Semaphore;
 use tracing::{Instrument as _, debug, debug_span, info, trace, warn};
 
-use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
 use gradient_scheduler::jobs::{Assignment, PendingJob};
+use gradient_scheduler::{ReportedTimeline, Scheduler};
 use gradient_wire::messages::{
     ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, ClusterMembership,
     JobKind, ServerMessage,
@@ -320,8 +320,9 @@ impl<'a> InboundContext<'a> {
                 job_id,
                 assignment_id,
                 spans,
-                ..
+                elapsed_ms,
             } => {
+                let report = ReportedTimeline::received(spans, elapsed_ms);
                 self.forget_uploads(&job_id, uploads).await;
                 self.logs.flush().await;
                 if let Some(assignment_id) = self.owned(&job_id, &assignment_id) {
@@ -330,7 +331,7 @@ impl<'a> InboundContext<'a> {
                         .push(JobEvent::Completed {
                             job_id,
                             assignment_id,
-                            spans,
+                            report,
                         })
                         .await;
                 }
@@ -343,8 +344,9 @@ impl<'a> InboundContext<'a> {
                 kind,
                 missing_paths,
                 spans,
-                ..
+                elapsed_ms,
             } => {
+                let report = ReportedTimeline::received(spans, elapsed_ms);
                 self.forget_uploads(&job_id, uploads).await;
                 self.logs.flush().await;
                 if self.owned(&job_id, &assignment_id).is_some()
@@ -353,12 +355,12 @@ impl<'a> InboundContext<'a> {
                     info!(peer_id = %self.peer_id, %job_id, %error, "held cluster member released before its start");
                     self.active.remove(&job_id);
                 } else if let Some(assignment_id) = self.owned(&job_id, &assignment_id) {
-                    warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
+                    warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = report.spans.len(), "job failed");
                     self.active.remove(&job_id);
                     self.scheduler.record_job_timeline(
                         assignment_id,
                         DispatchedJobOutcome::Failed,
-                        spans,
+                        report,
                     );
                     self.job_events
                         .push(JobEvent::Failed {

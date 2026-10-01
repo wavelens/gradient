@@ -17,9 +17,9 @@ use gradient_wire::types::{
     JobKind,
 };
 
-use super::Scheduler;
 use super::actor::WorkerCapabilities;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
+use super::{ReportedTimeline, Scheduler};
 use gradient_pool::session_port::{SessionPort, SessionSignal};
 use tokio::sync::mpsc;
 
@@ -1356,7 +1356,7 @@ async fn a_report_without_an_assignment_row_is_dropped_loudly() {
         .persist_job_timeline(
             DispatchedJobId::now_v7(),
             DispatchedJobOutcome::Completed,
-            vec![],
+            ReportedTimeline::received(vec![], 0),
         )
         .await;
 
@@ -1380,7 +1380,7 @@ async fn a_failed_lookup_is_not_reported_as_a_missing_row() {
         .persist_job_timeline(
             DispatchedJobId::now_v7(),
             DispatchedJobOutcome::Completed,
-            vec![],
+            ReportedTimeline::received(vec![], 0),
         )
         .await;
 
@@ -1404,7 +1404,11 @@ async fn a_report_with_an_open_row_closes_it() {
     let scheduler = test_scheduler_with(db).await;
 
     let landing = scheduler
-        .persist_job_timeline(assignment_id, DispatchedJobOutcome::Completed, vec![])
+        .persist_job_timeline(
+            assignment_id,
+            DispatchedJobOutcome::Completed,
+            ReportedTimeline::received(vec![], 0),
+        )
         .await;
 
     assert_eq!(landing, TimelineLanding::Closed);
@@ -1427,6 +1431,54 @@ async fn a_report_with_an_open_row_closes_it() {
     assert!(format!("{:?}", close.values).contains(&assignment_id.to_string()));
 }
 
+/// The finish mark is the moment the report arrived, not when the detached
+/// write ran, and the worker's own clock is stored beside it so the gap after
+/// the last span splits into worker tail and transit.
+#[tokio::test]
+async fn a_closing_report_stores_its_arrival_and_the_worker_clock() {
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+    use sea_orm::{DatabaseBackend, MockDatabase, Value};
+
+    let assignment_id = DispatchedJobId::now_v7();
+    let row = dispatched_row(assignment_id);
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![row.clone()], vec![row]])
+        .into_connection();
+    let log_db = db.clone();
+    let scheduler = test_scheduler_with(db).await;
+    let received_at = gradient_types::now() - chrono::Duration::seconds(30);
+
+    scheduler
+        .persist_job_timeline(
+            assignment_id,
+            DispatchedJobOutcome::Completed,
+            ReportedTimeline {
+                spans: vec![],
+                worker_elapsed_ms: 4_321,
+                received_at,
+            },
+        )
+        .await;
+
+    let log = log_db.into_transaction_log();
+    let close = log
+        .iter()
+        .flat_map(|t| t.statements())
+        .find(|s| s.sql.starts_with("UPDATE \"dispatched_job\""))
+        .expect("the report closes its own row");
+    assert!(
+        close.sql.contains("\"worker_elapsed_ms\" ="),
+        "{}",
+        close.sql
+    );
+    let values = &close.values.as_ref().expect("bound values").0;
+    assert!(values.contains(&Value::BigInt(Some(4_321))), "{values:?}");
+    assert!(
+        values.contains(&Value::ChronoDateTime(Some(received_at))),
+        "{values:?}"
+    );
+}
+
 /// A row that is found but cannot be stamped is not closed, so the report must
 /// not claim it landed.
 #[tokio::test]
@@ -1443,7 +1495,11 @@ async fn a_close_that_fails_is_reported_as_a_failed_close() {
     let scheduler = test_scheduler_with(db).await;
 
     let landing = scheduler
-        .persist_job_timeline(assignment_id, DispatchedJobOutcome::Completed, vec![])
+        .persist_job_timeline(
+            assignment_id,
+            DispatchedJobOutcome::Completed,
+            ReportedTimeline::received(vec![], 0),
+        )
         .await;
 
     assert_eq!(landing, TimelineLanding::CloseFailed);
@@ -1476,12 +1532,15 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
         .persist_job_timeline(
             assignment_id,
             DispatchedJobOutcome::Completed,
-            vec![JobPhaseSpan {
-                phase: JobPhase::Fetch,
-                start_ms: 0,
-                end_ms: 10,
-                ..Default::default()
-            }],
+            ReportedTimeline::received(
+                vec![JobPhaseSpan {
+                    phase: JobPhase::Fetch,
+                    start_ms: 0,
+                    end_ms: 10,
+                    ..Default::default()
+                }],
+                10,
+            ),
         )
         .await;
 
