@@ -3,6 +3,7 @@
   "version": "1.4.1",
   "private": true,
   "type": "module",
+  "sideEffects": false,
   "license": "AGPL-3.0-only",
   "scripts": {
     "tokens:generate": "node scripts/generate-tokens.mts",
