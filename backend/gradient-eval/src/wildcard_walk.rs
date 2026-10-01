@@ -85,7 +85,10 @@ pub struct Shard {
 /// `*` / `#` / opaque / literal semantics structurally identical, so the
 /// split-then-union invariant holds by construction instead of by test.
 enum Sink<'a> {
-    Derivations(&'a mut Vec<String>),
+    Derivations {
+        out: &'a mut Vec<String>,
+        deferred: Option<&'a mut Vec<Shard>>,
+    },
     Shards(&'a mut Vec<Shard>),
 }
 
@@ -94,7 +97,7 @@ impl Sink<'_> {
     /// the concrete segments as a wildcard-free shard.
     fn emit_leaf(&mut self, path: Vec<String>) {
         match self {
-            Sink::Derivations(out) => out.push(path.join(".")),
+            Sink::Derivations { out, .. } => out.push(path.join(".")),
             Sink::Shards(out) => out.push(Shard {
                 segments: path,
                 only: None,
@@ -114,6 +117,29 @@ impl Sink<'_> {
             out.push(Shard {
                 segments,
                 only: Some(names),
+            });
+        }
+
+        true
+    }
+
+    /// Split discovery hands a nested set under a trailing `*` back as a `#`
+    /// shard over its children, so their evaluation spreads across workers.
+    fn defer_children(&mut self, path: &[String], names: &[String]) -> bool {
+        let Sink::Derivations {
+            deferred: Some(deferred),
+            ..
+        } = self
+        else {
+            return false;
+        };
+
+        if !names.is_empty() {
+            let mut segments = path.to_vec();
+            segments.push("#".to_owned());
+            deferred.push(Shard {
+                segments,
+                only: Some(names.to_vec()),
             });
         }
 
@@ -157,7 +183,7 @@ fn traverse<N: WalkNode>(
 ) {
     match segs.split_first() {
         None => match sink {
-            Sink::Derivations(out) => {
+            Sink::Derivations { out, .. } => {
                 if tolerate(node.is_derivation(), path, diags) {
                     out.push(path.join("."));
                 }
@@ -183,7 +209,12 @@ fn traverse<N: WalkNode>(
                     } else if tolerate(child.is_opaque(), &p, diags) {
                         continue;
                     } else {
-                        for sub in tolerate(child.child_names(), &p, diags) {
+                        let subs = tolerate(child.child_names(), &p, diags);
+                        if sink.defer_children(&p, &subs) {
+                            continue;
+                        }
+
+                        for sub in subs {
                             let mut q = p.clone();
                             q.push(sub.clone());
                             let Some(gc) = tolerate(child.child(&sub), &q, diags) else {
@@ -248,7 +279,7 @@ fn descend<N: WalkNode>(
                 only: None,
             });
         }
-        Sink::Derivations(_) => traverse(child, &path, rest, None, sink, diags),
+        Sink::Derivations { .. } => traverse(child, &path, rest, None, sink, diags),
     }
 }
 
@@ -271,6 +302,31 @@ pub fn discover_within<N: WalkNode>(
     excludes: &[Vec<String>],
     only: Option<&[String]>,
 ) -> (Vec<String>, Vec<String>) {
+    collect_derivations(root, includes, excludes, only, None)
+}
+
+/// [`discover_within`] that returns each nested set under a trailing `*` as a
+/// deferred shard instead of forcing its children, so one heavy set (all NixOS
+/// tests of a system) is listable across the pool rather than on one worker.
+pub fn discover_split<N: WalkNode>(
+    root: &N,
+    includes: &[Vec<String>],
+    excludes: &[Vec<String>],
+    only: Option<&[String]>,
+) -> (Vec<String>, Vec<Shard>, Vec<String>) {
+    let mut deferred = Vec::new();
+    let (out, diags) = collect_derivations(root, includes, excludes, only, Some(&mut deferred));
+
+    (out, deferred, diags)
+}
+
+fn collect_derivations<N: WalkNode>(
+    root: &N,
+    includes: &[Vec<String>],
+    excludes: &[Vec<String>],
+    only: Option<&[String]>,
+    mut deferred: Option<&mut Vec<Shard>>,
+) -> (Vec<String>, Vec<String>) {
     let mut out = Vec::new();
     let mut diags = Vec::new();
     for inc in includes {
@@ -280,7 +336,10 @@ pub fn discover_within<N: WalkNode>(
             &[],
             &segs,
             only,
-            &mut Sink::Derivations(&mut out),
+            &mut Sink::Derivations {
+                out: &mut out,
+                deferred: deferred.as_deref_mut(),
+            },
             &mut diags,
         );
     }
@@ -299,11 +358,8 @@ pub fn discover_within<N: WalkNode>(
     (out, diags)
 }
 
-pub fn discover_patterns<N: WalkNode>(
-    root: &N,
-    wildcards: &[String],
-    only: Option<&[String]>,
-) -> (Vec<String>, Vec<String>) {
+/// Parse wildcard strings into `(includes, excludes)` segment lists.
+pub fn parse_patterns(wildcards: &[String]) -> (Vec<Vec<String>>, Vec<Vec<String>>) {
     let mut includes = Vec::new();
     let mut excludes = Vec::new();
     for w in wildcards {
@@ -315,7 +371,7 @@ pub fn discover_patterns<N: WalkNode>(
         }
     }
 
-    discover_within(root, &includes, &excludes, only)
+    (includes, excludes)
 }
 
 pub fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> (Vec<Shard>, Vec<String>) {
@@ -676,16 +732,18 @@ mod tests {
         let original = discover(&root, &[segs(pattern)], &[]).0;
 
         let mut union = Vec::new();
-        for shard in plan_shards(&root, &[segs(pattern)]).0 {
+        let mut queue = plan_shards(&root, &[segs(pattern)]).0;
+        while let Some(shard) = queue.pop() {
             let names = shard.only.clone().unwrap_or_default();
             let batches: Vec<Option<&[String]>> = match shard.only {
                 Some(_) => names.iter().map(std::slice::from_ref).map(Some).collect(),
                 None => vec![None],
             };
             for only in batches {
-                union.extend(
-                    discover_within(&root, std::slice::from_ref(&shard.segments), &[], only).0,
-                );
+                let (attrs, deferred, _) =
+                    discover_split(&root, std::slice::from_ref(&shard.segments), &[], only);
+                union.extend(attrs);
+                queue.extend(deferred);
             }
         }
         union.sort();
@@ -739,6 +797,49 @@ mod tests {
         assert_split_equivalent(&root, &["jobs", "*"]);
         assert_split_equivalent(&root, &["jobs", "#"]);
         assert_split_equivalent(&root, &["*", "*"]);
+    }
+
+    #[test]
+    fn split_discovery_defers_each_nested_set_under_a_trailing_star() {
+        let root = tree();
+        let (attrs, deferred, _) = discover_split(
+            &&root,
+            &[segs(&["packages", "*"])],
+            &[],
+            Some(&segs(&["x86_64-linux"])),
+        );
+        assert!(
+            attrs.is_empty(),
+            "no grandchild is forced inline: {attrs:?}"
+        );
+        assert_eq!(
+            deferred,
+            vec![restricted(
+                &["packages", "x86_64-linux", "#"],
+                &["cowsay", "hello", "nested"]
+            )]
+        );
+
+        let (attrs, deferred, _) = discover_split(
+            &&root,
+            &[segs(&["packages", "x86_64-linux", "*"])],
+            &[],
+            None,
+        );
+        assert_eq!(
+            attrs,
+            vec![
+                "packages.x86_64-linux.cowsay",
+                "packages.x86_64-linux.hello"
+            ]
+        );
+        assert_eq!(
+            deferred,
+            vec![restricted(
+                &["packages", "x86_64-linux", "nested", "#"],
+                &["inner"]
+            )]
+        );
     }
 
     #[test]

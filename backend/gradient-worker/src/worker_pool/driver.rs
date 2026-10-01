@@ -55,8 +55,14 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
             } => worker
                 .list(repository, wildcards, only, input_overrides)
                 .await
-                .map(|(attrs, warnings, errors, _stats)| {
-                    json!({"kind": "list_ok", "attrs": attrs, "warnings": warnings, "errors": errors})
+                .map(|l| {
+                    json!({
+                        "kind": "list_ok",
+                        "attrs": l.attrs,
+                        "deferred": l.deferred,
+                        "warnings": l.warnings,
+                        "errors": l.errors,
+                    })
                 }),
             EvalRequest::Resolve {
                 repository,

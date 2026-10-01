@@ -14,9 +14,10 @@ flowchart LR
 ## Subprocess IPC
 
 - **Frames:** a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`), the conventions of `/proto`.
-- **Version byte:** the subprocess writes `EVAL_IPC_VERSION` (currently 5) before the first frame; a binary swapped mid-run fails the handshake instead of sending undecodable frames.
+- **Version byte:** the subprocess writes `EVAL_IPC_VERSION` (currently 6) before the first frame; a binary swapped mid-run fails the handshake instead of sending undecodable frames.
 - **Streamed resolve:** `Resolve` answers with one `ResolveItem` per attribute as soon as the attribute resolves, then `ResolveEnd` with the batch's warnings and stats delta. Every other request is one request, one response.
 - **Shards:** `Plan` splits each include at its first wildcard. A wildcard followed by more segments yields one sub-pattern per child (`packages.*.hello` -> `packages.x86_64-linux.hello`). A trailing wildcard yields the unchanged pattern plus its child names (`only`), read without forcing any child; the parent lists those names in batches of `names / (pool * 4)` (at most 64), and `List` limits the first wildcard to the batch.
+- **Deferred sets:** `List` is never forcing the children of a nested set under a trailing `*` (all checks of one system). The set comes back in `deferred` as a `#` shard over its children, and the parent is queueing those names in batches. One heavy set is spreading across the pool instead of keeping one subprocess busy while the rest sit idle.
 - **Warm walker:** a subprocess keeps one walker (locked flake plus open eval cache) across consecutive requests for the same repository; a Plan / List / Resolve sequence pays the lock and the cache open once.
 
 ## Parent Side

@@ -155,18 +155,21 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             } => with_evaluator(&evaluator, |ev| {
                 let (result, warnings) = capture_warnings_during(|| {
                     walkers.with(ev, &repository, &input_overrides, |walker| {
-                        let (attrs, errors) = walker.discover(&wildcards, only.as_deref())?;
+                        let listing = walker.discover_split(&wildcards, only.as_deref())?;
                         let _ = walker.commit_cache();
-                        Ok((attrs, errors))
+                        Ok(listing)
                     })
                 });
                 let stats = take_delta(ev);
-                or_err(result.map(|(attrs, errors)| EvalResponse::ListOk {
-                    attrs,
-                    warnings,
-                    errors,
-                    stats,
-                }))
+                or_err(
+                    result.map(|(attrs, deferred, errors)| EvalResponse::ListOk {
+                        attrs,
+                        deferred,
+                        warnings,
+                        errors,
+                        stats,
+                    }),
+                )
             }),
             EvalRequest::Resolve {
                 repository,

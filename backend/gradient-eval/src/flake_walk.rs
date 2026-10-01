@@ -26,6 +26,13 @@ use crate::ipc::DiscoveryShard;
 use crate::strip_nix_store_prefix;
 use crate::wildcard_walk::{self, WalkNode};
 
+fn to_wire(shard: wildcard_walk::Shard) -> DiscoveryShard {
+    DiscoveryShard {
+        pattern: wildcard_walk::segments_to_pattern(&shard.segments),
+        only: shard.only,
+    }
+}
+
 /// A locked flake with an open eval cache, walked via a borrowed `EvalState`.
 pub struct FlakeWalker<'a> {
     cache: EvalCache,
@@ -67,8 +74,27 @@ impl<'a> FlakeWalker<'a> {
         only: Option<&[String]>,
     ) -> Result<(Vec<String>, Vec<String>)> {
         let root = self.root()?;
+        let (includes, excludes) = wildcard_walk::parse_patterns(wildcards);
 
-        Ok(wildcard_walk::discover_patterns(&root, wildcards, only))
+        Ok(wildcard_walk::discover_within(
+            &root, &includes, &excludes, only,
+        ))
+    }
+
+    /// [`Self::discover`] for one pooled shard: nested sets under a trailing
+    /// `*` come back as deferred shards for the parent to fan out.
+    #[tracing::instrument(level = "debug", skip_all)]
+    pub fn discover_split(
+        &self,
+        wildcards: &[String],
+        only: Option<&[String]>,
+    ) -> Result<(Vec<String>, Vec<DiscoveryShard>, Vec<String>)> {
+        let root = self.root()?;
+        let (includes, excludes) = wildcard_walk::parse_patterns(wildcards);
+        let (attrs, deferred, errors) =
+            wildcard_walk::discover_split(&root, &includes, &excludes, only);
+
+        Ok((attrs, deferred.into_iter().map(to_wire).collect(), errors))
     }
 
     /// Split the include patterns into disjoint shards for memory-bounded
@@ -77,24 +103,10 @@ impl<'a> FlakeWalker<'a> {
     #[tracing::instrument(level = "debug", skip_all)]
     pub fn plan_shards(&self, wildcards: &[String]) -> Result<(Vec<DiscoveryShard>, Vec<String>)> {
         let root = self.root()?;
-        let includes: Vec<Vec<String>> = wildcards
-            .iter()
-            .map(|w| wildcard_walk::parse_pattern(w))
-            .filter(|(exclude, _)| !exclude)
-            .map(|(_, segs)| segs)
-            .collect();
-
+        let (includes, _) = wildcard_walk::parse_patterns(wildcards);
         let (shards, errors) = wildcard_walk::plan_shards(&root, &includes);
-        Ok((
-            shards
-                .into_iter()
-                .map(|s| DiscoveryShard {
-                    pattern: wildcard_walk::segments_to_pattern(&s.segments),
-                    only: s.only,
-                })
-                .collect(),
-            errors,
-        ))
+
+        Ok((shards.into_iter().map(to_wire).collect(), errors))
     }
 
     #[tracing::instrument(level = "debug", skip_all, fields(attr = attr_path))]

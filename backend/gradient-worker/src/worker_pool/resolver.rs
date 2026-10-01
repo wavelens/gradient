@@ -20,11 +20,13 @@ use tracing::debug;
 
 use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
 use super::pool::{EvalWorkerPool, PooledEvalWorker};
+use super::transport::Listing;
 
 /// `DerivationResolver` impl that drives an [`EvalWorkerPool`].
 ///
 /// `list_flake_derivations` plans shards on one worker and fans them across
-/// the pool, a trailing wildcard's children in batches; `resolve_derivation_paths`
+/// the pool, a trailing wildcard's children in batches, queueing every nested
+/// set a worker defers as further batches; `resolve_derivation_paths`
 /// splits attrs into batches the same way. Both fan-outs run through [`pooled_fan_out`] and recover from
 /// subprocess crashes with the same [`MAX_CRASH_ATTEMPTS`] tolerance: a shard
 /// retries whole (its response is atomic), a resolve batch salvages its
@@ -154,39 +156,28 @@ fn crashed_derivation(attr: String) -> ResolvedDerivation {
     )
 }
 
-/// Dynamic work queue over the pool: `workers` loops each pull the next item
-/// as soon as they are free, so one slow item never leaves the rest of the
-/// pool idle. The first hard error drains the fan-out and propagates.
-async fn pooled_fan_out<T, Fut>(
-    workers: usize,
-    items: Vec<T>,
-    run: impl Fn(T) -> Fut + Sync,
-) -> Result<()>
+/// Dynamic work queue over the pool: up to `workers` items run at once and the
+/// next starts as soon as one finishes, so one slow item never leaves the rest
+/// of the pool idle. An item may return follow-up items, which join the queue.
+/// The first hard error drains the fan-out and propagates.
+async fn pooled_fan_out<T, Fut>(workers: usize, items: Vec<T>, run: impl Fn(T) -> Fut) -> Result<()>
 where
-    T: Send,
-    Fut: Future<Output = Result<()>>,
+    Fut: Future<Output = Result<Vec<T>>>,
 {
-    let queue = Mutex::new(VecDeque::from(items));
-    let (queue, run) = (&queue, &run);
-    let mut tasks: FuturesUnordered<_> = (0..workers.max(1))
-        .map(|_| async move {
-            loop {
-                // Scope the pop so the guard drops before the await; holding
-                // it across `.await` would deadlock the executor.
-                let item = queue.lock().pop_front();
-                let Some(item) = item else { break };
-                run(item).await?;
-            }
+    let mut queue = VecDeque::from(items);
+    let mut running = FuturesUnordered::new();
+    loop {
+        while running.len() < workers.max(1)
+            && let Some(item) = queue.pop_front()
+        {
+            running.push(run(item));
+        }
 
-            Ok::<(), anyhow::Error>(())
-        })
-        .collect();
-
-    while let Some(drained) = tasks.next().await {
-        drained?;
+        let Some(done) = running.next().await else {
+            return Ok(());
+        };
+        queue.extend(done?);
     }
-
-    Ok(())
 }
 
 /// Outcome of resolving one batch on one worker. `Complete` means the
@@ -412,7 +403,7 @@ impl WorkerPoolResolver {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
-    ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
+    ) -> Result<Listing> {
         let mut attempt = 0;
         loop {
             match self.list_once(repository, call.clone(), overrides).await {
@@ -434,7 +425,7 @@ impl WorkerPoolResolver {
         repository: &str,
         call: DiscoveryCall,
         overrides: &[(String, String)],
-    ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
+    ) -> Result<Listing> {
         let bucket = self.bucket_of(call.wildcards.first());
         let mut worker = self.pool.acquire().await?;
         match worker
@@ -446,9 +437,9 @@ impl WorkerPoolResolver {
             )
             .await
         {
-            Ok((attrs, warnings, errors, stats)) => {
-                self.finish_call(&mut worker, &bucket, stats);
-                Ok((attrs, warnings, errors))
+            Ok(mut listing) => {
+                self.finish_call(&mut worker, &bucket, listing.stats.take());
+                Ok(listing)
             }
             Err(e) => {
                 worker.mark_dead();
@@ -547,12 +538,13 @@ impl DerivationResolver for WorkerPoolResolver {
         {
             let repo = repository.as_str();
             let (attrs, warnings, errors) = (&attrs, &warnings, &errors);
+            let excludes = excludes.as_slice();
             pooled_fan_out(self.pool.max(), calls, |call| async move {
-                let (a, w, e) = self.list_shard(repo, call, overrides).await?;
-                attrs.lock().extend(a);
-                warnings.lock().extend(w);
-                errors.lock().extend(e);
-                Ok(())
+                let listing = self.list_shard(repo, call, overrides).await?;
+                attrs.lock().extend(listing.attrs);
+                warnings.lock().extend(listing.warnings);
+                errors.lock().extend(listing.errors);
+                Ok(discovery_calls(listing.deferred, excludes, self.pool.max()))
             })
             .await?;
         }
@@ -609,7 +601,7 @@ impl DerivationResolver for WorkerPoolResolver {
                 // protocol violation or pool failure is a hard error.
                 let resolved = resolve_chunk(resolve_batch, batch, 0).await?;
                 indexed.lock().extend(resolved);
-                Ok(())
+                Ok(Vec::new())
             })
             .await?;
         }
@@ -863,7 +855,7 @@ mod tests {
         let seen_ref = &seen;
         pooled_fan_out(3, (0..10).collect(), |n| async move {
             seen_ref.lock().push(n);
-            Ok(())
+            Ok(Vec::new())
         })
         .await
         .expect("no errors");
@@ -873,10 +865,28 @@ mod tests {
 
         let err = pooled_fan_out(2, vec![1, 2, 3], |n| async move {
             anyhow::ensure!(n != 2, "boom on {n}");
-            Ok(())
+            Ok(Vec::new())
         })
         .await
         .expect_err("error must propagate");
         assert!(err.to_string().contains("boom on 2"));
+    }
+
+    #[tokio::test]
+    async fn pooled_fan_out_runs_follow_ups_while_the_slow_item_is_in_flight() {
+        let seen = Mutex::new(Vec::new());
+        let seen_ref = &seen;
+        pooled_fan_out(2, vec![0, 1], |n| async move {
+            if n == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+
+            seen_ref.lock().push(n);
+            Ok(if n == 1 { vec![10, 11] } else { Vec::new() })
+        })
+        .await
+        .expect("no errors");
+
+        assert_eq!(seen.into_inner(), vec![1, 10, 11, 0]);
     }
 }

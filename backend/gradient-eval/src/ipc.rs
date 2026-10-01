@@ -35,7 +35,7 @@ use crate::stats::StatsDelta;
 /// changes. Parent and subprocess are the same re-exec'd binary, so a mismatch
 /// only happens when the binary is replaced mid-run; the handshake turns that
 /// from undecodable frames into one clear error.
-pub const EVAL_IPC_VERSION: u8 = 5;
+pub const EVAL_IPC_VERSION: u8 = 6;
 
 /// Upper bound on a single frame's payload. Far above any real message (a
 /// discovery response for a huge flake is a few MiB); its job is to turn a
@@ -69,7 +69,8 @@ pub enum EvalRequest {
         input_overrides: Vec<(String, String)>,
     },
     /// Discover all attribute paths in `repository` matching `wildcards`, the
-    /// first wildcard limited to `only` when set.
+    /// first wildcard limited to `only` when set. Nested sets under a trailing
+    /// `*` are answered as `deferred` shards instead of being forced.
     List {
         repository: String,
         wildcards: Vec<String>,
@@ -118,6 +119,8 @@ pub enum EvalResponse {
     },
     ListOk {
         attrs: Vec<String>,
+        #[serde(default)]
+        deferred: Vec<DiscoveryShard>,
         warnings: Vec<String>,
         errors: Vec<String>,
         stats: Option<StatsDelta>,

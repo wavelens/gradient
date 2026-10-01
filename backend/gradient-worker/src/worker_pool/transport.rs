@@ -46,6 +46,16 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// falling back to `/proc` state sampling.
 const EXIT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// One `List` answer: matched attrs plus the shards left to the parent.
+#[derive(Debug)]
+pub(super) struct Listing {
+    pub(super) attrs: Vec<String>,
+    pub(super) deferred: Vec<DiscoveryShard>,
+    pub(super) warnings: Vec<String>,
+    pub(super) errors: Vec<String>,
+    pub(super) stats: Option<StatsDelta>,
+}
+
 /// Handle to a single live eval-worker subprocess.
 ///
 /// Owns the child plus its piped stdin/stdout. The wire is `u32` LE length +
@@ -336,7 +346,7 @@ impl EvalWorker {
         wildcards: Vec<String>,
         only: Option<Vec<String>>,
         input_overrides: Vec<(String, String)>,
-    ) -> Result<(Vec<String>, Vec<String>, Vec<String>, Option<StatsDelta>)> {
+    ) -> Result<Listing> {
         self.call(
             EvalRequest::List {
                 repository,
@@ -348,10 +358,17 @@ impl EvalWorker {
             |resp| match resp {
                 EvalResponse::ListOk {
                     attrs,
+                    deferred,
                     warnings,
                     errors,
                     stats,
-                } => Ok((attrs, warnings, errors, stats)),
+                } => Ok(Listing {
+                    attrs,
+                    deferred,
+                    warnings,
+                    errors,
+                    stats,
+                }),
                 other => Err(Box::new(other)),
             },
         )
