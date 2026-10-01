@@ -113,6 +113,7 @@
       <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
       @if (sshKey()) {
         <gr-form-field label="Public Key">
+          <gr-label-help slot="label" doc="concepts/projects-and-tasks/#project" title="Project SSH key" />
           <gr-copy-field multiline [rows]="4" [value]="sshKey()" />
         </gr-form-field>
       } @else {

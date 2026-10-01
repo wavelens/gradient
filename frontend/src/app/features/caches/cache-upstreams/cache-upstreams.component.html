@@ -90,6 +90,7 @@
         <small class="text-secondary">External caches are always Read Only.</small>
       } @else {
         <gr-form-field label="Mode" for="edit-mode">
+          <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream modes" />
           <gr-select
             inputId="edit-mode"
             [options]="modes"
@@ -121,6 +122,7 @@
   }
   <div class="upstream-form">
     <gr-form-field label="Type">
+      <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream types" />
       <div class="type-toggle">
         <button type="button" class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'; probeSuggestsProto.set(false)">Internal</button>
         <button type="button" class="type-btn" [class.active]="upstreamType === 'gradient_proto'" (click)="upstreamType = 'gradient_proto'; probeSuggestsProto.set(false)">Gradient Proto</button>
@@ -137,6 +139,7 @@
         <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" />
       </gr-form-field>
       <gr-form-field label="Mode" for="up-mode" hint="Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.">
+        <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream modes" />
         <gr-select
             inputId="up-mode"
             [options]="modes"
@@ -160,6 +163,7 @@
         <input grInput type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" />
       </gr-form-field>
       <gr-form-field label="Mode" for="up-gp-mode">
+        <gr-label-help slot="label" doc="concepts/caches/#upstream-types" title="Upstream modes" />
         <gr-select
             inputId="up-gp-mode"
             [options]="modes"

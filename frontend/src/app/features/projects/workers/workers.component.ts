@@ -22,6 +22,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   MessageService,
@@ -36,6 +37,7 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
   selector: 'app-workers',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     RouterModule,
     FormsModule,

@@ -19,6 +19,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
   TableComponent,
@@ -30,6 +31,7 @@ import { ActionEventsComponent } from '../tasks/task-actions/action-events.compo
   selector: 'app-webhooks',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     FormsModule,
     ActionEventsComponent,

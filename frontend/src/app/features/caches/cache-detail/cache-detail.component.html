@@ -100,6 +100,7 @@
     maxWidth="none"
   >
     <gr-form-field label="Substituter URL" for="cache-url">
+      <gr-label-help slot="label" doc="concepts/caches/#using-a-cache" title="Using a cache" />
       <gr-copy-field id="cache-url" [value]="cacheUrl" />
     </gr-form-field>
 
@@ -114,13 +115,13 @@
     @if (!c.public) {
       <gr-divider />
       <gr-form-field label="Install netrc" for="cache-netrc">
-        <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/caches/#authentication" title="Cache authentication docs" />
+        <gr-label-help slot="label" doc="guides/share-a-cache/#1-use-the-cache-on-a-machine" title="Cache authentication docs" />
         <gr-copy-field id="cache-netrc" multiline [rows]="2" [value]="installNetrcCommand" />
         <span slot="hint">
           This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
           API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
           can authenticate. Prefer a declarative NixOS setup? See the
-          <a href="https://wavelens.github.io/gradient/usage/caches/#declarative-netrc" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
+          <a [href]="netrcDocsUrl" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
           in the docs.
         </span>
       </gr-form-field>

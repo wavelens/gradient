@@ -68,6 +68,7 @@
     <input grInput id="webhook-url" [ngModel]="url()" (ngModelChange)="url.set($event)" placeholder="https://example.com/gradient" />
   </gr-form-field>
   <gr-form-field label="Events" hint="Nothing selected receives every event in this scope.">
+    <gr-label-help slot="label" doc="reference/events/#webhooks" title="Webhook events" />
     <app-action-events [selected]="events()" (selectedChange)="events.set($event)" />
   </gr-form-field>
   <gr-form-field label="Event globs (optional)" for="webhook-globs" hint="Comma-separated, e.g. build.*, cache.nar.*">

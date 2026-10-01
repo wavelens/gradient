@@ -28,6 +28,7 @@ import {
   StatCardComponent,
 } from '@shared/ui';
 import { Cache, StarTarget } from '@core/models';
+import { docsUrl } from '@core/docs';
 import { formatBytes, formatCount } from '@shared/text';
 import { FormsModule } from '@angular/forms';
 
@@ -67,6 +68,7 @@ const CHART_COLORS = {
   styleUrl: './cache-detail.component.scss',
 })
 export class CacheDetailComponent implements OnInit {
+  protected readonly netrcDocsUrl = docsUrl('guides/share-a-cache/#1-use-the-cache-on-a-machine');
   private route = inject(ActivatedRoute);
   private cachesService = inject(CachesService);
   private stars = inject(StarsService);

@@ -214,6 +214,7 @@
       />
     </gr-form-field>
     <gr-form-field label="Permissions">
+      <gr-label-help slot="label" doc="ui/members-and-roles/#project-roles" title="Project permissions" />
       <div class="permissions-list">
         @for (perm of availablePermissions(); track perm.id) {
           <div class="permission-row">

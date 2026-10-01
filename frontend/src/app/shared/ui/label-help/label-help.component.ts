@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
+import { DocLink, docsUrl } from '@core/docs';
 import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 
@@ -28,6 +29,8 @@ import { CommonModule } from '@angular/common';
   styleUrl: './label-help.component.scss',
 })
 export class LabelHelpComponent {
-  href = input.required<string>();
+  doc = input.required<DocLink>();
   title = input<string>('Learn more');
+
+  protected readonly href = computed(() => docsUrl(this.doc()));
 }

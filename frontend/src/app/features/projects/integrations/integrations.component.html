@@ -173,14 +173,14 @@
     error="Lowercase letters, digits, and dashes only. Cannot start or end with a dash."
     hint="Used in the webhook URL. Lowercase letters, digits, and dashes."
   >
-    <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/integration/" title="Learn about forge integrations" />
+    <gr-label-help slot="label" doc="guides/forge-gitea/#1-create-the-integrations" title="Learn about forge integrations" />
     <input grInput id="int-name" [(ngModel)]="formData.name" placeholder="e.g. main-gitea" />
   </gr-form-field>
   <gr-form-field label="Display Name" for="int-display-name" hint="Human-readable label shown in the integrations list.">
     <input grInput id="int-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" />
   </gr-form-field>
   <gr-form-field label="Kind" for="int-kind">
-    <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/integration/" title="Inbound vs outbound integrations" />
+    <gr-label-help slot="label" doc="guides/forge-gitea/#1-create-the-integrations" title="Inbound vs outbound integrations" />
     <gr-select
       inputId="int-kind"
       [(ngModel)]="formData.kind"
@@ -201,6 +201,7 @@
 
   @if (formData.forge_type === 'github') {
     <gr-form-field label="App Installation ID" for="int-installation-id" hint="The numeric installation ID from your GitHub App installation.">
+      <gr-label-help slot="label" doc="guides/forge-github/#3-install-the-app" title="Install the GitHub App" />
       <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id"
         placeholder="e.g. 12345678" />
     </gr-form-field>

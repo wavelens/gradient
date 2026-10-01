@@ -19,6 +19,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LabelHelpComponent,
   LoadingSpinnerComponent,
   MessageService,
   PageLayoutComponent,
@@ -44,6 +45,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
   selector: 'app-task-flake-inputs',
   standalone: true,
   imports: [
+    LabelHelpComponent,
     CommonModule,
     RouterModule,
     FormsModule,
