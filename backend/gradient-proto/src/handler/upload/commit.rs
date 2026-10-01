@@ -81,7 +81,9 @@ async fn place(
                 return Err(rejected(format!("malformed store path {store_path}")));
             };
             match transfer {
-                Transfer::Relay(writer) => place_relayed(state, &hash, *writer, meta).await,
+                Transfer::Passthrough(writer) => {
+                    place_passed_through(state, &hash, *writer, meta).await
+                }
                 Transfer::Put | Transfer::Multipart { .. } => {
                     place_presigned(state, &hash, meta).await
                 }
@@ -125,7 +127,7 @@ async fn record(
     UploadOutcome::Ok
 }
 
-async fn place_relayed(
+async fn place_passed_through(
     state: &ServerState,
     hash: &str,
     writer: gradient_storage::PartialWriter,
@@ -198,7 +200,7 @@ async fn place_eval_cache(
     size_bytes: u64,
 ) -> Result<(), UploadOutcome> {
     match transfer {
-        Transfer::Relay(writer) => {
+        Transfer::Passthrough(writer) => {
             let staged = (*writer).finish().await.map_err(retry)?;
             if staged.len != size_bytes {
                 return Err(rejected(format!(
@@ -245,7 +247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_relayed_nar_with_the_wrong_size_is_rejected_and_frees_its_permit() {
+    async fn a_passed_through_nar_with_the_wrong_size_is_rejected_and_frees_its_permit() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let (_session, permit) = granted_permit(&state).await;
         let dir = tempfile::TempDir::new().unwrap();
@@ -263,7 +265,7 @@ mod tests {
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
-            transfer: Transfer::Relay(Box::new(writer)),
+            transfer: Transfer::Passthrough(Box::new(writer)),
             metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
                 file_hash: "sha256:0000".into(),
                 file_size: 99,
@@ -360,7 +362,7 @@ mod tests {
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
-            transfer: Transfer::Relay(Box::new(writer)),
+            transfer: Transfer::Passthrough(Box::new(writer)),
             metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
                 file_hash: gradient_storage::file_hash_sri(b"abc"),
                 file_size: 3,
@@ -393,7 +395,7 @@ mod tests {
     /// A resumed prefix may come from a differently configured encoder; a
     /// mismatch then starts the upload over instead of failing the job.
     #[tokio::test]
-    async fn a_resumed_relay_that_fails_its_hash_is_retried_from_scratch() {
+    async fn a_resumed_passthrough_that_fails_its_hash_is_retried_from_scratch() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let (_session, permit) = granted_permit(&state).await;
         let dir = tempfile::TempDir::new().unwrap();
@@ -413,7 +415,7 @@ mod tests {
             object: UploadObject::Nar {
                 store_path: format!("/nix/store/{}-p", "c".repeat(32)),
             },
-            transfer: Transfer::Relay(Box::new(writer)),
+            transfer: Transfer::Passthrough(Box::new(writer)),
             metadata: UploadMetadata::Nar(Box::new(NarUploadMetadata {
                 file_hash: gradient_storage::file_hash_sri(b"xyz"),
                 file_size: 3,

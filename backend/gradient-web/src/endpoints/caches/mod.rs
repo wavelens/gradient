@@ -21,7 +21,7 @@ pub mod roles;
 mod serve;
 pub mod subscriptions;
 mod upload;
-mod upstreams;
+mod upstream_caches;
 
 pub use self::build_log::log;
 pub use self::debuginfo::debuginfo;
@@ -41,6 +41,6 @@ pub use self::nars::{
 pub use self::proto::cache_proto;
 pub use self::serve::serve;
 pub use self::upload::{nar_chunk, nar_finalize, nars_upload};
-pub use self::upstreams::{
-    delete_cache_upstream, get_cache_upstreams, patch_cache_upstream, put_cache_upstream,
+pub use self::upstream_caches::{
+    delete_cache_upstream, get_upstream_caches, patch_cache_upstream, put_cache_upstream,
 };

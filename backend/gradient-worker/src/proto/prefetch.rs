@@ -10,12 +10,12 @@
 //! `prefetch_inputs` drives an [`InputPrefetcher`] pipeline:
 //!
 //! ```text
-//! enumerate_inputs  →  HashSet<String>        (all input paths)
-//! filter_missing    →  Vec<String>             (only what's absent from store)
-//! query_and_split   →  (by_url, by_request)   (split by download method)
-//! fetch_by_request  →  Vec<(path, nar, meta)>  (request over WS)
-//! download_by_url   →  Vec<(path, nar, meta)>  (HTTP download from S3)
-//! import_all        →  usize                   (stream into nix-daemon)
+//! enumerate_inputs  ->  HashSet<String>        (all input paths)
+//! filter_missing    ->  Vec<String>             (only what's absent from store)
+//! query_and_split   ->  (by_url, by_request)   (split by download method)
+//! fetch_by_request  ->  Vec<(path, nar, meta)>  (request over WS)
+//! download_by_url   ->  Vec<(path, nar, meta)>  (HTTP download from S3)
+//! import_all        ->  usize                   (stream into nix-daemon)
 //! ```
 
 use std::collections::{HashMap, HashSet};
@@ -77,7 +77,7 @@ impl std::error::Error for MissingInputs {}
 /// `nar_size`): the object bytes in our store do not match the metadata the
 /// server signs and serves. This happens when object and `cached_path` metadata
 /// are written by different producers (e.g. a non-reproducible local build vs an
-/// upstream substitute relay) and desync. The path is treated as a missing input
+/// upstream substitute passthrough) and desync. The path is treated as a missing input
 /// so the server demotes the corrupt object and rebuilds it with consistent
 /// metadata, rather than retrying forever against poison.
 #[derive(Debug)]
@@ -97,8 +97,8 @@ impl std::error::Error for CorruptCachedNar {}
 
 /// A substitute output is *genuinely* absent from every upstream cache (the
 /// CacheQuery Pull reported it uncached everywhere), as opposed to a transient
-/// timeout/transport failure during the relay. Only this case makes escalating
-/// the anchor to a real build sound; transient relay failures must retry as a
+/// timeout/transport failure during the passthrough. Only this case makes escalating
+/// the shared build to a real build sound; transient passthrough failures must retry as a
 /// substitute instead of counting toward the miss-escalation threshold.
 #[derive(Debug)]
 pub struct SubstituteNotOnUpstream(pub String);
@@ -347,7 +347,7 @@ impl<'a> InputPrefetcher<'a> {
     /// run with `use_substitutes = false`, so the daemon will not be able to fetch
     /// it from any upstream. Continuing would eventually surface as a confusing
     /// `path '…' is not valid` error deep inside `add_to_store_nar` when a
-    /// dependent path is imported. Failing here keeps the blame at the right layer.
+    /// parent path is imported. Failing here keeps the blame at the right layer.
     ///
     /// This query never leaves our cache (`external: false`). A path an upstream
     /// has but we do not is a Substitute's job to put here, not a build's to fetch.
@@ -487,8 +487,8 @@ impl<'a> InputPrefetcher<'a> {
         // local store (and thus not downloaded) aren't tracked here.
         let mut pending_deps: HashMap<String, HashSet<String>> = HashMap::new();
         // Reverse edges: when X imports successfully, promote each entry in
-        // `dependents[X]` one step closer to ready.
-        let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+        // `wanted_by[X]` one step closer to ready.
+        let mut wanted_by: HashMap<String, Vec<String>> = HashMap::new();
 
         for (path, (_, meta)) in &payload {
             let refs = meta.references.clone().unwrap_or_default();
@@ -497,7 +497,7 @@ impl<'a> InputPrefetcher<'a> {
                 .filter(|r| r != path && download_paths.contains(r))
                 .collect();
             for r in &restricted {
-                dependents.entry(r.clone()).or_default().push(path.clone());
+                wanted_by.entry(r.clone()).or_default().push(path.clone());
             }
             pending_deps.insert(path.clone(), restricted);
         }
@@ -536,7 +536,7 @@ impl<'a> InputPrefetcher<'a> {
                 return Err(e.context(format!("prefetch import failed for {}", path)));
             }
 
-            if let Some(kids) = dependents.remove(&path) {
+            if let Some(kids) = wanted_by.remove(&path) {
                 for k in kids {
                     if let Some(deps) = pending_deps.get_mut(&k) {
                         deps.remove(&path);
@@ -566,7 +566,7 @@ impl<'a> InputPrefetcher<'a> {
     /// The drv's declared inputs (`input_sources` + `input_derivation` outputs)
     /// are only the first hop. Each of those paths has its own runtime
     /// `references` - the transitive closure - which must also be in the
-    /// local store before the daemon can accept the import of a dependent.
+    /// local store before the daemon can accept the import of a parent.
     /// We therefore run `CacheQuery Pull` in a loop: on each iteration we
     /// inspect the references of everything we just fetched and queue any
     /// that are absent locally and haven't been queried yet. The loop ends
@@ -759,7 +759,7 @@ pub async fn prefetch_inputs(
 /// different worker, so the archived source store path is only in the binary
 /// cache, not this worker's local store. `nix` won't substitute a `path:` flake
 /// ref from a cache, so we pull it in ourselves first. Reuses the same
-/// closure-expanding `CacheQuery Pull → download → import` pipeline as
+/// closure-expanding `CacheQuery Pull -> download -> import` pipeline as
 /// [`prefetch_inputs`].
 pub async fn ensure_path(
     store: &LocalNixStore,

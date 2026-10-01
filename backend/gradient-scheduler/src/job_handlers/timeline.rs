@@ -98,14 +98,14 @@ impl Scheduler {
     /// report that arrives after the tracker has dropped the job still lands.
     pub fn record_job_timeline(
         self: &Arc<Self>,
-        dispatch: DispatchedJobId,
+        assignment_id: DispatchedJobId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
     ) {
         let scheduler = Arc::clone(self);
         self.state.shutdown.spawn(async move {
             let _ = scheduler
-                .persist_job_timeline(dispatch, outcome, spans)
+                .persist_job_timeline(assignment_id, outcome, spans)
                 .await;
         });
     }
@@ -115,11 +115,13 @@ impl Scheduler {
     /// and its claim loses to the fetch's own row while that is still open.
     pub async fn close_job_timeline(
         &self,
-        dispatch: DispatchedJobId,
+        assignment_id: DispatchedJobId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
     ) {
-        let _ = self.persist_job_timeline(dispatch, outcome, spans).await;
+        let _ = self
+            .persist_job_timeline(assignment_id, outcome, spans)
+            .await;
     }
 
     /// Reports what the terminal report found. The lookup is by dispatch id
@@ -133,28 +135,28 @@ impl Scheduler {
     /// applies them.
     pub(crate) async fn persist_job_timeline(
         &self,
-        dispatch: DispatchedJobId,
+        assignment_id: DispatchedJobId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
     ) -> TimelineLanding {
-        let row = match EDispatchedJob::find_by_id(dispatch)
+        let row = match EDispatchedJob::find_by_id(assignment_id)
             .one(&self.state.worker_db)
             .await
         {
             Ok(Some(row)) => row,
             Ok(None) => {
-                warn!(%dispatch, ?outcome, "no dispatched_job row for this report; outcome and phase timeline dropped");
+                warn!(dispatch = %assignment_id, ?outcome, "no dispatched_job row for this report; outcome and phase timeline dropped");
                 return TimelineLanding::NoRow;
             }
             Err(e) => {
-                warn!(%dispatch, error = %e, "dispatched_job lookup for the timeline failed");
+                warn!(dispatch = %assignment_id, error = %e, "dispatched_job lookup for the timeline failed");
                 return TimelineLanding::LookupFailed;
             }
         };
 
         let evaluation_id = row.evaluation_id;
         let landing = if row.finished_at.is_some() {
-            debug!(%dispatch, ?outcome, "dispatched_job row was already closed out; keeping the recorded outcome");
+            debug!(dispatch = %assignment_id, ?outcome, "dispatched_job row was already closed out; keeping the recorded outcome");
             TimelineLanding::AlreadyClosed
         } else {
             let mut active = row.into_active_model();
@@ -163,13 +165,13 @@ impl Scheduler {
             match active.update(&self.state.worker_db).await {
                 Ok(_) => TimelineLanding::Closed,
                 Err(e) => {
-                    warn!(%dispatch, error = %e, "failed to close the dispatched_job row");
+                    warn!(dispatch = %assignment_id, error = %e, "failed to close the dispatched_job row");
                     TimelineLanding::CloseFailed
                 }
             }
         };
 
-        let rows = phase_rows(dispatch, &spans);
+        let rows = phase_rows(assignment_id, &spans);
         if !rows.is_empty()
             && let Err(e) = gradient_entity::dispatched_job_phase::Entity::insert_many(
                 rows.into_iter().map(IntoActiveModel::into_active_model),
@@ -177,7 +179,7 @@ impl Scheduler {
             .exec(&self.state.worker_db)
             .await
         {
-            warn!(%dispatch, error = %e, "failed to insert dispatched_job_phase rows");
+            warn!(dispatch = %assignment_id, error = %e, "failed to insert dispatched_job_phase rows");
         }
 
         let totals = eval_phase_totals(&spans);

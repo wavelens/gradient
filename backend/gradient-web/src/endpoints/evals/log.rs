@@ -21,9 +21,9 @@ use tracing::error;
 
 use super::EvalAccessContext;
 
-/// The eval's (anchor, derivation-name) pairs, one per build_job. Anchors carry
+/// The eval's (shared build, derivation-name) pairs, one per build_job. Shared builds carry
 /// status; the name labels each log line.
-async fn eval_anchor_jobs(
+async fn eval_shared_build_jobs(
     state: &Arc<ServerState>,
     evaluation: EvaluationId,
 ) -> Result<Vec<(MDerivationBuild, String)>, WebError> {
@@ -32,9 +32,10 @@ async fn eval_anchor_jobs(
         .all(&state.web_db)
         .await?;
 
-    let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
-    let anchors: HashMap<DerivationBuildId, MDerivationBuild> = EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(anchor_ids))
+    let shared_build_ids: Vec<DerivationBuildId> =
+        jobs.iter().map(|j| j.derivation_build).collect();
+    let shared_builds: HashMap<DerivationBuildId, MDerivationBuild> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Id.is_in(shared_build_ids))
         .all(&state.web_db)
         .await?
         .into_iter()
@@ -55,11 +56,11 @@ async fn eval_anchor_jobs(
 
     let mut out = Vec::with_capacity(jobs.len());
     for job in jobs {
-        let Some(anchor) = anchors.get(&job.derivation_build).cloned() else {
+        let Some(shared_build) = shared_builds.get(&job.derivation_build).cloned() else {
             continue;
         };
         let name = names.get(&job.derivation).cloned().unwrap_or_default();
-        out.push((anchor, name));
+        out.push((shared_build, name));
     }
 
     Ok(out)
@@ -85,7 +86,7 @@ pub async fn post_evaluation_builds(
     let stream = stream! {
         let mut last_logs: HashMap<DerivationBuildId, usize> = HashMap::new();
 
-        let past = match eval_anchor_jobs(&state, evaluation.id).await {
+        let past = match eval_shared_build_jobs(&state, evaluation.id).await {
             Ok(jobs) => jobs,
             Err(e) => {
                 error!(error = %e, "Failed to query past builds");
@@ -93,12 +94,12 @@ pub async fn post_evaluation_builds(
             }
         };
 
-        for (anchor, name) in past {
-            let log = match gradient_db::latest_attempt_id(&state.web_db, anchor.id).await.unwrap_or(None) {
+        for (shared_build, name) in past {
+            let log = match gradient_db::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
                 Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
                 None => String::new(),
             };
-            last_logs.insert(anchor.id, log.len());
+            last_logs.insert(shared_build.id, log.len());
 
             yield log
                 .split("\n")
@@ -108,7 +109,7 @@ pub async fn post_evaluation_builds(
         }
 
         loop {
-            let current = match eval_anchor_jobs(&state, evaluation.id).await {
+            let current = match eval_shared_build_jobs(&state, evaluation.id).await {
                 Ok(jobs) => jobs,
                 Err(e) => {
                     error!(error = %e, "Failed to query builds");
@@ -147,23 +148,23 @@ pub async fn post_evaluation_builds(
                 continue;
             }
 
-            for (anchor, name) in building {
-                let log = match gradient_db::latest_attempt_id(&state.web_db, anchor.id).await.unwrap_or(None) {
+            for (shared_build, name) in building {
+                let log = match gradient_db::latest_attempt_id(&state.web_db, shared_build.id).await.unwrap_or(None) {
                     Some(key) => state.log_storage.read(key).await.unwrap_or_default(),
                     None => String::new(),
                 };
-                let last_offset = *last_logs.get(&anchor.id).unwrap_or(&0);
+                let last_offset = *last_logs.get(&shared_build.id).unwrap_or(&0);
                 let log_new = log[last_offset..].to_string();
 
                 if !log_new.is_empty() {
-                    last_logs.insert(anchor.id, log.len());
+                    last_logs.insert(shared_build.id, log.len());
                     yield log_new
                         .split("\n")
                         .map(|l| format!("{}> {}", name, l))
                         .collect::<Vec<String>>()
                         .join("\n");
                 } else {
-                    last_logs.entry(anchor.id).or_insert(0);
+                    last_logs.entry(shared_build.id).or_insert(0);
                 }
             }
         }

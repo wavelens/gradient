@@ -9,10 +9,10 @@
     reason = "the gate wraps a registered statement in EXPLAIN, which no registered statement can express"
 )]
 
-//! Runs one registered query through the planner. `EXPLAIN (GENERIC_PLAN)` comes
+//! Sends one registered query through the planner. `EXPLAIN (GENERIC_PLAN)` comes
 //! first because it plans without values and names the relations: a query whose
 //! relations are empty is unmeasured, and executing it would prove nothing. The
-//! measured pass then runs inside a transaction that is always rolled back,
+//! measured pass then executes inside a transaction that is always rolled back,
 //! which is what makes an INSERT, UPDATE, DELETE or FOR UPDATE safe to
 //! EXPLAIN ANALYZE: the statement really does execute. Per-node timing is off:
 //! no budget reads it, and the VM's `acpi_pm` clock traps on every read, which

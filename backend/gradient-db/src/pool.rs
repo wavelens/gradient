@@ -6,12 +6,12 @@
 
 //! Typed wrappers around the `SeaORM` connection pools.
 //!
-//! Gradient runs separate pools so HTTP requests served by the axum layer cannot
+//! Gradient keeps separate pools so HTTP requests served by the axum layer cannot
 //! be starved by the proto/scheduler/cache work. [`WebDb`], [`WorkerDb`] and
 //! [`CacheDb`] are newtypes that forward `ConnectionTrait`, so call sites
 //! (`find().one(&ctx.web_db)`, ...) work unchanged while the newtypes stay
-//! non-substitutable at any explicitly typed boundary. [`WorkerDb`] can also
-//! stand for one open transaction on its pool, which is how the graph actor runs
+//! non-available in a cache at any explicitly typed boundary. [`WorkerDb`] can also
+//! stand for one open transaction on its pool, which is how the graph writer is running
 //! every `gradient_db` function inside one transaction.
 
 use std::future::Future;
@@ -32,7 +32,7 @@ use sea_orm::{
 pub struct WebDb(Arc<DatabaseConnection>);
 
 /// The pool used by the proto handler, scheduler, cache GC, and any tracked
-/// background task; or, inside the graph actor, one open transaction on it.
+/// background task; or, inside the graph writer, one open transaction on it.
 #[derive(Debug, Clone)]
 pub struct WorkerDb(WorkerConn);
 
@@ -71,7 +71,7 @@ impl WorkerDb {
         Self(WorkerConn::Pool(Arc::new(conn)))
     }
 
-    /// A handle whose every statement runs on `tx`; `detached` gives the pool back.
+    /// A handle whose every statement executes on `tx`; `detached` gives the pool back.
     pub fn in_transaction(&self, tx: Arc<DatabaseTransaction>) -> Self {
         Self(WorkerConn::Transaction {
             tx,
@@ -120,7 +120,7 @@ impl WorkerDb {
 /// flattened list must not count them, and a `contains` over a formatted entry
 /// must not straddle two statements. A test that asserts ON transaction control
 /// instead (that a budget overrun rolled back rather than committed, as
-/// `gradient_graph::actor` does) must keep formatting whole entries; this drops
+/// `gradient_graph::writer` does) must keep formatting whole entries; this drops
 /// exactly what such a test is looking for.
 pub fn statements(log: Vec<sea_orm::Transaction>) -> Vec<String> {
     raw_statements(log)

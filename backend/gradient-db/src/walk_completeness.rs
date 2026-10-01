@@ -22,7 +22,7 @@
 //! The pre-image cannot supply that transition on its own. The batch that walks a
 //! derivation writes `walked = true` with the record, one statement before the seed,
 //! so by the time the seed reads the row a freshly walked LEAF already reads
-//! complete and would flip nothing, while its dependents counted it as a stub when
+//! complete and would flip nothing, while its parents counted it as a stub when
 //! they were seeded and would wait for a count-down that never comes. The caller
 //! therefore names which rows it just walked: those were incomplete before the batch
 //! by definition, whatever the row says now.
@@ -37,15 +37,15 @@
 //!
 //! The mirror precondition holds for the seed's recount: a seeded row that loses
 //! completeness is not rippled back, so only a caller whose rows cannot lose it may
-//! seed. Ingest is such a caller, since a derivation's BUILD edges all land in the
+//! seed. Record is such a caller, since a derivation's BUILD edges all land in the
 //! batch that walks it; [`unwalk`] is the up-ripple for the one event that does take
 //! completeness away.
 //!
 //! # Build edges only
 //!
 //! Every read here is `kind IN (0, 2)`, because the walk follows `inputDrvs` and a
-//! runtime edge is not a walk input. This column was written when the edge table
-//! held build edges alone, and the one-graph migration put runtime edges beside
+//! runtime dependency is not a walk input. This column was written when the edge table
+//! held build edges alone, and the one-graph migration put runtime dependencies beside
 //! them: those land from a narinfo or from a finished build, long after the batch
 //! that walked the parent and with no seed of their own. Counting them broke the
 //! precondition above in the direction the module cannot survive - a complete parent
@@ -59,7 +59,7 @@ use std::collections::BTreeMap;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseTransaction, DbErr, QueryResult, TransactionTrait};
 
-use crate::readiness::ids;
+use crate::can_start::ids;
 
 /// The sweep's absolute recount: `incomplete` is every stub and, transitively,
 /// everything above one, so a derivation's count is its direct inputs inside that
@@ -95,7 +95,7 @@ crate::sql! {
     /// an input that then flips and ripples a count-down for it anyway, and the
     /// parent lands one below the truth per input it shared its batch with.
     ///
-    /// `Bulk` for the reason the readiness seed it mirrors is: a batch that reads
+    /// `Bulk` for the reason the can-start state seed it mirrors is: a batch that reads
     /// the inputs of every value it was handed costs more than one row lookup per
     /// value, which is all the hot tier's ceiling allows for.
     SEED_UNWALKED_INPUTS = r#"
@@ -118,7 +118,7 @@ RETURNING d.id, x.was_complete, (d.walked AND d.unwalked_inputs = 0) AS complete
         tier = Bulk;
 
     /// The whole ripple in one call, `RIPPLE_UNWALKED_INPUTS_FN` in the migration
-    /// that defines it: every level's dependents counted over build edges, locked
+    /// that defines it: every level's parents counted over build edges, locked
     /// in id order and moved by their edge count, in place rather than a round
     /// trip per level. Returns every row that flipped.
     RIPPLE_UNWALKED_INPUTS = "SELECT id FROM ripple_unwalked_inputs($1::uuid[], $2::bool) AS r(id)",
@@ -181,7 +181,7 @@ pub async fn seed_walk_completeness(
     Ok(reached)
 }
 
-/// Drop the record of `derivations` and take the dependents of those that were
+/// Drop the record of `derivations` and take the parents of those that were
 /// complete out of completeness with them.
 pub async fn unwalk(txn: &DatabaseTransaction, derivations: &[DerivationId]) -> Result<(), DbErr> {
     if derivations.is_empty() {
@@ -240,7 +240,7 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
 
     /// The walk follows `inputDrvs`, so every edge this module counts must be a
-    /// build edge. A runtime edge lands from a narinfo or a finished build, with no
+    /// build edge. A runtime dependency lands from a narinfo or a finished build, with no
     /// seed of its own, and one counted by a ripple but never by a seed drives the
     /// counter below zero for good. Asserted per statement rather than per module so
     /// a new read cannot be added without one.
@@ -284,15 +284,15 @@ mod tests {
     }
 
     const RIPPLE_FN: &str =
-        gradient_migration::m20260930_000002_counter_ripple_functions::RIPPLE_UNWALKED_INPUTS_FN;
+        gradient_migration::m20261001_000001_plain_concept_names::RIPPLE_UNWALKED_INPUTS_FN;
 
     /// The function is the loop this module ran a level per round trip, under the
-    /// same discipline: the level's dependents are locked in id order before the
+    /// same discipline: the level's parents are locked in id order before the
     /// write, and a row continues the ripple on the transition the direction names.
     #[test]
     fn the_ripple_locks_each_level_in_id_order_before_it_writes() {
         let lock = RIPPLE_FN
-            .find("FROM derivation WHERE id = ANY(dependents) ORDER BY id FOR NO KEY UPDATE")
+            .find("FROM derivation WHERE id = ANY(parents) ORDER BY id FOR NO KEY UPDATE")
             .expect("the ordered lock");
         let write = RIPPLE_FN
             .find("SET unwalked_inputs = d.unwalked_inputs")
@@ -325,7 +325,7 @@ mod tests {
     }
 
     /// A row that was complete before the seed and after it flipped nothing, so no
-    /// dependent ever counted it and it must not count them down; only a row the
+    /// parent ever counted it and it must not count them down; only a row the
     /// seed flipped ripples, and the one call reports what the ripple reached.
     #[tokio::test]
     async fn only_a_row_the_seed_flipped_ripples() {
@@ -368,7 +368,7 @@ mod tests {
     }
 
     /// The batch writes `walked = true` one statement before the seed, so a freshly
-    /// walked leaf reads complete on both sides of it. Its dependents counted it
+    /// walked leaf reads complete on both sides of it. Its parents counted it
     /// while it was a stub and are waiting for the count-down, so the caller's
     /// "this batch walked it" is the endpoint, not the row.
     #[tokio::test]
@@ -401,13 +401,13 @@ mod tests {
         assert!(
             log.iter()
                 .any(|s| s.sql.contains("FROM ripple_unwalked_inputs(")),
-            "the leaf counts its dependents down: {log:?}"
+            "the leaf counts its parents down: {log:?}"
         );
     }
 
-    /// Rows are locked in id order before every update, and the seed runs on
-    /// `derivation` only: no anchor row is touched, which is the class order the
-    /// ingest and the un-walk both rely on.
+    /// Rows are locked in id order before every update, and the seed is running on
+    /// `derivation` only: no shared build row is touched, which is the class order the
+    /// record and the un-walk both rely on.
     #[tokio::test]
     async fn every_update_follows_an_ordered_lock_on_derivation_rows_only() {
         let a = DerivationId::now_v7();
@@ -438,12 +438,12 @@ mod tests {
         );
         assert!(
             log.iter().all(|s| !s.sql.contains("derivation_build")),
-            "the pass never reaches an anchor: {log:?}"
+            "the pass never reaches a shared build: {log:?}"
         );
     }
 
-    /// An un-walk takes the dependents of what WAS complete out of completeness
-    /// with it, and stops at a dependent that was not complete to begin with.
+    /// An un-walk takes the parents of what WAS complete out of completeness
+    /// with it, and stops at a parent that was not complete to begin with.
     #[tokio::test]
     async fn an_unwalk_ripples_incompleteness_up_from_what_was_complete() {
         let gone = DerivationId::now_v7();

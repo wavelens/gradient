@@ -7,16 +7,16 @@
 //! Build-graph invariant assertions: one repair pass, then counts. Counts
 //! violations of the invariants the dispatch/promotion gates trust, so a dead zone
 //! surfaces as a warning metric instead of a user-reported stuck evaluation. Reuses
-//! the very gate SQL the reconciler maintains, so a non-zero count means "the
+//! the very gate SQL the repair pass maintains, so a non-zero count means "the
 //! healing pipeline is not converging", never "the checker disagrees with the
 //! gates". Transient non-zero counts between a transition and this pass are
-//! expected; persistent counts are the alert. There is no reconcile tick to wait
+//! expected; persistent counts are the alert. There is no repair tick to wait
 //! for: the event that changes a counter moves it, and this sweep is the only
 //! backstop.
 //!
 //! Several columns are moved rather than derived, so nothing else would ever notice
-//! a lost move: the walk bit, runtime wholeness and demand are recounted table-wide,
-//! the readiness pair over the scope that gates progress, each repaired in place, so
+//! a lost move: the walk bit, runtime complete closure and need are recounted table-wide,
+//! the can-start state pair over the scope that gates progress, each repaired in place, so
 //! the counts reported for them are what was repaired. That makes the sweep their
 //! only backstop, and `GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS = 0` leaves
 //! them with none.
@@ -28,22 +28,22 @@ use sea_orm::{ConnectionTrait, DbErr, Statement};
 /// Counts of graph-invariant violations at one instant.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct ConsistencyReport {
-    /// `fetchable` and `unready_deps` rows rewritten over the pending anchors
+    /// `fetchable` and `blocking_deps` rows rewritten over the pending shared builds
     /// and their direct dependencies.
     pub counter_drift: i64,
     /// Walked derivations whose `unwalked_inputs` disagreed with the stubs below them.
     pub walk_drift: i64,
-    /// Anchors whose `missing_runtime_deps` disagreed with their runtime edges.
+    /// Shared builds whose `missing_runtime_deps` disagreed with their runtime dependencies.
     /// Also the column's backfill: the migration deliberately carries none.
     pub runtime_drift: i64,
-    /// Anchors whose `demanded` disagreed with the walk from the entry points.
-    pub demand_drift: i64,
-    /// Anchors this pass settled to `Skipped` or thawed back out of it. The
+    /// Shared builds whose `wanted` disagreed with the walk from the entry points.
+    pub need_drift: i64,
+    /// Shared builds this pass settled to `Skipped` or thawed back out of it. The
     /// backstop for a lost move, and the backfill of the status itself.
     pub skipped_moves: i64,
-    /// Promotable anchors found unpromoted, queued by this pass.
-    pub unpromoted_ready: i64,
-    /// `build_job` rows this pass inserted for pending anchors a live evaluation
+    /// Promotable shared builds found unpromoted, queued by this pass.
+    pub unpromoted_startable: i64,
+    /// `build_job` rows this pass inserted for pending shared builds a live evaluation
     /// reaches and nobody named. A repair, like the drift counts.
     pub adopted: i64,
     /// Outputs of terminal-success producers with no backing artifact. Nothing
@@ -54,10 +54,10 @@ pub struct ConsistencyReport {
     /// `Building` evaluations whose counters say nothing blocks them: the
     /// finalize that should have settled them never ran.
     pub wedged_building_evals: i64,
-    /// Evaluations whose anchor counters disagreed with a recount of their
+    /// Evaluations whose shared build counters disagreed with a recount of their
     /// `build_job` rows. A repair, like the other drift counts.
     pub eval_counter_drift: i64,
-    /// How many anchors the readiness repair locked and recounted. A measurement,
+    /// How many shared builds the can-start state repair locked and recounted. A measurement,
     /// not a violation: each is taken `FOR NO KEY UPDATE`, twice, against rows every live
     /// graph writer also locks, so the cost is worth seeing on a clean pass too.
     pub repair_scope: i64,
@@ -72,9 +72,9 @@ impl ConsistencyReport {
         self.counter_drift
             + self.walk_drift
             + self.runtime_drift
-            + self.demand_drift
+            + self.need_drift
             + self.skipped_moves
-            + self.unpromoted_ready
+            + self.unpromoted_startable
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
             + self.eval_counter_drift
@@ -98,7 +98,7 @@ crate::sql_fn! {
 fn wedged_building_evals_sql() -> String {
     format!(
         "SELECT count(*) AS n FROM evaluation ev \
-         WHERE ev.status = {building} AND ev.active_anchors = 0",
+         WHERE ev.status = {building} AND ev.active_shared_builds = 0",
         building = status_sql::eval(EvaluationStatus::Building),
     )
 }
@@ -117,57 +117,57 @@ async fn count<C: ConnectionTrait>(db: &C, stmt: Statement) -> Result<i64, DbErr
 }
 
 /// Recount every maintained column in the order the next one reads it - the walk's
-/// subtree bit, anchor wholeness, the flag, demand, then the counter and the queue -
+/// subtree bit, shared build complete closure, the flag, need, then the counter and the queue -
 /// and count the violations no recount can repair. Each recount is absolute and
 /// table-wide, so the row count it rewrote IS the drift, and a healthy fleet writes
 /// nothing.
 pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
     let db = &ctx.worker_db;
 
-    // The walk's own bit before the demand it gates: an abandoned walk's parents
-    // read complete until this runs, and the prune trusts the column.
+    // The walk's own bit before the need it gates: an abandoned walk's parents
+    // read complete until this executes, and the prune trusts the column.
     let walk_drift = crate::walk_completeness::recount_walk_completeness(db).await? as i64;
 
-    // Wholeness before the flag that reads it, and the flag before the demand walk
-    // that reads it: a stale `fetchable = true` is a settled anchor to every walk,
+    // Complete closure before the flag that reads it, and the flag before the need walk
+    // that reads it: a stale `fetchable = true` is a settled shared build to every walk,
     // and one that sits two hops below anything pending is nobody else's to repair.
-    let runtime_drift = crate::runtime_readiness::recount_missing_runtime_deps(db).await? as i64;
-    let scope = crate::readiness::readiness_scope(db).await?;
-    let fetchable = crate::readiness::repair_fetchable(db, &scope).await?;
+    let runtime_drift = crate::runtime_can_start::recount_missing_runtime_deps(db).await? as i64;
+    let scope = crate::can_start::can_start_scope(db).await?;
+    let fetchable = crate::can_start::repair_fetchable(db, &scope).await?;
 
     // Before the queue settles, so it reads a corrected column rather than
-    // promoting against a stale demand.
-    let demand_drift = crate::readiness::recount_demanded(db).await? as i64;
+    // promoting against a stale need.
+    let need_drift = crate::can_start::recount_wanted(db).await? as i64;
 
     // Both directions read the column the recount above just corrected: what
     // nothing wants any more settles, what something wants again wakes.
-    let settled = crate::readiness::settle_skipped(db).await?;
+    let settled = crate::can_start::settle_skipped(db).await?;
     crate::status::emit_transition_effects(ctx, &settled).await;
 
-    let repaired = crate::readiness::repair_readiness(db, &scope).await?;
+    let repaired = crate::can_start::repair_can_start(db, &scope).await?;
     // Fan out in the order the two statements ran, or a row both moved ends on
     // the board at the status the earlier statement wrote.
     crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await;
     crate::status::emit_transition_effects(ctx, &repaired.promoted).await;
 
-    // The one naming repair: the events that can leave a pending anchor unnamed
+    // The one naming repair: the events that can leave a pending shared build unnamed
     // each repair it on their own path, and this is the backstop for a lost move.
     let adopted = if crate::reachability::pending_orphan_frontier(db).await? {
         let adopted = crate::reachability::adopt_pending_closures(db).await?;
-        // Naming is half of what demand means, as it is on every other adoption
-        // path: a name makes the anchor a demander of its own inputs, and without
+        // Naming is half of what need means, as it is on every other adoption
+        // path: a name makes the shared build a consumer of its own inputs, and without
         // this the closure below what was just named waits for the NEXT sweep's
         // recount to be queueable at all.
         let mut queued = Vec::new();
         for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
             queued.extend(
-                crate::readiness::recompute_and_settle_demand(db, chunk)
+                crate::can_start::update_and_settle_need(db, chunk)
                     .await?
                     .changes,
             );
         }
         for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
-            queued.extend(crate::readiness::promote(db, chunk).await?);
+            queued.extend(crate::can_start::promote(db, chunk).await?);
         }
 
         crate::bump_graph_version(db, &adopted.evaluations()).await?;
@@ -180,16 +180,17 @@ pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyRepo
     let unbacked_trusted_outputs = count(db, UNBACKED_TRUSTED_OUTPUT_COUNT.stmt()).await?;
 
     // Before the wedged alarm, which reads the counters this corrects.
-    let eval_counter_drift = crate::eval_counters::recount_eval_anchor_counters(db).await? as i64;
+    let eval_counter_drift =
+        crate::eval_counters::recount_eval_shared_build_counters(db).await? as i64;
     let wedged_building_evals = count(db, WEDGED_BUILDING_EVALS.stmt()).await?;
 
     Ok(ConsistencyReport {
-        counter_drift: (fetchable + repaired.unready_deps) as i64,
+        counter_drift: (fetchable + repaired.blocking_deps) as i64,
         walk_drift,
         runtime_drift,
-        demand_drift,
+        need_drift,
         skipped_moves: settled.len() as i64,
-        unpromoted_ready: repaired.promoted.len() as i64,
+        unpromoted_startable: repaired.promoted.len() as i64,
         adopted,
         unbacked_trusted_outputs,
         wedged_building_evals,
@@ -211,8 +212,8 @@ mod tests {
         }
     }
 
-    /// The sweep's statement script: the walk and wholeness recounts under their
-    /// own raises, the scope select and the flag repair, the demand recount under
+    /// The sweep's statement script: the walk and complete closure recounts under their
+    /// own raises, the scope select and the flag repair, the need recount under
     /// its raise, the queue settle in both directions, the counter repair and the
     /// queue, the naming probe (and the walk it guards when `hole` is set), then
     /// the two read-only alarms.
@@ -223,7 +224,7 @@ mod tests {
             .map(|_| {
                 BTreeMap::from([
                     ("derivation".to_owned(), Value::from(uuid::Uuid::now_v7())),
-                    ("demanded".to_owned(), Value::from(true)),
+                    ("wanted".to_owned(), Value::from(true)),
                 ])
             })
             .collect();
@@ -266,8 +267,8 @@ mod tests {
     }
 
     /// The repairs are these counters' only backstop, so the report has to
-    /// actually run them - the NAR one first, because the readiness recount
-    /// reads wholeness. Without this, deleting either leaves the suite green.
+    /// actually run them - the NAR one first, because the can-start state recount
+    /// reads complete closure. Without this, deleting either leaves the suite green.
     /// The recounts return different row counts so `counter_drift` cannot pass
     /// while carrying only one of the two.
     #[tokio::test]
@@ -278,23 +279,23 @@ mod tests {
 
         assert_eq!(
             report.counter_drift, 8,
-            "both readiness recounts are reported, not one of them"
+            "both can-start recounts are reported, not one of them"
         );
         assert_eq!(
             report.repair_scope, 1,
-            "the readiness repair's scope is measured too"
+            "the can-start repair's scope is measured too"
         );
         assert_eq!(
-            report.demand_drift, 4,
-            "every anchor the recount rewrote is reported"
+            report.need_drift, 4,
+            "every shared build the recount rewrote is reported"
         );
         assert_eq!(
             report.walk_drift, 7,
-            "the walk recount runs before the demand recount"
+            "the walk recount comes before the need recount"
         );
         assert_eq!(
             report.runtime_drift, 6,
-            "the anchor wholeness recount runs before the readiness repair that reads it"
+            "the complete-closure recount comes before the can-start repair that reads it"
         );
         assert_eq!(report.adopted, 0);
         assert_eq!(
@@ -311,7 +312,7 @@ mod tests {
         assert!(
             log[2].contains("SET LOCAL work_mem")
                 && log[3].contains("SET missing_runtime_deps = coalesce(c.n, 0)"),
-            "wholeness is recounted before anything that reads it: {log:?}"
+            "the complete closure is recounted before anything that reads it: {log:?}"
         );
         assert!(
             log[4].contains("SELECT q.derivation FROM derivation_build q")
@@ -320,26 +321,26 @@ mod tests {
         );
         assert!(
             log[5].contains("FOR NO KEY UPDATE") && log[6].contains("SET fetchable"),
-            "the flag is repaired under its own ordered lock, before the demand walk \
-             that stops at a fetchable anchor: {log:?}"
+            "the flag is repaired under its own ordered lock, before the need walk \
+             that stops at a fetchable shared build: {log:?}"
         );
         assert!(
-            log[7].contains("SET LOCAL work_mem") && log[8].contains("SET demanded ="),
-            "the table-wide demand walk runs under its own raise, on a repaired flag: {log:?}"
+            log[7].contains("SET LOCAL work_mem") && log[8].contains("SET wanted ="),
+            "the table-wide need walk takes place under its own raise, on a repaired flag: {log:?}"
         );
         assert!(
-            log[9].contains("db.status IN (5, 10) AND db.demanded")
-                && log[10].contains("db.status = 0 AND NOT db.demanded"),
-            "both Skipped directions read the demand this pass corrected: {log:?}"
+            log[9].contains("db.status IN (5, 10) AND db.wanted")
+                && log[10].contains("db.status = 0 AND NOT db.wanted"),
+            "both Skipped directions read the need this pass corrected: {log:?}"
         );
         assert!(
-            log[11].contains("FOR NO KEY UPDATE") && log[12].contains("SET unready_deps"),
-            "the counter recount follows the demand recount, in a second locked pass \
+            log[11].contains("FOR NO KEY UPDATE") && log[12].contains("SET blocking_deps"),
+            "the counter recount follows the need recount, in a second locked pass \
              over the same scope: {log:?}"
         );
         assert!(
             log[13].contains("SET status = 0") && log[14].contains("SET status = 1"),
-            "the queue is settled against the repaired counters and the corrected demand: {log:?}"
+            "the queue is settled against the repaired counters and the corrected need: {log:?}"
         );
         assert!(
             log[15].contains(
@@ -354,22 +355,22 @@ mod tests {
         assert!(
             log[17].contains("SELECT id FROM evaluation WHERE status IN")
                 && log[18].contains("pg_advisory_xact_lock")
-                && log[19].contains("DELETE FROM evaluation_anchor_delta"),
+                && log[19].contains("DELETE FROM evaluation_shared_build_delta"),
             "the evaluation counters are recounted under the fold's lock: {log:?}"
         );
         assert!(
-            log[20].contains("active_anchors = 0"),
+            log[20].contains("active_shared_builds = 0"),
             "the wedged alarm reads the counters the recount just corrected: {log:?}"
         );
         assert_eq!(log.len(), 21, "{log:?}");
     }
 
-    /// A pending anchor nobody names below a live evaluation's builder is the one
-    /// hole no counter repair can close: the sweep walks, names, recomputes the
-    /// demand the new name carries, queues what it named, and reports the rows as
+    /// A pending shared build nobody names below a live evaluation's builder is the one
+    /// hole no counter repair can close: the sweep walks, names, updates the
+    /// need the new name carries, queues what it named, and reports the rows as
     /// a repair.
     #[tokio::test]
-    async fn the_sweep_adopts_when_a_live_evaluation_reaches_an_unnamed_pending_anchor() {
+    async fn the_sweep_adopts_when_a_live_evaluation_reaches_an_unnamed_pending_shared_build() {
         let (ctx, pool) = crate::test_ctx::ctx(scripted(true)).await;
         let report = graph_consistency_report(&ctx).await.unwrap();
         drop(ctx);
@@ -386,7 +387,7 @@ mod tests {
             log[18].contains("SET LOCAL work_mem")
                 && log[19].contains("ORDER BY derivation FOR NO KEY UPDATE")
                 && log[20].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
-            "a name gives the closure below it demand, in this pass and not the next: {log:?}"
+            "a name gives the closure below it a need, in this pass and not the next: {log:?}"
         );
         assert!(
             log[21].contains("SET status = 1")
@@ -394,7 +395,8 @@ mod tests {
             "then queue what was named and bump: {log:?}"
         );
         assert!(
-            log[23].contains("SELECT DISTINCT o.hash") && log[27].contains("active_anchors = 0"),
+            log[23].contains("SELECT DISTINCT o.hash")
+                && log[27].contains("active_shared_builds = 0"),
             "the alarms still come last: {log:?}"
         );
     }
@@ -407,9 +409,9 @@ mod tests {
             counter_drift: 1,
             walk_drift: 9,
             runtime_drift: 10,
-            demand_drift: 8,
+            need_drift: 8,
             skipped_moves: 11,
-            unpromoted_ready: 3,
+            unpromoted_startable: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
             eval_counter_drift: 6,

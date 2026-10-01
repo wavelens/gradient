@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Content-integrity verification for stored NAR bytes: recompute the narinfo
+//! Content-integrity verification for stored NAR bytes: recalculate the narinfo
 //! `file_hash` (SHA-256 SRI) over the object and compare it against the value a
 //! worker or client reported at upload time.
 
@@ -43,7 +43,7 @@ pub enum VerifyError {
 }
 
 /// Verify `bytes` against the reported `file_hash` and `size`. The size check is
-/// unconditional; the content-hash check runs only for SHA-256 expected hashes,
+/// unconditional; the content-hash check executes only for SHA-256 expected hashes,
 /// so a legacy non-sha256 (e.g. blake3) upload is size-verified rather than
 /// falsely rejected.
 pub fn verify_nar_bytes(

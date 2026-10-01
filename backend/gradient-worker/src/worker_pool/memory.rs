@@ -37,7 +37,7 @@ pub fn budgeted_pool_size(fork_workers: usize, max_eval_rss: u64, ram_budget: u6
 /// else 10% of total RAM clamped to `[128 MiB, 1 GiB]`. Below this the reaper
 /// acts and `acquire` back-pressures. Lifted out for unit testing.
 ///
-/// The 1 GiB is a **ceiling**, not a floor. As a floor it demanded half of a
+/// The 1 GiB is a **ceiling**, not a floor. As a floor it required half of a
 /// 2 GiB host be free at all times, so the guard was armed continuously under
 /// ordinary build load and the reaper spent the whole run killing evals that
 /// were never the cause (#579). The margin only has to be deep enough to react
@@ -211,10 +211,10 @@ mod tests {
     }
 
     /// The margin must stay a small fraction of the host. As a 1 GiB *floor* it
-    /// demanded half of the 2 GiB CI builder be free, so the guard was armed
+    /// required half of the 2 GiB CI builder be free, so the guard was armed
     /// continuously under ordinary build load (#579).
     #[test]
-    fn the_adaptive_margin_never_demands_a_large_share_of_the_host() {
+    fn the_adaptive_margin_never_needs_a_large_share_of_the_host() {
         for total in [512 * MIB, GIB, 2 * GIB, 4 * GIB, 16 * GIB, 128 * GIB] {
             let margin = memory_guard_bytes(0, total);
             assert!(

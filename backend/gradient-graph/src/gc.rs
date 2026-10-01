@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Maintenance deletes applied inside the actor. The sweep scans on the pool,
-//! where a full keep-set walk is cheap to pay for once; the actor then applies
+//! Maintenance deletes applied inside the graph writer. The sweep scans on the pool,
+//! where a full keep-set walk is cheap to pay for once; the graph writer then applies
 //! each bounded chunk in one short transaction, re-checking only what became
 //! live SINCE that scan.
 //!
@@ -32,8 +32,8 @@ use sea_orm::{
 use tracing::info;
 use uuid::Uuid;
 
-use crate::actor::GraphMsg;
 use crate::messages::{GcReport, GcRequest};
+use crate::writer::GraphMsg;
 
 /// Everything a root created at or after `$2` can reach. The seed is the two
 /// kinds of root the keep-set walk uses, so a candidate this misses is one no
@@ -100,16 +100,16 @@ gradient_db::sql! {
 
     /// The edges INTO the candidates, taken BEFORE the delete for the same
     /// reason: `derivation_dependency.dependency` is ON DELETE CASCADE, so a
-    /// dependent that survives has silently lost part of its record.
-    GC_CANDIDATE_DEPENDENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
+    /// parent that survives has silently lost part of its record.
+    GC_CANDIDATE_PARENTS = "SELECT e.derivation, e.dependency FROM derivation_dependency e \
              WHERE e.dependency = ANY($1)",
         params = [DerivationIds(64)],
         tier = Sweep;
 
-    /// Every anchor whose queue membership deleting these evaluations can close:
+    /// Every shared build whose queue membership deleting these evaluations can close:
     /// the derivations they name, and the direct inputs of those, which lose a
-    /// demander with them.
-    GC_ANCHORS_LOSING_AN_EVALUATION = "WITH named AS MATERIALIZED ( \
+    /// parent that wanted them.
+    GC_SHARED_BUILDS_LOSING_AN_EVALUATION = "WITH named AS MATERIALIZED ( \
                  SELECT DISTINCT derivation FROM build_job WHERE evaluation = ANY($1::uuid[])) \
              SELECT derivation FROM named \
              UNION SELECT derivation FROM entry_point WHERE evaluation = ANY($1::uuid[]) \
@@ -119,12 +119,12 @@ gradient_db::sql! {
         tier = Sweep;
 }
 
-/// The per-task evaluation retention an ingest triggers. Runs OFF the actor (it
-/// is spawned past the batch's own transaction) and asks the actor to apply what
-/// it selected, so the prompt GC an ingest owes is still a single-writer delete.
+/// The per-task evaluation retention a record pass triggers. Executes OFF the graph writer (it
+/// is spawned past the batch's own transaction) and asks the graph writer to apply what
+/// it selected, so the prompt GC a record pass owes is still a single-writer delete.
 pub(crate) async fn gc_task_evaluations(
     ctx: &DbContext,
-    actor: ActorRef<GraphMsg>,
+    writer: ActorRef<GraphMsg>,
     task_id: TaskId,
     keep: usize,
 ) -> Result<()> {
@@ -132,7 +132,7 @@ pub(crate) async fn gc_task_evaluations(
 
     for chunk in plan.chunks(gradient_db::IN_CHUNK_SIZE) {
         let ids: Vec<EvaluationId> = chunk.iter().map(|e| e.id).collect();
-        let report = match actor
+        let report = match writer
             .call(
                 |reply| GraphMsg::Gc(GcRequest::Evaluations { ids }, reply),
                 None,
@@ -140,7 +140,7 @@ pub(crate) async fn gc_task_evaluations(
             .await
         {
             Ok(ractor::rpc::CallResult::Success(result)) => result?,
-            other => anyhow::bail!("the graph actor did not apply the evaluation GC: {other:?}"),
+            other => anyhow::bail!("the graph writer did not apply the evaluation GC: {other:?}"),
         };
 
         let deleted: Vec<MEvaluation> = chunk
@@ -154,7 +154,7 @@ pub(crate) async fn gc_task_evaluations(
     Ok(())
 }
 
-/// One maintenance request, applied and emitted inside the actor's transaction.
+/// One maintenance request, applied and emitted inside the graph writer's transaction.
 pub(crate) async fn apply(ctx: &DbContext, req: GcRequest) -> Result<GcReport> {
     match req {
         GcRequest::Derivations {
@@ -189,9 +189,9 @@ async fn delete_derivations(
     let attempts = pairs(db, GC_CANDIDATE_ATTEMPTS.bind([ids(candidates)]), "attempt")
         .await
         .context("GC: failed to snapshot the candidates' build attempts")?;
-    let dependents = pairs(
+    let wanted_by = pairs(
         db,
-        GC_CANDIDATE_DEPENDENTS.bind([ids(candidates)]),
+        GC_CANDIDATE_PARENTS.bind([ids(candidates)]),
         "dependency",
     )
     .await
@@ -212,11 +212,11 @@ async fn delete_derivations(
         return Ok(GcReport::default());
     }
 
-    // A surviving dependent's record lost an edge, so `walked` is no longer true
+    // A surviving parent's record lost an edge, so `walked` is no longer true
     // of it and every gate that reads it must close until a fresh evaluation
     // re-walks it. The un-promote re-checks the gates rather than the list, so a
-    // dependent a concurrent eval already re-walked keeps its place in the queue.
-    let survivors: Vec<DerivationId> = orphaned_survivors(&dependents, &deleted);
+    // parent a concurrent eval already re-walked keeps its place in the queue.
+    let survivors: Vec<DerivationId> = orphaned_survivors(&wanted_by, &deleted);
     if !survivors.is_empty() {
         let txn = db.begin().await.context("GC: begin the survivor un-walk")?;
         gradient_db::unwalk(&txn, &survivors)
@@ -270,7 +270,7 @@ async fn retire_stale_paths(
     }
 
     // `retire_outputs` takes a transaction because the locks it opens with must
-    // still be held when its DELETE runs. Inside the actor that is a savepoint:
+    // still be held when its DELETE executes. Inside the graph writer that is a savepoint:
     // Postgres keeps a subtransaction's locks until the outer commit, so the
     // release below never drops one early.
     let savepoint = db
@@ -300,7 +300,7 @@ async fn delete_evaluations(ctx: &DbContext, evaluations: &[EvaluationId]) -> Re
 
     let raw: Vec<Uuid> = evaluations.iter().map(|e| e.into_inner()).collect();
     let lost: Vec<DerivationId> = db
-        .query_all_raw(GC_ANCHORS_LOSING_AN_EVALUATION.bind([raw.into()]))
+        .query_all_raw(GC_SHARED_BUILDS_LOSING_AN_EVALUATION.bind([raw.into()]))
         .await
         .context("GC: failed to collect the derivations of the evaluations to delete")?
         .iter()
@@ -389,19 +389,19 @@ async fn pairs<C: ConnectionTrait>(
 }
 
 /// The derivations that SURVIVED the delete while at least one of their
-/// dependencies was reclaimed, sorted and deduplicated. A dependent that was
+/// dependencies was reclaimed, sorted and deduplicated. A parent that was
 /// itself deleted is excluded: its row is gone and updating it would be a no-op
 /// on a cascaded id.
 fn orphaned_survivors(
-    dependents: &[(DerivationId, Uuid)],
+    wanted_by: &[(DerivationId, Uuid)],
     deleted: &HashSet<DerivationId>,
 ) -> Vec<DerivationId> {
-    let mut survivors: Vec<DerivationId> = dependents
+    let mut survivors: Vec<DerivationId> = wanted_by
         .iter()
-        .filter(|(dependent, dependency)| {
-            deleted.contains(&DerivationId::new(*dependency)) && !deleted.contains(dependent)
+        .filter(|(parent, dependency)| {
+            deleted.contains(&DerivationId::new(*dependency)) && !deleted.contains(parent)
         })
-        .map(|(dependent, _)| *dependent)
+        .map(|(parent, _)| *parent)
         .collect();
     survivors.sort_unstable();
     survivors.dedup();
@@ -481,7 +481,7 @@ mod tests {
     /// A path a commit since the scan references, or the fresh closure reaches,
     /// is not retired.
     #[tokio::test]
-    async fn the_retire_excludes_fresh_referrers_and_the_fresh_closure() {
+    async fn the_retire_excludes_fresh_parents_and_the_fresh_closure() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([empty()])
             .into_connection();
@@ -531,20 +531,20 @@ mod tests {
         assert!(gradient_db::pool::statements(pool.into_transaction_log()).is_empty());
     }
 
-    /// A dependent that survived while its dependency went has an incomplete
+    /// A parent that survived while its dependency went has an incomplete
     /// record; one that went with it has no row left to re-walk.
     #[test]
     fn only_a_survivor_of_a_reclaimed_dependency_is_re_walked() {
         let survivor = DerivationId::now_v7();
-        let gone_dependent = DerivationId::now_v7();
+        let gone_parent = DerivationId::now_v7();
         let dependency = DerivationId::now_v7();
-        let deleted: HashSet<DerivationId> = [dependency, gone_dependent].into_iter().collect();
+        let deleted: HashSet<DerivationId> = [dependency, gone_parent].into_iter().collect();
 
         assert_eq!(
             orphaned_survivors(
                 &[
                     (survivor, dependency.into_inner()),
-                    (gone_dependent, dependency.into_inner()),
+                    (gone_parent, dependency.into_inner()),
                 ],
                 &deleted,
             ),

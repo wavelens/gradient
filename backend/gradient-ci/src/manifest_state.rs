@@ -18,7 +18,7 @@ use gradient_types::ids::UserId;
 
 use crate::github_app_manifest::ManifestResult;
 
-/// Map of state-token → (initiating superuser id, issuance time). Tokens older
+/// Map of state-token -> (initiating superuser id, issuance time). Tokens older
 /// than 10 minutes are pruned on each `issue_state` call.
 ///
 /// The user id is recorded at issuance so the callback - which arrives as an
@@ -27,7 +27,7 @@ use crate::github_app_manifest::ManifestResult;
 /// the manifest flow without trusting query-string input.
 pub type ManifestStateStore = Mutex<HashMap<String, (UserId, Instant)>>;
 
-/// Map of superuser id → (pending credentials, deposit time). Entries older
+/// Map of superuser id -> (pending credentials, deposit time). Entries older
 /// than 10 minutes are pruned on each `store_credentials` call.
 pub type PendingCredentialsStore = Mutex<HashMap<UserId, (ManifestResult, Instant)>>;
 
@@ -62,7 +62,7 @@ pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<U
     }
 }
 
-/// Stores `creds` keyed by `user_id`, overwriting any prior entry. Prunes
+/// Stores `creds` per `user_id`, overwriting any prior entry. Prunes
 /// expired entries as a side-effect.
 pub fn store_credentials(store: &PendingCredentialsStore, user_id: UserId, creds: ManifestResult) {
     let mut guard = store.lock().unwrap_or_else(|p| p.into_inner());

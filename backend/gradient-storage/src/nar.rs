@@ -46,7 +46,7 @@ impl Default for S3Timeouts {
 
 /// How long a multipart part upload may make no progress before the write is
 /// abandoned, and the fixed floor under [`single_write_budget`]. An upload holds
-/// one of the few per-connection NAR-commit permits while it runs, so a wedged
+/// one of the few per-connection NAR-commit permits while it is running, so a wedged
 /// one takes the whole connection's commit path down with it.
 const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -96,8 +96,8 @@ pub struct NarStore {
     /// S3 store - held separately to enable presigned URL generation via the
     /// [`object_store::signer::Signer`] trait.  `None` for local-disk stores.
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
-    /// Relayed NARs awaiting the background upload; `None` on a store built
-    /// without staging, whose relay commit writes through synchronously.
+    /// Passed-through NARs awaiting the background upload; `None` on a store built
+    /// without staging, whose passthrough commit writes through synchronously.
     hot: Arc<HotNarCache>,
 }
 
@@ -206,7 +206,7 @@ impl NarStore {
         // retry budget re-running a request certain to be cancelled again -
         // surfacing as a hard failure ~3m30s in. Progress is policed by the
         // read timeout instead, an inactivity timer that a healthy transfer
-        // resets on every chunk however long it runs.
+        // resets on every chunk however long it keeps running.
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(bucket)
             .with_region(region)
@@ -420,7 +420,7 @@ impl NarStore {
 
     /// Verify a stored NAR object against its reported file_hash and size.
     /// Always HEADs to confirm existence and size; when `rehash` is set it
-    /// additionally GETs the object and recomputes the file hash (authoritative
+    /// additionally GETs the object and recalculates the file hash (authoritative
     /// but costs a full object read).
     pub async fn verify(
         &self,
@@ -649,7 +649,7 @@ impl NarStore {
         }
     }
 
-    /// Object-store path for a fleet-shared eval-cache blob keyed by flake
+    /// Object-store path for a fleet-shared eval-cache blob per flake
     /// fingerprint. Namespaced under `eval-cache/` so it never collides with the
     /// `nars/` NAR layout (#386).
     fn eval_cache_path(&self, fingerprint: &str) -> Path {
@@ -707,7 +707,7 @@ impl NarStore {
         self.delete_object(&self.eval_cache_path(fingerprint)).await
     }
 
-    /// Object-store path for a build-request blob keyed by project + BLAKE3 hash.
+    /// Object-store path for a build-request blob per project + BLAKE3 hash.
     /// Layout: `<prefix>build-request-blobs/<project-uuid>/<hh>/<full-hex>`.
     fn blob_path(&self, project: uuid::Uuid, hash: &[u8; 32]) -> Path {
         let hex = hex::encode(hash);
@@ -901,14 +901,14 @@ impl NarStore {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageTarget {
-    Relay,
+    Passthrough,
     Put { url: String },
     Multipart(gradient_wire::types::PresignedMultipart),
 }
 
 pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Duration> {
     match target {
-        StorageTarget::Relay => None,
+        StorageTarget::Passthrough => None,
         StorageTarget::Put { .. } => Some(PRESIGN_TTL),
         StorageTarget::Multipart(_) => Some(crate::multipart::part_ttl(size)),
     }
@@ -916,14 +916,14 @@ pub fn upload_lease(target: &StorageTarget, size: u64) -> Option<std::time::Dura
 
 impl NarStore {
     /// The one transport this backend accepts for `object`: presigned on S3,
-    /// relayed through the server on a local store.
+    /// passed through the server on a local store.
     pub async fn upload_target(&self, object: &ObjectKey, size: u64) -> Result<StorageTarget> {
         if !self.presigner_available() {
-            return Ok(StorageTarget::Relay);
+            return Ok(StorageTarget::Passthrough);
         }
         let missing = || anyhow::anyhow!("the S3 store could not presign an upload for {object:?}");
         match object {
-            ObjectKey::Rest(_) => Ok(StorageTarget::Relay),
+            ObjectKey::Rest(_) => Ok(StorageTarget::Passthrough),
             ObjectKey::Nar(hash) if size > MULTIPART_NAR_BYTES => self
                 .presigned_multipart(hash, size)
                 .await?
@@ -983,7 +983,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_local_store_relays_every_upload() {
+    async fn a_local_store_passes_through_every_upload() {
         let dir = tempfile::TempDir::new().unwrap();
         let store = NarStore::local(dir.path().to_str().unwrap()).unwrap();
         for object in [
@@ -995,7 +995,7 @@ mod tests {
                     .upload_target(&object, 10 * 1024 * 1024 * 1024)
                     .await
                     .unwrap(),
-                StorageTarget::Relay
+                StorageTarget::Passthrough
             );
         }
     }
@@ -1028,7 +1028,7 @@ mod tests {
                 .upload_target(&ObjectKey::Rest("r".into()), 1)
                 .await
                 .unwrap(),
-            StorageTarget::Relay
+            StorageTarget::Passthrough
         );
     }
 

@@ -8,7 +8,7 @@
 //!
 //! Algorithm:
 //!  1. Walk the directory and serialise its contents as a canonical NAR via `NarByteStream`.
-//!  2. SHA-256 the NAR bytes → `nar_hash`.
+//!  2. SHA-256 the NAR bytes -> `nar_hash`.
 //!  3. Build a `NixArchive` content address and call `make_store_path_from_ca` with name
 //!     "source", producing the same path `nix-store --add` would assign.
 

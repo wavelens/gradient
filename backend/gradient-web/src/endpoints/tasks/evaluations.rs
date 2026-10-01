@@ -243,8 +243,8 @@ pub async fn post_task_evaluate(
         if eval.status == EvaluationStatus::Building {
             state
                 .graph
-                .transition(gradient_graph::Transition::Reconcile {
-                    scope: gradient_db::ReconcileScope::Eval(eval.id),
+                .transition(gradient_graph::Transition::Repair {
+                    scope: gradient_db::RepairScope::Eval(eval.id),
                 })
                 .await
                 .map_err(|e| {
@@ -574,7 +574,7 @@ fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
 /// walk carries the seed through the recursion, so its cost is the page size
 /// times the evaluation's build graph. A page of 100 over a 74-entry-point
 /// NixOS flake measured 93 s a call and 80% of the database's time; the tail is
-/// paged in on demand and only for pages someone scrolls to.
+/// paged in when needed and only for pages someone scrolls to.
 const ENTRY_POINTS_PAGE: u64 = 25;
 const ENTRY_POINTS_PAGE_MAX: u64 = 500;
 
@@ -666,11 +666,11 @@ pub async fn get_task_entry_points(
 
 /// All DB data needed to render a list of [`EntryPointSummary`] records.
 ///
-/// Loaded in one pass via `load` to avoid per-entry-point round-trips. Keyed on
-/// the entry point's derivation; the shared `derivation_build` anchor carries
+/// Loaded in one pass via `load` to avoid per-entry-point round-trips. One entry per
+/// the entry point's derivation; the `derivation_build` shared build carries
 /// status and the per-eval `build_job` carries the public build id.
 struct EntryPointRelatedData {
-    anchors: HashMap<DerivationId, MDerivationBuild>,
+    shared_builds: HashMap<DerivationId, MDerivationBuild>,
     build_jobs: HashMap<DerivationId, BuildJobId>,
     derivations: HashMap<DerivationId, MDerivation>,
     has_products: HashMap<DerivationId, bool>,
@@ -723,7 +723,7 @@ impl EntryPointRelatedData {
             .map(|d| (d.id, d))
             .collect();
 
-        let anchors: HashMap<DerivationId, MDerivationBuild> =
+        let shared_builds: HashMap<DerivationId, MDerivationBuild> =
             gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
                 EDerivationBuild::find()
                     .filter(CDerivationBuild::Derivation.is_in(chunk))
@@ -748,7 +748,7 @@ impl EntryPointRelatedData {
             .map(|j| (j.derivation, j.id))
             .collect();
 
-        let completed_drv_ids: HashSet<DerivationId> = anchors
+        let completed_drv_ids: HashSet<DerivationId> = shared_builds
             .values()
             .filter(|a| a.status == BuildStatus::Completed || a.status == BuildStatus::Substituted)
             .map(|a| a.derivation)
@@ -789,7 +789,7 @@ impl EntryPointRelatedData {
                 })
                 .await?;
                 for bp in products {
-                    // Map back from output → derivation.
+                    // Map back from output -> derivation.
                     if let Some(output) = built.iter().find(|o| o.id == bp.derivation_output) {
                         m.insert(output.derivation, true);
                     }
@@ -798,14 +798,15 @@ impl EntryPointRelatedData {
             m
         };
 
-        // Latest attempt per anchor, batched into one DISTINCT ON query, then
-        // re-keyed by derivation for the summary lookup.
+        // Latest attempt per shared build, batched into one DISTINCT ON query, then
+        // re-per derivation for the summary lookup.
         let attempts: HashMap<DerivationId, MBuildAttempt> = {
-            let anchor_ids: Vec<DerivationBuildId> = anchors.values().map(|a| a.id).collect();
-            let mut by_anchor = gradient_db::latest_attempts(db, &anchor_ids).await?;
-            anchors
+            let shared_build_ids: Vec<DerivationBuildId> =
+                shared_builds.values().map(|a| a.id).collect();
+            let mut by_shared_build = gradient_db::latest_attempts(db, &shared_build_ids).await?;
+            shared_builds
                 .iter()
-                .filter_map(|(drv, a)| by_anchor.remove(&a.id).map(|att| (*drv, att)))
+                .filter_map(|(drv, a)| by_shared_build.remove(&a.id).map(|att| (*drv, att)))
                 .collect()
         };
 
@@ -825,7 +826,7 @@ impl EntryPointRelatedData {
         }
 
         Ok(Self {
-            anchors,
+            shared_builds,
             build_jobs,
             derivations,
             has_products,
@@ -846,7 +847,7 @@ impl EntryPointRelatedData {
                 continue;
             };
             let build_status = self
-                .anchors
+                .shared_builds
                 .get(&ep.derivation)
                 .map(|a| a.status)
                 .unwrap_or(BuildStatus::Queued)
@@ -870,7 +871,7 @@ impl EntryPointRelatedData {
                 deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
                 deps_total: self.deps_total.get(&ep.id).copied().unwrap_or(0),
                 prioritized: self
-                    .anchors
+                    .shared_builds
                     .get(&ep.derivation)
                     .is_some_and(|a| a.prioritized),
                 created_at: ep.created_at,
@@ -1067,7 +1068,7 @@ pub async fn get_entry_point_download(
         .or_not_found("Evaluation")?;
 
     // Entry point whose `eval` attribute path matches the query param.
-    // Axum URL-decodes the value automatically, so %22 → " before this comparison.
+    // Axum URL-decodes the value automatically, so %22 -> " before this comparison.
     let ep = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
         .filter(CEntryPoint::Eval.eq(&params.eval))
@@ -1075,13 +1076,15 @@ pub async fn get_entry_point_download(
         .await?
         .or_not_found("Entry point")?;
 
-    let anchor = EDerivationBuild::find()
+    let shared_build = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.eq(ep.derivation))
         .one(&state.web_db)
         .await?
         .or_not_found("Build")?;
 
-    if anchor.status != BuildStatus::Completed && anchor.status != BuildStatus::Substituted {
+    if shared_build.status != BuildStatus::Completed
+        && shared_build.status != BuildStatus::Substituted
+    {
         return Err(WebError::not_found("File"));
     }
 

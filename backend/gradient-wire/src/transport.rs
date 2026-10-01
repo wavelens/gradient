@@ -10,14 +10,14 @@ use crate::types::QueryMode;
 /// the server, or straight to object storage on a presigned URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
-    Relay,
+    Passthrough,
     Presigned,
 }
 
 /// Whether a query may leave our cache. Only a caller that said `external` ever
 /// does: a build's inputs are here or the build fails, and putting them here is a
 /// Substitute's job, so a Pull without the flag is answered from our rows alone.
-pub fn may_consult_upstreams(mode: QueryMode, external: bool) -> bool {
+pub fn may_consult_upstream_caches(mode: QueryMode, external: bool) -> bool {
     external && !matches!(mode, QueryMode::Push)
 }
 
@@ -27,7 +27,7 @@ pub fn external_arity_ok(external: bool, paths: usize) -> bool {
     !external || paths == 1
 }
 
-/// Download transport for a cached path: relay unless the store can presign,
+/// Download transport for a cached path: passthrough unless the store can presign,
 /// the object is confirmed there, and it is over the threshold.
 pub fn pull_transport(
     confirmed: bool,
@@ -38,7 +38,7 @@ pub fn pull_transport(
     if presigner && confirmed && file_size > small_nar_bytes {
         Transport::Presigned
     } else {
-        Transport::Relay
+        Transport::Passthrough
     }
 }
 
@@ -47,7 +47,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pull_transport_relays_unconfirmed_small_and_presignerless_paths() {
+    fn pull_transport_passes_through_unconfirmed_small_and_presignerless_paths() {
         let threshold = 1024 * 1024;
         assert_eq!(
             pull_transport(true, threshold + 1, threshold, true),
@@ -55,25 +55,25 @@ mod tests {
         );
         assert_eq!(
             pull_transport(false, threshold + 1, threshold, true),
-            Transport::Relay
+            Transport::Passthrough
         );
         assert_eq!(
             pull_transport(true, threshold, threshold, true),
-            Transport::Relay
+            Transport::Passthrough
         );
         assert_eq!(
             pull_transport(true, threshold + 1, threshold, false),
-            Transport::Relay
+            Transport::Passthrough
         );
     }
 
     #[test]
     fn only_an_external_pull_or_normal_query_leaves_our_cache() {
-        assert!(may_consult_upstreams(QueryMode::Pull, true));
-        assert!(may_consult_upstreams(QueryMode::Normal, true));
-        assert!(!may_consult_upstreams(QueryMode::Push, true));
-        assert!(!may_consult_upstreams(QueryMode::Pull, false));
-        assert!(!may_consult_upstreams(QueryMode::Normal, false));
+        assert!(may_consult_upstream_caches(QueryMode::Pull, true));
+        assert!(may_consult_upstream_caches(QueryMode::Normal, true));
+        assert!(!may_consult_upstream_caches(QueryMode::Push, true));
+        assert!(!may_consult_upstream_caches(QueryMode::Pull, false));
+        assert!(!may_consult_upstream_caches(QueryMode::Normal, false));
     }
 
     #[test]

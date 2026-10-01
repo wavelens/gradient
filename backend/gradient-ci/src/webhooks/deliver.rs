@@ -8,7 +8,7 @@ use super::sign;
 use crate::actions::{MAX_BODY_BYTES, decrypt_secret_with_file, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
-use gradient_types::ids::OutboxId;
+use gradient_types::ids::PendingDeliveryId;
 use gradient_types::*;
 use gradient_util::http_validation::validate_webhook_url;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
@@ -28,7 +28,7 @@ pub async fn deliver(
     ctx: &CiContext,
     hook: &MWebhook,
     envelope: &JsonValue,
-    delivery: OutboxId,
+    delivery: PendingDeliveryId,
 ) -> Result<MWebhookDelivery> {
     let event = envelope
         .get("event")
@@ -73,7 +73,7 @@ async fn post(
     hook: &MWebhook,
     event: &str,
     body: &str,
-    delivery: OutboxId,
+    delivery: PendingDeliveryId,
 ) -> Result<(i32, String)> {
     validate_webhook_url(&hook.url).map_err(|e| anyhow!("URL rejected: {e}"))?;
     let secret = decrypt_secret_with_file(&ctx.db.config.secrets.crypt_file, &hook.secret)?;

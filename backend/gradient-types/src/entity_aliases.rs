@@ -7,10 +7,10 @@
 //! Single-letter prefix aliases for sea-orm entity types.
 //!
 //! Mapping:
-//! - `E*` → `gradient_entity::*::Entity` - the type carrying `find()`, `insert()`, etc.
-//! - `M*` → `gradient_entity::*::Model` - a fully-loaded row.
-//! - `A*` → `gradient_entity::*::ActiveModel` - for inserts/updates.
-//! - `C*` → `gradient_entity::*::Column` - column references for filters.
+//! - `E*` -> `gradient_entity::*::Entity` - the type carrying `find()`, `insert()`, etc.
+//! - `M*` -> `gradient_entity::*::Model` - a fully-loaded row.
+//! - `A*` -> `gradient_entity::*::ActiveModel` - for inserts/updates.
+//! - `C*` -> `gradient_entity::*::Column` - column references for filters.
 //!
 //! These aliases are pervasive in older code; new code may prefer the
 //! canonical `gradient_entity::api::Entity` form, which is what sea-orm tutorials use
@@ -68,7 +68,7 @@ pub type EEvaluation = evaluation::Entity;
 pub type EEvaluationFlakeInputOverride = evaluation_flake_input_override::Entity;
 pub type EEvaluationInputUpdate = evaluation_input_update::Entity;
 pub type EOpenPrState = open_pr_state::Entity;
-pub type EOutbox = outbox::Entity;
+pub type EPendingDelivery = pending_delivery::Entity;
 pub type EEvaluationMessage = evaluation_message::Entity;
 pub type EFeature = feature::Entity;
 pub type EIntegration = integration::Entity;
@@ -126,7 +126,7 @@ pub type MEvaluation = evaluation::Model;
 pub type MEvaluationFlakeInputOverride = evaluation_flake_input_override::Model;
 pub type MEvaluationInputUpdate = evaluation_input_update::Model;
 pub type MOpenPrState = open_pr_state::Model;
-pub type MOutbox = outbox::Model;
+pub type MPendingDelivery = pending_delivery::Model;
 pub type MEvaluationMessage = evaluation_message::Model;
 pub type MEvaluationAttrCost = evaluation_attr_cost::Model;
 pub type MEvaluationMetric = evaluation_metric::Model;
@@ -184,7 +184,7 @@ pub type AEvaluation = evaluation::ActiveModel;
 pub type AEvaluationFlakeInputOverride = evaluation_flake_input_override::ActiveModel;
 pub type AEvaluationInputUpdate = evaluation_input_update::ActiveModel;
 pub type AOpenPrState = open_pr_state::ActiveModel;
-pub type AOutbox = outbox::ActiveModel;
+pub type APendingDelivery = pending_delivery::ActiveModel;
 pub type AEvaluationMessage = evaluation_message::ActiveModel;
 pub type AEvaluationAttrCost = evaluation_attr_cost::ActiveModel;
 pub type AEvaluationMetric = evaluation_metric::ActiveModel;
@@ -243,7 +243,7 @@ pub type CEvaluation = evaluation::Column;
 pub type CEvaluationFlakeInputOverride = evaluation_flake_input_override::Column;
 pub type CEvaluationInputUpdate = evaluation_input_update::Column;
 pub type COpenPrState = open_pr_state::Column;
-pub type COutbox = outbox::Column;
+pub type CPendingDelivery = pending_delivery::Column;
 pub type CEvaluationMessage = evaluation_message::Column;
 pub type CFeature = feature::Column;
 pub type CIntegration = integration::Column;

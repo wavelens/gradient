@@ -70,7 +70,7 @@ fn unwrap_dir(out: Extracted) -> Vec<u8> {
 
 type FileMap = BTreeMap<String, (u32, Vec<u8>)>;
 
-/// Decompress a `tar.zst` archive and return a map of path → (mode-bits, body)
+/// Decompress a `tar.zst` archive and return a map of path -> (mode-bits, body)
 /// for regular files, plus a sorted list of all entry paths (including dirs
 /// and symlinks) so tests can assert on structure.
 fn read_tar_zst(tar_zst: &[u8]) -> (FileMap, Vec<String>) {

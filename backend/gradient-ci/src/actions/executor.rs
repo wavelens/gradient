@@ -5,7 +5,7 @@
  */
 
 use super::send::{
-    execute_forge_status_report, execute_open_pr, execute_send_mail, execute_send_web_request,
+    execute_git_host_status_report, execute_open_pr, execute_send_mail, execute_send_web_request,
 };
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
@@ -56,8 +56,8 @@ pub async fn execute_action(
         ActionConfig::SendWebRequest { url, token } => {
             execute_send_web_request(ctx, event, &envelope, &url, token.as_deref()).await
         }
-        ActionConfig::ForgeStatusReport { integration_id } => {
-            execute_forge_status_report(ctx, event, &content, integration_id).await
+        ActionConfig::GitHostStatusReport { integration_id } => {
+            execute_git_host_status_report(ctx, event, &content, integration_id).await
         }
         ActionConfig::OpenPr {
             integration_id,

@@ -83,7 +83,7 @@ pub fn carries_debug_info(package: &str) -> bool {
 }
 
 /// The next batch of cached debug outputs whose NAR has not been walked yet.
-/// Oldest first, so a backfill drains in ingest order.
+/// Oldest first, so a backfill drains in record order.
 pub async fn pending_debug_index<C: ConnectionTrait>(
     db: &C,
     limit: u64,
@@ -97,7 +97,7 @@ pub async fn pending_debug_index<C: ConnectionTrait>(
 /// Walks one stored NAR and records its build ids, then marks the path scanned.
 /// The marker is set even when the walk finds nothing - or when the object is
 /// gone - so the same NAR is never read twice; a re-upload under a different
-/// `file_hash` clears it again on ingest, which is also how a re-index is
+/// `file_hash` clears it again on record, which is also how a re-index is
 /// forced. Returns the number of build ids recorded.
 pub async fn index_cached_path<C: ConnectionTrait>(
     db: &C,

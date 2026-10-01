@@ -81,7 +81,7 @@ pub struct Model {
     pub project: ProjectId,
     pub task: Option<TaskId>,
     pub worker_id: String,
-    /// The scheduler's job key (`build:<anchor>` / `eval:<evaluation>`), unique
+    /// The scheduler's job key (`build:<shared_build>` / `eval:<evaluation>`), unique
     /// among in-flight jobs. Lets a terminal report close its own row instead of
     /// guessing at the newest open one for the worker. `None` on rows written
     /// before the column existed.

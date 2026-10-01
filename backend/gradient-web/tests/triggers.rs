@@ -28,7 +28,7 @@
 use gradient_entity::{ids::*, integration, project_user, task, task_trigger};
 use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
-use gradient_types::{ConcurrencyPolicy, ForgeType, SessionId, TriggerType};
+use gradient_types::{ConcurrencyPolicy, GitHostType, SessionId, TriggerType};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
@@ -98,7 +98,7 @@ fn github_inbound_integration_row() -> integration::Model {
         project: project_id(),
         name: "github".into(),
         display_name: "GitHub".into(),
-        forge_type: ForgeType::GitHub,
+        git_host_type: GitHostType::GitHub,
         created_by: user_id(),
         created_at: test_date(),
         ..Default::default()
@@ -632,7 +632,7 @@ fn patch_task_concurrency_to_skip() {
 // ── Integration enrichment tests ──────────────────────────────────────────────
 //
 // Regression coverage: reporter triggers must surface the referenced
-// integration's name/display_name/forge_type alongside the raw `integration_id`,
+// integration's name/display_name/git_host_type alongside the raw `integration_id`,
 // so the trigger UI can render "from GitHub" instead of falling back to a UUID.
 // Polling triggers must keep `integration: null` (no extra DB round-trip).
 
@@ -669,7 +669,7 @@ fn list_reporter_trigger_includes_integration_metadata() {
         );
         assert_eq!(item["integration"]["name"], "github");
         assert_eq!(item["integration"]["display_name"], "GitHub");
-        assert_eq!(item["integration"]["forge_type"], "github");
+        assert_eq!(item["integration"]["git_host_type"], "github");
     });
 }
 
@@ -765,6 +765,6 @@ fn get_reporter_trigger_includes_integration_metadata() {
         let body: Value = res.json();
         assert_eq!(body["message"]["type"], "reporter_push");
         assert_eq!(body["message"]["integration"]["display_name"], "GitHub");
-        assert_eq!(body["message"]["integration"]["forge_type"], "github");
+        assert_eq!(body["message"]["integration"]["git_host_type"], "github");
     });
 }

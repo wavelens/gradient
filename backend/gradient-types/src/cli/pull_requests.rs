@@ -9,8 +9,8 @@ use clap::Args;
 #[derive(Args, Debug, Clone, Default)]
 pub struct PullRequestsArgs {
     /// Author/committer name for commits the `OpenPr` action pushes. Unset (the
-    /// default) lets the forge attribute the commit to the authenticated
-    /// app/token: GitHub credits the App bot and signs it verified.
+    /// default) lets each Git host choose: GitHub credits the App bot and marks
+    /// the commit verified; Gitea, Forgejo and GitLab use the token owner.
     #[arg(
         long = "pull-requests-commit-name",
         env = "GRADIENT_PULL_REQUESTS_COMMIT_NAME"

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Per-evaluation anchor counters: the evaluation's folded columns plus its
-//! unfolded ledger rows. The triggers of the `evaluation_anchor_counters`
-//! migration are the only writers of the ledger; this module folds and recounts.
+//! Per-evaluation shared build counters: the evaluation's folded columns plus its
+//! unfolded ledger rows. The `evaluation_shared_build_*` triggers are the only
+//! writers of the ledger; this module folds and recounts.
 
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
@@ -36,23 +36,23 @@ impl EvalCounters {
 
 crate::sql! {
     EVAL_COUNTERS = "SELECT \
-        (e.named_anchors + coalesce(sum(d.named), 0))::bigint AS named, \
-        (e.active_anchors + coalesce(sum(d.active), 0))::bigint AS active, \
-        (e.failed_anchors + coalesce(sum(d.failed), 0))::bigint AS failed, \
-        (e.queued_anchors + coalesce(sum(d.queued), 0))::bigint AS queued, \
-        (e.building_anchors + coalesce(sum(d.building), 0))::bigint AS building \
-        FROM evaluation e LEFT JOIN evaluation_anchor_delta d ON d.evaluation = e.id \
+        (e.named_shared_builds + coalesce(sum(d.named), 0))::bigint AS named, \
+        (e.active_shared_builds + coalesce(sum(d.active), 0))::bigint AS active, \
+        (e.failed_shared_builds + coalesce(sum(d.failed), 0))::bigint AS failed, \
+        (e.queued_shared_builds + coalesce(sum(d.queued), 0))::bigint AS queued, \
+        (e.building_shared_builds + coalesce(sum(d.building), 0))::bigint AS building \
+        FROM evaluation e LEFT JOIN evaluation_shared_build_delta d ON d.evaluation = e.id \
         WHERE e.id = $1 GROUP BY e.id",
         params = [EvaluationId],
         tier = Hot;
 
     IN_FLIGHT_COUNTERS = "SELECT e.id, \
-        (e.named_anchors + coalesce(sum(d.named), 0))::bigint AS named, \
-        (e.active_anchors + coalesce(sum(d.active), 0))::bigint AS active, \
-        (e.failed_anchors + coalesce(sum(d.failed), 0))::bigint AS failed, \
-        (e.queued_anchors + coalesce(sum(d.queued), 0))::bigint AS queued, \
-        (e.building_anchors + coalesce(sum(d.building), 0))::bigint AS building \
-        FROM evaluation e LEFT JOIN evaluation_anchor_delta d ON d.evaluation = e.id \
+        (e.named_shared_builds + coalesce(sum(d.named), 0))::bigint AS named, \
+        (e.active_shared_builds + coalesce(sum(d.active), 0))::bigint AS active, \
+        (e.failed_shared_builds + coalesce(sum(d.failed), 0))::bigint AS failed, \
+        (e.queued_shared_builds + coalesce(sum(d.queued), 0))::bigint AS queued, \
+        (e.building_shared_builds + coalesce(sum(d.building), 0))::bigint AS building \
+        FROM evaluation e LEFT JOIN evaluation_shared_build_delta d ON d.evaluation = e.id \
         WHERE e.id = ANY($1::uuid[]) GROUP BY e.id",
         params = [EvaluationIds(64)],
         tier = Bulk;
@@ -65,33 +65,33 @@ crate::sql! {
         params = [Int(640)],
         tier = Hot;
 
-    FOLD_ANCHOR_DELTAS = "WITH gone AS (DELETE FROM evaluation_anchor_delta RETURNING \
+    FOLD_SHARED_BUILD_DELTAS = "WITH gone AS (DELETE FROM evaluation_shared_build_delta RETURNING \
         evaluation, named, active, failed, queued, building), \
         s AS (SELECT evaluation, sum(named)::int AS named, sum(active)::int AS active, \
               sum(failed)::int AS failed, sum(queued)::int AS queued, \
               sum(building)::int AS building FROM gone GROUP BY evaluation) \
-        UPDATE evaluation e SET named_anchors = e.named_anchors + s.named, \
-        active_anchors = e.active_anchors + s.active, \
-        failed_anchors = e.failed_anchors + s.failed, \
-        queued_anchors = e.queued_anchors + s.queued, \
-        building_anchors = e.building_anchors + s.building \
+        UPDATE evaluation e SET named_shared_builds = e.named_shared_builds + s.named, \
+        active_shared_builds = e.active_shared_builds + s.active, \
+        failed_shared_builds = e.failed_shared_builds + s.failed, \
+        queued_shared_builds = e.queued_shared_builds + s.queued, \
+        building_shared_builds = e.building_shared_builds + s.building \
         FROM s WHERE e.id = s.evaluation",
         params = [],
         tier = Bulk;
 
-    RECOUNT_EVAL_COUNTERS = "WITH gone AS (DELETE FROM evaluation_anchor_delta \
+    RECOUNT_EVAL_COUNTERS = "WITH gone AS (DELETE FROM evaluation_shared_build_delta \
         WHERE evaluation = ANY($1::uuid[]) RETURNING evaluation), \
         c AS (SELECT e.id, count(bj.id)::int AS named, coalesce(sum(x.active), 0)::int AS active, \
               coalesce(sum(x.failed), 0)::int AS failed, coalesce(sum(x.queued), 0)::int AS queued, \
               coalesce(sum(x.building), 0)::int AS building \
               FROM evaluation e LEFT JOIN build_job bj ON bj.evaluation = e.id \
               LEFT JOIN derivation_build db ON db.id = bj.derivation_build \
-              LEFT JOIN LATERAL evaluation_anchor_counts(db.status, db.demanded) x ON db.id IS NOT NULL \
+              LEFT JOIN LATERAL evaluation_shared_build_counts(db.status, db.wanted) x ON db.id IS NOT NULL \
               WHERE e.id = ANY($1::uuid[]) GROUP BY e.id) \
-        UPDATE evaluation e SET named_anchors = c.named, active_anchors = c.active, \
-        failed_anchors = c.failed, queued_anchors = c.queued, building_anchors = c.building \
-        FROM c WHERE e.id = c.id AND (e.named_anchors, e.active_anchors, e.failed_anchors, \
-        e.queued_anchors, e.building_anchors) IS DISTINCT FROM \
+        UPDATE evaluation e SET named_shared_builds = c.named, active_shared_builds = c.active, \
+        failed_shared_builds = c.failed, queued_shared_builds = c.queued, building_shared_builds = c.building \
+        FROM c WHERE e.id = c.id AND (e.named_shared_builds, e.active_shared_builds, e.failed_shared_builds, \
+        e.queued_shared_builds, e.building_shared_builds) IS DISTINCT FROM \
         (c.named, c.active, c.failed, c.queued, c.building)",
         params = [EvaluationIds(64)],
         tier = Sweep;
@@ -152,7 +152,7 @@ pub async fn in_flight_counters<C: ConnectionTrait>(
 
 /// Move the ledger into the evaluation columns. False when another instance
 /// holds the fold: its fold covers the same rows.
-pub async fn fold_anchor_deltas<C>(db: &C) -> Result<bool, DbErr>
+pub async fn fold_shared_build_deltas<C>(db: &C) -> Result<bool, DbErr>
 where
     C: TransactionTrait<Transaction = DatabaseTransaction>,
 {
@@ -167,14 +167,14 @@ where
         return Ok(false);
     }
 
-    txn.execute_raw(FOLD_ANCHOR_DELTAS.stmt()).await?;
+    txn.execute_raw(FOLD_SHARED_BUILD_DELTAS.stmt()).await?;
     txn.commit().await?;
     Ok(true)
 }
 
 /// Recount the counters of every in-flight evaluation. Returns the evaluations
 /// whose stored counters disagreed.
-pub async fn recount_eval_anchor_counters<C>(db: &C) -> Result<u64, DbErr>
+pub async fn recount_eval_shared_build_counters<C>(db: &C) -> Result<u64, DbErr>
 where
     C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
 {
@@ -221,8 +221,8 @@ mod tests {
     /// either predicate without a migration replacing the function fails here.
     #[test]
     fn membership_matches_the_graph_predicates() {
-        let f = gradient_migration::m20260923_000002_evaluation_anchor_counters::ANCHOR_COUNTS_FN;
-        let alias = "evaluation_anchor_counts";
+        let f = gradient_migration::m20261001_000001_plain_concept_names::SHARED_BUILD_COUNTS_FN;
+        let alias = "evaluation_shared_build_counts";
         assert!(
             f.contains(&crate::graph_sql::blocks_evaluation_predicate(alias)),
             "{f}"
@@ -251,13 +251,15 @@ mod tests {
     /// folded or still in the ledger, never both and never neither.
     #[test]
     fn the_fold_deletes_what_it_adds_in_one_statement() {
-        let sql = FOLD_ANCHOR_DELTAS.text();
+        let sql = FOLD_SHARED_BUILD_DELTAS.text();
         assert!(
-            sql.starts_with("WITH gone AS (DELETE FROM evaluation_anchor_delta RETURNING"),
+            sql.starts_with("WITH gone AS (DELETE FROM evaluation_shared_build_delta RETURNING"),
             "{sql}"
         );
         assert!(
-            sql.contains("UPDATE evaluation e SET named_anchors = e.named_anchors + s.named"),
+            sql.contains(
+                "UPDATE evaluation e SET named_shared_builds = e.named_shared_builds + s.named"
+            ),
             "{sql}"
         );
     }
@@ -269,12 +271,12 @@ mod tests {
         let sql = RECOUNT_EVAL_COUNTERS.text();
         assert!(
             sql.starts_with(
-                "WITH gone AS (DELETE FROM evaluation_anchor_delta WHERE evaluation = ANY($1"
+                "WITH gone AS (DELETE FROM evaluation_shared_build_delta WHERE evaluation = ANY($1"
             ),
             "{sql}"
         );
         assert!(
-            sql.contains("evaluation_anchor_counts(db.status, db.demanded)"),
+            sql.contains("evaluation_shared_build_counts(db.status, db.wanted)"),
             "{sql}"
         );
         assert!(sql.contains("IS DISTINCT FROM"), "{sql}");

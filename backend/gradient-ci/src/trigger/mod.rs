@@ -5,7 +5,7 @@
  */
 
 //! Shared logic for creating a queued evaluation from any trigger source
-//! (API endpoint, incoming forge webhook, …) and for restarting the failed
+//! (API endpoint, incoming Git host webhook, …) and for restarting the failed
 //! builds of a previous evaluation.
 
 mod drv_recovery;

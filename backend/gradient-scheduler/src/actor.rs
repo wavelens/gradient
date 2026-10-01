@@ -22,7 +22,7 @@ use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info};
 
 use crate::jobs::{
-    Assignment, BoardActiveJob, CandidateDetail, DispatchDecision, JobTracker, PendingBuildJob,
+    AssignDecision, Assignment, BoardActiveJob, CandidateDetail, JobTracker, PendingBuildJob,
     PendingJob, PendingJobInfo,
 };
 use gradient_pool::session_port::{SessionPort, SessionSignal};
@@ -226,15 +226,15 @@ pub enum SchedulerMsg {
     },
     AbortEvaluation {
         evaluation_id: EvaluationId,
-        /// The anchors the database abort actually moved. A build anchor is
+        /// The shared builds the database abort actually moved. A shared build is
         /// global, so the ones it spared are still wanted by a live evaluation
         /// and their workers must keep building.
-        aborted_anchors: Vec<DerivationBuildId>,
+        aborted_shared_builds: Vec<DerivationBuildId>,
         reply: RpcReplyPort<Vec<(String, String)>>,
     },
     Prioritize {
         evaluation: Option<EvaluationId>,
-        anchors: Vec<DerivationBuildId>,
+        shared_builds: Vec<DerivationBuildId>,
         reply: RpcReplyPort<()>,
     },
     RemoveJobs {
@@ -282,7 +282,7 @@ pub enum SchedulerMsg {
         reply: RpcReplyPort<Vec<BoardActiveJob>>,
     },
     RecentDecisions {
-        reply: RpcReplyPort<Vec<DispatchDecision>>,
+        reply: RpcReplyPort<Vec<AssignDecision>>,
     },
     CandidateDetail {
         id: DispatchedJobId,
@@ -848,21 +848,22 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::AbortEvaluation {
                 evaluation_id,
-                aborted_anchors,
+                aborted_shared_builds,
                 reply,
             } => {
                 // Stop this evaluation's own eval job unconditionally, but a
-                // build only when the database aborted its anchor: an anchor
+                // build only when the database aborted its shared build: a shared build
                 // shared with another live evaluation keeps building for it.
-                let aborted_anchors: HashSet<DerivationBuildId> =
-                    aborted_anchors.into_iter().collect();
+                let aborted_shared_builds: HashSet<DerivationBuildId> =
+                    aborted_shared_builds.into_iter().collect();
                 let to_abort: Vec<(String, String)> = core
                     .tracker
                     .active_jobs()
                     .filter(|(_, _, job)| job.evaluation_id() == evaluation_id)
                     .filter(|(_, _, job)| {
-                        job.derivation_build()
-                            .is_none_or(|anchor| aborted_anchors.contains(&anchor))
+                        job.derivation_build().is_none_or(|shared_build| {
+                            aborted_shared_builds.contains(&shared_build)
+                        })
                     })
                     .map(|(job_id, worker, _)| (worker.to_owned(), job_id.to_owned()))
                     .collect();
@@ -877,11 +878,11 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::Prioritize {
                 evaluation,
-                anchors,
+                shared_builds,
                 reply,
             } => {
                 core.tracker
-                    .prioritize(evaluation, &anchors.into_iter().collect());
+                    .prioritize(evaluation, &shared_builds.into_iter().collect());
                 let _ = reply.send(());
             }
             SchedulerMsg::RemoveJobs { job_ids, reply } => {

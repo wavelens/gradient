@@ -24,10 +24,10 @@ impl Scheduler {
     // ── Abort ─────────────────────────────────────────────────────────────────
 
     /// Abort an evaluation: mark it `Aborted` and stop its eval job, then
-    /// leave the anchors to the graph actor in the background. The caller (the
-    /// abort button) must not wait on the graph actor's queue; the anchor write
-    /// reports which anchors it moved, and only those builds are stopped -
-    /// anchors another live evaluation still needs keep running for it.
+    /// leave the shared builds to the graph writer in the background. The caller (the
+    /// abort button) must not wait on the graph writer's queue; the shared build write
+    /// reports which shared builds it moved, and only those builds are stopped -
+    /// shared builds another live evaluation still needs keep running for it.
     pub async fn abort_evaluation(self: &Arc<Self>, evaluation: MEvaluation) {
         let evaluation_id = evaluation.id;
         let marked =
@@ -40,9 +40,13 @@ impl Scheduler {
 
         let scheduler = Arc::clone(self);
         self.state.shutdown.spawn(async move {
-            let anchors = scheduler.abort_evaluation_anchors(evaluation_id).await;
-            if !anchors.is_empty() {
-                scheduler.log_aborted_jobs(evaluation_id, anchors).await;
+            let shared_builds = scheduler
+                .abort_evaluation_shared_builds(evaluation_id)
+                .await;
+            if !shared_builds.is_empty() {
+                scheduler
+                    .log_aborted_jobs(evaluation_id, shared_builds)
+                    .await;
             }
         });
     }
@@ -70,31 +74,38 @@ impl Scheduler {
             Some("scheduler".to_owned()),
         )
         .await;
-        let anchors = self.abort_evaluation_anchors(evaluation_id).await;
-        self.log_aborted_jobs(evaluation_id, anchors).await;
+        let shared_builds = self.abort_evaluation_shared_builds(evaluation_id).await;
+        self.log_aborted_jobs(evaluation_id, shared_builds).await;
     }
 
-    /// Abort the anchors only `evaluation` still needed; the graph actor owns that write.
-    pub(crate) async fn abort_evaluation_anchors(
+    /// Abort the shared builds only `evaluation` still needed; the graph writer owns that write.
+    pub(crate) async fn abort_evaluation_shared_builds(
         &self,
         evaluation: EvaluationId,
     ) -> Vec<DerivationBuildId> {
         match self
             .state
             .graph
-            .transition(Transition::AbortEvaluationAnchors { evaluation })
+            .transition(Transition::AbortEvaluationSharedBuilds { evaluation })
             .await
         {
-            Ok(report) => report.aborted_anchors,
+            Ok(report) => report.aborted_shared_builds,
             Err(e) => {
-                warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's anchors did not reach the graph actor");
+                warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's shared builds did not reach the graph writer");
                 Vec::new()
             }
         }
     }
 
-    async fn log_aborted_jobs(&self, evaluation_id: EvaluationId, anchors: Vec<DerivationBuildId>) {
-        for (worker_id, job_id) in self.abort_evaluation_jobs(evaluation_id, anchors).await {
+    async fn log_aborted_jobs(
+        &self,
+        evaluation_id: EvaluationId,
+        shared_builds: Vec<DerivationBuildId>,
+    ) {
+        for (worker_id, job_id) in self
+            .abort_evaluation_jobs(evaluation_id, shared_builds)
+            .await
+        {
             info!(%worker_id, %job_id, %evaluation_id, "sent AbortJob to worker");
         }
     }
@@ -112,7 +123,7 @@ impl Scheduler {
         }
 
         if let Err(e) =
-            gradient_db::abandon_open_dispatches_for_jobs(&self.state.worker_db, &reaped).await
+            gradient_db::abandon_open_assignments_for_jobs(&self.state.worker_db, &reaped).await
         {
             warn!(error = %e, "failed to close the dispatch rows of reaped aborts");
         }
@@ -129,16 +140,16 @@ impl Scheduler {
     }
 
     /// The in-memory half of an abort: `(worker, job)` pairs that were told to
-    /// stop. `aborted_anchors` are the anchors the database abort moved; a build
-    /// on any other anchor is left alone.
+    /// stop. `aborted_shared_builds` are the shared builds the database abort moved; a build
+    /// on any other shared build is left alone.
     pub async fn abort_evaluation_jobs(
         &self,
         evaluation_id: EvaluationId,
-        aborted_anchors: Vec<DerivationBuildId>,
+        aborted_shared_builds: Vec<DerivationBuildId>,
     ) -> Vec<(String, String)> {
         self.call(|reply| SchedulerMsg::AbortEvaluation {
             evaluation_id,
-            aborted_anchors,
+            aborted_shared_builds,
             reply,
         })
         .await

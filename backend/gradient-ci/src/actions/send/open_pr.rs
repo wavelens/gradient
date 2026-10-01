@@ -8,12 +8,12 @@
 //! `input_update` evaluation, commits it onto a deterministic branch, and opens
 //! or updates a pull request, recording the lifecycle in `open_pr_state`.
 
-use super::forge_status::build_reporter_for_integration;
+use super::git_host_status::build_reporter_for_integration;
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
-use gradient_forge::reporter::parse_owner_repo;
-use gradient_forge::{BranchCommit, CommitFile, CommitIdent};
+use gradient_git_host::reporter::parse_owner_repo;
+use gradient_git_host::{BranchCommit, CommitFile, CommitIdent};
 use gradient_types::{
     AOpenPrState, CEvaluationInputUpdate, COpenPrState, ECommit, EEvaluation,
     EEvaluationInputUpdate, EOpenPrState, ETask, EvaluationId, IntegrationId, OpenPrStateId,
@@ -104,7 +104,11 @@ pub(crate) async fn execute_open_pr(
             .one(&ctx.db.worker_db)
             .await
             .context("checking existing open_pr_state")?;
-        if existing.as_ref().and_then(|s| s.forge_pr_number).is_some() {
+        if existing
+            .as_ref()
+            .and_then(|s| s.git_host_pr_number)
+            .is_some()
+        {
             return Ok(no_op());
         }
     }
@@ -150,7 +154,7 @@ fn no_op() -> ExecutorOk {
     }
 }
 
-/// The identity to force onto the commit, or `None` to let the forge attribute
+/// The identity to force onto the commit, or `None` to let the Git host attribute
 /// it to the authenticated app/token. Both fields must be set; a half-configured
 /// identity falls back to `None`.
 fn configured_commit_ident(name: &Option<String>, email: &Option<String>) -> Option<CommitIdent> {
@@ -181,7 +185,7 @@ async fn upsert_open_pr_state(
 
     if let Some(row) = existing {
         let mut am = row.into_active_model();
-        am.forge_pr_number = Set(Some(pr_number));
+        am.git_host_pr_number = Set(Some(pr_number));
         am.head_commit = Set(Some(head_commit.to_owned()));
         am.status = Set("open".to_owned());
         am.updated_at = Set(now);
@@ -194,7 +198,7 @@ async fn upsert_open_pr_state(
             task: Set(task_id),
             action: Set(action_id),
             branch: Set(branch.to_owned()),
-            forge_pr_number: Set(Some(pr_number)),
+            git_host_pr_number: Set(Some(pr_number)),
             head_commit: Set(Some(head_commit.to_owned())),
             status: Set("open".to_owned()),
             created_at: Set(now),

@@ -121,7 +121,7 @@ id_newtype!(FlakeInputOverrideId);
 id_newtype!(GithubInstallationId);
 id_newtype!(IntegrationId);
 id_newtype!(OpenPrStateId);
-id_newtype!(OutboxId);
+id_newtype!(PendingDeliveryId);
 id_newtype!(ProjectId);
 id_newtype!(ProjectCacheId);
 id_newtype!(ProjectInvitationId);

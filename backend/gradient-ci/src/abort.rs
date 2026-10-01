@@ -8,7 +8,7 @@
 //!
 //! Both kinds mark the evaluation `Aborted` in the trigger's transaction, and
 //! that is all this helper does. After a [`AbortKind::Hard`] the caller asks the
-//! graph actor to abort every anchor no other live evaluation still needs, then
+//! graph writer to abort every shared build no other live evaluation still needs, then
 //! drops the in-memory job entries via `Scheduler::cancel_evaluation_jobs`.
 //! After a [`AbortKind::Soft`] the in-flight builds keep running and their
 //! outputs land in the cache for the next evaluation to reuse.

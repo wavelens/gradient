@@ -46,7 +46,7 @@ const HASH_ALGOS: &[&str] = &["sha256", "blake3"];
 /// `sha256` for legacy callers) to the canonical `{algo}:{nix32}` form.
 ///
 /// Recognised algorithms: `sha256`, `blake3` (both produce 32-byte digests
-/// → 52-char nix32 / 64-char hex). Inputs that match no recognised form are
+/// -> 52-char nix32 / 64-char hex). Inputs that match no recognised form are
 /// returned unchanged to preserve caller intent for sentinel values.
 pub fn normalize_nar_hash(hash: &str) -> String {
     for algo in HASH_ALGOS {

@@ -110,7 +110,7 @@ impl<'a> StateApplicator<'a> {
                 cache_id
             };
 
-            self.apply_cache_upstreams(cache_id, &state_cache.name, &state_cache.upstreams)
+            self.apply_upstream_caches(cache_id, &state_cache.name, &state_cache.upstream_caches)
                 .await?;
 
             for project_name in &state_cache.projects {
@@ -211,18 +211,18 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
-    pub(crate) async fn apply_cache_upstreams(
+    pub(crate) async fn apply_upstream_caches(
         &self,
         cache_id: CacheId,
         cache_name: &str,
-        upstreams: &[StateUpstream],
+        upstream_caches: &[StateUpstream],
     ) -> Result<(), DynError> {
         ECacheUpstream::delete_many()
             .filter(CCacheUpstream::Cache.eq(cache_id))
             .exec(self.db)
             .await?;
 
-        if upstreams.is_empty() {
+        if upstream_caches.is_empty() {
             return Ok(());
         }
 
@@ -233,7 +233,7 @@ impl<'a> StateApplicator<'a> {
             .map(|c| (c.name, c.id))
             .collect();
 
-        for upstream in upstreams {
+        for upstream in upstream_caches {
             let record = match upstream {
                 StateUpstream::Internal {
                     cache_name: upstream_cache_name,
@@ -281,9 +281,9 @@ impl<'a> StateApplicator<'a> {
         }
 
         tracing::debug!(
-            count = upstreams.len(),
+            count = upstream_caches.len(),
             cache = %cache_name,
-            "Applied upstreams to cache"
+            "Applied upstream caches to cache"
         );
         Ok(())
     }

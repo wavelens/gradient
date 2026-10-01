@@ -10,8 +10,8 @@
 //! reassign-before-delete invariant.
 //!
 //! `MockDatabase` replays canned query results in FIFO order, so each test
-//! script is "auth (3 selects) → load_project → load_membership → load_role →
-//! …handler-specific…". Where the handler runs `INSERT … RETURNING …` we feed
+//! script is "auth (3 selects) -> load_project -> load_membership -> load_role ->
+//! …handler-specific…". Where the handler executes `INSERT … RETURNING …` we feed
 //! the inserted row in via `append_query_results` *and* match up an
 //! `append_exec_results` with `rows_affected: 1`, otherwise SeaORM treats the
 //! insert as a no-op and short-circuits.

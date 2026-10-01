@@ -20,7 +20,7 @@ pub(crate) enum Step {
     Idle,
     /// One unit finished; the next waits for the pace.
     Paced,
-    /// One unit of a requested round finished; the next runs at once.
+    /// One unit of a requested round finished; the next starts at once.
     Requested,
 }
 

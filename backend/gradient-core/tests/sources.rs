@@ -40,7 +40,7 @@ fn hash_from_url_nar_with_compression_ok() {
 
 #[test]
 fn hash_from_url_narinfo_cannot_have_compression_suffix() {
-    // narinfo must be 2 parts exactly - `.narinfo.zst` is 3 parts → rejected.
+    // narinfo must be 2 parts exactly - `.narinfo.zst` is 3 parts -> rejected.
     let url = format!("{}.narinfo.zst", h32());
     assert!(get_hash_from_url(url).is_err());
 }
@@ -97,7 +97,7 @@ fn hash_from_path_extracts_hash_and_package() {
 
 #[test]
 fn hash_from_path_package_with_no_dash_rejected() {
-    // Path `abc123` has no dash → can't split into hash-package.
+    // Path `abc123` has no dash -> can't split into hash-package.
     assert!(get_hash_from_path("/nix/store/abc123".to_string()).is_err());
 }
 

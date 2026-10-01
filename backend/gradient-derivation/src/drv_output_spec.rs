@@ -59,9 +59,9 @@ impl DerivationOutput {
     /// Return the [`DrvOutputSpec`] for this output.
     ///
     /// The discrimination follows the Nix `.drv` ATerm format:
-    /// - `hash_algo` + `hash` both non-empty → [`DrvOutputSpec::FixedOutput`]
-    /// - `path` non-empty → [`DrvOutputSpec::InputAddressed`]
-    /// - otherwise → [`DrvOutputSpec::Deferred`]
+    /// - `hash_algo` + `hash` both non-empty -> [`DrvOutputSpec::FixedOutput`]
+    /// - `path` non-empty -> [`DrvOutputSpec::InputAddressed`]
+    /// - otherwise -> [`DrvOutputSpec::Deferred`]
     pub fn as_spec(&self) -> DrvOutputSpec<'_> {
         if !self.hash_algo.is_empty() && !self.hash.is_empty() {
             DrvOutputSpec::FixedOutput {
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn only_hash_algo_without_hash_is_deferred() {
-        // Partial FOD (hash_algo set but hash missing) → treat as Deferred
+        // Partial FOD (hash_algo set but hash missing) -> treat as Deferred
         // to avoid sending a malformed CAFixed to the daemon.
         let o = output("out", "", "sha256", "");
         assert_eq!(o.as_spec(), DrvOutputSpec::Deferred);

@@ -7,7 +7,7 @@
 //! The scoring weight model, in one place. Every rule's magnitude lives here so
 //! cross-rule priorities are visible and tunable side by side instead of being
 //! scattered magic numbers. Scores are additive; a job dispatches to a worker
-//! only when its summed total reaches [`DISPATCH_FLOOR`] and no rule vetoed.
+//! only when its summed total reaches [`ASSIGN_FLOOR`] and no rule vetoed.
 //!
 //! Relative scale (largest first): a prioritized job's QOS_PRIORITIZED (5000)
 //! outranks any unprioritized wait; anti-starvation WAIT_TIME_CAP (4000)
@@ -22,7 +22,7 @@
 /// A job dispatches only when its summed score reaches this floor. "Do not
 /// dispatch yet" is expressed by a rule veto, not by hoping penalties push the
 /// sum below the floor.
-pub const DISPATCH_FLOOR: f64 = 0.0;
+pub const ASSIGN_FLOOR: f64 = 0.0;
 
 /// MissingPathsRule: bonus cap for a fully-warm worker, baseline multiplier
 /// over the 1h average missing-path count, and the fallback average.

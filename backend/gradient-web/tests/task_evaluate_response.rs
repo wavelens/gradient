@@ -154,7 +154,7 @@ fn restart_failed_answers_with_the_new_evaluation_id() {
     });
 }
 
-/// Sequence up to the point the pinned-commit validation runs: authorize, then
+/// Sequence up to the point the pinned-commit validation starts: authorize, then
 /// `load_task` with the TriggerEvaluation permission.
 fn authorized_db(session_id: SessionId) -> MockDatabase {
     let session = live_session(session_id);

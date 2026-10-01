@@ -22,8 +22,8 @@ fn store_path_hash(store_path: &str) -> Option<&str> {
 
 /// Whether any of `derivations` is reachable (has a `build_job`, so promotion can
 /// schedule it). A producer with none is an orphan: pruned out of the build graph
-/// because a referrer was cached without its closure, it can never be queued and
-/// must instead be revived by re-walking its cached referrers.
+/// because a parent was cached without its closure, it can never be queued and
+/// must instead be revived by re-walking its cached parents.
 async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[DerivationId]) -> bool {
     for d in derivations {
         if gradient_db::derivation_is_reachable(db, *d)
@@ -50,16 +50,16 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
 /// A missing input with no producing derivation (a `.drv` file or a source
 /// path) is only purged when its NAR is genuinely gone: `demote_cached_output`
 /// preserves a still-present producerless artifact, because nothing rebuilds it
-/// and deleting the only copy dead-ends every dependent on `InputsUnavailable`
+/// and deleting the only copy dead-ends every parent on `InputsUnavailable`
 /// forever (a present one means a transient fetch miss, so the build just retries).
-pub(crate) async fn reconcile_missing_inputs(
+pub(crate) async fn repair_missing_inputs(
     ctx: &DbContext,
     failed_derivation: DerivationId,
     missing_paths: &[String],
 ) -> Result<()> {
     let db = &ctx.worker_db;
     let mut purged = 0usize;
-    let mut referrers_demoted = 0usize;
+    let mut wanted_by_demoted = 0usize;
     let mut sources_purged: Vec<&str> = Vec::new();
     let mut demoted_producers: Vec<DerivationId> = Vec::new();
     // Set when a missing input cannot be reached upward: an absent orphan pruned
@@ -91,21 +91,21 @@ pub(crate) async fn reconcile_missing_inputs(
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
                 // An orphan producer (no `build_job`) can never be queued, so the
-                // flag clear is not enough: demote the referrers and drop their
+                // flag clear is not enough: demote the parents and drop their
                 // record, so the next eval walks them again, re-records the edge
                 // and schedules it.
                 let orphan = !any_reachable(db, &drvs).await;
                 demoted_producers.extend(drvs);
                 if orphan {
-                    match gradient_db::demote_referrers_of(ctx, hash).await {
+                    match gradient_db::demote_parents_of(ctx, hash).await {
                         Ok(refs) if !refs.is_empty() => {
-                            referrers_demoted += refs.len();
+                            wanted_by_demoted += refs.len();
                             match gradient_db::unwalk_derivations(ctx, &refs).await {
                                 Ok(changes) => {
                                     gradient_db::emit_transition_effects(ctx, &changes).await
                                 }
                                 Err(e) => {
-                                    warn!(%path, error = %e, "reconcile: re-walk referrers (orphan producer) failed")
+                                    warn!(%path, error = %e, "repair: re-walk parents (orphan producer) failed")
                                 }
                             }
 
@@ -113,7 +113,7 @@ pub(crate) async fn reconcile_missing_inputs(
                         }
                         Ok(_) => needs_dep_rewalk = true,
                         Err(e) => {
-                            warn!(%path, error = %e, "reconcile: demote referrers (orphan producer) failed")
+                            warn!(%path, error = %e, "repair: demote parents (orphan producer) failed")
                         }
                     }
                 }
@@ -121,18 +121,18 @@ pub(crate) async fn reconcile_missing_inputs(
             Ok(_) => {
                 sources_purged.push(path);
                 // No producing derivation (a source / `.drv`): it only returns to
-                // the cache as part of a referrer's closure, so demote the
-                // rebuildable output referrers - their rebuild re-pushes it.
-                match gradient_db::demote_referrers_of(ctx, hash).await {
+                // the cache as part of a parent's closure, so demote the
+                // rebuildable output parents - their rebuild re-pushes it.
+                match gradient_db::demote_parents_of(ctx, hash).await {
                     Ok(drvs) if !drvs.is_empty() => {
-                        referrers_demoted += drvs.len();
+                        wanted_by_demoted += drvs.len();
                         demoted_producers.extend(drvs);
                     }
                     Ok(_) => needs_dep_rewalk = true,
-                    Err(e) => warn!(%path, error = %e, "reconcile: demote referrers failed"),
+                    Err(e) => warn!(%path, error = %e, "repair: demote parents failed"),
                 }
             }
-            Err(e) => warn!(%path, error = %e, "reconcile: purge cached output failed"),
+            Err(e) => warn!(%path, error = %e, "repair: purge cached output failed"),
         }
     }
 
@@ -141,33 +141,33 @@ pub(crate) async fn reconcile_missing_inputs(
     if needs_dep_rewalk {
         match gradient_db::demote_output_only_cached_deps(ctx, failed_derivation).await {
             Ok(drvs) => {
-                referrers_demoted += drvs.len();
+                wanted_by_demoted += drvs.len();
                 demoted_producers.extend(&drvs);
                 info!(
                     %failed_derivation,
                     count = drvs.len(),
-                    "reconcile: demoted output-only-cached direct deps to re-walk an absent orphan input"
+                    "repair: demoted output-only-cached direct deps to re-walk an absent orphan input"
                 );
             }
             Err(e) => {
-                warn!(%failed_derivation, error = %e, "reconcile: demote output-only-cached deps failed")
+                warn!(%failed_derivation, error = %e, "repair: demote output-only-cached deps failed")
             }
         }
     }
 
-    // A demanded output whose producer is terminal-failed must retry on demand:
+    // A wanted output whose producer is terminal-failed must retry once wanted:
     // waiting for an eval to requeue it dead-ends whenever evals are aborted.
     let requeued = if demoted_producers.is_empty() {
         0
     } else {
-        match gradient_db::requeue_failed_anchors(db, &demoted_producers).await {
+        match gradient_db::requeue_failed_shared_builds(db, &demoted_producers).await {
             Ok(changes) => {
                 let thawed = changes.len();
                 gradient_db::emit_transition_effects(ctx, &changes).await;
                 thawed
             }
             Err(e) => {
-                warn!(error = %e, "reconcile: requeue failed producers failed");
+                warn!(error = %e, "repair: requeue failed producers failed");
                 0
             }
         }
@@ -178,7 +178,7 @@ pub(crate) async fn reconcile_missing_inputs(
             %failed_derivation,
             count = sources_purged.len(),
             sample = ?sources_purged.iter().take(5).collect::<Vec<_>>(),
-            "reconcile: purged stale cache rows + objects for inputs with no producing \
+            "repair: purged stale cache rows + objects for inputs with no producing \
              derivation (.drv / source); the next evaluation re-instantiates and re-pushes them"
         );
     }
@@ -187,10 +187,10 @@ pub(crate) async fn reconcile_missing_inputs(
         %failed_derivation,
         purged,
         sources_purged = sources_purged.len(),
-        referrers_demoted,
+        wanted_by_demoted,
         requeued,
         paths = missing_paths.len(),
-        "reconciled missing inputs; stale cache rows + objects purged for next-eval rebuild"
+        "repaired missing inputs; stale cache rows + objects purged for next-eval rebuild"
     );
     Ok(())
 }

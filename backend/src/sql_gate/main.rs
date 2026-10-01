@@ -6,7 +6,7 @@
 
 //! Explains every statement `gradient_db::sql!` registered, against the cache
 //! VM's own database amplified to production scale, and fails on a pathological
-//! plan. `docs/src/contributors/tests.md` documents where it runs and why.
+//! plan. `docs/src/contributors/tests.md` documents where it is running and why.
 
 mod amplify;
 mod explain;
@@ -18,7 +18,7 @@ use clap::Parser;
 use gradient_db::sql::registry;
 use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
 
-/// Every crate that declares statements, with the anchor that pulls it in. A
+/// Every crate that declares statements, with the call that pulls it in. A
 /// linker drops an rlib the binary never mentions, so without these calls that
 /// crate's registry entries are silently absent and the gate measures a subset.
 const LINKED: &[(&str, fn())] = &[
@@ -41,7 +41,7 @@ struct Cli {
     #[arg(long)]
     list: bool,
     /// Print one registered statement's text and exit, for a test that has to run
-    /// the exact SQL the server runs.
+    /// the exact SQL the server executes.
     #[arg(long, value_name = "NAME")]
     print: Option<String>,
     /// Divides the amplification targets; 1 is the full production shape.
@@ -161,7 +161,7 @@ mod tests {
         for (_, link) in super::LINKED {
             link();
         }
-        let text = statement_text("LOCK_SEED_ANCHORS").expect("registered");
+        let text = statement_text("LOCK_SEED_SHARED_BUILDS").expect("registered");
         assert!(text.contains("pg_advisory_xact_lock_shared"), "{text}");
         assert!(statement_text("NO_SUCH_STATEMENT").is_none());
     }

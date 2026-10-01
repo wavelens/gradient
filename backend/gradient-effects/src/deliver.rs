@@ -5,21 +5,21 @@
  */
 
 //! The two ends the actor is generic over, wired to what actually exists: the
-//! outbox table behind [`DbStore`], and a ractor factory of [`Deliverer`]
-//! workers behind [`FactoryDispatch`]. A worker that panics mid-delivery is the
+//! `pending_delivery` table behind [`DbStore`], and a ractor factory of [`Deliverer`]
+//! workers behind [`FactoryHandoff`]. A worker that panics mid-delivery is the
 //! factory's to replace; its row stays leased until `next_attempt_at`.
 
 use std::sync::Arc;
 
 use gradient_ci::CiContext;
 use gradient_core::ServerState;
-use gradient_db::outbox::{OutboxRow, Outcome};
+use gradient_db::pending_deliveries::{Outcome, PendingDelivery};
 use gradient_db::{DbContext, WorkerDb};
-use gradient_types::ids::OutboxId;
+use gradient_types::ids::PendingDeliveryId;
 use ractor::factory::{FactoryMessage, Job, JobOptions, Worker, WorkerId};
 use ractor::{ActorProcessingErr, ActorRef};
 
-use crate::actor::{Dispatch, EffectsMsg, OutboxStore};
+use crate::actor::{EffectsMsg, Handoff, PendingDeliveryStore};
 use crate::consume::consume;
 
 /// What a delivery may reach. Held by every worker, so it is a handle bundle
@@ -43,7 +43,7 @@ impl EffectsCtx {
 }
 
 /// One row handed to one worker, with the actor to answer.
-pub type DeliverJob = (OutboxRow, ActorRef<EffectsMsg>);
+pub type DeliverJob = (PendingDelivery, ActorRef<EffectsMsg>);
 
 pub struct DbStore {
     db: WorkerDb,
@@ -55,13 +55,13 @@ impl DbStore {
     }
 }
 
-impl OutboxStore for DbStore {
-    async fn claim_due(&self, limit: usize) -> anyhow::Result<Vec<OutboxRow>> {
-        Ok(gradient_db::outbox::claim_due(&self.db, limit).await?)
+impl PendingDeliveryStore for DbStore {
+    async fn claim_due(&self, limit: usize) -> anyhow::Result<Vec<PendingDelivery>> {
+        Ok(gradient_db::pending_deliveries::claim_due(&self.db, limit).await?)
     }
 
-    async fn mark(&self, row: &OutboxRow, outcome: &Outcome) -> anyhow::Result<()> {
-        Ok(gradient_db::outbox::mark(&self.db, row, outcome).await?)
+    async fn mark(&self, row: &PendingDelivery, outcome: &Outcome) -> anyhow::Result<()> {
+        Ok(gradient_db::pending_deliveries::mark(&self.db, row, outcome).await?)
     }
 }
 
@@ -70,7 +70,7 @@ pub struct Deliverer {
 }
 
 impl Worker for Deliverer {
-    type Key = OutboxId;
+    type Key = PendingDeliveryId;
     type Message = DeliverJob;
     type State = ();
     type Arguments = ();
@@ -102,12 +102,12 @@ impl Worker for Deliverer {
     }
 }
 
-pub struct FactoryDispatch {
-    pub factory: ActorRef<FactoryMessage<OutboxId, DeliverJob>>,
+pub struct FactoryHandoff {
+    pub factory: ActorRef<FactoryMessage<PendingDeliveryId, DeliverJob>>,
 }
 
-impl Dispatch for FactoryDispatch {
-    fn dispatch(&self, row: OutboxRow, reply: ActorRef<EffectsMsg>) {
+impl Handoff for FactoryHandoff {
+    fn hand_off(&self, row: PendingDelivery, reply: ActorRef<EffectsMsg>) {
         let _ = self.factory.cast(FactoryMessage::Dispatch(Job {
             key: row.id,
             msg: (row, reply),

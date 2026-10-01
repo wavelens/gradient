@@ -30,7 +30,7 @@ pub struct DerivationOutput {
 #[derive(Debug, Clone)]
 pub struct Derivation {
     pub outputs: Vec<DerivationOutput>,
-    /// Map of `.drv` path → set of output names required from it.
+    /// Map of `.drv` path -> set of output names required from it.
     pub input_derivations: Vec<InputDrv>,
     /// Plain store paths (not derivations) needed at build time.
     pub input_sources: Vec<String>,

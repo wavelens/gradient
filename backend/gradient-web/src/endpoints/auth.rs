@@ -718,7 +718,7 @@ const CLI_DEVICE_LIFETIME_MINUTES: i64 = 10;
 const CLI_DEVICE_POLL_INTERVAL_SECONDS: u64 = 3;
 
 /// Alphabet for the human-typed `user_code` shown on both screens. Omits
-/// visually ambiguous characters (0/O, 1/I/L) so a phone-screen → terminal
+/// visually ambiguous characters (0/O, 1/I/L) so a phone-screen -> terminal
 /// transcription doesn't mis-type.
 const CLI_USER_CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 

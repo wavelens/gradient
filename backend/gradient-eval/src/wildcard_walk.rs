@@ -45,7 +45,7 @@ pub fn collapse_stars(segs: &[String]) -> Vec<String> {
 /// Parse one wildcard string into (is_exclude, segments). Mirrors the worker's
 /// pattern format: `.`-separated segments, optional leading `!` = exclude.
 /// Double-quoted spans keep an inner `.` within one segment (the quotes are
-/// stripped), e.g. `pkgs."python3.12".*` → `["pkgs", "python3.12", "*"]`.
+/// stripped), e.g. `pkgs."python3.12".*` -> `["pkgs", "python3.12", "*"]`.
 pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
     let (exclude, body) = match pat.strip_prefix('!') {
         Some(rest) => (true, rest),

@@ -178,7 +178,7 @@ fn server_with_email(
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -187,10 +187,10 @@ fn server_with_email(
                 bytes: u64::MAX,
             },
         ),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
     TestServer::new(create_router(state).expect("router"))
@@ -359,7 +359,7 @@ fn create_send_web_request_returns_token_once() {
 }
 
 #[test]
-fn create_forge_status_report_rejects_nonempty_events() {
+fn create_git_host_status_report_rejects_nonempty_events() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -381,7 +381,7 @@ fn create_forge_status_report_rejects_nonempty_events() {
             .json(&json!({
                 "name": "status",
                 "config": {
-                    "type": "forge_status_report",
+                    "type": "git_host_status_report",
                     "integration_id": integration_id.to_string(),
                 },
                 "events": ["build.started"],
@@ -395,8 +395,8 @@ fn create_forge_status_report_rejects_nonempty_events() {
             body["message"]
                 .as_str()
                 .unwrap()
-                .contains("forge_status_report"),
-            "expected forge_status_report mention, got: {}",
+                .contains("git_host_status_report"),
+            "expected git_host_status_report mention, got: {}",
             body["message"]
         );
     });

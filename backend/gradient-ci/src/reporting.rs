@@ -12,7 +12,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 
 /// Snake-case tag of an evaluation kind, surfaced in action payloads so the
-/// effects consumer can restrict `OpenPr` to `input_update` runs.
+/// effects consumer can restrict `OpenPr` to `input_update` evaluations.
 pub fn eval_kind_str(kind: EvaluationKind) -> &'static str {
     match kind {
         EvaluationKind::Normal => "normal",
@@ -39,7 +39,7 @@ pub fn approval_check_context(task_name: &str) -> String {
 
 /// CI check name for the per-evaluation roll-up status. `wildcard_suffix` is
 /// `Some` only when a run targets a wildcard other than the task default
-/// (e.g. `/gradient run <wildcard>`), so that custom-wildcard runs report as
+/// (e.g. `/gradient run <wildcard>`), so that custom-wildcard evaluations report as
 /// their own check line instead of overwriting the default evaluation check.
 pub fn evaluation_check_context(task_name: &str, wildcard_suffix: Option<&str>) -> String {
     match wildcard_suffix {
@@ -60,7 +60,7 @@ pub fn build_check_context(task_name: &str, entry_point: &str) -> String {
 pub enum CheckContextKind {
     /// `Awaiting Approval` gate, cleared when a maintainer approves.
     Approval,
-    /// Per-evaluation roll-up status (Queued → Running → terminal).
+    /// Per-evaluation roll-up status (Queued -> Running -> terminal).
     Evaluation,
     /// Per-entry-point build status.
     Build,
@@ -83,7 +83,7 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
     }
 }
 
-/// Whether a forge report for the Evaluation check should be suppressed.
+/// Whether a Git host report for the Evaluation check should be suppressed.
 ///
 /// The Evaluation check tracks the evaluation phase, which concludes
 /// successfully the moment the eval reaches `Building`. A later `Failure`/
@@ -94,7 +94,7 @@ pub fn suppress_evaluation_failure(status: &CiStatus, reached_building: bool) ->
     reached_building && matches!(status, CiStatus::Failure | CiStatus::Error)
 }
 
-/// Maps an [`EvaluationStatus`] to the [`CiStatus`] reported to external forges.
+/// Maps an [`EvaluationStatus`] to the [`CiStatus`] reported to external Git hosts.
 ///
 /// Returns `None` for non-terminal/intermediate states that do not produce a
 /// CI report from this helper (the per-job handlers report `Running` directly
@@ -125,7 +125,7 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
         | BuildStatus::FailedTimeout
         | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
         BuildStatus::Aborted => Some(CiStatus::Error),
-        // `Skipped` never reaches a forge: nothing names it, so no check exists.
+        // `Skipped` never reaches a Git host: nothing names it, so no check exists.
         BuildStatus::Created
         | BuildStatus::Queued
         | BuildStatus::FailedTransient
@@ -277,7 +277,7 @@ mod tests {
         ] {
             assert_eq!(Reported::reports(s), Some("build.failed"));
             assert_eq!(
-                crate::actions::forge_status_for_event(Reported::reports(s).unwrap()),
+                crate::actions::git_host_status_for_event(Reported::reports(s).unwrap()),
                 Some(CiStatus::Failure)
             );
         }
@@ -294,7 +294,7 @@ mod tests {
             Some(CheckContextKind::Build)
         );
         assert_eq!(
-            crate::actions::forge_status_for_event("build.created"),
+            crate::actions::git_host_status_for_event("build.created"),
             Some(CiStatus::Pending)
         );
     }

@@ -14,7 +14,7 @@ use gradient_ci::actions::encrypt_action_secret;
 use gradient_core::ServerState;
 use gradient_entity::webhook::WebhookScope;
 use gradient_types::events::{Envelope, EventFilter, webhook};
-use gradient_types::ids::OutboxId;
+use gradient_types::ids::PendingDeliveryId;
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
 use gradient_util::http_validation::validate_webhook_url;
@@ -349,10 +349,14 @@ pub async fn test_webhook(
 ) -> WebResult<Json<BaseResponse<DeliveryListItem>>> {
     let hook = owned_webhook(&state, &owner).await?;
     let envelope = Envelope::now(webhook::Ping { webhook: hook.id }.into());
-    let delivery =
-        gradient_ci::webhooks::deliver(&state.ci(), &hook, &envelope.to_json(), OutboxId::now_v7())
-            .await
-            .map_err(|e| WebError::internal(format!("test fire failed: {e:#}")))?;
+    let delivery = gradient_ci::webhooks::deliver(
+        &state.ci(),
+        &hook,
+        &envelope.to_json(),
+        PendingDeliveryId::now_v7(),
+    )
+    .await
+    .map_err(|e| WebError::internal(format!("test fire failed: {e:#}")))?;
     Ok(ok_json(to_delivery_item(delivery)))
 }
 

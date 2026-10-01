@@ -7,7 +7,7 @@
 //! Routing layer for the fleet eval-cache transfer (issue #386 L3).
 //!
 //! Before evaluating a flake the worker PULLs its `<fingerprint>.sqlite` blob
-//! from the server so the eval runs warm; after, it PUSHes the updated blob
+//! from the server so the eval starts warm; after, it PUSHes the updated blob
 //! back. Both legs are best-effort - a cache failure never fails the eval.
 //!
 //! [`super::job::JobUpdater::pull_eval_cache`] registers a [`PendingPull`] then
@@ -16,7 +16,7 @@
 //! frames via [`EvalCacheReceiver::deliver_pull_chunk`]. Pushes go through the
 //! connection's upload handshake instead.
 //!
-//! Mirrors [`super::nar_recv`] but simpler: the executor runs one eval at a
+//! Mirrors [`super::nar_recv`] but simpler: the executor is running one eval at a
 //! time so a single in-flight pull per `job_id` is enough.
 
 use gradient_util::sync::Mutex;

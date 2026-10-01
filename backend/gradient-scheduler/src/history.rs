@@ -75,7 +75,7 @@ fn summarize(rows: &[MDerivationMetric]) -> gradient_pool::score::HistoryPredict
     }
 }
 
-/// Integer mean of already-collected non-null values, clamped to 0. Empty → 0.
+/// Integer mean of already-collected non-null values, clamped to 0. Empty -> 0.
 fn mean_nonnull(vals: &[i64]) -> u64 {
     if vals.is_empty() {
         return 0;

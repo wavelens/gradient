@@ -27,7 +27,7 @@ use tokio::sync::mpsc;
 
 pub(super) struct HeldJob {
     pub job_id: String,
-    pub dispatch: String,
+    pub assignment_id: String,
     pub job: Job,
     pub kind: JobKind,
     pub credentials: CredentialStore,
@@ -225,7 +225,7 @@ mod tests {
     fn held(job_id: &str) -> HeldJob {
         HeldJob {
             job_id: job_id.to_owned(),
-            dispatch: format!("dispatch-{job_id}"),
+            assignment_id: format!("dispatch-{job_id}"),
             job: Job::Build(BuildJob { builds: Vec::new() }),
             kind: JobKind::Build,
             credentials: CredentialStore::new(),

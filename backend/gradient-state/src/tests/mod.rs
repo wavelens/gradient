@@ -124,9 +124,9 @@ fn state_task_keep_evaluations_zero_rejected_by_validator() {
 #[test]
 fn state_reporter_trigger_accepts_declared_inbound_integration() {
     let integrations = r#"{
-        "forge": { "name": "forge", "project": "acme", "kind": "inbound", "forge_type": "forgejo", "created_by": "alice" }
+        "git-host": { "name": "git-host", "project": "acme", "kind": "inbound", "git_host_type": "forgejo", "created_by": "alice" }
     }"#;
-    let cfg = reporter_cfg("forge", integrations);
+    let cfg = reporter_cfg("git-host", integrations);
     let v = cfg.validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
 }
@@ -148,9 +148,9 @@ fn state_reporter_trigger_rejects_unknown_integration() {
 #[test]
 fn state_reporter_trigger_rejects_outbound_integration() {
     let integrations = r#"{
-        "forge": { "name": "forge", "project": "acme", "kind": "outbound", "forge_type": "forgejo", "created_by": "alice" }
+        "git-host": { "name": "git-host", "project": "acme", "kind": "outbound", "git_host_type": "forgejo", "created_by": "alice" }
     }"#;
-    let cfg = reporter_cfg("forge", integrations);
+    let cfg = reporter_cfg("git-host", integrations);
     let v = cfg.validate();
     assert!(!v.is_valid);
     assert!(
@@ -170,7 +170,7 @@ fn state_reporter_trigger_accepts_github_app_name() {
 #[test]
 fn state_github_integration_requires_installation_id() {
     let integrations = r#"{
-        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "forge_type": "github", "created_by": "alice" }
+        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "git_host_type": "github", "created_by": "alice" }
     }"#;
     let cfg = integration_cfg(integrations);
     let v = cfg.validate();
@@ -187,7 +187,7 @@ fn state_github_integration_requires_installation_id() {
 #[test]
 fn state_github_integration_with_installation_id_is_valid() {
     let integrations = r#"{
-        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "forge_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
+        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "git_host_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
     }"#;
     let cfg = integration_cfg(integrations);
     let v = cfg.validate();
@@ -296,7 +296,7 @@ fn state_action_validate_rejects_duplicate_names() {
 }
 
 #[test]
-fn state_action_validate_rejects_events_on_forge_status_report() {
+fn state_action_validate_rejects_events_on_git_host_status_report() {
     let json = r#"{
         "users": {
             "alice": {
@@ -315,7 +315,7 @@ fn state_action_validate_rejects_events_on_forge_status_report() {
                 "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
-                    { "name": "x", "type": "forge_status_report", "events": ["build.completed"], "config": { "integration": "gh" } }
+                    { "name": "x", "type": "git_host_status_report", "events": ["build.completed"], "config": { "integration": "gh" } }
                 ]
             }
         }
@@ -327,7 +327,7 @@ fn state_action_validate_rejects_events_on_forge_status_report() {
         v.errors
             .iter()
             .any(|e| e.field == "tasks.web.actions.x.events"),
-        "expected forge_status_report-events error, got: {:?}",
+        "expected git_host_status_report-events error, got: {:?}",
         v.errors
     );
 }

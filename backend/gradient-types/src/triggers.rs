@@ -42,7 +42,7 @@ pub enum TriggerConfig {
         #[serde(default = "default_pr_actions")]
         actions: Vec<String>,
         /// When true (default, secure-by-default), PRs from contributors who
-        /// are not repo writers on the forge are parked in
+        /// are not repo writers on the Git host are parked in
         /// `WaitingReason::Approval` until a maintainer either clicks the
         /// "Approve and Run" check-run action (GitHub) or comments
         /// `/gradient approve` (or `/gradient run`) on the PR.

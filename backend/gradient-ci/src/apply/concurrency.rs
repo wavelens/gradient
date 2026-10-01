@@ -44,7 +44,7 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
                 abort_evaluation(db, running.id, AbortKind::Soft).await?;
                 aborted_evaluation = Some(running.id);
             }
-            // Excluded by the `!concurrent_flag` guard; `All` allows concurrent runs, so no abort.
+            // Excluded by the `!concurrent_flag` guard; `All` allows concurrent evaluations, so no abort.
             ConcurrencyPolicy::All => {}
         }
     }

@@ -168,14 +168,14 @@ pub fn make_ctx() -> crate::CiContext {
         },
         shutdown: gradient_util::shutdown::Shutdown::new(),
         events: gradient_types::EventBus::default(),
-        outbox_wake: Default::default(),
+        delivery_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
     };
     CiContext {
         db,
         http: gradient_util::http::build_client().expect("http client"),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
     }
 }

@@ -11,19 +11,19 @@ use std::sync::Mutex;
 use tokio::sync::{Notify, mpsc};
 
 use super::pool::{WebDb, WorkerDb};
-use super::ready_set::ReadySet;
+use super::startable_set::StartableSet;
 use gradient_storage::StorageCtx;
 use gradient_types::{DerivationId, RuntimeConfig};
 use gradient_util::shutdown::Shutdown;
 
-/// The anchors a demand recompute turned on, on their way to the upstream probe.
+/// The shared builds a need update turned on, on their way to the upstream probe.
 ///
-/// A channel rather than a call: probing is HTTP, and every demand recompute runs
-/// on a path that may be inside the graph actor's transaction, where a network
+/// A channel rather than a call: probing is HTTP, and every need update is running
+/// on a path that may be inside the graph writer's transaction, where a network
 /// round trip would hold the one writer to the graph for its duration. The
 /// receiving end rides along so the composition root can hand it to the probe loop
 /// without a second field; [`Self::default`] is a sink with no receiver at all, so
-/// a harness that runs no loop drops what it is handed.
+/// a harness running no loop drops what it is handed.
 #[derive(Clone, Debug, Default)]
 pub struct ProbeRequests {
     sender: Option<mpsc::UnboundedSender<Vec<DerivationId>>>,
@@ -39,10 +39,10 @@ impl ProbeRequests {
         }
     }
 
-    /// Hand the probe loop what just gained demand. Never blocks and never fails,
-    /// but it is not optional: demand stops at an anchor the probe has not answered
-    /// for, so a loop that never runs is a fleet that promotes nothing below an
-    /// entry point. The loop sweeps for demand whose request was lost; a loop that
+    /// Hand the probe loop what just gained need. Never blocks and never fails,
+    /// but it is not optional: need stops at a shared build the probe has not answered
+    /// for, so a loop that never starts is a fleet that promotes nothing below an
+    /// entry point. The loop sweeps for need whose request was lost; a loop that
     /// is down is the supervisor's, and reports itself through health.
     pub fn send(&self, derivations: Vec<DerivationId>) {
         if derivations.is_empty() {
@@ -65,7 +65,7 @@ impl ProbeRequests {
 /// connection pools, resolved config, storage handles, the shutdown
 /// coordinator and board-event broadcast used by db-side background tasks, and
 /// the wake the effects actor waits on. Nothing here reaches `ci`: what a state
-/// change owes the outside world is an `outbox` row, not a call.
+/// change owes the outside world is a pending delivery, not a call.
 #[derive(Clone, Debug)]
 pub struct DbContext {
     pub worker_db: WorkerDb,
@@ -76,20 +76,20 @@ pub struct DbContext {
     pub events: gradient_types::EventBus,
     /// Nudged after every committed write that owes an effect, so the effects
     /// actor claims the row it just wrote instead of waiting out its tick.
-    pub outbox_wake: Arc<Notify>,
-    /// Where a demand recompute reports what it turned on, for the probe loop.
+    pub delivery_wake: Arc<Notify>,
+    /// Where a need update reports what it turned on, for the probe loop.
     pub probe_requests: ProbeRequests,
-    /// Where an anchor entering or leaving `Queued` is reported, for dispatch.
-    pub ready_set: ReadySet,
+    /// Where a shared build entering or leaving `Queued` is reported, for dispatch.
+    pub startable_set: StartableSet,
 }
 
 impl DbContext {
-    /// The same context with every statement bound to `tx`. Its ready-set
+    /// The same context with every statement bound to `tx`. Its startable-set
     /// moves are staged until the owner of `tx` publishes them after the commit.
     pub fn in_transaction(&self, tx: Arc<sea_orm::DatabaseTransaction>) -> DbContext {
         DbContext {
             worker_db: self.worker_db.in_transaction(tx),
-            ready_set: self.ready_set.staged(),
+            startable_set: self.startable_set.staged(),
             ..self.clone()
         }
     }
@@ -98,7 +98,7 @@ impl DbContext {
     pub fn detached(&self) -> DbContext {
         DbContext {
             worker_db: self.worker_db.detached(),
-            ready_set: self.ready_set.unstaged(),
+            startable_set: self.startable_set.unstaged(),
             ..self.clone()
         }
     }

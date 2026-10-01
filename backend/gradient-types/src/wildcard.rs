@@ -236,7 +236,7 @@ fn pattern_covers(pattern: &str, path: &[String]) -> bool {
 /// segments. Returns each segment together with a flag indicating whether it
 /// was enclosed in double quotes.
 ///
-/// Example: `my."wild.card".*` → `[("my", false), ("\"wild.card\"", true), ("*", false)]`
+/// Example: `my."wild.card".*` -> `[("my", false), ("\"wild.card\"", true), ("*", false)]`
 fn split_segments(pattern: &str) -> Vec<(String, bool)> {
     let mut segments = Vec::new();
     let mut current = String::new();
@@ -266,7 +266,7 @@ fn split_segments(pattern: &str) -> Vec<(String, bool)> {
 /// Converts a path body (no leading `!`) into a Nix list-of-strings literal,
 /// one element per segment. Quoted segments are unwrapped to their inner content.
 ///
-/// Example: `my."wild.card".*` → `[ "my" "wild.card" "*" ]`
+/// Example: `my."wild.card".*` -> `[ "my" "wild.card" "*" ]`
 fn path_to_nix_list(path: &str) -> String {
     let raw_elems: Vec<String> = split_segments(path)
         .into_iter()

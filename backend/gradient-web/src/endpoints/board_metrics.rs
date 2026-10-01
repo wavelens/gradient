@@ -98,7 +98,7 @@ pub struct BoardCacheStats {
 }
 
 #[derive(Serialize)]
-pub struct BoardUpstream {
+pub struct BoardUpstreamCache {
     pub upstream_id: String,
     pub display_name: String,
     pub url: String,
@@ -110,8 +110,8 @@ pub struct BoardUpstream {
 }
 
 #[derive(Serialize)]
-pub struct BoardUpstreamStats {
-    pub upstreams: Vec<BoardUpstream>,
+pub struct BoardUpstreamCacheStats {
+    pub upstream_caches: Vec<BoardUpstreamCache>,
 }
 
 pub async fn get_board_cache(
@@ -148,7 +148,7 @@ fn upstream_host(url: &str) -> String {
     }
 }
 
-fn board_upstreams_sql(window_hours: i64) -> String {
+fn board_upstream_caches_sql(window_hours: i64) -> String {
     format!(
         "SELECT mr.scope->>'upstream_url' AS upstream_url, mr.metric AS metric, \
                 mr.bucket_start AS bucket_start, mr.count AS c, mr.sum AS s \
@@ -162,21 +162,21 @@ fn board_upstreams_sql(window_hours: i64) -> String {
 }
 
 gradient_db::sql_fn! {
-    BOARD_UPSTREAMS = || board_upstreams_sql(24),
+    BOARD_UPSTREAM_CACHES = || board_upstream_caches_sql(24),
         params = [];
 }
 
-pub async fn get_board_upstreams(
+pub async fn get_board_upstream_caches(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Query(params): Query<WindowParams>,
-) -> WebResult<Json<BaseResponse<BoardUpstreamStats>>> {
+) -> WebResult<Json<BaseResponse<BoardUpstreamCacheStats>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let window = window_clause(&params);
 
     let rows = state
         .web_db
-        .query_all_raw(BOARD_UPSTREAMS.bind_built(board_upstreams_sql(window), []))
+        .query_all_raw(BOARD_UPSTREAM_CACHES.bind_built(board_upstream_caches_sql(window), []))
         .await?;
 
     use std::collections::HashMap;
@@ -242,14 +242,16 @@ pub async fn get_board_upstreams(
 
     if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
-            return Ok(ok_json(BoardUpstreamStats { upstreams: vec![] }));
+            return Ok(ok_json(BoardUpstreamCacheStats {
+                upstream_caches: vec![],
+            }));
         }
 
         let allowed = gradient_db::upstream_urls_for_projects(&state.web_db, &list).await?;
         by_upstream.retain(|url, _| allowed.contains(url));
     }
 
-    let mut upstreams = Vec::new();
+    let mut upstream_caches = Vec::new();
     for (uid, agg) in by_upstream {
         let hit_rate_series = agg
             .buckets
@@ -281,7 +283,7 @@ pub async fn get_board_upstreams(
         // superusers), so the URL is the caller's own - no cross-project mask needed.
         let display_name = upstream_host(&uid);
 
-        upstreams.push(BoardUpstream {
+        upstream_caches.push(BoardUpstreamCache {
             upstream_id: uid.clone(),
             display_name,
             url: uid,
@@ -293,9 +295,9 @@ pub async fn get_board_upstreams(
         });
     }
 
-    upstreams.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+    upstream_caches.sort_by(|a, b| a.display_name.cmp(&b.display_name));
 
-    Ok(ok_json(BoardUpstreamStats { upstreams }))
+    Ok(ok_json(BoardUpstreamCacheStats { upstream_caches }))
 }
 
 #[derive(Serialize)]
@@ -636,11 +638,11 @@ pub struct BoardHealth {
     pub supervised: Vec<SupervisedLoop>,
     pub proto_sessions: usize,
     pub unconfirmed_nars: u64,
-    /// Outbox rows still owed, and rows that gave up after their last attempt.
-    /// A rising `outbox_failed` is a forge or a mail host that is down, not a
+    /// Pending deliveries still owed, and rows that gave up after their last attempt.
+    /// A rising `failed_deliveries` is a Git host or a mail host that is down, not a
     /// backlog: those rows are dead letters until an operator acts.
-    pub outbox_pending: i64,
-    pub outbox_failed: i64,
+    pub pending_deliveries: i64,
+    pub failed_deliveries: i64,
     pub hot_nar_cache: HotNarCacheHealth,
 }
 
@@ -693,8 +695,8 @@ pub async fn get_board_health(
         .and_then(|r| r.try_get("", "m").ok().flatten());
 
     let rollup_lag_seconds = latest.map(|t| (now() - t).num_milliseconds() as f64 / 1000.0);
-    let (outbox_pending, outbox_failed) =
-        gradient_db::outbox::pending_counts(&state.web_db).await?;
+    let (pending_deliveries, failed_deliveries) =
+        gradient_db::pending_deliveries::pending_counts(&state.web_db).await?;
 
     Ok(ok_json(BoardHealth {
         version: obs.version,
@@ -714,8 +716,8 @@ pub async fn get_board_health(
         supervised: loops_view(scheduler.loop_health(), std::time::Instant::now()),
         proto_sessions: limiter.in_use(),
         unconfirmed_nars: gradient_db::unconfirmed_cached_path_count(&state.web_db).await?,
-        outbox_pending,
-        outbox_failed,
+        pending_deliveries,
+        failed_deliveries,
         hot_nar_cache: state.nar_storage.hot().stats().into(),
     }))
 }
@@ -742,7 +744,7 @@ mod tests {
     }
 
     /// A build named by many evaluations is one build: the heatmap reads each
-    /// anchor's latest attempt once and scopes it through an `EXISTS`, never a
+    /// shared build's latest attempt once and scopes it through an `EXISTS`, never a
     /// join that repeats it per naming job.
     #[test]
     fn the_durations_heatmap_counts_each_build_once() {

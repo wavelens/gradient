@@ -69,7 +69,7 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
     let others_remain = remaining > 0;
 
     // Last cache dropped the path: demote through the shared helper so the
-    // producer anchor, gate flags and referrer counters reset symmetrically (a
+    // producer shared build, gate flags and parent counters reset symmetrically (a
     // bare is_cached clear leaves a Completed producer with no backing NAR).
     if !others_remain {
         gradient_db::demote_cached_output(ctx, hash).await?;

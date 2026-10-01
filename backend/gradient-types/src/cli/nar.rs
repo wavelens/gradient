@@ -33,9 +33,9 @@ pub struct NarArgs {
     pub hot_cache_bytes: u64,
 
     /// When set, the S3 presigned NAR commit path GETs the uploaded object and
-    /// recomputes its hash before marking it cached, catching same-length
+    /// hashes it again before marking it cached, catching same-length
     /// corruption at the cost of a full object read. Off by default: the presigned
-    /// path still HEAD-checks size, and the relayed/REST upload paths always
+    /// path still HEAD-checks size, and granted worker and REST uploads always
     /// content-verify since they already hold the bytes in memory.
     #[arg(
         long = "nar-verify-digest",

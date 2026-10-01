@@ -8,7 +8,7 @@
 //!
 //! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
 
-use gradient_ci::actions::{FORGE_STATUS_EVENTS, forge_status_payload, matches_event};
+use gradient_ci::actions::{GIT_HOST_STATUS_EVENTS, git_host_status_payload, matches_event};
 use gradient_types::{ActionType, MTaskAction, TaskActionId, TaskId, UserId};
 use serde_json::json;
 use uuid::Uuid;
@@ -49,16 +49,19 @@ fn matches_event_send_web_request_filters_by_events() {
 }
 
 #[test]
-fn matches_event_forge_status_report_ignores_stored_events() {
+fn matches_event_git_host_status_report_ignores_stored_events() {
     // Seed the stored events with something that is NOT in
-    // FORGE_STATUS_EVENTS so we can verify the action still matches every
-    // forge-status event (proving the stored list is disregarded) and does
+    // GIT_HOST_STATUS_EVENTS so we can verify the action still matches every
+    // Git-host-status event (proving the stored list is disregarded) and does
     // NOT match the unrelated event it was seeded with.
-    let action = action_with(ActionType::ForgeStatusReport, json!(["evaluation.waiting"]));
-    for ev in FORGE_STATUS_EVENTS {
+    let action = action_with(
+        ActionType::GitHostStatusReport,
+        json!(["evaluation.waiting"]),
+    );
+    for ev in GIT_HOST_STATUS_EVENTS {
         assert!(
             matches_event(&action, ev),
-            "forge-status should always match '{}'",
+            "git-host-status should always match '{}'",
             ev
         );
     }
@@ -66,8 +69,8 @@ fn matches_event_forge_status_report_ignores_stored_events() {
 }
 
 #[test]
-fn forge_status_payload_round_trip_required_fields() {
-    let p = forge_status_payload("acme", "widgets", "deadbeef", "ctx", None, None, None);
+fn git_host_status_payload_round_trip_required_fields() {
+    let p = git_host_status_payload("acme", "widgets", "deadbeef", "ctx", None, None, None);
     assert_eq!(p["owner"], "acme");
     assert_eq!(p["repo"], "widgets");
     assert_eq!(p["sha"], "deadbeef");
@@ -78,8 +81,8 @@ fn forge_status_payload_round_trip_required_fields() {
 }
 
 #[test]
-fn forge_status_payload_carries_optional_fields() {
-    let p = forge_status_payload(
+fn git_host_status_payload_carries_optional_fields() {
+    let p = git_host_status_payload(
         "o",
         "r",
         "s",

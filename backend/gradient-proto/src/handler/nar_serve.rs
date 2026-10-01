@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
-use gradient_storage::relay::{RelayRequest, RelayTimeouts, ServeError, serve_nar};
+use gradient_storage::passthrough::{
+    PassthroughRequest, PassthroughTimeouts, ServeError, serve_nar,
+};
 use gradient_util::telemetry::{GAUGES, Gauges};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::warn;
@@ -71,11 +73,11 @@ pub(super) async fn serve_nar_request(
     client_token: Option<&str>,
 ) -> anyhow::Result<()> {
     let nar_cfg = &state.config.nar;
-    let timeouts = RelayTimeouts {
+    let timeouts = PassthroughTimeouts {
         open: Duration::from_secs(nar_cfg.storage_open_timeout_secs),
         chunk_read: Duration::from_secs(nar_cfg.send_chunk_timeout_secs),
     };
-    let req = RelayRequest {
+    let req = PassthroughRequest {
         job_id,
         store_path,
         resume_from,
@@ -230,7 +232,7 @@ mod serve_nar_tests {
         );
     }
 
-    /// Missing object → `NarUnavailable` (not `NarAbort`, no NarPush) and an
+    /// Missing object -> `NarUnavailable` (not `NarAbort`, no NarPush) and an
     /// `Err` from `serve_nar_request`.
     #[tokio::test]
     async fn serve_emits_nar_unavailable_when_missing() {

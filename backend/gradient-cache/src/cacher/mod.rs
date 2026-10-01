@@ -7,7 +7,7 @@
 //! Server-side cache maintenance.
 //!
 //! Workers pack and compress NARs; the server signs them on upload. This
-//! module runs the periodic sweeps: cleanup, signature and debug-index
+//! module is running the periodic sweeps: cleanup, signature and debug-index
 //! backfills, eval cache eviction, and the storage migrations and deep GC.
 
 mod cleanup;
@@ -27,7 +27,7 @@ pub use self::eval_cache_sweep::evict_eval_cache;
 
 pub use self::cleanup::{
     CleanupReport, cleanup_expired_upload_sessions, cleanup_old_evaluations,
-    cleanup_stale_build_request_blobs, evict_stale_cached_paths, reconcile_nar_shard,
+    cleanup_stale_build_request_blobs, evict_stale_cached_paths, repair_nar_shard,
 };
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::sign_sweep::sign_missing_signatures;
@@ -65,7 +65,7 @@ impl Sweep {
 }
 
 /// The registered sweeps. "cache-maintenance" bundles the order-sensitive
-/// GC/reconcile steps; "storage-maintenance" the storage migrations and the
+/// GC/repair steps; "storage-maintenance" the storage migrations and the
 /// deep GC; "sign-sweep" is the signature backfill, "debug-index" the build-id
 /// backfill, "eval-cache-sweep" the eval-cache eviction.
 fn sweeps(state: &ServerState) -> Vec<Sweep> {
@@ -159,8 +159,8 @@ async fn run_derivation_gc(state: &Arc<ServerState>) -> anyhow::Result<usize> {
 }
 
 /// One tick of the background storage work: a pending storage migration
-/// first, then the deep GC. A requested deep GC round runs unit after unit
-/// within the tick; anything else runs one unit and waits for the pace.
+/// first, then the deep GC. A requested deep GC round executes unit after unit
+/// within the tick; anything else executes one unit and waits for the pace.
 async fn run_storage_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     loop {
         let step = match storage_migrations::step(&state).await? {
@@ -175,7 +175,7 @@ async fn run_storage_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> 
 
 /// The order-sensitive cache-maintenance steps, run sequentially every
 /// `gc.interval_secs`. No per-output work here - the worker uploads+signs; this
-/// is GC and self-heal reconciliation only. Storage objects are reconciled by
+/// is GC and self-heal repair only. Storage objects are repaired by
 /// the deep GC.
 async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     if let Err(e) = cleanup_old_evaluations(Arc::clone(&state)).await {

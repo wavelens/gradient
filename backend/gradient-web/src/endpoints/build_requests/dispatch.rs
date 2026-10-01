@@ -21,7 +21,7 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::ServerState;
-use gradient_proto::ingest::{NarCommit, SignTargets};
+use gradient_proto::import::{NarCommit, SignTargets};
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::ids::{

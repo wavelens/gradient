@@ -198,11 +198,11 @@ fn starring_a_task_records_a_task_star_event() {
 
         res.assert_status_ok();
         assert!(ran(db, "INSERT INTO user_task_star"));
-        let outbox = statements(worker_db)
+        let delivery = statements(worker_db)
             .into_iter()
-            .find(|s| s.sql.contains("INSERT INTO outbox"))
+            .find(|s| s.sql.contains("INSERT INTO pending_delivery"))
             .expect("event row");
-        let payload = format!("{:?}", outbox.values);
+        let payload = format!("{:?}", delivery.values);
         assert!(payload.contains("TaskStar"), "{payload}");
     });
 }

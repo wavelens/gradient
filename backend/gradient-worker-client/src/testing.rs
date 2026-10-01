@@ -52,7 +52,7 @@ impl Default for PeerSpec {
 #[derive(Debug, Clone)]
 pub struct Assignment {
     pub job_id: String,
-    pub dispatch: String,
+    pub assignment_id: String,
     pub job: Job,
 }
 
@@ -193,12 +193,12 @@ impl ProtoPeer {
             .recv_until(|msg| match msg {
                 ServerMessage::AssignJob {
                     job_id,
-                    dispatch,
+                    assignment_id,
                     job,
                     ..
                 } => Some(Assignment {
                     job_id,
-                    dispatch,
+                    assignment_id,
                     job,
                 }),
                 _ => None,
@@ -216,7 +216,7 @@ impl ProtoPeer {
     pub async fn complete(&self, assignment: &Assignment) -> Result<()> {
         self.send(ClientMessage::JobCompleted {
             job_id: assignment.job_id.clone(),
-            dispatch: assignment.dispatch.clone(),
+            assignment_id: assignment.assignment_id.clone(),
             spans: vec![],
         })
         .await
@@ -225,7 +225,7 @@ impl ProtoPeer {
     pub async fn fail(&self, assignment: &Assignment, kind: BuildFailureKind) -> Result<()> {
         self.send(ClientMessage::JobFailed {
             job_id: assignment.job_id.clone(),
-            dispatch: assignment.dispatch.clone(),
+            assignment_id: assignment.assignment_id.clone(),
             error: "scripted failure".into(),
             kind,
             missing_paths: vec![],
@@ -349,13 +349,13 @@ mod tests {
         };
         let peer_side = async {
             let assignment = peer.claim(JobKind::Build).await.unwrap();
-            assert_eq!(assignment.dispatch, "d-1");
+            assert_eq!(assignment.assignment_id, "d-1");
             peer.complete(&assignment).await.unwrap();
         };
         let (report, ()) = tokio::join!(server_side, peer_side);
         assert!(matches!(
             report,
-            ClientMessage::JobCompleted { dispatch, .. } if dispatch == "d-1"
+            ClientMessage::JobCompleted { assignment_id, .. } if assignment_id == "d-1"
         ));
     }
 

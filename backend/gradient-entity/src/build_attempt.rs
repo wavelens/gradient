@@ -84,7 +84,7 @@ pub struct Model {
     pub id: BuildAttemptId,
     /// The eval that drove this attempt's dispatch. `None` once that evaluation
     /// is GC'd: the attempt (and its log) live on with the `derivation_build`
-    /// anchor, its true owner, until the derivation itself is reclaimed.
+    /// shared build, its true owner, until the derivation itself is reclaimed.
     pub build_job: Option<BuildJobId>,
     pub derivation_build: DerivationBuildId,
     pub dispatched_job: DispatchedJobId,

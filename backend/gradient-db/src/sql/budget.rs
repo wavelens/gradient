@@ -5,7 +5,7 @@
  */
 
 //! What a query is allowed to cost. Every limit is a property of the plan, never
-//! of the clock: the VM the gate runs in is shared and slow, so a millisecond
+//! of the clock: the VM the gate is running in is shared and slow, so a millisecond
 //! budget would only measure how busy the runner was.
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

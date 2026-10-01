@@ -6,7 +6,7 @@
 
 use super::helpers::{EntityLookup, ErrorCollector};
 use gradient_ci::integration_lookup::IntegrationKind;
-use gradient_types::forge::ForgeType;
+use gradient_types::git_host::GitHostType;
 
 fn parse_integration_kind(s: &str) -> Option<IntegrationKind> {
     match s {
@@ -39,22 +39,22 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 ),
             );
         }
-        if ForgeType::from_path_segment(&integration.forge_type).is_none() {
+        if GitHostType::from_path_segment(&integration.git_host_type).is_none() {
             errors.push(
-                format!("integrations.{}.forge_type", integration.name),
+                format!("integrations.{}.git_host_type", integration.name),
                 format!(
-                    "Invalid forge_type '{}': expected gitea/forgejo/gitlab/github",
-                    integration.forge_type
+                    "Invalid git_host_type '{}': expected gitea/forgejo/gitlab/github",
+                    integration.git_host_type
                 ),
             );
         }
 
-        if integration.forge_type == "github"
+        if integration.git_host_type == "github"
             && integration.installation_id.is_none_or(|id| id <= 0)
         {
             errors.push(
                 format!("integrations.{}.installation_id", integration.name),
-                "forge_type 'github' requires a positive installation_id",
+                "git_host_type 'github' requires a positive installation_id",
             );
         }
     }

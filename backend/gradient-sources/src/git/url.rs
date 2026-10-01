@@ -20,7 +20,7 @@ pub(super) fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), Sou
 }
 
 /// Translates a nix flake URL into a transport URL libgit2 understands by
-/// stripping the `git+` scheme prefix (`git+https://h/r` → `https://h/r`).
+/// stripping the `git+` scheme prefix (`git+https://h/r` -> `https://h/r`).
 /// libgit2 registers no `git+https`/`git+http` transport: it misroutes such a
 /// URL to SSH, whose scheme has no default port, and the connect then fails with
 /// "invalid argument port". Bare schemes and SCP-style remotes pass through.

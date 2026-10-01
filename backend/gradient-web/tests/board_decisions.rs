@@ -50,7 +50,7 @@ fn with_user(
 }
 
 #[test]
-fn dispatch_decisions_rejects_non_superuser() {
+fn assign_decisions_rejects_non_superuser() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
@@ -71,7 +71,7 @@ fn dispatch_decisions_rejects_non_superuser() {
 }
 
 #[test]
-fn dispatch_decisions_superuser_returns_empty_ring() {
+fn assign_decisions_superuser_returns_empty_ring() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);

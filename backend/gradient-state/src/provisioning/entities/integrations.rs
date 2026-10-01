@@ -12,7 +12,7 @@ use anyhow::Result;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_entity::*;
-use gradient_types::ForgeType;
+use gradient_types::GitHostType;
 use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
@@ -56,18 +56,18 @@ impl<'a> StateApplicator<'a> {
                 }
             };
 
-            let forge = ForgeType::from_path_segment(&state_int.forge_type).ok_or_else(|| {
+            let git_host = GitHostType::from_path_segment(&state_int.git_host_type).ok_or_else(|| {
                 format!(
-                    "Integration '{}' has invalid forge_type '{}': expected gitea/forgejo/gitlab/github",
-                    state_int.name, state_int.forge_type
+                    "Integration '{}' has invalid git_host_type '{}': expected gitea/forgejo/gitlab/github",
+                    state_int.name, state_int.git_host_type
                 )
             })?;
 
-            let github_installation = if matches!(forge, ForgeType::GitHub) {
+            let github_installation = if matches!(git_host, GitHostType::GitHub) {
                 let installation_id =
                     state_int.installation_id.filter(|id| *id > 0).ok_or_else(|| {
                         format!(
-                            "Integration '{}' has forge_type 'github' but no positive installation_id",
+                            "Integration '{}' has git_host_type 'github' but no positive installation_id",
                             state_int.name
                         )
                     })?;
@@ -117,7 +117,7 @@ impl<'a> StateApplicator<'a> {
             if let Some(existing) = existing {
                 let mut active: integration::ActiveModel = existing.into();
                 active.display_name = Set(display_name);
-                active.forge_type = Set(forge);
+                active.git_host_type = Set(git_host);
                 active.endpoint_url = Set(endpoint);
                 active.secret = Set(encrypted_secret);
                 active.access_token = Set(encrypted_token);
@@ -132,7 +132,7 @@ impl<'a> StateApplicator<'a> {
                     name: state_int.name.clone(),
                     display_name,
                     kind,
-                    forge_type: forge,
+                    git_host_type: git_host,
                     secret: encrypted_secret,
                     endpoint_url: endpoint,
                     access_token: encrypted_token,

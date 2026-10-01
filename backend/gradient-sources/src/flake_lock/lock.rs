@@ -9,7 +9,7 @@
 //! `locked`/`original` blocks are kept as sorted `serde_json::Map`s so unknown
 //! keys survive a round-trip and re-serialization is byte-stable against nix's
 //! nlohmann output (sorted keys, 2-space indent). A [`LockedRef`] *view* is
-//! parsed on demand to drive resolution.
+//! parsed when needed to drive resolution.
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ pub enum InputRef {
     Follows(Vec<String>),
 }
 
-/// Typed view over a `locked`/`original` block, keyed on its `type`. Drives
+/// Typed view over a `locked`/`original` block, per `type`. Drives
 /// revision resolution. Unsupported types parse into [`LockedRef::Other`] and
 /// fail explicitly at resolution time.
 #[derive(Clone, Debug, PartialEq, Eq)]

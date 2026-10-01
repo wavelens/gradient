@@ -6,7 +6,7 @@
 
 //! A derivation's `inputSrcs` - build-time source paths (e.g.
 //! `builtins.toFile` configs) that have no producing derivation. Recorded per
-//! derivation so the dispatch readiness gate can require every source to be in
+//! derivation so the dispatch can-start gate can require every source to be in
 //! the cache before a real build is dispatched.
 
 use chrono::NaiveDateTime;

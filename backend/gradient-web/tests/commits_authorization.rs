@@ -180,7 +180,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         events: gradient_types::EventBus::default(),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         upload_admission: gradient_storage::admission::UploadAdmission::new(
@@ -189,10 +189,10 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
                 bytes: u64::MAX,
             },
         ),
-        outbox_wake: Default::default(),
-        eval_dispatch_wake: Default::default(),
+        delivery_wake: Default::default(),
+        eval_assign_wake: Default::default(),
         probe_requests: Default::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
         graph: gradient_core::Graph::stub(),
     });
     TestServer::new(create_router(state).expect("router"))
@@ -215,7 +215,7 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// Anonymous caller: commit reachable through a public-project task → 200.
+/// Anonymous caller: commit reachable through a public-project task -> 200.
 #[test]
 fn anon_can_read_commit_in_public_project() {
     run(async {
@@ -234,7 +234,7 @@ fn anon_can_read_commit_in_public_project() {
     });
 }
 
-/// Anonymous caller: commit reachable only through a private project → 404.
+/// Anonymous caller: commit reachable only through a private project -> 404.
 #[test]
 fn anon_cannot_read_commit_in_private_project() {
     run(async {
@@ -253,7 +253,7 @@ fn anon_cannot_read_commit_in_private_project() {
 }
 
 /// Authenticated project member: commit reachable through a private project they
-/// belong to → 200.
+/// belong to -> 200.
 #[test]
 fn member_can_read_commit_in_private_project() {
     run(async {
@@ -280,7 +280,7 @@ fn member_can_read_commit_in_private_project() {
 }
 
 /// Authenticated user with no membership in any project that owns the commit's
-/// evaluation → 404 (must not leak existence).
+/// evaluation -> 404 (must not leak existence).
 #[test]
 fn non_member_cannot_read_commit() {
     run(async {
@@ -317,7 +317,7 @@ fn non_member_cannot_read_commit() {
 }
 
 /// Evaluation referencing the commit has no task (legacy direct-build
-/// row before issue #234) → 404, since task is required to resolve project.
+/// row before issue #234) -> 404, since task is required to resolve project.
 #[test]
 fn commit_referenced_only_via_orphan_eval_returns_404() {
     run(async {
@@ -338,7 +338,7 @@ fn commit_referenced_only_via_orphan_eval_returns_404() {
     });
 }
 
-/// Commit row doesn't exist → 404 with no further DB lookups needed.
+/// Commit row doesn't exist -> 404 with no further DB lookups needed.
 #[test]
 fn nonexistent_commit_returns_404() {
     run(async {
@@ -354,7 +354,7 @@ fn nonexistent_commit_returns_404() {
 }
 
 /// Commit row exists but no evaluation references it (orphan or
-/// race-condition cleanup) → 404.
+/// race-condition cleanup) -> 404.
 #[test]
 fn commit_without_evaluation_returns_404() {
     run(async {

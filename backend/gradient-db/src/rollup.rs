@@ -6,8 +6,8 @@
 
 //! Background aggregator that folds fact tables into `metric_rollup`.
 //!
-//! Each pass recomputes minute buckets for a trailing window from the fact
-//! tables (idempotent via `ON CONFLICT`), then cascades minute→hour→day→week
+//! Each pass updates minute buckets for a trailing window from the fact
+//! tables (idempotent via `ON CONFLICT`), then cascades minute -> hour -> day -> week
 //! over `metric_rollup` itself. Best-effort: SQL failures are logged, never
 //! propagated. Timestamps are compared in UTC to match the naive-UTC values the
 //! recording layer writes via `gradient_types::now()`.
@@ -22,7 +22,7 @@ use tracing::{debug, warn};
 
 use super::DbContext;
 
-/// A simple count metric over the global `derivation_build` anchor, attributed
+/// A simple count metric over the global `derivation_build` shared build, attributed
 /// to an owning project once per referencing `build_job` (its eval -> task join).
 struct BuildCount {
     name: &'static str,
@@ -83,14 +83,14 @@ struct BuildDuration {
 }
 
 const BUILD_DURATIONS: &[BuildDuration] = &[
-    // Queue wait excluding dependency wait: ready (deps satisfied) → dispatched.
+    // Queue wait excluding dependency wait: can start (deps satisfied) -> dispatched.
     BuildDuration {
         name: "dispatch.wait_ms",
         start_col: "ready_at",
         end_col: "dispatched_at",
         filter: "TRUE",
     },
-    // Dependency wait: entered the queue → all dependencies satisfied.
+    // Dependency wait: entered the queue -> all dependencies satisfied.
     BuildDuration {
         name: "deps.wait_ms",
         start_col: "queued_at",
@@ -399,9 +399,9 @@ fn build_duration_attempt_sql() -> String {
 
 /// `phase.<kind>.<phase>.ms`: one series per job kind and phase, so the board
 /// can compare where eval and build time actually goes. The phase name array is
-/// indexed by `phase + 1` because Postgres arrays are 1-based, and it is keyed by
+/// indexed by `phase + 1` because Postgres arrays are 1-based, and it is per
 /// `JobPhase::as_i16`, not by the enum's current order: position 10 is the retired
-/// discriminant 9 (`substitute_relay`), which historical rows still carry.
+/// discriminant 9 (`substitute_passthrough`), which historical rows still carry.
 fn phase_duration_sql() -> String {
     let ms = "(p.end_ms - p.start_ms)::double precision";
     let last = JobPhase::ALL.iter().map(|p| p.as_i16()).max().unwrap_or(0);
@@ -522,7 +522,7 @@ mod tests {
     }
 
     /// The window must be the seed, not a filter after a join over every
-    /// Completed anchor: an idle window then reads nothing (#629).
+    /// Completed shared build: an idle window then reads nothing (#629).
     #[test]
     fn duration_rollup_seeds_from_attempts_finished_in_the_window() {
         let sql = build_duration_attempt_sql();

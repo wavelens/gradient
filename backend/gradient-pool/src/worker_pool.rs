@@ -768,7 +768,7 @@ mod tests {
     #[test]
     fn build_capacity_strict_at_limit() {
         // Worker at exactly max_concurrent_builds must reject new builds.
-        // Guards against `<` → `<=` off-by-one in `has_build_capacity`.
+        // Guards against `<` -> `<=` off-by-one in `has_build_capacity`.
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities(
@@ -803,11 +803,11 @@ mod tests {
         pool.assign_job("w1", "j2");
         assert_eq!(pool.all_workers()[0].assigned_job_count, 2);
 
-        // Releasing one of two jobs leaves the worker busy → not idle.
+        // Releasing one of two jobs leaves the worker busy -> not idle.
         assert!(!pool.release_job("w1", "j1"));
         assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
 
-        // Releasing the last job makes the worker idle → dispatch may kick.
+        // Releasing the last job makes the worker idle -> dispatch may kick.
         assert!(pool.release_job("w1", "j2"));
         assert_eq!(pool.all_workers()[0].assigned_job_count, 0);
     }

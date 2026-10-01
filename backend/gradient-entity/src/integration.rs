@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{GithubInstallationId, IntegrationId, ProjectId, UserId};
 
-/// Webhook direction of an integration: receives forge events (inbound) or
-/// reports statuses / opens PRs on the forge (outbound).
+/// Webhook direction of an integration: receives Git host events (inbound) or
+/// reports statuses / opens PRs on the Git host (outbound).
 #[repr(i16)]
 #[derive(
     Debug,
@@ -38,7 +38,7 @@ pub enum IntegrationKind {
     Outbound = 1,
 }
 
-/// The forge identity shared by `gradient-forge` providers, `ci` integration
+/// The Git host identity shared by `gradient-git-host` providers, `ci` integration
 /// lookups, and state export.
 #[repr(i16)]
 #[derive(
@@ -58,7 +58,7 @@ pub enum IntegrationKind {
 )]
 #[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
 #[serde(rename_all = "lowercase")]
-pub enum ForgeType {
+pub enum GitHostType {
     #[default]
     #[sea_orm(num_value = 0)]
     Gitea = 0,
@@ -70,7 +70,7 @@ pub enum ForgeType {
     GitHub = 3,
 }
 
-impl ForgeType {
+impl GitHostType {
     pub fn from_path_segment(s: &str) -> Option<Self> {
         match s {
             "gitea" => Some(Self::Gitea),
@@ -82,7 +82,7 @@ impl ForgeType {
     }
 
     /// Inverse of [`from_path_segment`](Self::from_path_segment): the canonical
-    /// path/state segment naming this forge.
+    /// path/state segment naming this Git host.
     pub const fn as_path_segment(self) -> &'static str {
         match self {
             Self::Gitea => "gitea",
@@ -103,7 +103,7 @@ pub struct Model {
     /// Human-readable display name for this integration.
     pub display_name: String,
     pub kind: IntegrationKind,
-    pub forge_type: ForgeType,
+    pub git_host_type: GitHostType,
     #[sea_orm(column_type = "Text", nullable)]
     pub secret: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
@@ -148,7 +148,7 @@ impl std::fmt::Debug for Model {
             .field("name", &self.name)
             .field("display_name", &self.display_name)
             .field("kind", &self.kind)
-            .field("forge_type", &self.forge_type)
+            .field("git_host_type", &self.git_host_type)
             .field("secret", &self.secret.as_ref().map(|_| "[redacted]"))
             .field("endpoint_url", &self.endpoint_url)
             .field(

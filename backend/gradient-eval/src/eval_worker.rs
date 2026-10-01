@@ -225,7 +225,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
     }
 }
 
-/// Runs `f` against the initialized evaluator, or answers the one canonical
+/// Executes `f` against the initialized evaluator, or answers the one canonical
 /// error when libnix failed to come up (the parent then discards this worker).
 fn with_evaluator<'ev>(
     evaluator: &'ev Option<NixEvaluator>,
@@ -246,7 +246,7 @@ fn or_err(result: anyhow::Result<EvalResponse>) -> EvalResponse {
     })
 }
 
-/// Single-entry walker cache keyed by `(repository, input_overrides)`.
+/// Single-entry walker cache per `(repository, input_overrides)`.
 /// Consecutive requests for the same flake and override set (the common
 /// Plan/List/Resolve sequence) reuse one locked flake + open eval cache; a
 /// different repository or a different override set replaces the entry, so a
@@ -383,7 +383,7 @@ fn response_kind(resp: &EvalResponse) -> String {
     }
 }
 
-/// Runs `f` while capturing everything written to stderr (fd 2).
+/// Executes `f` while capturing everything written to stderr (fd 2).
 ///
 /// Redirects fd 2 to a pipe for the duration of `f`, then restores it.
 /// Returns the result of `f` alongside any lines from the captured output
@@ -400,7 +400,7 @@ where
     use std::io::Read;
     use std::os::unix::io::FromRawFd;
 
-    // SAFETY (all libc calls below): this runs on the eval-worker's single
+    // SAFETY (all libc calls below): this executes on the eval-worker's single
     // thread; every fd (`2`, `saved`, `pipefd[*]`) is valid by construction and
     // failures are best-effort - on error we just skip warning capture.
     // `pipefd[0]` is handed to `File::from_raw_fd` exactly once, taking ownership.
@@ -425,7 +425,7 @@ where
     // Run the evaluation. Nix writes warnings directly to fd 2.
     let result = f();
 
-    // Restore fd 2. After this, the pipe's write end has no open fds → EOF.
+    // Restore fd 2. After this, the pipe's write end has no open fds -> EOF.
     unsafe { libc::dup2(saved, 2) };
     unsafe { libc::close(saved) };
 

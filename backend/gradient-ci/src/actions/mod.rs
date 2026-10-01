@@ -25,9 +25,9 @@ pub use crypto::{
     encrypt_secret_with_file,
 };
 pub use executor::execute_action;
-pub use matchers::{FORGE_STATUS_EVENTS, forge_status_for_event, matches_event};
-pub use payload::forge_status_payload;
-pub use send::{reporter_for_task, verify_forge_action};
+pub use matchers::{GIT_HOST_STATUS_EVENTS, git_host_status_for_event, matches_event};
+pub use payload::git_host_status_payload;
+pub use send::{reporter_for_task, verify_git_host_action};
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
@@ -62,11 +62,11 @@ pub async fn active_actions_for_task(
 }
 
 /// The actions that react to `event`, with the two payload rules: `OpenPr` only
-/// on input-update evaluations, forge reports never on them.
+/// on input-update evaluations, Git host reports never on them.
 ///
 /// `OpenPr` fires on a normal gate event (build/eval completed) but must only
-/// act on `input_update` evaluations, never regular CI runs. A
-/// `forge_status_report` posts a CI status against a real commit/PR, and an
+/// act on `input_update` evaluations, never regular CI evaluations. A
+/// `git_host_status_report` posts a CI status against a real commit/PR, and an
 /// `input_update` eval is an internal bump whose own commit is blank until its
 /// PR is pushed, so it is skipped there: the PR's own CI run reports normally.
 pub fn matching_actions(
@@ -81,7 +81,7 @@ pub fn matching_actions(
         .into_iter()
         .filter(|a| matches_event(a, event))
         .filter(|a| a.action_type != ActionType::OpenPr || is_input_update)
-        .filter(|a| a.action_type != ActionType::ForgeStatusReport || !is_input_update)
+        .filter(|a| a.action_type != ActionType::GitHostStatusReport || !is_input_update)
         .collect()
 }
 

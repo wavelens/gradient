@@ -10,7 +10,7 @@ use anyhow::Result;
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
-use gradient_graph::IngestBatch;
+use gradient_graph::RecordBatch;
 use gradient_types::*;
 use gradient_util::store_path::strip_nix_store_prefix;
 use gradient_wire::types::DiscoveredDerivation;
@@ -194,7 +194,7 @@ impl Scheduler {
         };
 
         // Canonicalise every store path to its bare `<hash>-<name>` form before
-        // it reaches the graph actor: `derivation.derivation_path` mirrors the
+        // it reaches the graph writer: `derivation.derivation_path` mirrors the
         // narinfo `References:` convention used by `cached_path`, and the
         // `/nix/store/` prefix is added back only at the worker / API boundary.
         for d in &mut derivations {
@@ -207,7 +207,7 @@ impl Scheduler {
         let truly_substituted = eval::assess_cached(&self.state, &derivations).await;
         self.state
             .graph
-            .ingest(IngestBatch {
+            .record(RecordBatch {
                 evaluation: job.evaluation_id,
                 task: job.task_id,
                 derivations,

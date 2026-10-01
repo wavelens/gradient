@@ -12,7 +12,7 @@
 //! recorded plus the direct inputs of that, so the interior of a pruned subtree
 //! is named by the evaluation that walked it and by nobody else; adoption is what
 //! keeps the rows true when that evaluation is deleted, or a thaw, a reset or a
-//! retire leaves an open anchor unnamed, while another evaluation still waits on
+//! retire leaves an open shared build unnamed, while another evaluation still waits on
 //! the subtree.
 
 use crate::graph_sql::{builder_predicate, open_closure_cte, open_predicate};
@@ -27,11 +27,11 @@ use sea_orm::{
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-/// Whether an evaluation still names an anchor it is waiting for.
+/// Whether an evaluation still names a shared build it is waiting for.
 ///
 /// The exact answer behind the evaluation counters: asked only once they say
 /// nothing blocks, so normally once per evaluation, and then it reads every
-/// anchor the evaluation names. That is the working set it was handed, which is
+/// shared build the evaluation names. That is the working set it was handed, which is
 /// what `Bulk` is for.
 static EVAL_BLOCKED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -47,26 +47,26 @@ crate::sql_lazy! {
         params = [EvaluationId],
         tier = Bulk,
         budget = crate::sql::Budget::bulk().buffers(500_000)
-            .because("an evaluation nothing blocks is read to its last anchor, and the \
+            .because("an evaluation nothing blocks is read to its last shared build, and the \
                       fixture's largest names ~98k");
 }
 
-/// Whether any anchor the evaluation names ended without being built: what
+/// Whether any shared build the evaluation names ended without being built: what
 /// decides `Failed` over `Completed` once [`eval_blocked`] says nothing is left.
 ///
 /// The set is [`BuildStatus::REQUEUEABLE`], because the two questions are one
 /// question seen from either end - what a fresh evaluation thaws is exactly what
 /// this evaluation did not get built. `Aborted` is the member that matters and
-/// the one this used to omit: `derivation_build` is global, so an anchor a
+/// the one this used to omit: `derivation_build` is global, so a shared build a
 /// previous evaluation hard-aborted is already terminal when the next evaluation
-/// names it, and an abort blocks nothing. An evaluation whose every anchor sat
+/// names it, and an abort blocks nothing. An evaluation whose every shared build sat
 /// `Aborted` therefore finalized `Completed` milliseconds after reaching
 /// `Building` - a green check for a commit on which nothing was built. It is
 /// deliberately NOT [`BuildStatus::TERMINAL_FAILURE`], which excludes `Aborted`
 /// so an abort never cascades `DependencyFailed` downward. The one `Aborted`
-/// anchor that is no failure: a companion stopped because its cluster job
+/// shared build that is no failure: a companion stopped because its cluster job
 /// completed through the primary member.
-static EVAL_ANY_ANCHOR_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
+static EVAL_ANY_SHARED_BUILD_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
         "SELECT EXISTS (SELECT 1 FROM build_job bj \
          JOIN derivation_build db ON db.id = bj.derivation_build \
@@ -81,11 +81,11 @@ static EVAL_ANY_ANCHOR_FAILED_SQL: LazyLock<String> = LazyLock::new(|| {
 });
 
 crate::sql_lazy! {
-    EVAL_ANY_ANCHOR_FAILED = || EVAL_ANY_ANCHOR_FAILED_SQL.as_str(),
+    EVAL_ANY_SHARED_BUILD_FAILED = || EVAL_ANY_SHARED_BUILD_FAILED_SQL.as_str(),
         params = [EvaluationId];
 }
 
-/// See [`EVAL_BLOCKED_SQL`]. An evaluation naming no anchor at all is not blocked.
+/// See [`EVAL_BLOCKED_SQL`]. An evaluation naming no shared build at all is not blocked.
 pub async fn eval_blocked<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -93,12 +93,12 @@ pub async fn eval_blocked<C: ConnectionTrait>(
     flag(db, &EVAL_BLOCKED, evaluation, "blocked").await
 }
 
-/// See [`EVAL_ANY_ANCHOR_FAILED_SQL`].
-pub async fn eval_any_anchor_failed<C: ConnectionTrait>(
+/// See [`EVAL_ANY_SHARED_BUILD_FAILED_SQL`].
+pub async fn eval_any_shared_build_failed<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
 ) -> Result<bool, DbErr> {
-    flag(db, &EVAL_ANY_ANCHOR_FAILED, evaluation, "failed").await
+    flag(db, &EVAL_ANY_SHARED_BUILD_FAILED, evaluation, "failed").await
 }
 
 /// A one-row, one-column `EXISTS` read. A missing row is an error and not `false`:
@@ -116,21 +116,21 @@ async fn flag<C: ConnectionTrait>(
         .try_get::<bool>("", column)
 }
 
-/// The anchor's current status, for the dispatcher's last look before a
+/// The shared build's current status, for the dispatcher's last look before a
 /// hand-out: a queued job whose gate regressed since it was enqueued reads
 /// `Created` here and is dropped instead of dispatched with a missing input.
-pub async fn anchor_status<C: ConnectionTrait>(
+pub async fn shared_build_status<C: ConnectionTrait>(
     db: &C,
-    anchor: DerivationBuildId,
+    shared_build: DerivationBuildId,
 ) -> Result<Option<BuildStatus>, DbErr> {
-    Ok(EDerivationBuild::find_by_id(anchor)
+    Ok(EDerivationBuild::find_by_id(shared_build)
         .one(db)
         .await?
         .map(|a| a.status))
 }
 
 /// Evaluations that reference `derivation` (via a `build_job`). Drives status
-/// fan-out: a single anchor transition updates every referencing eval's view.
+/// fan-out: a single shared build transition updates every referencing eval's view.
 pub async fn evals_referencing_derivation<C: ConnectionTrait>(
     db: &C,
     derivation: DerivationId,
@@ -204,7 +204,7 @@ crate::sql! {
     PRODUCERS_OF_HASHES = "SELECT DISTINCT o.derivation FROM derivation_output o WHERE o.hash = ANY($1)",
         params = [CachedPathHashes(64)];
 
-    /// A restart re-runs the previous evaluation's graph without walking it, so it
+    /// A restart repeats the previous evaluation's graph without walking it, so it
     /// takes the previous names over as its own: every reader of "does some
     /// evaluation still want this", and the thaw's seed, is a `build_job` row.
     INHERIT_NAMES = "INSERT INTO build_job \
@@ -235,7 +235,7 @@ pub async fn inherit_names<C: ConnectionTrait>(
         .rows_affected())
 }
 
-/// The derivations whose outputs carry any of `hashes`: the anchors a store
+/// The derivations whose outputs carry any of `hashes`: the shared builds a store
 /// path's arrival or removal can make fetchable or unfetchable.
 pub async fn producers_of_hashes<C: ConnectionTrait>(
     db: &C,
@@ -295,7 +295,7 @@ crate::sql! {
         params = [DerivationHashes(64)];
 }
 
-/// The derivations whose own `.drv` hash is any of `hashes`: the anchors whose
+/// The derivations whose own `.drv` hash is any of `hashes`: the shared builds whose
 /// own derivation file just arrived in, or left, the cache.
 pub async fn derivations_with_hashes<C: ConnectionTrait>(
     db: &C,
@@ -346,7 +346,7 @@ impl Adopted {
         out
     }
 
-    /// The anchors that gained a name, deduplicated: what a promote re-checks.
+    /// The shared builds that gained a name, deduplicated: what a promote re-checks.
     pub fn derivations(&self) -> Vec<DerivationId> {
         let mut out: Vec<DerivationId> = self.pairs.iter().map(|(_, d)| *d).collect();
         out.sort_unstable();
@@ -356,7 +356,7 @@ impl Adopted {
     }
 }
 
-/// The walk's seeds: one row per `build_job` on an open anchor, carrying the
+/// The walk's seeds: one row per `build_job` on an open shared build, carrying the
 /// builder bit of the row it stands on.
 fn named_open(scope: &str) -> String {
     format!(
@@ -390,7 +390,7 @@ static ADOPT_LIVE: LazyLock<String> = LazyLock::new(|| {
     )))
 });
 
-/// One evaluation names what it reaches: the graph reconciler runs this for the
+/// One evaluation names what it reaches: the graph repair pass executes this for the
 /// evaluation it heals, whatever its status.
 static ADOPT_EVAL: LazyLock<String> =
     LazyLock::new(|| adopt_sql(&named_open("bj.evaluation = $1")));
@@ -425,10 +425,10 @@ crate::sql_lazy! {
         params = [DerivationIds(64)];
 }
 
-/// The frontier every naming hole has: an open anchor nobody names, one edge the
-/// walk would take below an open anchor a live evaluation names. Asked on every
-/// sweep, and the walk runs only when the answer is yes; a settled server has no
-/// frontier, so the answer costs a pass over the anchors that are still open.
+/// The frontier every naming hole has: an open shared build nobody names, one edge the
+/// walk would take below an open shared build a live evaluation names. Asked on every
+/// sweep, and the walk starts only when the answer is yes; a settled server has no
+/// frontier, so the answer costs a pass over the shared builds that are still open.
 static PENDING_ORPHAN_FRONTIER: LazyLock<String> = LazyLock::new(|| {
     pending_orphans_sql(&format!(
         "EXISTS (SELECT 1 FROM derivation_dependency e \
@@ -468,8 +468,8 @@ pub async fn pending_orphans_among<C: ConnectionTrait>(
         .is_some())
 }
 
-/// Whether some live evaluation reaches an open anchor nobody names: the
-/// consistency sweep's guard on the walk.
+/// Whether some live evaluation reaches an open shared build nobody names: the
+/// consistency check's guard on the walk.
 pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     Ok(db
         .query_one_raw(PENDING_ORPHAN_FRONTIER_QUERY.stmt())
@@ -477,9 +477,9 @@ pub async fn pending_orphan_frontier<C: ConnectionTrait>(db: &C) -> Result<bool,
         .is_some())
 }
 
-/// Name, for every live evaluation, each open anchor it reaches from the open
-/// anchors it already names, and return the rows that were missing. One statement
-/// under the walk's own transaction; a concurrent ingest naming the same pair is
+/// Name, for every live evaluation, each open shared build it reaches from the open
+/// shared builds it already names, and return the rows that were missing. One statement
+/// under the walk's own transaction; a concurrent record naming the same pair is
 /// absorbed by the conflict clause.
 pub async fn adopt_pending_closures<C>(db: &C) -> Result<Adopted, DbErr>
 where
@@ -542,13 +542,13 @@ mod tests {
         }
     }
 
-    /// `derivation_build` is global, so an anchor a previous evaluation aborted
+    /// `derivation_build` is global, so a shared build a previous evaluation aborted
     /// is terminal before the next evaluation ever dispatches it - and an abort
     /// blocks nothing. Omitting `Aborted` here finalized such an evaluation
-    /// `Completed`: 26 of 26 anchors aborted, nothing built, a green check.
+    /// `Completed`: 26 of 26 shared builds aborted, nothing built, a green check.
     #[test]
-    fn an_aborted_anchor_fails_the_evaluation_it_was_never_built_for() {
-        let sql = EVAL_ANY_ANCHOR_FAILED_SQL.as_str();
+    fn an_aborted_shared_build_fails_the_evaluation_it_was_never_built_for() {
+        let sql = EVAL_ANY_SHARED_BUILD_FAILED_SQL.as_str();
         let expected = crate::status_sql::build_in(&BuildStatus::REQUEUEABLE);
         assert!(
             sql.contains(&format!("db.status IN ({expected})")),
@@ -556,7 +556,7 @@ mod tests {
         );
         assert!(
             BuildStatus::REQUEUEABLE.contains(&BuildStatus::Aborted),
-            "an anchor nothing built is not a success"
+            "a shared build nothing built is not a success"
         );
         for ok in BuildStatus::TERMINAL_SUCCESS {
             assert!(
@@ -574,12 +574,12 @@ mod tests {
     }
 
     /// Adoption is one statement under the walk's own transaction: the open
-    /// closure below every open anchor a live evaluation names, inserted as the
+    /// closure below every open shared build a live evaluation names, inserted as the
     /// names it lacks and returned as such. The seed is what a live evaluation
-    /// NAMES and is still open, so a pruned root and an unwhole `Completed` input
+    /// NAMES and is still open, so a pruned root and an incomplete `Completed` input
     /// seed the walk like a builder does.
     #[tokio::test]
-    async fn adoption_names_every_open_anchor_a_live_evaluation_reaches() {
+    async fn adoption_names_every_open_shared_build_a_live_evaluation_reaches() {
         let e = EvaluationId::now_v7();
         let d = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -600,7 +600,7 @@ mod tests {
             sql.contains(
                 "WITH RECURSIVE pending(evaluation, derivation, builder) AS \
                  (SELECT bj.evaluation, bj.derivation, (w.walked AND db.probed \
-                 AND NOT db.substitutable AND db.status IN (0, 1, 2, 8)) FROM build_job bj"
+                 AND NOT db.cache_available AND db.status IN (0, 1, 2, 8)) FROM build_job bj"
             ),
             "{sql}"
         );
@@ -626,8 +626,8 @@ mod tests {
         );
     }
 
-    /// The reconciler's variant is the same walk seeded from one evaluation's
-    /// names and without the liveness filter: it runs for the evaluation it heals.
+    /// The repair pass's variant is the same walk seeded from one evaluation's
+    /// names and without the liveness filter: it executes for the evaluation it heals.
     #[tokio::test]
     async fn one_evaluation_adopts_from_its_own_names() {
         let e = EvaluationId::now_v7();
@@ -658,8 +658,8 @@ mod tests {
 
     /// The GC's question is bounded to the names it cascaded away and reads one
     /// row at most; the sweep's is the frontier every naming hole has: an open
-    /// anchor nobody names, one edge the walk would take below an open anchor a
-    /// live evaluation names. The 22 unwhole `Completed` anchors of the wedge were
+    /// shared build nobody names, one edge the walk would take below an open shared build a
+    /// live evaluation names. The 22 incomplete `Completed` shared builds of the wedge were
     /// exactly that and matched neither probe while both asked for a status.
     #[tokio::test]
     async fn the_orphan_probes_read_one_row_and_bind_their_scope() {
@@ -702,7 +702,7 @@ mod tests {
                  JOIN evaluation ev ON ev.id = pj.evaluation \
                  WHERE e.dependency = db.derivation \
                  AND (NOT p.fetchable AND p.status NOT IN (4, 6, 9)) \
-                 AND ((w.walked AND p.probed AND NOT p.substitutable \
+                 AND ((w.walked AND p.probed AND NOT p.cache_available \
                  AND p.status IN (0, 1, 2, 8)) OR e.kind IN (1, 2)) AND ev.status IN ("
             ),
             "{frontier}"
@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn a_companion_of_a_completed_cluster_does_not_fail_its_evaluation() {
-        let sql = EVAL_ANY_ANCHOR_FAILED_SQL.as_str();
+        let sql = EVAL_ANY_SHARED_BUILD_FAILED_SQL.as_str();
 
         assert!(sql.contains("FROM cluster_member cm"), "{sql}");
         assert!(sql.contains("AND NOT (db.status ="), "{sql}");

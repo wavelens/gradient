@@ -176,7 +176,7 @@ impl NetworkPeakSampler {
 }
 
 /// Samples a daemon build's cgroup `memory.peak` / `io.stat` / `cpu.stat` *while
-/// it runs*, because nix destroys the cgroup as soon as the build finishes. It
+/// it is running*, because nix destroys the cgroup as soon as the build finishes. It
 /// locates the cgroup via [`build_cgroup`], locks onto it, and keeps the last good
 /// reading - the high-water `memory.peak` and cumulative counters just before
 /// teardown.
@@ -322,10 +322,10 @@ mod tests {
             disk_write_bytes: 20,
             oom_killed: false,
         };
-        // build_time_ms = 0 → avg_cpu_pct None (no divide-by-zero panic).
+        // build_time_ms = 0 -> avg_cpu_pct None (no divide-by-zero panic).
         let m = raw_to_build_metrics(Some(raw), 0, 4, None);
         assert_eq!(m.avg_cpu_pct, None);
-        // cpu_count = 0 → avg_cpu_pct None.
+        // cpu_count = 0 -> avg_cpu_pct None.
         let m = raw_to_build_metrics(Some(raw), 1_000, 0, None);
         assert_eq!(m.avg_cpu_pct, None);
         assert_eq!(m.peak_ram_mb, Some(2));

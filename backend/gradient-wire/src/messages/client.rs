@@ -101,8 +101,8 @@ pub enum ClientMessage {
     /// The server maps these directly to `EvaluationStatus` / `BuildStatus`.
     JobUpdate {
         job_id: String,
-        /// The `dispatch` the `AssignJob` carried.
-        dispatch: String,
+        /// The `assignment_id` the `AssignJob` carried.
+        assignment_id: String,
         update: JobUpdateKind,
     },
 
@@ -111,8 +111,8 @@ pub enum ClientMessage {
     /// Per-build resource metrics travel inline on each `JobUpdate::BuildOutput`.
     JobCompleted {
         job_id: String,
-        /// The `dispatch` the `AssignJob` carried.
-        dispatch: String,
+        /// The `assignment_id` the `AssignJob` carried.
+        assignment_id: String,
         /// The worker's phase timeline; empty when the job recorded no phase.
         spans: Vec<JobPhaseSpan>,
     },
@@ -120,8 +120,8 @@ pub enum ClientMessage {
     /// A step in the job failed; remaining steps are skipped.
     JobFailed {
         job_id: String,
-        /// The `dispatch` the `AssignJob` carried.
-        dispatch: String,
+        /// The `assignment_id` the `AssignJob` carried.
+        assignment_id: String,
         error: String,
         kind: BuildFailureKind,
         /// For `BuildFailureKind::InputsUnavailable`: the required input store
@@ -140,8 +140,8 @@ pub enum ClientMessage {
     /// Fire-and-forget; `total` is `None` when the source announced no size.
     BuildProgress {
         job_id: String,
-        /// The `dispatch` the `AssignJob` carried.
-        dispatch: String,
+        /// The `assignment_id` the `AssignJob` carried.
+        assignment_id: String,
         build_id: String,
         downloaded: u64,
         total: Option<u64>,
@@ -221,7 +221,7 @@ pub enum ClientMessage {
         /// [`QueryMode::Push`] only: the uncompressed NAR size of `paths[i]`,
         /// `None` when unknown. Empty in every other mode.
         nar_sizes: Vec<Option<u64>>,
-        /// The server may consult its upstreams for the one path named. Every other
+        /// The server may consult its upstream caches for the one path named. Every other
         /// query answers from our cache alone: a build's inputs are here or it fails
         /// `InputsUnavailable`, and putting them here is a Substitute's job.
         external: bool,

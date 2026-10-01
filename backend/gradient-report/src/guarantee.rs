@@ -191,7 +191,7 @@ mod tests {
     }
 
     /// The toggles are independent, so a report may name packages while hiding
-    /// who owns them. That combination is the shipped default.
+    /// who owns them. That combination is the default as released.
     #[test]
     fn packages_can_be_kept_while_identities_are_hidden() {
         let dir = tempfile::tempdir().expect("tempdir");

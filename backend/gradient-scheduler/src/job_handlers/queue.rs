@@ -89,11 +89,11 @@ impl Scheduler {
     }
 
     /// Wake the build dispatcher now instead of waiting for its 5s tick.
-    pub(crate) fn kick_dispatch(&self) {
+    pub(crate) fn kick_assigner(&self) {
         self.kick_gen
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Some(actor) = self.build_dispatch.load_full() {
-            let _ = actor.send_message(crate::dispatch::BuildMsg::Kick);
+        if let Some(actor) = self.build_assigner.load_full() {
+            let _ = actor.send_message(crate::loops::BuildMsg::Kick);
         }
     }
 

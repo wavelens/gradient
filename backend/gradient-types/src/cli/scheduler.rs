@@ -17,14 +17,6 @@ pub struct SchedulerArgs {
     )]
     pub scoring_policy: String,
 
-    /// Days to retain `dispatched_job` forensic rows. 0 = keep forever.
-    #[arg(
-        long = "scheduler-dispatch-retention-days",
-        env = "GRADIENT_SCHEDULER_DISPATCH_RETENTION_DAYS",
-        default_value_t = 30
-    )]
-    pub dispatch_retention_days: i64,
-
     /// Seconds every member of a cluster attempt has to accept its assignment
     /// before the attempt is aborted and the cluster queued again.
     #[arg(
@@ -56,7 +48,6 @@ impl Default for SchedulerArgs {
     fn default() -> Self {
         Self {
             scoring_policy: "resource-aware".into(),
-            dispatch_retention_days: 30,
             cluster_prepare_timeout_secs: 30,
             cluster_reserve_after_secs: 600,
             cluster_reserve_timeout_secs: 1800,

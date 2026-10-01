@@ -71,7 +71,7 @@ impl BuildError {
     }
     /// The server sent `AbortJob` while the daemon was building. Reported as
     /// its own kind, never `Permanent`: a `Permanent` build failure is recorded
-    /// as `BuilderNonzero`, which permanently excludes the anchor from every
+    /// as `BuilderNonzero`, which permanently excludes the shared build from every
     /// requeue even though `Aborted` is a requeueable status (#572).
     pub(crate) fn aborted(drv_path: &str) -> Self {
         Self::new(
@@ -112,7 +112,7 @@ pub(super) fn looks_like_oom(msg: &str) -> bool {
 /// Signatures of a failure in the store or the daemon rather than in the
 /// derivation. These say nothing about whether the build *would* succeed, so
 /// treating them as deterministic strands the build: `Permanent` is never
-/// re-thawed, and every dependent cascades to `DependencyFailed`.
+/// re-thawed, and everything wanting it cascades to `DependencyFailed`.
 const INFRA_FAILURE_SIGNATURES: &[&str] = &[
     "is not valid",
     "does not exist in the store",
@@ -170,7 +170,7 @@ pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> B
         BuildError::substitute_unavailable(e)
     } else if let Some(mi) = e.chain().find_map(|c| c.downcast_ref::<MissingInputs>()) {
         // The upstream advertised the path but the object GET 404'd: surface
-        // the paths so the server's demote/reconcile self-heal clears the
+        // the paths so the server's demote/repair self-heal clears the
         // stale record instead of this build retrying against it forever.
         tracing::warn!(%build_id, error = %e, "substitute: advertised NAR object missing; InputsUnavailable");
         BuildError::inputs_unavailable(mi.0.clone(), e)
@@ -259,7 +259,7 @@ mod tests {
 
     /// The failure that took down eval `019fcf38`: a single missing input path
     /// was classified `Permanent`, so it was never retried and cascaded into
-    /// 2,687 `DependencyFailed` dependents. A store path the daemon refuses is
+    /// 2,687 `DependencyFailed` parents. A store path the daemon refuses is
     /// infrastructure, never a deterministic property of the derivation.
     #[test]
     fn a_store_or_daemon_error_is_transient_not_permanent() {
@@ -333,7 +333,7 @@ mod tests {
     }
 
     /// An abort must never reach the server as `Permanent`: that is stored as
-    /// `BuilderNonzero` and permanently blocks the anchor from being requeued
+    /// `BuilderNonzero` and permanently blocks the shared build from being requeued
     /// (#572). Both shapes are covered - the `BuildError` raised inside the
     /// daemon log drain, and the bare `JobAborted` raised at a NAR-push
     /// checkpoint or an eval wave boundary.
@@ -408,17 +408,18 @@ mod tests {
         }
     }
 
-    /// Only a genuine "not on any upstream" miss escalates; a transient relay
+    /// Only a genuine "not on any upstream" miss escalates; a transient passthrough
     /// timeout (Pull RPC / NAR download / presigned PUT) retries as a substitute
     /// instead of counting toward miss-escalation - two transient timeouts must
-    /// not turn a substitutable build into a from-scratch one.
+    /// not turn a build available in a cache into a from-scratch one.
     #[test]
     fn substitute_wrapped_and_transient_classification() {
         use crate::proto::prefetch::SubstituteNotOnUpstream;
 
         let wrapped = classify_substitute_failure(
             "b",
-            anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into())).context("relay"),
+            anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into()))
+                .context("passthrough"),
         );
         assert!(matches!(
             wrapped.kind,

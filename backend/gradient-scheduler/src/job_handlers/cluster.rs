@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Cluster jobs: placement, prepare, start and signal relay.
+//! Cluster jobs: placement, prepare, start and signal forwarding.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -18,7 +18,7 @@ use tracing::{debug, info, warn};
 /// How long a resolved attempt waits for a survivor that never reports back.
 const RESOLVED_ATTEMPT_TTL: Duration = Duration::from_secs(600);
 
-use super::assignment::{claim_gate, dispatch_row, dispatched_transition};
+use super::assignment::{assigned_transition, assignment_row, claim_gate};
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
 use crate::cluster::{
@@ -159,7 +159,7 @@ impl Scheduler {
                 .iter()
                 .map(|s| {
                     (
-                        dispatch_row(&s.record, &s.worker, now),
+                        assignment_row(&s.record, &s.worker, now),
                         claim_gate(&s.record),
                     )
                 })
@@ -227,7 +227,7 @@ impl Scheduler {
     }
 
     /// A lost claim: another instance holds the cluster or a member's gate no
-    /// longer holds. The members go back to the ready feed, which re-reads them.
+    /// longer holds. The members go back to the startable feed, which re-reads them.
     async fn hand_back(&self, attempt: ClusterAttemptId) {
         let Some(state) = self.attempts.lock().take(attempt) else {
             return;
@@ -278,7 +278,7 @@ impl Scheduler {
             .unwrap_or(u32::MAX)
             .saturating_add(CLUSTER_HOLD_MARGIN_SECS);
         for seat in &seats {
-            if let Err(e) = dispatched_transition(&self.state, &seat.record).await {
+            if let Err(e) = assigned_transition(&self.state, &seat.record).await {
                 warn!(error = %e, %attempt, "cluster member transition failed");
                 self.fail_prepare(attempt).await;
                 return;
@@ -287,7 +287,7 @@ impl Scheduler {
 
         let mut signals = Vec::with_capacity(seats.len());
         for seat in seats {
-            self.announce_dispatch(&seat.worker, &seat.record);
+            self.announce_assignment(&seat.worker, &seat.record);
             let membership = ClusterMembership {
                 attempt: attempt.to_string(),
                 role: seat.role,
@@ -297,7 +297,7 @@ impl Scheduler {
             let assignment = Assignment {
                 job: seat.job.clone().into_job(),
                 project_id: seat.job.project_id(),
-                dispatch_record: seat.record,
+                assignment_record: seat.record,
                 pending: seat.job,
             };
             self.prepared.lock().insert(
@@ -416,7 +416,7 @@ impl Scheduler {
         self.restore_parked(attempt, state).await;
     }
 
-    pub async fn relay_cluster_signal(
+    pub async fn forward_cluster_signal(
         &self,
         from_worker: &str,
         attempt: &str,

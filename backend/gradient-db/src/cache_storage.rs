@@ -195,7 +195,7 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
     let outputs_cached = outputs.iter().filter(|o| o.is_cached).count();
     let producer_drvs: Vec<DerivationId> = outputs.iter().map(|o| o.derivation).collect();
 
-    // Anchors are global; the producer's build status is the same regardless of
+    // Shared builds are global; the producer's build status is the same regardless of
     // the querying evaluation.
     let producer_build_statuses = if producer_drvs.is_empty() {
         Vec::new()
@@ -245,7 +245,7 @@ fn demoted_output(
 /// Whether `demote_cached_output` must PRESERVE a reported-missing artifact
 /// instead of deleting it: a producerless input (source / `.drv`) whose NAR is
 /// still present. Nothing rebuilds such an input, so deleting the only copy
-/// dead-ends every dependent on `InputsUnavailable`; a present object means the
+/// dead-ends every parent on `InputsUnavailable`; a present object means the
 /// failure was transient. An output (`has_producer`, restored by its rebuild) or
 /// a genuinely-absent object is never preserved.
 fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
@@ -253,8 +253,8 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 }
 
 crate::sql! {
-    CLEAR_SUBSTITUTABLE_TRUST = "UPDATE derivation_build SET substitutable = false \
-             WHERE derivation = ANY($1) AND substitutable",
+    CLEAR_CACHE_AVAILABLE_TRUST = "UPDATE derivation_build SET cache_available = false \
+             WHERE derivation = ANY($1) AND cache_available",
         params = [DerivationIds(64)];
 }
 
@@ -262,9 +262,9 @@ crate::sql! {
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
 /// retires the `cached_path` row itself
-/// ([`crate::runtime_readiness::retire_outputs`]: the row goes, its
+/// ([`crate::runtime_can_start::retire_outputs`]: the row goes, its
 /// `cached_path_signature` rows cascade, the `derivation_output` FK is
-/// `ON DELETE SET NULL`, and every anchor that trusted it loses wholeness,
+/// `ON DELETE SET NULL`, and every shared build that trusted it loses its complete closure,
 /// `fetchable` and its queue place), and removes the NAR object from storage so the
 /// row and the object stay in step. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
@@ -274,33 +274,33 @@ crate::sql! {
 ///
 /// The producer reset lives in the retire, which decides it from the `fetchable`
 /// flag it has just written rather than from this hash: what this does here is drop
-/// the upstream trust the demoted output carried, so the anchor stops being a relay
+/// the upstream trust the demoted output carried, so the shared build stops being a passthrough
 /// against an artifact nothing serves.
 ///
-/// That clear runs at every status, and it decides which arm of `gates_predicate`
-/// the anchor takes, so a `Queued` relay whose demand was its only satisfier would
+/// That clear takes place at every status, and it decides which arm of `gates_predicate`
+/// the shared build takes, so a `Queued` passthrough whose need was its only satisfier would
 /// be left queued with its gates false - and dispatch reads the status rather than
-/// the gates, so it would dispatch that anchor against a `.drv` nothing can serve.
+/// the gates, so it would dispatch that shared build against a `.drv` nothing can serve.
 /// The un-promote that follows is what closes that, and it shares the retire's
 /// transaction so a crash cannot separate the two. The promote AFTER the commit is
-/// the other half: an anchor that stops being a relay becomes a builder, at an
-/// unchanged status the transition emitter cannot notice, and a builder demands its
+/// the other half: a shared build that stops being a passthrough becomes a builder, at an
+/// unchanged status the transition emitter cannot notice, and a builder needs its
 /// direct inputs.
 ///
 /// Because the clear has to run inside that transaction AND before the retire reads
-/// `substitutable`, this is the one path that would write `derivation_build` before
+/// `cache_available`, this is the one path that would write `derivation_build` before
 /// touching `cached_path`. It opens with
-/// [`crate::runtime_readiness::lock_cached_paths`] instead, so the class order every
+/// [`crate::runtime_can_start::lock_cached_paths`] instead, so the class order every
 /// other writer follows (`cached_path`, then `derivation_build`) holds here too and a
 /// concurrent TTL or zombie retire cannot deadlock against it. The retire's own pass then re-acquires a row this
 /// transaction already holds, which is free.
 ///
-/// [`crate::readiness::lock_anchors`] follows it for the same reason one class down.
+/// [`crate::can_start::lock_shared_builds`] follows it for the same reason one class down.
 /// The clear names its producers in a single UPDATE, so it acquires them in plan
 /// order, and a hash with several producers can then hold one while
-/// [`crate::readiness::repair_readiness`]'s ordered chunk holds another. Taking the
+/// [`crate::can_start::repair_can_start`]'s ordered chunk holds another. Taking the
 /// ordered pass first means every `derivation_build` row this transaction writes is
-/// already held in `derivation` order, and the retire's own anchor pass re-acquires
+/// already held in `derivation` order, and the retire's own shared build pass re-acquires
 /// them for free.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
@@ -320,7 +320,7 @@ pub async fn demote_cached_output(
 
     // A producerless input (a build-time source or a `.drv`) has nothing to
     // rebuild it, so deleting a still-present NAR destroys the only copy and
-    // dead-ends every dependent on `InputsUnavailable` forever (a producer's
+    // dead-ends every parent on `InputsUnavailable` forever (a producer's
     // output, by contrast, is restored by the rebuild below). Only purge it when
     // the object is genuinely gone - a zombie the dispatch gate must stop trusting;
     // a present object means the fetch failure was transient, so keep it and let
@@ -333,26 +333,26 @@ pub async fn demote_cached_output(
 
     // The artifact is gone, so the upstream offer recorded with it is not evidence
     // any more: `demoted_output` cleared `external_url`, and this clears the
-    // anchor's `substitutable` so the retire's `fetchable` mark sees the truth. The
-    // next eval re-marks it substitutable if it is genuinely still on an upstream.
+    // shared build's `cache_available` so the retire's `fetchable` mark sees the truth. The
+    // next eval re-marks it available in a cache if it is genuinely still on an upstream.
     let txn = db.begin().await?;
-    crate::runtime_readiness::lock_cached_paths(&txn, &[hash.to_owned()]).await?;
-    let _anchors = crate::readiness::lock_anchors(&txn, &producers).await?;
+    crate::runtime_can_start::lock_cached_paths(&txn, &[hash.to_owned()]).await?;
+    let _shared_builds = crate::can_start::lock_shared_builds(&txn, &producers).await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
-        txn.execute_raw(CLEAR_SUBSTITUTABLE_TRUST.bind([ids.into()]))
+        txn.execute_raw(CLEAR_CACHE_AVAILABLE_TRUST.bind([ids.into()]))
             .await?;
     }
 
-    let mut retired = crate::runtime_readiness::retire_outputs(&txn, &[hash.to_owned()]).await?;
+    let mut retired = crate::runtime_can_start::retire_outputs(&txn, &[hash.to_owned()]).await?;
     retired
         .transitions
-        .extend(crate::readiness::unpromote_ungated(&txn, &producers).await?);
+        .extend(crate::can_start::unpromote_ungated(&txn, &producers).await?);
     txn.commit().await?;
 
-    // Clearing `substitutable` turns these producers back into builders, so demand
+    // Clearing `cache_available` turns these producers back into builders, so need
     // reaches their whole pending closure again and not just one hop.
-    let settled = crate::readiness::recompute_and_settle_demand(db, &producers).await?;
+    let settled = crate::can_start::update_and_settle_need(db, &producers).await?;
     retired.transitions.extend(settled.changes);
     crate::status::emit_transition_effects(ctx, &retired.transitions).await;
 
@@ -365,22 +365,22 @@ pub async fn demote_cached_output(
 
 /// Demote every cached **output** that directly references `missing_hash`, so its
 /// producer rebuilds and re-pushes the missing path. Only rebuildable output
-/// referrers are demoted ([`OUTPUT_REFERRERS_SELECT`]): a producerless referrer -
+/// parents are demoted ([`OUTPUT_PARENTS_SELECT`]): a producerless parent -
 /// a `.drv` or an input source - is left in place. Deleting one re-pushes nothing
-/// (no producer rebuilds) and would strand the `.drv`'s own live dependents behind
+/// (no producer rebuilds) and would strand the `.drv`'s own live parents behind
 /// the `.drv`-importable term of [`crate::graph_sql::gates_predicate`], a permanent
 /// dead zone, since a genuinely missing input `.drv`/source is re-supplied only by
 /// a full re-eval. The transitive completeness invariant is handled by the reverse
-/// ripple inside [`crate::runtime_readiness::retire_outputs`], which raises the
-/// referrers' counters and leaves their healthy NARs in place. Returns the producers reset to
+/// ripple inside [`crate::runtime_can_start::retire_outputs`], which raises the
+/// parents' counters and leaves their healthy NARs in place. Returns the producers reset to
 /// `Created`.
-pub async fn demote_referrers_of(
+pub async fn demote_parents_of(
     ctx: &crate::DbContext,
     missing_hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     let mut producers = Vec::new();
-    for referrer_hash in output_referrers_of_hash(&ctx.worker_db, missing_hash).await? {
-        producers.extend(demote_cached_output(ctx, &referrer_hash).await?);
+    for parent_hash in output_parents_of_hash(&ctx.worker_db, missing_hash).await? {
+        producers.extend(demote_cached_output(ctx, &parent_hash).await?);
     }
 
     Ok(producers)
@@ -400,13 +400,13 @@ crate::sql! {
 /// Demote every output-only-cached **direct build dependency** of `derivation`
 /// (output present in our cache, not on a real upstream). Recovers an *absent
 /// orphan*: when a build fails on an input that has no producer row and no
-/// reference-index referrer, the orphan was pruned out of the graph under one of
+/// reference-index parent, the orphan was pruned out of the graph under one of
 /// this build's cached deps - and being absent, it cannot be reached upward. So
 /// reach it from the known failing build downward: demoting its output-only-cached
 /// deps forces the next eval to re-walk them (`unwalk_derivations` drops their record
 /// and closes their gates), re-record the dropped edges, and schedule the orphan.
 /// Upstream-fetchable deps (`external_url`) are left intact - their closure is served
-/// whole by the upstream. Returns producers reset to `Created`.
+/// complete by the upstream cache. Returns producers reset to `Created`.
 pub async fn demote_output_only_cached_deps(
     ctx: &crate::DbContext,
     derivation: DerivationId,
@@ -435,7 +435,7 @@ pub async fn demote_output_only_cached_deps(
     // The demote alone no longer re-walks anything: the walk prunes on `walked` and
     // `unwalked_inputs = 0`, and the cache facts it used to read are exactly what a
     // demote clears.
-    let changes = crate::readiness::unwalk_derivations(ctx, &producers).await?;
+    let changes = crate::can_start::unwalk_derivations(ctx, &producers).await?;
     crate::status::emit_transition_effects(ctx, &changes).await;
 
     Ok(producers)
@@ -444,27 +444,27 @@ pub async fn demote_output_only_cached_deps(
 /// The row-vs-object invariant, as a query: **every** output of a terminal-success
 /// producer (`Completed`/`Substituted`) must have a backing artifact, present in our
 /// cache (`cached_path` with a NAR) or on a configured upstream (`external_url`).
-/// An anchor that breaks it is a dead end - its `fetchable` is, correctly, false, so
-/// it counts toward its dependents' `unready_deps` forever, and being
+/// A shared build that breaks it is a dead end - its `fetchable` is, correctly, false, so
+/// it counts toward its parents' `blocking_deps` forever, and being
 /// terminal-*success* no requeue path ever reaches it.
 ///
 /// This is measured, not repaired. It used to feed a sweep that demoted such a
 /// producer back to `Created` so the next build would rebuild it, which is where
-/// #654 came from: the sweep re-derived the same demote every reconcile pass, the
+/// #654 came from: the sweep re-derived the same demote every repair pass, the
 /// fleet rebuilt an output that never came back, and nothing noticed the rebuild had
 /// changed nothing. Every way the invariant was known to break is now closed where
 /// it happens: a NAR whose commit fails fails its build, a completion is not
-/// recorded until that job's commits have settled, an eval marks an anchor
+/// recorded until that job's commits have settled, an eval marks a shared build
 /// substituted only when EVERY output is already whole here, and every pass that
 /// deletes a `cached_path` row resets the producers it unbacked in the deleting
-/// transaction (`runtime_readiness::retire_outputs`). So a non-zero count is a bug in one of
+/// transaction (`runtime_can_start::retire_outputs`). So a non-zero count is a bug in one of
 /// those, and the consistency report is where it surfaces
 /// ([`crate::consistency::ConsistencyReport::unbacked_trusted_outputs`]) - a repair
 /// that rebuilds on its own would only hide it again, and one that failed the
 /// producer instead would take a real subtree down on a false positive.
 ///
-/// Keyed on the **ground truth** (a backing `cached_path` NAR), not the derived
-/// `is_cached` flag, which is `false` for an anchor that was marked done with an
+/// Decided per the **ground truth** (a backing `cached_path` NAR), not the derived
+/// `is_cached` flag, which is `false` for a shared build that was marked done with an
 /// output that was never cached at all - exactly the case worth seeing.
 pub(crate) fn unbacked_trusted_outputs_select() -> String {
     format!(
@@ -483,7 +483,7 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
 }
 
 crate::sql! {
-    OUTPUT_REFERRERS_SELECT = "SELECT DISTINCT o.hash AS referrer \
+    OUTPUT_PARENTS_SELECT = "SELECT DISTINCT o.hash AS parent \
      FROM derivation_dependency e \
      JOIN derivation_output o ON o.derivation = e.derivation \
      WHERE e.kind IN (1, 2) \
@@ -491,31 +491,31 @@ crate::sql! {
         params = [CachedPathHash];
 }
 
-/// Referrers of `missing_hash` that are **rebuildable outputs**: a
-/// `derivation_output` exists for the referrer's own hash, so demoting it resets a
-/// producer that rebuilds and re-pushes `missing_hash`. Producerless referrers - a
+/// Parents of `missing_hash` that are **rebuildable outputs**: a
+/// `derivation_output` exists for the parent's own hash, so demoting it resets a
+/// producer that rebuilds and re-pushes `missing_hash`. Producerless parents - a
 /// `.drv` (whose store-path hash is a derivation hash with no `derivation_output`)
 /// or an input source - are excluded on purpose: demoting one deletes a
 /// `.drv`/source the cache cannot re-supply without a full re-eval, rebuilds
-/// nothing, and strands the deleted `.drv`'s own live dependents behind the
+/// nothing, and strands the deleted `.drv`'s own live parents behind the
 /// `.drv`-importable promotion gate - the exact dead zone this filter prevents.
-async fn output_referrers_of_hash<C: ConnectionTrait>(
+async fn output_parents_of_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
 ) -> Result<Vec<String>, sea_orm::DbErr> {
     use sea_orm::FromQueryResult;
 
     #[derive(sea_orm::FromQueryResult)]
-    struct Referrer {
-        referrer: String,
+    struct ParentRow {
+        parent: String,
     }
 
     Ok(
-        Referrer::find_by_statement(OUTPUT_REFERRERS_SELECT.bind([hash.into()]))
+        ParentRow::find_by_statement(OUTPUT_PARENTS_SELECT.bind([hash.into()]))
             .all(db)
             .await?
             .into_iter()
-            .map(|r| r.referrer)
+            .map(|r| r.parent)
             .collect(),
     )
 }
@@ -593,10 +593,10 @@ mod tests {
 
         // Find the output, RETURNING the demoted row, take both lock classes in
         // order and drop its producer's upstream trust; then the retire resolves the
-        // producers of the hash, reads which of them were whole before it takes the
+        // producers of the hash, reads which of them were complete before it takes the
         // path away, deletes the row, clears `is_cached`, marks (nothing flips, so
         // nothing ripples), resets the producer left with nothing to serve and
-        // un-promotes; last the raised, locked recompute of what it now demands.
+        // un-promotes; last the raised, locked update of what it now needs.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([
@@ -632,27 +632,27 @@ mod tests {
         assert_eq!(
             log.len(),
             18,
-            "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
-             producers of the hash, the wholeness they had, delete, is_cached, \
-             anchor lock, mark, reset, owners, un-promote, and the raised, locked \
-             recompute of what the producers now demand: {log:?}"
+            "outputs, demote, path lock, shared build lock, trust clear, retire lock, \
+             producers of the hash, the complete closure they had, delete, is_cached, \
+             shared build lock, mark, reset, owners, un-promote, and the raised, locked \
+             update of what the producers now need: {log:?}"
         );
         let paths = log
             .iter()
             .position(|s| s.contains("FROM cached_path WHERE hash = ANY($1)"))
             .expect("the path lock is taken first");
-        let anchors = log
+        let shared_builds = log
             .iter()
             .position(|s| s.contains("FROM derivation_build WHERE derivation = ANY($1::uuid[])"))
-            .expect("the anchor lock is taken");
+            .expect("the shared build lock is taken");
         let trust = log
             .iter()
-            .position(|s| s.contains("SET substitutable = false"))
+            .position(|s| s.contains("SET cache_available = false"))
             .expect("the upstream trust is dropped");
-        let whole = log
+        let complete = log
             .iter()
             .position(|s| s.contains("ORDER BY db.derivation FOR NO KEY UPDATE"))
-            .expect("the wholeness the producers had is read");
+            .expect("the complete closure the producers had is read");
         let retire = log
             .iter()
             .position(|s| s.contains("DELETE FROM cached_path"))
@@ -670,18 +670,18 @@ mod tests {
             "this is the one path that writes derivation_build before a retire, so it takes the cached_path lock first or it deadlocks against a concurrent eviction: {log:?}"
         );
         assert!(
-            paths < anchors && anchors < trust,
+            paths < shared_builds && shared_builds < trust,
             "the trust clear names its producers in one UPDATE, so it acquires them in \
-             plan order: the ordered anchor pass has to precede it or it deadlocks \
-             against the readiness repair's chunk: {log:?}"
+             plan order: the ordered shared build pass has to precede it or it deadlocks \
+             against the can-start repair's chunk: {log:?}"
         );
         assert!(
             trust < retire,
             "the retire decides fetchability, so the stale offer must be gone first: {log:?}"
         );
         assert!(
-            whole < retire,
-            "which producers were whole is the one endpoint the delete destroys, so it \
+            complete < retire,
+            "which producers had a complete closure is the one endpoint the delete destroys, so it \
              is read under the lock before it: {log:?}"
         );
         assert!(
@@ -693,7 +693,7 @@ mod tests {
 
     /// A hash with NO `cached_path` row is half of what
     /// [`unbacked_trusted_outputs_select`] matches, and it deletes nothing and
-    /// ripples nothing, so a readiness pass keyed only on what moved would leave its
+    /// ripples nothing, so a can-start state pass limited to what moved would leave its
     /// producer terminal-success and fetchable against an artifact that does not
     /// exist. `REQUEUEABLE` excludes terminal success, so no other path recovers it.
     #[tokio::test]
@@ -716,7 +716,7 @@ mod tests {
 
         let none = Vec::<BTreeMap<String, Value>>::new();
 
-        // The retire resolves the producers of the hash, finds none of them whole and
+        // The retire resolves the producers of the hash, finds none of them complete and
         // nothing to delete, then marks, ripples, re-opens the walk below what the
         // mark flipped, resets and un-promotes on the producers alone.
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -750,11 +750,11 @@ mod tests {
         assert_eq!(
             log.len(),
             21,
-            "outputs, demote, path lock, anchor lock, trust clear, retire lock, \
-             producers of the hash, the wholeness they had, the delete that finds \
-             nothing, anchor lock, mark, ripple, the raised, locked recompute below \
+            "outputs, demote, path lock, shared build lock, trust clear, retire lock, \
+             producers of the hash, the complete closure they had, the delete that finds \
+             nothing, shared build lock, mark, ripple, the raised, locked update below \
              what the mark flipped, reset, owners, un-promote, and the raised, locked \
-             recompute of what the producers now demand: {log:?}"
+             update of what the producers now need: {log:?}"
         );
         assert!(
             !log.iter()
@@ -778,7 +778,7 @@ mod tests {
 
     /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
     /// node still records an upstream offer for a copy that is gone, and its
-    /// reset-to-build anchor dead-ends on a `.drv` the eval never re-pushes.
+    /// reset-to-shared-build dead-ends on a `.drv` the eval never re-pushes.
     #[test]
     fn demote_clears_upstream_availability() {
         use sea_orm::ActiveValue::Set;
@@ -823,7 +823,7 @@ mod tests {
     }
 
     /// The consistency report measures the row-vs-object invariant on
-    /// terminal-success anchors. It must key on the **ground truth** (a missing
+    /// terminal-success shared builds. It must key on the **ground truth** (a missing
     /// `cached_path` NAR), NOT the derived `is_cached` flag - that flag is `false`
     /// for exactly the never-cached-output case worth seeing - and must skip
     /// upstream-fetchable outputs (`external_url`), which are served without us.
@@ -854,7 +854,7 @@ mod tests {
 
     /// A producerless input (source / `.drv`) whose NAR is still present must be
     /// PRESERVED by `demote_cached_output`: nothing rebuilds it, so deleting the
-    /// only copy dead-ends every dependent on `InputsUnavailable`. An output (has
+    /// only copy dead-ends every parent on `InputsUnavailable`. An output (has
     /// a producer, restored by the rebuild) or a genuinely-absent object is never
     /// preserved.
     #[test]
@@ -874,22 +874,22 @@ mod tests {
         assert!(!preserve_missing_artifact(true, false));
     }
 
-    /// `demote_referrers_of` may only demote referrers that are rebuildable
-    /// outputs. A producerless `.drv`/source referrer must be excluded: deleting it
+    /// `demote_parents_of` may only demote parents that are rebuildable
+    /// outputs. A producerless `.drv`/source parent must be excluded: deleting it
     /// re-pushes nothing (no producer rebuilds) and strands the `.drv`'s own live
-    /// dependents behind the `.drv`-importable promotion gate - a permanent dead
-    /// zone (a completed, substitutable dep whose `.drv` a demote deleted, blocking
-    /// every non-substitutable dependent from ever dispatching).
+    /// parents behind the `.drv`-importable promotion gate - a permanent dead
+    /// zone (a completed dep available in a cache whose `.drv` a demote deleted, blocking
+    /// every parent not available in a cache from ever dispatching).
     #[test]
-    fn output_referrers_exclude_producerless_drv_and_source() {
-        let sql = OUTPUT_REFERRERS_SELECT
+    fn output_parents_exclude_producerless_drv_and_source() {
+        let sql = OUTPUT_PARENTS_SELECT
             .text()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
         assert!(
             sql.contains("FROM derivation_dependency e") && sql.contains("e.kind IN (1, 2)"),
-            "must resolve the runtime referrers of the missing hash: {sql}"
+            "must resolve the runtime parents of the missing hash: {sql}"
         );
         assert!(
             sql.contains("JOIN derivation_output o ON o.derivation = e.derivation"),

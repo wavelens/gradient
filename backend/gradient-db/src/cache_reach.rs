@@ -10,7 +10,7 @@
 //!
 //! Two projects are "cache-connected" when the writer project pushes into
 //! a cache that lies in the upstream closure of one of the reader project's
-//! caches. External (URL-based) upstreams are excluded - they don't host
+//! caches. External (URL-based) upstream caches are excluded - they don't host
 //! Gradient builds.
 
 use std::collections::{HashSet, VecDeque};
@@ -29,7 +29,7 @@ use gradient_entity::project_cache::{
 ///
 /// Algorithm:
 /// 1. Load reader's `project_cache` rows with mode `ReadWrite`/`ReadOnly`.
-/// 2. BFS forward over `cache_upstream` edges (`cache → upstream_cache`) to
+/// 2. BFS forward over `cache_upstream` edges (`cache -> upstream_cache`) to
 ///    compute the upstream closure of the reader's caches. Cycles tolerated.
 /// 3. Load every `project_cache` row with mode `ReadWrite`/`WriteOnly`
 ///    on any cache in that closure; return the distinct project ids.
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn transitive_internal_chain() {
         run(async {
-            // chain: cache_a → upstream cache_b → upstream cache_c
+            // chain: cache_a -> upstream cache_b -> upstream cache_c
             // reader on a, writer on c
             let a = cid(1);
             let b = cid(2);
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn cycle_tolerated() {
         run(async {
-            // cache_a.upstream = b; cache_b.upstream = a → cycle. BFS must
+            // cache_a.upstream = b; cache_b.upstream = a -> cycle. BFS must
             // terminate via the visited set.
             let a = cid(1);
             let b = cid(2);

@@ -7,7 +7,7 @@
 //! Integration tests for `POST /api/v1/build-requests/url` (#564).
 //!
 //! The no-upload build request: the source is already published at a URL, so a
-//! deployment tool posts the URL and a revision instead of shipping a source
+//! deployment tool posts the URL and a revision instead of uploading a source
 //! tree. Every test here pins an explicit `rev`, which is the branch that does
 //! no network work - resolving a `ref` needs a real remote.
 //!

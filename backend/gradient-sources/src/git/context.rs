@@ -18,7 +18,7 @@ use sea_orm::EntityTrait;
 /// [`get_commit_info`](super::get_commit_info) are thin wrappers that construct
 /// this context and call the corresponding method, so the DB round-trip and key
 /// decryption only happen once even when both are called in sequence (e.g. in
-/// `dispatch::poll_tasks_for_evaluations`).
+/// `assignment_id::poll_tasks_for_evaluations`).
 pub(super) struct TaskGitContext<'a> {
     pub(super) ctx: &'a DbContext,
     pub(super) task: &'a MTask,

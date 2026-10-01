@@ -112,7 +112,7 @@ mod tests {
     static Q: Query = Query {
         name: "SAMPLE",
         sql: Sql::Static("SELECT 1"),
-        file: "src/readiness.rs",
+        file: "src/can_start.rs",
         line: 348,
         params: &[Param::DerivationId],
         tier: Tier::Hot,
@@ -132,7 +132,7 @@ mod tests {
         )];
 
         let text = render(&rows);
-        assert!(text.contains("readiness.rs:348"), "{text}");
+        assert!(text.contains("can_start.rs:348"), "{text}");
         assert!(text.contains("SAMPLE"), "{text}");
         assert!(text.contains("buffers 48213 > 2000"), "{text}");
         assert!(text.contains("SELECT 1"), "the statement itself: {text}");

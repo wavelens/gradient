@@ -69,25 +69,26 @@ pub async fn get_task_metrics(
         .all(&state.web_db)
         .await?;
 
-    // Anchors, their attempts and the entry points come back for the whole page
+    // Shared builds, their attempts and the entry points come back for the whole page
     // at once; only the closure walks below stay per evaluation, since each one
     // is seeded by that evaluation's own entry points.
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
-    let mut anchors_by_eval: HashMap<EvaluationId, Vec<DerivationBuildId>> = HashMap::new();
+    let mut shared_builds_by_eval: HashMap<EvaluationId, Vec<DerivationBuildId>> = HashMap::new();
     for job in EBuildJob::find()
         .filter(CBuildJob::Evaluation.is_in(eval_ids.clone()))
         .all(&state.web_db)
         .await?
     {
-        anchors_by_eval
+        shared_builds_by_eval
             .entry(job.evaluation)
             .or_default()
             .push(job.derivation_build);
     }
 
-    let all_anchors: Vec<DerivationBuildId> = anchors_by_eval.values().flatten().copied().collect();
-    let attempts = gradient_db::latest_attempts(&state.web_db, &all_anchors).await?;
+    let all_shared_builds: Vec<DerivationBuildId> =
+        shared_builds_by_eval.values().flatten().copied().collect();
+    let attempts = gradient_db::latest_attempts(&state.web_db, &all_shared_builds).await?;
 
     let mut entry_points_by_eval: HashMap<EvaluationId, Vec<DerivationId>> = HashMap::new();
     for ep in EEntryPoint::find()
@@ -109,12 +110,12 @@ pub async fn get_task_metrics(
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
-        // Sum build time over every anchor this eval needs (one per build_job).
-        let build_time_total_ms: i64 = anchors_by_eval
+        // Sum build time over every shared build this eval needs (one per build_job).
+        let build_time_total_ms: i64 = shared_builds_by_eval
             .get(&evaluation.id)
             .into_iter()
             .flatten()
-            .filter_map(|anchor| attempts.get(anchor))
+            .filter_map(|shared_build| attempts.get(shared_build))
             .filter_map(|a| a.duration_ms())
             .sum();
 
@@ -254,7 +255,7 @@ pub async fn get_entry_point_metrics(
         .all(&state.web_db)
         .await?;
 
-    // Evaluation, anchor, build job and attempt for the whole page in four
+    // Evaluation, shared build, build job and attempt for the whole page in four
     // queries; the closure walks below stay per distinct derivation, each seeded
     // by that derivation. The build-job read is narrowed by derivation too, so it
     // returns the entry points rather than every build of every evaluation.
@@ -269,7 +270,7 @@ pub async fn get_entry_point_metrics(
         .map(|e| (e.id, e))
         .collect();
 
-    let anchors: HashMap<DerivationId, MDerivationBuild> = EDerivationBuild::find()
+    let shared_builds: HashMap<DerivationId, MDerivationBuild> = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.is_in(drv_ids.clone()))
         .all(&state.web_db)
         .await?
@@ -286,8 +287,8 @@ pub async fn get_entry_point_metrics(
         .map(|j| ((j.evaluation, j.derivation), j))
         .collect();
 
-    let anchor_ids: Vec<DerivationBuildId> = anchors.values().map(|a| a.id).collect();
-    let attempts = gradient_db::latest_attempts(&state.web_db, &anchor_ids)
+    let shared_build_ids: Vec<DerivationBuildId> = shared_builds.values().map(|a| a.id).collect();
+    let attempts = gradient_db::latest_attempts(&state.web_db, &shared_build_ids)
         .await
         .unwrap_or_default();
 
@@ -298,15 +299,15 @@ pub async fn get_entry_point_metrics(
     let mut by_derivation: HashMap<DerivationId, DerivationMetrics> = HashMap::new();
     let mut points = Vec::new();
     for ep in entry_points {
-        let (Some(evaluation), Some(anchor), Some(build_job)) = (
+        let (Some(evaluation), Some(shared_build), Some(build_job)) = (
             evaluations.get(&ep.evaluation),
-            anchors.get(&ep.derivation),
+            shared_builds.get(&ep.derivation),
             build_jobs.get(&(ep.evaluation, ep.derivation)),
         ) else {
             continue;
         };
 
-        let build_time_ms = attempts.get(&anchor.id).and_then(|a| a.duration_ms());
+        let build_time_ms = attempts.get(&shared_build.id).and_then(|a| a.duration_ms());
 
         let metrics = match by_derivation.get(&ep.derivation) {
             Some(m) => *m,
@@ -321,7 +322,7 @@ pub async fn get_entry_point_metrics(
             evaluation_id: evaluation.id,
             build_id: build_job.id,
             created_at: evaluation.created_at,
-            build_status: anchor.status.for_api(),
+            build_status: shared_build.status.for_api(),
             build_time_ms,
             output_size_bytes: metrics.output_size_bytes,
             closure_size_bytes: metrics.closure_size_bytes,

@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! What one outbox row owes. An event expands into the deliveries it implies
+//! What one pending-delivery row owes. An event expands into the deliveries it implies
 //! and writes them back as rows, so an expansion that half-succeeds costs a
 //! retry of the expansion and never a duplicated external call; a delivery row
 //! is exactly one external call.
 //!
 //! Every consumer is idempotent on its natural key, which is what makes
-//! at-least-once delivery safe: a forge status is keyed by commit plus check
+//! at-least-once delivery safe: a Git host status is per commit plus check
 //! name, an open-PR by its branch, a log finalize replaces the chunk index.
 
 use anyhow::{Context, Result, anyhow};
 use gradient_ci::actions::{active_actions_for_task, execute_action, matching_actions};
 use gradient_ci::reactions::react_to_source_comment_on_terminal;
-use gradient_db::outbox::{OutboxKind, OutboxRow, Outcome, enqueue};
+use gradient_db::pending_deliveries::{Outcome, PendingDelivery, PendingDeliveryKind, enqueue};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::events::{Envelope, Event, evaluation};
 use gradient_types::ids::{BuildAttemptId, TaskActionId, WebhookId};
@@ -27,12 +27,12 @@ use tracing::warn;
 
 use crate::deliver::EffectsCtx;
 
-pub async fn consume(ctx: &EffectsCtx, row: &OutboxRow) -> Outcome {
+pub async fn consume(ctx: &EffectsCtx, row: &PendingDelivery) -> Outcome {
     let result = match row.kind {
-        OutboxKind::Event => expand_event(ctx, row).await,
-        OutboxKind::LogFinalize => finalize(ctx, row).await,
-        OutboxKind::ActionDelivery => deliver_action(ctx, row).await,
-        OutboxKind::WebhookDelivery => deliver_webhook(ctx, row).await,
+        PendingDeliveryKind::Event => expand_event(ctx, row).await,
+        PendingDeliveryKind::LogFinalize => finalize(ctx, row).await,
+        PendingDeliveryKind::ActionDelivery => deliver_action(ctx, row).await,
+        PendingDeliveryKind::WebhookDelivery => deliver_webhook(ctx, row).await,
     };
 
     match result {
@@ -41,20 +41,20 @@ pub async fn consume(ctx: &EffectsCtx, row: &OutboxRow) -> Outcome {
     }
 }
 
-fn field<'a>(row: &'a OutboxRow, name: &str) -> Result<&'a JsonValue> {
+fn field<'a>(row: &'a PendingDelivery, name: &str) -> Result<&'a JsonValue> {
     row.payload
         .get(name)
-        .ok_or_else(|| anyhow!("outbox payload has no {name}"))
+        .ok_or_else(|| anyhow!("pending delivery payload has no {name}"))
 }
 
-fn uuid_field(row: &OutboxRow, name: &str) -> Result<uuid::Uuid> {
+fn uuid_field(row: &PendingDelivery, name: &str) -> Result<uuid::Uuid> {
     field(row, name)?
         .as_str()
         .and_then(|s| s.parse().ok())
-        .ok_or_else(|| anyhow!("outbox payload {name} is not a uuid"))
+        .ok_or_else(|| anyhow!("pending delivery payload {name} is not a uuid"))
 }
 
-async fn expand_event(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
+async fn expand_event(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let event: Event =
         serde_json::from_value(row.payload.clone()).context("decoding a stored event")?;
     let Some(event) = crate::enrich::enrich(&ctx.db(), event).await? else {
@@ -82,18 +82,18 @@ fn plan_deliveries(
     actions: &[MTaskAction],
     hooks: &[MWebhook],
     parent: &str,
-) -> Vec<(OutboxKind, String, JsonValue)> {
+) -> Vec<(PendingDeliveryKind, String, JsonValue)> {
     let name = envelope.event.name();
     let to_actions = actions.iter().map(|action| {
         (
-            OutboxKind::ActionDelivery,
+            PendingDeliveryKind::ActionDelivery,
             format!("{}:{name}:{parent}", action.id),
             action_delivery_payload(action.id, envelope),
         )
     });
     let to_hooks = hooks.iter().map(|hook| {
         (
-            OutboxKind::WebhookDelivery,
+            PendingDeliveryKind::WebhookDelivery,
             format!("{}:{name}:{parent}", hook.id),
             serde_json::json!({
                 "webhook": hook.id,
@@ -151,7 +151,10 @@ async fn fan_out(ctx: &EffectsCtx, envelope: &Envelope, parent: &str) -> Result<
 }
 
 /// A webhook deleted or deactivated while the row waited is delivered-by-omission.
-async fn live_webhook<C: ConnectionTrait>(db: &C, row: &OutboxRow) -> Result<Option<MWebhook>> {
+async fn live_webhook<C: ConnectionTrait>(
+    db: &C,
+    row: &PendingDelivery,
+) -> Result<Option<MWebhook>> {
     let id = WebhookId::new(uuid_field(row, "webhook")?);
     let hook = EWebhook::find_by_id(id)
         .one(db)
@@ -161,7 +164,7 @@ async fn live_webhook<C: ConnectionTrait>(db: &C, row: &OutboxRow) -> Result<Opt
 }
 
 /// A non-2xx answer is logged on the delivery row and retried with backoff.
-async fn deliver_webhook(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
+async fn deliver_webhook(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let ci = ctx.ci();
     let Some(hook) = live_webhook(&ci.db.worker_db, row).await? else {
         return Ok(());
@@ -204,7 +207,7 @@ async fn react_on_terminal(ctx: &EffectsCtx, reported: &evaluation::Reported) {
 
 /// Compress a finished build's log into chunks. Its own storage failure is a
 /// retry, not a lost log: the inline copy stays until the index is written.
-async fn finalize(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
+async fn finalize(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let attempt = BuildAttemptId::new(uuid_field(row, "attempt")?);
 
     gradient_db::status::logging::finalize_build_log(&ctx.db(), attempt).await
@@ -212,12 +215,12 @@ async fn finalize(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
 
 /// One external call. An action deleted or deactivated while the row waited is
 /// delivered-by-omission: nothing is owed to a rule that no longer exists.
-async fn deliver_action(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
+async fn deliver_action(ctx: &EffectsCtx, row: &PendingDelivery) -> Result<()> {
     let ci = ctx.ci();
     let action_id = TaskActionId::new(uuid_field(row, "action")?);
     let event = field(row, "event")?
         .as_str()
-        .ok_or_else(|| anyhow!("outbox payload event is not a string"))?
+        .ok_or_else(|| anyhow!("pending delivery payload event is not a string"))?
         .to_owned();
     let envelope = field(row, "envelope")?.clone();
 
@@ -239,13 +242,13 @@ async fn deliver_action(ctx: &EffectsCtx, row: &OutboxRow) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_db::outbox::OutboxRow;
-    use gradient_types::ids::OutboxId;
+    use gradient_db::pending_deliveries::PendingDelivery;
+    use gradient_types::ids::PendingDeliveryId;
 
-    fn row(payload: JsonValue) -> OutboxRow {
-        OutboxRow {
-            id: OutboxId::now_v7(),
-            kind: OutboxKind::ActionDelivery,
+    fn row(payload: JsonValue) -> PendingDelivery {
+        PendingDelivery {
+            id: PendingDeliveryId::now_v7(),
+            kind: PendingDeliveryKind::ActionDelivery,
             key: "k".into(),
             payload,
             attempts: 0,
@@ -318,7 +321,10 @@ mod tests {
         let kinds: Vec<_> = plan.iter().map(|(kind, _, _)| *kind).collect();
         assert_eq!(
             kinds,
-            vec![OutboxKind::ActionDelivery, OutboxKind::WebhookDelivery]
+            vec![
+                PendingDeliveryKind::ActionDelivery,
+                PendingDeliveryKind::WebhookDelivery
+            ]
         );
         assert!(
             plan.iter()

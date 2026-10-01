@@ -36,9 +36,9 @@ pub fn substitutes_from(upstream: &MCacheUpstream) -> bool {
         && upstream.url.is_some()
 }
 
-/// The upstreams of one cache's rows that it substitutes from, in row order.
-pub fn substitution_sources(upstreams: &[MCacheUpstream]) -> Vec<UpstreamSource> {
-    upstreams
+/// The upstream caches of one cache's rows that it substitutes from, in row order.
+pub fn substitution_sources(upstream_caches: &[MCacheUpstream]) -> Vec<UpstreamSource> {
+    upstream_caches
         .iter()
         .filter(|u| substitutes_from(u))
         .filter_map(|u| {
@@ -52,9 +52,9 @@ pub fn substitution_sources(upstreams: &[MCacheUpstream]) -> Vec<UpstreamSource>
 
 /// The first 2xx answer for `path` (relative to each upstream's base URL), in
 /// order. Redirects are followed: Attic, Cachix and S3 gateways answer object
-/// GETs with a 3xx. Tripped upstreams are skipped and every answer feeds the
+/// GETs with a 3xx. Tripped upstream caches are skipped and every answer feeds the
 /// shared breakers.
-pub async fn fetch_from_upstreams(
+pub async fn fetch_from_upstream_caches(
     sources: &[UpstreamSource],
     path: &str,
     timeout: Option<Duration>,
@@ -88,9 +88,12 @@ pub async fn fetch_from_upstreams(
 pub async fn fetch_upstream_log(sources: &[UpstreamSource], drv: &str) -> Option<String> {
     let path = format!("log/{drv}");
     for source in sources {
-        let Some(response) =
-            fetch_from_upstreams(std::slice::from_ref(source), &path, Some(LOG_FETCH_TIMEOUT))
-                .await
+        let Some(response) = fetch_from_upstream_caches(
+            std::slice::from_ref(source),
+            &path,
+            Some(LOG_FETCH_TIMEOUT),
+        )
+        .await
         else {
             continue;
         };
@@ -166,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn only_readable_http_upstreams_are_substituted_from() {
+    fn only_readable_http_upstream_caches_are_substituted_from() {
         let rows = vec![
             row(1, CacheUpstreamKind::Http, CacheSubscriptionMode::ReadWrite),
             row(2, CacheUpstreamKind::Http, CacheSubscriptionMode::ReadOnly),

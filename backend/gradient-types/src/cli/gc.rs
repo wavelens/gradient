@@ -20,7 +20,7 @@ pub struct GcArgs {
     /// retained evaluation's outputs and `.drv` files) is kept after its last
     /// fetch, or its commit if never fetched. `0` keeps nothing beyond
     /// `nar_upload_grace_hours`, which always applies so a closure member is
-    /// never evicted between its own commit and its referrer's.
+    /// never evicted between its own commit and the commit of the path that references it.
     #[arg(
         long = "gc-nar-ttl-hours",
         env = "GRADIENT_GC_NAR_TTL_HOURS",
@@ -62,7 +62,7 @@ pub struct GcArgs {
     pub wedged_eval_hours: i64,
 
     /// Seconds from the end of one background deep GC round to the start of the
-    /// next. `0` runs a round only when one is requested.
+    /// next. `0` starts a round only when one is requested.
     #[arg(
         long = "gc-deep-interval-secs",
         env = "GRADIENT_GC_DEEP_INTERVAL_SECS",
@@ -71,7 +71,7 @@ pub struct GcArgs {
     pub deep_interval_secs: u64,
 
     /// Milliseconds between two units of a storage migration or a background
-    /// deep GC round. A requested round runs its units without a pause.
+    /// deep GC round. A requested round executes its units without a pause.
     #[arg(
         long = "gc-deep-pace-ms",
         env = "GRADIENT_GC_DEEP_PACE_MS",

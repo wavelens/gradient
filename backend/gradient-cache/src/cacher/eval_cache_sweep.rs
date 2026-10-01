@@ -186,7 +186,7 @@ mod tests {
             (id(4), 500, ts(NOW - 10)),
         ];
         // id(1) age-evicted; survivors id2+id3+id4 = 1500 > 1000, so evicting the
-        // oldest survivor (id2 → 1000) brings it to the cap. Total: id1 + id2.
+        // oldest survivor (id2 -> 1000) brings it to the cap. Total: id1 + id2.
         let out = select_evictions(&rows, 1000, Duration::days(30), ts(NOW));
 
         assert!(out.contains(&id(1)), "aged row evicted");

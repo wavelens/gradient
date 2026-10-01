@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Pre-loaded derivation/feature data for a set of pending build anchors, used
+//! Pre-loaded derivation/feature data for a set of pending shared builds, used
 //! to decide whether the connected worker pool can build any of them.
 
 use std::collections::{BTreeMap, HashMap};
@@ -17,32 +17,32 @@ use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use crate::dispatch_mode::decide_build_spec_kind;
+use crate::assign_mode::decide_build_spec_kind;
 use gradient_wire::types::BuildSpecKind;
 
-/// Pre-loaded derivation and feature data for a set of pending anchors.
+/// Pre-loaded derivation and feature data for a set of pending shared builds.
 ///
-/// Used by [`crate::waiting_state::reconcile_waiting_state`] to determine
-/// whether any pending anchor can be satisfied by the current worker pool
+/// Used by [`crate::waiting_state::refresh_waiting_state`] to determine
+/// whether any pending shared build can be satisfied by the current worker pool
 /// without re-querying the DB per evaluation.
 pub(crate) struct BuildabilityChecker {
     drv_by_id: HashMap<DerivationId, MDerivation>,
-    /// Maps derivation ID → list of required feature IDs.
+    /// Maps derivation ID -> list of required feature IDs.
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_name: HashMap<FeatureId, String>,
 }
 
 impl BuildabilityChecker {
     /// Query the DB for all derivations and required features referenced by
-    /// `anchors`, returning a checker ready to call [`any_buildable`].
+    /// `shared_builds`, returning a checker ready to call [`any_buildable`].
     ///
     /// [`any_buildable`]: BuildabilityChecker::any_buildable
     pub(crate) async fn load(
         state: &Arc<ServerState>,
-        anchors: &[MDerivationBuild],
+        shared_builds: &[MDerivationBuild],
     ) -> Result<Self> {
         let db = &state.worker_db;
-        let drv_ids: Vec<DerivationId> = anchors.iter().map(|a| a.derivation).collect();
+        let drv_ids: Vec<DerivationId> = shared_builds.iter().map(|a| a.derivation).collect();
 
         let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
             EDerivation::find()
@@ -90,17 +90,18 @@ impl BuildabilityChecker {
         })
     }
 
-    /// Whether any pending anchor can run on the connected pool. `Queued` means
-    /// the gates held, so a queued or `Building` anchor is dispatchable and a
-    /// `Created` anchor is still behind its readiness counters. A substitutable
-    /// anchor is a relay and runs anywhere; once its miss budget is spent the graph
-    /// actor has already cleared the flag, so there is nothing to escalate here.
+    /// Whether any pending shared build can run on the connected pool. `Queued` means
+    /// the gates held, so a queued or `Building` shared build is dispatchable and a
+    /// `Created` shared build is still behind its can-start counters. A shared build
+    /// available in a cache is a passthrough, running on any worker; once its miss budget
+    /// is spent the graph writer has already cleared the flag, so there is nothing to
+    /// escalate here.
     pub(crate) fn any_buildable(
         &self,
-        anchors: &[MDerivationBuild],
+        shared_builds: &[MDerivationBuild],
         worker_caps: &[(Vec<String>, Vec<String>)],
     ) -> bool {
-        anchors.iter().any(|a| {
+        shared_builds.iter().any(|a| {
             if a.status == BuildStatus::Building {
                 return true;
             }
@@ -110,7 +111,8 @@ impl BuildabilityChecker {
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 return false;
             };
-            match decide_build_spec_kind(a.substitutable, &drv.architecture, drv.is_fixed_output) {
+            match decide_build_spec_kind(a.cache_available, &drv.architecture, drv.is_fixed_output)
+            {
                 BuildSpecKind::Substitute | BuildSpecKind::Download => true,
                 BuildSpecKind::Build => {
                     let required: Vec<&str> = self.required_features_for(&a.derivation);
@@ -141,20 +143,20 @@ impl BuildabilityChecker {
     }
 
     /// Group every unsatisfiable `(architecture, required_features)` combo and
-    /// the number of pending anchors it covers. Used for the API
+    /// the number of pending shared builds it covers. Used for the API
     /// `waiting_reason` payload so the UI can explain *why* nothing is
     /// dispatching.
     pub(crate) fn compute_waiting_reason(
         &self,
-        anchors: &[MDerivationBuild],
+        shared_builds: &[MDerivationBuild],
         worker_caps: &[(Vec<String>, Vec<String>)],
     ) -> WaitingReason {
         let mut grouped: BTreeMap<(String, Vec<String>), u32> = BTreeMap::new();
-        for a in anchors {
+        for a in shared_builds {
             let Some(drv) = self.drv_by_id.get(&a.derivation) else {
                 continue;
             };
-            if decide_build_spec_kind(a.substitutable, &drv.architecture, drv.is_fixed_output)
+            if decide_build_spec_kind(a.cache_available, &drv.architecture, drv.is_fixed_output)
                 != BuildSpecKind::Build
             {
                 continue;
@@ -358,25 +360,25 @@ mod tests {
         assert!(unmet.is_empty());
     }
 
-    fn substitutable_build(drv_id: DerivationId, _eval_id: EvaluationId) -> MDerivationBuild {
+    fn cache_available_build(drv_id: DerivationId, _eval_id: EvaluationId) -> MDerivationBuild {
         gradient_entity::derivation_build::Model {
             id: DerivationBuildId::now_v7(),
             derivation: drv_id,
             status: BuildStatus::Queued,
-            substitutable: true,
+            cache_available: true,
             ..Default::default()
         }
     }
 
-    /// A relay moves bytes between two caches, so it never needs a worker of the
-    /// derivation's own architecture and never counts as an unmet requirement. An
-    /// anchor whose miss budget is spent is no longer substitutable at all by the
-    /// time it reaches here, so nothing is parked on a stalled relay.
+    /// A passthrough moves bytes between two caches, so it never needs a worker of the
+    /// derivation's own architecture and never counts as an unmet requirement. A
+    /// shared build whose miss budget is spent is no longer available in a cache by the
+    /// time it reaches here, so nothing is parked on a stalled passthrough.
     #[test]
-    fn a_relay_is_buildable_anywhere_whatever_its_architecture() {
+    fn a_passthrough_is_buildable_anywhere_whatever_its_architecture() {
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "aarch64-linux");
-        let build = substitutable_build(d.id, eval_id);
+        let build = cache_available_build(d.id, eval_id);
         let checker = checker_with(vec![d], vec![]);
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
@@ -387,14 +389,14 @@ mod tests {
         assert!(unmet.is_empty());
     }
 
-    /// The exhausted anchor: `substitutable` cleared, so it is checked against the
+    /// The exhausted shared build: `cache_available` cleared, so it is checked against the
     /// real pool and surfaces as an unmet requirement the parker can act on.
     #[test]
-    fn an_exhausted_relay_is_an_ordinary_build_with_an_unmet_architecture() {
+    fn an_exhausted_passthrough_is_an_ordinary_build_with_an_unmet_architecture() {
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "aarch64-linux");
-        let mut build = substitutable_build(d.id, eval_id);
-        build.substitutable = false;
+        let mut build = cache_available_build(d.id, eval_id);
+        build.cache_available = false;
         let checker = checker_with(vec![d], vec![]);
 
         let caps: Vec<(Vec<String>, Vec<String>)> = vec![(vec!["x86_64-linux".into()], vec![])];
@@ -407,8 +409,8 @@ mod tests {
     }
 
     #[test]
-    fn dependency_blocked_anchor_is_not_buildable() {
-        // A `Created` anchor still has unsatisfied dependency anchors, so it is
+    fn dependency_blocked_shared_build_is_not_buildable() {
+        // A `Created` shared build still has unsatisfied dependency shared builds, so it is
         // not dispatchable even when a matching worker is connected.
         let eval_id = EvaluationId::now_v7();
         let d = drv(DerivationId::now_v7(), "x86_64-linux");
@@ -427,8 +429,13 @@ mod tests {
         let d = drv(DerivationId::now_v7(), "x86_64-linux");
         let b = build_for(d.id, eval_id);
         let checker = checker_with(vec![d], vec![]);
-        let anchors = std::slice::from_ref(&b);
-        assert!(checker.any_buildable(anchors, &[(vec!["x86_64-linux".to_string()], vec![])]));
-        assert!(!checker.any_buildable(anchors, &[(vec!["aarch64-linux".to_string()], vec![])]));
+        let shared_builds = std::slice::from_ref(&b);
+        assert!(
+            checker.any_buildable(shared_builds, &[(vec!["x86_64-linux".to_string()], vec![])])
+        );
+        assert!(!checker.any_buildable(
+            shared_builds,
+            &[(vec!["aarch64-linux".to_string()], vec![])]
+        ));
     }
 }

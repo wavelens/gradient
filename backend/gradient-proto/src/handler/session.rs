@@ -51,7 +51,7 @@ pub(super) struct ProtoSession<S> {
     pub session_state: S,
 }
 
-// ── Opening → Authenticated ───────────────────────────────────────────────────
+// ── Opening -> Authenticated ───────────────────────────────────────────────────
 
 impl ProtoSession<Opening> {
     pub fn new(socket: ProtoSocket, state: Arc<ServerState>, scheduler: Arc<Scheduler>) -> Self {
@@ -64,7 +64,7 @@ impl ProtoSession<Opening> {
     }
 
     /// Discoverable check, then the shared handshake FSM drives
-    /// InitConnection → AuthChallenge/AuthResponse → InitAck with
+    /// InitConnection -> AuthChallenge/AuthResponse -> InitAck with
     /// [`ServerAuthority`] supplying the auth policy.
     pub async fn handshake(
         mut self,
@@ -415,7 +415,7 @@ mod auth_decision_tests {
         );
     }
 
-    /// Worker had a registration once but it's been removed → reject as
+    /// Worker had a registration once but it's been removed -> reject as
     /// deactivated, regardless of inbound vs. outbound.
     #[test]
     fn deactivated_worker_rejected_inbound() {
@@ -439,7 +439,7 @@ mod auth_decision_tests {
         );
     }
 
-    /// Registered peers exist but no token validated → 401.
+    /// Registered peers exist but no token validated -> 401.
     #[test]
     fn registered_but_no_valid_token() {
         assert_eq!(
@@ -452,7 +452,7 @@ mod auth_decision_tests {
     }
 
     /// Tokens validated but every authorized peer was demoted because its
-    /// project has no cache → distinct 495, not a misleading 401.
+    /// project has no cache -> distinct 495, not a misleading 401.
     #[test]
     fn registered_emptied_by_missing_cache() {
         assert_eq!(
@@ -478,7 +478,7 @@ mod auth_decision_tests {
         );
     }
 
-    /// Registered + at least one valid token → accept.
+    /// Registered + at least one valid token -> accept.
     #[test]
     fn registered_with_valid_token_accepted() {
         assert_eq!(

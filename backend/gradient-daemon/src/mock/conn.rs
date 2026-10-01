@@ -10,7 +10,7 @@ use crate::mock::nar::{NarFile, encode};
 use crate::mock::spec::Timing;
 use crate::mock::store::{MockStore, Origin};
 use crate::mock::timing::chunk_delay;
-use crate::mock::{MockState, build, ca_path, ingest, store_path};
+use crate::mock::{MockState, build, ca_path, import, store_path};
 use futures::{Stream, StreamExt as _, TryStreamExt as _};
 use harmonia_file_nar::archive::NarByteStream;
 use harmonia_protocol::daemon::wire::types::Operation;
@@ -106,7 +106,7 @@ impl MockConn {
         source: R,
     ) -> anyhow::Result<()> {
         let key = full(&info.path);
-        let nar = ingest::read_with_delays(source, self.timing_for(&key), &key).await?;
+        let nar = import::read_with_delays(source, self.timing_for(&key), &key).await?;
         if let Some(ca) = &info.info.ca {
             let name = info.path.name().to_string();
             let computed = ca_path::path_for(&name, ca, &info.info.references)?;
@@ -135,7 +135,7 @@ impl MockConn {
         refs: &StorePathSet,
         source: impl AsyncBufRead + Unpin,
     ) -> anyhow::Result<ValidPathInfo> {
-        let dump = ingest::read_with_delays(source, &self.state.config.timing, name).await?;
+        let dump = import::read_with_delays(source, &self.state.config.timing, name).await?;
         let (path, ca) = ca_path::ca_path(name, cam, refs, &dump)?;
         let nar = match cam {
             ContentAddressMethodAlgorithm::NixArchive(_) => dump,

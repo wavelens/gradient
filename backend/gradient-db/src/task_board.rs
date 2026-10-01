@@ -166,7 +166,7 @@ struct DepCountRow {
 }
 
 /// The evaluation's edges are materialised ONCE and the per-entry-point walk
-/// runs over that set, which is the whole performance story. The answer is
+/// stays within that set, which is the whole performance story. The answer is
 /// inherently one row per (entry point, derivation) pair, and entry points of
 /// one flake share nearly all of their closure: 74 NixOS hosts reached 1,868
 /// derivations each out of a 10,689-derivation union, so a walk that probed

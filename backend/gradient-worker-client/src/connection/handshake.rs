@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Protocol handshake: `InitConnection` → `InitAck` / `Reject`.
+//! Protocol handshake: `InitConnection` -> `InitAck` / `Reject`.
 //!
 //! The wire sequence is driven by gradient-proto's shared
 //! [`as_peer`](gradient_wire::session::handshake::as_peer) FSM; this module

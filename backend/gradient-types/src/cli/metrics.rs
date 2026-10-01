@@ -26,7 +26,8 @@ pub struct MetricsArgs {
     )]
     pub rollup_interval_secs: u64,
 
-    /// Days to retain raw `phase_event` / `worker_sample` rows. 0 = keep forever.
+    /// Days to keep raw phase and worker samples and the per-minute cache and
+    /// upstream traffic counters. `0` keeps them forever.
     #[arg(
         long = "metrics-retention-raw-days",
         env = "GRADIENT_METRICS_RETENTION_RAW_DAYS",
@@ -76,11 +77,11 @@ pub struct MetricsArgs {
     )]
     pub instance_interval_secs: u64,
 
-    /// Interval in seconds between build-graph consistency sweeps (stale gate
-    /// flags, unpromoted-ready anchors, unbacked trusted outputs, wedged Building
-    /// evaluations are logged as warnings). The sweep also repairs the NAR
-    /// reference counter over the paths pending anchors gate on, and is that
-    /// counter's only backstop, so 0 disables both.
+    /// Seconds between build graph consistency checks (stale gate flags,
+    /// unpromoted builds that can start, unbacked trusted outputs and wedged
+    /// Building evaluations are logged as warnings). The check also repairs the
+    /// NAR reference counter over the paths pending builds wait on and is that
+    /// counter's only backstop; `0` disables both.
     #[arg(
         long = "metrics-graph-consistency-interval-secs",
         env = "GRADIENT_METRICS_GRAPH_CONSISTENCY_INTERVAL_SECS",

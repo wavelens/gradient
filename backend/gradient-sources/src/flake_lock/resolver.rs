@@ -6,7 +6,7 @@
 
 //! Newest-revision resolution behind the [`RevisionResolver`] seam.
 //!
-//! [`HttpRevisionResolver`] resolves github/gitlab over each forge's HTTP API
+//! [`HttpRevisionResolver`] resolves github/gitlab over each Git host's HTTP API
 //! and plain `git` via libgit2, recomputing `narHash` natively (see
 //! [`super::narhash`]). Unsupported fetcher types fail explicitly so a bad input
 //! never produces a half-baked lock.
@@ -336,6 +336,10 @@ mod tests {
         let (_tmp, repo) = make_git_repo();
         let url = format!("file://{}", repo.display());
         let out = git_checkout(&url, None, Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
-        assert!(out.is_ok(), "keyed file:// clone failed: {:?}", out.err());
+        assert!(
+            out.is_ok(),
+            "file:// clone with an ssh key failed: {:?}",
+            out.err()
+        );
     }
 }

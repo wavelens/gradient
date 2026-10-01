@@ -43,17 +43,17 @@ use std::sync::Arc;
 /// Resolved access context for a per-eval build (`build_job`).
 ///
 /// The public build identity is the `build_job` id; build state lives on the
-/// shared `derivation_build` anchor. Walks build_job -> evaluation -> task ->
+/// `derivation_build` shared build. Walks build_job -> evaluation -> task ->
 /// project and enforces the access check. Returns `not_found("Build")` on
 /// any failure so callers cannot distinguish missing from forbidden.
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
-    pub anchor: MDerivationBuild,
+    pub shared_build: MDerivationBuild,
     pub project: MProject,
 }
 
 impl BuildAccessContext {
-    /// Load build_job + anchor + project without enforcing an access check.
+    /// Load build_job + shared build + project without enforcing an access check.
     ///
     /// Use this when access is gated by custom logic (e.g. download tokens).
     pub(super) async fn load_unguarded(
@@ -65,14 +65,14 @@ impl BuildAccessContext {
             .await?
             .or_not_found("Build")?;
 
-        let anchor = EDerivationBuild::find_by_id(build_job.derivation_build)
+        let shared_build = EDerivationBuild::find_by_id(build_job.derivation_build)
             .one(&state.web_db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
-                    anchor_id = %build_job.derivation_build,
+                    shared_build_id = %build_job.derivation_build,
                     build_job_id = %build_job_id,
-                    "DerivationBuild anchor not found for build_job",
+                    "shared build not found for build_job",
                 );
                 WebError::data_inconsistency("Build")
             })?;
@@ -116,7 +116,7 @@ impl BuildAccessContext {
 
         Ok(Self {
             build_job,
-            anchor,
+            shared_build,
             project,
         })
     }
@@ -176,7 +176,7 @@ async fn reachable_projects_accessible(
         .all(&state.web_db)
         .await?;
 
-    // One read for every task behind these evaluations: this runs on the
+    // One read for every task behind these evaluations: this executes on the
     // authorization path of each request.
     let task_ids: Vec<TaskId> = evals.iter().filter_map(|ev| ev.task).collect();
     let project_ids: std::collections::HashSet<ProjectId> = ETask::find()
@@ -195,14 +195,14 @@ async fn reachable_projects_accessible(
     Ok(false)
 }
 
-/// The attempt id whose stored log should be served for an anchor: its latest
-/// attempt. Substituted/cache-completed anchors may never have produced an
+/// The attempt id whose stored log should be served for a shared build: its latest
+/// attempt. Substituted/cache-completed shared builds may never have produced an
 /// attempt, in which case there is no log to read.
 pub(super) async fn effective_log_id(
     state: &Arc<ServerState>,
-    anchor: &MDerivationBuild,
+    shared_build: &MDerivationBuild,
 ) -> Option<BuildAttemptId> {
-    latest_attempt_id(&state.web_db, anchor.id)
+    latest_attempt_id(&state.web_db, shared_build.id)
         .await
         .ok()
         .flatten()

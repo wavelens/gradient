@@ -92,6 +92,6 @@ mod tests {
         let refs = StorePathSet::new();
         let (path, ca) =
             ca_path("x", ContentAddressMethodAlgorithm::Text, &refs, b"y").expect("ca");
-        assert_eq!(path_for("x", &ca, &refs).expect("recompute"), path);
+        assert_eq!(path_for("x", &ca, &refs).expect("path_for"), path);
     }
 }

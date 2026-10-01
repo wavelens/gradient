@@ -64,7 +64,7 @@ struct MetricRow {
 }
 
 #[derive(Debug, Default, FromQueryResult)]
-struct DispatchRow {
+struct AssignmentWindowRow {
     wait_5m: Option<f64>,
     wait_1h: Option<f64>,
     wait_24h: Option<f64>,
@@ -117,12 +117,12 @@ gradient_db::sql! {
 
 gradient_db::sql_fn! {
     /// The exemplar behind the dispatch-window query's `kind` fence: the gate
-    /// plans against the same generated fragment the call site runs.
-    INSTANCE_DISPATCH_WINDOWS = dispatch_windows_sql,
+    /// plans against the same generated fragment the call site executes.
+    INSTANCE_DISPATCH_WINDOWS = assignment_windows_sql,
         params = [Now, Now, Now];
 }
 
-fn dispatch_windows_sql() -> String {
+fn assignment_windows_sql() -> String {
     format!(
         r#"
         SELECT
@@ -171,23 +171,28 @@ pub async fn compute_instance_context(
         }
     };
 
-    let dispatch = match DispatchRow::find_by_statement(INSTANCE_DISPATCH_WINDOWS.bind([
-        c5m.into(),
-        c1h.into(),
-        c24h.into(),
-    ]))
-    .one(db)
-    .await
-    {
-        Ok(row) => row.unwrap_or_default(),
-        Err(e) => {
-            error!(error = %e, "instance metrics: dispatched_job query failed");
-            DispatchRow::default()
-        }
-    };
+    let assignment_id =
+        match AssignmentWindowRow::find_by_statement(INSTANCE_DISPATCH_WINDOWS.bind([
+            c5m.into(),
+            c1h.into(),
+            c24h.into(),
+        ]))
+        .one(db)
+        .await
+        {
+            Ok(row) => row.unwrap_or_default(),
+            Err(e) => {
+                error!(error = %e, "instance metrics: dispatched_job query failed");
+                AssignmentWindowRow::default()
+            }
+        };
 
     gradient_pool::score::InstanceContext {
-        wait_secs: windowed(dispatch.wait_5m, dispatch.wait_1h, dispatch.wait_24h),
+        wait_secs: windowed(
+            assignment_id.wait_5m,
+            assignment_id.wait_1h,
+            assignment_id.wait_24h,
+        ),
         build_time_ms: windowed(
             metric.build_time_5m,
             metric.build_time_1h,
@@ -200,9 +205,21 @@ pub async fn compute_instance_context(
         network_mbps: windowed(metric.network_5m, metric.network_1h, metric.network_24h),
         oom_rate: windowed(metric.oom_5m, metric.oom_1h, metric.oom_24h),
         closure_size: windowed(metric.closure_5m, metric.closure_1h, metric.closure_24h),
-        nar_size_mb: windowed(dispatch.nar_5m, dispatch.nar_1h, dispatch.nar_24h),
-        missing_paths: windowed(dispatch.miss_5m, dispatch.miss_1h, dispatch.miss_24h),
-        dependency_cnt: windowed(dispatch.dep_5m, dispatch.dep_1h, dispatch.dep_24h),
+        nar_size_mb: windowed(
+            assignment_id.nar_5m,
+            assignment_id.nar_1h,
+            assignment_id.nar_24h,
+        ),
+        missing_paths: windowed(
+            assignment_id.miss_5m,
+            assignment_id.miss_1h,
+            assignment_id.miss_24h,
+        ),
+        dependency_cnt: windowed(
+            assignment_id.dep_5m,
+            assignment_id.dep_1h,
+            assignment_id.dep_24h,
+        ),
         completed: windowed(
             Some(metric.completed_5m),
             Some(metric.completed_1h),
@@ -276,7 +293,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// `MockDatabase` replays raw column maps for the two statements, so the
-    /// test pins the column→field mapping and count wiring. The SQL aggregation
+    /// test pins the column->field mapping and count wiring. The SQL aggregation
     /// (FILTER windows, jsonb extraction) is validated in CI against Postgres.
     #[tokio::test]
     async fn maps_columns_and_counts_into_snapshot() {
@@ -312,7 +329,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let dispatch: BTreeMap<String, Value> = [
+        let assignment_id: BTreeMap<String, Value> = [
             f("wait_5m", 1.5),
             f("wait_1h", 2.5),
             f("wait_24h", 3.5),
@@ -331,7 +348,7 @@ mod tests {
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![metric]])
-            .append_query_results([vec![dispatch]])
+            .append_query_results([vec![assignment_id]])
             .into_connection();
 
         let counts = InstanceCounts {

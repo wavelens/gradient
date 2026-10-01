@@ -24,7 +24,7 @@ use gradient_entity::integration::IntegrationKind;
 use gradient_entity::{github_installation, ids::*, integration, project_user, role};
 use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
-use gradient_types::{ForgeType, SessionId};
+use gradient_types::{GitHostType, SessionId};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use uuid::Uuid;
@@ -72,7 +72,7 @@ fn github_inbound_row() -> integration::Model {
         project: project_id(),
         name: "github".into(),
         display_name: "GitHub".into(),
-        forge_type: ForgeType::GitHub,
+        git_host_type: GitHostType::GitHub,
         github_installation: Some(github_installation_id()),
         created_by: user_id(),
         created_at: test_date(),
@@ -179,9 +179,9 @@ fn summary_endpoint_returns_all_kinds() {
         let items = body["message"].as_array().expect("array");
         assert_eq!(items.len(), 3);
         assert_eq!(items[0]["kind"], "inbound");
-        assert_eq!(items[0]["forge_type"], "gitea");
+        assert_eq!(items[0]["git_host_type"], "gitea");
         assert_eq!(items[0]["name"], "my-gitea-hook");
-        assert_eq!(items[1]["forge_type"], "github");
+        assert_eq!(items[1]["git_host_type"], "github");
         assert_eq!(items[1]["display_name"], "GitHub");
         assert_eq!(items[2]["kind"], "outbound");
     });
@@ -234,7 +234,7 @@ fn summary_endpoint_excludes_credential_state() {
 
 #[test]
 fn summary_endpoint_rejects_non_member() {
-    // Non-member: the project_user lookup returns no row → 404 (Project loader hides
+    // Non-member: the project_user lookup returns no row -> 404 (Project loader hides
     // existence rather than returning 403).
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -327,7 +327,7 @@ fn github_create_without_app_config_is_rejected() {
             .json(&serde_json::json!({
                 "name": "my-gh",
                 "kind": "outbound",
-                "forge_type": "github",
+                "git_host_type": "github",
                 "installation_id": 42,
             }))
             .await;

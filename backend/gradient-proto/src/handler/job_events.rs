@@ -5,7 +5,7 @@
  */
 
 //! A worker's job lifecycle reports, applied in arrival order off the session's
-//! read loop. Applying one waits on the graph actor, which under load takes
+//! read loop. Applying one waits on the graph writer, which under load takes
 //! seconds; inline, that wait stopped the connection from reading anything else,
 //! so the worker's other jobs timed out on `CacheQuery` replies never read.
 
@@ -35,7 +35,7 @@ pub(super) enum JobEvent {
     },
     Completed {
         job_id: String,
-        dispatch: DispatchedJobId,
+        assignment_id: DispatchedJobId,
         spans: Vec<JobPhaseSpan>,
     },
     Failed {
@@ -147,9 +147,9 @@ impl ApplyJobEvent for SchedulerJobEvents {
             JobEvent::Update { job_id, update } => self.update(job_id, update).await,
             JobEvent::Completed {
                 job_id,
-                dispatch,
+                assignment_id,
                 spans,
-            } => self.completed(job_id, dispatch, spans).await,
+            } => self.completed(job_id, assignment_id, spans).await,
             JobEvent::Failed {
                 job_id,
                 error,
@@ -238,11 +238,16 @@ impl SchedulerJobEvents {
         }
     }
 
-    async fn completed(&self, job_id: String, dispatch: DispatchedJobId, spans: Vec<JobPhaseSpan>) {
+    async fn completed(
+        &self,
+        job_id: String,
+        assignment_id: DispatchedJobId,
+        spans: Vec<JobPhaseSpan>,
+    ) {
         let peer_id = self.peer_id.as_str();
         info!(%peer_id, %job_id, phases = spans.len(), "job completed");
         self.scheduler
-            .close_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans)
+            .close_job_timeline(assignment_id, DispatchedJobOutcome::Completed, spans)
             .await;
         if let Err(e) = self.scheduler.handle_job_completed(peer_id, &job_id).await {
             error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");

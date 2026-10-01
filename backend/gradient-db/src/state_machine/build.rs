@@ -46,7 +46,7 @@ impl BuildStateMachine {
     /// Returns `Ok(to)` if the transition is valid, `Err` otherwise.
     ///
     /// `Queued` back to `Created` is un-promotion: a gate regressed under a
-    /// promoted anchor, so it returns to the queue's waiting room instead of
+    /// promoted shared build, so it returns to the queue's waiting room instead of
     /// being dispatched with a missing input. No other state may move there.
     pub fn validate(
         from: BuildStatus,
@@ -72,8 +72,8 @@ impl BuildStateMachine {
         match (from, to) {
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
 
-            // Demand settles work without finishing it: a build-time dependency
-            // of a relay is not pending, and it is not done either. It thaws the
+            // Need settles work without finishing it: a build-time dependency
+            // of a passthrough is not pending, and it is not done either. It thaws the
             // moment something wants it again, and never queues from here - the
             // thaw is what re-opens the gate.
             (BuildStatus::Created, BuildStatus::Skipped) => Ok(to),
@@ -122,10 +122,10 @@ mod tests {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Queued).is_ok());
     }
 
-    /// Demand settles work without finishing it, and brings it back the same way.
-    /// The thaw goes to `Created`, never straight to the queue: a `Skipped` anchor
+    /// Need settles work without finishing it, and brings it back the same way.
+    /// The thaw goes to `Created`, never straight to the queue: a `Skipped` shared build
     /// has passed no gate, and letting it queue would dispatch against inputs
-    /// nothing has demanded yet.
+    /// nothing has wanted yet.
     #[test]
     fn build_sm_skipped_is_entered_and_left_through_created_only() {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Skipped).is_ok());
@@ -141,7 +141,7 @@ mod tests {
     }
 
     /// Un-promotion: a retired input or a demoted dependency pulls a queued
-    /// anchor back to Created; only Queued may move there.
+    /// shared build back to Created; only Queued may move there.
     #[test]
     fn build_sm_queued_to_created_for_unpromotion() {
         assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Created).is_ok());

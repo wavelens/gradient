@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Dual token-bucket limiter for worker→server log forwarding. One bucket
+//! Dual token-bucket limiter for worker->server log forwarding. One bucket
 //! bounds a 1-minute burst, the other a 1-hour sustained rate. A log chunk is
 //! forwarded only if BOTH buckets admit it; once either is exhausted the
 //! limiter trips permanently for that build and forwarding stops. The build

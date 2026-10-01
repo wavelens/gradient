@@ -112,7 +112,7 @@ pub struct StateTask {
 /// against `action_type` at apply time:
 ///   - `send_mail`           `{ recipients: [..], subject_template?: str }`
 ///   - `send_web_request`    `{ url: str, token_file?: str }`
-///   - `forge_status_report` `{ integration: <outbound integration name> }`
+///   - `git_host_status_report` `{ integration: <outbound integration name> }`
 ///   - `open_pr`             `{ integration: <name>, generator?, granularity?, verify_gate?, branch_pattern?, ... }`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -172,16 +172,16 @@ pub struct StateIntegration {
     /// `"inbound"` or `"outbound"`.
     pub kind: String,
     /// `"gitea"`, `"forgejo"`, `"gitlab"`, or `"github"`.
-    pub forge_type: String,
+    pub git_host_type: String,
     #[serde(default)]
     pub secret_file: Option<String>,
     #[serde(default)]
     pub endpoint_url: Option<String>,
     #[serde(default)]
     pub access_token_file: Option<String>,
-    /// GitHub App installation id. Required when `forge_type = "github"`,
+    /// GitHub App installation id. Required when `git_host_type = "github"`,
     /// ignored otherwise; provisions/links a `github_installation` row in place
-    /// of the secret/token credentials other forges use.
+    /// of the secret/token credentials other Git hosts use.
     #[serde(default)]
     pub installation_id: Option<i64>,
     /// Optional GitHub account login for the installation, used only for naming.
@@ -208,7 +208,7 @@ pub struct StateCache {
     #[serde(default)]
     pub projects: Vec<String>,
     #[serde(default)]
-    pub upstreams: Vec<StateUpstream>,
+    pub upstream_caches: Vec<StateUpstream>,
     pub public: bool,
     pub created_by: String,
     #[serde(default)]

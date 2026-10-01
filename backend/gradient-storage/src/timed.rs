@@ -5,7 +5,7 @@
  */
 
 //! Latency and error telemetry for every NAR storage call, file or S3. A call
-//! whose future is dropped before it finishes (the relay's open timeout,
+//! whose future is dropped before it finishes (the passthrough's open timeout,
 //! `bounded()`) is counted as cancelled, which is how a hung backend shows up.
 
 use std::fmt;

@@ -66,7 +66,7 @@ impl Job {
 /// exclusion is applied across the whole include set.
 ///
 /// Synchronous and Boehm-GC bound: call from a context without a Tokio runtime
-/// (the CLI runs it before the runtime starts, mirroring the eval worker).
+/// (the CLI executes it before the runtime starts, mirroring the eval worker).
 pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job)) -> Result<()> {
     let evaluator = NixEvaluator::new()?;
     let walker = evaluator.walker(flake_ref, &[])?;

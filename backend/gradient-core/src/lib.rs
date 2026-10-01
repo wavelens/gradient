@@ -216,7 +216,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
             upstream_query_concurrency.max(1),
         )),
         upload_admission: gradient_storage::admission::UploadAdmission::new(upload_limits),
-        forge: gradient_forge::ForgeRegistry::with_builtin(),
+        git_host: gradient_git_host::GitHostRegistry::with_builtin(),
         github_app_install_url: Default::default(),
         shutdown: Shutdown::new(),
         last_used_stamps: last_used_stamps(),
@@ -228,10 +228,10 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         oidc_group_roles,
         scim_group_roles,
         events: gradient_types::EventBus::default(),
-        outbox_wake: Arc::new(tokio::sync::Notify::new()),
-        eval_dispatch_wake: Arc::new(tokio::sync::Notify::new()),
+        delivery_wake: Arc::new(tokio::sync::Notify::new()),
+        eval_assign_wake: Arc::new(tokio::sync::Notify::new()),
         graph: Graph::new(),
         probe_requests: gradient_db::ProbeRequests::channel(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
     }))
 }

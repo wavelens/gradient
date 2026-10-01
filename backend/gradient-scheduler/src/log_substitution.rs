@@ -6,10 +6,10 @@
 
 //! Best-effort log substitution for substituted / externally-cached builds.
 //!
-//! A build-once anchor has a single attempt, so there is no sibling to dedup a
+//! A build-once shared build has a single attempt, so there is no sibling to dedup a
 //! log from; the only source is the upstream cache's Hydra-style `/log/{drv}`
-//! endpoint, fetched from the upstreams the project's workers substitute from
-//! and appended to the anchor's latest attempt log. Every failure is non-fatal:
+//! endpoint, fetched from the upstream caches the project's workers substitute from
+//! and appended to the shared build's latest attempt log. Every failure is non-fatal:
 //! log substitution must never break the build pipeline.
 
 use std::sync::Arc;
@@ -113,7 +113,7 @@ async fn project_for_derivation(
         if let Ok(Some(eval)) = EEvaluation::find_by_id(job.evaluation)
             .one(&state.worker_db)
             .await
-            && let Some(project) = crate::dispatch::project_id_for_eval(state, &eval).await
+            && let Some(project) = crate::loops::project_id_for_eval(state, &eval).await
         {
             return Some(project);
         }

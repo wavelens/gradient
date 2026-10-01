@@ -10,7 +10,7 @@ use gradient_graph::Demotion;
 use gradient_sources::get_hash_from_path;
 use std::sync::Arc;
 
-/// Invalidates a path's cached state across all caches in the graph actor's
+/// Invalidates a path's cached state across all caches in the graph writer's
 /// transaction: the cache link and upstream availability on every matching
 /// output, the trusted producers, the `cached_path` rows and the NAR object,
 /// and the gate flags they backed.

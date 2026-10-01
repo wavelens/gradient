@@ -97,6 +97,8 @@ mod m20260930_000001_unsettled_anchor_index;
 pub mod m20260930_000002_counter_ripple_functions;
 mod m20260930_000003_cluster_jobs;
 mod m20261001_000000_storage_maintenance;
+pub mod m20261001_000001_plain_concept_names;
+mod m20261001_000002_retention_indexes;
 
 pub struct Migrator;
 
@@ -190,6 +192,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260930_000002_counter_ripple_functions::Migration),
             Box::new(m20260930_000003_cluster_jobs::Migration),
             Box::new(m20261001_000000_storage_maintenance::Migration),
+            Box::new(m20261001_000001_plain_concept_names::Migration),
+            Box::new(m20261001_000002_retention_indexes::Migration),
         ]
     }
 }

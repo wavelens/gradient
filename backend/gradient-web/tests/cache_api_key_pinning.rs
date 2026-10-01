@@ -223,7 +223,7 @@ fn create_cache_pinned_key_cannot_exceed_member_mask() {
         let session = gradient_test_support::web::live_session(session_id);
 
         // A View-role member (or project member, same View mask) may mint a
-        // read-only key, but not one granting `writeStore` beyond their mask → 403 (#334).
+        // read-only key, but not one granting `writeStore` beyond their mask -> 403 (#334).
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![session.clone()]])
             .append_query_results([vec![session]])
@@ -234,7 +234,7 @@ fn create_cache_pinned_key_cannot_exceed_member_mask() {
             .append_query_results([vec![private_cache_row()]])
             // load_cache(Readable): membership visibility check
             .append_query_results([vec![view_cache_member()]])
-            // effective_cache_mask: member + role lookup → View mask
+            // effective_cache_mask: member + role lookup -> View mask
             .append_query_results([vec![view_cache_member()]])
             .append_query_results([vec![view_cache_role()]]);
 

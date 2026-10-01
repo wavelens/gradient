@@ -9,7 +9,7 @@
 //! [`MockProtoServer`] binds `127.0.0.1:0` and accepts one connection per
 //! [`MockProtoServer::accept`]. The resulting [`MockServerConn`] sends and
 //! receives typed frames and scripts the authority side: handshake, job list,
-//! offers, score collection, assignment and NAR relay, each wait bounded by
+//! offers, score collection, assignment and NAR passthrough, each wait bounded by
 //! [`SCRIPT_TIMEOUT`].
 
 use crate::constants::BULK_CHUNK_SIZE;
@@ -104,7 +104,7 @@ impl MockServerConn {
 
 pub const SCRIPT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// One upload the mock granted: what was asked, the relayed chunks (empty for a
+/// One upload the mock granted: what was asked, the passed-through chunks (empty for a
 /// presigned grant) and the metadata the peer finished with.
 #[derive(Debug)]
 pub struct ServedUpload {
@@ -117,7 +117,7 @@ pub struct ServedUpload {
 }
 
 impl ServedUpload {
-    pub fn relayed(&self) -> Vec<u8> {
+    pub fn passed_through(&self) -> Vec<u8> {
         self.chunks
             .iter()
             .flat_map(|(data, ..)| data.clone())
@@ -132,7 +132,7 @@ impl ServedUpload {
     }
 }
 
-/// A NAR a peer relayed to the mock, with the metadata its `UploadFinished` carried.
+/// A NAR a peer passed through to the mock, with the metadata its `UploadFinished` carried.
 #[derive(Debug)]
 pub struct PushedNar {
     pub job_id: String,
@@ -217,10 +217,10 @@ impl MockServerConn {
         .await
     }
 
-    pub async fn assign(&mut self, job_id: &str, dispatch: &str, job: Job) -> Result<bool> {
+    pub async fn assign(&mut self, job_id: &str, assignment_id: &str, job: Job) -> Result<bool> {
         self.send(ServerMessage::AssignJob {
             job_id: job_id.into(),
-            dispatch: dispatch.into(),
+            assignment_id: assignment_id.into(),
             job,
             cluster: None,
         })
@@ -249,7 +249,7 @@ impl MockServerConn {
         .await
     }
 
-    /// Grant the next upload request with `target`, collect its relayed chunks
+    /// Grant the next upload request with `target`, collect its passed-through chunks
     /// and acknowledge its `UploadFinished` with `UploadCommitted{Ok}`.
     pub async fn serve_upload(&mut self, target: GrantTarget) -> Result<ServedUpload> {
         let (job_id, request_id, object, size) = self
@@ -263,11 +263,11 @@ impl MockServerConn {
                 _ => None,
             })
             .await?;
-        let relayed = matches!(target, GrantTarget::Relay { .. });
+        let passed_through = matches!(target, GrantTarget::Passthrough { .. });
         self.send(ServerMessage::UploadGrant { request_id, target })
             .await?;
 
-        // The finish rides the control lane and may overtake the relay's final
+        // The finish rides the control lane and may overtake the passthrough's final
         // chunk on the bulk lane, as the real server allows.
         enum Arrival {
             Chunk(Vec<u8>, u64, bool),
@@ -276,7 +276,7 @@ impl MockServerConn {
         let mut chunks = Vec::new();
         let mut finished = None;
         while finished.is_none()
-            || (relayed && !chunks.last().is_some_and(|(_, _, is_final)| *is_final))
+            || (passed_through && !chunks.last().is_some_and(|(_, _, is_final)| *is_final))
         {
             match self
                 .recv_until(|msg| match msg {
@@ -315,7 +315,7 @@ impl MockServerConn {
 
     pub async fn receive_push(&mut self) -> Result<PushedNar> {
         let served = self
-            .serve_upload(GrantTarget::Relay { resume_offset: 0 })
+            .serve_upload(GrantTarget::Passthrough { resume_offset: 0 })
             .await?;
         let UploadObject::Nar { store_path } = &served.object else {
             anyhow::bail!("expected a NAR upload, got {:?}", served.object);
@@ -324,7 +324,7 @@ impl MockServerConn {
         Ok(PushedNar {
             job_id: served.job_id.clone(),
             store_path: store_path.clone(),
-            compressed: served.relayed(),
+            compressed: served.passed_through(),
             nar_size: meta.nar_size,
             nar_hash: meta.nar_hash.clone(),
         })
@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_relayed_push_is_granted_from_zero_and_assembled() {
+    async fn a_passed_through_push_is_granted_from_zero_and_assembled() {
         let (mut conn, mut socket) = connected().await;
         let store_path = format!("/nix/store/{}-p", "a".repeat(32));
         let peer = async {
@@ -470,7 +470,7 @@ mod tests {
                 grant,
                 ServerMessage::UploadGrant {
                     request_id: 7,
-                    target: GrantTarget::Relay { resume_offset: 0 },
+                    target: GrantTarget::Passthrough { resume_offset: 0 },
                 }
             );
             for (data, offset, is_final) in [(b"ab".to_vec(), 0, false), (Vec::new(), 2, true)] {

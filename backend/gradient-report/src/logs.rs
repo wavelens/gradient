@@ -47,7 +47,7 @@ pub fn create_log_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// A log is free text carrying whatever the builder printed, so redaction runs
+/// A log is free text carrying whatever the builder printed, so redaction is running
 /// here rather than at the call site: no caller can write one unredacted.
 pub fn insert_log(conn: &Connection, redactor: &Redactor, attempt: &str, log: &str) -> Result<()> {
     conn.execute(
@@ -121,7 +121,7 @@ pub fn write_failed_logs(
         rows_included: logs.entries.len() as i64,
         rows_available: logs.attempts_available,
         scope:
-            "the evaluation's build anchors, so attempts made for other evaluations are included"
+            "the evaluation's shared builds, so attempts made for other evaluations are included"
                 .to_owned(),
         filter: "failed attempts only".to_owned(),
         redactions: redactor.log_redactions(),

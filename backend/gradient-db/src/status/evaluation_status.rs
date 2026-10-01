@@ -114,7 +114,7 @@ pub async fn update_evaluation_status(
     {
         error!(error = %e, evaluation_id = %updated_eval.id, "failed to record an evaluation report");
     }
-    ctx.outbox_wake.notify_one();
+    ctx.delivery_wake.notify_one();
 
     record_phase_event(
         &ctx.worker_db,

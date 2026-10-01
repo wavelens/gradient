@@ -18,7 +18,7 @@
 //!   `EvaluatingDerivation` need an eval-capable worker) and no connected
 //!   worker provides that capability.
 //! - `Approval` - pull-request evaluation from a contributor who is not a
-//!   forge writer on the repo, gated until a maintainer approves.
+//!   Git host writer on the repo, gated until a maintainer approves.
 //! - `NoCache` - the task's project has no active cache configured,
 //!   so the build outputs would have nowhere to land.
 //! - `CacheStorageFull` - every writable cache for the project is within
@@ -69,15 +69,15 @@ pub enum WaitingReason {
     /// The instance is draining: scheduling is paused and this evaluation is
     /// parked until draining is disabled or the server restarts.
     Draining,
-    /// The connected pool can build every pending anchor, but none is
+    /// The connected pool can build every pending shared build, but none is
     /// dispatchable - nothing in the pending set passes the dispatch gate and no
     /// in-flight build is left to drive promotion. What blocks it is not recorded
-    /// here; `pending_anchors` is the blocked count. The reconciler
+    /// here; `pending_shared_builds` is the blocked count. The repair pass
     /// heals on entry and when that count changes, the graph-stuck re-heal pass
-    /// re-runs the heal on the consistency sweep's cadence, and the counters
+    /// repeats the heal on the consistency check's cadence, and the counters
     /// promote the set as soon as its gates open.
     GraphStuck {
-        pending_anchors: u32,
+        pending_shared_builds: u32,
     },
 }
 
@@ -135,8 +135,10 @@ impl WaitingReason {
         }
     }
 
-    pub fn graph_stuck(pending_anchors: u32) -> Self {
-        Self::GraphStuck { pending_anchors }
+    pub fn graph_stuck(pending_shared_builds: u32) -> Self {
+        Self::GraphStuck {
+            pending_shared_builds,
+        }
     }
 }
 

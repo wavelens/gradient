@@ -22,15 +22,15 @@ use tracing::{debug, trace, warn};
 
 use crate::messages::{NarCommit, NarCommitted, SignTargets};
 
-/// Record a stored NAR: the row, the runtime edges its references name, the demand
-/// those edges carry, the anchor wholeness seeded from them and the readiness side
+/// Record a stored NAR: the row, the runtime dependencies its references name, the need
+/// those edges carry, the complete closure of the shared build seeded from them and the can-start side
 /// of that flip.
 ///
-/// Runs inside the graph actor's transaction, and only there. The pre-commit
+/// Executes inside the graph writer's transaction, and only there. The pre-commit
 /// presence endpoint is read under a row lock a pooled handle would release with
 /// the statement that took it, which is a race against the maintenance retires with
 /// no compile error and no runtime signal, so the handle is checked here instead.
-/// The anchor locks are taken on that same transaction, always after the
+/// The shared build locks are taken on that same transaction, always after the
 /// `cached_path` one and never before.
 pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<NarCommitted> {
     let db = &ctx.worker_db;
@@ -40,7 +40,7 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     }
 
     let txn = db.as_transaction().context(
-        "NarCommit must run inside a transaction: the wholeness endpoint it decides from and the anchor locks it takes are only held under one",
+        "NarCommit must run inside a transaction: the complete-closure endpoint it decides from and the shared build locks it takes are only held under one",
     )?;
 
     let Upserted {
@@ -53,18 +53,18 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
 
     // The NAR is where a built output's runtime references are learned, so the
     // graph edges they name are written from the same report the index is, and what
-    // demand those edges carry is recomputed from the anchor they hang off.
+    // need those edges carry is updated from the shared build they hang off.
     let referenced = gradient_db::producers_of_tokens(txn, &c.references).await?;
     if !referenced.is_empty() {
         for producer in &producers {
-            gradient_db::insert_runtime_edges(txn, *producer, &referenced).await?;
+            gradient_db::insert_runtime_dependencies(txn, *producer, &referenced).await?;
         }
 
-        let settled = gradient_db::recompute_and_settle_demand(txn, &producers).await?;
+        let settled = gradient_db::update_and_settle_need(txn, &producers).await?;
         gradient_db::emit_transition_effects(ctx, &settled.changes).await;
     }
 
-    // Wholeness is counted on the anchor, and the seed needs the endpoint this
+    // Complete closure is counted on the shared build, and the seed needs the endpoint this
     // commit destroyed: a path that had no NAR before is what makes its producers
     // present, and the row already says so by the time the seed reads it. A re-push
     // of a backed path changed no presence, so it is only recounted.
@@ -79,11 +79,11 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
     } else {
         gradient_db::derivations_with_hashes(txn, &[sp.hash().to_owned()]).await?
     };
-    trace!(store_path = %c.store_path, whole = seeded.whole.len(), "anchor wholeness ripple");
-    advance_anchors(ctx, txn, &seeded.whole, &owners).await?;
-    if !seeded.unwhole.is_empty() {
-        warn!(store_path = %c.store_path, unwhole = seeded.unwhole.len(), "commit added unwhole references");
-        retract_anchors(ctx, txn, &seeded.unwhole).await?;
+    trace!(store_path = %c.store_path, complete = seeded.complete.len(), "shared build complete-closure ripple");
+    advance_shared_builds(ctx, txn, &seeded.complete, &owners).await?;
+    if !seeded.incomplete.is_empty() {
+        warn!(store_path = %c.store_path, incomplete = seeded.incomplete.len(), "commit added incomplete references");
+        retract_shared_builds(ctx, txn, &seeded.incomplete).await?;
     }
 
     let signed = sign_into_caches(ctx, &[(c, &sp, cached_path)])
@@ -111,14 +111,14 @@ pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<Nar
 /// [`commit`] for a batch, one statement per step instead of a dozen per NAR: the
 /// commit's cost is round trips, not the database's work. Any failure fails the
 /// batch; the caller then commits its NARs one by one, so a bad one still fails
-/// only its own uploader. Runs on the graph actor's transaction, like [`commit`].
+/// only its own uploader. Executes on the graph writer's transaction, like [`commit`].
 pub(crate) async fn commit_batch(
     ctx: &DbContext,
     commits: &[NarCommit],
 ) -> anyhow::Result<Vec<NarCommitted>> {
     let db = &ctx.worker_db;
     let txn = db.as_transaction().context(
-        "a NAR batch must run inside a transaction: the anchor locks it takes are only held under one",
+        "a NAR batch must run inside a transaction: the shared build locks it takes are only held under one",
     )?;
     let paths = commits
         .iter()
@@ -148,20 +148,20 @@ pub(crate) async fn commit_batch(
     let backed: Vec<String> = backed.into_iter().map(|(h, _)| h.clone()).collect();
     let fresh: Vec<String> = fresh.into_iter().map(|(h, _)| h.clone()).collect();
 
-    commit_runtime_edges(ctx, txn, commits, &hashes).await?;
+    commit_runtime_dependencies(ctx, txn, commits, &hashes).await?;
 
     let freshly_present = gradient_db::producers_of_hashes(txn, &fresh).await?;
     let recounted = gradient_db::producers_of_hashes(txn, &backed).await?;
     let seeded = gradient_db::seed_runtime_deps(txn, &freshly_present, &recounted).await?;
     let owners = gradient_db::derivations_with_hashes(txn, &fresh).await?;
-    advance_anchors(ctx, txn, &seeded.whole, &owners).await?;
-    if !seeded.unwhole.is_empty() {
+    advance_shared_builds(ctx, txn, &seeded.complete, &owners).await?;
+    if !seeded.incomplete.is_empty() {
         warn!(
             nars = commits.len(),
-            unwhole = seeded.unwhole.len(),
-            "commit added unwhole references"
+            incomplete = seeded.incomplete.len(),
+            "commit added incomplete references"
         );
-        retract_anchors(ctx, txn, &seeded.unwhole).await?;
+        retract_shared_builds(ctx, txn, &seeded.incomplete).await?;
     }
 
     let signing: Vec<(&NarCommit, &StorePath, CachedPathId)> = commits
@@ -236,10 +236,10 @@ async fn upsert_cached_paths(
     Ok(upserted)
 }
 
-/// The runtime edges and demand of the NARs a producer backs. A `.drv` or a
+/// The runtime dependencies and need of the NARs a producer backs. A `.drv` or a
 /// source has none, so one lookup settles the common batch; a batch that has any
 /// takes them NAR by NAR, exactly as [`commit`] does.
-async fn commit_runtime_edges(
+async fn commit_runtime_dependencies(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
     commits: &[NarCommit],
@@ -269,9 +269,9 @@ async fn commit_runtime_edges(
             continue;
         }
         for producer in &producers {
-            gradient_db::insert_runtime_edges(txn, *producer, &referenced).await?;
+            gradient_db::insert_runtime_dependencies(txn, *producer, &referenced).await?;
         }
-        let settled = gradient_db::recompute_and_settle_demand(txn, &producers).await?;
+        let settled = gradient_db::update_and_settle_need(txn, &producers).await?;
         gradient_db::emit_transition_effects(ctx, &settled.changes).await;
     }
 
@@ -300,20 +300,20 @@ async fn mark_outputs_cached(
     Ok(marked)
 }
 
-/// The anchor side of a forward wholeness flip: the anchors in `whole` can serve
+/// The shared build side of a forward complete closure flip: the shared builds in `complete` can serve
 /// their outputs, and the `owners` of a `.drv` this commit made present are
 /// importable, so their gates may have opened.
 ///
 /// One ordered lock over both sets, on the commit's own transaction: the mark is a
-/// bound and not a claim, so an anchor whose predicate does not hold is passed over,
-/// and `promote` runs under the same lock that produced its candidates.
-async fn advance_anchors(
+/// bound and not a claim, so a shared build whose predicate does not hold is passed over,
+/// and `promote` executes under the same lock that produced its candidates.
+async fn advance_shared_builds(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
-    whole: &[DerivationId],
+    complete: &[DerivationId],
     owners: &[DerivationId],
 ) -> anyhow::Result<()> {
-    let lock = gradient_db::lock_anchors(txn, &union(whole, owners)).await?;
+    let lock = gradient_db::lock_shared_builds(txn, &union(complete, owners)).await?;
     let mut changes = gradient_db::became_fetchable(&lock).await?;
     changes.extend(gradient_db::promote(txn, owners).await?);
     gradient_db::emit_transition_effects(ctx, &changes).await;
@@ -322,15 +322,15 @@ async fn advance_anchors(
 }
 
 /// The symmetric loss. A commit that reports a reference we do not have takes
-/// anchors OUT of wholeness, and one left fetchable against such an anchor
+/// shared builds OUT of complete closure, and one left fetchable against such a shared build
 /// dispatches a build whose input nothing can provide - the forward-only half of
 /// this pair is the dead zone this project has paid for repeatedly.
-async fn retract_anchors(
+async fn retract_shared_builds(
     ctx: &DbContext,
     txn: &sea_orm::DatabaseTransaction,
-    unwhole: &[DerivationId],
+    incomplete: &[DerivationId],
 ) -> anyhow::Result<()> {
-    let lock = gradient_db::lock_anchors(txn, unwhole).await?;
+    let lock = gradient_db::lock_shared_builds(txn, incomplete).await?;
     let changes = gradient_db::lost_fetchability(&lock).await?;
     gradient_db::emit_transition_effects(ctx, &changes).await;
 
@@ -346,7 +346,7 @@ fn union(a: &[DerivationId], b: &[DerivationId]) -> Vec<DerivationId> {
     all
 }
 
-/// The debug-info walk decompresses the whole NAR, so it runs detached.
+/// The debug-info walk decompresses the whole NAR, so it is running detached.
 pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path: &str) {
     let Ok(sp) = StorePath::parse(store_path) else {
         return;
@@ -380,7 +380,7 @@ struct Upserted {
 }
 
 /// Insert or refresh the row under its `FOR NO KEY UPDATE` lock. A duplicate-key error
-/// on the insert propagates: the actor serialises commits, so there is no race to
+/// on the insert propagates: the graph writer serialises commits, so there is no race to
 /// recover from, and inside a transaction a re-select after a failed INSERT would
 /// only replace the real error with 25P02.
 async fn upsert_cached_path(
@@ -615,7 +615,7 @@ mod tests {
 
     const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
     const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    /// A referrer of [`HASH`], for the ripple level a whole commit drives.
+    /// A parent of [`HASH`], for the ripple level a completing commit drives.
     const DEP_HASH: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     fn cache_id() -> CacheId {
@@ -668,11 +668,11 @@ mod tests {
         BTreeMap::from([("derivation".to_owned(), Value::from(Uuid::now_v7()))])
     }
 
-    /// One region row of the bounded demand walk: the anchor and what it now reads.
-    fn demand_row() -> BTreeMap<String, Value> {
+    /// One region row of the bounded need walk: the shared build and what it now reads.
+    fn need_row() -> BTreeMap<String, Value> {
         BTreeMap::from([
             ("derivation".to_owned(), Value::from(Uuid::now_v7())),
-            ("demanded".to_owned(), Value::from(true)),
+            ("wanted".to_owned(), Value::from(true)),
         ])
     }
 
@@ -725,7 +725,7 @@ mod tests {
         stmt.values.as_ref().expect("the statement binds values").0[position - 1].clone()
     }
 
-    /// `commit` runs in the graph actor's transaction and rejects a pooled handle,
+    /// `commit` executes in the graph writer's transaction and rejects a pooled handle,
     /// so every test drives one. The mock records the whole transaction as a single
     /// log entry whose synthetic `BEGIN`/`COMMIT` the shared helper drops, so the
     /// statement indices stay the ones the code issues.
@@ -897,7 +897,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ingest_records_content_address() {
+    async fn recording_keeps_the_content_address() {
         let ca = "text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944";
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
@@ -943,18 +943,18 @@ mod tests {
     }
 
     /// The NAR is where a built output's runtime references are learned: every
-    /// reference with a producer becomes a runtime edge from the path's producer,
-    /// and the demand those edges carry is recomputed over the producer at once.
-    /// Without it the anchors the new edges reach wait a sweep interval for demand
+    /// reference with a producer becomes a runtime dependency from the path's producer,
+    /// and the need those edges carry is updated over the producer at once.
+    /// Without it the shared builds the new edges reach wait a sweep interval for need
     /// they already have, which is the whole point of learning them here.
     #[tokio::test]
-    async fn a_commit_writes_the_runtime_edges_its_references_name() {
+    async fn a_commit_writes_the_runtime_dependencies_its_references_name() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])
             .append_query_results([vec![producer_row()]])
             .append_query_results([vec![producer_row()]])
-            .append_query_results([vec![demand_row()]])
+            .append_query_results([vec![need_row()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -975,24 +975,24 @@ mod tests {
             .position(|s| {
                 s.contains("INSERT INTO derivation_dependency (derivation, dependency, kind)")
             })
-            .expect("the runtime edges are written");
-        let demand = log
+            .expect("the runtime dependencies are written");
+        let need = log
             .iter()
             .position(|s| s.contains("region(evaluation, derivation, builder) AS"))
-            .expect("demand is recomputed over the producer");
+            .expect("need is updated over the producer");
         assert!(
-            edges < demand,
-            "the recompute must see the edges it walks: {log:?}"
+            edges < need,
+            "the update must see the edges it walks: {log:?}"
         );
     }
 
-    /// A NAR that makes its producer present advances the anchor side in the SAME
-    /// transaction: the producer's counter is seeded, what became whole is offered
+    /// A NAR that makes its producer present advances the shared build side in the SAME
+    /// transaction: the producer's counter is seeded, what became complete is offered
     /// to the fetchable mark, and the derivation whose own `.drv` this is is offered
     /// to promotion. Without this the counters only move on the next sweep, and a
-    /// dependent waits a sweep interval for an input it already has.
+    /// parent waits a sweep interval for an input it already has.
     #[tokio::test]
-    async fn a_whole_commit_advances_the_anchors_behind_the_paths_it_completed() {
+    async fn a_complete_commit_advances_the_shared_builds_behind_the_paths_it_completed() {
         let producer = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
@@ -1003,8 +1003,8 @@ mod tests {
             )])]])
             .append_query_results([vec![BTreeMap::from([
                 ("derivation".to_owned(), Value::from(producer)),
-                ("was_whole".to_owned(), Value::from(false)),
-                ("whole".to_owned(), Value::from(true)),
+                ("was_complete".to_owned(), Value::from(false)),
+                ("complete".to_owned(), Value::from(true)),
             ])]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![BTreeMap::from([(
@@ -1025,22 +1025,22 @@ mod tests {
         let mark = log
             .iter()
             .position(|s| s.contains("SET fetchable = true"))
-            .expect("what became whole is offered to the mark");
+            .expect("what became complete is offered to the mark");
         let promote = log
             .iter()
             .position(|s| s.contains("SET status = 1"))
             .expect("the owner of the .drv is offered to promotion");
         assert!(
             seed < mark && mark < promote,
-            "the anchor side follows the seed that produced its set: {log:?}"
+            "the shared build side follows the seed that produced its set: {log:?}"
         );
     }
 
     /// The pre-commit presence endpoint must be read under the row lock. A
     /// maintenance retire deletes the same row from its own transaction, outside
-    /// the graph actor, so an unlocked read lets the delete land between the read
+    /// the graph writer, so an unlocked read lets the delete land between the read
     /// and the write: the commit would then call its producers freshly present
-    /// against a row that is gone and count every dependent down a second time,
+    /// against a row that is gone and count every parent down a second time,
     /// permanently. The row read is the commit's first statement.
     #[tokio::test]
     async fn the_pre_commit_endpoint_is_read_under_the_row_lock() {
@@ -1052,7 +1052,7 @@ mod tests {
     }
 
     /// The narinfo `References:` line is one ordered text column on the path now,
-    /// written from the same report the runtime edges are, so the line and the
+    /// written from the same report the runtime dependencies are, so the line and the
     /// signature fingerprint over it reconstruct verbatim.
     #[tokio::test]
     async fn a_commit_writes_the_reported_references_onto_the_row() {
@@ -1105,13 +1105,13 @@ mod tests {
         );
     }
 
-    /// A commit that names a reference whose producer is not whole takes its OWN
-    /// producer out of wholeness: the new runtime edge is a hole, the seed reports
-    /// the loss, and every anchor left fetchable against it dispatches a build whose
+    /// A commit that names a reference whose producer is not complete takes its OWN
+    /// producer out of complete closure: the new runtime dependency is a missing dependency, the seed reports
+    /// the loss, and every shared build left fetchable against it dispatches a build whose
     /// input nothing can provide. The forward-only half of this pair is the dead
     /// zone this project has paid for repeatedly.
     #[tokio::test]
-    async fn a_commit_that_loses_wholeness_ripples_backward() {
+    async fn a_commit_that_loses_completeness_ripples_backward() {
         let producer = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([
@@ -1126,8 +1126,8 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![BTreeMap::from([
                 ("derivation".to_owned(), Value::from(producer)),
-                ("was_whole".to_owned(), Value::from(true)),
-                ("whole".to_owned(), Value::from(false)),
+                ("was_complete".to_owned(), Value::from(true)),
+                ("complete".to_owned(), Value::from(false)),
             ])]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1147,11 +1147,11 @@ mod tests {
             log.iter()
                 .any(|s| s
                     .contains("INSERT INTO derivation_dependency (derivation, dependency, kind)")),
-            "the hole is recorded as a runtime edge: {log:?}"
+            "the missing dependency is recorded as a runtime dependency: {log:?}"
         );
         assert!(
             log.iter().any(|s| s.contains("SET fetchable = false")),
-            "an anchor that stopped being whole must stop being fetchable: {log:?}"
+            "a shared build that stopped being complete must stop being fetchable: {log:?}"
         );
     }
 
@@ -1171,10 +1171,10 @@ mod tests {
         assert_eq!(committed.outputs_marked, 2);
     }
 
-    /// A relayed NAR on S3 is committed before its object exists, so the row
+    /// A passthrough NAR on S3 is committed before its object exists, so the row
     /// must say so.
     #[tokio::test]
-    async fn a_relayed_commit_on_s3_inserts_the_row_unconfirmed() {
+    async fn a_passed_through_commit_on_s3_inserts_the_row_unconfirmed() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MCachedPath>::new()])
             .append_query_results([vec![returned_cached_path(HASH)]])

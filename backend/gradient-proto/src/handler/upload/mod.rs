@@ -17,7 +17,7 @@ use gradient_wire::messages::ServerMessage;
 use gradient_wire::types::{GrantTarget, UploadMetadata, UploadObject, UploadOutcome};
 use tracing::warn;
 
-use super::dispatch::DispatchContext;
+use super::inbound::InboundContext;
 use super::socket::send_server_msg;
 pub(super) use table::{Granted, Lease, Transfer, UploadTable};
 
@@ -46,7 +46,7 @@ fn key_name(key: &ObjectKey) -> &str {
     }
 }
 
-impl DispatchContext<'_> {
+impl InboundContext<'_> {
     pub(super) async fn on_upload_request(
         &mut self,
         job_id: String,
@@ -161,7 +161,7 @@ impl DispatchContext<'_> {
             },
         };
         Ok(match target {
-            StorageTarget::Relay => {
+            StorageTarget::Passthrough => {
                 let token = key_name(key);
                 let partial = format!("{}/{token}", self.peer_id);
                 let received = uploads.partials.received_len(&partial, token).await?;
@@ -170,10 +170,10 @@ impl DispatchContext<'_> {
                     .open_writer(&partial, token, received, uploads.retain_up_to)
                     .await?;
                 (
-                    GrantTarget::Relay {
+                    GrantTarget::Passthrough {
                         resume_offset: received,
                     },
-                    Transfer::Relay(Box::new(writer)),
+                    Transfer::Passthrough(Box::new(writer)),
                     lease,
                 )
             }
@@ -199,7 +199,7 @@ impl DispatchContext<'_> {
     ) {
         let verdict = match uploads.table.granted_mut(request_id) {
             Some(Granted {
-                transfer: Transfer::Relay(writer),
+                transfer: Transfer::Passthrough(writer),
                 size,
                 lease,
                 final_seen,
@@ -222,7 +222,7 @@ impl DispatchContext<'_> {
                         .map_err(|e| format!("staging failed: {e:#}"))
                 }
             }
-            _ => Err(format!("request {request_id} holds no relay grant")),
+            _ => Err(format!("request {request_id} holds no passthrough grant")),
         };
         if let Err(reason) = verdict {
             if let Some(granted) = uploads.table.remove(request_id) {
@@ -257,7 +257,7 @@ impl DispatchContext<'_> {
                 .await;
         };
         granted.finished = Some(metadata);
-        if matches!(granted.transfer, Transfer::Relay(_)) && !granted.final_seen {
+        if matches!(granted.transfer, Transfer::Passthrough(_)) && !granted.final_seen {
             return uploads.table.grant(request_id, granted);
         }
         self.commit(request_id, granted);
@@ -331,7 +331,7 @@ impl DispatchContext<'_> {
 }
 
 /// Abort what a dropped grant leaves behind in storage: an open multipart
-/// upload. A relay partial is left to the TTL sweep so a retry can resume it.
+/// upload. A passthrough partial is left to the TTL sweep so a retry can resume it.
 pub(super) async fn abandon_transfer(state: &ServerState, granted: Granted) {
     if let (Transfer::Multipart { upload_id }, Some(ObjectKey::Nar(hash))) =
         (&granted.transfer, object_key(&granted.object))
@@ -340,7 +340,7 @@ pub(super) async fn abandon_transfer(state: &ServerState, granted: Granted) {
     }
 }
 
-impl DispatchContext<'_> {
+impl InboundContext<'_> {
     async fn grant(&self, request_id: u64, target: GrantTarget) {
         let _ = send_server_msg(
             self.writer,
@@ -364,7 +364,7 @@ impl DispatchContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handler::dispatch::fixture::{JOB, TestSession, decode};
+    use crate::handler::inbound::fixture::{JOB, TestSession, decode};
     use gradient_test_support::state::test_state;
     use gradient_wire::messages::ClientMessage;
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -393,7 +393,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_request_on_the_local_backend_is_granted_a_relay() {
+    async fn a_request_on_the_local_backend_is_granted_a_passthrough() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
@@ -405,7 +405,7 @@ mod tests {
             decode(sent.try_recv().unwrap()),
             ServerMessage::UploadGrant {
                 request_id: 1,
-                target: GrantTarget::Relay { resume_offset: 0 }
+                target: GrantTarget::Passthrough { resume_offset: 0 }
             }
         ));
         assert_eq!(state.upload_admission.in_flight(), 1);
@@ -427,7 +427,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_granted_relay_accepts_contiguous_chunks_and_rejects_a_gap() {
+    async fn a_granted_passthrough_accepts_contiguous_chunks_and_rejects_a_gap() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
         let (mut session, mut sent, mut admitted) = TestSession::new(&state).await;
         let (mut ctx, uploads) = session.split();
@@ -479,7 +479,7 @@ mod tests {
     }
 
     /// The worker's writer drains the control lane first, so `UploadFinished`
-    /// can overtake the last relayed chunks; the commit must wait for them.
+    /// can overtake the last passed-through chunks; the commit must wait for them.
     #[tokio::test]
     async fn a_finish_that_overtakes_the_final_chunk_waits_for_it() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
@@ -529,11 +529,11 @@ mod tests {
                     ..
                 }
             ),
-            "the complete relay is not rejected"
+            "the complete passthrough is not rejected"
         );
     }
 
-    /// A failed job's uploads must not keep their permits until a lease runs out.
+    /// A failed job's uploads must not keep their permits until a lease expires.
     #[tokio::test]
     async fn a_failed_job_releases_its_granted_and_queued_uploads() {
         let state = test_state(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
@@ -549,13 +549,13 @@ mod tests {
 
         let failed = ClientMessage::JobFailed {
             job_id: JOB.into(),
-            dispatch: "not-this-dispatch".into(),
+            assignment_id: "not-this-dispatch".into(),
             error: "boom".into(),
             kind: gradient_wire::messages::BuildFailureKind::Transient,
             missing_paths: Vec::new(),
             spans: Vec::new(),
         };
-        ctx.dispatch(
+        ctx.handle(
             gradient_wire::session::frame::Inbound::Control(failed),
             uploads,
         )

@@ -42,7 +42,7 @@ pub struct PendingProjectMembership {
 pub type PendingProjectMemberships = HashMap<String, Vec<PendingProjectMembership>>;
 
 /// Outcome of applying declarative state: memberships deferred until their user
-/// exists, and the OIDC/SCIM group → role grants resolved from `StateRole`.
+/// exists, and the OIDC/SCIM group -> role grants resolved from `StateRole`.
 pub struct StateApplyResult {
     pub pending: PendingProjectMemberships,
     pub oidc_group_roles: crate::OidcGroupRoles,
@@ -72,7 +72,7 @@ pub(super) async fn apply_state_to_database(
     app.apply_project_members(&config.projects, &mut pending)
         .await?;
     // Integrations must land before tasks: task triggers
-    // (reporter_push/reporter_pull_request) and `forge_status_report` actions
+    // (reporter_push/reporter_pull_request) and `git_host_status_report` actions
     // resolve integrations by name from the DB at apply time (#332).
     app.apply_integrations(&config.integrations).await?;
     app.apply_tasks(&config.tasks).await?;

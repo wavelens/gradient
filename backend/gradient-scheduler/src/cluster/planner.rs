@@ -134,15 +134,18 @@ mod tests {
     };
 
     fn build_member(role: &str, pin: Option<&str>) -> ClusterMember {
-        let anchor = DerivationBuildId::now_v7();
-        let job =
-            crate::scheduler_tests::build_job(EvaluationId::now_v7(), ProjectId::now_v7(), anchor);
+        let shared_build = DerivationBuildId::now_v7();
+        let job = crate::scheduler_tests::build_job(
+            EvaluationId::now_v7(),
+            ProjectId::now_v7(),
+            shared_build,
+        );
         ClusterMember {
             id: ClusterMemberId::now_v7(),
             role: role.into(),
             primary: false,
             pin: pin.map(str::to_owned),
-            key: crate::jobs::build_job_key(anchor),
+            key: crate::jobs::build_job_key(shared_build),
             job: Some(PendingJob::Build(job)),
         }
     }

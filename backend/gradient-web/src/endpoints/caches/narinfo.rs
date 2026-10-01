@@ -252,7 +252,7 @@ async fn fetch_from_upstream(
     cache: &MCache,
     path_hash: &str,
 ) -> Option<String> {
-    let upstreams: Vec<UpstreamProbe> = ECacheUpstream::find()
+    let upstream_caches: Vec<UpstreamProbe> = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache.id))
         .all(&state.web_db)
         .await
@@ -273,9 +273,12 @@ async fn fetch_from_upstream(
         })
         .collect();
 
-    let found =
-        gradient_core::upstream::fetch_narinfo_body(http::download_client(), &upstreams, path_hash)
-            .await?;
+    let found = gradient_core::upstream::fetch_narinfo_body(
+        http::download_client(),
+        &upstream_caches,
+        path_hash,
+    )
+    .await?;
 
     let body = rewrite_nar_url(&found.body, found.upstream);
 

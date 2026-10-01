@@ -51,7 +51,7 @@ pub fn make_entry_point(eval_id: EvaluationId, derivation: DerivationId) -> MEnt
     }
 }
 
-pub fn make_anchor(derivation: DerivationId, status: BuildStatus) -> MDerivationBuild {
+pub fn make_shared_build(derivation: DerivationId, status: BuildStatus) -> MDerivationBuild {
     MDerivationBuild {
         id: DerivationBuildId::now_v7(),
         derivation,

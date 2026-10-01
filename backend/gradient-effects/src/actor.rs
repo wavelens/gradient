@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Claims due outbox rows and hands them to whoever delivers them. Nothing here
+//! Claims due pending-delivery rows and hands them to whoever delivers them. Nothing here
 //! talks to the network and nothing here talks to a database: the store and the
 //! deliverer are traits, so the one thing this actor owns - never more than
 //! `capacity` deliveries in flight, and one pass per burst of wakes - is tested
@@ -15,8 +15,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gradient_db::outbox::{OutboxRow, Outcome};
-use gradient_types::ids::OutboxId;
+use gradient_db::pending_deliveries::{Outcome, PendingDelivery};
+use gradient_types::ids::PendingDeliveryId;
 use gradient_util::supervision::SupervisorHealth;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
 use tracing::warn;
@@ -24,22 +24,22 @@ use tracing::warn;
 pub const HEALTH_NAME: &str = "effects";
 
 /// Where due rows come from and where their outcome goes back to.
-pub trait OutboxStore: Send + Sync + 'static {
+pub trait PendingDeliveryStore: Send + Sync + 'static {
     fn claim_due(
         &self,
         limit: usize,
-    ) -> impl Future<Output = anyhow::Result<Vec<OutboxRow>>> + Send;
+    ) -> impl Future<Output = anyhow::Result<Vec<PendingDelivery>>> + Send;
     fn mark(
         &self,
-        row: &OutboxRow,
+        row: &PendingDelivery,
         outcome: &Outcome,
     ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
 /// Hands one claimed row to whoever delivers it; the deliverer answers with
 /// [`EffectsMsg::Done`] on `reply`.
-pub trait Dispatch: Send + Sync + 'static {
-    fn dispatch(&self, row: OutboxRow, reply: ActorRef<EffectsMsg>);
+pub trait Handoff: Send + Sync + 'static {
+    fn hand_off(&self, row: PendingDelivery, reply: ActorRef<EffectsMsg>);
 }
 
 pub enum EffectsMsg {
@@ -50,14 +50,14 @@ pub enum EffectsMsg {
     /// The backstop, in case a wake was lost with the writer that sent it.
     Tick,
     Done {
-        row: OutboxRow,
+        row: PendingDelivery,
         outcome: Outcome,
     },
 }
 
 pub struct EffectsArgs<S, D> {
     pub store: Arc<S>,
-    pub dispatch: Arc<D>,
+    pub hand_off: Arc<D>,
     pub capacity: usize,
     pub tick: Duration,
     pub health: Option<Arc<SupervisorHealth>>,
@@ -65,7 +65,7 @@ pub struct EffectsArgs<S, D> {
 
 pub struct EffectsState<S, D> {
     args: EffectsArgs<S, D>,
-    in_flight: HashSet<OutboxId>,
+    in_flight: HashSet<PendingDeliveryId>,
     pass_scheduled: bool,
 }
 
@@ -77,7 +77,7 @@ impl<S, D> Default for EffectsActor<S, D> {
     }
 }
 
-impl<S: OutboxStore, D: Dispatch> Actor for EffectsActor<S, D> {
+impl<S: PendingDeliveryStore, D: Handoff> Actor for EffectsActor<S, D> {
     type Msg = EffectsMsg;
     type State = EffectsState<S, D>;
     type Arguments = EffectsArgs<S, D>;
@@ -126,7 +126,7 @@ impl<S: OutboxStore, D: Dispatch> Actor for EffectsActor<S, D> {
             EffectsMsg::Done { row, outcome } => {
                 st.in_flight.remove(&row.id);
                 if let Err(e) = st.args.store.mark(&row, &outcome).await {
-                    warn!(error = %e, outbox = %row.id, "failed to record an outbox outcome");
+                    warn!(error = %e, delivery = %row.id, "failed to record a delivery outcome");
                 }
                 pass(&myself, st).await;
             }
@@ -138,7 +138,7 @@ impl<S: OutboxStore, D: Dispatch> Actor for EffectsActor<S, D> {
 
 /// Fill every free slot, then stop. A claim that comes back short means the
 /// queue is drained, so the pass ends rather than asking again for nothing.
-async fn pass<S: OutboxStore, D: Dispatch>(
+async fn pass<S: PendingDeliveryStore, D: Handoff>(
     myself: &ActorRef<EffectsMsg>,
     st: &mut EffectsState<S, D>,
 ) {
@@ -152,7 +152,7 @@ async fn pass<S: OutboxStore, D: Dispatch>(
             Ok(rows) => rows,
             Err(e) => {
                 record(&st.args.health, Err(&e));
-                warn!(error = %e, "failed to claim due outbox rows");
+                warn!(error = %e, "failed to claim due pending deliveries");
                 return;
             }
         };
@@ -160,7 +160,7 @@ async fn pass<S: OutboxStore, D: Dispatch>(
         let claimed = rows.len();
         for row in rows {
             st.in_flight.insert(row.id);
-            st.args.dispatch.dispatch(row, myself.clone());
+            st.args.hand_off.hand_off(row, myself.clone());
         }
 
         if claimed < free {
@@ -187,18 +187,18 @@ fn record(health: &Option<Arc<SupervisorHealth>>, outcome: Result<(), &anyhow::E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::outbox::OutboxKind;
+    use gradient_entity::pending_delivery::PendingDeliveryKind;
     use gradient_util::sync::Mutex;
     use std::collections::VecDeque;
 
     struct Store {
-        rows: Mutex<VecDeque<OutboxRow>>,
+        rows: Mutex<VecDeque<PendingDelivery>>,
         claims: Mutex<Vec<usize>>,
-        marks: Mutex<Vec<(OutboxId, Outcome)>>,
+        marks: Mutex<Vec<(PendingDeliveryId, Outcome)>>,
     }
 
     impl Store {
-        fn with(rows: impl IntoIterator<Item = OutboxRow>) -> Arc<Self> {
+        fn with(rows: impl IntoIterator<Item = PendingDelivery>) -> Arc<Self> {
             Arc::new(Self {
                 rows: Mutex::new(rows.into_iter().collect()),
                 claims: Mutex::new(Vec::new()),
@@ -207,14 +207,14 @@ mod tests {
         }
     }
 
-    impl OutboxStore for Store {
-        async fn claim_due(&self, limit: usize) -> anyhow::Result<Vec<OutboxRow>> {
+    impl PendingDeliveryStore for Store {
+        async fn claim_due(&self, limit: usize) -> anyhow::Result<Vec<PendingDelivery>> {
             self.claims.lock().push(limit);
             let mut rows = self.rows.lock();
             Ok((0..limit).filter_map(|_| rows.pop_front()).collect())
         }
 
-        async fn mark(&self, row: &OutboxRow, outcome: &Outcome) -> anyhow::Result<()> {
+        async fn mark(&self, row: &PendingDelivery, outcome: &Outcome) -> anyhow::Result<()> {
             self.marks.lock().push((row.id, outcome.clone()));
             Ok(())
         }
@@ -222,18 +222,18 @@ mod tests {
 
     /// Holds every dispatched row until the test releases it.
     #[derive(Default)]
-    struct Held(Mutex<Vec<(OutboxRow, ActorRef<EffectsMsg>)>>);
+    struct Held(Mutex<Vec<(PendingDelivery, ActorRef<EffectsMsg>)>>);
 
-    impl Dispatch for Held {
-        fn dispatch(&self, row: OutboxRow, reply: ActorRef<EffectsMsg>) {
+    impl Handoff for Held {
+        fn hand_off(&self, row: PendingDelivery, reply: ActorRef<EffectsMsg>) {
             self.0.lock().push((row, reply));
         }
     }
 
-    fn row(n: u8) -> OutboxRow {
-        OutboxRow {
-            id: OutboxId::now_v7(),
-            kind: OutboxKind::ActionDelivery,
+    fn row(n: u8) -> PendingDelivery {
+        PendingDelivery {
+            id: PendingDeliveryId::now_v7(),
+            kind: PendingDeliveryKind::ActionDelivery,
             key: n.to_string(),
             payload: serde_json::json!({}),
             attempts: 0,
@@ -250,7 +250,7 @@ mod tests {
             EffectsActor::<Store, Held>::default(),
             EffectsArgs {
                 store,
-                dispatch: held,
+                hand_off: held,
                 capacity,
                 tick: Duration::from_secs(3600),
                 health: None,

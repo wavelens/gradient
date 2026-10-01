@@ -62,7 +62,7 @@ pub async fn get_build_log_chunks(
     Path(build_id): Path<BuildJobId>,
 ) -> WebResult<Json<BaseResponse<LogChunkIndex>>> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let rows = match super::effective_log_id(&state, &ctx.anchor).await {
+    let rows = match super::effective_log_id(&state, &ctx.shared_build).await {
         Some(log_key) => load_chunk_rows(&state, log_key).await?,
         None => vec![],
     };
@@ -101,7 +101,7 @@ pub async fn get_build_log_chunk(
     Path((build_id, index)): Path<(BuildJobId, u32)>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let log_key = super::effective_log_id(&state, &ctx.anchor)
+    let log_key = super::effective_log_id(&state, &ctx.shared_build)
         .await
         .ok_or_else(|| WebError::not_found("LogChunk"))?;
 
@@ -158,7 +158,7 @@ pub async fn get_build_log_lines(
     Query(q): Query<LineRangeQuery>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let Some(log_key) = super::effective_log_id(&state, &ctx.anchor).await else {
+    let Some(log_key) = super::effective_log_id(&state, &ctx.shared_build).await else {
         return Ok((
             [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
             String::new(),
@@ -227,7 +227,7 @@ pub async fn get_build_log_search(
     Query(query): Query<SearchQuery>,
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
-    let (log_key, rows) = match super::effective_log_id(&state, &ctx.anchor).await {
+    let (log_key, rows) = match super::effective_log_id(&state, &ctx.shared_build).await {
         Some(key) => (key, load_chunk_rows(&state, key).await?),
         None => {
             return Ok(

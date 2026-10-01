@@ -110,7 +110,7 @@ pub async fn enable_auto_base_workers_for_project<C: ConnectionTrait>(
 }
 
 /// Links every existing project to one base worker, skipping the ones already
-/// linked. Runs once when an `auto_enable` base worker first appears.
+/// linked. Executes once when an `auto_enable` base worker first appears.
 pub async fn enable_base_worker_for_all_projects<C: ConnectionTrait>(
     db: &C,
     base_worker: BaseWorkerId,

@@ -40,7 +40,7 @@ pub async fn unpark_no_cache_for_project<C: ConnectionTrait>(
 
 /// Flip evaluations parked with `WaitingReason::CacheStorageFull` for tasks
 /// in `project` back to `Queued`, but only when the project actually has
-/// storage headroom again. The guard prevents a churn of re-queue → re-park
+/// storage headroom again. The guard prevents a churn of re-queue -> re-park
 /// when nothing actionable changed (mirrors `unpark_no_workers_for_project`).
 pub async fn unpark_storage_full_for_project<C: ConnectionTrait>(
     db: &C,
@@ -103,12 +103,12 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
 /// is what `park_if_no_workers` writes when the project has no active
 /// `eval`-capable worker registration at all; other `Workers { .. }` parks
 /// (capability mismatch, transient runtime stall) are owned by the
-/// build-dispatch reconciler and are left alone.
+/// build-dispatch repair pass and are left alone.
 ///
 /// No-op when the project still has no active `eval`-capable worker
 /// registration - callers in the worker endpoints invoke this unconditionally
 /// after any registration touch, and this guard prevents a churn of
-/// re-queue → reconciler re-park when nothing actionable changed.
+/// re-queue -> repair pass re-park when nothing actionable changed.
 pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
@@ -408,7 +408,7 @@ mod tests {
             e
         };
         // A Workers park with connected_workers > 0 represents a capability
-        // mismatch the runtime reconciler manages; the registration unpark
+        // mismatch the runtime repair pass manages; the registration unpark
         // path must leave it alone.
         let capability_mismatch = {
             let mut e = waiting_eval(WaitingReason::workers(
@@ -425,13 +425,13 @@ mod tests {
         requeued.waiting_reason = None;
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Gate: project has an eval-capable registration → continue
+            // Gate: project has an eval-capable registration -> continue
             .append_query_results([vec![eval_capable_registration()]])
             // Fetch project's tasks
             .append_query_results([vec![task.clone()]])
             // Fetch Waiting evals across those tasks
             .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
-            // Update the one matching row → only `stranded` is touched
+            // Update the one matching row -> only `stranded` is touched
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -475,13 +475,13 @@ mod tests {
         requeued.waiting_reason = None;
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Guard `project_caches_all_full`: no writable caches → not full.
+            // Guard `project_caches_all_full`: no writable caches -> not full.
             .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             // unpark_for_project: project's tasks
             .append_query_results([vec![task.clone()]])
             // unpark_for_project: Waiting evals across those tasks
             .append_query_results([vec![stranded.clone()]])
-            // Update the matching row → requeued
+            // Update the matching row -> requeued
             .append_query_results([vec![requeued.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,

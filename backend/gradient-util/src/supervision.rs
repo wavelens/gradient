@@ -37,9 +37,9 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const HEALTHY_RESET: Duration = Duration::from_secs(300);
 const STOP_TIMEOUT: Duration = Duration::from_secs(25);
 
-/// A pass that runs every `period`, cancelled in place past `budget`. A `wake`
-/// runs the next pass at once instead of at the end of the period; one arriving
-/// during a pass runs another right after it.
+/// A pass that starts every `period`, cancelled in place past `budget`. A `wake`
+/// starts the next pass at once instead of at the end of the period; one arriving
+/// during a pass starts another right after it.
 #[derive(Clone)]
 pub struct PeriodicSpec {
     pub name: &'static str,
@@ -568,7 +568,7 @@ mod tests {
     }
 
     /// A queued evaluation sat out the rest of a 5 s dispatch tick before
-    /// anything looked at it; a wake runs the pass now.
+    /// anything looked at it; a wake starts the pass now.
     #[tokio::test]
     async fn a_wake_runs_the_pass_before_its_period() {
         let shutdown = Shutdown::new();

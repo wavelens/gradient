@@ -278,7 +278,7 @@ impl JobExecutor {
         self.evaluator.shutdown().await;
     }
 
-    /// Execute a `FlakeJob` (fetch → eval-flake → eval-derivations).
+    /// Execute a `FlakeJob` (fetch -> eval-flake -> eval-derivations).
     ///
     /// When `FetchFlake` and eval steps are in the same job, the local clone
     /// path from the fetch is reused for evaluation - the repo is cloned
@@ -291,7 +291,7 @@ impl JobExecutor {
         credentials: &CredentialStore,
         abort: watch::Receiver<bool>,
     ) -> Result<()> {
-        // If FetchFlake runs, it stores the local checkout path here so
+        // If FetchFlake is running, it stores the local checkout path here so
         // subsequent eval steps use it instead of the remote URL.
         let mut local_flake_path: Option<String> = None;
 
@@ -368,7 +368,7 @@ impl JobExecutor {
         Ok(())
     }
 
-    /// Execute a `BuildJob` (builds → compress → push).
+    /// Execute a `BuildJob` (builds -> compress -> push).
     ///
     /// Before each derivation is built, we prefetch any of its input store
     /// paths that aren't in the local store from the server's cache (via
@@ -422,7 +422,7 @@ impl JobExecutor {
             check_abort(&abort)?;
             // Move the build to `Building` on the server *before* anything
             // that can fail. The state machine only allows
-            // `Building → Failed`; if we let prefetch (or anything before
+            // `Building -> Failed`; if we let prefetch (or anything before
             // `report_building`) bubble up an error first, the eventual
             // `JobFailed` would arrive at the server while the build is
             // still `Queued`, the transition would be rejected, and the UI
@@ -445,7 +445,7 @@ impl JobExecutor {
             }
 
             if build_task.kind == BuildSpecKind::Substitute {
-                // What the store already held is pinned before the fetch that runs
+                // What the store already held is pinned before the fetch that is running
                 // beside it; what an upstream serves never lands there, so it needs
                 // no root.
                 for (_, path) in &realised {
@@ -711,7 +711,7 @@ mod tests {
         }
     }
 
-    /// A Download runs on workers that have no nix at all, which is the point of
+    /// A Download is running on workers that have no nix at all, which is the point of
     /// the kind. The store that cannot answer must not swallow the output: every
     /// path falls through to the fetch it would have had before this check.
     #[tokio::test]

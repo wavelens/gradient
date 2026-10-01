@@ -6,7 +6,7 @@
 
 //! Prometheus exposition endpoint (`GET /metrics`) - closes #35.
 //!
-//! Collects metrics on demand at scrape time. No background aggregation:
+//! Collects metrics when scraped. No background aggregation:
 //! one DB query plus one scheduler snapshot per request. The route is only
 //! mounted when a metrics token is configured (`MetricsConfig::token`);
 //! when absent, callers fall through to the global 404 handler.
@@ -373,7 +373,7 @@ pub(crate) fn process_snapshot() -> ProcessStat {
     s
 }
 
-/// Middleware recording each request's duration and status keyed by the matched
+/// Middleware recording each request's duration and status per the matched
 /// route template (so dynamic segments don't explode label cardinality).
 pub async fn track_http_metrics(request: axum::extract::Request, next: Next) -> Response {
     let method = request.method().as_str().to_owned();

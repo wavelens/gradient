@@ -53,7 +53,7 @@ pub mod flake_output_node;
 pub mod github_installation;
 pub mod integration;
 pub mod open_pr_state;
-pub mod outbox;
+pub mod pending_delivery;
 pub mod project;
 pub mod project_base_worker;
 pub mod project_cache;

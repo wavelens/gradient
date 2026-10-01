@@ -5,7 +5,7 @@
  */
 
 //! Graph-derived evaluation finalization. An evaluation settles the moment its
-//! last referenced anchor leaves the active set, regardless of WHICH mutation
+//! last referenced shared build leaves the active set, regardless of WHICH mutation
 //! path moved it - the effects emitter calls in here on every terminal
 //! transition, so bulk sweeps and the single-row path finalize identically.
 
@@ -16,8 +16,8 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::info;
 
-/// Settle `evaluation_id` once no anchor it names blocks it
-/// ([`crate::graph_sql::blocks_evaluation`]). `Failed` when any anchor ended
+/// Settle `evaluation_id` once no shared build it names blocks it
+/// ([`crate::graph_sql::blocks_evaluation`]). `Failed` when any shared build ended
 /// unbuilt or the eval logged error-level messages (nix eval errors mean a
 /// partially-successful walk), else `Completed`. A no-op unless the evaluation
 /// is in its build phase.
@@ -51,7 +51,7 @@ pub async fn check_evaluation_done(
         return Ok(());
     }
 
-    let any_failed = crate::reachability::eval_any_anchor_failed(db, evaluation_id).await?;
+    let any_failed = crate::reachability::eval_any_shared_build_failed(db, evaluation_id).await?;
 
     let eval_error_messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
@@ -80,7 +80,7 @@ pub async fn check_evaluation_done(
 
 /// An evaluation whose builds are what it is waiting on: `Building`, or parked on
 /// a reason the build phase owns. A pre-build park (`Approval`, `NoCache`, the
-/// capacity and drain reasons) has named no anchors of its own yet, and an
+/// capacity and drain reasons) has named no shared builds of its own yet, and an
 /// `Aborting` park belongs to the abort, which writes the terminal status itself.
 fn in_build_phase(eval: &MEvaluation) -> bool {
     match eval.status {
@@ -98,7 +98,7 @@ fn in_build_phase(eval: &MEvaluation) -> bool {
 /// Finalize every evaluation referencing any of `derivations`, deduplicated.
 ///
 /// The referencing set is resolved for the whole batch in one read rather than one
-/// per derivation: a demand loss names as many derivations as the recompute moved,
+/// per derivation: a need loss names as many derivations as the update moved,
 /// and the union is all this wants.
 pub async fn finalize_evals_for_derivations(
     ctx: &DbContext,
@@ -119,7 +119,7 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 
-    /// The reply to the counters read: the evaluation names two anchors.
+    /// The reply to the counters read: the evaluation names two shared builds.
     fn counters(active: i64, failed: i64) -> Vec<BTreeMap<String, Value>> {
         vec![BTreeMap::from([
             ("named".to_owned(), Value::BigInt(Some(2))),
@@ -187,9 +187,9 @@ mod tests {
         );
     }
 
-    /// An anchor still blocking stops the pass at the one read. The emitter asks
+    /// A shared build still blocking stops the pass at the one read. The emitter asks
     /// this on every terminal transition, so the blocked answer must cost the
-    /// counters row and must not read the anchor set or the evaluation row.
+    /// counters row and must not read the shared build set or the evaluation row.
     #[tokio::test]
     async fn a_blocked_evaluation_costs_one_read() {
         let eval = building();
@@ -203,13 +203,13 @@ mod tests {
 
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(log.len(), 1, "one counters read and nothing else: {log:?}");
-        assert!(log[0].contains("evaluation_anchor_delta"), "{log:?}");
+        assert!(log[0].contains("evaluation_shared_build_delta"), "{log:?}");
     }
 
     /// The verdict is the exact read's, not the counter's: a `failed` counter
     /// that missed an abort would otherwise turn a red evaluation green.
     #[tokio::test]
-    async fn a_failed_anchor_fails_the_evaluation() {
+    async fn a_failed_shared_build_fails_the_evaluation() {
         let eval = building();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([counters(0, 0)])
@@ -245,7 +245,7 @@ mod tests {
     }
 
     /// Counters that say nothing blocks while the exact read finds a blocking
-    /// anchor drifted low: the evaluation is recounted, not settled.
+    /// shared build drifted low: the evaluation is recounted, not settled.
     #[tokio::test]
     async fn counters_the_exact_read_contradicts_are_recounted() {
         let eval = building();
@@ -262,7 +262,7 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
             log[2].contains("pg_advisory_xact_lock")
-                && log[3].contains("DELETE FROM evaluation_anchor_delta"),
+                && log[3].contains("DELETE FROM evaluation_shared_build_delta"),
             "{log:?}"
         );
         assert!(

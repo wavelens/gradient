@@ -80,7 +80,7 @@ fn client_builder() -> reqwest::ClientBuilder {
     untimed_client_builder().timeout(DEFAULT_TIMEOUT)
 }
 
-/// Client for API traffic (forges, webhooks, OIDC).
+/// Client for API traffic (Git hosts, webhooks, OIDC).
 /// Redirects are refused: following one on an authenticated call is an SSRF
 /// pivot, so a 3xx must surface as itself.
 pub fn build_client() -> reqwest::Result<reqwest::Client> {

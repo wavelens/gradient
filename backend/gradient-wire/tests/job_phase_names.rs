@@ -8,7 +8,7 @@ use gradient_wire::types::JobPhase;
 
 #[test]
 fn a_retired_code_keeps_its_historical_name() {
-    assert_eq!(JobPhase::name_of(9), "substitute_relay");
+    assert_eq!(JobPhase::name_of(9), "substitute_passthrough");
 }
 
 #[test]

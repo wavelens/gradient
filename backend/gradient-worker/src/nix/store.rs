@@ -13,7 +13,7 @@
 //!
 //! ## Connection-poisoning policy
 //!
-//! Every daemon op runs inside [`PooledConnectionGuard::execute`], which
+//! Every daemon op executes inside [`PooledConnectionGuard::execute`], which
 //! discards the connection unless the op returns cleanly - so a cancelled
 //! or errored exchange never recycles a mid-protocol socket (which would
 //! surface downstream as `"serialised integer N is too large for type 'j'"`
@@ -42,7 +42,7 @@ use gradient_worker_client::nar::{PathMeta, PathMetaSource};
 /// Maximum time `pool.acquire()` blocks before failing with a timeout.
 ///
 /// `add_to_store_nar` legitimately holds a connection for the duration of a
-/// NAR upload + daemon ingest, which can run into the tens of seconds for
+/// NAR upload + daemon import, which can run into the tens of seconds for
 /// large closures. With concurrent build jobs each issuing parallel
 /// prefetch imports, the pool's acquire queue can grow well past the
 /// harmonia default of 30 s - long enough that downstream acquires time
@@ -116,13 +116,13 @@ impl LocalNixStore {
     /// Check whether a store path is present in the local store.
     ///
     /// Uses `is_valid_path` rather than `query_path_info`. The former is the
-    /// authoritative "the daemon will accept a dependent that references
+    /// authoritative "the daemon will accept a parent that references
     /// this path" check; the latter only confirms the store DB has metadata
     /// for the path, which can disagree with on-disk presence after a GC
     /// race or an interrupted import. A `query_path_info` false-positive
     /// causes the prefetch closure walk to skip a path the daemon will then
     /// reject, surfacing as a confusing `store path '...' does not exist`
-    /// error during import of a dependent.
+    /// error during import of a parent.
     pub async fn has_path(&self, store_path: &str) -> Result<bool> {
         let hash_name = strip_store_prefix(store_path);
         let sp = StorePath::from_base_path(hash_name)

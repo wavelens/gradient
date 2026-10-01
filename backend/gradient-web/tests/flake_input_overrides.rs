@@ -419,7 +419,7 @@ fn patch_omitting_url_does_not_change_it() {
             session_id,
         ))
         .append_query_results([vec![nixpkgs_override_row()]])
-        // dup-check for "renamed" → empty means no conflict
+        // dup-check for "renamed" -> empty means no conflict
         .append_query_results([Vec::<task_flake_input_override::Model>::new()])
         .append_query_results([vec![updated]]);
 

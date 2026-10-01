@@ -283,7 +283,7 @@ pub async fn get_project_workers(
         .all(&state.web_db)
         .await?;
 
-    // Build a map of worker_id → live info from the scheduler.
+    // Build a map of worker_id -> live info from the scheduler.
     let live_workers: std::collections::HashMap<String, WorkerInfo> = scheduler
         .workers_info()
         .await

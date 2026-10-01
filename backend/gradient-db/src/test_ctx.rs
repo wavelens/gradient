@@ -39,7 +39,7 @@ pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
 }
 
 /// [`ctx`] with the probe channel's receiving end, for a test whose subject is
-/// what a demand move hands the upstream probe.
+/// what a need move hands the upstream probe.
 pub(crate) async fn ctx_with_probes(
     db: DatabaseConnection,
 ) -> (
@@ -93,9 +93,9 @@ pub(crate) async fn ctx_at(db: DatabaseConnection, dir: &std::path::Path) -> (Db
         },
         shutdown: Shutdown::new(),
         events: gradient_types::EventBus::new(16),
-        outbox_wake: Default::default(),
+        delivery_wake: Default::default(),
         probe_requests: ProbeRequests::default(),
-        ready_set: Default::default(),
+        startable_set: Default::default(),
     };
 
     (ctx, worker_db)

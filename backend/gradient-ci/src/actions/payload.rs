@@ -6,8 +6,8 @@
 
 use serde_json::Value as JsonValue;
 
-/// Builds the payload skeleton expected by `execute_forge_status_report`.
-pub fn forge_status_payload(
+/// Builds the payload skeleton expected by `execute_git_host_status_report`.
+pub fn git_host_status_payload(
     owner: &str,
     repo: &str,
     sha: &str,

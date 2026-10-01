@@ -33,7 +33,7 @@ pub struct GradientCapabilities {
     /// Peer is the Gradient server itself (coordinator).
     /// Always `true` on the server side, always `false` for external workers.
     pub core: bool,
-    /// Client supports federation - relaying work and NAR traffic between workers and servers.
+    /// Client supports federation - forwarding work and NAR traffic between workers and servers.
     pub federate: bool,
     /// Client supports fetching flake inputs and pre-fetching sources.
     pub fetch: bool,
@@ -329,7 +329,7 @@ pub enum UploadObject {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum GrantTarget {
     Skip,
-    Relay { resume_offset: u64 },
+    Passthrough { resume_offset: u64 },
     Put { url: String },
     Multipart(PresignedMultipart),
 }
@@ -391,7 +391,7 @@ pub struct CachedPath {
     /// Populated for cached paths in [`QueryMode::Pull`].
     pub nar_hash: Option<String>,
     /// SHA-256 of the compressed NAR (`FileHash`) in `sha256:<nix32>` format.
-    /// Populated for cached paths in [`QueryMode::Pull`]; lets the worker relay
+    /// Populated for cached paths in [`QueryMode::Pull`]; lets the worker pass through
     /// a verbatim upstream NAR without recomputing its file hash.
     pub file_hash: Option<String>,
     /// Other store paths this path references (full `/nix/store/...` paths).
@@ -636,7 +636,7 @@ impl JobPhase {
     }
 
     /// Wire/DB discriminant, written out so reordering the enum cannot silently
-    /// re-label historical rows. 9 is retired (`substitute_relay`) and must stay
+    /// re-label historical rows. 9 is retired (`substitute_passthrough`) and must stay
     /// unused; [`Self::name_of`] still names it for historical spans.
     pub const fn as_i16(self) -> i16 {
         match self {
@@ -683,7 +683,7 @@ impl JobPhase {
     pub fn name_of(v: i16) -> std::borrow::Cow<'static, str> {
         match (Self::from_i16(v), v) {
             (Some(phase), _) => phase.as_str().into(),
-            (None, 9) => "substitute_relay".into(),
+            (None, 9) => "substitute_passthrough".into(),
             (None, _) => format!("unknown_{v}").into(),
         }
     }
@@ -766,7 +766,7 @@ pub enum BuildFailureKind {
     /// Infrastructure failure (OOM, disk full, network/substitution error,
     /// builder crash) - eligible for retry. Default so a wire-decode glitch
     /// retries within the bounded attempt budget instead of permanently
-    /// poisoning the build-once anchor; unclassified worker errors map to
+    /// poisoning the build-once shared build; unclassified worker errors map to
     /// `Permanent` explicitly in `wire_failure`, never via this default.
     #[default]
     Transient,
@@ -792,7 +792,7 @@ pub enum BuildFailureKind {
     CorruptEvalCache,
     /// The server sent `AbortJob` and the worker stopped. Not a failure of the
     /// derivation: it is recorded as `AttemptOutcome::Aborted` with no reason,
-    /// so a later evaluation can thaw the anchor. Reporting an abort as
+    /// so a later evaluation can thaw the shared build. Reporting an abort as
     /// `Permanent` stamped `AttemptFailureReason::BuilderNonzero` on the
     /// attempt, which permanently blocks every requeue (#572).
     Aborted,

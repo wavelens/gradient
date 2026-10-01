@@ -8,7 +8,7 @@
 //! database, one unit per step. A round is an `admin_task` row whose checkpoint
 //! names the last finished unit, so a restart resumes it. Background rounds
 //! start every `gc.deep_interval_secs` and pace their units; a round requested
-//! by `POST /admin/maintenance/deep-gc` runs its units back to back.
+//! by `POST /admin/maintenance/deep-gc` executes its units back to back.
 
 mod passes;
 

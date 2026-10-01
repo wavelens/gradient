@@ -37,11 +37,11 @@ pub struct StoreFixture {
     pub entry_point: String,
     /// All discovered derivations (full closure via BFS from entry point).
     pub derivations: Vec<DiscoveredDerivation>,
-    /// Adjacency list: drv_path → direct dependency drv_paths.
+    /// Adjacency list: drv_path -> direct dependency drv_paths.
     pub tree: HashMap<String, Vec<String>>,
-    /// All parsed derivations keyed by store path.
+    /// All parsed derivations per store path.
     pub parsed: HashMap<String, Derivation>,
-    /// Raw `.drv` file bytes keyed by store path (for `FakeDrvReader`).
+    /// Raw `.drv` file bytes per store path (for `FakeDrvReader`).
     pub raw_drvs: HashMap<String, Vec<u8>>,
     /// Configured `FakeDerivationResolver` with all drv data loaded.
     pub resolver: FakeDerivationResolver,
@@ -265,9 +265,9 @@ impl StoreFixture {
             .collect()
     }
 
-    /// Derivations that are ready to build: all dependencies are built, but
+    /// Derivations that can start: all dependencies are built, but
     /// this derivation itself is not.
-    pub fn ready_to_build(&self) -> Vec<&DiscoveredDerivation> {
+    pub fn startable(&self) -> Vec<&DiscoveredDerivation> {
         self.derivations
             .iter()
             .filter(|d| {
@@ -353,23 +353,26 @@ mod tests {
         fixture.mark_all_built();
         assert_eq!(fixture.built().len(), fixture.derivations.len());
         assert!(fixture.unbuilt().is_empty());
-        assert!(fixture.ready_to_build().is_empty());
+        assert!(fixture.startable().is_empty());
     }
 
     #[test]
-    fn leaf_nodes_are_ready_to_build() {
+    fn leaf_nodes_can_start() {
         let fixture = load_store(&fixture_dir());
-        let ready = fixture.ready_to_build();
-        // Leaf nodes (no dependencies) should be ready.
-        for drv in &ready {
+        let startable = fixture.startable();
+        // Leaf nodes (no dependencies) can start.
+        for drv in &startable {
             assert!(
                 drv.dependencies.is_empty(),
-                "{} is ready but has dependencies: {:?}",
+                "{} can start but has dependencies: {:?}",
                 drv.drv_path,
                 drv.dependencies
             );
         }
-        assert!(!ready.is_empty(), "there should be at least one leaf node");
+        assert!(
+            !startable.is_empty(),
+            "there should be at least one leaf node"
+        );
     }
 
     #[test]
@@ -393,18 +396,18 @@ mod tests {
     }
 
     #[test]
-    fn ready_to_build_converges() {
+    fn startable_converges() {
         let mut fixture = load_store(&fixture_dir());
         let total = fixture.derivations.len();
         let mut waves = 0;
 
         loop {
-            let ready = fixture.ready_to_build();
-            if ready.is_empty() {
+            let startable = fixture.startable();
+            if startable.is_empty() {
                 break;
             }
-            // Build everything that's ready.
-            let paths: Vec<String> = ready.iter().map(|d| d.drv_path.clone()).collect();
+            // Build everything that can start.
+            let paths: Vec<String> = startable.iter().map(|d| d.drv_path.clone()).collect();
             for path in &paths {
                 fixture.mark_built(path);
             }
@@ -469,15 +472,15 @@ mod tests {
             fixture.store.remove_present_path(&output.path);
         }
 
-        let ready = fixture.ready_to_build();
+        let startable = fixture.startable();
         assert!(
-            ready.iter().any(|d| d.drv_path == leaf),
-            "unbuilt leaf should be ready to build"
+            startable.iter().any(|d| d.drv_path == leaf),
+            "unbuilt leaf can start"
         );
     }
 
     #[test]
-    fn ready_to_build_respects_dependencies() {
+    fn startable_respects_dependencies() {
         let mut fixture = load_store(&fixture_dir());
         // Build only leaf nodes.
         let leaves: Vec<String> = fixture
@@ -489,9 +492,9 @@ mod tests {
         for leaf in &leaves {
             fixture.mark_built(leaf);
         }
-        let ready = fixture.ready_to_build();
-        // Ready nodes must have all deps built but not be built themselves.
-        for drv in &ready {
+        let startable = fixture.startable();
+        // Startable nodes must have all deps built but not be built themselves.
+        for drv in &startable {
             assert!(!fixture.is_built(drv));
             for dep in &drv.dependencies {
                 let dep_drv = fixture
@@ -501,7 +504,7 @@ mod tests {
                     .unwrap();
                 assert!(
                     fixture.is_built(dep_drv),
-                    "{} is ready but dep {} is not built",
+                    "{} can start but dep {} is not built",
                     drv.drv_path,
                     dep
                 );

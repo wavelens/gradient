@@ -72,7 +72,7 @@ pub const MAX_PROTO_MESSAGE_SIZE: usize = 8 * 1024 * 1024;
 pub const SAFE_INFLIGHT_MESSAGE_SIZE: usize = 2 * 1024 * 1024;
 
 /// Maximum time the server will wait for a peer to complete the handshake
-/// (Discoverable check → InitConnection → AuthChallenge → AuthResponse →
+/// (Discoverable check -> InitConnection -> AuthChallenge -> AuthResponse ->
 /// InitAck). A peer that opens the WebSocket and then stalls is dropped after
 /// this deadline so it cannot pin a tokio task and FD indefinitely.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -1029,7 +1029,7 @@ mod tests {
         assert!(
             ClientMessage::JobCompleted {
                 job_id: "build:1".into(),
-                dispatch: "dispatch-1".into(),
+                assignment_id: "dispatch-1".into(),
                 spans: Vec::new(),
             }
             .is_bulk()

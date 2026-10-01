@@ -72,11 +72,11 @@ pub enum ServerMessage {
     /// Assign a job to this worker.  Worker must respond with
     /// [`super::client::ClientMessage::AssignJobResponse`] before starting
     /// work.
-    /// `dispatch` is the `dispatched_job` id; every report for this job echoes it.
+    /// `assignment_id` is the `dispatched_job` id; every report for this job echoes it.
     /// `cluster` is set when the job is one member of a cluster attempt.
     AssignJob {
         job_id: String,
-        dispatch: String,
+        assignment_id: String,
         job: Job,
         cluster: Option<Box<ClusterMembership>>,
     },

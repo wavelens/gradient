@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use gradient_types::*;
 
 #[derive(FromQueryResult)]
-struct ReferrerTokens {
+struct ReferenceTokens {
     hash: String,
     references: Option<String>,
 }
@@ -67,17 +67,17 @@ crate::sql! {
         params = [CachedPathHashes(64)];
 }
 
-/// Runtime reference edges of `referrers`: `(referrer hash, referenced hash)`
-/// pairs, read off the narinfo line each referrer stores.
+/// Runtime reference edges of `wanted_by`: `(parent hash, referenced hash)`
+/// pairs, read off the narinfo line each parent stores.
 pub async fn reference_edges<C: ConnectionTrait>(
     db: &C,
-    referrers: &[String],
+    wanted_by: &[String],
 ) -> Result<Vec<(String, String)>, DbErr> {
     let mut edges = Vec::new();
-    for (referrer, refs) in references_for_hashes(db, referrers).await? {
+    for (parent, refs) in references_for_hashes(db, wanted_by).await? {
         for token in refs {
             if let Some(hash) = parse_reference_hash(&token) {
-                edges.push((referrer.clone(), hash));
+                edges.push((parent.clone(), hash));
             }
         }
     }
@@ -100,7 +100,7 @@ pub async fn references_for_hash<C: ConnectionTrait>(
     )
 }
 
-/// [`references_for_hash`] for many referrers at once, grouped by referrer and
+/// [`references_for_hash`] for many parents at once, grouped by parent and
 /// kept in stored order within each group.
 ///
 /// Answering a `Pull` cache query one path at a time is what made a full-width
@@ -116,7 +116,7 @@ pub async fn references_for_hashes<C: ConnectionTrait>(
     }
 
     let rows = crate::fetch_in_chunks(hashes, |chunk| async move {
-        ReferrerTokens::find_by_statement(REFERENCES_FOR_HASHES.bind([chunk.into()]))
+        ReferenceTokens::find_by_statement(REFERENCES_FOR_HASHES.bind([chunk.into()]))
             .all(db)
             .await
     })
@@ -155,7 +155,7 @@ crate::sql_fn! {
 }
 
 /// Runtime closure of `seed_hashes` as one recursive statement; returns every
-/// reached `cached_path` row keyed by hash. Seeds and references without a
+/// reached `cached_path` row per hash. Seeds and references without a
 /// `cached_path` row (NAR not yet uploaded) are simply absent from the result.
 pub async fn runtime_closure_reachable<C>(
     db: &C,
@@ -215,7 +215,7 @@ mod tests {
     }
 
     /// The narinfo line is one column on the path, and the closure is a walk of
-    /// the graph's runtime edges. Neither reads the retired path-level index.
+    /// the graph's runtime dependencies. Neither reads the retired path-level index.
     #[test]
     fn the_line_is_a_column_and_the_closure_is_a_graph_walk() {
         let refs = REFERENCES_FOR_HASHES.text();
@@ -228,7 +228,7 @@ mod tests {
         assert!(!walk.contains("cached_path_reference"), "{walk}");
     }
 
-    /// The runtime closure is the widest read in the system, so it runs inside
+    /// The runtime closure is the widest read in the system, so it executes inside
     /// the raised-`work_mem` transaction instead of on the bare pool where
     /// `SET LOCAL` would be ignored.
     #[tokio::test]

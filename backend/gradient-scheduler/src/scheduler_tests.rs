@@ -97,7 +97,7 @@ pub(crate) fn eval_job(peer: ProjectId) -> PendingEvalJob {
     }
 }
 
-/// One build job on the global anchor `derivation_build`, attributed to the
+/// One build job on the global shared build `derivation_build`, attributed to the
 /// evaluation that dispatched it.
 pub(crate) fn build_job(
     evaluation_id: EvaluationId,
@@ -171,7 +171,7 @@ async fn test_enqueue_and_get_candidates() {
         .await
         .unwrap();
 
-    // Open mode (empty authorized peers) → see all jobs.
+    // Open mode (empty authorized peers) -> see all jobs.
     let candidates = scheduler.get_job_candidates("w1").await;
     assert_eq!(candidates.len(), 2);
 }
@@ -255,11 +255,11 @@ async fn a_reenqueued_eval_job_is_offered_again_in_the_delta() {
 /// when no dispatcher is running yet, so the actor services it on its next
 /// pass instead of losing the wakeup.
 #[tokio::test]
-async fn dispatch_kick_is_retained_when_not_awaiting() {
+async fn assigner_kick_is_retained_when_not_awaiting() {
     use std::sync::atomic::Ordering;
     let scheduler = test_scheduler().await;
     let before = scheduler.kick_gen.load(Ordering::Relaxed);
-    scheduler.kick_dispatch();
+    scheduler.kick_assigner();
     assert_eq!(
         scheduler.kick_gen.load(Ordering::Relaxed),
         before + 1,
@@ -267,13 +267,13 @@ async fn dispatch_kick_is_retained_when_not_awaiting() {
     );
 }
 
-/// A capability heartbeat must not reconcile inline: `update_worker_capabilities`
-/// runs on the per-connection read loop, and awaiting the (DB-heavy) reconcile
+/// A capability heartbeat must not refresh the waiting state inline: `update_worker_capabilities`
+/// is running on the per-connection read loop, and awaiting the (DB-heavy) refresh
 /// there blocked the loop from reading the same worker's next `CacheQuery`, which
-/// then timed out after 75s. It now kicks the dispatch loop, which reconciles off
+/// then timed out after 75s. It now kicks the dispatch loop, which refreshes off
 /// that loop.
 #[tokio::test]
-async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
+async fn capability_update_kicks_the_assigner_instead_of_repairing_inline() {
     let scheduler = test_scheduler().await;
     scheduler
         .update_worker_capabilities(
@@ -294,7 +294,7 @@ async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
             .kick_gen
             .load(std::sync::atomic::Ordering::Relaxed),
         1,
-        "capability update must kick the dispatch loop, not reconcile inline"
+        "capability update must kick the dispatch loop, not refresh inline"
     );
 }
 
@@ -373,7 +373,7 @@ async fn test_job_rejected_requeues() {
     scheduler.request_job("w1", JobKind::Flake).await;
     assert_eq!(scheduler.pending_job_count().await, 0);
 
-    // Worker rejects the job → back to pending.
+    // Worker rejects the job -> back to pending.
     scheduler.job_rejected("w1", "j1").await;
     assert_eq!(scheduler.pending_job_count().await, 1);
 }
@@ -400,7 +400,7 @@ async fn test_worker_disconnect_requeues_jobs() {
 
     assert_eq!(scheduler.pending_job_count().await, 0);
 
-    // Worker disconnects → both jobs requeued.
+    // Worker disconnects -> both jobs requeued.
     scheduler.unregister_worker("w1").await;
     assert_eq!(scheduler.pending_job_count().await, 2);
     assert_eq!(scheduler.worker_count().await, 0);
@@ -493,7 +493,7 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
     assert_eq!(assigned.job_id(), "j1");
     assert_eq!(assigned.pending.evaluation_id(), eval_id);
 
-    // An eval job has no anchor, so it stops on the evaluation alone.
+    // An eval job has no shared build, so it stops on the evaluation alone.
     let aborted = scheduler.abort_evaluation_jobs(eval_id, vec![]).await;
 
     assert_eq!(aborted, vec![("w1".to_string(), "j1".to_string())]);
@@ -511,7 +511,7 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
     );
 }
 
-/// The abort button waits for this call. The anchors belong to the graph actor,
+/// The abort button waits for this call. The shared builds belong to the graph writer,
 /// whose queue can run minutes behind, so the evaluation is marked and its
 /// eval job told to stop here; nothing the request waits on goes through it.
 #[tokio::test]
@@ -569,7 +569,7 @@ async fn aborting_an_evaluation_marks_it_and_stops_its_eval_job_itself() {
 }
 
 /// A finished evaluation keeps its verdict: an abort that arrives late must not
-/// stop the jobs of anchors it no longer owns.
+/// stop the jobs of shared builds it no longer owns.
 #[tokio::test]
 async fn aborting_a_finished_evaluation_stops_nothing() {
     use gradient_entity::evaluation::EvaluationStatus;
@@ -666,13 +666,13 @@ async fn a_running_job_nobody_aborted_is_never_reaped() {
     assert_eq!(scheduler.counts().await.active, 1);
 }
 
-/// Two live evaluations building the same derivation share its global anchor.
-/// The database abort spares an anchor another live evaluation still holds a
-/// `build_job` on and reports only the anchors it moved, so the scheduler must
+/// Two live evaluations building the same derivation share its global shared build.
+/// The database abort spares a shared build another live evaluation still holds a
+/// `build_job` on and reports only the shared builds it moved, so the scheduler must
 /// stop exactly those: aborting by evaluation alone would kill a build the
 /// other evaluation is still waiting on.
 #[tokio::test]
-async fn abort_leaves_a_shared_anchor_running_for_the_other_evaluation() {
+async fn abort_leaves_a_shared_build_running_for_the_other_evaluation() {
     use crate::jobs::{PendingJob, build_job_key};
 
     let scheduler = test_scheduler().await;
@@ -681,7 +681,7 @@ async fn abort_leaves_a_shared_anchor_running_for_the_other_evaluation() {
     let shared = DerivationBuildId::now_v7();
     let only_mine = DerivationBuildId::now_v7();
 
-    // Both anchors are building on w1, dispatched by the evaluation being aborted.
+    // Both shared builds are building on w1, dispatched by the evaluation being aborted.
     let (session, mut signals) = port();
     scheduler
         .reattach_worker(
@@ -704,7 +704,7 @@ async fn abort_leaves_a_shared_anchor_running_for_the_other_evaluation() {
         .expect("reattach");
 
     // The other evaluation still needs `shared`, so the database abort left it
-    // Building and reported only the anchor it took.
+    // Building and reported only the shared build it took.
     let aborted = scheduler
         .abort_evaluation_jobs(aborted_eval, vec![only_mine])
         .await;
@@ -719,13 +719,13 @@ async fn abort_leaves_a_shared_anchor_running_for_the_other_evaluation() {
     );
     assert!(
         scheduler.active_job(&build_job_key(shared)).await.is_some(),
-        "the shared anchor keeps building for the evaluation that still needs it"
+        "the shared build keeps building for the evaluation that still needs it"
     );
 }
 
 #[tokio::test]
 async fn record_eval_message_drops_when_job_unknown() {
-    // No active job → silently accepted, no DB insert attempted (MockDatabase
+    // No active job -> silently accepted, no DB insert attempted (MockDatabase
     // would panic on an unexpected exec; absence of panic proves no insert).
     let scheduler = test_scheduler().await;
     let r = scheduler
@@ -1002,7 +1002,7 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
 /// process handed out still has a closer in the terminal report landing for
 /// it, and a deploy reconnects the worker inside exactly that window.
 #[tokio::test]
-async fn registering_a_worker_closes_only_the_rows_it_never_dispatched() {
+async fn registering_a_worker_closes_only_the_rows_it_never_assigned() {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1044,7 +1044,7 @@ async fn registering_a_worker_closes_only_the_rows_it_never_dispatched() {
 /// is handed back, not on a detached task the worker's first report can
 /// overtake.
 #[tokio::test]
-async fn the_dispatch_record_is_written_before_the_assignment_returns() {
+async fn the_assignment_record_is_written_before_the_assignment_returns() {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     let ok = MockExecResult {
@@ -1077,7 +1077,7 @@ async fn the_dispatch_record_is_written_before_the_assignment_returns() {
     let values = format!("{:?}", insert.values);
     assert!(values.contains("\"j1\""), "{values}");
     assert!(
-        values.contains(&assigned.dispatch().to_string()),
+        values.contains(&assigned.assignment_id().to_string()),
         "{values}"
     );
 }
@@ -1123,10 +1123,10 @@ async fn a_lost_claim_drops_the_job_and_claims_the_next() {
 }
 
 /// A build claim can lose to a gate that moved after the job was assembled,
-/// such as a probe turning it into a relay. Its anchor goes back to the ready
+/// such as a probe turning it into a passthrough. Its shared build goes back to the startable
 /// set, so the dispatcher reads it again and assembles it for what it is now.
 #[tokio::test]
-async fn a_lost_build_claim_hands_its_anchor_back_to_the_ready_set() {
+async fn a_lost_build_claim_hands_its_shared_build_back_to_the_startable_set() {
     let scheduler = test_scheduler_with(claim_results(&[false])).await;
     let peer = ProjectId::now_v7();
     let job = build_job(EvaluationId::now_v7(), peer, DerivationBuildId::now_v7());
@@ -1167,7 +1167,7 @@ async fn a_lost_build_claim_hands_its_anchor_back_to_the_ready_set() {
     assert!(scheduler.active_job("jbuild").await.is_none());
     assert!(scheduler.pending_job("jbuild").await.is_none());
     assert_eq!(
-        scheduler.state.ready_set.take().entered,
+        scheduler.state.startable_set.take().entered,
         HashSet::from([derivation])
     );
 }
@@ -1195,13 +1195,13 @@ async fn a_build_that_left_queued_leaves_the_tracker() {
 
     scheduler
         .state
-        .ready_set
+        .startable_set
         .record(&[gradient_db::status::TransitionChange {
             derivation,
             from: BuildStatus::Queued,
             to: BuildStatus::Created,
         }]);
-    crate::dispatch::admit_ready_moves(&scheduler)
+    crate::loops::admit_startable_moves(&scheduler)
         .await
         .expect("admission");
 
@@ -1209,9 +1209,9 @@ async fn a_build_that_left_queued_leaves_the_tracker() {
     assert!(log_db.into_transaction_log().is_empty());
 }
 
-/// An anchor that entered `Queued` is read by its derivation alone.
+/// A shared build that entered `Queued` is read by its derivation alone.
 #[tokio::test]
-async fn admission_reads_only_the_anchors_that_moved() {
+async fn admission_reads_only_the_shared_builds_that_moved() {
     use gradient_entity::build::BuildStatus;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -1224,13 +1224,13 @@ async fn admission_reads_only_the_anchors_that_moved() {
 
     scheduler
         .state
-        .ready_set
+        .startable_set
         .record(&[gradient_db::status::TransitionChange {
             derivation,
             from: BuildStatus::Created,
             to: BuildStatus::Queued,
         }]);
-    crate::dispatch::admit_ready_moves(&scheduler)
+    crate::loops::admit_startable_moves(&scheduler)
         .await
         .expect("admission");
 
@@ -1249,10 +1249,10 @@ async fn admission_reads_only_the_anchors_that_moved() {
 }
 
 /// The resync is what keeps a per-instance cache honest: a pending build the
-/// whole ready set no longer holds (claimed by another instance, or moved
+/// whole startable set no longer holds (claimed by another instance, or moved
 /// without a hint this instance saw) is dropped.
 #[tokio::test]
-async fn the_resync_prunes_pending_builds_no_longer_ready() {
+async fn the_resync_prunes_pending_builds_no_longer_startable() {
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1275,21 +1275,21 @@ async fn the_resync_prunes_pending_builds_no_longer_ready() {
         .await
         .unwrap();
 
-    crate::dispatch::resync_ready_set(&scheduler)
+    crate::loops::resync_startable_set(&scheduler)
         .await
         .expect("resync");
 
     assert!(scheduler.pending_job("jbuild").await.is_none());
     assert!(
         scheduler.pending_job("jeval").await.is_some(),
-        "evaluations are not the build ready set's to prune"
+        "evaluations are not the build startable set's to prune"
     );
 }
 
 /// A claim whose record cannot be written is released: the job is pending
 /// again, nothing is active, and the worker gets no job to run unrecorded.
 #[tokio::test]
-async fn a_failed_dispatch_record_withdraws_the_assignment() {
+async fn a_failed_assignment_record_withdraws_the_assignment() {
     use sea_orm::{DatabaseBackend, DbErr, MockDatabase, MockExecResult};
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1342,7 +1342,7 @@ fn closed_dispatched_row(id: DispatchedJobId) -> gradient_entity::dispatched_job
 /// no row at all is a defect, not a race, so it is dropped with a warning
 /// instead of returning silently.
 #[tokio::test]
-async fn a_report_without_a_dispatch_row_is_dropped_loudly() {
+async fn a_report_without_an_assignment_row_is_dropped_loudly() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -1387,16 +1387,16 @@ async fn a_failed_lookup_is_not_reported_as_a_missing_row() {
     assert_eq!(landing, TimelineLanding::LookupFailed);
 }
 
-/// The open row is stamped with this report's finish mark and outcome, keyed
-/// on the dispatch the report carries.
+/// The open row is stamped with this report's finish mark and outcome, found
+/// through the dispatch the report carries.
 #[tokio::test]
 async fn a_report_with_an_open_row_closes_it() {
     use crate::job_handlers::timeline::TimelineLanding;
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    let dispatch = DispatchedJobId::now_v7();
-    let row = dispatched_row(dispatch);
+    let assignment_id = DispatchedJobId::now_v7();
+    let row = dispatched_row(assignment_id);
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![row.clone()], vec![row]])
         .into_connection();
@@ -1404,7 +1404,7 @@ async fn a_report_with_an_open_row_closes_it() {
     let scheduler = test_scheduler_with(db).await;
 
     let landing = scheduler
-        .persist_job_timeline(dispatch, DispatchedJobOutcome::Completed, vec![])
+        .persist_job_timeline(assignment_id, DispatchedJobOutcome::Completed, vec![])
         .await;
 
     assert_eq!(landing, TimelineLanding::Closed);
@@ -1424,7 +1424,7 @@ async fn a_report_with_an_open_row_closes_it() {
         "the stamp must be in the SET, not only echoed by RETURNING: {}",
         close.sql
     );
-    assert!(format!("{:?}", close.values).contains(&dispatch.to_string()));
+    assert!(format!("{:?}", close.values).contains(&assignment_id.to_string()));
 }
 
 /// A row that is found but cannot be stamped is not closed, so the report must
@@ -1435,15 +1435,15 @@ async fn a_close_that_fails_is_reported_as_a_failed_close() {
     use gradient_entity::dispatched_job::DispatchedJobOutcome;
     use sea_orm::{DatabaseBackend, DbErr, MockDatabase};
 
-    let dispatch = DispatchedJobId::now_v7();
+    let assignment_id = DispatchedJobId::now_v7();
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![dispatched_row(dispatch)]])
+        .append_query_results([vec![dispatched_row(assignment_id)]])
         .append_query_errors([DbErr::Custom("close refused".into())])
         .into_connection();
     let scheduler = test_scheduler_with(db).await;
 
     let landing = scheduler
-        .persist_job_timeline(dispatch, DispatchedJobOutcome::Completed, vec![])
+        .persist_job_timeline(assignment_id, DispatchedJobOutcome::Completed, vec![])
         .await;
 
     assert_eq!(landing, TimelineLanding::CloseFailed);
@@ -1460,12 +1460,12 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
     use gradient_wire::types::{JobPhase, JobPhaseSpan};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    let dispatch = DispatchedJobId::now_v7();
+    let assignment_id = DispatchedJobId::now_v7();
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![closed_dispatched_row(dispatch)]])
+        .append_query_results([vec![closed_dispatched_row(assignment_id)]])
         .append_query_results([vec![gradient_entity::dispatched_job_phase::Model {
             id: DispatchedJobPhaseId::now_v7(),
-            dispatched_job: dispatch,
+            dispatched_job: assignment_id,
             ..Default::default()
         }]])
         .into_connection();
@@ -1474,7 +1474,7 @@ async fn a_report_for_an_already_closed_row_keeps_the_recorded_outcome() {
 
     let landing = scheduler
         .persist_job_timeline(
-            dispatch,
+            assignment_id,
             DispatchedJobOutcome::Completed,
             vec![JobPhaseSpan {
                 phase: JobPhase::Fetch,
@@ -1907,7 +1907,7 @@ async fn a_lost_cluster_claim_hands_the_members_back_to_the_feed() {
     assert_eq!(
         scheduler.untracked(vec!["eval:a".into()]).await,
         vec!["eval:a".to_owned()],
-        "the ready feed re-reads a member whose cluster claim was lost"
+        "the startable feed re-reads a member whose cluster claim was lost"
     );
 }
 
@@ -2011,7 +2011,7 @@ async fn a_signal_reaches_the_other_members_of_a_started_attempt() {
     drain(&mut w2);
 
     scheduler
-        .relay_cluster_signal("w1", &attempt, None, b"hi".to_vec())
+        .forward_cluster_signal("w1", &attempt, None, b"hi".to_vec())
         .await;
 
     assert!(

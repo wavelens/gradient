@@ -21,11 +21,11 @@ pub struct JobSubjects {
 impl JobSubjects {
     pub async fn load<C: ConnectionTrait>(
         db: &C,
-        anchors: &[DerivationBuildId],
+        shared_builds: &[DerivationBuildId],
         evaluations: &[EvaluationId],
     ) -> Result<Self, DbErr> {
         Ok(Self {
-            derivations: derivation_names(db, anchors).await?,
+            derivations: derivation_names(db, shared_builds).await?,
             repositories: repositories(db, evaluations).await?,
         })
     }
@@ -33,11 +33,11 @@ impl JobSubjects {
     /// A build job names its derivation, an eval job its repository.
     pub fn subject(
         &self,
-        anchor: Option<DerivationBuildId>,
+        shared_build: Option<DerivationBuildId>,
         evaluation: EvaluationId,
     ) -> Option<String> {
-        match anchor {
-            Some(anchor) => self.derivations.get(&anchor).cloned(),
+        match shared_build {
+            Some(shared_build) => self.derivations.get(&shared_build).cloned(),
             None => self.repositories.get(&evaluation).cloned(),
         }
     }
@@ -45,10 +45,10 @@ impl JobSubjects {
 
 async fn derivation_names<C: ConnectionTrait>(
     db: &C,
-    anchors: &[DerivationBuildId],
+    shared_builds: &[DerivationBuildId],
 ) -> Result<HashMap<DerivationBuildId, String>, DbErr> {
-    let by_anchor: Vec<(DerivationId, DerivationBuildId)> =
-        gradient_db::fetch_in_chunks(anchors, |chunk| async move {
+    let by_shared_build: Vec<(DerivationId, DerivationBuildId)> =
+        gradient_db::fetch_in_chunks(shared_builds, |chunk| async move {
             EDerivationBuild::find()
                 .select_only()
                 .column(CDerivationBuild::Derivation)
@@ -60,7 +60,7 @@ async fn derivation_names<C: ConnectionTrait>(
         })
         .await?;
 
-    let derivation_ids: Vec<DerivationId> = by_anchor.iter().map(|(d, _)| *d).collect();
+    let derivation_ids: Vec<DerivationId> = by_shared_build.iter().map(|(d, _)| *d).collect();
     let names: HashMap<DerivationId, String> =
         gradient_db::fetch_in_chunks(&derivation_ids, |chunk| async move {
             EDerivation::find()
@@ -76,9 +76,9 @@ async fn derivation_names<C: ConnectionTrait>(
         .into_iter()
         .collect();
 
-    Ok(by_anchor
+    Ok(by_shared_build
         .into_iter()
-        .filter_map(|(drv, anchor)| names.get(&drv).map(|n| (anchor, n.clone())))
+        .filter_map(|(drv, shared_build)| names.get(&drv).map(|n| (shared_build, n.clone())))
         .collect())
 }
 
@@ -151,12 +151,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_build_names_its_derivation_and_an_eval_its_repository() {
-        let (anchor, drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
+        let (shared_build, drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
         let evaluation = EvaluationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row([
                 ("derivation", drv.into_inner().into()),
-                ("id", anchor.into_inner().into()),
+                ("id", shared_build.into_inner().into()),
             ])]])
             .append_query_results([vec![row([
                 ("id", drv.into_inner().into()),
@@ -168,12 +168,12 @@ mod tests {
             ])]])
             .into_connection();
 
-        let subjects = JobSubjects::load(&db, &[anchor], &[evaluation])
+        let subjects = JobSubjects::load(&db, &[shared_build], &[evaluation])
             .await
             .unwrap();
 
         assert_eq!(
-            subjects.subject(Some(anchor), evaluation).as_deref(),
+            subjects.subject(Some(shared_build), evaluation).as_deref(),
             Some("hello-2.12.1")
         );
         assert_eq!(

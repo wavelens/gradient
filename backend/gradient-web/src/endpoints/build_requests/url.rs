@@ -7,13 +7,13 @@
 //! `POST /build-requests/url` - queue a build request against a remote
 //! repository instead of an uploaded source tree (#564).
 //!
-//! The upload flows exist so `gradient build` can ship a dirty working tree. A
+//! The upload flows exist so `gradient build` can send a dirty working tree. A
 //! deployment tool already has the source published at a URL and only needs
 //! Gradient to evaluate one attribute of it, so there is nothing to upload:
 //! `repository_url_to_nix` turns the URL and revision into exactly the source
 //! string an evaluation carries, and the worker fetches it directly.
 //!
-//! Like the upload flows this runs on the project's reserved `build-request`
+//! Like the upload flows this executes on the project's reserved `build-request`
 //! task, so a caller never has to create a task per job.
 
 use super::dispatch::{
@@ -40,7 +40,7 @@ const COMMIT_HASH_BYTES: usize = 20;
 
 #[derive(Deserialize, Debug)]
 pub struct UrlRequest {
-    /// Project the build runs under; supplies the cache, the workers, and the
+    /// Project the build is running under; supplies the cache, the workers, and the
     /// deploy key used to reach a private repository.
     pub project: String,
     pub url: String,

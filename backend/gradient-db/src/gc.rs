@@ -83,9 +83,9 @@ where
 /// The evaluations of `task_id` this pass should delete, retaining the most
 /// recent `keep` terminal ones (see [`evaluations_to_gc`]).
 ///
-/// Selection only: the rows are deleted by the graph actor, which owns every
+/// Selection only: the rows are deleted by the graph writer, which owns every
 /// write to the graph, and the log files and orphaned commits are reclaimed by
-/// [`after_evaluation_delete`] once the actor reports what it removed.
+/// [`after_evaluation_delete`] once the graph writer reports what it removed.
 pub async fn evaluation_gc_plan(
     ctx: &DbContext,
     task_id: TaskId,
@@ -122,7 +122,7 @@ pub async fn evaluation_gc_plan(
 /// What the evaluation delete leaves behind outside the graph: commits nothing
 /// references any more. The `build_job` rows cascaded with their evaluation, and
 /// the `build_attempt` rows were set-null'd onto the surviving `derivation_build`
-/// anchor - their true, build-once owner - so their logs are the derivation GC's
+/// shared build - their true, build-once owner - so their logs are the derivation GC's
 /// to reclaim, not this pass's.
 pub async fn after_evaluation_delete(ctx: &DbContext, deleted: &[MEvaluation]) -> Result<()> {
     if deleted.is_empty() {
@@ -169,7 +169,7 @@ pub async fn settle_after_delete(
     let db = &ctx.worker_db;
     let adopted = if crate::reachability::pending_orphans_among(db, lost)
         .await
-        .context("GC: failed to look for pending anchors the deletion left unnamed")?
+        .context("GC: failed to look for pending shared builds the deletion left unnamed")?
     {
         crate::reachability::adopt_pending_closures(db)
             .await
@@ -178,8 +178,8 @@ pub async fn settle_after_delete(
         crate::reachability::Adopted::default()
     };
 
-    // Naming is half of what demand means, so a deletion can take it away and an
-    // adoption can give it back: recompute below both before the queue is settled.
+    // Naming is half of what need means, so a deletion can take it away and an
+    // adoption can give it back: update below both before the queue is settled.
     let mut changes = Vec::new();
     for chunk in lost
         .iter()
@@ -189,16 +189,16 @@ pub async fn settle_after_delete(
         .chunks(crate::IN_CHUNK_SIZE)
     {
         changes.extend(
-            crate::readiness::recompute_and_settle_demand(db, chunk)
+            crate::can_start::update_and_settle_need(db, chunk)
                 .await
-                .context("GC: failed to settle demand after deleting evaluations")?
+                .context("GC: failed to settle need after deleting evaluations")?
                 .changes,
         );
     }
 
     for chunk in lost.chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(
-            crate::readiness::unpromote_ungated(db, chunk)
+            crate::can_start::unpromote_ungated(db, chunk)
                 .await
                 .context("GC: failed to settle the queue after deleting evaluations")?,
         );
@@ -206,7 +206,7 @@ pub async fn settle_after_delete(
 
     for chunk in adopted.derivations().chunks(crate::IN_CHUNK_SIZE) {
         changes.extend(
-            crate::readiness::promote(db, chunk)
+            crate::can_start::promote(db, chunk)
                 .await
                 .context("GC: failed to queue what the live evaluations adopted")?,
         );
@@ -248,7 +248,7 @@ fn last_progress_at(e: &MEvaluation) -> chrono::NaiveDateTime {
 /// [`last_progress_at`], not `updated_at`, because a wedged run still takes
 /// writes and so never looks stale. Wedged evaluations
 /// are never deleted themselves; the `keep` most recent terminal evaluations
-/// are retained regardless of outcome - `Failed` and `Aborted` runs can still
+/// are retained regardless of outcome - `Failed` and `Aborted` evaluations can still
 /// hold successfully-built NARs, so they are not sacrificed ahead of newer
 /// `Completed` ones.
 fn evaluations_to_gc(
@@ -287,19 +287,19 @@ fn evaluations_to_gc(
 
 /// Derivation GC candidate scan (the mark half of mark-and-sweep): global
 /// `derivation` rows that lie *outside the dependency closure, over build and
-/// runtime edges alike, of every live root* - an `entry_point` or a derivation a
+/// runtime dependencies alike, of every live root* - an `entry_point` or a derivation a
 /// retained eval's `build_job` references - and whose grace period has expired. The
 /// grace lets rapid re-evaluations reuse recent derivations.
 ///
 /// Reachability matters because `build_job` rows are pruned with old evals while
-/// `derivation_dependency` edges and anchors persist: a derivation still needed as
+/// `derivation_dependency` edges and shared builds persist: a derivation still needed as
 /// a build input of a retained closure (its own evals long gone) has no `build_job`
 /// yet must be kept. A naive "no `build_job`" test reclaimed those, deleting build
-/// inputs of live anchors and stranding dependents on `InputsUnavailable`.
+/// inputs of live shared builds and stranding parents on `InputsUnavailable`.
 ///
 /// Read-only, and run on the pool: the whole keep-set walk is too long to hold the
-/// graph actor's single writer lock. The returned timestamp is taken BEFORE the
-/// walk, so the actor's delete can re-check exactly what became live since - see
+/// graph writer's single writer lock. The returned timestamp is taken BEFORE the
+/// walk, so the graph writer's delete can re-check exactly what became live since - see
 /// `gradient_graph::gc`. Rows and attempt logs are all this pass reclaims: the
 /// NARs of what it deletes leave the live set with it and are the eviction pass's
 /// (`evict_stale_cached_paths`) to remove once past the fetch TTL. FK cascade
@@ -553,7 +553,7 @@ mod tests {
             log[3].contains("SET LOCAL work_mem")
                 && log[4].contains("ORDER BY derivation FOR NO KEY UPDATE")
                 && log[5].contains("ON d.derivation = r.derivation ORDER BY r.derivation"),
-            "what lost a name and what gained one are recomputed together, locked and raised: {log:?}"
+            "what lost a name and what gained one are updated together, locked and raised: {log:?}"
         );
         assert!(
             log[6].contains("SET status = 0") && log[6].contains("db.derivation = ANY($1::uuid[])"),
@@ -570,7 +570,7 @@ mod tests {
     }
 
     /// Nothing pending lost its last name: no adoption walk is paid for, and the
-    /// lost set is recomputed and re-gated as before.
+    /// lost set is updated and re-gated as before.
     #[tokio::test]
     async fn a_deletion_that_orphans_nothing_pending_walks_nothing() {
         use sea_orm::{DatabaseBackend, MockDatabase, Value};
@@ -595,7 +595,7 @@ mod tests {
             log[0].contains("LIMIT 1")
                 && !log.iter().any(|s| s.contains("INSERT INTO build_job"))
                 && log[3].contains("ON d.derivation = r.derivation ORDER BY r.derivation")
-                && !log.iter().any(|s| s.contains("SET demanded ="))
+                && !log.iter().any(|s| s.contains("SET wanted ="))
                 && log[4].contains("SET status = 0"),
             "{log:?}"
         );

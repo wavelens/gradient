@@ -7,7 +7,7 @@
 mod fixtures;
 
 use super::*;
-use fixtures::{make_anchor, make_entry_point, make_eval, make_task};
+use fixtures::{make_entry_point, make_eval, make_shared_build, make_task};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus, WalkMode};
 use gradient_types::*;
@@ -153,7 +153,7 @@ async fn trigger_already_in_progress() {
 // ── trigger_restart_builds ───────────────────────────────────────────────
 
 /// Regression for the "evaluations stuck in Building forever" symptom: when
-/// every entry-point anchor is already terminal-success there is nothing to
+/// every entry-point shared build is already terminal-success there is nothing to
 /// rebuild, so the new evaluation must start in `Completed` rather than
 /// `Building`, otherwise nothing fires `check_evaluation_done` and the row is
 /// stuck.
@@ -170,9 +170,9 @@ async fn restart_with_all_cached_inserts_completed_eval() {
         make_entry_point(prev_eval_id, drv_a),
         make_entry_point(prev_eval_id, drv_b),
     ];
-    let anchors = vec![
-        make_anchor(drv_a, BuildStatus::Completed),
-        make_anchor(drv_b, BuildStatus::Substituted),
+    let shared_builds = vec![
+        make_shared_build(drv_a, BuildStatus::Completed),
+        make_shared_build(drv_b, BuildStatus::Substituted),
     ];
 
     let inserted_eval = {
@@ -188,8 +188,8 @@ async fn restart_with_all_cached_inserts_completed_eval() {
         .append_query_results([vec![prev_eval]])
         // 3. load prev entry points
         .append_query_results([prev_entry_points])
-        // 4. load anchors for the entry-point derivations (all terminal-success)
-        .append_query_results([anchors])
+        // 4. load shared builds for the entry-point derivations (all terminal-success)
+        .append_query_results([shared_builds])
         // 5. INSERT new evaluation: returns the row with status=Completed
         .append_query_results([vec![inserted_eval]])
         // 6. snapshot flake input overrides (none)
@@ -215,7 +215,7 @@ async fn restart_with_all_cached_inserts_completed_eval() {
     );
 }
 
-/// When at least one entry-point anchor is not terminal-success, the new eval
+/// When at least one entry-point shared build is not terminal-success, the new eval
 /// must start in `Building` and named: it takes the previous evaluation's names
 /// over, since it never walks, and the heal's thaw is seeded from them.
 #[tokio::test]
@@ -231,9 +231,9 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
         make_entry_point(prev_eval_id, drv_a),
         make_entry_point(prev_eval_id, drv_b),
     ];
-    let anchors = vec![
-        make_anchor(drv_a, BuildStatus::Completed),
-        make_anchor(drv_b, BuildStatus::FailedPermanent),
+    let shared_builds = vec![
+        make_shared_build(drv_a, BuildStatus::Completed),
+        make_shared_build(drv_b, BuildStatus::FailedPermanent),
     ];
 
     let inserted_eval = {
@@ -246,7 +246,7 @@ async fn restart_with_one_failed_inserts_building_eval_and_inherits_the_names() 
         .append_query_results([Vec::<evaluation::Model>::new()])
         .append_query_results([vec![prev_eval]])
         .append_query_results([prev_entry_points])
-        .append_query_results([anchors])
+        .append_query_results([shared_builds])
         .append_query_results([vec![inserted_eval]])
         .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .append_query_results([vec![make_entry_point(new_eval_id, drv_a)]])
