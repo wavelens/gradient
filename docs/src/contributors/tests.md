@@ -35,7 +35,7 @@ How testing is structured and which patterns a new test follows. Individual test
     A local `cargo test` or `cargo nextest` over the whole backend workspace needs more memory than a typical workstation has. Use the Nix checks.
 
 - The cargo suites are checks, not the packages' check phase: `nix build .#gradient` builds the binary only.
-- Tests build under `[profile.test]`: unoptimised, without the full DWARF of the shipped binary; `[profile.dev.package."*"]` keeps dependencies optimised.
+- Tests build under `[profile.test]`: unoptimised, without the full DWARF of the released binary; `[profile.dev.package."*"]` keeps dependencies optimised.
 - Any folder under `nix/tests/gradient/` becomes the check `gradient-<folder>` without wiring.
 - Every VM test stores NARs on local disk; S3 storage has no VM test.
 

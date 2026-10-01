@@ -80,7 +80,7 @@ CI (`.github/workflows/rust.yml`) runs fmt, the `#[allow]` grep gate and cargo-d
 
 - Standalone components with signals (`signal()`, `computed()`), feature folders under `frontend/src/app/features/`.
 - UI components from `gr-ui` (`src/app/shared/ui/`, on `@angular/cdk`), charts through `<gr-metric-chart>` (Apache ECharts), colours and spacing from `src/app/styles/_variables.scss`. See the [Frontend Style Guide](frontend-style-guide.md).
-- No UI or chart dependency with a field-of-use restriction: the bundle ships under AGPL-3.0, and anything beyond MIT, BSD or Apache-2.0 cannot be passed on.
+- No UI or chart dependency with a field-of-use restriction: the bundle is distributed under AGPL-3.0, and anything beyond MIT, BSD or Apache-2.0 cannot be passed on.
 - A refreshed `pnpm-lock.yaml` changes the `pnpmDeps` hash in `nix/packages/gradient-frontend.nix`: set `lib.fakeHash`, run `nix build .#gradient-frontend.pnpmDeps`, take the reported hash.
 - `minimumReleaseAge` in `pnpm-workspace.yaml` refuses packages younger than 24 hours; a local `pnpm update` then resolves the same versions the Nix build accepts.
 

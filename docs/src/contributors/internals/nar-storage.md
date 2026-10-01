@@ -52,7 +52,7 @@ logs/<last 2 chars>/<attempt>/chunk_<n>.zst        # finalized
 
 ## Storage Migrations
 
-Layout changes of NAR, log and blob storage ship as storage migrations, the storage counterpart of the database migrations (`gradient-cache/src/cacher/storage_migrations/`).
+Layout changes of NAR, log and blob storage come as storage migrations, the storage counterpart of the database migrations (`gradient-cache/src/cacher/storage_migrations/`).
 
 - **Units:** a migration lists its units in ascending order; each unit is idempotent and runs again in full when a restart cuts it short.
 - **Ledger:** `storage_migration` holds one row per migration: `checkpoint` names the last finished unit, `applied_at` marks it done.
