@@ -175,10 +175,7 @@
   width="480px"
 >
   @if (projectId()) {
-    <gr-form-field
-      label="Peer ID (this project)"
-      hint="Write this alongside the token into your worker's peers file."
-    >
+    <gr-form-field label="Peer ID (this project)">
       <gr-copy-field [value]="projectId()!" />
     </gr-form-field>
   }
@@ -188,7 +185,7 @@
       {{ errorMessage() }}
     </div>
   }
-  <gr-form-field label="Name" for="worker-name" hint="Human-readable label shown in the workers list.">
+  <gr-form-field label="Name" for="worker-name">
     <input
       grInput
       id="worker-name"
@@ -199,7 +196,6 @@
   </gr-form-field>
   <gr-form-field label="Worker ID" for="worker-id">
     <gr-label-help slot="label" doc="guides/remote-worker/#1-pick-a-worker-id" title="Pick a worker ID" />
-    <span slot="hint">Must be a UUID v4 - run <code>uuidgen</code> or use the worker's auto-generated ID from <code>/var/lib/gradient-worker/worker-id</code>.</span>
     <input
       grInput
       id="worker-id"
@@ -208,7 +204,7 @@
       (keyup.enter)="registerWorker()"
     />
   </gr-form-field>
-  <gr-form-field label="Worker URL" for="worker-url" hint="If set, the server connects outbound to this URL instead of waiting for the worker to connect.">
+  <gr-form-field label="Worker URL" for="worker-url">
     <span slot="label" class="text-secondary">(optional)</span>
     <input
       grInput
@@ -217,7 +213,7 @@
       placeholder="e.g. wss://worker.example.com/proto"
     />
   </gr-form-field>
-  <gr-form-field label="Token" for="worker-token" hint="Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration).">
+  <gr-form-field label="Token" for="worker-token">
     <gr-label-help slot="label" doc="guides/remote-worker/#2-register-the-worker" title="Register a worker" />
     <span slot="label" class="text-secondary">(optional)</span>
     <input
@@ -227,7 +223,7 @@
       placeholder="Output of: openssl rand -base64 48"
     />
   </gr-form-field>
-  <gr-form-field label="Server-side capability gates" hint="Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.">
+  <gr-form-field label="Server-side capability gates">
     <gr-label-help slot="label" doc="concepts/workers/#capabilities" title="Worker capabilities" />
     <div class="cap-tag-group">
       <button
