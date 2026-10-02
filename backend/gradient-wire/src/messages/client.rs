@@ -226,6 +226,10 @@ impl ClientMessage {
             ClientMessage::UploadCancel { .. } => "UploadCancel",
         }
     }
+
+    pub fn carries_secret(&self) -> bool {
+        matches!(self, ClientMessage::AuthResponse { .. })
+    }
 }
 
 #[cfg(test)]

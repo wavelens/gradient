@@ -66,10 +66,24 @@ pub trait WireMessage: Sized + std::fmt::Debug + Send + 'static {
 
     fn variant_name(&self) -> &'static str;
 
+    fn carries_secret(&self) -> bool;
+
     fn is_bulk(&self) -> bool;
 
     fn frame_variant_name(frame: &Frame<Self>) -> &'static str;
     fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError>;
+}
+
+pub struct Redacted<'a, M>(pub &'a M);
+
+impl<M: WireMessage> std::fmt::Debug for Redacted<'_, M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.carries_secret() {
+            return write!(f, "{} {{ .. }}", self.0.variant_name());
+        }
+
+        std::fmt::Debug::fmt(self.0, f)
+    }
 }
 
 pub enum Inbound<M> {
@@ -132,6 +146,10 @@ impl WireMessage for ClientMessage {
 
     fn variant_name(&self) -> &'static str {
         ClientMessage::variant_name(self)
+    }
+
+    fn carries_secret(&self) -> bool {
+        ClientMessage::carries_secret(self)
     }
 
     fn is_bulk(&self) -> bool {
@@ -197,6 +215,10 @@ impl WireMessage for ServerMessage {
 
     fn variant_name(&self) -> &'static str {
         ServerMessage::variant_name(self)
+    }
+
+    fn carries_secret(&self) -> bool {
+        ServerMessage::carries_secret(self)
     }
 
     fn is_bulk(&self) -> bool {
@@ -296,7 +318,7 @@ impl ProtoSocket {
         let len = bytes.len();
         match ServerMessage::decode(bytes) {
             Ok(Inbound::Control(msg)) => {
-                trace!(?msg, bytes = len, "recv ServerMessage");
+                trace!(msg = ?Redacted(&msg), bytes = len, "recv ServerMessage");
                 Some(msg)
             }
             Ok(Inbound::Bulk(frame)) => {
@@ -315,7 +337,7 @@ impl ProtoSocket {
 
     pub async fn send_client_msg(&mut self, msg: &ClientMessage) -> Result<(), SendError> {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
-        trace!(?msg, bytes = bytes.len(), "send ClientMessage");
+        trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send ClientMessage");
         self.send_bytes(bytes).await
     }
 
@@ -327,7 +349,7 @@ impl ProtoSocket {
         let len = bytes.len();
         match ClientMessage::decode(bytes) {
             Ok(Inbound::Control(msg)) => {
-                trace!(?msg, bytes = len, "recv ClientMessage");
+                trace!(msg = ?Redacted(&msg), bytes = len, "recv ClientMessage");
                 Some(msg)
             }
             Ok(Inbound::Bulk(frame)) => {
@@ -348,7 +370,7 @@ impl ProtoSocket {
 
     pub async fn send_msg(&mut self, msg: &ServerMessage) -> Result<(), SendError> {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
-        trace!(?msg, bytes = bytes.len(), "send ServerMessage");
+        trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send ServerMessage");
         self.send_bytes(bytes).await
     }
 
@@ -533,7 +555,7 @@ impl<M> MsgWriter<M> {
 impl<M: WireMessage> MsgWriter<M> {
     pub async fn send_msg(&self, msg: &M) -> Result<(), SendError> {
         let bytes = msg.encode().ok_or(SendError::Encode)?;
-        trace!(?msg, bytes = bytes.len(), "send message");
+        trace!(msg = ?Redacted(msg), bytes = bytes.len(), "send message");
         if let Some(observer) = &self.observer {
             observer.sent(msg, bytes.len());
         }
@@ -1169,5 +1191,27 @@ mod writer_tests {
         writer.send_msg(&msg).await.expect("queue had room");
         let bytes = control_rx.try_recv().expect("byte buffer enqueued");
         assert!(!bytes.is_empty(), "serialised message should be non-empty");
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+    use crate::messages::PROTO_VERSION;
+
+    #[test]
+    fn a_traced_handshake_message_never_shows_its_tokens() {
+        let authenticate = ServerMessage::Authenticate {
+            version: PROTO_VERSION,
+            worker_id: "w1".into(),
+            tokens: vec![("p1".into(), "s3cret".into())],
+        };
+        let response = ClientMessage::AuthResponse {
+            tokens: vec![("p1".into(), "s3cret".into())],
+        };
+
+        assert!(!format!("{:?}", Redacted(&authenticate)).contains("s3cret"));
+        assert!(!format!("{:?}", Redacted(&response)).contains("s3cret"));
+        assert!(format!("{:?}", Redacted(&ServerMessage::Draining)).contains("Draining"));
     }
 }
