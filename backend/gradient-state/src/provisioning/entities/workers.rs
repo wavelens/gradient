@@ -9,6 +9,7 @@ use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
 use crate::config::*;
 use anyhow::Result;
+use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_entity::*;
 use gradient_types::*;
 use sea_orm::{
@@ -32,6 +33,7 @@ impl<'a> StateApplicator<'a> {
                 "worker token file",
             )?;
             let token_hash = password_auth::generate_hash(token.trim());
+            let token_encrypted = self.encrypt_dial_token(state_worker, token.trim())?;
             let created_by_id = state_worker
                 .created_by
                 .as_ref()
@@ -45,6 +47,7 @@ impl<'a> StateApplicator<'a> {
                     &project_map,
                     created_by_id,
                     token_hash,
+                    token_encrypted,
                 )
                 .await?;
 
@@ -70,6 +73,7 @@ impl<'a> StateApplicator<'a> {
                 if let Some(existing) = existing {
                     let mut reg: worker_registration::ActiveModel = existing.into();
                     reg.token_hash = Set(token_hash.clone());
+                    reg.token_encrypted = Set(token_encrypted.clone());
                     reg.managed = Set(true);
                     reg.url = Set(url.clone());
                     reg.display_name = Set(state_worker.display_name.clone());
@@ -90,9 +94,11 @@ impl<'a> StateApplicator<'a> {
                         peer_id,
                         worker_id: state_worker.worker_id.clone(),
                         token_hash: token_hash.clone(),
+                        token_encrypted: token_encrypted.clone(),
                         managed: true,
                         url: url.clone(),
                         display_name: state_worker.display_name.clone(),
+                        gradient_ci: false,
                         active: state_worker.enabled,
                         enable_fetch: state_worker.enable_fetch,
                         enable_eval: state_worker.enable_eval,
@@ -114,6 +120,27 @@ impl<'a> StateApplicator<'a> {
 
         Ok(())
     }
+
+    fn encrypt_dial_token(
+        &self,
+        worker: &StateWorker,
+        token: &str,
+    ) -> Result<Option<String>, DynError> {
+        let dialed = worker.url.as_deref().is_some_and(|u| !u.trim().is_empty());
+        if !dialed {
+            return Ok(None);
+        }
+
+        encrypt_secret_with_file(self.crypt_secret_file, token)
+            .map(Some)
+            .map_err(|e| {
+                format!(
+                    "Failed to encrypt token for worker '{}': {e}",
+                    worker.worker_id
+                )
+                .into()
+            })
+    }
 }
 
 /// Pre-enablements are only added. Frontend opt-ins are not state-managed and must survive
@@ -124,6 +151,7 @@ async fn apply_base_worker<C: ConnectionTrait>(
     project_map: &HashMap<String, ProjectId>,
     user_id: Option<UserId>,
     token_hash: String,
+    token_encrypted: Option<String>,
 ) -> Result<(), DynError> {
     let authorize_against = worker
         .authorize_against
@@ -143,6 +171,7 @@ async fn apply_base_worker<C: ConnectionTrait>(
         let newly_auto = worker.auto_enable && !row.auto_enable;
         let mut am: base_worker::ActiveModel = row.into();
         am.token_hash = Set(token_hash);
+        am.token_encrypted = Set(token_encrypted);
         am.url = Set(worker.url.clone());
         am.display_name = Set(worker.display_name.clone());
         am.enable_fetch = Set(worker.enable_fetch);
@@ -160,8 +189,10 @@ async fn apply_base_worker<C: ConnectionTrait>(
             id,
             worker_id: worker.worker_id.clone(),
             token_hash,
+            token_encrypted,
             url: worker.url.clone(),
             display_name: worker.display_name.clone(),
+            gradient_ci: false,
             enable_fetch: worker.enable_fetch,
             enable_eval: worker.enable_eval,
             enable_build: worker.enable_build,
@@ -276,6 +307,7 @@ mod base_worker_tests {
             &HashMap::new(),
             Some(UserId::now_v7()),
             "hash".to_string(),
+            None,
         )
         .await
         .unwrap();

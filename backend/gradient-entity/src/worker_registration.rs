@@ -18,6 +18,8 @@ pub struct Model {
     pub peer_id: ProjectId,
     pub worker_id: String,
     pub token_hash: String,
+    #[serde(skip_serializing)]
+    pub token_encrypted: Option<String>,
     pub managed: bool,
     /// The server is connecting outbound to this URL when set, instead of waiting for an inbound
     /// connection.
@@ -27,6 +29,7 @@ pub struct Model {
     pub enable_eval: bool,
     pub enable_build: bool,
     pub display_name: String,
+    pub gradient_ci: bool,
     pub created_by: Option<UserId>,
     pub created_at: NaiveDateTime,
 }
