@@ -55,7 +55,11 @@ pub async fn get_base_workers(
     Ok(ok_json(
         rows.into_iter()
             .map(|bw| BaseWorkerEntry {
-                connection: worker_connection(&live, &scheduler.connection_failures, &bw.worker_id),
+                connection: worker_connection(
+                    &live,
+                    Some(&*scheduler.connection_failures),
+                    &bw.worker_id,
+                ),
                 worker_id: bw.worker_id,
                 display_name: bw.display_name,
                 url: bw.url,
@@ -100,6 +104,7 @@ pub async fn delete_base_worker(
         .await?;
     EBaseWorker::delete_by_id(bw.id).exec(&state.web_db).await?;
     scheduler.request_reauth(&worker_id).await;
+    scheduler.connection_failures.clear(&worker_id);
 
     Ok(ok_json(format!("base worker '{worker_id}' disconnected")))
 }

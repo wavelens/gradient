@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, ProjectAccess, load_project};
+use crate::access::{Caller, ProjectAccess, has_permission, load_project};
 use crate::authorization::MaybeApiKey;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::permissions::Permission;
 use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
     Model as MWorkerRegistration,
@@ -90,12 +91,12 @@ pub struct WorkerConnection {
 
 pub(crate) fn worker_connection(
     live: &std::collections::HashMap<String, WorkerInfo>,
-    failures: &ConnectionFailures,
+    failures: Option<&ConnectionFailures>,
     worker_id: &str,
 ) -> WorkerConnection {
     WorkerConnection {
         connected: live.contains_key(worker_id),
-        last_error: failures.last(worker_id),
+        last_error: failures.and_then(|f| f.last(worker_id)),
     }
 }
 
@@ -162,6 +163,9 @@ pub async fn post_project_worker(
     let worker_uuid = Uuid::parse_str(&body.worker_id)
         .map_err(|_| WebError::bad_request("worker_id must be a valid UUID"))?;
     let worker_id_str = worker_uuid.to_string();
+    if body.url.as_deref().is_some_and(|u| !u.trim().is_empty()) {
+        ensure_dialable_worker_id(&state, &worker_id_str).await?;
+    }
 
     let (token, return_token) = if let Some(provided) = body.token {
         let t = provided.trim().to_string();
@@ -223,6 +227,25 @@ pub async fn post_project_worker(
     }))
 }
 
+async fn ensure_dialable_worker_id(state: &ServerState, worker_id: &str) -> WebResult<()> {
+    let base =
+        gradient_db::projects::base_workers::worker_id_is_base(&state.web_db, worker_id).await?;
+
+    let gradient_ci = EWorkerRegistration::find()
+        .filter(worker_registration::Column::WorkerId.eq(worker_id))
+        .filter(worker_registration::Column::GradientCi.eq(true))
+        .one(&state.web_db)
+        .await?
+        .is_some();
+    if base || gradient_ci {
+        return Err(WebError::conflict(
+            "the worker id belongs to a base worker or a Gradient.CI connection",
+        ));
+    }
+
+    Ok(())
+}
+
 /// Open-mode workers (`authorized_peers == None`) are matching any project. Restricted workers are
 /// matching only the projects whose token they presented in the handshake.
 fn worker_live_for_project(info: &WorkerInfo, project: ProjectId) -> bool {
@@ -281,6 +304,17 @@ pub async fn get_project_workers(
         },
     )
     .await?;
+    let manages_workers = user.superuser
+        || has_permission(
+            &state,
+            user.id,
+            project.id,
+            Permission::ManageWorkers,
+            api_key.as_ref(),
+        )
+        .await?;
+
+    let failures = manages_workers.then_some(&*scheduler.connection_failures);
 
     let registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(project.id))
@@ -312,11 +346,7 @@ pub async fn get_project_workers(
         .into_iter()
         .map(|reg| {
             let live = live_for(&reg.worker_id);
-            let connection = worker_connection(
-                &live_workers,
-                &scheduler.connection_failures,
-                &reg.worker_id,
-            );
+            let connection = worker_connection(&live_workers, failures, &reg.worker_id);
             ProjectWorkerEntry {
                 gradient_ci: reg.gradient_ci,
                 connection,
@@ -356,8 +386,7 @@ pub async fn get_project_workers(
             .map(|bw| {
                 let live = live_for(&bw.worker_id);
                 let active = enabled_ids.contains(&bw.id);
-                let connection =
-                    worker_connection(&live_workers, &scheduler.connection_failures, &bw.worker_id);
+                let connection = worker_connection(&live_workers, failures, &bw.worker_id);
                 base_worker_entry(bw, active, live, connection)
             }),
     );
@@ -717,6 +746,7 @@ pub async fn delete_project_worker(
         .await;
 
     scheduler.request_reauth(&worker_id).await;
+    scheduler.connection_failures.clear(&worker_id);
 
     Ok(ok_json(format!("worker '{}' unregistered", worker_id)))
 }
@@ -771,7 +801,8 @@ mod tests {
             "dial timed out after 10 s",
         );
 
-        let connection = worker_connection(&std::collections::HashMap::new(), &failures, "w1");
+        let connection =
+            worker_connection(&std::collections::HashMap::new(), Some(&failures), "w1");
 
         assert!(!connection.connected);
         assert_eq!(
