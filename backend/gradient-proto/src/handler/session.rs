@@ -38,12 +38,22 @@ pub(crate) enum SessionOrigin {
     ServerDialed(DialTarget),
 }
 
+impl SessionOrigin {
+    fn dialed_url(&self) -> Option<String> {
+        match self {
+            SessionOrigin::WorkerDialed => None,
+            SessionOrigin::ServerDialed(target) => Some(target.url.clone()),
+        }
+    }
+}
+
 pub(super) struct Opening;
 
 pub(super) struct Authenticated {
     pub peer_id: String,
     pub negotiated: GradientCapabilities,
     pub authorized_peers: Vec<String>,
+    pub dialed_url: Option<String>,
 }
 
 pub(super) struct ProtoSession<S> {
@@ -88,6 +98,7 @@ impl ProtoSession<Opening> {
                 peer_id: result.peer_id,
                 negotiated: result.negotiated,
                 authorized_peers: result.authorized_peers,
+                dialed_url: origin.dialed_url(),
             },
         })
     }
@@ -206,6 +217,7 @@ impl ProtoSession<Authenticated> {
                     peer_id,
                     negotiated,
                     authorized_peers,
+                    dialed_url,
                 },
         } = self;
 
@@ -228,6 +240,7 @@ impl ProtoSession<Authenticated> {
             socket,
             capabilities: negotiated,
             authorized_peers,
+            dialed_url,
         };
 
         match sessions.attach(args).await {
