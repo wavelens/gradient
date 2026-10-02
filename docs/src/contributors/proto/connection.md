@@ -59,8 +59,9 @@ sequenceDiagram
 
 - The server is sending its tokens over `wss://`. A `ws://` URL is for local and operator setups only. The server is still sending the tokens and logging a warning.
 - `services.gradient.worker.acceptedServerTokensFile` is holding the hashes a worker is checking. The worker is accepting every server without the file.
-- A reauth of a server-dialed session is sending `AuthUpdate` while every project was part of the last `Authenticate`. The server is never sending `AuthChallenge` there.
-- A reauth finding a new project is closing the session. The next dial is carrying the new project's token.
+- A reauth of a server-dialed session is answered with `AuthUpdate`, never with `AuthChallenge`.
+- A reauth finding a new registration is closing the session. The next dial is carrying the new project's token.
+- A project enabling a base worker is joining the running session. Every enabling project is sharing the base worker's one token.
 - A registration may not reuse the worker ID of a base worker. Gradient.CI worker IDs belong to one registration or base worker only.
 - The server is keeping the last failure of every worker ID in memory as the worker's offline reason.
 - The server is keeping a failure before the token check only for a registered worker ID.
