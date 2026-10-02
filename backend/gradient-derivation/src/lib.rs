@@ -5,7 +5,9 @@
  */
 
 mod derivation;
+mod discovered;
 mod drv_output_spec;
 
 pub use self::derivation::*;
+pub use self::discovered::discovered_derivation;
 pub use self::drv_output_spec::DrvOutputSpec;
