@@ -28,7 +28,6 @@ pub struct BuildFailure {
 pub type DrvResult = Result<Outputs, BuildFailure>;
 
 pub struct BuildOutcome {
-    pub evaluation: EvaluationId,
     pub results: Vec<(String, DrvResult)>,
 }
 
@@ -101,10 +100,7 @@ pub async fn wait(
         results.push((path.clone(), result));
     }
 
-    Ok(BuildOutcome {
-        evaluation,
-        results,
-    })
+    Ok(BuildOutcome { results })
 }
 
 async fn prefixes(
