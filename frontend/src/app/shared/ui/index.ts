@@ -6,6 +6,7 @@
 
 // Gradient-specific primitives, bound to app models and services.
 export * from './eval-status-badge/eval-status-badge.component';
+export * from './gradient-ci-connect/gradient-ci-connect.component';
 export * from './label-help/label-help.component';
 export * from './metric-chart/metric-chart.component';
 export * from './metric-chart/metric-chart.options';

@@ -12,6 +12,7 @@ export * from './task.model';
 export * from './build.model';
 export * from './cache.model';
 export * from './worker.model';
+export * from './gradient-ci.model';
 export * from './commit.model';
 export * from './integration.model';
 export * from './trigger.model';

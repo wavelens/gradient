@@ -7,6 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from '@core/services/api.service';
+import { BaseWorkerEntry } from '@core/models';
 
 export interface GithubAppManifestResponse {
   manifest: Record<string, unknown>;
@@ -64,5 +65,13 @@ export class AdminService {
 
   listTasks(): Observable<AdminTask[]> {
     return this.api.get<AdminTask[]>('admin/tasks');
+  }
+
+  listBaseWorkers(): Observable<BaseWorkerEntry[]> {
+    return this.api.get<BaseWorkerEntry[]>('admin/base-workers');
+  }
+
+  deleteBaseWorker(workerId: string): Observable<string> {
+    return this.api.delete<string>(`admin/base-workers/${workerId}`);
   }
 }
